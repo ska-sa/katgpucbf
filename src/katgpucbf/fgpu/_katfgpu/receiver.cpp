@@ -8,24 +8,50 @@ static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int DATA_ID = 0x3300;
 static constexpr int SAMPLE_BITS = 10;
 
+stream::stream(spead2::io_service_ref io_service, receiver &parent, int pol)
+    : spead2::recv::stream(io_service, 0, 1),
+    parent(parent),
+    pol(pol)
+{
+    // TODO: set allow_unsized_heaps etc
+}
+
+void stream::heap_ready(spead2::recv::live_heap &&heap)
+{
+    parent.heap_ready(pol, std::move(heap));
+}
+
+void stream::stop_received()
+{
+    spead2::recv::stream::stop_received();
+    parent.stop_received(pol);
+}
+
+
 receiver::receiver(spead2::io_service_ref io_service,
                    std::size_t packet_samples, std::size_t chunk_samples,
                    chunk_func ready_callback)
-    : spead2::recv::stream(io_service, 0, 1),
-    packet_samples(packet_samples),
+    : packet_samples(packet_samples),
     chunk_samples(chunk_samples),
     chunk_packets(chunk_samples / packet_samples),
     ready_callback(ready_callback)
 {
     assert(chunk_samples % packet_samples == 0);
-    // TODO: set allocator
+    for (int i = 0; i < N_POL; i++)
+    {
+        streams[i] = std::make_unique<stream>(io_service, *this, i);
+        // TODO: set allocator
+    }
 }
 
 void receiver::add_chunk(std::unique_ptr<in_chunk> &&chunk)
 {
-    assert(buffer_size(chunk->storage) == SAMPLE_BITS * chunk_samples / 8);
-    chunk->present.clear();
-    chunk->present.resize(chunk_packets);
+    for (int i = 0; i < N_POL; i++)
+    {
+        assert(buffer_size(chunk->storage[i]) == SAMPLE_BITS * chunk_samples / 8);
+        chunk->present[i].clear();
+        chunk->present[i].resize(chunk_packets);
+    }
     {
         std::lock_guard<std::mutex> lock(free_chunks_lock);
         free_chunks.push(std::move(chunk));
@@ -57,17 +83,17 @@ void receiver::flush_chunk()
 }
 
 std::tuple<void *, in_chunk *, std::size_t>
-receiver::decode_timestamp(std::int64_t timestamp, in_chunk &chunk)
+receiver::decode_timestamp(int pol, std::int64_t timestamp, in_chunk &chunk)
 {
     std::size_t sample_idx = timestamp - chunk.timestamp;
     std::size_t packet_idx = sample_idx / packet_samples;
     std::size_t byte_idx = sample_idx * SAMPLE_BITS / 8;
-    void *ptr = boost::asio::buffer_cast<std::uint8_t *>(chunk.storage) + byte_idx;
+    void *ptr = boost::asio::buffer_cast<std::uint8_t *>(chunk.storage[pol]) + byte_idx;
     return std::make_tuple(ptr, &chunk, packet_idx);
 }
 
 std::tuple<void *, in_chunk *, std::size_t>
-receiver::decode_timestamp(std::int64_t timestamp)
+receiver::decode_timestamp(int pol, std::int64_t timestamp)
 {
     if (first_timestamp == -1)
     {
@@ -84,7 +110,7 @@ receiver::decode_timestamp(std::int64_t timestamp)
     {
         if (timestamp >= chunk->timestamp
             && timestamp < chunk->timestamp + chunk_samples)
-            return decode_timestamp(timestamp, *chunk);
+            return decode_timestamp(pol, timestamp, *chunk);
     }
     if (timestamp < base)
     {
@@ -108,11 +134,11 @@ receiver::decode_timestamp(std::int64_t timestamp)
                 flush_chunk();
         }
         grab_chunk(start);
-        return decode_timestamp(timestamp, *active_chunks.back());
+        return decode_timestamp(pol, timestamp, *active_chunks.back());
     }
 }
 
-void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
+void receiver::heap_ready(int pol, spead2::recv::live_heap &&live_heap)
 {
     if (!live_heap.is_complete())
         return;      // should never happen: digitiser heaps are single packet
@@ -145,18 +171,30 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
         // TODO: log. It's the wrong size.
         return;
     }
-    std::tie(expected_ptr, chunk, packet_idx) = decode_timestamp(timestamp);
+    std::tie(expected_ptr, chunk, packet_idx) = decode_timestamp(pol, timestamp);
     if (expected_ptr != actual_ptr)
     {
         // TODO: log. This should only happen if we receive data that is too old.
         return;
     }
-    chunk->present[packet_idx] = true;
+    chunk->present[pol][packet_idx] = true;
 }
 
-void receiver::stop_received()
+void receiver::stop_received(int pol)
 {
-    spead2::recv::stream::stop_received();
+    // TODO: wait for both pols!
     while (!active_chunks.empty())
         flush_chunk();
+}
+
+stream &receiver::get_stream(int pol)
+{
+    assert(0 <= pol && pol < N_POL);
+    return *streams[pol];
+}
+
+const stream &receiver::get_stream(int pol) const
+{
+    assert(0 <= pol && pol < N_POL);
+    return *streams[pol];
 }

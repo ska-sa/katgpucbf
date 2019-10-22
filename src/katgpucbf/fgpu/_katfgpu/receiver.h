@@ -12,6 +12,8 @@
 #include <spead2/common_semaphore.h>
 #include <boost/asio.hpp>
 
+static constexpr int N_POL = 2;
+
 /**
  * Collection of contiguous 10-bit samples in memory, together with information
  * about which samples are present. It references the sample storage but does
@@ -19,18 +21,35 @@
  */
 struct in_chunk
 {
-    std::int64_t timestamp;       ///< Timestamp of first sample
-    std::vector<bool> present;    ///< Bitmask of packets that are present
-    boost::asio::mutable_buffer storage;
+    std::int64_t timestamp;                       ///< Timestamp of first sample
+    std::vector<bool> present[N_POL];             ///< Bitmask of packets that are present
+    boost::asio::mutable_buffer storage[N_POL];   ///< Storage for each polarisation
 };
 
 typedef std::function<void(std::unique_ptr<in_chunk> &&)> chunk_func;
 
-class receiver : public spead2::recv::stream
+class receiver;
+
+class stream : public spead2::recv::stream
 {
 private:
     virtual void heap_ready(spead2::recv::live_heap &&heap) override;
     virtual void stop_received() override;
+
+    receiver &parent;
+    int pol;
+
+public:
+    stream(spead2::io_service_ref io_service, receiver &parent, int pol);
+};
+
+class receiver
+{
+private:
+    friend class stream;
+
+    void heap_ready(int pol, spead2::recv::live_heap &&heap);
+    void stop_received(int pol);
 
     const std::size_t packet_samples;        ///< Number of samples in each packet
     const std::size_t chunk_samples;         ///< Number of samples in each chunk
@@ -44,6 +63,8 @@ private:
     std::stack<std::unique_ptr<in_chunk>> free_chunks;     ///< Chunks available for allocation
     std::deque<std::unique_ptr<in_chunk>> active_chunks;   ///< Chunks currently being filled
 
+    std::unique_ptr<stream> streams[N_POL];
+
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
     void grab_chunk(std::int64_t timestamp);
 
@@ -56,7 +77,8 @@ private:
      * If the timestamp is beyond the last active chunk, old chunks may be
      * flushed and new chunks appended.
      */
-    std::tuple<void *, in_chunk *, std::size_t> decode_timestamp(std::int64_t timestamp);
+    std::tuple<void *, in_chunk *, std::size_t>
+    decode_timestamp(int pol, std::int64_t timestamp);
 
     /**
      * Determine data pointer, chunk and packet index from packet timestamp.
@@ -65,13 +87,17 @@ private:
      * redundant, but allows this function to be tail-called from the main
      * overload.
      */
-    std::tuple<void *, in_chunk *, std::size_t> decode_timestamp(std::int64_t timestamp,
-                                                                 in_chunk &chunk);
+    std::tuple<void *, in_chunk *, std::size_t>
+    decode_timestamp(int pol, std::int64_t timestamp, in_chunk &chunk);
 
 public:
     receiver(spead2::io_service_ref io_service,
              std::size_t packet_samples, std::size_t chunk_samples,
              chunk_func ready_callback);
+
+    /// Get one of the underlying streams (e.g. to add readers)
+    stream &get_stream(int pol);
+    const stream &get_stream(int pol) const;
 
     /// Add a chunk to the free pool
     void add_chunk(std::unique_ptr<in_chunk> &&chunk);
