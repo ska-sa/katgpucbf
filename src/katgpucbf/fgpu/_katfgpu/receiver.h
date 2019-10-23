@@ -13,6 +13,7 @@
 #include <boost/asio.hpp>
 
 static constexpr int N_POL = 2;
+static constexpr int SAMPLE_BITS = 10;
 
 /**
  * Collection of contiguous 10-bit samples in memory, together with information
@@ -26,9 +27,9 @@ struct in_chunk
     boost::asio::mutable_buffer storage[N_POL];   ///< Storage for each polarisation
 };
 
-typedef std::function<void(std::unique_ptr<in_chunk> &&)> chunk_func;
-
 class receiver;
+
+typedef std::function<void(receiver &, std::unique_ptr<in_chunk> &&)> chunk_func;
 
 class stream : public spead2::recv::stream
 {
@@ -41,6 +42,19 @@ private:
 
 public:
     stream(spead2::io_service_ref io_service, receiver &parent, int pol);
+};
+
+class allocator : public spead2::memory_allocator
+{
+private:
+    receiver &recv;
+    int pol;
+
+public:
+    allocator(receiver &recv, int pol);
+
+    virtual pointer allocate(std::size_t size, void *hint) override;
+    virtual void free(std::uint8_t *ptr, void *user) override;
 };
 
 class receiver

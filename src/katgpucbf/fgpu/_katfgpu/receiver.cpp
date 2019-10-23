@@ -1,19 +1,20 @@
 #include <utility>
 #include <cassert>
 #include <map>     // TODO: workaround for it missing in recv_heap.h
+#include <iostream>  // TODO: for debugging
 #include <spead2/recv_heap.h>
 #include "receiver.h"
 
 static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int DATA_ID = 0x3300;
-static constexpr int SAMPLE_BITS = 10;
 
 stream::stream(spead2::io_service_ref io_service, receiver &parent, int pol)
     : spead2::recv::stream(io_service, 0, 1),
     parent(parent),
     pol(pol)
 {
-    // TODO: set allow_unsized_heaps etc
+    set_allow_unsized_heaps(false);
+    set_memcpy(spead2::MEMCPY_NONTEMPORAL);
 }
 
 void stream::heap_ready(spead2::recv::live_heap &&heap)
@@ -25,6 +26,20 @@ void stream::stop_received()
 {
     spead2::recv::stream::stop_received();
     parent.stop_received(pol);
+}
+
+
+allocator::allocator(receiver &recv, int pol) : recv(recv), pol(pol) {}
+
+auto allocator::allocate(std::size_t size, void *hint) -> pointer
+{
+    return spead2::memory_allocator::allocate(size, hint);
+}
+
+void allocator::free(std::uint8_t *ptr, void *user)
+{
+    if (!user)
+        delete[] ptr;
 }
 
 
@@ -40,7 +55,8 @@ receiver::receiver(spead2::io_service_ref io_service,
     for (int i = 0; i < N_POL; i++)
     {
         streams[i] = std::make_unique<stream>(io_service, *this, i);
-        // TODO: set allocator
+        auto alloc = std::make_shared<allocator>(*this, i);
+        streams[i]->set_memory_allocator(std::move(alloc));
     }
 }
 
@@ -79,7 +95,7 @@ void receiver::flush_chunk()
     assert(!active_chunks.empty());
     auto chunk = std::move(active_chunks[0]);
     active_chunks.pop_front();
-    ready_callback(std::move(chunk));
+    ready_callback(*this, std::move(chunk));
 }
 
 std::tuple<void *, in_chunk *, std::size_t>
@@ -109,7 +125,7 @@ receiver::decode_timestamp(int pol, std::int64_t timestamp)
     for (const auto &chunk : active_chunks)
     {
         if (timestamp >= chunk->timestamp
-            && timestamp < chunk->timestamp + chunk_samples)
+            && timestamp < chunk->timestamp + std::int64_t(chunk_samples))
             return decode_timestamp(pol, timestamp, *chunk);
     }
     if (timestamp < base)
@@ -126,7 +142,7 @@ receiver::decode_timestamp(int pol, std::int64_t timestamp)
         // Usually this will be the next sequential chunk. If not, we flush
         // all chunks rather than leaving active_chunks discontiguous.
         std::int64_t start = active_chunks.back()->timestamp + chunk_samples;
-        if (timestamp >= start + chunk_samples)
+        if (timestamp >= start + std::int64_t(chunk_samples))
         {
             // TODO: log/count.
             start += (timestamp - start) / chunk_samples * chunk_samples;
