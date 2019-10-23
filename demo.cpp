@@ -6,54 +6,58 @@
 #include <spead2/recv_udp_pcap.h>
 #include "src/receiver.h"
 
-static constexpr int PACKET_SAMPLES = 4096;
-static constexpr int CHUNK_SAMPLES = 1 << 25;
+static constexpr std::size_t PACKET_SAMPLES = 4096;
+static constexpr std::size_t CHUNK_SAMPLES = 1 << 28;
 
 class plain_in_chunk : public in_chunk
 {
 private:
-    std::unique_ptr<std::uint8_t[]> storage_ptr[N_POL];
+    std::unique_ptr<std::uint8_t[]> storage_ptr;
 
 public:
     plain_in_chunk()
     {
         constexpr std::size_t bytes = CHUNK_SAMPLES * SAMPLE_BITS / 8;
-        for (int pol = 0; pol < 2; pol++)
-        {
-            storage_ptr[pol] = std::make_unique<std::uint8_t[]>(bytes);
-            storage[pol] = boost::asio::mutable_buffer(storage_ptr[pol].get(), bytes);
-            present[pol].resize(CHUNK_SAMPLES / PACKET_SAMPLES);
-        }
+        storage_ptr = std::make_unique<std::uint8_t[]>(bytes);
+        storage = boost::asio::mutable_buffer(storage_ptr.get(), bytes);
+        present.resize(CHUNK_SAMPLES / PACKET_SAMPLES);
     }
 };
 
 int main()
 {
-    std::vector<std::vector<std::uint8_t>> storage;
-
-    receiver recv(PACKET_SAMPLES, CHUNK_SAMPLES);
-    for (int i = 0; i < 4; i++)
-        recv.add_chunk(std::make_unique<plain_in_chunk>());
-    recv.get_stream(0).emplace_reader<spead2::recv::udp_pcap_file_reader>(
-        "/mnt/data/bmerry/pcap/dig1s.pcap");
-    recv.get_stream(1).emplace_reader<spead2::recv::udp_pcap_file_reader>(
-        "/mnt/data/bmerry/pcap/dig1s.pcap");
+    static constexpr int N_POL = 2;
+    receiver::ringbuffer_t ringbuffer(2);
+    std::array<std::unique_ptr<receiver>, N_POL> recv;
+    for (int pol = 0; pol < N_POL; pol++)
+    {
+        recv[pol] = std::make_unique<receiver>(pol, PACKET_SAMPLES, CHUNK_SAMPLES, ringbuffer);
+        for (int i = 0; i < 4; i++)
+            recv[pol]->add_chunk(std::make_unique<plain_in_chunk>());
+    }
+    for (int pol = 0; pol < N_POL; pol++)
+    {
+        recv[pol]->get_stream().emplace_reader<spead2::recv::udp_pcap_file_reader>(
+            "/mnt/data/bmerry/pcap/dig1s.pcap");
+    }
 
     while (true)
     {
         try
         {
-            auto chunk = recv.ringbuffer.pop();
+            auto chunk = ringbuffer.pop();
             std::size_t good = 0;
-            for (int i = 0; i < N_POL; i++)
-                good = std::accumulate(chunk->present[i].begin(), chunk->present[i].end(), good);
+            good = std::accumulate(chunk->present.begin(), chunk->present.end(), good);
             std::cout << "Received chunk with timestamp " << chunk->timestamp
-                << " (" << good << " / " << N_POL * chunk->present[0].size() << " packets)\n";
-            recv.add_chunk(std::move(chunk));
+                << " on pol " << chunk->pol
+                << " (" << good << " / " << chunk->present.size() << " packets)\n";
+            recv[chunk->pol]->add_chunk(std::move(chunk));
         }
         catch (spead2::ringbuffer_stopped &e)
         {
             break;
         }
     }
+    for (int pol = 0; pol < N_POL; pol++)
+        recv[pol]->get_stream().stop();   // TODO: make a stop function in recv
 }
