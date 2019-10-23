@@ -18,13 +18,15 @@ static constexpr int SAMPLE_BITS = 10;
 /**
  * Collection of contiguous 10-bit samples in memory, together with information
  * about which samples are present. It references the sample storage but does
- * not own it.
+ * not own it (although it is polymorphic, so subclasses can own storage).
  */
 struct in_chunk
 {
     std::int64_t timestamp;                       ///< Timestamp of first sample
     std::vector<bool> present[N_POL];             ///< Bitmask of packets that are present
     boost::asio::mutable_buffer storage[N_POL];   ///< Storage for each polarisation
+
+    virtual ~in_chunk() = default;
 };
 
 class receiver;
