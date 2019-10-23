@@ -67,7 +67,9 @@ receiver::receiver(int pol, std::size_t packet_samples, std::size_t chunk_sample
 
 void receiver::add_chunk(std::unique_ptr<in_chunk> &&chunk)
 {
-    assert(buffer_size(chunk->storage) == SAMPLE_BITS * chunk_samples / 8);
+    if (buffer_size(chunk->storage) != SAMPLE_BITS * chunk_samples / 8)
+        throw std::invalid_argument("Chunk has incorrect size");
+
     chunk->present.clear();
     chunk->present.resize(chunk_packets);
     chunk->pol = pol;
@@ -234,7 +236,6 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
 
 void receiver::stop_received()
 {
-    std::cout << "Received stop on pol " << pol << '\n';
     while (!active_chunks.empty())
         flush_chunk();
     ringbuffer.stop();

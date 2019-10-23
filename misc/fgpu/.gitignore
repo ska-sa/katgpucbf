@@ -1,2 +1,6 @@
 *.o
+*.egg-info
+__pycache__
 /demo
+/build
+/katfgpu/*.so
