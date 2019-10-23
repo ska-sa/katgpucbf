@@ -3,6 +3,7 @@
 #include <map>     // TODO: workaround for it missing in recv_heap.h
 #include <iostream>  // TODO: for debugging
 #include <spead2/recv_heap.h>
+#include <spead2/recv_udp_pcap.h>
 #include <spead2/common_endian.h>
 #include "receiver.h"
 
@@ -237,6 +238,25 @@ void receiver::stop_received()
     while (!active_chunks.empty())
         flush_chunk();
     ringbuffer.stop();
+}
+
+void receiver::add_udp_pcap_file_reader(const std::string &filename)
+{
+    stream.emplace_reader<spead2::recv::udp_pcap_file_reader>(filename);
+}
+
+void receiver::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+                                  const std::string &interface_address,
+                                  std::size_t buffer_size, int comp_vector, int max_poll)
+{
+    std::vector<boost::asio::ip::udp::endpoint> endpoints2;
+    for (const auto &ep : endpoints)
+        endpoints2.emplace_back(boost::asio::ip::address::from_string(ep.first), ep.second);
+    auto interface_address2 = boost::asio::ip::address::from_string(interface_address);
+    const std::size_t payload_size = chunk_samples * SAMPLE_BITS / 8;
+    stream.emplace_reader<spead2::recv::udp_ibv_reader>(
+        endpoints2, interface_address2, payload_size + 128,
+        buffer_size, comp_vector, max_poll);
 }
 
 sample_stream &receiver::get_stream()

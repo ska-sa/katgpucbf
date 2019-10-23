@@ -3,7 +3,6 @@
 #include <utility>
 #include <numeric>
 #include <boost/asio.hpp>
-#include <spead2/recv_udp_pcap.h>
 #include "src/receiver.h"
 
 static constexpr std::size_t PACKET_SAMPLES = 4096;
@@ -37,8 +36,14 @@ int main()
     }
     for (int pol = 0; pol < N_POL; pol++)
     {
-        recv[pol]->get_stream().emplace_reader<spead2::recv::udp_pcap_file_reader>(
-            "/mnt/data/bmerry/pcap/dig1s.pcap");
+#if 1
+        recv[pol]->add_udp_pcap_file_reader("/mnt/data/bmerry/pcap/dig1s.pcap");
+#else
+        std::vector<std::pair<std::string, std::uint16_t>> endpoints;
+        for (int i = 0; i < 8; i++)
+            endpoints.emplace_back("239.10.0." + std::to_string(pol * 8 + i), 7148);
+        recv[pol]->add_udp_ibv_reader(endpoints, "10.100.24.69", 32 * 1024 * 1024, pol);
+#endif
     }
 
     while (true)

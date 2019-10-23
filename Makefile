@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -pthread -Wall -g -std=c++17
-LDFLAGS = -pthread -g -lspead2 -lboost_system -lpcap
+CXXFLAGS = -pthread -Wall -g -std=c++17 -fvisibility=hidden -fPIC -I3rdparty/pybind11/include `python3-config --includes`
+LDFLAGS = -pthread -g -lspead2 -lboost_system -lpcap -ldl
 
 SOURCES = demo.cpp $(wildcard src/*.cpp)
 OBJECTS = $(patsubst %.cpp, %.o, $(SOURCES))

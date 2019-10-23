@@ -2,8 +2,11 @@
 #include <deque>
 #include <mutex>
 #include <memory>
+#include <vector>
 #include <tuple>
 #include <bitset>
+#include <utility>
+#include <string>
 #include <cstdint>
 #include <spead2/recv_udp.h>
 #include <spead2/recv_udp_ibv.h>
@@ -59,7 +62,8 @@ public:
 class receiver
 {
 public:
-    using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<in_chunk>>;
+    using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<in_chunk>,
+                                            spead2::semaphore_fd>;
 
 private:
     friend class sample_stream;
@@ -114,6 +118,13 @@ private:
 public:
     receiver(int pol, std::size_t packet_samples, std::size_t chunk_samples,
              ringbuffer_t &ringbuffer, int thread_affinity = -1);
+
+    void add_udp_pcap_file_reader(const std::string &filename);
+
+    void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+                            const std::string &interface_address,
+                            std::size_t buffer_size, int comp_vector = 0,
+                            int max_poll = spead2::recv::udp_ibv_reader::default_max_poll);
 
     /// Get the underlying stream (e.g. to add readers)
     sample_stream &get_stream();
