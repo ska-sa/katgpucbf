@@ -52,12 +52,11 @@ void allocator::free(std::uint8_t *ptr, void *user)
 
 
 receiver::receiver(spead2::io_service_ref io_service,
-                   std::size_t packet_samples, std::size_t chunk_samples,
-                   chunk_func ready_callback)
+                   std::size_t packet_samples, std::size_t chunk_samples)
     : packet_samples(packet_samples),
     chunk_samples(chunk_samples),
     chunk_packets(chunk_samples / packet_samples),
-    ready_callback(ready_callback)
+    ringbuffer(2)
 {
     assert(chunk_samples % packet_samples == 0);
     for (int i = 0; i < N_POL; i++)
@@ -103,7 +102,14 @@ void receiver::flush_chunk()
     assert(!active_chunks.empty());
     auto chunk = std::move(active_chunks[0]);
     active_chunks.pop_front();
-    ready_callback(*this, std::move(chunk));
+    try
+    {
+        ringbuffer.push(std::move(chunk));
+    }
+    catch (spead2::ringbuffer_stopped &e)
+    {
+        // TODO: log/count
+    }
 }
 
 std::tuple<void *, in_chunk *, std::size_t>
@@ -232,9 +238,17 @@ void receiver::heap_ready(int pol, spead2::recv::live_heap &&live_heap)
 
 void receiver::stop_received(int pol)
 {
-    // TODO: wait for both pols!
-    while (!active_chunks.empty())
-        flush_chunk();
+    std::cout << "Received stop on pol " << pol << '\n';
+    if (!stream_stopped[pol])
+    {
+        stream_stopped.set(pol);
+        if (stream_stopped.all())
+        {
+            while (!active_chunks.empty())
+                flush_chunk();
+            ringbuffer.stop();
+        }
+    }
 }
 
 stream &receiver::get_stream(int pol)

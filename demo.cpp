@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <utility>
+#include <numeric>
 #include <boost/asio.hpp>
 #include <spead2/recv_udp_pcap.h>
 #include "src/receiver.h"
@@ -26,22 +27,35 @@ public:
     }
 };
 
-void ready_callback(receiver &recv, std::unique_ptr<in_chunk> &&chunk)
-{
-    std::cout << "Received chunk with timestamp " << chunk->timestamp << '\n';
-    recv.add_chunk(std::move(chunk));
-}
-
 int main()
 {
     std::vector<std::vector<std::uint8_t>> storage;
-    boost::asio::io_service io_service;
+    spead2::thread_pool tpool;
 
-    receiver recv(io_service, PACKET_SAMPLES, CHUNK_SAMPLES, ready_callback);
+    receiver recv(tpool, PACKET_SAMPLES, CHUNK_SAMPLES);
     for (int i = 0; i < 4; i++)
         recv.add_chunk(std::make_unique<plain_in_chunk>());
     recv.get_stream(0).emplace_reader<spead2::recv::udp_pcap_file_reader>(
-        "/mnt/data/bmerry/pcap/dig10s.pcap");
+        "/mnt/data/bmerry/pcap/dig1s.pcap");
+    recv.get_stream(1).emplace_reader<spead2::recv::udp_pcap_file_reader>(
+        "/mnt/data/bmerry/pcap/dig1s.pcap");
 
-    io_service.run();
+    while (true)
+    {
+        try
+        {
+            auto chunk = recv.ringbuffer.pop();
+            std::size_t good = 0;
+            for (int i = 0; i < N_POL; i++)
+                good = std::accumulate(chunk->present[i].begin(), chunk->present[i].end(), good);
+            std::cout << "Received chunk with timestamp " << chunk->timestamp
+                << " (" << good << " / " << N_POL * chunk->present[0].size() << " packets)\n";
+            recv.add_chunk(std::move(chunk));
+        }
+        catch (spead2::ringbuffer_stopped &e)
+        {
+            break;
+        }
+    }
+    tpool.stop();
 }

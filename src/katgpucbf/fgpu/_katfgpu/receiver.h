@@ -3,13 +3,14 @@
 #include <mutex>
 #include <memory>
 #include <tuple>
-#include <functional>
+#include <bitset>
 #include <cstdint>
 #include <spead2/recv_udp.h>
 #include <spead2/recv_udp_ibv.h>
 #include <spead2/common_thread_pool.h>
 #include <spead2/common_memory_allocator.h>
 #include <spead2/common_semaphore.h>
+#include <spead2/common_ringbuffer.h>
 #include <boost/asio.hpp>
 
 static constexpr int N_POL = 2;
@@ -30,8 +31,6 @@ struct in_chunk
 };
 
 class receiver;
-
-typedef std::function<void(receiver &, std::unique_ptr<in_chunk> &&)> chunk_func;
 
 class stream : public spead2::recv::stream
 {
@@ -71,7 +70,6 @@ private:
     const std::size_t packet_samples;        ///< Number of samples in each packet
     const std::size_t chunk_samples;         ///< Number of samples in each chunk
     const std::size_t chunk_packets;         ///< Number of packets in each chunk
-    const chunk_func ready_callback;         ///< Called when a chunk has been filled
 
     std::int64_t first_timestamp = -1;       ///< Very first timestamp observed
 
@@ -80,6 +78,7 @@ private:
     std::stack<std::unique_ptr<in_chunk>> free_chunks;     ///< Chunks available for allocation
     std::deque<std::unique_ptr<in_chunk>> active_chunks;   ///< Chunks currently being filled
 
+    std::bitset<N_POL> stream_stopped;
     std::unique_ptr<stream> streams[N_POL];
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
@@ -110,9 +109,11 @@ private:
     void *allocate(int pol, std::size_t size, spead2::recv::packet_header &packet);
 
 public:
+    spead2::ringbuffer<std::unique_ptr<in_chunk>> ringbuffer;    ///< Chunks ready to be processed
+
+    // NB: io_service must be running with only one thread!
     receiver(spead2::io_service_ref io_service,
-             std::size_t packet_samples, std::size_t chunk_samples,
-             chunk_func ready_callback);
+             std::size_t packet_samples, std::size_t chunk_samples);
 
     /// Get one of the underlying streams (e.g. to add readers)
     stream &get_stream(int pol);
