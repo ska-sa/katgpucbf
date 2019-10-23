@@ -3,6 +3,7 @@
 #include <map>     // TODO: workaround for it missing in recv_heap.h
 #include <iostream>  // TODO: for debugging
 #include <spead2/recv_heap.h>
+#include <spead2/common_endian.h>
 #include "receiver.h"
 
 static constexpr int TIMESTAMP_ID = 0x1600;
@@ -33,6 +34,13 @@ allocator::allocator(receiver &recv, int pol) : recv(recv), pol(pol) {}
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
+    if (hint)
+    {
+        void *ptr = recv.allocate(pol, size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
+        if (ptr)
+            return pointer(reinterpret_cast<std::uint8_t *>(ptr),
+                           deleter(shared_from_this(), (void *) std::uintptr_t(true)));
+    }
     return spead2::memory_allocator::allocate(size, hint);
 }
 
@@ -154,6 +162,31 @@ receiver::decode_timestamp(int pol, std::int64_t timestamp)
     }
 }
 
+void *receiver::allocate(int pol, std::size_t size, spead2::recv::packet_header &packet)
+{
+    // TODO: precompute?
+    std::size_t expected_size = packet_samples * SAMPLE_BITS / 8;
+    if (size != expected_size)
+        return nullptr;
+    std::int64_t timestamp = -1;
+    spead2::recv::pointer_decoder decoder(packet.heap_address_bits);
+    // Extract timestamp
+    for (int i = 0; i < packet.n_items; i++)
+    {
+        spead2::item_pointer_t pointer;
+        pointer = spead2::load_be<spead2::item_pointer_t>(packet.pointers + i * sizeof(pointer));
+        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == TIMESTAMP_ID)
+        {
+            timestamp = decoder.get_immediate(pointer);
+            break;
+        }
+    }
+    if (timestamp == -1)
+        return nullptr;
+
+    return std::get<0>(decode_timestamp(pol, timestamp));
+}
+
 void receiver::heap_ready(int pol, spead2::recv::live_heap &&live_heap)
 {
     if (!live_heap.is_complete())
@@ -187,6 +220,7 @@ void receiver::heap_ready(int pol, spead2::recv::live_heap &&live_heap)
         // TODO: log. It's the wrong size.
         return;
     }
+
     std::tie(expected_ptr, chunk, packet_idx) = decode_timestamp(pol, timestamp);
     if (expected_ptr != actual_ptr)
     {

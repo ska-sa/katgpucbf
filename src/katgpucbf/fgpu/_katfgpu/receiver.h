@@ -63,6 +63,7 @@ class receiver
 {
 private:
     friend class stream;
+    friend class allocator;
 
     void heap_ready(int pol, spead2::recv::live_heap &&heap);
     void stop_received(int pol);
@@ -72,7 +73,7 @@ private:
     const std::size_t chunk_packets;         ///< Number of packets in each chunk
     const chunk_func ready_callback;         ///< Called when a chunk has been filled
 
-    std::int64_t first_timestamp;            ///< Very first timestamp observed
+    std::int64_t first_timestamp = -1;       ///< Very first timestamp observed
 
     mutable std::mutex free_chunks_lock;     ///< Protects access to @ref free_chunks
     spead2::semaphore free_chunks_sem;       ///< Semaphore that is put whenever chunks are added
@@ -105,6 +106,8 @@ private:
      */
     std::tuple<void *, in_chunk *, std::size_t>
     decode_timestamp(int pol, std::int64_t timestamp, in_chunk &chunk);
+
+    void *allocate(int pol, std::size_t size, spead2::recv::packet_header &packet);
 
 public:
     receiver(spead2::io_service_ref io_service,

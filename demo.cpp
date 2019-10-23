@@ -6,7 +6,7 @@
 #include "src/receiver.h"
 
 static constexpr int PACKET_SAMPLES = 4096;
-static constexpr int CHUNK_SAMPLES = 1 << 20;
+static constexpr int CHUNK_SAMPLES = 1 << 25;
 
 class plain_in_chunk : public in_chunk
 {
