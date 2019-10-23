@@ -30,9 +30,8 @@ public:
 int main()
 {
     std::vector<std::vector<std::uint8_t>> storage;
-    spead2::thread_pool tpool;
 
-    receiver recv(tpool, PACKET_SAMPLES, CHUNK_SAMPLES);
+    receiver recv(PACKET_SAMPLES, CHUNK_SAMPLES);
     for (int i = 0; i < 4; i++)
         recv.add_chunk(std::make_unique<plain_in_chunk>());
     recv.get_stream(0).emplace_reader<spead2::recv::udp_pcap_file_reader>(
@@ -57,5 +56,4 @@ int main()
             break;
         }
     }
-    tpool.stop();
 }

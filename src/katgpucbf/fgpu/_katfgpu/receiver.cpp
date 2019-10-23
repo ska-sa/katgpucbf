@@ -51,17 +51,17 @@ void allocator::free(std::uint8_t *ptr, void *user)
 }
 
 
-receiver::receiver(spead2::io_service_ref io_service,
-                   std::size_t packet_samples, std::size_t chunk_samples)
+receiver::receiver(std::size_t packet_samples, std::size_t chunk_samples, int thread_affinity)
     : packet_samples(packet_samples),
     chunk_samples(chunk_samples),
     chunk_packets(chunk_samples / packet_samples),
+    thread_pool(1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
     ringbuffer(2)
 {
     assert(chunk_samples % packet_samples == 0);
     for (int i = 0; i < N_POL; i++)
     {
-        streams[i] = std::make_unique<stream>(io_service, *this, i);
+        streams[i] = std::make_unique<stream>(thread_pool, *this, i);
         auto alloc = std::make_shared<allocator>(*this, i);
         streams[i]->set_memory_allocator(std::move(alloc));
     }

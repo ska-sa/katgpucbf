@@ -73,6 +73,7 @@ private:
 
     std::int64_t first_timestamp = -1;       ///< Very first timestamp observed
 
+    spead2::thread_pool thread_pool;         ///< Single-threaded pool servicing the streams
     mutable std::mutex free_chunks_lock;     ///< Protects access to @ref free_chunks
     spead2::semaphore free_chunks_sem;       ///< Semaphore that is put whenever chunks are added
     std::stack<std::unique_ptr<in_chunk>> free_chunks;     ///< Chunks available for allocation
@@ -111,9 +112,7 @@ private:
 public:
     spead2::ringbuffer<std::unique_ptr<in_chunk>> ringbuffer;    ///< Chunks ready to be processed
 
-    // NB: io_service must be running with only one thread!
-    receiver(spead2::io_service_ref io_service,
-             std::size_t packet_samples, std::size_t chunk_samples);
+    receiver(std::size_t packet_samples, std::size_t chunk_samples, int thread_affinity = -1);
 
     /// Get one of the underlying streams (e.g. to add readers)
     stream &get_stream(int pol);
