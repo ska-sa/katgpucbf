@@ -13,26 +13,6 @@ namespace katfgpu::recv
 static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int DATA_ID = 0x3300;
 
-sample_stream::sample_stream(spead2::io_service_ref io_service, receiver &parent)
-    : spead2::recv::stream(io_service, 0, 1),
-    parent(parent)
-{
-    set_allow_unsized_heaps(false);
-    set_memcpy(spead2::MEMCPY_NONTEMPORAL);
-}
-
-void sample_stream::heap_ready(spead2::recv::live_heap &&heap)
-{
-    parent.heap_ready(std::move(heap));
-}
-
-void sample_stream::stop_received()
-{
-    spead2::recv::stream::stop_received();
-    parent.stop_received();
-}
-
-
 allocator::allocator(receiver &recv) : recv(recv) {}
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
@@ -56,15 +36,16 @@ void allocator::free(std::uint8_t *ptr, void *user)
 
 receiver::receiver(int pol, int sample_bits, std::size_t packet_samples,
                    std::size_t chunk_samples, ringbuffer_t &ringbuffer, int thread_affinity)
-    : pol(pol),
+    : spead2::thread_pool(
+        1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
+    spead2::recv::stream(*static_cast<thread_pool *>(this), 0, 1),
+    pol(pol),
     sample_bits(sample_bits),
     packet_samples(packet_samples),
     chunk_samples(chunk_samples),
     chunk_packets(chunk_samples / packet_samples),
     packet_bytes(packet_samples / 8 * sample_bits),
     chunk_bytes(chunk_samples / 8 * sample_bits),
-    thread_pool(1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
-    stream(thread_pool, *this),
     ringbuffer(ringbuffer)
 {
     if (sample_bits <= 0)
@@ -77,7 +58,9 @@ receiver::receiver(int pol, int sample_bits, std::size_t packet_samples,
         throw std::invalid_argument("packet_samples must be a multiple of 8");
     if (chunk_samples % packet_samples != 0)
         throw std::invalid_argument("chunk_samples must be a multiple of packet_samples");
-    stream.set_memory_allocator(std::make_shared<allocator>(*this));
+    set_allow_unsized_heaps(false);
+    set_memcpy(spead2::MEMCPY_NONTEMPORAL);
+    set_memory_allocator(std::make_shared<katfgpu::recv::allocator>(*this));
 }
 
 receiver::~receiver()
@@ -260,11 +243,12 @@ void receiver::stop_received()
         if (!flush_chunk())
             break;
     ringbuffer.stop();
+    spead2::recv::stream::stop_received();
 }
 
 void receiver::add_udp_pcap_file_reader(const std::string &filename)
 {
-    stream.emplace_reader<spead2::recv::udp_pcap_file_reader>(filename);
+    emplace_reader<spead2::recv::udp_pcap_file_reader>(filename);
 }
 
 void receiver::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
@@ -275,19 +259,9 @@ void receiver::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::
     for (const auto &ep : endpoints)
         endpoints2.emplace_back(boost::asio::ip::address::from_string(ep.first), ep.second);
     auto interface_address2 = boost::asio::ip::address::from_string(interface_address);
-    stream.emplace_reader<spead2::recv::udp_ibv_reader>(
+    emplace_reader<spead2::recv::udp_ibv_reader>(
         endpoints2, interface_address2, chunk_bytes + 128,
         buffer_size, comp_vector, max_poll);
-}
-
-sample_stream &receiver::get_stream()
-{
-    return stream;
-}
-
-const sample_stream &receiver::get_stream() const
-{
-    return stream;
 }
 
 receiver::ringbuffer_t &receiver::get_ringbuffer()
@@ -333,7 +307,7 @@ const receiver::ringbuffer_t &receiver::get_ringbuffer() const
 void receiver::stop()
 {
     ringbuffer.stop();
-    stream.stop();
+    spead2::recv::stream::stop();
 }
 
 } // namespace katfgpu::recv

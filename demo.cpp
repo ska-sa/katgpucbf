@@ -67,5 +67,5 @@ int main()
         }
     }
     for (int pol = 0; pol < N_POL; pol++)
-        recv[pol]->get_stream().stop();   // TODO: make a stop function in recv
+        recv[pol]->stop();
 }

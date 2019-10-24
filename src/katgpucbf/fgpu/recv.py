@@ -42,4 +42,4 @@ class Ringbuffer(_Ringbuffer):
         try:
             return await self.async_pop()
         except _katfgpu.Stopped:
-            raise AsyncStopIteration
+            raise StopAsyncIteration from None

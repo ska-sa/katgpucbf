@@ -40,18 +40,6 @@ struct chunk
 
 class receiver;
 
-class sample_stream : public spead2::recv::stream
-{
-private:
-    virtual void heap_ready(spead2::recv::live_heap &&heap) override;
-    virtual void stop_received() override;
-
-    receiver &parent;
-
-public:
-    sample_stream(spead2::io_service_ref io_service, receiver &parent);
-};
-
 class allocator : public spead2::memory_allocator
 {
 private:
@@ -64,18 +52,17 @@ public:
     virtual void free(std::uint8_t *ptr, void *user) override;
 };
 
-class receiver
+class receiver : private spead2::thread_pool, public spead2::recv::stream
 {
 public:
     using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>,
                                             spead2::semaphore_fd>;
 
 private:
-    friend class sample_stream;
     friend class allocator;
 
-    void heap_ready(spead2::recv::live_heap &&heap);
-    void stop_received();
+    virtual void heap_ready(spead2::recv::live_heap &&heap) override;
+    virtual void stop_received() override;
 
     const int pol;                           ///< Polarisation index
     const int sample_bits;                   ///< Number of bits per sample
@@ -92,8 +79,6 @@ private:
     std::stack<std::unique_ptr<chunk>> free_chunks;     ///< Chunks available for allocation
     std::deque<std::unique_ptr<chunk>> active_chunks;   ///< Chunks currently being filled
 
-    spead2::thread_pool thread_pool;         ///< Single-threaded pool servicing the stream
-    sample_stream stream;
     ringbuffer_t &ringbuffer;  ///< Chunks ready to be processed
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
@@ -140,10 +125,6 @@ public:
                             std::size_t buffer_size, int comp_vector = 0,
                             int max_poll = spead2::recv::udp_ibv_reader::default_max_poll);
 
-    /// Get the underlying stream (e.g. to add readers)
-    sample_stream &get_stream();
-    const sample_stream &get_stream() const;
-
     /// Get the referenced ringbuffer
     ringbuffer_t &get_ringbuffer();
     const ringbuffer_t &get_ringbuffer() const;
@@ -158,7 +139,7 @@ public:
     /// Add a chunk to the free pool
     void add_chunk(std::unique_ptr<chunk> &&c);
 
-    void stop();
+    virtual void stop() override;
 };
 
 } // namespace katfgpu::recv
