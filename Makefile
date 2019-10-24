@@ -1,8 +1,8 @@
 CXX = g++
-CXXFLAGS = -pthread -Wall -g -std=c++17 -fvisibility=hidden -fPIC -I3rdparty/pybind11/include `python3-config --includes`
+CXXFLAGS = -pthread -Wall -g -std=c++17 -fvisibility=hidden
 LDFLAGS = -pthread -g -lspead2 -lboost_system -lpcap -ldl
 
-SOURCES = demo.cpp $(filter-out src/bind.cpp, $(wildcard src/*.cpp))
+SOURCES = demo.cpp $(filter-out $(wildcard src/py_*.cpp), $(wildcard src/*.cpp))
 OBJECTS = $(patsubst %.cpp, %.o, $(SOURCES))
 HEADERS = $(wildcard src/*.h)
 

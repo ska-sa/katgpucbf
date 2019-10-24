@@ -5,7 +5,10 @@
 #include <spead2/recv_heap.h>
 #include <spead2/recv_udp_pcap.h>
 #include <spead2/common_endian.h>
-#include "receiver.h"
+#include "recv.h"
+
+namespace katfgpu::recv
+{
 
 static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int DATA_ID = 0x3300;
@@ -332,3 +335,5 @@ void receiver::stop()
     ringbuffer.stop();
     stream.stop();
 }
+
+} // namespace katfgpu::recv

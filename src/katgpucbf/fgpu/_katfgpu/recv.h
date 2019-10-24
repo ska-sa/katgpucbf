@@ -1,3 +1,6 @@
+#ifndef KATFGPU_RECEIVER_H
+#define KATFGPU_RECEIVER_H
+
 #include <stack>
 #include <deque>
 #include <mutex>
@@ -15,6 +18,9 @@
 #include <spead2/common_semaphore.h>
 #include <spead2/common_ringbuffer.h>
 #include <boost/asio.hpp>
+
+namespace katfgpu::recv
+{
 
 /**
  * Collection of contiguous 10-bit samples in memory, together with information
@@ -154,3 +160,7 @@ public:
 
     void stop();
 };
+
+} // namespace katfgpu::recv
+
+#endif // KATFGPU_RECEIVER_H

@@ -1,9 +1,12 @@
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "receiver.h"
+#include "recv.h"
 
 namespace py = pybind11;
+
+namespace katfgpu::recv
+{
 
 // Copied from spead2
 py::buffer_info request_buffer_info(py::buffer &buffer, int extra_flags)
@@ -33,9 +36,12 @@ public:
     }
 };
 
+}
+
 PYBIND11_MODULE(_katfgpu, m)
 {
     using namespace pybind11::literals;
+    using namespace katfgpu::recv;
     m.doc() = "C++ backend of fgpu";
 
     py::register_exception<spead2::ringbuffer_stopped>(m, "Stopped");
@@ -78,7 +84,7 @@ PYBIND11_MODULE(_katfgpu, m)
     ;
 
     py::class_<receiver::ringbuffer_t>(receiver_class, "Ringbuffer", "Ringbuffer for samples")
-        .def(py::init<int>())
+        .def(py::init<int>(), "cap"_a)
         .def("pop", [](receiver::ringbuffer_t &self)
         {
             std::unique_ptr<in_chunk> chunk = self.pop();

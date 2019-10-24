@@ -3,7 +3,9 @@
 #include <utility>
 #include <numeric>
 #include <boost/asio.hpp>
-#include "src/receiver.h"
+#include "src/recv.h"
+
+using namespace katfgpu::recv;
 
 static constexpr int SAMPLE_BITS = 10;
 static constexpr std::size_t PACKET_SAMPLES = 4096;
