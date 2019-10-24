@@ -74,6 +74,7 @@ PYBIND11_MODULE(_katfgpu, m)
              "endpoints"_a, "interface_address"_a, "buffer_size"_a,
              "comp_vector"_a = 0,
              "max_poll"_a = spead2::recv::udp_ibv_reader::default_max_poll)
+        .def("stop", &receiver::stop)
     ;
 
     py::class_<receiver::ringbuffer_t>(receiver_class, "Ringbuffer", "Ringbuffer for samples")

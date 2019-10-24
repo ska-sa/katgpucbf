@@ -51,33 +51,37 @@ def main():
     ring = katfgpu.Receiver.Ringbuffer(2)
     recv = [katfgpu.Receiver(i, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
             for i in range(N_POL)]
-    dev_samples = accel.DeviceArray(ctx, (recv[0].chunk_bytes,), np.uint8)
-    for pol in range(N_POL):
-        for i in range(4):
-            buf = accel.HostArray((recv[pol].chunk_bytes,), np.uint8, context=ctx)
-            recv[pol].add_chunk(katfgpu.InChunk(buf))
-        if isinstance(args.sources[pol], str):
-            recv[pol].add_udp_pcap_file_reader(args.sources[pol])
-        else:
-            recv[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
+    try:
+        dev_samples = accel.DeviceArray(ctx, (recv[0].chunk_bytes,), np.uint8)
+        for pol in range(N_POL):
+            for i in range(4):
+                buf = accel.HostArray((recv[pol].chunk_bytes,), np.uint8, context=ctx)
+                recv[pol].add_chunk(katfgpu.InChunk(buf))
+            if isinstance(args.sources[pol], str):
+                recv[pol].add_udp_pcap_file_reader(args.sources[pol])
+            else:
+                recv[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
 
-    lost = 0
-    while True:
-        try:
-            chunk = ring.pop()
-        except katfgpu.Stopped:
-            break
-        total = len(chunk.present)
-        good = sum(chunk.present)
-        lost += total - good
-        print('Received chunk: timestamp={chunk.timestamp} pol={chunk.pol} ({good}/{total}, lost {lost})'.format(
-            chunk=chunk, good=good, total=total, lost=lost))
-        try:
-            buf = chunk.base
-            dev_samples.set(queue, buf)
-        finally:
-            recv[chunk.pol].add_chunk(chunk)
-    print('Done!')
+        lost = 0
+        while True:
+            try:
+                chunk = ring.pop()
+            except katfgpu.Stopped:
+                break
+            total = len(chunk.present)
+            good = sum(chunk.present)
+            lost += total - good
+            print('Received chunk: timestamp={chunk.timestamp} pol={chunk.pol} ({good}/{total}, lost {lost})'.format(
+                chunk=chunk, good=good, total=total, lost=lost))
+            try:
+                buf = chunk.base
+                dev_samples.set(queue, buf)
+            finally:
+                recv[chunk.pol].add_chunk(chunk)
+        print('Done!')
+    finally:
+        for r in recv:
+            r.stop()
 
 
 if __name__ == '__main__':
