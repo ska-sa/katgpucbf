@@ -38,21 +38,21 @@ struct chunk
     virtual ~chunk() = default; // makes it polymorphic
 };
 
-class receiver;
+class stream;
 
 class allocator : public spead2::memory_allocator
 {
 private:
-    receiver &recv;
+    stream &recv;
 
 public:
-    explicit allocator(receiver &recv);
+    explicit allocator(stream &recv);
 
     virtual pointer allocate(std::size_t size, void *hint) override;
     virtual void free(std::uint8_t *ptr, void *user) override;
 };
 
-class receiver : private spead2::thread_pool, public spead2::recv::stream
+class stream : private spead2::thread_pool, public spead2::recv::stream
 {
 public:
     using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>,
@@ -114,9 +114,9 @@ private:
     void *allocate(std::size_t size, spead2::recv::packet_header &packet);
 
 public:
-    receiver(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
-             ringbuffer_t &ringbuffer, int thread_affinity = -1);
-    ~receiver();
+    stream(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
+           ringbuffer_t &ringbuffer, int thread_affinity = -1);
+    ~stream();
 
     void add_udp_pcap_file_reader(const std::string &filename);
 

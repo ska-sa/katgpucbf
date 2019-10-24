@@ -50,7 +50,7 @@ async def main() -> None:
     queue = ctx.create_command_queue()
 
     ring = katfgpu.recv.Ringbuffer(2)
-    recv = [katfgpu.recv.Receiver(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
+    recv = [katfgpu.recv.Stream(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
             for pol in range(N_POL)]
     try:
         dev_samples = [accel.DeviceArray(ctx, (recv[pol].chunk_bytes,), np.uint8)

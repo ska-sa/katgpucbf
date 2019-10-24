@@ -13,7 +13,7 @@ namespace katfgpu::recv
 static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int DATA_ID = 0x3300;
 
-allocator::allocator(receiver &recv) : recv(recv) {}
+allocator::allocator(stream &recv) : recv(recv) {}
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
@@ -34,7 +34,7 @@ void allocator::free(std::uint8_t *ptr, void *user)
 }
 
 
-receiver::receiver(int pol, int sample_bits, std::size_t packet_samples,
+stream::stream(int pol, int sample_bits, std::size_t packet_samples,
                    std::size_t chunk_samples, ringbuffer_t &ringbuffer, int thread_affinity)
     : spead2::thread_pool(
         1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
@@ -63,12 +63,12 @@ receiver::receiver(int pol, int sample_bits, std::size_t packet_samples,
     set_memory_allocator(std::make_shared<katfgpu::recv::allocator>(*this));
 }
 
-receiver::~receiver()
+stream::~stream()
 {
     stop();
 }
 
-void receiver::add_chunk(std::unique_ptr<chunk> &&c)
+void stream::add_chunk(std::unique_ptr<chunk> &&c)
 {
     if (buffer_size(c->storage) != chunk_bytes)
         throw std::invalid_argument("Chunk has incorrect size");
@@ -83,7 +83,7 @@ void receiver::add_chunk(std::unique_ptr<chunk> &&c)
     free_chunks_sem.put();
 }
 
-void receiver::grab_chunk(std::int64_t timestamp)
+void stream::grab_chunk(std::int64_t timestamp)
 {
     semaphore_get(free_chunks_sem);
     {
@@ -95,7 +95,7 @@ void receiver::grab_chunk(std::int64_t timestamp)
     active_chunks.back()->timestamp = timestamp;
 }
 
-bool receiver::flush_chunk()
+bool stream::flush_chunk()
 {
     assert(!active_chunks.empty());
     try
@@ -112,7 +112,7 @@ bool receiver::flush_chunk()
 }
 
 std::tuple<void *, chunk *, std::size_t>
-receiver::decode_timestamp(std::int64_t timestamp, chunk &c)
+stream::decode_timestamp(std::int64_t timestamp, chunk &c)
 {
     std::size_t sample_idx = timestamp - c.timestamp;
     std::size_t packet_idx = sample_idx / packet_samples;
@@ -122,7 +122,7 @@ receiver::decode_timestamp(std::int64_t timestamp, chunk &c)
 }
 
 std::tuple<void *, chunk *, std::size_t>
-receiver::decode_timestamp(std::int64_t timestamp)
+stream::decode_timestamp(std::int64_t timestamp)
 {
     if (first_timestamp == -1)
     {
@@ -171,7 +171,7 @@ receiver::decode_timestamp(std::int64_t timestamp)
     }
 }
 
-void *receiver::allocate(std::size_t size, spead2::recv::packet_header &packet)
+void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
     if (size != packet_bytes)
         return nullptr;
@@ -194,7 +194,7 @@ void *receiver::allocate(std::size_t size, spead2::recv::packet_header &packet)
     return std::get<0>(decode_timestamp(timestamp));
 }
 
-void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
+void stream::heap_ready(spead2::recv::live_heap &&live_heap)
 {
     if (!live_heap.is_complete())
         return;      // should never happen: digitiser heaps are single packet
@@ -237,7 +237,7 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
     c->present[packet_idx] = true;
 }
 
-void receiver::stop_received()
+void stream::stop_received()
 {
     while (!active_chunks.empty())
         if (!flush_chunk())
@@ -246,12 +246,12 @@ void receiver::stop_received()
     spead2::recv::stream::stop_received();
 }
 
-void receiver::add_udp_pcap_file_reader(const std::string &filename)
+void stream::add_udp_pcap_file_reader(const std::string &filename)
 {
     emplace_reader<spead2::recv::udp_pcap_file_reader>(filename);
 }
 
-void receiver::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                                   const std::string &interface_address,
                                   std::size_t buffer_size, int comp_vector, int max_poll)
 {
@@ -264,47 +264,47 @@ void receiver::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::
         buffer_size, comp_vector, max_poll);
 }
 
-receiver::ringbuffer_t &receiver::get_ringbuffer()
+stream::ringbuffer_t &stream::get_ringbuffer()
 {
     return ringbuffer;
 }
 
-int receiver::get_pol() const
+int stream::get_pol() const
 {
     return pol;
 }
 
-int receiver::get_sample_bits() const
+int stream::get_sample_bits() const
 {
     return sample_bits;
 }
 
-std::size_t receiver::get_packet_samples() const
+std::size_t stream::get_packet_samples() const
 {
     return packet_samples;
 }
 
-std::size_t receiver::get_chunk_samples() const
+std::size_t stream::get_chunk_samples() const
 {
     return chunk_samples;
 }
 
-std::size_t receiver::get_chunk_packets() const
+std::size_t stream::get_chunk_packets() const
 {
     return chunk_packets;
 }
 
-std::size_t receiver::get_chunk_bytes() const
+std::size_t stream::get_chunk_bytes() const
 {
     return chunk_bytes;
 }
 
-const receiver::ringbuffer_t &receiver::get_ringbuffer() const
+const stream::ringbuffer_t &stream::get_ringbuffer() const
 {
     return ringbuffer;
 }
 
-void receiver::stop()
+void stream::stop()
 {
     ringbuffer.stop();
     spead2::recv::stream::stop();

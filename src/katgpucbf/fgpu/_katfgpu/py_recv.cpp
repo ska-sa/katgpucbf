@@ -41,7 +41,7 @@ py::module register_module(py::module &parent)
     using namespace pybind11::literals;
 
     py::module m = parent.def_submodule("recv");
-    m.doc() = "receiver for katfgpu";
+    m.doc() = "stream for katfgpu";
 
     py::class_<py_chunk>(m, "Chunk", "Chunk of samples")
         .def(py::init<py::buffer>(), "base"_a)
@@ -51,46 +51,46 @@ py::module register_module(py::module &parent)
         .def_readonly("base", &py_chunk::base)
     ;
 
-    py::class_<receiver>(m, "Receiver", "SPEAD stream receiver")
-        .def(py::init<int, int, std::size_t, std::size_t, receiver::ringbuffer_t &, int>(),
+    py::class_<stream>(m, "Stream", "SPEAD stream receiver")
+        .def(py::init<int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int>(),
              "pol"_a, "sample_bits"_a, "packet_samples"_a, "chunk_samples"_a,
              "ringbuffer"_a, "thread_affinity"_a = -1, py::keep_alive<1, 6>())
-        .def_property_readonly("ringbuffer", [](receiver &self) -> receiver::ringbuffer_t &
+        .def_property_readonly("ringbuffer", [](stream &self) -> stream::ringbuffer_t &
         {
             return self.get_ringbuffer();
         })
-        .def_property_readonly("pol", &receiver::get_pol)
-        .def_property_readonly("sample_bits", &receiver::get_sample_bits)
-        .def_property_readonly("packet_samples", &receiver::get_packet_samples)
-        .def_property_readonly("chunk_samples", &receiver::get_chunk_samples)
-        .def_property_readonly("chunk_packets", &receiver::get_chunk_packets)
-        .def_property_readonly("chunk_bytes", &receiver::get_chunk_bytes)
-        .def("add_chunk", [](receiver &self, const py_chunk &chunk)
+        .def_property_readonly("pol", &stream::get_pol)
+        .def_property_readonly("sample_bits", &stream::get_sample_bits)
+        .def_property_readonly("packet_samples", &stream::get_packet_samples)
+        .def_property_readonly("chunk_samples", &stream::get_chunk_samples)
+        .def_property_readonly("chunk_packets", &stream::get_chunk_packets)
+        .def_property_readonly("chunk_bytes", &stream::get_chunk_bytes)
+        .def("add_chunk", [](stream &self, const py_chunk &chunk)
         {
             self.add_chunk(std::make_unique<py_chunk>(chunk));
         })
-        .def("add_udp_pcap_file_reader", &receiver::add_udp_pcap_file_reader,
+        .def("add_udp_pcap_file_reader", &stream::add_udp_pcap_file_reader,
              "filename"_a)
-        .def("add_udp_ibv_reader", &receiver::add_udp_ibv_reader,
+        .def("add_udp_ibv_reader", &stream::add_udp_ibv_reader,
              "endpoints"_a, "interface_address"_a, "buffer_size"_a,
              "comp_vector"_a = 0,
              "max_poll"_a = spead2::recv::udp_ibv_reader::default_max_poll)
-        .def("stop", &receiver::stop)
+        .def("stop", &stream::stop)
     ;
 
-    py::class_<receiver::ringbuffer_t>(m, "Ringbuffer", "Ringbuffer for samples")
+    py::class_<stream::ringbuffer_t>(m, "Ringbuffer", "Ringbuffer for samples")
         .def(py::init<int>(), "cap"_a)
-        .def("pop", [](receiver::ringbuffer_t &self)
+        .def("pop", [](stream::ringbuffer_t &self)
         {
             std::unique_ptr<chunk> chunk = self.pop();
             return std::unique_ptr<py_chunk>(&dynamic_cast<py_chunk &>(*chunk.release()));
         })
-        .def("try_pop", [](receiver::ringbuffer_t &self)
+        .def("try_pop", [](stream::ringbuffer_t &self)
         {
             std::unique_ptr<chunk> chunk = self.try_pop();
             return std::unique_ptr<py_chunk>(&dynamic_cast<py_chunk &>(*chunk.release()));
         })
-        .def_property_readonly("data_fd", [](receiver::ringbuffer_t &self)
+        .def_property_readonly("data_fd", [](stream::ringbuffer_t &self)
         {
             return self.get_data_sem().get_fd();
         })

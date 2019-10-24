@@ -29,11 +29,11 @@ public:
 int main()
 {
     static constexpr int N_POL = 2;
-    receiver::ringbuffer_t ringbuffer(2);
-    std::array<std::unique_ptr<receiver>, N_POL> recv;
+    stream::ringbuffer_t ringbuffer(2);
+    std::array<std::unique_ptr<stream>, N_POL> recv;
     for (int pol = 0; pol < N_POL; pol++)
     {
-        recv[pol] = std::make_unique<receiver>(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ringbuffer);
+        recv[pol] = std::make_unique<stream>(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ringbuffer);
         for (int i = 0; i < 4; i++)
             recv[pol]->add_chunk(std::make_unique<plain_chunk>());
     }

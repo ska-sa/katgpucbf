@@ -2,7 +2,7 @@ import asyncio
 from typing import AsyncIterator
 
 from . import _katfgpu
-from ._katfgpu.recv import Receiver, Chunk
+from ._katfgpu.recv import Stream, Chunk
 from ._katfgpu.recv import Ringbuffer as _Ringbuffer
 
 
