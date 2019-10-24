@@ -5,6 +5,7 @@
 #include <boost/asio.hpp>
 #include "src/receiver.h"
 
+static constexpr int SAMPLE_BITS = 10;
 static constexpr std::size_t PACKET_SAMPLES = 4096;
 static constexpr std::size_t CHUNK_SAMPLES = 1 << 28;
 
@@ -16,7 +17,7 @@ private:
 public:
     plain_in_chunk()
     {
-        constexpr std::size_t bytes = CHUNK_SAMPLES * SAMPLE_BITS / 8;
+        constexpr std::size_t bytes = CHUNK_SAMPLES / 8 * SAMPLE_BITS;
         storage_ptr = std::make_unique<std::uint8_t[]>(bytes);
         storage = boost::asio::mutable_buffer(storage_ptr.get(), bytes);
         present.resize(CHUNK_SAMPLES / PACKET_SAMPLES);
@@ -30,7 +31,7 @@ int main()
     std::array<std::unique_ptr<receiver>, N_POL> recv;
     for (int pol = 0; pol < N_POL; pol++)
     {
-        recv[pol] = std::make_unique<receiver>(pol, PACKET_SAMPLES, CHUNK_SAMPLES, ringbuffer);
+        recv[pol] = std::make_unique<receiver>(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ringbuffer);
         for (int i = 0; i < 4; i++)
             recv[pol]->add_chunk(std::make_unique<plain_in_chunk>());
     }

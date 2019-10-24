@@ -51,17 +51,29 @@ void allocator::free(std::uint8_t *ptr, void *user)
 }
 
 
-receiver::receiver(int pol, std::size_t packet_samples, std::size_t chunk_samples,
-                   ringbuffer_t &ringbuffer, int thread_affinity)
+receiver::receiver(int pol, int sample_bits, std::size_t packet_samples,
+                   std::size_t chunk_samples, ringbuffer_t &ringbuffer, int thread_affinity)
     : pol(pol),
+    sample_bits(sample_bits),
     packet_samples(packet_samples),
     chunk_samples(chunk_samples),
     chunk_packets(chunk_samples / packet_samples),
+    packet_bytes(packet_samples / 8 * sample_bits),
+    chunk_bytes(chunk_samples / 8 * sample_bits),
     thread_pool(1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
     stream(thread_pool, *this),
     ringbuffer(ringbuffer)
 {
-    assert(chunk_samples % packet_samples == 0);
+    if (sample_bits <= 0)
+        throw std::invalid_argument("sample_bits must be greater than 0");
+    if (packet_samples <= 0)
+        throw std::invalid_argument("packet_samples must be greater than 0");
+    if (chunk_samples <= 0)
+        throw std::invalid_argument("chunk_samples must be greater than 0");
+    if (packet_samples % 8 != 0)
+        throw std::invalid_argument("packet_samples must be a multiple of 8");
+    if (chunk_samples % packet_samples != 0)
+        throw std::invalid_argument("chunk_samples must be a multiple of packet_samples");
     stream.set_memory_allocator(std::make_shared<allocator>(*this));
 }
 
@@ -72,7 +84,7 @@ receiver::~receiver()
 
 void receiver::add_chunk(std::unique_ptr<in_chunk> &&chunk)
 {
-    if (buffer_size(chunk->storage) != SAMPLE_BITS * chunk_samples / 8)
+    if (buffer_size(chunk->storage) != chunk_bytes)
         throw std::invalid_argument("Chunk has incorrect size");
 
     chunk->present.clear();
@@ -118,7 +130,7 @@ receiver::decode_timestamp(std::int64_t timestamp, in_chunk &chunk)
 {
     std::size_t sample_idx = timestamp - chunk.timestamp;
     std::size_t packet_idx = sample_idx / packet_samples;
-    std::size_t byte_idx = sample_idx * SAMPLE_BITS / 8;
+    std::size_t byte_idx = sample_idx / 8 * sample_bits;
     void *ptr = boost::asio::buffer_cast<std::uint8_t *>(chunk.storage) + byte_idx;
     return std::make_tuple(ptr, &chunk, packet_idx);
 }
@@ -175,9 +187,7 @@ receiver::decode_timestamp(std::int64_t timestamp)
 
 void *receiver::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
-    // TODO: precompute?
-    std::size_t expected_size = packet_samples * SAMPLE_BITS / 8;
-    if (size != expected_size)
+    if (size != packet_bytes)
         return nullptr;
     std::int64_t timestamp = -1;
     spead2::recv::pointer_decoder decoder(packet.heap_address_bits);
@@ -226,7 +236,7 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
         // TODO: log. It's not a valid digitiser packet.
         return;
     }
-    if (length != SAMPLE_BITS * packet_samples / 8)
+    if (length != packet_bytes)
     {
         // TODO: log. It's the wrong size.
         return;
@@ -262,9 +272,8 @@ void receiver::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::
     for (const auto &ep : endpoints)
         endpoints2.emplace_back(boost::asio::ip::address::from_string(ep.first), ep.second);
     auto interface_address2 = boost::asio::ip::address::from_string(interface_address);
-    const std::size_t payload_size = chunk_samples * SAMPLE_BITS / 8;
     stream.emplace_reader<spead2::recv::udp_ibv_reader>(
-        endpoints2, interface_address2, payload_size + 128,
+        endpoints2, interface_address2, chunk_bytes + 128,
         buffer_size, comp_vector, max_poll);
 }
 
@@ -281,6 +290,36 @@ const sample_stream &receiver::get_stream() const
 receiver::ringbuffer_t &receiver::get_ringbuffer()
 {
     return ringbuffer;
+}
+
+int receiver::get_pol() const
+{
+    return pol;
+}
+
+int receiver::get_sample_bits() const
+{
+    return sample_bits;
+}
+
+std::size_t receiver::get_packet_samples() const
+{
+    return packet_samples;
+}
+
+std::size_t receiver::get_chunk_samples() const
+{
+    return chunk_samples;
+}
+
+std::size_t receiver::get_chunk_packets() const
+{
+    return chunk_packets;
+}
+
+std::size_t receiver::get_chunk_bytes() const
+{
+    return chunk_bytes;
 }
 
 const receiver::ringbuffer_t &receiver::get_ringbuffer() const

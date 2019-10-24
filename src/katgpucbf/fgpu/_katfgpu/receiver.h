@@ -16,8 +16,6 @@
 #include <spead2/common_ringbuffer.h>
 #include <boost/asio.hpp>
 
-static constexpr int SAMPLE_BITS = 10;
-
 /**
  * Collection of contiguous 10-bit samples in memory, together with information
  * about which samples are present. It references the sample storage but does
@@ -74,9 +72,12 @@ private:
     void stop_received();
 
     const int pol;                           ///< Polarisation index
+    const int sample_bits;                   ///< Number of bits per sample
     const std::size_t packet_samples;        ///< Number of samples in each packet
     const std::size_t chunk_samples;         ///< Number of samples in each chunk
     const std::size_t chunk_packets;         ///< Number of packets in each chunk
+    const std::size_t packet_bytes;          ///< Number of payload bytes in each packet
+    const std::size_t chunk_bytes;           ///< Number of payload bytes in each chunk
 
     std::int64_t first_timestamp = -1;       ///< Very first timestamp observed
 
@@ -122,7 +123,7 @@ private:
     void *allocate(std::size_t size, spead2::recv::packet_header &packet);
 
 public:
-    receiver(int pol, std::size_t packet_samples, std::size_t chunk_samples,
+    receiver(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
              ringbuffer_t &ringbuffer, int thread_affinity = -1);
     ~receiver();
 
@@ -140,6 +141,13 @@ public:
     /// Get the referenced ringbuffer
     ringbuffer_t &get_ringbuffer();
     const ringbuffer_t &get_ringbuffer() const;
+
+    int get_pol() const;
+    int get_sample_bits() const;
+    std::size_t get_packet_samples() const;
+    std::size_t get_chunk_samples() const;
+    std::size_t get_chunk_packets() const;
+    std::size_t get_chunk_bytes() const;
 
     /// Add a chunk to the free pool
     void add_chunk(std::unique_ptr<in_chunk> &&chunk);

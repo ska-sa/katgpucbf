@@ -6,18 +6,20 @@ import katsdpsigproc.accel as accel
 import katfgpu._katfgpu as katfgpu
 
 
+SAMPLE_BITS = 10
 CHUNK_SAMPLES = 2**28
+PACKET_SAMPLES = 4096
 CHUNK_BYTES = CHUNK_SAMPLES * 10 // 8
 
 ctx = accel.create_some_context()
 queue = ctx.create_command_queue()
-dev_samples = accel.DeviceArray(ctx, (CHUNK_BYTES,), np.uint8)
 
 ring = katfgpu.Receiver.Ringbuffer(2)
-recv = [katfgpu.Receiver(i, 4096, CHUNK_SAMPLES, ring) for i in range(2)]
+recv = [katfgpu.Receiver(i, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring) for i in range(2)]
+dev_samples = accel.DeviceArray(ctx, (recv[0].chunk_bytes,), np.uint8)
 for pol in range(len(recv)):
     for i in range(4):
-        buf = accel.HostArray((CHUNK_BYTES,), np.uint8, context=ctx)
+        buf = accel.HostArray((recv[pol].chunk_bytes,), np.uint8, context=ctx)
         recv[pol].add_chunk(katfgpu.InChunk(buf))
     recv[pol].add_udp_pcap_file_reader('/mnt/data/bmerry/pcap/dig1s.pcap')
 
