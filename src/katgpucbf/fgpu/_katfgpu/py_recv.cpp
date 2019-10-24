@@ -20,13 +20,13 @@ py::buffer_info request_buffer_info(py::buffer &buffer, int extra_flags)
     return info;
 }
 
-class py_in_chunk : public in_chunk
+class py_chunk : public chunk
 {
 public:
     py::buffer base;
     std::shared_ptr<py::buffer_info> buffer_info;
 
-    py_in_chunk(py::buffer base)
+    py_chunk(py::buffer base)
         : base(std::move(base)),
         buffer_info(std::make_shared<py::buffer_info>(
             request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
@@ -36,27 +36,22 @@ public:
     }
 };
 
-}
-
-PYBIND11_MODULE(_katfgpu, m)
+py::module register_module(py::module &parent)
 {
     using namespace pybind11::literals;
-    using namespace katfgpu::recv;
-    m.doc() = "C++ backend of fgpu";
 
-    py::register_exception<spead2::ringbuffer_stopped>(m, "Stopped");
-    py::register_exception<spead2::ringbuffer_empty>(m, "Empty");
+    py::module m = parent.def_submodule("recv");
+    m.doc() = "receiver for katfgpu";
 
-    py::class_<py_in_chunk>(m, "InChunk", "Chunk of samples")
+    py::class_<py_chunk>(m, "Chunk", "Chunk of samples")
         .def(py::init<py::buffer>(), "base"_a)
-        .def_readwrite("timestamp", &py_in_chunk::timestamp)
-        .def_readwrite("pol", &py_in_chunk::pol)
-        .def_readonly("present", &py_in_chunk::present)
-        .def_readonly("base", &py_in_chunk::base)
+        .def_readwrite("timestamp", &py_chunk::timestamp)
+        .def_readwrite("pol", &py_chunk::pol)
+        .def_readonly("present", &py_chunk::present)
+        .def_readonly("base", &py_chunk::base)
     ;
 
-    py::class_<receiver> receiver_class(m, "Receiver", "SPEAD stream receiver");
-    receiver_class
+    py::class_<receiver>(m, "Receiver", "SPEAD stream receiver")
         .def(py::init<int, int, std::size_t, std::size_t, receiver::ringbuffer_t &, int>(),
              "pol"_a, "sample_bits"_a, "packet_samples"_a, "chunk_samples"_a,
              "ringbuffer"_a, "thread_affinity"_a = -1, py::keep_alive<1, 6>())
@@ -70,9 +65,9 @@ PYBIND11_MODULE(_katfgpu, m)
         .def_property_readonly("chunk_samples", &receiver::get_chunk_samples)
         .def_property_readonly("chunk_packets", &receiver::get_chunk_packets)
         .def_property_readonly("chunk_bytes", &receiver::get_chunk_bytes)
-        .def("add_chunk", [](receiver &self, const py_in_chunk &chunk)
+        .def("add_chunk", [](receiver &self, const py_chunk &chunk)
         {
-            self.add_chunk(std::make_unique<py_in_chunk>(chunk));
+            self.add_chunk(std::make_unique<py_chunk>(chunk));
         })
         .def("add_udp_pcap_file_reader", &receiver::add_udp_pcap_file_reader,
              "filename"_a)
@@ -83,16 +78,20 @@ PYBIND11_MODULE(_katfgpu, m)
         .def("stop", &receiver::stop)
     ;
 
-    py::class_<receiver::ringbuffer_t>(receiver_class, "Ringbuffer", "Ringbuffer for samples")
+    py::class_<receiver::ringbuffer_t>(m, "Ringbuffer", "Ringbuffer for samples")
         .def(py::init<int>(), "cap"_a)
         .def("pop", [](receiver::ringbuffer_t &self)
         {
-            std::unique_ptr<in_chunk> chunk = self.pop();
-            return std::unique_ptr<py_in_chunk>(&dynamic_cast<py_in_chunk &>(*chunk.release()));
+            std::unique_ptr<chunk> chunk = self.pop();
+            return std::unique_ptr<py_chunk>(&dynamic_cast<py_chunk &>(*chunk.release()));
         })
         .def_property_readonly("data_fd", [](receiver::ringbuffer_t &self)
         {
             return self.get_data_sem().get_fd();
         })
     ;
+
+    return m;
 }
+
+} // namespace katfgpu::recv

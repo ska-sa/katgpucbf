@@ -85,17 +85,17 @@ receiver::~receiver()
     stop();
 }
 
-void receiver::add_chunk(std::unique_ptr<in_chunk> &&chunk)
+void receiver::add_chunk(std::unique_ptr<chunk> &&c)
 {
-    if (buffer_size(chunk->storage) != chunk_bytes)
+    if (buffer_size(c->storage) != chunk_bytes)
         throw std::invalid_argument("Chunk has incorrect size");
 
-    chunk->present.clear();
-    chunk->present.resize(chunk_packets);
-    chunk->pol = pol;
+    c->present.clear();
+    c->present.resize(chunk_packets);
+    c->pol = pol;
     {
         std::lock_guard<std::mutex> lock(free_chunks_lock);
-        free_chunks.push(std::move(chunk));
+        free_chunks.push(std::move(c));
     }
     free_chunks_sem.put();
 }
@@ -128,17 +128,17 @@ bool receiver::flush_chunk()
     }
 }
 
-std::tuple<void *, in_chunk *, std::size_t>
-receiver::decode_timestamp(std::int64_t timestamp, in_chunk &chunk)
+std::tuple<void *, chunk *, std::size_t>
+receiver::decode_timestamp(std::int64_t timestamp, chunk &c)
 {
-    std::size_t sample_idx = timestamp - chunk.timestamp;
+    std::size_t sample_idx = timestamp - c.timestamp;
     std::size_t packet_idx = sample_idx / packet_samples;
     std::size_t byte_idx = sample_idx / 8 * sample_bits;
-    void *ptr = boost::asio::buffer_cast<std::uint8_t *>(chunk.storage) + byte_idx;
-    return std::make_tuple(ptr, &chunk, packet_idx);
+    void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + byte_idx;
+    return std::make_tuple(ptr, &c, packet_idx);
 }
 
-std::tuple<void *, in_chunk *, std::size_t>
+std::tuple<void *, chunk *, std::size_t>
 receiver::decode_timestamp(std::int64_t timestamp)
 {
     if (first_timestamp == -1)
@@ -152,11 +152,11 @@ receiver::decode_timestamp(std::int64_t timestamp)
         return std::make_tuple(nullptr, nullptr, 0);
     }
     std::int64_t base = active_chunks[0]->timestamp;
-    for (const auto &chunk : active_chunks)
+    for (const auto &c : active_chunks)
     {
-        if (timestamp >= chunk->timestamp
-            && timestamp < chunk->timestamp + std::int64_t(chunk_samples))
-            return decode_timestamp(timestamp, *chunk);
+        if (timestamp >= c->timestamp
+            && timestamp < c->timestamp + std::int64_t(chunk_samples))
+            return decode_timestamp(timestamp, *c);
     }
     if (timestamp < base)
     {
@@ -221,7 +221,7 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
     std::size_t length = 0;
 
     void *expected_ptr;
-    in_chunk *chunk;
+    chunk *c;
     std::size_t packet_idx;
 
     for (const auto &item : heap.get_items())
@@ -245,13 +245,13 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
         return;
     }
 
-    std::tie(expected_ptr, chunk, packet_idx) = decode_timestamp(timestamp);
+    std::tie(expected_ptr, c, packet_idx) = decode_timestamp(timestamp);
     if (expected_ptr != actual_ptr)
     {
         // TODO: log. This should only happen if we receive data that is too old.
         return;
     }
-    chunk->present[packet_idx] = true;
+    c->present[packet_idx] = true;
 }
 
 void receiver::stop_received()

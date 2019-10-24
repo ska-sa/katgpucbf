@@ -1,1 +1,1 @@
-from . import _katfgpu
+from ._katfgpu import Stopped, Empty

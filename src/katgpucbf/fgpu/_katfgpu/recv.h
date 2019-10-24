@@ -1,5 +1,5 @@
-#ifndef KATFGPU_RECEIVER_H
-#define KATFGPU_RECEIVER_H
+#ifndef KATFGPU_RECV_H
+#define KATFGPU_RECV_H
 
 #include <stack>
 #include <deque>
@@ -28,14 +28,14 @@ namespace katfgpu::recv
  * not own it. However, it is polymorphic, so subclasses can own storage, and
  * it is guaranteed that it will not be destroyed from the worker thread.
  */
-struct in_chunk
+struct chunk
 {
     int pol;                               ///< Polarisation index
     std::int64_t timestamp;                ///< Timestamp of first sample
     std::vector<bool> present;             ///< Bitmask of packets that are present
     boost::asio::mutable_buffer storage;   ///< Storage for samples
 
-    virtual ~in_chunk() = default; // makes it polymorphic
+    virtual ~chunk() = default; // makes it polymorphic
 };
 
 class receiver;
@@ -67,7 +67,7 @@ public:
 class receiver
 {
 public:
-    using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<in_chunk>,
+    using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>,
                                             spead2::semaphore_fd>;
 
 private:
@@ -89,8 +89,8 @@ private:
 
     mutable std::mutex free_chunks_lock;     ///< Protects access to @ref free_chunks
     spead2::semaphore free_chunks_sem;       ///< Semaphore that is put whenever chunks are added
-    std::stack<std::unique_ptr<in_chunk>> free_chunks;     ///< Chunks available for allocation
-    std::deque<std::unique_ptr<in_chunk>> active_chunks;   ///< Chunks currently being filled
+    std::stack<std::unique_ptr<chunk>> free_chunks;     ///< Chunks available for allocation
+    std::deque<std::unique_ptr<chunk>> active_chunks;   ///< Chunks currently being filled
 
     spead2::thread_pool thread_pool;         ///< Single-threaded pool servicing the stream
     sample_stream stream;
@@ -113,7 +113,7 @@ private:
      * If the timestamp is beyond the last active chunk, old chunks may be
      * flushed and new chunks appended.
      */
-    std::tuple<void *, in_chunk *, std::size_t>
+    std::tuple<void *, chunk *, std::size_t>
     decode_timestamp(std::int64_t timestamp);
 
     /**
@@ -123,8 +123,8 @@ private:
      * redundant, but allows this function to be tail-called from the main
      * overload.
      */
-    std::tuple<void *, in_chunk *, std::size_t>
-    decode_timestamp(std::int64_t timestamp, in_chunk &chunk);
+    std::tuple<void *, chunk *, std::size_t>
+    decode_timestamp(std::int64_t timestamp, chunk &c);
 
     void *allocate(std::size_t size, spead2::recv::packet_header &packet);
 
@@ -156,11 +156,11 @@ public:
     std::size_t get_chunk_bytes() const;
 
     /// Add a chunk to the free pool
-    void add_chunk(std::unique_ptr<in_chunk> &&chunk);
+    void add_chunk(std::unique_ptr<chunk> &&c);
 
     void stop();
 };
 
 } // namespace katfgpu::recv
 
-#endif // KATFGPU_RECEIVER_H
+#endif // KATFGPU_RECV_H

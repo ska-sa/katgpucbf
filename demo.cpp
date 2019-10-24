@@ -11,13 +11,13 @@ static constexpr int SAMPLE_BITS = 10;
 static constexpr std::size_t PACKET_SAMPLES = 4096;
 static constexpr std::size_t CHUNK_SAMPLES = 1 << 28;
 
-class plain_in_chunk : public in_chunk
+class plain_chunk : public chunk
 {
 private:
     std::unique_ptr<std::uint8_t[]> storage_ptr;
 
 public:
-    plain_in_chunk()
+    plain_chunk()
     {
         constexpr std::size_t bytes = CHUNK_SAMPLES / 8 * SAMPLE_BITS;
         storage_ptr = std::make_unique<std::uint8_t[]>(bytes);
@@ -35,7 +35,7 @@ int main()
     {
         recv[pol] = std::make_unique<receiver>(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ringbuffer);
         for (int i = 0; i < 4; i++)
-            recv[pol]->add_chunk(std::make_unique<plain_in_chunk>());
+            recv[pol]->add_chunk(std::make_unique<plain_chunk>());
     }
     for (int pol = 0; pol < N_POL; pol++)
     {
@@ -53,13 +53,13 @@ int main()
     {
         try
         {
-            auto chunk = ringbuffer.pop();
+            auto c = ringbuffer.pop();
             std::size_t good = 0;
-            good = std::accumulate(chunk->present.begin(), chunk->present.end(), good);
-            std::cout << "Received chunk with timestamp " << chunk->timestamp
-                << " on pol " << chunk->pol
-                << " (" << good << " / " << chunk->present.size() << " packets)\n";
-            recv[chunk->pol]->add_chunk(std::move(chunk));
+            good = std::accumulate(c->present.begin(), c->present.end(), good);
+            std::cout << "Received chunk with timestamp " << c->timestamp
+                << " on pol " << c->pol
+                << " (" << good << " / " << c->present.size() << " packets)\n";
+            recv[c->pol]->add_chunk(std::move(c));
         }
         catch (spead2::ringbuffer_stopped &e)
         {

@@ -9,7 +9,7 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 import numpy as np
 import katsdpsigproc.accel as accel
 
-import katfgpu._katfgpu as katfgpu
+import katfgpu.recv
 
 
 SAMPLE_BITS = 10
@@ -48,15 +48,15 @@ def main():
     ctx = accel.create_some_context()
     queue = ctx.create_command_queue()
 
-    ring = katfgpu.Receiver.Ringbuffer(2)
-    recv = [katfgpu.Receiver(i, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
+    ring = katfgpu.recv.Ringbuffer(2)
+    recv = [katfgpu.recv.Receiver(i, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
             for i in range(N_POL)]
     try:
         dev_samples = accel.DeviceArray(ctx, (recv[0].chunk_bytes,), np.uint8)
         for pol in range(N_POL):
             for i in range(4):
                 buf = accel.HostArray((recv[pol].chunk_bytes,), np.uint8, context=ctx)
-                recv[pol].add_chunk(katfgpu.InChunk(buf))
+                recv[pol].add_chunk(katfgpu.recv.Chunk(buf))
             if isinstance(args.sources[pol], str):
                 recv[pol].add_udp_pcap_file_reader(args.sources[pol])
             else:
