@@ -21,7 +21,8 @@ static constexpr int SAMPLE_BITS = 10;
 /**
  * Collection of contiguous 10-bit samples in memory, together with information
  * about which samples are present. It references the sample storage but does
- * not own it (although it is polymorphic, so subclasses can own storage).
+ * not own it. However, it is polymorphic, so subclasses can own storage, and
+ * it is guaranteed that it will not be destroyed from the worker thread.
  */
 struct in_chunk
 {
@@ -91,8 +92,13 @@ private:
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
     void grab_chunk(std::int64_t timestamp);
 
-    /// Send the first active chunk to the callback
-    void flush_chunk();
+    /**
+     * Send the first active chunk to the ringbuffer.
+     * 
+     * @retval true on success
+     * @retval false if the ringbuffer has already been stopped
+     */
+    bool flush_chunk();
 
     /**
      * Determine data pointer, chunk and packet index from packet timestamp.

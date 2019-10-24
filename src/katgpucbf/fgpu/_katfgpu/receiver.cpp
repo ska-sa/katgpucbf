@@ -87,31 +87,29 @@ void receiver::add_chunk(std::unique_ptr<in_chunk> &&chunk)
 
 void receiver::grab_chunk(std::int64_t timestamp)
 {
-    std::unique_ptr<in_chunk> chunk;
-
     semaphore_get(free_chunks_sem);
     {
         std::lock_guard<std::mutex> lock(free_chunks_lock);
         assert(!free_chunks.empty());
-        chunk = std::move(free_chunks.top());
+        active_chunks.push_back(std::move(free_chunks.top()));
         free_chunks.pop();
     }
-    chunk->timestamp = timestamp;
-    active_chunks.push_back(std::move(chunk));
+    active_chunks.back()->timestamp = timestamp;
 }
 
-void receiver::flush_chunk()
+bool receiver::flush_chunk()
 {
     assert(!active_chunks.empty());
-    auto chunk = std::move(active_chunks[0]);
-    active_chunks.pop_front();
     try
     {
-        ringbuffer.push(std::move(chunk));
+        ringbuffer.push(std::move(active_chunks[0]));
+        active_chunks.pop_front();
+        return true;
     }
     catch (spead2::ringbuffer_stopped &e)
     {
-        // TODO: log/count
+        // TODO: add to counter
+        return false;
     }
 }
 
@@ -152,20 +150,24 @@ receiver::decode_timestamp(std::int64_t timestamp)
     }
     else
     {
-        // We've gone forward beyond the last active chunk. Make room to add
-        // a new one.
-        while (active_chunks.size() >= 2)
-            flush_chunk();
-        // Usually this will be the next sequential chunk. If not, we flush
-        // all chunks rather than leaving active_chunks discontiguous.
+        std::size_t max_active = 1;
+        /* We've gone forward beyond the last active chunk. Make room to add
+         * a new one. Usually this will be the next sequential chunk. If not,
+         * we flush all chunks rather than leaving active_chunks discontiguous.
+         */
         std::int64_t start = active_chunks.back()->timestamp + chunk_samples;
         if (timestamp >= start + std::int64_t(chunk_samples))
         {
             // TODO: log/count.
             start += (timestamp - start) / chunk_samples * chunk_samples;
-            while (!active_chunks.empty())
-                flush_chunk();
+            max_active = 0;
         }
+        while (active_chunks.size() > max_active)
+            if (!flush_chunk())
+            {
+                // ringbuffer was stopped, so no point in continuing.
+                return std::make_tuple(nullptr, nullptr, 0);
+            }
         grab_chunk(start);
         return decode_timestamp(timestamp, *active_chunks.back());
     }
@@ -242,7 +244,8 @@ void receiver::heap_ready(spead2::recv::live_heap &&live_heap)
 void receiver::stop_received()
 {
     while (!active_chunks.empty())
-        flush_chunk();
+        if (!flush_chunk())
+            break;
     ringbuffer.stop();
 }
 
