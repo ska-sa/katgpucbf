@@ -19,13 +19,14 @@ CHUNK_BYTES = CHUNK_SAMPLES * 10 // 8
 N_POL = 2
 
 
-def parse_source(value: str) -> Union[List[Endpoint], str]:
+def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
     try:
         endpoints = endpoint_list_parser(None)(value)
         for endpoint in endpoints:
             ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
             if endpoint.port is None:
                 raise ValueError
+        return [(ep.host, ep.port) for ep in endpoints]
     except ValueError:
         return value
 
