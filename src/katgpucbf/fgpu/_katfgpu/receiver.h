@@ -118,6 +118,7 @@ private:
 public:
     receiver(int pol, std::size_t packet_samples, std::size_t chunk_samples,
              ringbuffer_t &ringbuffer, int thread_affinity = -1);
+    ~receiver();
 
     void add_udp_pcap_file_reader(const std::string &filename);
 
@@ -136,4 +137,6 @@ public:
 
     /// Add a chunk to the free pool
     void add_chunk(std::unique_ptr<in_chunk> &&chunk);
+
+    void stop();
 };

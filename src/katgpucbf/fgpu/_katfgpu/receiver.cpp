@@ -65,6 +65,11 @@ receiver::receiver(int pol, std::size_t packet_samples, std::size_t chunk_sample
     stream.set_memory_allocator(std::make_shared<allocator>(*this));
 }
 
+receiver::~receiver()
+{
+    stop();
+}
+
 void receiver::add_chunk(std::unique_ptr<in_chunk> &&chunk)
 {
     if (buffer_size(chunk->storage) != SAMPLE_BITS * chunk_samples / 8)
@@ -278,4 +283,10 @@ receiver::ringbuffer_t &receiver::get_ringbuffer()
 const receiver::ringbuffer_t &receiver::get_ringbuffer() const
 {
     return ringbuffer;
+}
+
+void receiver::stop()
+{
+    ringbuffer.stop();
+    stream.stop();
 }
