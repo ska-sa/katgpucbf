@@ -6,7 +6,7 @@ import katsdpsigproc.accel as accel
 import katfgpu._katfgpu as katfgpu
 
 
-CHUNK_SAMPLES = 2**25
+CHUNK_SAMPLES = 2**28
 CHUNK_BYTES = CHUNK_SAMPLES * 10 // 8
 
 ctx = accel.create_some_context()
@@ -21,12 +21,17 @@ for pol in range(len(recv)):
         recv[pol].add_chunk(katfgpu.InChunk(buf))
     recv[pol].add_udp_pcap_file_reader('/mnt/data/bmerry/pcap/dig1s.pcap')
 
+lost = 0
 while True:
     try:
         chunk = ring.pop()
     except katfgpu.Stopped:
         break
-    print(f'Received chunk: timestamp={chunk.timestamp} pol={chunk.pol}')
+    total = len(chunk.present)
+    good = sum(chunk.present)
+    lost += total - good
+    print('Received chunk: timestamp={chunk.timestamp} pol={chunk.pol} ({good}/{total}, lost {lost})'.format(
+        chunk=chunk, good=good, total=total, lost=lost))
     try:
         buf = chunk.base
         dev_samples.set(queue, buf)

@@ -1,5 +1,6 @@
 #include <memory>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include "receiver.h"
 
 namespace py = pybind11;
@@ -44,6 +45,7 @@ PYBIND11_MODULE(_katfgpu, m)
         .def(py::init<py::buffer>(), "base"_a)
         .def_readwrite("timestamp", &py_in_chunk::timestamp)
         .def_readwrite("pol", &py_in_chunk::pol)
+        .def_readonly("present", &py_in_chunk::present)
         .def_readonly("base", &py_in_chunk::base)
     ;
 

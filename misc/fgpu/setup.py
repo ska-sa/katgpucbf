@@ -59,6 +59,6 @@ setup(
     ext_package='katfgpu',
     ext_modules=extensions,
     cmdclass={'build_ext': BuildExt},
-    python_requires='>=3.6',
+    python_requires='>=3.5',
     packages=find_packages()
 )
