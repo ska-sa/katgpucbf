@@ -50,43 +50,39 @@ async def main() -> None:
     queue = ctx.create_command_queue()
 
     ring = katfgpu.recv.Ringbuffer(2)
-    recv = [katfgpu.recv.Stream(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
-            for pol in range(N_POL)]
+    streams = [katfgpu.recv.Stream(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
+               for pol in range(N_POL)]
     try:
-        dev_samples = [accel.DeviceArray(ctx, (recv[pol].chunk_bytes,), np.uint8)
+        dev_samples = [accel.DeviceArray(ctx, (streams[pol].chunk_bytes,), np.uint8)
                        for pol in range(N_POL)]
         dev_timestamp = [None] * N_POL
         for pol in range(N_POL):
             for i in range(4):
-                buf = accel.HostArray((recv[pol].chunk_bytes,), np.uint8, context=ctx)
-                recv[pol].add_chunk(katfgpu.recv.Chunk(buf))
+                buf = accel.HostArray((streams[pol].chunk_bytes,), np.uint8, context=ctx)
+                streams[pol].add_chunk(katfgpu.recv.Chunk(buf))
             if isinstance(args.sources[pol], str):
-                recv[pol].add_udp_pcap_file_reader(args.sources[pol])
+                streams[pol].add_udp_pcap_file_reader(args.sources[pol])
             else:
-                recv[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
+                streams[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
 
-        lost = 0
-        async for chunk in ring:
-            total = len(chunk.present)
-            good = sum(chunk.present)
-            lost += total - good
-            print('Received chunk: timestamp={chunk.timestamp} pol={chunk.pol} ({good}/{total}, lost {lost})'.format(
-                chunk=chunk, good=good, total=total, lost=lost))
+        async for chunk_set in katfgpu.recv.chunk_sets(streams):
             try:
-                buf = chunk.base
-                dev_samples[chunk.pol].set(queue, buf)
-                dev_timestamp[chunk.pol] = chunk.timestamp
-                if all(t == chunk.timestamp for t in dev_timestamp):
-                    print(f'Ready to process timestamp {chunk.timestamp}')
+                for pol in range(N_POL):
+                    dev_samples[pol].set(queue, chunk_set[pol].base)
+                print(f'Ready to process timestamp {chunk_set[0].timestamp}')
             finally:
-                recv[chunk.pol].add_chunk(chunk)
+                for chunk in chunk_set:
+                    streams[chunk.pol].add_chunk(chunk)
         print('Done!')
     finally:
-        for r in recv:
-            r.stop()
+        for stream in streams:
+            stream.stop()
 
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
-    loop.close()
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
