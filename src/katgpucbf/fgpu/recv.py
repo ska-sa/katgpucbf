@@ -1,4 +1,5 @@
 import asyncio
+from typing import AsyncIterator
 
 from . import _katfgpu
 from ._katfgpu.recv import Receiver, Chunk
@@ -33,3 +34,12 @@ class Ringbuffer(_Ringbuffer):
             pass
         except Exception as exc:
             self._waiter.set_exception(exc)
+
+    async def __aiter__(self) -> AsyncIterator[Chunk]:
+        return self
+
+    async def __anext__(self) -> Chunk:
+        try:
+            return await self.async_pop()
+        except _katfgpu.Stopped:
+            raise AsyncStopIteration

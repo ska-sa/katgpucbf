@@ -32,7 +32,7 @@ def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
         return value
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--interface', '-i', type=get_interface_address,
                         help='Interface for live capture')
@@ -44,16 +44,18 @@ def parse_args():
     return args
 
 
-async def main():
+async def main() -> None:
     args = parse_args()
     ctx = accel.create_some_context()
     queue = ctx.create_command_queue()
 
     ring = katfgpu.recv.Ringbuffer(2)
-    recv = [katfgpu.recv.Receiver(i, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
-            for i in range(N_POL)]
+    recv = [katfgpu.recv.Receiver(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
+            for pol in range(N_POL)]
     try:
-        dev_samples = accel.DeviceArray(ctx, (recv[0].chunk_bytes,), np.uint8)
+        dev_samples = [accel.DeviceArray(ctx, (recv[pol].chunk_bytes,), np.uint8)
+                       for pol in range(N_POL)]
+        dev_timestamp = [None] * N_POL
         for pol in range(N_POL):
             for i in range(4):
                 buf = accel.HostArray((recv[pol].chunk_bytes,), np.uint8, context=ctx)
@@ -64,11 +66,7 @@ async def main():
                 recv[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
 
         lost = 0
-        while True:
-            try:
-                chunk = await ring.async_pop()
-            except katfgpu.Stopped:
-                break
+        async for chunk in ring:
             total = len(chunk.present)
             good = sum(chunk.present)
             lost += total - good
@@ -76,7 +74,10 @@ async def main():
                 chunk=chunk, good=good, total=total, lost=lost))
             try:
                 buf = chunk.base
-                dev_samples.set(queue, buf)
+                dev_samples[chunk.pol].set(queue, buf)
+                dev_timestamp[chunk.pol] = chunk.timestamp
+                if all(t == chunk.timestamp for t in dev_timestamp):
+                    print(f'Ready to process timestamp {chunk.timestamp}')
             finally:
                 recv[chunk.pol].add_chunk(chunk)
         print('Done!')
