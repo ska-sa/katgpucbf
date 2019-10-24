@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import asyncio
 import ipaddress
 from typing import List, Tuple, Union
 
@@ -43,7 +44,7 @@ def parse_args():
     return args
 
 
-def main():
+async def main():
     args = parse_args()
     ctx = accel.create_some_context()
     queue = ctx.create_command_queue()
@@ -65,7 +66,7 @@ def main():
         lost = 0
         while True:
             try:
-                chunk = ring.pop()
+                chunk = await ring.async_pop()
             except katfgpu.Stopped:
                 break
             total = len(chunk.present)
@@ -85,4 +86,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    loop.close()

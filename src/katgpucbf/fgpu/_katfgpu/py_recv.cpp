@@ -85,6 +85,11 @@ py::module register_module(py::module &parent)
             std::unique_ptr<chunk> chunk = self.pop();
             return std::unique_ptr<py_chunk>(&dynamic_cast<py_chunk &>(*chunk.release()));
         })
+        .def("try_pop", [](receiver::ringbuffer_t &self)
+        {
+            std::unique_ptr<chunk> chunk = self.try_pop();
+            return std::unique_ptr<py_chunk>(&dynamic_cast<py_chunk &>(*chunk.release()));
+        })
         .def_property_readonly("data_fd", [](receiver::ringbuffer_t &self)
         {
             return self.get_data_sem().get_fd();
