@@ -3,6 +3,14 @@
 #define WGS ${wgs}
 #define TAPS ${taps}
 
+/* Each work-item is responsible for a run of input values with stride `step`.
+ *
+ * This approach becomes very register-heavy as the number of taps increases.
+ * A better approach may be to have the work group cooperatively load a
+ * rectangle of data into local memory, transpose, and work from there. While
+ * local memory is smaller than the register file, multiple threads will read
+ * the same value.
+ */
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,
     const GLOBAL short * RESTRICT in,
