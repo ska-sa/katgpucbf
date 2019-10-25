@@ -21,8 +21,8 @@ class Decode10Bit(accel.Operation):
         if samples % 8 != 0:
             raise ValueError('samples must be a multiple of 8')
         super().__init__(command_queue)
-        padded_samples = accel.roundup(samples, template.wgs)
-        in_dim = accel.Dimension(samples * 10 // 8, min_padded_size=padded_samples * 10 // 8 + 1)
+        padded_samples = accel.roundup(samples, 16 * template.wgs)
+        in_dim = accel.Dimension(samples * 10 // 8, min_padded_size=padded_samples * 10 // 8)
         out_dim = accel.Dimension(samples, template.wgs)
         self.template = template
         self.samples = samples
@@ -32,12 +32,13 @@ class Decode10Bit(accel.Operation):
     def _run(self):
         in_buf = self.buffer('in')
         out_buf = self.buffer('out')
+        work_items = accel.divup(self.samples, 16)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
                 self.buffer('out').buffer,
                 self.buffer('in').buffer
             ],
-            global_size=(accel.roundup(self.samples, self.template.wgs),),
+            global_size=(accel.roundup(work_items, self.template.wgs),),
             local_size=(self.template.wgs,)
         )

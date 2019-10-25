@@ -24,7 +24,7 @@ def decode_10bit_host(data):
 def test_decode():
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
-    samples = 128 * 1024
+    samples = 128 * 1024 + 8
     h_in = np.random.randint(0, 256, samples * 10 // 8, np.uint8)
     expected = decode_10bit_host(h_in)
 
@@ -52,5 +52,4 @@ def bench_decode():
 
 
 if __name__ == '__main__':
-    #test_decode()
     bench_decode()
