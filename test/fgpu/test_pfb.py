@@ -34,12 +34,12 @@ def bench_pfb_fir():
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
     samples = 128 * 1024 * 1024
-    step = 8192
-    taps = 4
+    step = 65536
+    taps = 16
     h_in = np.random.randint(-512, 512, samples + step * (taps - 1), np.int16)
 
-    template = pfb.PFBFIRTemplate(ctx, 4)
-    fn = template.instantiate(queue, samples, 8192)
+    template = pfb.PFBFIRTemplate(ctx, taps)
+    fn = template.instantiate(queue, samples, step)
     fn.ensure_all_bound()
     fn.buffer('in').set(queue, h_in)
     for i in range(100):
