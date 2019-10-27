@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, AsyncIterator, AsyncGenerator
+from typing import List, AsyncIterator, AsyncGenerator, Optional
 
 from . import _katfgpu
 from ._katfgpu.recv import Stream, Chunk
