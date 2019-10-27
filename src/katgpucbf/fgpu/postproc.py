@@ -61,7 +61,7 @@ class Postproc(accel.Operation):
                 np.int32(out.padded_shape[2]),
                 np.int32(in0.padded_shape[1]),
                 np.int32(self.acc_len),
-                np.float32(1 / self.channels),
+                np.float32(-1 / self.channels),
                 np.float32(self.quant_scale)
             ],
             global_size=(self.template.block * groups_x,

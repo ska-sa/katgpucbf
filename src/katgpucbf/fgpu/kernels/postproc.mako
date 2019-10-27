@@ -54,7 +54,7 @@ KERNEL void postproc(
         // TODO: load delays more efficiently (it's common across channels)
         float delay = fine_delay[spectrum];
         float re, im;
-        // TODO: Check sign convention!
+        // Note: delay_scale incorporates the minus sign
         sincospif(delay * delay_scale * ${c}, &im, &re);
         v0 = apply_delay(v0, re, im);
         v1 = apply_delay(v1, re, im);

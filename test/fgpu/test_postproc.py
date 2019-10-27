@@ -7,9 +7,9 @@ from katfgpu import postproc
 def postproc_host_pol(data, channels, acc_len, spectra, fine_delay, quant_scale):
     # Throw out last channel (Nyquist frequency)
     data = data[:, :channels]
-    # Compute delay phases (TODO: check sign convention and factors of 2)
+    # Compute delay phases
     channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :]
-    phase = np.exp(np.complex64(2j * np.pi) * fine_delay[:, np.newaxis] * channel_idx / (2 * channels))
+    phase = np.exp(np.complex64(-2j * np.pi) * fine_delay[:, np.newaxis] * channel_idx / (2 * channels))
     assert phase.dtype == np.complex64
     corrected = data * phase.astype(np.complex64)
     # Split complex into real, imaginary
