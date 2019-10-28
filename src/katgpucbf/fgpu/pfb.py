@@ -6,9 +6,11 @@ import skcuda.fft
 import skcuda.cufft
 from katsdpsigproc import accel
 
+from .types import AbstractContext, AbstractCommandQueue
+
 
 class PFBFIRTemplate:
-    def __init__(self, context, taps):
+    def __init__(self, context: AbstractContext, taps: int) -> None:
         if taps <= 0:
             raise ValueError('taps must be at least 1')
         self.wgs = 128
@@ -19,12 +21,14 @@ class PFBFIRTemplate:
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
         self.kernel = program.get_kernel('pfb_fir')
 
-    def instantiate(self, command_queue, samples, spectra, channels):
+    def instantiate(self, command_queue: AbstractCommandQueue,
+                    samples: int, spectra: int, channels: int) -> 'PFBFIR':
         return PFBFIR(self, command_queue, samples, spectra, channels)
 
 
 class PFBFIR(accel.Operation):
-    def __init__(self, template, command_queue, samples, spectra, channels):
+    def __init__(self, template: PFBFIRTemplate, command_queue: AbstractCommandQueue,
+                 samples: int, spectra: int, channels: int) -> None:
         super().__init__(command_queue)
         if samples % 8 != 0:
             raise ValueError('samples must be a multiple of 8')
@@ -42,7 +46,7 @@ class PFBFIR(accel.Operation):
         self.in_offset = 0            # TODO: docs
         self.out_offset = 0           # TODO: docs
 
-    def _run(self):
+    def _run(self) -> None:
         if self.spectra == 0:
             return
         step = 2 * self.channels
@@ -72,7 +76,7 @@ class PFBFIR(accel.Operation):
 
 
 class FFT(accel.Operation):
-    def __init__(self, command_queue, spectra, channels):
+    def __init__(self, command_queue: AbstractCommandQueue, spectra: int, channels: int) -> None:
         super().__init__(command_queue)
         self.spectra = spectra
         self.channels = channels
@@ -92,7 +96,7 @@ class FFT(accel.Operation):
                                          np.complex64)
         self.slots['work'] = accel.IOSlot((work_size,), np.uint8)
 
-    def _run(self):
+    def _run(self) -> None:
         with self.command_queue.context:
             self.plan.set_work_area(self.buffer('work').buffer)
             skcuda.fft.fft(self.buffer('in').buffer,

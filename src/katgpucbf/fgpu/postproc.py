@@ -2,9 +2,11 @@ import pkg_resources
 import numpy as np
 from katsdpsigproc import accel
 
+from .types import AbstractContext, AbstractCommandQueue
+
 
 class PostprocTemplate:
-    def __init__(self, context):
+    def __init__(self, context: AbstractContext) -> None:
         self.block = 32
         self.vtx = 1
         self.vty = 1
@@ -14,12 +16,14 @@ class PostprocTemplate:
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
         self.kernel = program.get_kernel('postproc')
 
-    def instantiate(self, command_queue, spectra, acc_len, channels):
+    def instantiate(self, command_queue: AbstractCommandQueue,
+                    spectra: int, acc_len: int, channels: int) -> 'Postproc':
         return Postproc(self, command_queue, spectra, acc_len, channels)
 
 
 class Postproc(accel.Operation):
-    def __init__(self, template, command_queue, spectra, acc_len, channels):
+    def __init__(self, template: PostprocTemplate, command_queue: AbstractCommandQueue,
+                 spectra: int, acc_len: int, channels: int) -> None:
         super().__init__(command_queue)
         if spectra % acc_len != 0:
             raise ValueError('spectra must be a multiple of acc_len')
@@ -41,7 +45,7 @@ class Postproc(accel.Operation):
         self.slots['fine_delay'] = accel.IOSlot((spectra,), np.float32)
         self.quant_scale = 1.0
 
-    def _run(self):
+    def _run(self) -> None:
         block_x = self.template.block * self.template.vtx
         block_y = self.template.block * self.template.vty
         groups_x = self.channels // block_x

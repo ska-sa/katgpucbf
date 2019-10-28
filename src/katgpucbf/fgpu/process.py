@@ -8,19 +8,14 @@ from katsdpsigproc import accel, cuda, opencl
 
 from .delay import AbstractDelayModel
 from .compute import Compute
+from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
 
 
-# TODO: introduce these as real classes in katsdpsigproc
-_AbstractContext = Union[cuda.Context, opencl.Context]
-_AbstractCommandQueue = Union[cuda.CommandQueue, opencl.CommandQueue]
-_AbstractEvent = Union[cuda.Event, opencl.Event]
-
-
-def _device_allocate_slot(context: _AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
+def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
     return accel.DeviceArray(context, slot.shape, slot.dtype, slot.required_padded_shape())
 
 
-def _host_allocate_slot(context: _AbstractContext, slot: accel.IOSlot) -> accel.HostArray:
+def _host_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.HostArray:
     return accel.HostArray(slot.shape, slot.dtype, slot.required_padded_shape(), context=context)
 
 
@@ -35,9 +30,9 @@ class BaseItem:
 
 
 class EventItem(BaseItem):
-    event: Optional[_AbstractEvent]
+    event: Optional[AbstractEvent]
 
-    def enqueue_wait(self, command_queue: _AbstractCommandQueue) -> None:
+    def enqueue_wait(self, command_queue: AbstractCommandQueue) -> None:
         if self.event is not None:
             command_queue.enqueue_wait_for_events([self.event])
 
