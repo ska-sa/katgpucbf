@@ -66,6 +66,9 @@ class Compute(accel.OperationSequence):
             raise ValueError(f'samples must contain {self.pols} elements')
         for pol in range(self.pols):
             self.bind(**{f'in{pol}': samples[pol]})
+        # TODO: only bind relevant slots for frontend
+        self.ensure_all_bound()
+        for pol in range(self.pols):
             # TODO: could run these in parallel, but that would require two
             # command queues.
             self.pfb_fir[pol].in_offset = in_offset
@@ -75,6 +78,8 @@ class Compute(accel.OperationSequence):
 
     def run_backend(self, out: accel.DeviceArray) -> None:
         self.bind(out=out)
+        # TODO: only bind relevant slots for backend
+        self.ensure_all_bound()
         for fft in self.fft:
             fft()
         self.postproc()
