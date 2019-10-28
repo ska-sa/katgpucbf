@@ -76,7 +76,7 @@ class LinearDelayModel(ABC):
         return rel_orig + self.start, residual
 
 
-class MultiDelayModel:
+class MultiDelayModel(AbstractDelayModel):
     """Piece-wise linear delay model.
 
     The model evolves over time by calling :meth:`add`. It **must** only be
