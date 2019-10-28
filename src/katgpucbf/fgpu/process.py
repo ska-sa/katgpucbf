@@ -4,11 +4,13 @@ import warnings
 from typing import Deque, List, Optional, Union
 
 import numpy as np
-from katsdpsigproc import accel, cuda, opencl
+from katsdpsigproc import accel
+from katsdpsigproc.resource import async_wait_for_events
 
 from .delay import AbstractDelayModel
 from .compute import Compute
 from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
+from . import recv
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -30,15 +32,14 @@ class BaseItem:
 
 
 class EventItem(BaseItem):
-    event: Optional[AbstractEvent]
+    events: List[AbstractEvent]
 
     def enqueue_wait(self, command_queue: AbstractCommandQueue) -> None:
-        if self.event is not None:
-            command_queue.enqueue_wait_for_events([self.event])
+        command_queue.enqueue_wait_for_events(self.events)
 
     def reset(self, timestamp: int = 0) -> None:
         super().reset(timestamp)
-        self.event = None
+        self.events = []
 
 
 class InItem(EventItem):
@@ -46,10 +47,10 @@ class InItem(EventItem):
     n_samples: int
     sample_bits: int
 
-    def __init__(self, compute: Compute, timestamp: int) -> None:
+    def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.sample_bits = compute.sample_bits
         self.samples = [
-            _device_allocate_slot(compute.context, compute.slots[f'in{pol}'])
+            _device_allocate_slot(compute.template.context, compute.slots[f'in{pol}'])
             for pol in range(compute.pols)
         ]
         super().__init__(timestamp)
@@ -77,8 +78,8 @@ class OutItem(EventItem):
     n_spectra: int
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
-        self.spectra = _device_allocate_slot(compute.context, compute.slots['out'])
-        self.fine_delay = _host_allocate_slot(compute.context, compute.slots['fine_delay'])
+        self.spectra = _device_allocate_slot(compute.template.context, compute.slots['out'])
+        self.fine_delay = _host_allocate_slot(compute.template.context, compute.slots['fine_delay'])
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -100,19 +101,21 @@ class OutItem(EventItem):
 
 
 class Processor:
-    def __init__(self, compute: Compute,
-                 delay_model: AbstractDelayModel,
-                 in_queue: asyncio.Queue, in_free_queue: asyncio.Queue,
-                 out_queue: asyncio.Queue, out_free_queue: asyncio.Queue) -> None:
+    def __init__(self, compute: Compute, delay_model: AbstractDelayModel) -> None:
         self.compute = compute
         self.delay_model = delay_model
-        self.in_queue = in_queue
-        self.in_free_queue = in_free_queue
-        self.out_queue = out_queue
-        self.out_free_queue = out_free_queue
-
+        self.in_queue = asyncio.Queue()        # type: asyncio.Queue[InItem]
+        self.in_free_queue = asyncio.Queue()   # type: asyncio.Queue[InItem]
+        self.out_queue = asyncio.Queue()       # type: asyncio.Queue[OutItem]
+        self.out_free_queue = asyncio.Queue()  # type: asyncio.Queue[OutItem]
+        for i in range(3):
+            self.in_free_queue.put_nowait(InItem(compute))
+        for i in range(1):
+            self.out_free_queue.put_nowait(OutItem(compute))
         self._in_items: Deque[InItem] = deque()
         self._out_item = OutItem(compute)
+        self._upload_queue = compute.template.context.create_command_queue()
+        self._download_queue = compute.template.context.create_command_queue()
 
     @property
     def channels(self) -> int:
@@ -125,6 +128,10 @@ class Processor:
     @property
     def acc_len(self) -> int:
         return self.compute.acc_len
+
+    @property
+    def sample_bits(self) -> int:
+        return self.compute.sample_bits
 
     @property
     def spectra_samples(self) -> int:
@@ -152,7 +159,7 @@ class Processor:
             self.compute.buffer('fine_delay').set_async(self.compute.command_queue,
                                                         self._out_item.fine_delay)
             self.compute.run_backend(self._out_item.spectra)
-            self._out_item.event = self.compute.command_queue.enqueue_marker()
+            self._out_item.events.append(self.compute.command_queue.enqueue_marker())
             self.out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're
             # ready to flush again?
@@ -160,7 +167,7 @@ class Processor:
         else:
             self._out_item.timestamp = new_timestamp
 
-    async def _run(self) -> None:
+    async def run_processing(self) -> None:
         # TODO: add a final flush on CancelledError?
         while True:
             if len(self._in_items) == 0:
@@ -200,7 +207,7 @@ class Processor:
                     orig_timestamp, fine_delay = self.delay_model.invert(timestamp)
                     if orig_timestamp >= self._in_items[0].timestamp:
                         break
-                await self._flush_back(timestamp)
+                await self._flush_out(timestamp)
             assert timestamp == self._out_item.end_timestamp
 
             coarse_delay = timestamp - orig_timestamp
@@ -211,7 +218,7 @@ class Processor:
             # - we run out of the current input array; or
             # - we fill up the output array
             max_end_in = self._in_items[0].end_timestamp - self.taps * self.spectra_samples + 1
-            max_end_out = self._out_item.timestamp + self.out_item.capacity * self.spectra_samples
+            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
             batch_spectra = 0
             # TODO: add functionality in delay model to speed this up
@@ -232,12 +239,39 @@ class Processor:
 
             if end_timestamp >= max_end_out:
                 # We've filled up the output buffer.
-                await self._flush_back()
+                await self._flush_out(end_timestamp)
 
             if end_timestamp >= max_end_in:
                 # We've exhausted the input buffer.
                 # TODO: should also do this if _in_items[1] would work just as well and we've
                 # filled the output buffer.
                 item = self._in_items.popleft()
-                item.event = self.compute.command_queue.enqueue_marker()
+                item.events.append(self.compute.command_queue.enqueue_marker())
                 self.in_free_queue.put_nowait(item)
+
+    async def run_receive(self, streams: List[recv.Stream]) -> None:
+        async for chunks in recv.chunk_sets(streams):
+            in_item = await self.in_free_queue.get()
+            await async_wait_for_events(in_item.events)
+            in_item.reset(chunks[0].timestamp)
+            in_item.n_samples = chunks[0].base.nbytes * 8 // self.sample_bits
+            transfer_events = []
+            for pol, chunk in enumerate(chunks):
+                in_item.samples[pol].set_region(
+                    self._upload_queue, chunk.base,
+                    np.s_[:chunk.base.nbytes], np.s_[:],
+                    blocking=False)
+                transfer_events.append(self._upload_queue.enqueue_marker())
+            in_item.events.extend(transfer_events)
+            self.in_queue.put_nowait(in_item)
+            for pol in range(len(chunks)):
+                await async_wait_for_events([transfer_events[pol]])
+                streams[pol].add_chunk(chunks[pol])
+
+    async def run_transmit(self) -> None:
+        # TODO: This is a dummy until transmit is implemented
+        while True:
+            out_item = await self.out_queue.get()
+            await async_wait_for_events(out_item.events)
+            out_item.reset()
+            self.out_free_queue.put_nowait(out_item)
