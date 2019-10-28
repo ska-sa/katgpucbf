@@ -114,10 +114,6 @@ class Processor:
         self._in_items: Deque[InItem] = deque()
         self._out_item = OutItem(compute)
 
-        self._buffer_timestamp = 0
-        self._buffer_spectra = 0
-        self._in_offset = 0
-
     @property
     def channels(self) -> int:
         return self.compute.channels
@@ -134,14 +130,6 @@ class Processor:
     def spectra_samples(self) -> int:
         return 2 * self.channels
 
-    @property
-    def _buffer_end_timestamp(self) -> int:
-        return self._buffer_timestamp + self.spectra_samples * self._buffer_spectra
-
-    @property
-    def _buffer_samples(self) -> int:
-        return self._buffer_spectra * self.spectra_samples
-
     async def _next_in(self) -> None:
         self._in_items.append(await self.in_queue.get())
         self._in_items[-1].enqueue_wait(self.compute.command_queue)
@@ -152,25 +140,12 @@ class Processor:
         item.reset(new_timestamp)
         return item
 
-    async def _flush_front(self, new_timestamp: int) -> None:
-        if self._buffer_spectra > 0:
-            if self._out_item.n_spectra == 0:
-                self._out_item.timestamp = self._buffer_timestamp
-            assert self._out_item.end_timestamp == self._buffer_timestamp
-            self.compute.run_frontend(self._in_items[0].samples,
-                                      self._in_offset,
-                                      self._out_item.n_spectra,
-                                      self._buffer_spectra)
-        self._buffer_spectra = 0
-        self._buffer_timestamp = new_timestamp
-
-    async def _flush_back(self, new_timestamp: int) -> None:
-        await self._flush_front(new_timestamp)
+    async def _flush_out(self, new_timestamp: int) -> None:
+        # Round down to a multiple of accs (don't send heap with partial
+        # data).
+        accs = self._out_item.n_spectra // self.acc_len
+        self._out_item.n_spectra = accs * self.acc_len
         if self._out_item.n_spectra > 0:
-            # Round down to a multiple of accs (don't send heap with partial
-            # data).
-            accs = self._out_item.n_spectra // self.acc_len
-            self._out_item.n_spectra = accs * self.acc_len
             # TODO: only need to copy the relevant region, and can limit
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
@@ -179,6 +154,8 @@ class Processor:
             self.compute.run_backend(self._out_item.spectra)
             self._out_item.event = self.compute.command_queue.enqueue_marker()
             self.out_queue.put_nowait(self._out_item)
+            # TODO: could set it to None, since we only need it when we're
+            # ready to flush again?
             self._out_item = await self._next_out(new_timestamp)
         else:
             self._out_item.timestamp = new_timestamp
@@ -207,8 +184,9 @@ class Processor:
                     self._in_items[0].n_samples += copy_samples
 
             # If the input starts too late for the next expected timestamp,
-            # we need to skip ahead to the next heap after the start.
-            timestamp = self._buffer_end_timestamp
+            # we need to skip ahead to the next heap after the start, and
+            # flush what we already have.
+            timestamp = self._out_item.end_timestamp
             orig_timestamp, fine_delay = self.delay_model.invert(timestamp)
             if orig_timestamp < self._in_items[0].timestamp:
                 align = self.acc_len * self.spectra_samples
@@ -223,26 +201,43 @@ class Processor:
                     if orig_timestamp >= self._in_items[0].timestamp:
                         break
                 await self._flush_back(timestamp)
+            assert timestamp == self._out_item.end_timestamp
 
-            assert self._buffer_end_timestamp == timestamp
-            if orig_timestamp + self.taps * self.spectra_samples > self._in_items[0].end_timestamp:
-                # Insufficient space in current input buffer for the PFB
-                # TODO: should also do this if _in_items[1] would work just as well and we
-                # have nothing already buffered.
-                await self._flush_front(timestamp)
+            coarse_delay = timestamp - orig_timestamp
+            offset = orig_timestamp - self._in_items[0].timestamp
+            end_timestamp = timestamp
+            # Identify a block of frontend work. We can grow it until
+            # - the coarse delay changes;
+            # - we run out of the current input array; or
+            # - we fill up the output array
+            max_end_in = self._in_items[0].end_timestamp - self.taps * self.spectra_samples + 1
+            max_end_out = self._out_item.timestamp + self.out_item.capacity * self.spectra_samples
+            max_end = min(max_end_in, max_end_out)
+            batch_spectra = 0
+            # TODO: add functionality in delay model to speed this up
+            while end_timestamp < max_end:
+                orig_timestamp, fine_delay = self.delay_model.invert(end_timestamp)
+                if end_timestamp - orig_timestamp != coarse_delay:
+                    break
+                self._out_item.fine_delay[self._out_item.n_spectra + batch_spectra] = fine_delay
+                end_timestamp += self.spectra_samples
+                batch_spectra += 1
+
+            if batch_spectra > 0:
+                self.compute.run_frontend(self._in_items[0].samples,
+                                          offset,
+                                          self._out_item.n_spectra,
+                                          batch_spectra)
+                self._out_item.n_spectra += batch_spectra
+
+            if end_timestamp >= max_end_out:
+                # We've filled up the output buffer.
+                await self._flush_back()
+
+            if end_timestamp >= max_end_in:
+                # We've exhausted the input buffer.
+                # TODO: should also do this if _in_items[1] would work just as well and we've
+                # filled the output buffer.
                 item = self._in_items.popleft()
                 item.event = self.compute.command_queue.enqueue_marker()
                 self.in_free_queue.put_nowait(item)
-                continue
-
-            offset = orig_timestamp - self._in_items[0].timestamp - self._buffer_samples
-            if self._buffer_spectra > 0 and offset != self._in_offset:
-                # The coarse delay changed, so split up the frontend work
-                await self._flush_front(timestamp)
-            self._in_offset = offset
-
-            assert self._buffer_end_timestamp == timestamp
-            self._buffer_spectra += 1
-            if self._buffer_spectra + self._out_item.n_spectra >= self._out_item.capacity:
-                # We have enough data to fill an output buffer
-                await self._flush_back(timestamp)
