@@ -1,5 +1,9 @@
+import threading
+
 import pkg_resources
 import numpy as np
+import skcuda.fft
+import skcuda.cufft
 from katsdpsigproc import accel
 
 
@@ -50,3 +54,32 @@ class PFBFIR(accel.Operation):
             global_size=(groupsx * self.template.wgs, groupsy),
             local_size=(self.template.wgs, 1)
         )
+
+
+class FFT(accel.Operation):
+    def __init__(self, command_queue, spectra, channels):
+        super().__init__(command_queue)
+        self.spectra = spectra
+        self.channels = channels
+        with command_queue.context:
+            self.plan = skcuda.fft.Plan(
+                2 * channels, np.float32, np.complex64, spectra,
+                stream=command_queue._pycuda_stream,
+                inembed=np.array([2 * channels], np.int32),
+                idist=2 * channels,
+                onembed=np.array([channels + 1], np.int32),
+                odist=channels + 1,
+                auto_allocate=False)
+            work_size = skcuda.cufft.cufftGetSize(self.plan.handle)
+        self.slots['in'] = accel.IOSlot((spectra, accel.Dimension(2 * channels, exact=True)),
+                                        np.float32)
+        self.slots['out'] = accel.IOSlot((spectra, accel.Dimension(channels + 1, exact=True)),
+                                         np.complex64)
+        self.slots['work'] = accel.IOSlot((work_size,), np.uint8)
+
+    def _run(self):
+        with self.command_queue.context:
+            self.plan.set_work_area(self.buffer('work').buffer)
+            skcuda.fft.fft(self.buffer('in').buffer,
+                           self.buffer('out').buffer,
+                           self.plan)

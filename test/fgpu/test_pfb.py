@@ -46,5 +46,21 @@ def bench_pfb_fir():
         fn()
 
 
+def test_fft():
+    ctx = accel.create_some_context(interactive=False)
+    queue = ctx.create_command_queue()
+    spectra = 37
+    channels = 256
+    h_data = np.random.uniform(-5, 5, (spectra, 2 * channels)).astype(np.float32)
+    expected = np.fft.rfft(h_data, axis=-1)
+
+    fn = pfb.FFT(queue, spectra, channels)
+    fn.ensure_all_bound()
+    fn.buffer('in').set(queue, h_data)
+    fn()
+    h_out = fn.buffer('out').get(queue)
+    np.testing.assert_allclose(h_out, expected, rtol=1e-4)
+
+
 if __name__ == '__main__':
     bench_pfb_fir()
