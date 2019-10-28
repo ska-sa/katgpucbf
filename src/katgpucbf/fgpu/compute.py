@@ -17,7 +17,8 @@ class ComputeTemplate:
 
 class Compute(accel.OperationSequence):
     def __init__(self, template, command_queue, samples, spectra, acc_len, channels):
-        pols = 2
+        self.pols = 2
+        self.sample_bits = 10
         self.template = template
         self.channels = channels
         self.samples = samples
@@ -57,7 +58,7 @@ class Compute(accel.OperationSequence):
         if len(samples) != pols:
             raise ValueError(f'samples must contain {pols} elements')
         for pol in range(pols):
-            self.bind(**{f'in{pol}': samples[pol])
+            self.bind(**{f'in{pol}': samples[pol]})
             # TODO: could run these in parallel, but that would require two
             # command queues.
             self.pfb_fir[pol].in_offset = in_offset

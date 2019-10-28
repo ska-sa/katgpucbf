@@ -7,12 +7,21 @@ import numpy as np
 from katsdpsigproc import accel, cuda, opencl
 
 from .delay import AbstractDelayModel
+from .compute import Compute
 
 
 # TODO: introduce these as real classes in katsdpsigproc
 _AbstractContext = Union[cuda.Context, opencl.Context]
 _AbstractCommandQueue = Union[cuda.CommandQueue, opencl.CommandQueue]
 _AbstractEvent = Union[cuda.Event, opencl.Event]
+
+
+def _device_allocate_slot(context: _AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
+    return accel.DeviceArray(context, slot.shape, slot.dtype, slot.required_padded_shape())
+
+
+def _host_allocate_slot(context: _AbstractContext, slot: accel.IOSlot) -> accel.HostArray:
+    return accel.HostArray(slot.shape, slot.dtype, slot.required_padded_shape(), context=context)
 
 
 class BaseItem:
@@ -42,15 +51,11 @@ class InItem(EventItem):
     n_samples: int
     sample_bits: int
 
-    def __init__(self, context: _AbstractContext, sample_bits: int, pols: int, capacity: int,
-                 timestamp: int) -> None:
-        if capacity % 8 != 0:
-            raise ValueError('capacity must be a multiple of 8')
-        n_bytes = capacity * self.sample_bits // 8
-        # TODO: construct from an IOSlot?
+    def __init__(self, compute: Compute, timestamp: int) -> None:
+        self.sample_bits = compute.sample_bits
         self.samples = [
-            accel.DeviceArray(context, (n_bytes,), np.uint8)
-            for pol in range(pols)
+            _device_allocate_slot(compute.context, compute.slots[f'in{pol}'])
+            for pol in range(compute.pols)
         ]
         super().__init__(timestamp)
 
@@ -73,17 +78,12 @@ class InItem(EventItem):
 
 class OutItem(EventItem):
     spectra: accel.DeviceArray
+    fine_delay: accel.HostArray
     n_spectra: int
 
-    def __init__(self, context: _AbstractContext, dtype: np.dtype,
-                 capacity: int, channels: int, acc_len: int, pols: int,
-                 timestamp: int = 0) -> None:
-        if capacity % acc_len != 0:
-            raise ValueError('capacity must be a multiple of acc_len')
-        # TODO: construct from an IOSlot?
-        self.spectra = accel.DeviceArray(context,
-                                         (capacity // acc_len, channels, acc_len, pols, 2),
-                                         dtype)
+    def __init__(self, compute: Compute, timestamp: int = 0) -> None:
+        self.spectra = _device_allocate_slot(compute.context, compute.slots['out'])
+        self.fine_delay = _host_allocate_slot(compute.context, compute.slots['fine_delay'])
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -104,87 +104,85 @@ class OutItem(EventItem):
         return self.spectra.shape[3]
 
 
-class _MidItem(BaseItem):
-    n_spectra: int
-    offsets: accel.HostArray
-    fine_delays: accel.HostArray
-
-    def __init__(self, context: _AbstractContext, capacity: int) -> None:
-        self.offsets = accel.HostArray((capacity,), np.uint32, context=context)
-        self.fine_delays = accel.HostArray((capacity,), np.float32, context=context)
-        self.reset()
-
-    def add(self, offset: int, fine_delay: float) -> None:
-        self.offsets[self.n_spectra] = offset
-        self.fine_delays[self.n_spectra] = fine_delay
-        self.n_spectra += 1
-
-    def reset(self, timestamp: int = 0) -> None:
-        super().reset(timestamp)
-        self.n_spectra = 0
-
-    @property
-    def end_timestamp(self) -> int:
-        return self.timestamp + self.n_spectra
-
-
 class Processor:
-    def __init__(self, context: _AbstractContext,
-                 capacity: int, channels: int, taps: int, acc_len: int, pols: int,
+    def __init__(self, compute: Compute,
                  delay_model: AbstractDelayModel,
                  in_queue: asyncio.Queue, in_free_queue: asyncio.Queue,
                  out_queue: asyncio.Queue, out_free_queue: asyncio.Queue) -> None:
-        self.context = context
-        self.channels = channels
-        self.taps = taps
-        self.acc_len = acc_len
-        self.spectra_samples = 2 * channels
+        self.compute = compute
         self.delay_model = delay_model
         self.in_queue = in_queue
         self.in_free_queue = in_free_queue
         self.out_queue = out_queue
         self.out_free_queue = out_free_queue
 
-        self._command_queue = context.create_command_queue()
-        self._front_fn = TODO
-        self._back_fn = TODO
-
         self._in_items: Deque[InItem] = deque()
-        self._mid_item = _MidItem(context, capacity)
-        self._out_item: OutItem = out_free_queue.get_nowait()
+        self._out_item = OutItem(compute)
+
+        self._buffer_timestamp = 0
+        self._buffer_spectra = 0
+        self._in_offset = 0
+
+    @property
+    def channels(self) -> int:
+        return self.compute.channels
+
+    @property
+    def taps(self) -> int:
+        return self.compute.template.taps
+
+    @property
+    def acc_len(self) -> int:
+        return self.compute.acc_len
+
+    @property
+    def spectra_samples(self) -> int:
+        return 2 * self.channels
+
+    @property
+    def _buffer_end_timestamp(self) -> int:
+        return self._buffer_timestamp + self.spectra_samples * self._buffer_spectra
+
+    @property
+    def _buffer_samples(self) -> int:
+        return self._buffer_spectra * self.spectra_samples
 
     async def _next_in(self) -> None:
         self._in_items.append(await self.in_queue.get())
-        self._in_items[-1].enqueue_wait(self._command_queue)
+        self._in_items[-1].enqueue_wait(self.compute.command_queue)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
         item = await self.out_free_queue.get()
-        item.enqueue_wait(self._command_queue)
+        item.enqueue_wait(self.compute.command_queue)
         item.reset(new_timestamp)
         return item
 
     async def _flush_front(self, new_timestamp: int) -> None:
-        assert self._out_item is not None
-        if self._mid_item.n_spectra > 0:
+        if self._buffer_spectra > 0:
             if self._out_item.n_spectra == 0:
-                self._out_item.timestamp = self._mid_item.timestamp
-            assert self._out_item.end_timestamp == self._mid_item.timestamp
-            # TODO: bind buffers
-            self._front_fn.n_spectra = self._mid_item.n_spectra
-            self._front_fn.out_offset = self._out_item.n_spectra
-            self._front_fn()
-            self._out_item.n_spectra += self._mid_item.n_spectra
-        self._mid_item.reset(new_timestamp)
+                self._out_item.timestamp = self._buffer_timestamp
+            assert self._out_item.end_timestamp == self._buffer_timestamp
+            self.compute.run_frontend(self._in_items[0].samples,
+                                      self._in_offset,
+                                      self._out_item.n_spectra,
+                                      self._buffer_spectra)
+        self._buffer_spectra = 0
+        self._buffer_timestamp = new_timestamp
 
     async def _flush_back(self, new_timestamp: int) -> None:
         await self._flush_front(new_timestamp)
         if self._out_item.n_spectra > 0:
+            # Round down to a multiple of accs (don't send heap with partial
+            # data).
             accs = self._out_item.n_spectra // self.acc_len
             self._out_item.n_spectra = accs * self.acc_len
-            # TODO: bind buffers
-            self._back_fn.n_spectra = self._out_item.n_spectra
-            self._back_fn()
-            self._out_item.event = self._command_queue.enqueue_marker()
+            # TODO: only need to copy the relevant region, and can limit
+            # postprocessing to the relevant range (the FFT size is baked into
+            # the plan, so is harder to modify on the fly).
+            self.compute.buffer('fine_delay').set_async(self.compute.command_queue,
+                                                        self._out_item.fine_delay)
+            self.compute.run_backend(self._out_item.spectra)
+            self._out_item.event = self.compute.command_queue.enqueue_marker()
             self.out_queue.put_nowait(self._out_item)
             self._out_item = await self._next_out(new_timestamp)
         else:
@@ -207,7 +205,7 @@ class Processor:
                     end_bytes = self._in_items[0].n_samples * sample_bits // 8
                     for pol in range(len(self._in_items[0].samples)):
                         self._in_items[1].samples[pol].copy_region(
-                            self._command_queue,
+                            self.compute.command_queue,
                             self._in_items[0].samples[pol],
                             np.s_[:copy_bytes],
                             np.s_[-copy_bytes:])
@@ -215,7 +213,7 @@ class Processor:
 
             # If the input starts too late for the next expected timestamp,
             # we need to skip ahead to the next heap after the start.
-            timestamp = self._mid_item.end_timestamp
+            timestamp = self._buffer_end_timestamp
             orig_timestamp, fine_delay = self.delay_model.invert(timestamp)
             if orig_timestamp < self._in_items[0].timestamp:
                 align = self.acc_len * self.spectra_samples
@@ -231,17 +229,25 @@ class Processor:
                         break
                 await self._flush_back(timestamp)
 
-            assert self._mid_item.end_timestamp == timestamp
+            assert self._buffer_end_timestamp == timestamp
             if orig_timestamp + self.taps * self.spectra_samples > self._in_items[0].end_timestamp:
                 # Insufficient space in current input buffer for the PFB
+                # TODO: should also do this if _in_items[1] would work just as well and we
+                # have nothing already buffered.
                 await self._flush_front(timestamp)
                 item = self._in_items.popleft()
-                item.event = self._command_queue.enqueue_marker()
+                item.event = self.compute.command_queue.enqueue_marker()
                 self.in_free_queue.put_nowait(item)
                 continue
 
-            assert self._mid_item.end_timestamp == timestamp
-            self._mid_item.add(orig_timestamp - self._in_items[0].timestamp, fine_delay)
-            if self._mid_item.n_spectra + self._out_item.n_spectra >= self._out_item.capacity:
+            offset = orig_timestamp - self._in_items[0].timestamp - self._buffer_samples
+            if self._buffer_spectra > 0 and offset != self._in_offset:
+                # The coarse delay changed, so split up the frontend work
+                await self._flush_front(timestamp)
+            self._in_offset = offset
+
+            assert self._buffer_end_timestamp == timestamp
+            self._buffer_spectra += 1
+            if self._buffer_spectra + self._out_item.n_spectra >= self._out_item.capacity:
                 # We have enough data to fill an output buffer
                 await self._flush_back(timestamp)
