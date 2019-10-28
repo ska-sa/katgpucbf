@@ -26,14 +26,15 @@ class PFBFIRTemplate:
 class PFBFIR(accel.Operation):
     def __init__(self, template, command_queue, samples, spectra, channels):
         super().__init__(command_queue)
-        # n is number of *output* samples
+        if samples % 8 != 0:
+            raise ValueError('samples must be a multiple of 8')
         if (2 * channels) % template.wgs != 0:
             raise ValueError(f'2*channels must be a multiple of {template.wgs}')
         self.template = template
         self.samples = samples
         self.spectra = spectra        # Can be changed (TODO: documentation)
         self.channels = channels
-        self.slots['in'] = accel.IOSlot((samples,), np.int16)
+        self.slots['in'] = accel.IOSlot((samples * 10 // 8,), np.uint8)
         self.slots['out'] = accel.IOSlot(
             (spectra, accel.Dimension(2 * channels, exact=True)),
             np.float32)

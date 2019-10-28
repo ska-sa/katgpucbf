@@ -4,8 +4,18 @@ from katsdpsigproc import accel
 from katfgpu import pfb
 
 
+def decode_10bit_host(data):
+    bits = np.unpackbits(data).reshape(-1, 10)
+    # Replicate the high (sign) bit
+    extra = np.tile(bits[:, 0:1], (1, 6))
+    combined = np.hstack([extra, bits])
+    packed = np.packbits(combined)
+    return packed.view('>i2').astype('i2')
+
+
 def pfb_fir_host(data, channels, weights):
-    grid = data.reshape(-1, 2 * channels).astype(np.float32)
+    decoded = decode_10bit_host(data)
+    grid = decoded.reshape(-1, 2 * channels).astype(np.float32)
     out = np.apply_along_axis(np.convolve, 0, grid, v=weights[::-1], mode='valid')
     return out
 
@@ -16,10 +26,10 @@ def test_pfb_fir(repeat=1):
 
     weights = np.array([3, 17, -4, 7], np.float32)
     taps = len(weights)
-    spectra = 30123
+    spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
-    h_in = np.random.randint(-512, 512, samples, np.int16)
+    h_in = np.random.randint(0, 256, samples * 10 // 8, np.uint8)
     expected = pfb_fir_host(h_in, channels, weights)
 
     template = pfb.PFBFIRTemplate(ctx, 4)
@@ -31,7 +41,7 @@ def test_pfb_fir(repeat=1):
         # Split into two parts to test the offsetting
         fn.in_offset = 0
         fn.out_offset = 0
-        fn.spectra = 10000
+        fn.spectra = 1003
         fn()
         fn.in_offset = fn.spectra * 2 * channels
         fn.out_offset = fn.spectra
