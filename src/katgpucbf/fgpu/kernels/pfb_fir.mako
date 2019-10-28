@@ -15,14 +15,15 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,
     const GLOBAL short * RESTRICT in,
     const GLOBAL float * RESTRICT weights,
-    int n, int step, int stepy)
+    int n, int step, int stepy,
+    int in_offset, int out_offset)
 {
     int group_x = get_group_id(0);
     int group_y = get_group_id(1);
     int lid = get_local_id(0);
     int offset = group_y * stepy + group_x * WGS + lid;
-    out += offset;
-    in += offset;
+    out += offset + in_offset;
+    in += offset + out_offset;
     n -= offset;
 
     float samples[TAPS];

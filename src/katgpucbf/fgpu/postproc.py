@@ -14,12 +14,12 @@ class PostprocTemplate:
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
         self.kernel = program.get_kernel('postproc')
 
-    def instantiate(self, command_queue, channels, spectra, acc_len):
-        return Postproc(self, command_queue, channels, spectra, acc_len)
+    def instantiate(self, command_queue, spectra, acc_len, channels):
+        return Postproc(self, command_queue, spectra, acc_len, channels)
 
 
 class Postproc(accel.Operation):
-    def __init__(self, template, command_queue, channels, spectra, acc_len):
+    def __init__(self, template, command_queue, spectra, acc_len, channels):
         super().__init__(command_queue)
         if spectra % acc_len != 0:
             raise ValueError('spectra must be a multiple of acc_len')

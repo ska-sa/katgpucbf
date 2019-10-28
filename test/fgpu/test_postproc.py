@@ -4,7 +4,7 @@ from katsdpsigproc import accel
 from katfgpu import postproc
 
 
-def postproc_host_pol(data, channels, acc_len, spectra, fine_delay, quant_scale):
+def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, quant_scale):
     # Throw out last channel (Nyquist frequency)
     data = data[:, :channels]
     # Compute delay phases
@@ -30,7 +30,7 @@ def postproc_host(in0, in1, channels, acc_len, spectra, fine_delay, quant_scale)
     return np.stack([out0, out1], axis=3)
 
 
-def test_postproc():
+def test_postproc(repeat=1):
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
     channels = 4096
@@ -41,33 +41,20 @@ def test_postproc():
     h_in0 = np.random.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
     h_in1 = np.random.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
     h_fine_delay = np.random.uniform(0.0, 2.0, (spectra,)).astype(np.float32)
-    expected = postproc_host(h_in0, h_in1, channels, acc_len, spectra, h_fine_delay, quant_scale)
+    expected = postproc_host(h_in0, h_in1, spectra, acc_len, channels, h_fine_delay, quant_scale)
 
     template = postproc.PostprocTemplate(ctx)
-    fn = template.instantiate(queue, channels, spectra, acc_len)
+    fn = template.instantiate(queue, spectra, acc_len, channels)
     fn.ensure_all_bound()
     fn.buffer('in0').set(queue, h_in0)
     fn.buffer('in1').set(queue, h_in1)
     fn.buffer('fine_delay').set(queue, h_fine_delay)
     fn.quant_scale = quant_scale
-    fn()
+    for i in range(repeat):
+        fn()
     h_out = fn.buffer('out').get(queue)
     np.testing.assert_allclose(h_out, expected, atol=1)
 
 
-def bench_postproc():
-    ctx = accel.create_some_context(interactive=False)
-    queue = ctx.create_command_queue()
-    channels = 4096
-    acc_len = 256
-    spectra = 16384
-
-    template = postproc.PostprocTemplate(ctx)
-    fn = template.instantiate(queue, channels, spectra, acc_len)
-    fn.ensure_all_bound()
-    for i in range(100):
-        fn()
-
-
 if __name__ == '__main__':
-    bench_postproc()
+    test_postproc(repeat=100)
