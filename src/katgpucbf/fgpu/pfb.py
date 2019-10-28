@@ -35,7 +35,9 @@ class PFBFIR(accel.Operation):
         self.n = n
         self.step = step
         self.slots['in'] = accel.IOSlot((n + step * (template.taps - 1),), np.int16)
-        self.slots['out'] = accel.IOSlot((n,), np.float32)
+        self.slots['out'] = accel.IOSlot(
+            (n // step, accel.Dimension(step, exact=True)),
+            np.float32)
         self.slots['weights'] = accel.IOSlot((template.taps,), np.float32)
 
     def _run(self):

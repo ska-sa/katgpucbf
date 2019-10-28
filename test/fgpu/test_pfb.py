@@ -7,7 +7,7 @@ from katfgpu import pfb
 def pfb_fir_host(data, step, weights):
     grid = data.reshape(-1, step).astype(np.float32)
     out = np.apply_along_axis(np.convolve, 0, grid, v=weights[::-1], mode='valid')
-    return out.reshape(-1)
+    return out
 
 
 def test_pfb_fir():
