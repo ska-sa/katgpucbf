@@ -60,5 +60,15 @@ setup(
     ext_modules=extensions,
     cmdclass={'build_ext': BuildExt},
     python_requires='>=3.5',
-    packages=find_packages()
+    install_requires=[
+        'katsdpsigproc[CUDA]',
+        'katsdpservices',
+        'katsdptelstate',
+        'numpy',
+        'scikit-cuda'
+    ],
+    scripts=['demo2.py'],
+    packages=find_packages(),
+    package_data={'': ['kernels/*.mako']},
+    include_package_data=True
 )

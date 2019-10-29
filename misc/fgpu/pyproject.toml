@@ -1,0 +1,2 @@
+[build-system]
+requires = ["setuptools", "wheel", "jinja2==2.10.1", "pycparser==2.19"]

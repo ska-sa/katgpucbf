@@ -1,0 +1,22 @@
+appdirs
+decorator
+llvmlite
+mako
+markupsafe
+msgpack
+netifaces
+numba
+numpy==1.17.3
+pandas
+pycuda==2019.1.2
+pygelf
+python-dateutil
+pytools
+pytz
+redis
+scikit-cuda==0.5.3
+scipy
+
+katsdpservices @ git+https://github.com/ska-sa/katsdpservices
+katsdpsigproc @ git+https://github.com/ska-sa/katsdpsigproc
+katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
