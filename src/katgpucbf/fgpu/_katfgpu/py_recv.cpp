@@ -1,4 +1,5 @@
 #include <memory>
+#include <utility>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "recv.h"
@@ -67,7 +68,7 @@ py::module register_module(py::module &parent)
         .def_property_readonly("chunk_bytes", &stream::get_chunk_bytes)
         .def("add_chunk", [](stream &self, const py_chunk &chunk)
         {
-            self.add_chunk(std::make_unique<py_chunk>(chunk));
+            self.add_chunk(std::make_unique<py_chunk>(std::move(chunk)));
         })
         .def("add_udp_pcap_file_reader", &stream::add_udp_pcap_file_reader,
              "filename"_a)
