@@ -1,0 +1,115 @@
+#include <spead2/send_udp.h>
+#include "send.h"
+
+namespace katfgpu::send
+{
+
+static constexpr int TIMESTAMP_ID = 0x1600;
+static constexpr int FENG_ID_ID = 0x4101;
+static constexpr int FREQUENCY_ID = 0x4103;
+static constexpr int FENG_RAW_ID = 0x4300;
+
+struct context
+{
+    ringbuffer_t &free_ring;
+    std::unique_ptr<chunk> c;
+    std::vector<spead2::send::heap> heaps;
+    std::size_t remaining;
+
+    context(ringbuffer_t &free_ring, std::unique_ptr<chunk> &&c, std::size_t n_heaps)
+        : free_ring(free_ring), c(std::move(c)), remaining(n_heaps)
+    {
+        heaps.reserve(n_heaps);
+    }
+};
+
+sender::sender(int free_ring_space, int thread_affinity)
+    : worker(1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
+    free_ring(free_ring_space)
+{
+}
+
+sender::~sender()
+{
+    stop();
+}
+
+template<typename Stream, typename... Args>
+void sender::emplace_stream(Args&&... args)
+{
+    streams.push_back(std::make_unique<Stream>(worker.get_io_service(),
+                                               std::forward<Args>(args)...));
+}
+
+void sender::add_udp_stream(const std::string &address, std::uint16_t port,
+                            std::size_t max_packet_size, double rate, std::size_t max_heaps)
+{
+    boost::asio::ip::udp::endpoint endpoint( boost::asio::ip::address::from_string(address), port);
+    spead2::send::stream_config config;
+    config.set_max_packet_size(max_packet_size);
+    config.set_rate(rate);
+    config.set_max_heaps(max_heaps);  // TODO: get sender to compute it, given shape of chunks?
+    emplace_stream<spead2::send::udp_stream>(endpoint, config);
+}
+
+void sender::stop()
+{
+    free_ring.stop();
+    for (auto &stream : streams)
+        stream->flush();
+    worker.stop();
+}
+
+void sender::send_chunk(std::unique_ptr<chunk> &&c)
+{
+    if (c->channels % streams.size() != 0)
+        throw std::invalid_argument("channels must be divisible by the number of streams");
+    c->error = boost::system::error_code();
+
+    const spead2::flavour flavour(spead2::maximum_version, 64, 48);
+    const std::size_t n_heaps = streams.size() * c->frames;
+    const int channels_per_stream = c->channels / streams.size();
+    const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->acc_len * c->pols * 2;
+    const std::size_t heap_bytes = frame_bytes / streams.size();
+    const std::int64_t timestamp_step = c->acc_len * c->channels * 2;
+
+    auto ctx = std::make_shared<context>(free_ring, std::move(c), n_heaps);
+    auto callback = [ctx] (const boost::system::error_code &ec, spead2::item_pointer_t bytes_transferred)
+    {
+        if (ec)
+            ctx->c->error = ec;
+        if (--ctx->remaining == 0)
+            ctx->free_ring.push(std::move(ctx->c));
+    };
+
+    for (int i = 0; i < c->frames; i++)
+        for (std::size_t j = 0; j < streams.size(); j++)
+        {
+            auto heap_data = boost::asio::buffer(ctx->c->storage + i * frame_bytes + j * heap_bytes,
+                                                 heap_bytes);
+            ctx->heaps.emplace_back(flavour);
+            spead2::send::heap &heap = ctx->heaps.back();
+            // TODO: Consider pre-creating the heaps and recycling
+            heap.set_repeat_pointers(true);
+            heap.add_item(TIMESTAMP_ID, ctx->c->timestamp + i * timestamp_step);
+            heap.add_item(FENG_ID_ID, 0);    // TODO: take feng_id in constructor
+            heap.add_item(FREQUENCY_ID, j * channels_per_stream);
+            heap.add_item(FENG_RAW_ID,
+                          boost::asio::buffer_cast<const void *>(heap_data),
+                          boost::asio::buffer_size(heap_data),
+                          false);
+            streams[j]->async_send_heap(heap, callback);
+        }
+}
+
+ringbuffer_t &sender::get_free_ring()
+{
+    return free_ring;
+}
+
+const ringbuffer_t &sender::get_free_ring() const
+{
+    return free_ring;
+}
+
+} // namespace katfgpu::send
