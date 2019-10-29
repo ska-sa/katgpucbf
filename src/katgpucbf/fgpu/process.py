@@ -10,7 +10,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .delay import AbstractDelayModel
 from .compute import Compute
 from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
-from . import recv
+from . import recv, send, Stopped, Empty
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -275,10 +275,21 @@ class Processor:
                 await async_wait_for_events([transfer_events[pol]])
                 streams[pol].add_chunk(chunks[pol])
 
-    async def run_transmit(self) -> None:
+    async def run_transmit(self, sender: send.Sender) -> None:
         # TODO: This is a dummy until transmit is implemented
+        free_ring = send.AsyncRingbuffer(sender.free_ring)
         while True:
             out_item = await self.out_queue.get()
-            await async_wait_for_events(out_item.events)
+            self._download_queue.enqueue_wait_for_events(out_item.events)
+            chunk = await free_ring.async_pop()
+            # TODO: use get_region since it might be partial
+            out_item.spectra.get_async(self._download_queue, chunk.base)
+            chunk.timestamp = out_item.timestamp
+            chunk.acc_len = self.acc_len
+            chunk.channels = self.channels
+            chunk.frames = out_item.n_spectra // self.acc_len
+            transfer_event = self._download_queue.enqueue_marker()
+            await async_wait_for_events([transfer_event])
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
+            sender.send_chunk(chunk)

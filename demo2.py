@@ -66,6 +66,7 @@ async def main() -> None:
     ring = katfgpu.recv.Ringbuffer(2)
     streams = [katfgpu.recv.Stream(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
                for pol in range(N_POL)]
+    sender = katfgpu.send.Sender(2)
     try:
         for pol in range(N_POL):
             for i in range(4):
@@ -76,16 +77,22 @@ async def main() -> None:
             else:
                 streams[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
 
+        for i in range(2):
+            buf = accel.HostArray((SPECTRA // ACC_LEN, CHANNELS, ACC_LEN, N_POL, 2), np.int8, context=ctx)
+            sender.free_ring.try_push(katfgpu.send.Chunk(buf))
+        sender.add_udp_stream('127.0.0.1', 7149, 8872, 0, 2 * SPECTRA // ACC_LEN)
+
         tasks = [
             loop.create_task(processor.run_processing()),
             loop.create_task(processor.run_receive(streams)),
-            loop.create_task(processor.run_transmit())
+            loop.create_task(processor.run_transmit(sender))
         ]
         await asyncio.gather(*tasks)
         print('Done!')
     finally:
         for stream in streams:
             stream.stop()
+        sender.stop()
 
 
 if __name__ == '__main__':

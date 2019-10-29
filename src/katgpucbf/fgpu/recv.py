@@ -1,7 +1,7 @@
 import asyncio
 from typing import List, AsyncIterator, AsyncGenerator, Optional
 
-from . import _katfgpu
+from . import Empty, Stopped
 from ._katfgpu.recv import Stream, Chunk
 from ._katfgpu.recv import Ringbuffer as _Ringbuffer
 
@@ -29,7 +29,7 @@ class Ringbuffer(_Ringbuffer):
         try:
             chunk = self.try_pop()
             self._waiter.set_result(chunk)
-        except _katfgpu.Empty:
+        except Empty:
             # Spurious wakeup, no action required
             pass
         except Exception as exc:
@@ -41,7 +41,7 @@ class Ringbuffer(_Ringbuffer):
     async def __anext__(self) -> Chunk:
         try:
             return await self.async_pop()
-        except _katfgpu.Stopped:
+        except Stopped:
             raise StopAsyncIteration from None
 
 

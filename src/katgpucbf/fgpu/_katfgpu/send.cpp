@@ -1,3 +1,4 @@
+#include <iostream>      // TODO: debugging
 #include <spead2/send_udp.h>
 #include "send.h"
 
@@ -62,9 +63,10 @@ void sender::stop()
 
 void sender::send_chunk(std::unique_ptr<chunk> &&c)
 {
+    if (streams.empty())
+        throw std::invalid_argument("cannot use send_chunk until streams have been added");
     if (c->channels % streams.size() != 0)
         throw std::invalid_argument("channels must be divisible by the number of streams");
-    c->error = boost::system::error_code();
 
     const spead2::flavour flavour(spead2::maximum_version, 64, 48);
     const std::size_t n_heaps = streams.size() * c->frames;
@@ -72,6 +74,16 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->acc_len * c->pols * 2;
     const std::size_t heap_bytes = frame_bytes / streams.size();
     const std::int64_t timestamp_step = c->acc_len * c->channels * 2;
+    if (boost::asio::buffer_size(c->storage) < c->frames * frame_bytes)
+        throw std::invalid_argument("send_chunk storage is too small");
+
+    c->error = boost::system::error_code();
+    if (c->frames <= 0 || c->channels <= 0 || c->acc_len <= 0)
+    {
+        // Chunk contains no data, so send it directly to the free ring
+        free_ring.push(std::move(c));
+        return;
+    }
 
     auto ctx = std::make_shared<context>(free_ring, std::move(c), n_heaps);
     auto callback = [ctx] (const boost::system::error_code &ec, spead2::item_pointer_t bytes_transferred)
@@ -82,7 +94,9 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
             ctx->free_ring.push(std::move(ctx->c));
     };
 
-    for (int i = 0; i < c->frames; i++)
+    std::cout << "About to send: frames=" << ctx->c->frames << " channels=" << ctx->c->channels
+        << " acc_len=" << ctx->c->acc_len << '\n';
+    for (int i = 0; i < ctx->c->frames; i++)
         for (std::size_t j = 0; j < streams.size(); j++)
         {
             auto heap_data = boost::asio::buffer(ctx->c->storage + i * frame_bytes + j * heap_bytes,
