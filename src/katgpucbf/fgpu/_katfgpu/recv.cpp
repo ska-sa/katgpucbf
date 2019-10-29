@@ -127,7 +127,7 @@ stream::decode_timestamp(std::int64_t timestamp)
     if (first_timestamp == -1)
     {
         first_timestamp = timestamp / chunk_samples * chunk_samples;
-        grab_chunk(timestamp);
+        grab_chunk(first_timestamp);
     }
     if ((timestamp - first_timestamp) % packet_samples != 0)
     {
