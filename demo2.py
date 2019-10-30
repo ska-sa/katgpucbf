@@ -27,7 +27,7 @@ def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
 
 
 def comma_split(count: int, base_type: Callable[[str], _T]) -> Callable[[str], List[_T]]:
-    def func(value: str):
+    def func(value: str) -> List[_T]:
         parts = value.split(',')
         n = len(parts)
         if n != count:
