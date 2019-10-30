@@ -276,7 +276,6 @@ class Processor:
                 streams[pol].add_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
-        # TODO: This is a dummy until transmit is implemented
         free_ring = send.AsyncRingbuffer(sender.free_ring)
         while True:
             out_item = await self.out_queue.get()
