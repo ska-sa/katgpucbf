@@ -1,1 +1,3 @@
-from ._katfgpu import Stopped, Empty   # noqa: F401
+from ._katfgpu import Stopped, Empty
+
+__all__ = ['Stopped', 'Empty']

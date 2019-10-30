@@ -1,5 +1,4 @@
 import asyncio
-from abc import ABC, abstractmethod
 from typing import Optional, AsyncIterator, Generic, TypeVar
 
 from typing_extensions import Protocol
@@ -13,10 +12,17 @@ _T = TypeVar('_T')
 class RingbufferProtocol(Protocol[_T]):
     """Protocol for Python wrappers of spead2's C++ ringbuffer class."""
     @property
-    def data_fd(self) -> int: ...
-    def try_push(self, item: _T) -> None: ...
-    def try_pop(self) -> _T: ...
-    def pop(self) -> _T: ...
+    def data_fd(self) -> int:
+        ...
+
+    def try_push(self, item: _T) -> None:
+        ...
+
+    def try_pop(self) -> _T:
+        ...
+
+    def pop(self) -> _T:
+        ...
 
 
 class AsyncRingbuffer(Generic[_T]):
