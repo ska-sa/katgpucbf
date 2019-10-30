@@ -3,97 +3,125 @@
 import argparse
 import asyncio
 import ipaddress
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, TypeVar, Callable
 
 from katsdpservices import get_interface_address
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
-import numpy as np
+from katsdptelstate.endpoint import endpoint_list_parser
 import katsdpsigproc.accel as accel
 
-import katfgpu.recv
-from katfgpu.compute import ComputeTemplate
-from katfgpu.process import Processor
-from katfgpu.delay import MultiDelayModel
+from katfgpu.engine import Engine
 
 
-SAMPLE_BITS = 10
+_T = TypeVar('_T')
 N_POL = 2
-PACKET_SAMPLES = 4096
-
-CHANNELS = 4096
-CHUNK_SAMPLES = 2**26
-SPECTRA = CHUNK_SAMPLES // (2 * CHANNELS)
-OVERLAP_SAMPLES = 2**23
-CHUNK_BYTES = CHUNK_SAMPLES * 10 // 8
-ACC_LEN = 256
-TAPS = 4
 
 
 def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
     try:
-        endpoints = endpoint_list_parser(None)(value)
+        endpoints = endpoint_list_parser(7148)(value)
         for endpoint in endpoints:
             ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
-            if endpoint.port is None:
-                raise ValueError
         return [(ep.host, ep.port) for ep in endpoints]
     except ValueError:
         return value
 
 
+def comma_split(count: int, base_type: Callable[[str], _T]) -> Callable[[str], List[_T]]:
+    def func(value: str):
+        parts = value.split(',')
+        n = len(parts)
+        if n != count:
+            raise ValueError(f'Expected {count} comma-separated fields, received {n}')
+        return [base_type(part) for part in parts]
+    return func
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--interface', '-i', type=get_interface_address,
-                        help='Interface for live capture')
-    parser.add_argument('sources', type=parse_source, nargs=N_POL)
+    parser.add_argument(
+        '--src-interface', type=get_interface_address,
+        help='Name of input network device')
+    parser.add_argument(
+        '--src-ibv', action='store_true',
+        help='Use ibverbs for input [no]')
+    parser.add_argument(
+        '--src-affinity', type=comma_split(N_POL, int), metavar='CORE,CORE',
+        default=[-1] * N_POL,
+        help='Cores for input-handling threads (comma-separated) [not bound]')
+    parser.add_argument(
+        '--src-packet-samples', type=int, default=4096,
+        help='Number of samples per digitiser packet [%(default)s]')
+    parser.add_argument(
+        '--src-buffer', type=int, default=32*1024*1024, metavar='BYTES',
+        help='Size of network receive buffer (per pol) [32MiB]')
+    parser.add_argument(
+        '--dst-interface', type=get_interface_address, required=True,
+        help='Name of output network device')
+    parser.add_argument(
+        '--dst-ttl', type=int, default=4,
+        help='TTL for outgoing packets [%(default)s]')
+    parser.add_argument(
+        '--dst-ibv', action='store_true',
+        help='Use ibverbs for output [no]')
+    parser.add_argument(
+        '--dst-max-packet-size', type=int, default=8872, metavar='BYTES',
+        help='Maximum size for output packets [%(default)s]')
+    parser.add_argument(
+        '--dst-affinity', type=int, default=-1,
+        help='Cores for output-handling threads [not bound]')
+    parser.add_argument(
+        '--bandwidth', type=float, default=0.0, metavar='HZ',
+        help='Digitiser sampling rate, used to determine transmission rate [fast as possible]')
+    parser.add_argument(
+        '--channels', type=int, required=True,
+        help='Number of output channels to produce')
+    parser.add_argument(
+        '--acc-len', type=int, default=256, metavar='SPECTRA',
+        help='Spectra in each output heap [%(default)s]')
+    parser.add_argument(
+        '--chunk-samples', type=int, default=2**26, metavar='SAMPLES',
+        help='Number of digitiser samples to process at a time (per pol) [%(default)s]')
+    parser.add_argument(
+        '--taps', type=int, default=16,
+        help='Number of taps in polyphase filter bank [%(default)s]')
+
+    parser.add_argument('src', type=parse_source, nargs=N_POL,
+                        help='Source endpoints (or pcap file)')
+    parser.add_argument('dst', type=endpoint_list_parser(7148),
+                        help='Destination endpoints')
     args = parser.parse_args()
-    for source in args.sources:
-        if not isinstance(source, str) and args.interface is None:
-            parser.error('Live source requires --interface')
+
+    for src in args.src:
+        if not isinstance(src, str) and args.src_interface is None:
+            parser.error('Live source requires --src-interface')
     return args
 
 
 async def main() -> None:
-    loop = asyncio.get_event_loop()
     args = parse_args()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    queue = ctx.create_command_queue()
-    template = ComputeTemplate(ctx, TAPS)
-    compute = template.instantiate(
-        queue, CHUNK_SAMPLES + OVERLAP_SAMPLES, SPECTRA, ACC_LEN, CHANNELS)
-    processor = Processor(compute, MultiDelayModel())
 
-    ring = katfgpu.recv.Ringbuffer(2)
-    streams = [katfgpu.recv.Stream(pol, SAMPLE_BITS, PACKET_SAMPLES, CHUNK_SAMPLES, ring)
-               for pol in range(N_POL)]
-    sender = katfgpu.send.Sender(2)
-    try:
-        for pol in range(N_POL):
-            for i in range(4):
-                buf = accel.HostArray((streams[pol].chunk_bytes,), np.uint8, context=ctx)
-                streams[pol].add_chunk(katfgpu.recv.Chunk(buf))
-            if isinstance(args.sources[pol], str):
-                streams[pol].add_udp_pcap_file_reader(args.sources[pol])
-            else:
-                streams[pol].add_udp_ibv_reader(args.sources[pol], args.interface, 32 * 1024 * 1024, pol)
-
-        for i in range(2):
-            buf = accel.HostArray((SPECTRA // ACC_LEN, CHANNELS, ACC_LEN, N_POL, 2), np.int8, context=ctx)
-            sender.free_ring.try_push(katfgpu.send.Chunk(buf))
-        sender.add_udp_stream('239.102.123.0', 7149, 1, '127.0.0.1', False,
-                              8872, 0, 2 * SPECTRA // ACC_LEN)
-
-        tasks = [
-            loop.create_task(processor.run_processing()),
-            loop.create_task(processor.run_receive(streams)),
-            loop.create_task(processor.run_transmit(sender))
-        ]
-        await asyncio.gather(*tasks)
-        print('Done!')
-    finally:
-        for stream in streams:
-            stream.stop()
-        sender.stop()
+    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.acc_len)
+    engine = Engine(
+        context=ctx,
+        srcs=args.src,
+        src_interface=args.src_interface,
+        src_ibv=args.src_ibv,
+        src_affinity=args.src_affinity,
+        src_packet_samples=args.src_packet_samples,
+        src_buffer=args.src_buffer,
+        dst=args.dst,
+        dst_interface=args.dst_interface,
+        dst_ttl=args.dst_ttl,
+        dst_ibv=args.dst_ibv,
+        dst_max_packet_size=args.dst_max_packet_size,
+        dst_affinity=args.dst_affinity,
+        bandwidth=args.bandwidth,
+        spectra=chunk_samples // (2 * args.channels),
+        acc_len=args.acc_len,
+        channels=args.channels,
+        taps=args.taps)
+    await engine.run()
 
 
 if __name__ == '__main__':

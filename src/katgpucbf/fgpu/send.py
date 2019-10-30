@@ -37,7 +37,7 @@ class AsyncRingbuffer:
         except Exception as exc:
             self._waiter.set_exception(exc)
 
-    async def __aiter__(self) -> AsyncIterator[Chunk]:
+    def __aiter__(self) -> AsyncIterator[Chunk]:
         return self
 
     async def __anext__(self) -> Chunk:
