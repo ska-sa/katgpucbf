@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
 async def main() -> None:
     loop = asyncio.get_event_loop()
     args = parse_args()
-    ctx = accel.create_some_context()
+    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
     template = ComputeTemplate(ctx, TAPS)
     compute = template.instantiate(
