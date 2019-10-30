@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         '--src-packet-samples', type=int, default=4096,
         help='Number of samples per digitiser packet [%(default)s]')
     parser.add_argument(
-        '--src-buffer', type=int, default=32*1024*1024, metavar='BYTES',
+        '--src-buffer', type=int, default=32 * 1024 * 1024, metavar='BYTES',
         help='Size of network receive buffer (per pol) [32MiB]')
     parser.add_argument(
         '--dst-interface', type=get_interface_address, required=True,

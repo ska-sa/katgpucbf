@@ -1,2 +1,8 @@
 [flake8]
 max-line-length = 100
+exclude = 3rdparty
+ignore =
+    # whitespace before ':' - flake8 doesn't handle slices properly
+    E203
+    # line break before binary operator
+    W504

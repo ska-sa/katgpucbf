@@ -3,10 +3,12 @@ from typing import Tuple
 import warnings
 from abc import ABC, abstractmethod
 
+import numpy as np
+
 
 class AbstractDelayModel(ABC):
     """Abstract base class for delay models.
-    
+
     All units are samples rather than SI units.
 
     """
@@ -20,6 +22,29 @@ class AbstractDelayModel(ABC):
         """
 
     @abstractmethod
+    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Find input sample timestamps corresponding to a range of output samples.
+
+        For each output sample with timestamp in ``range(start, stop, step)``, it
+        determines a corresponding input sample.
+
+        Parameters
+        ----------
+        start
+            First timestamp (inclusive).
+        stop
+            Last timestamp (exclusive)
+        step
+            Interval between timestamps (must be positive).
+
+        Returns
+        -------
+        orig_time
+            Undelayed timestamps corresponding to ``range(start, stop, step)``
+        residual
+            Fractional sample delay not accounted for by ``time - orig_time``.
+        """
+
     def invert(self, time: int) -> Tuple[int, float]:
         """Find  input sample timestamp corresponding to a given output sample.
 
@@ -35,9 +60,11 @@ class AbstractDelayModel(ABC):
         residual
             Fractional sample delay not accounted for by ``time - orig_time``.
         """
+        orig_time, residual = self.invert_range(time, time + 1, 1)
+        return int(orig_time[0]), float(residual[0])
 
 
-class LinearDelayModel(ABC):
+class LinearDelayModel(AbstractDelayModel):
     """Delay model that adjusts delay linearly over time.
 
     Parameters
@@ -68,9 +95,10 @@ class LinearDelayModel(ABC):
         rel_time = time - self.start
         return rel_time * self.rate + self.delay
 
-    def invert(self, time: int) -> Tuple[int, float]:
+    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
+        time = np.arange(start, stop, step)
         rel_time = time - self.start
-        rel_orig = int(round((rel_time - self.delay) / (self.rate + 1)))
+        rel_orig = np.rint((rel_time - self.delay) / (self.rate + 1)).astype(np.int64)
         delay = rel_orig * self.rate + self.delay
         residual = delay - (rel_time - rel_orig)
         return rel_orig + self.start, residual
@@ -86,7 +114,7 @@ class MultiDelayModel(AbstractDelayModel):
     In the initial state it has a model with zero delay.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._models = deque([LinearDelayModel(0, 0.0, 0.0)])
 
     def __call__(self, time: float) -> float:
@@ -97,16 +125,36 @@ class MultiDelayModel(AbstractDelayModel):
                           'possibly due to non-monotonic queries')
         return self._models[0](time)
 
-    def invert(self, time: int) -> Tuple[int, float]:
-        while True:
-            ans = self._models[0].invert(time)
-            if len(self._models) <= 1 or ans[0] < self._models[1].start:
-                break
-            self._models.popleft()
-        if ans[0] < self._models[0].start:
+    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
+        orig, fine_delay = self._models[0].invert_range(start, stop, step)
+        if len(orig) == 0:
+            return orig, fine_delay
+
+        if orig[0] < self._models[0].start:
             warnings.warn('Timestamp is before start of first linear model - '
                           'possibly due to non-monotonic queries')
-        return ans
+        # Step through later models and apply them where valid. This is not
+        # particularly optimal since we evaluate the full range for each
+        # combination of model and timestamp. However, we expect to have
+        # only a small number of models.
+        cull = 0
+        for i, model in enumerate(self._models):
+            if i == 0:
+                continue    # We've already done it
+            if stop <= model.start:
+                # Models are assumed to have positive delays, so the
+                # inverse of stop in any model is <= stop.
+                break
+            new_orig, new_fine_delay = model.invert_range(start, stop, step)
+            mask = new_orig >= model.start
+            np.copyto(orig, new_orig, where=mask)
+            np.copyto(fine_delay, new_fine_delay, where=mask)
+            if mask[0]:
+                # The previous model is completely overwritten
+                cull = i
+        for i in range(cull):
+            self._models.popleft()
+        return orig, fine_delay
 
     def add(self, model: LinearDelayModel) -> None:
         """Extend the model with a new linear model.

@@ -9,7 +9,8 @@ def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, quant_scale)
     data = data[:, :channels]
     # Compute delay phases
     channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :]
-    phase = np.exp(np.complex64(-2j * np.pi) * fine_delay[:, np.newaxis] * channel_idx / (2 * channels))
+    m2ipi = np.complex64(-2j * np.pi)
+    phase = np.exp(m2ipi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels))
     assert phase.dtype == np.complex64
     corrected = data * phase.astype(np.complex64)
     # Split complex into real, imaginary

@@ -1,7 +1,6 @@
 import asyncio
 from collections import deque
-import warnings
-from typing import Deque, List, Optional, Union
+from typing import Deque, List
 
 import numpy as np
 from katsdpsigproc import accel
@@ -10,7 +9,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .delay import AbstractDelayModel
 from .compute import Compute
 from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
-from . import recv, send, Stopped, Empty
+from . import recv, send
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -143,7 +142,8 @@ class Processor:
 
     async def _next_in(self) -> None:
         self._in_items.append(await self.in_queue.get())
-        print(f'Received input with timestamp {self._in_items[-1].timestamp}, {self._in_items[-1].n_samples} samples')
+        print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
+              f'{self._in_items[-1].n_samples} samples')
         self._in_items[-1].enqueue_wait(self.compute.command_queue)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
@@ -186,7 +186,6 @@ class Processor:
                     sample_bits = self._in_items[0].sample_bits
                     copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
                     copy_bytes = copy_samples * sample_bits // 8
-                    end_bytes = self._in_items[0].n_samples * sample_bits // 8
                     for pol in range(len(self._in_items[0].samples)):
                         self._in_items[1].samples[pol].copy_region(
                             self.compute.command_queue,
@@ -217,33 +216,42 @@ class Processor:
 
             coarse_delay = timestamp - orig_timestamp
             offset = orig_timestamp - self._in_items[0].timestamp
-            end_timestamp = timestamp
             # Identify a block of frontend work. We can grow it until
+            # - we run out of the current input array;
+            # - we fill up the output array; or
             # - the coarse delay changes;
-            # - we run out of the current input array; or
-            # - we fill up the output array
+            # We speculatively calculate delays until one of the first two is
+            # met, then truncate if we observe a coarse delay change.
             max_end_in = self._in_items[0].end_timestamp - self.taps * self.spectra_samples + 1
             max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
-            batch_spectra = 0
-            # TODO: add functionality in delay model to speed this up
-            while end_timestamp < max_end:
-                orig_timestamp, fine_delay = self.delay_model.invert(end_timestamp)
-                if end_timestamp - orig_timestamp != coarse_delay:
-                    print('coarse delay changed')
-                    break
-                self._out_item.fine_delay[self._out_item.n_spectra + batch_spectra] = fine_delay
-                end_timestamp += self.spectra_samples
-                batch_spectra += 1
+            # Speculatively evaluate until one of the first two conditions is met
+            timestamps = np.arange(timestamp, max_end, self.spectra_samples)
+            orig_timestamps, fine_delays = self.delay_model.invert_range(
+                timestamp, max_end, self.spectra_samples)
+            coarse_delays = timestamps - orig_timestamps
+            # Uses fact that argmax returns first maximum i.e. first true value
+            delay_change = np.argmax(coarse_delays != coarse_delay)
+            if coarse_delays[delay_change] != coarse_delay:
+                print(f'Coarse delay changed from {coarse_delays[delay_change]} to '
+                      f'{coarse_delay} at {orig_timestamps[delay_change]}')
+                orig_timestamps = orig_timestamps[:delay_change]
+                fine_delays = fine_delays[:delay_change]
+                batch_spectra = delay_change
+            else:
+                batch_spectra = len(orig_timestamps)
 
             if batch_spectra > 0:
                 print(f'Processing {batch_spectra} spectra')
+                self._out_item.fine_delay[self._out_item.n_spectra
+                                          : self._out_item.n_spectra + batch_spectra] = fine_delays
                 self.compute.run_frontend(self._in_items[0].samples,
                                           offset,
                                           self._out_item.n_spectra,
                                           batch_spectra)
                 self._out_item.n_spectra += batch_spectra
 
+            end_timestamp = self._out_item.end_timestamp
             if end_timestamp >= max_end_out:
                 # We've filled up the output buffer.
                 await self._flush_out(end_timestamp)

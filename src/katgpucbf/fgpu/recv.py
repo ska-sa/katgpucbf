@@ -62,8 +62,8 @@ async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]
             total = len(chunk.present)
             good = sum(chunk.present)
             lost += total - good
-            print('Received chunk: timestamp={chunk.timestamp} pol={chunk.pol} ({good}/{total}, lost {lost})'.format(
-                chunk=chunk, good=good, total=total, lost=lost))
+            print(f'Received chunk: timestamp={chunk.timestamp} '
+                  f'pol={chunk.pol} ({good}/{total}, lost {lost})')
             if buf[chunk.pol] is not None:
                 # Chunk was passed by without getting used. Return to the pool.
                 streams[chunk.pol].add_chunk(buf[chunk.pol])

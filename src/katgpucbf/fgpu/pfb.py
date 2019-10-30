@@ -1,5 +1,3 @@
-import threading
-
 import pkg_resources
 import numpy as np
 import skcuda.fft

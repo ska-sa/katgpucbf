@@ -44,7 +44,8 @@ extensions = [
         sources=sources,
         depends=headers,
         language='c++',
-        include_dirs=['src', '3rdparty/spead2/include', '3rdparty/spead2/3rdparty/pybind11/include'],
+        include_dirs=['src', '3rdparty/spead2/include',
+                      '3rdparty/spead2/3rdparty/pybind11/include'],
         extra_compile_args=['-std=c++17', '-g3', '-O3', '-fvisibility=hidden'],
         libraries=['boost_system', 'pcap']
     )
