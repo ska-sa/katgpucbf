@@ -58,7 +58,7 @@ py::module register_module(py::module &parent)
         .def("add_chunk", [](stream &self, const py_chunk &chunk)
         {
             self.add_chunk(std::make_unique<py_chunk>(std::move(chunk)));
-        })
+        }, "chunk"_a)
         .def("add_udp_pcap_file_reader", &stream::add_udp_pcap_file_reader,
              "filename"_a)
         .def("add_udp_ibv_reader", &stream::add_udp_ibv_reader,

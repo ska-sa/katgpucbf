@@ -52,7 +52,7 @@ py::module register_module(py::module &parent)
         {
             auto c = std::make_unique<py_chunk>(std::move(chunk));
             self.send_chunk(std::move(c));
-        })
+        }, "chunk"_a)
         .def("stop", &sender::stop)
         .def_property_readonly("free_ring", [](sender &self) -> ringbuffer_t &
         {

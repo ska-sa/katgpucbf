@@ -27,7 +27,7 @@ class Engine:
                  dst_ttl: int,
                  dst_ibv: bool,
                  dst_max_packet_size: int,
-                 dst_affinity: List[int],
+                 dst_affinity: int,
                  bandwidth: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int) -> None:
@@ -67,12 +67,14 @@ class Engine:
         loop = asyncio.get_event_loop()
         try:
             for pol, stream in enumerate(self._src_streams):
-                if isinstance(self._srcs[pol], str):
-                    stream.add_udp_pcap_file_reader(self._srcs[pol])
+                src = self._srcs[pol]
+                if isinstance(src, str):
+                    stream.add_udp_pcap_file_reader(src)
                 else:
+                    if self._src_interface is None:
+                        raise ValueError('src_interface is required for UDP sources')
                     # TODO: use src_ibv
-                    stream.add_udp_ibv_reader(self._srcs[pol], self._src_interface,
-                                              self._src_buffer, pol)
+                    stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer, pol)
             tasks = [
                 loop.create_task(self._processor.run_processing()),
                 loop.create_task(self._processor.run_receive(self._src_streams)),

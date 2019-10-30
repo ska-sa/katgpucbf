@@ -9,7 +9,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .delay import AbstractDelayModel
 from .compute import Compute
 from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
-from . import recv, send
+from . import recv, send, ringbuffer
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -284,7 +284,7 @@ class Processor:
                 streams[pol].add_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
-        free_ring = send.AsyncRingbuffer(sender.free_ring)
+        free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring)
         while True:
             out_item = await self.out_queue.get()
             self._download_queue.enqueue_wait_for_events(out_item.events)

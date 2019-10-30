@@ -37,7 +37,7 @@ pybind11::class_<R> register_ringbuffer(pybind11::module &m, const char *name, c
                     item = std::move(*item2);
                 throw;
             }
-        })
+        }, "item"_a)
         .def_property_readonly("data_fd", [](R &self)
         {
             return self.get_data_sem().get_fd();
