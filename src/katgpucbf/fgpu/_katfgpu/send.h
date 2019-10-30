@@ -54,6 +54,7 @@ public:
     void emplace_stream(Args&&... args);
 
     void add_udp_stream(const std::string &address, std::uint16_t port,
+                        int ttl, const std::string &interface_address, bool ibv,
                         std::size_t max_packet_size, double rate, std::size_t max_heaps);
 
     /// Send a chunk asynchronously, and put it onto the free ring when complete.

@@ -1,5 +1,6 @@
 #include <iostream>      // TODO: debugging
 #include <spead2/send_udp.h>
+#include <spead2/send_udp_ibv.h>
 #include "send.h"
 
 namespace katfgpu::send
@@ -43,14 +44,28 @@ void sender::emplace_stream(Args&&... args)
 }
 
 void sender::add_udp_stream(const std::string &address, std::uint16_t port,
+                            int ttl, const std::string &interface_address, bool ibv,
                             std::size_t max_packet_size, double rate, std::size_t max_heaps)
 {
-    boost::asio::ip::udp::endpoint endpoint( boost::asio::ip::address::from_string(address), port);
+    boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address::from_string(address), port);
+    boost::asio::ip::address interface = boost::asio::ip::address::from_string(interface_address);
     spead2::send::stream_config config;
     config.set_max_packet_size(max_packet_size);
     config.set_rate(rate);
     config.set_max_heaps(max_heaps);  // TODO: get sender to compute it, given shape of chunks?
-    emplace_stream<spead2::send::udp_stream>(endpoint, config);
+    // TODO: allow comp_vector to be set too
+    if (ibv)
+    {
+        emplace_stream<spead2::send::udp_ibv_stream>(
+            endpoint, config, interface,
+            spead2::send::udp_ibv_stream::default_buffer_size, ttl);
+    }
+    else
+    {
+        emplace_stream<spead2::send::udp_stream>(
+            endpoint, config, spead2::send::udp_stream::default_buffer_size,
+            ttl, interface);
+    }
 }
 
 void sender::stop()

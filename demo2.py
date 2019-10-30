@@ -80,7 +80,8 @@ async def main() -> None:
         for i in range(2):
             buf = accel.HostArray((SPECTRA // ACC_LEN, CHANNELS, ACC_LEN, N_POL, 2), np.int8, context=ctx)
             sender.free_ring.try_push(katfgpu.send.Chunk(buf))
-        sender.add_udp_stream('127.0.0.1', 7149, 8872, 0, 2 * SPECTRA // ACC_LEN)
+        sender.add_udp_stream('239.102.123.0', 7149, 1, '127.0.0.1', False,
+                              8872, 0, 2 * SPECTRA // ACC_LEN)
 
         tasks = [
             loop.create_task(processor.run_processing()),

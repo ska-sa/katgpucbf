@@ -46,7 +46,8 @@ py::module register_module(py::module &parent)
     py::class_<sender>(m, "Sender", "Converts Chunks to heaps and transmit them")
         .def(py::init<int, int>(), "free_ring_space"_a, "thread_affinity"_a = -1)
         .def("add_udp_stream", &sender::add_udp_stream,
-             "address"_a, "port"_a, "max_packet_size"_a, "rate"_a, "max_heaps"_a)
+             "address"_a, "port"_a, "ttl"_a, "interface_address"_a, "ibv"_a,
+             "max_packet_size"_a, "rate"_a, "max_heaps"_a)
         .def("send_chunk", [](sender &self, py_chunk &chunk)
         {
             auto c = std::make_unique<py_chunk>(std::move(chunk));
