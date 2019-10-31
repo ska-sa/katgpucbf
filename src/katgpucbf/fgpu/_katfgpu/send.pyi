@@ -6,6 +6,7 @@ class Chunk:
     channels: int
     acc_len: int
     frames: int
+    pols: int
 
     def __init__(self, base: Any) -> None: ...
 

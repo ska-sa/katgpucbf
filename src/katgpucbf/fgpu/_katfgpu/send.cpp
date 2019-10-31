@@ -111,13 +111,17 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     auto callback = [ctx] (const boost::system::error_code &ec, spead2::item_pointer_t bytes_transferred)
     {
         if (ec)
+        {
             ctx->c->error = ec;
+            std::cout << "Error in send: " << ec << '\n';
+        }
         if (--ctx->remaining == 0)
             ctx->free_ring.push(std::move(ctx->c));
     };
 
     std::cout << "About to send: frames=" << ctx->c->frames << " channels=" << ctx->c->channels
-        << " acc_len=" << ctx->c->acc_len << '\n';
+        << " acc_len=" << ctx->c->acc_len << " pols=" << ctx->c->pols << '\n';
+    std::cout << "heap_bytes = " << heap_bytes << '\n';
     for (int i = 0; i < ctx->c->frames; i++)
         for (std::size_t j = 0; j < streams.size(); j++)
         {
@@ -136,6 +140,7 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
                           false);
             streams[j]->async_send_heap(heap, callback);
         }
+    std::cout << "Sent " << ctx->c->frames * streams.size() << " heaps\n";
 }
 
 ringbuffer_t &sender::get_free_ring()

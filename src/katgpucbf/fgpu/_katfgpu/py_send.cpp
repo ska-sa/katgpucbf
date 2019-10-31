@@ -38,6 +38,7 @@ py::module register_module(py::module &parent)
         .def_readwrite("channels", &py_chunk::channels)
         .def_readwrite("acc_len", &py_chunk::acc_len)
         .def_readwrite("frames", &py_chunk::frames)
+        .def_readwrite("pols", &py_chunk::pols)
         .def_readonly("base", &py_chunk::base)
     ;
 

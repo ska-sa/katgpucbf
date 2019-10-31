@@ -140,6 +140,10 @@ class Processor:
     def spectra_samples(self) -> int:
         return 2 * self.channels
 
+    @property
+    def pols(self) -> int:
+        return self.compute.pols
+
     async def _next_in(self) -> None:
         self._in_items.append(await self.in_queue.get())
         print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
@@ -295,6 +299,7 @@ class Processor:
             chunk.acc_len = self.acc_len
             chunk.channels = self.channels
             chunk.frames = out_item.n_spectra // self.acc_len
+            chunk.pols = self.pols
             transfer_event = self._download_queue.enqueue_marker()
             await async_wait_for_events([transfer_event])
             out_item.reset()
