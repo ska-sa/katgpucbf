@@ -19,8 +19,6 @@ def pfb_fir_host(data, channels, taps):
     # depending on scipy.
     window_size = 2 * channels * taps
     window = 0.5 - 0.5 * np.cos(2 * np.pi / (window_size - 1) * np.arange(window_size))
-    # TODO: Debug
-    window.fill(1)
     window = window.astype(np.float32)
     step = 2 * channels
     out = np.empty((len(decoded) // step - taps + 1, step), np.float32)
@@ -56,7 +54,7 @@ def test_pfb_fir(repeat=1):
         fn.spectra = spectra - fn.spectra
         fn()
     h_out = fn.buffer('out').get(queue)
-    np.testing.assert_allclose(h_out, expected, rtol=1e-5)
+    np.testing.assert_allclose(h_out, expected, rtol=1e-5, atol=1e-3)
 
 
 def test_fft():

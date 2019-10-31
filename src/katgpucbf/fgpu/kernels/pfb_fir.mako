@@ -48,7 +48,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         in_offset += step;
     }
 
-    float hann_scale = 2.0f / (step - 1);
+    float hann_scale = 2.0f / (TAPS * step - 1);
     int rows = stepy / step;
     // Unrolling by factor of TAPS makes the sample index known at compile time.
 #pragma unroll ${taps}
@@ -62,9 +62,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         for (int j = 0; j < TAPS; j++)
         {
             int filter_sample = j * step + pos;
-            // float weight = 0.5f * cospif(filter_sample * hann_scale) - 0.5f;
-            // TODO DEBUG
-            float weight = 1.0f;
+            float weight = -0.5f * cospif(filter_sample * hann_scale) + 0.5f;
             sum += weight * samples[(i + j) % TAPS];
         }
         out[idx] = sum;
