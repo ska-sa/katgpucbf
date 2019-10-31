@@ -60,7 +60,6 @@ stream::stream(int pol, int sample_bits, std::size_t packet_samples,
     if (chunk_samples % packet_samples != 0)
         throw std::invalid_argument("chunk_samples must be a multiple of packet_samples");
     set_allow_unsized_heaps(false);
-    set_memcpy(spead2::MEMCPY_NONTEMPORAL);
     set_memory_allocator(std::make_shared<katfgpu::recv::allocator>(*this));
 }
 
