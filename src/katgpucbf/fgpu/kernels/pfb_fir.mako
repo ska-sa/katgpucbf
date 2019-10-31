@@ -49,6 +49,13 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     }
 
     float hann_scale = 2.0f / (TAPS * step - 1);
+    float weights[TAPS];
+    for (int i = 0; i < TAPS; i++)
+    {
+        int filter_sample = i * step + pos;
+        weights[i] = -0.5f * cospif(filter_sample * hann_scale) + 0.5f;
+    }
+
     int rows = stepy / step;
     // Unrolling by factor of TAPS makes the sample index known at compile time.
 #pragma unroll ${taps}
@@ -60,11 +67,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         samples[(i + TAPS - 1) % TAPS] = get_sample_10bit(in, in_offset + idx);
         float sum = 0.0f;
         for (int j = 0; j < TAPS; j++)
-        {
-            int filter_sample = j * step + pos;
-            float weight = -0.5f * cospif(filter_sample * hann_scale) + 0.5f;
-            sum += weight * samples[(i + j) % TAPS];
-        }
+            sum += weights[j] * samples[(i + j) % TAPS];
         out[idx] = sum;
     }
 }

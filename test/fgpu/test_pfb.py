@@ -32,7 +32,7 @@ def test_pfb_fir(repeat=1):
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
 
-    taps = 4
+    taps = 16
     spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
