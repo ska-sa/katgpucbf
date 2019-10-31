@@ -48,7 +48,7 @@ class Engine:
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
                                          chunk_samples, ring, src_affinity[pol])
                              for pol in range(pols)]
-        self._sender = send.Sender(2, dst_affinity)
+        self._sender = send.Sender(len(dst), 2, dst_affinity)
         for stream in self._src_streams:
             for i in range(4):
                 buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)

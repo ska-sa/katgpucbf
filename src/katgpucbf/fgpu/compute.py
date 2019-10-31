@@ -49,7 +49,6 @@ class Compute(accel.OperationSequence):
         operations.append(('postproc', self.postproc))
 
         compounds = {
-            'weights': [f'pfb_fir{pol}:work' for pol in range(self.pols)],
             'fft_work': [f'fft{pol}:work' for pol in range(self.pols)],
             'out': ['postproc:out'],
             'fine_delay': ['postproc:fine_delay']

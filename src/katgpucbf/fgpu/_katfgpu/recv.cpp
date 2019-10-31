@@ -2,6 +2,7 @@
 #include <cassert>
 #include <map>     // TODO: workaround for it missing in recv_heap.h
 #include <iostream>  // TODO: for debugging
+#include <stdexcept>
 #include <spead2/recv_heap.h>
 #include <spead2/recv_udp_pcap.h>
 #include <spead2/common_endian.h>

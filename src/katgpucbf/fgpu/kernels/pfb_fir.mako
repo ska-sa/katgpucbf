@@ -28,14 +28,14 @@ DEVICE_FN float get_sample_10bit(const GLOBAL uchar * RESTRICT in, int idx)
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,
     const GLOBAL uchar * RESTRICT in,
-    const GLOBAL float * RESTRICT weights,
     int n, int step, int stepy,
     int in_offset, int out_offset)
 {
     int group_x = get_group_id(0);
     int group_y = get_group_id(1);
     int lid = get_local_id(0);
-    int offset = group_y * stepy + group_x * WGS + lid;
+    int pos = group_x * WGS + lid;
+    int offset = group_y * stepy + pos;
     out += offset + out_offset;
     // can't skip individual samples with pointer arithmetic, so track in_offset
     in_offset += offset;
@@ -48,10 +48,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         in_offset += step;
     }
 
-    float rweights[TAPS];
-    for (int i = 0; i < TAPS; i++)
-        rweights[i] = weights[i];
-
+    float hann_scale = 2.0f / (step - 1);
     int rows = stepy / step;
     // Unrolling by factor of TAPS makes the sample index known at compile time.
 #pragma unroll ${taps}
@@ -63,7 +60,13 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         samples[(i + TAPS - 1) % TAPS] = get_sample_10bit(in, in_offset + idx);
         float sum = 0.0f;
         for (int j = 0; j < TAPS; j++)
-            sum += rweights[j] * samples[(i + j) % TAPS];
+        {
+            int filter_sample = j * step + pos;
+            // float weight = 0.5f * cospif(filter_sample * hann_scale) - 0.5f;
+            // TODO DEBUG
+            float weight = 1.0f;
+            sum += weight * samples[(i + j) % TAPS];
+        }
         out[idx] = sum;
     }
 }

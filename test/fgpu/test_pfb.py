@@ -13,10 +13,20 @@ def decode_10bit_host(data):
     return packed.view('>i2').astype('i2')
 
 
-def pfb_fir_host(data, channels, weights):
+def pfb_fir_host(data, channels, taps):
     decoded = decode_10bit_host(data)
-    grid = decoded.reshape(-1, 2 * channels).astype(np.float32)
-    out = np.apply_along_axis(np.convolve, 0, grid, v=weights[::-1], mode='valid')
+    # Hann window - should be equivalent to scipy.signal.windows.hann, but we can avoid
+    # depending on scipy.
+    window_size = 2 * channels * taps
+    window = 0.5 - 0.5 * np.cos(2 * np.pi / (window_size - 1) * np.arange(window_size))
+    # TODO: Debug
+    window.fill(1)
+    window = window.astype(np.float32)
+    step = 2 * channels
+    out = np.empty((len(decoded) // step - taps + 1, step), np.float32)
+    for i in range(0, len(out)):
+        windowed = decoded[i * step : i * step + window_size] * window
+        out[i] = np.sum(windowed.reshape(-1, step), axis=0)
     return out
 
 
@@ -24,19 +34,17 @@ def test_pfb_fir(repeat=1):
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
 
-    weights = np.array([3, 17, -4, 7], np.float32)
-    taps = len(weights)
+    taps = 4
     spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
     h_in = np.random.randint(0, 256, samples * 10 // 8, np.uint8)
-    expected = pfb_fir_host(h_in, channels, weights)
+    expected = pfb_fir_host(h_in, channels, taps)
 
     template = pfb.PFBFIRTemplate(ctx, 4)
     fn = template.instantiate(queue, samples, spectra, channels)
     fn.ensure_all_bound()
     fn.buffer('in').set(queue, h_in)
-    fn.buffer('weights').set(queue, weights)
     for i in range(repeat):
         # Split into two parts to test the offsetting
         fn.in_offset = 0
@@ -48,7 +56,7 @@ def test_pfb_fir(repeat=1):
         fn.spectra = spectra - fn.spectra
         fn()
     h_out = fn.buffer('out').get(queue)
-    np.testing.assert_array_equal(h_out, expected)
+    np.testing.assert_allclose(h_out, expected, rtol=1e-5)
 
 
 def test_fft():

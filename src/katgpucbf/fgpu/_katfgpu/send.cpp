@@ -1,4 +1,5 @@
 #include <iostream>      // TODO: debugging
+#include <stdexcept>
 #include <spead2/send_udp.h>
 #include <spead2/send_udp_ibv.h>
 #include "send.h"
@@ -25,10 +26,13 @@ struct context
     }
 };
 
-sender::sender(int free_ring_space, int thread_affinity)
+sender::sender(int streams, int free_ring_space, int thread_affinity)
     : worker(1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
     free_ring(free_ring_space)
 {
+    if (streams <= 0)
+        throw std::invalid_argument("streams must be positive");
+    this->streams.reserve(streams);
 }
 
 sender::~sender()
@@ -39,8 +43,11 @@ sender::~sender()
 template<typename Stream, typename... Args>
 void sender::emplace_stream(Args&&... args)
 {
+    if (streams.size() == streams.capacity())
+        throw std::length_error("too many streams");
     streams.push_back(std::make_unique<Stream>(worker.get_io_service(),
                                                std::forward<Args>(args)...));
+    streams.back()->set_cnt_sequence(streams.size(), streams.capacity());
 }
 
 void sender::add_udp_stream(const std::string &address, std::uint16_t port,
@@ -78,7 +85,7 @@ void sender::stop()
 
 void sender::send_chunk(std::unique_ptr<chunk> &&c)
 {
-    if (streams.empty())
+    if (streams.size() != streams.capacity())
         throw std::invalid_argument("cannot use send_chunk until streams have been added");
     if (c->channels % streams.size() != 0)
         throw std::invalid_argument("channels must be divisible by the number of streams");
