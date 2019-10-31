@@ -41,7 +41,7 @@ def test_pfb_fir(repeat=1):
     h_in = np.random.randint(0, 256, samples * 10 // 8, np.uint8)
     expected = pfb_fir_host(h_in, channels, taps)
 
-    template = pfb.PFBFIRTemplate(ctx, 4)
+    template = pfb.PFBFIRTemplate(ctx, taps)
     fn = template.instantiate(queue, samples, spectra, channels)
     fn.ensure_all_bound()
     fn.buffer('in').set(queue, h_in)
