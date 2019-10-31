@@ -66,7 +66,8 @@ setup(
         'katsdpservices',
         'katsdptelstate',
         'numpy',
-        'scikit-cuda'
+        'scikit-cuda',
+        'typing_extensions'
     ],
     scripts=['demo2.py'],
     packages=find_packages(),

@@ -16,6 +16,7 @@ pytz
 redis
 scikit-cuda==0.5.3
 scipy
+typing_extensions==3.7.4.1
 
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
 katsdpsigproc @ git+https://github.com/ska-sa/katsdpsigproc
