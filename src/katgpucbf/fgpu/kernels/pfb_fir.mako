@@ -28,6 +28,7 @@ DEVICE_FN float get_sample_10bit(const GLOBAL uchar * RESTRICT in, int idx)
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,
     const GLOBAL uchar * RESTRICT in,
+    const GLOBAL float * RESTRICT weights,
     int n, int step, int stepy,
     int in_offset, int out_offset)
 {
@@ -48,13 +49,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         in_offset += step;
     }
 
-    float hann_scale = 2.0f / (TAPS * step - 1);
-    float weights[TAPS];
+    float rweights[TAPS];
+#pragma unroll
     for (int i = 0; i < TAPS; i++)
-    {
-        int filter_sample = i * step + pos;
-        weights[i] = -0.5f * cospif(filter_sample * hann_scale) + 0.5f;
-    }
+        rweights[i] = weights[i * step + pos];
 
     int rows = stepy / step;
     // Unrolling by factor of TAPS makes the sample index known at compile time.
@@ -67,7 +65,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         samples[(i + TAPS - 1) % TAPS] = get_sample_10bit(in, in_offset + idx);
         float sum = 0.0f;
         for (int j = 0; j < TAPS; j++)
-            sum += weights[j] * samples[(i + j) % TAPS];
+            sum += rweights[j] * samples[(i + j) % TAPS];
         out[idx] = sum;
     }
 }

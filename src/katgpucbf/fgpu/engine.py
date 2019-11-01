@@ -11,6 +11,16 @@ from .delay import MultiDelayModel
 from .types import AbstractContext
 
 
+def generate_weights(channels: int, taps: int) -> np.ndarray:
+    step = 2 * channels
+    window_size = step * taps
+    idx = np.arange(window_size)
+    hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
+    sinc = np.sinc(idx / (step - taps / 2))
+    weights = hann * sinc
+    return weights.astype(np.float32)
+
+
 class Engine:
     """Combines all the processing steps for a single digitiser."""
 
@@ -38,6 +48,8 @@ class Engine:
         extra_samples = taps * channels * 2 - 8
         compute = template.instantiate(
             queue, chunk_samples + extra_samples, spectra, acc_len, channels)
+        device_weights = compute.slots['weights'].allocate(accel.DeviceAllocator(context))
+        device_weights.set(queue, generate_weights(channels, taps))
         pols = compute.pols
         self._processor = Processor(compute, self.delay_model)
 

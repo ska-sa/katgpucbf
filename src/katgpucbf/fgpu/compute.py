@@ -50,6 +50,7 @@ class Compute(accel.OperationSequence):
 
         compounds = {
             'fft_work': [f'fft{pol}:work' for pol in range(self.pols)],
+            'weights': [f'pfb_fir{pol}:weights' for pol in range(self.pols)],
             'out': ['postproc:out'],
             'fine_delay': ['postproc:fine_delay']
         }

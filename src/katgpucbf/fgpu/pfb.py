@@ -40,6 +40,7 @@ class PFBFIR(accel.Operation):
         self.slots['out'] = accel.IOSlot(
             (spectra, accel.Dimension(2 * channels, exact=True)),
             np.float32)
+        self.slots['weights'] = accel.IOSlot((2 * channels * template.taps,), np.float32)
         self.in_offset = 0            # TODO: docs
         self.out_offset = 0           # TODO: docs
 
@@ -63,6 +64,7 @@ class PFBFIR(accel.Operation):
             [
                 self.buffer('out').buffer,
                 self.buffer('in').buffer,
+                self.buffer('weights').buffer,
                 np.int32(out_n), np.int32(step), np.int32(stepy),
                 np.int32(self.in_offset), np.int32(self.out_offset * step)
             ],

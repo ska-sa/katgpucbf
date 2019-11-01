@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from katsdpsigproc import accel
 
 from katfgpu import pfb
@@ -13,17 +14,15 @@ def decode_10bit_host(data):
     return packed.view('>i2').astype('i2')
 
 
-def pfb_fir_host(data, channels, taps):
-    decoded = decode_10bit_host(data)
-    # Hann window - should be equivalent to scipy.signal.windows.hann, but we can avoid
-    # depending on scipy.
-    window_size = 2 * channels * taps
-    window = 0.5 - 0.5 * np.cos(2 * np.pi / (window_size - 1) * np.arange(window_size))
-    window = window.astype(np.float32)
+def pfb_fir_host(data, channels, weights):
     step = 2 * channels
+    assert len(weights) % step == 0
+    taps = len(weights) // step
+    decoded = decode_10bit_host(data)
+    window_size = 2 * channels * taps
     out = np.empty((len(decoded) // step - taps + 1, step), np.float32)
     for i in range(0, len(out)):
-        windowed = decoded[i * step : i * step + window_size] * window
+        windowed = decoded[i * step : i * step + window_size] * weights
         out[i] = np.sum(windowed.reshape(-1, step), axis=0)
     return out
 
@@ -37,12 +36,14 @@ def test_pfb_fir(repeat=1):
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
     h_in = np.random.randint(0, 256, samples * 10 // 8, np.uint8)
-    expected = pfb_fir_host(h_in, channels, taps)
+    weights = np.random.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
+    expected = pfb_fir_host(h_in, channels, weights)
 
     template = pfb.PFBFIRTemplate(ctx, taps)
     fn = template.instantiate(queue, samples, spectra, channels)
     fn.ensure_all_bound()
     fn.buffer('in').set(queue, h_in)
+    fn.buffer('weights').set(queue, weights)
     for i in range(repeat):
         # Split into two parts to test the offsetting
         fn.in_offset = 0
