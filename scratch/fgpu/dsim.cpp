@@ -18,7 +18,7 @@ struct options
     double adc_rate = 1712000000.0;
 };
 
-static constexpr int capacity = 65536;
+static constexpr int capacity = 128;
 static constexpr int sample_bits = 10;
 static constexpr int packet_samples = 4096;
 static constexpr std::size_t packet_size = packet_samples * sample_bits / 8;
