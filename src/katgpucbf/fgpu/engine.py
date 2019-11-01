@@ -38,7 +38,7 @@ class Engine:
                  dst_ibv: bool,
                  dst_max_packet_size: int,
                  dst_affinity: int,
-                 bandwidth: float,
+                 adc_rate: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int) -> None:
         self.delay_model = MultiDelayModel()
@@ -69,8 +69,8 @@ class Engine:
             buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
                                   context=context)
             self._sender.free_ring.try_push(send.Chunk(buf))
-        # Send a bit faster than nominal bandwidth to account for header overheads
-        rate = pols * bandwidth * buf.dtype.itemsize * 1.1
+        # Send a bit faster than nominal rate to account for header overheads
+        rate = pols * adc_rate * buf.dtype.itemsize * 1.1
         for i, (host, port) in enumerate(dst):
             self._sender.add_udp_stream(host, port, dst_ttl, dst_interface, dst_ibv,
                                         dst_max_packet_size, rate, 2 * spectra // acc_len)

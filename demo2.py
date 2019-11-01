@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
         '--dst-affinity', type=int, default=-1,
         help='Cores for output-handling threads [not bound]')
     parser.add_argument(
-        '--bandwidth', type=float, default=0.0, metavar='HZ',
+        '--adc-rate', type=float, default=0.0, metavar='HZ',
         help='Digitiser sampling rate, used to determine transmission rate [fast as possible]')
     parser.add_argument(
         '--channels', type=int, required=True,
@@ -116,7 +116,7 @@ async def main() -> None:
         dst_ibv=args.dst_ibv,
         dst_max_packet_size=args.dst_max_packet_size,
         dst_affinity=args.dst_affinity,
-        bandwidth=args.bandwidth,
+        adc_rate=args.adc_rate,
         spectra=chunk_samples // (2 * args.channels),
         acc_len=args.acc_len,
         channels=args.channels,
