@@ -38,7 +38,7 @@ void allocator::free(std::uint8_t *ptr, void *user)
 stream::stream(int pol, int sample_bits, std::size_t packet_samples,
                    std::size_t chunk_samples, ringbuffer_t &ringbuffer, int thread_affinity)
     : spead2::thread_pool(
-        1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
+        1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
     spead2::recv::stream(*static_cast<thread_pool *>(this), 0, 1),
     pol(pol),
     sample_bits(sample_bits),

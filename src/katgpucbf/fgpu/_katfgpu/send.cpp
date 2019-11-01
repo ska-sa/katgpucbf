@@ -27,7 +27,7 @@ struct context
 };
 
 sender::sender(int streams, int free_ring_space, int thread_affinity)
-    : worker(1, thread_affinity ? std::vector<int>{} : std::vector<int>{thread_affinity}),
+    : worker(1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
     free_ring(free_ring_space)
 {
     if (streams <= 0)
