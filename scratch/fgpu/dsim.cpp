@@ -9,11 +9,14 @@
 namespace po = boost::program_options;
 
 static constexpr double bandwidth = 1712000000.0;
-static constexpr int max_heaps = 1024;
+static constexpr int capacity = 65536;
 static constexpr int sample_bits = 10;
 static constexpr int packet_samples = 4096;
 static constexpr std::size_t packet_size = packet_samples * sample_bits / 8;
 static const spead2::flavour flavour(4, 64, 48);
+static const spead2::send::stream_config config(
+    8872,      // Doesn't matter, just needs to be bigger than actual size
+    bandwidth * 10.0 / 8.0 * (packet_size + 64) / packet_size, 65536, 128);
 
 struct heap_data
 {
@@ -46,10 +49,8 @@ struct polarisation
                  const boost::asio::ip::udp::endpoint &endpoint,
                  const boost::asio::ip::address &interface_address)
         : pool(1),
-        stream(pool, endpoint,
-               spead2::send::stream_config(5120 + 64, bandwidth * 10.0 / 8.0, 65536, capacity),
-               interface_address),
-        next_sem(capacity)
+        stream(pool, endpoint, config, interface_address),
+        next_sem(config.get_max_heaps())
     {
         heaps.reserve(capacity);
         for (std::size_t i = 0; i < capacity; i++)
@@ -79,11 +80,11 @@ int main(int argc, char **argv)
         boost::asio::ip::address::from_string("239.101.200.0"), 7148);
     boost::asio::ip::udp::endpoint endpoint1(
         boost::asio::ip::address::from_string("239.101.200.2"), 7148);
-    auto interface_address = boost::asio::ip::address::from_string("192.168.8.5");
+    auto interface_address = boost::asio::ip::address::from_string("192.168.8.2");
 
     std::array<std::unique_ptr<polarisation>, 2> pols;
-    pols[0] = std::make_unique<polarisation>(max_heaps, endpoint0, interface_address);
-    pols[1] = std::make_unique<polarisation>(max_heaps, endpoint1, interface_address);
+    pols[0] = std::make_unique<polarisation>(capacity, endpoint0, interface_address);
+    pols[1] = std::make_unique<polarisation>(capacity, endpoint1, interface_address);
     while (true)
     {
         for (int p = 0; p < 2; p++)
