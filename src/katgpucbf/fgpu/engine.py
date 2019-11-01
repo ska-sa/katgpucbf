@@ -16,7 +16,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     window_size = step * taps
     idx = np.arange(window_size)
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
-    sinc = np.sinc(idx / (step - taps / 2))
+    sinc = np.sinc(idx / step - taps / 2)
     weights = hann * sinc
     return weights.astype(np.float32)
 
