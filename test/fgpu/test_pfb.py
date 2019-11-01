@@ -1,5 +1,4 @@
 import numpy as np
-import math
 from katsdpsigproc import accel
 
 from katfgpu import pfb

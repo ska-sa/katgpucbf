@@ -1,4 +1,3 @@
-import numpy as np
 from katsdpsigproc import accel
 
 from katfgpu import compute
