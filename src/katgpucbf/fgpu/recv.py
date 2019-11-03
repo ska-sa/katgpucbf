@@ -37,7 +37,7 @@ async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]
     finally:
         for c in buf:
             if c is not None:
-                streams[chunk.pol].add_chunk(c)
+                streams[c.pol].add_chunk(c)
 
 
 __all__ = ['chunk_sets', 'Stream', 'Chunk', 'Ringbuffer']
