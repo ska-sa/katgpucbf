@@ -122,7 +122,8 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     std::cout << "About to send: frames=" << ctx->c->frames << " channels=" << ctx->c->channels
         << " acc_len=" << ctx->c->acc_len << " pols=" << ctx->c->pols << '\n';
     std::cout << "heap_bytes = " << heap_bytes << '\n';
-    for (int i = 0; i < ctx->c->frames; i++)
+    int frames = ctx->c->frames;
+    for (int i = 0; i < frames; i++)
         for (std::size_t j = 0; j < streams.size(); j++)
         {
             auto heap_data = boost::asio::buffer(ctx->c->storage + i * frame_bytes + j * heap_bytes,
@@ -139,8 +140,10 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
                           boost::asio::buffer_size(heap_data),
                           false);
             streams[j]->async_send_heap(heap, callback);
+            // After the last call to async_send_heap we must be careful not
+            // to access ctx->c, because it will be cleared by the callback.
         }
-    std::cout << "Sent " << ctx->c->frames * streams.size() << " heaps\n";
+    std::cout << "Sent " << frames * streams.size() << " heaps\n";
 }
 
 ringbuffer_t &sender::get_free_ring()
