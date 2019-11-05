@@ -69,7 +69,9 @@ setup(
         'scikit-cuda',
         'typing_extensions'
     ],
-    scripts=['demo2.py'],
+    entry_points={
+        'console_scripts': ['fgpu = katfgpu.main:main']
+    },
     packages=find_packages(),
     package_data={'': ['kernels/*.mako']},
     include_package_data=True

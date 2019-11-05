@@ -9,7 +9,7 @@ from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 import katsdpsigproc.accel as accel
 
-from katfgpu.engine import Engine
+from .engine import Engine
 
 
 _T = TypeVar('_T')
@@ -97,7 +97,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-async def main() -> None:
+async def async_main() -> None:
     args = parse_args()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
@@ -124,10 +124,14 @@ async def main() -> None:
     await engine.run()
 
 
-if __name__ == '__main__':
+def main() -> None:
     loop = asyncio.get_event_loop()
     try:
-        loop.run_until_complete(main())
+        loop.run_until_complete(async_main())
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
+
+
+if __name__ == '__main__':
+    main()
