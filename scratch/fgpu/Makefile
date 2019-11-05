@@ -1,8 +1,17 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -g -O3 -pthread
-LDFLAGS = -lspead2 -lboost_program_options -lboost_system -ldl -pthread
+CXXFLAGS = $(shell pkg-config --cflags spead2) -std=c++17 -Wall -Wextra -g -O3 -pthread
+LDFLAGS = $(shell pkg-config --static --libs spead2) -lboost_program_options
+TARGETS = dsim
 
-all: dsim
+all: $(TARGETS)
 
-dsim: dsim.cpp
-	$(CXX) -o $@ $< $(CXXFLAGS) $(LDFLAGS)
+dsim: dsim.o
+	$(CXX) -o $@ $^ $(LDFLAGS)
+
+%.o: %.cpp
+	$(CXX) -c $< $(CXXFLAGS)
+
+clean:
+	rm -f $(TARGETS) *.o
+
+.PHONY: all clean
