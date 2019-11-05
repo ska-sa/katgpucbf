@@ -72,10 +72,10 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint_list(const std
     if (colon == std::string::npos)
         throw std::invalid_argument("Address must contain a colon");
     std::uint16_t port = boost::lexical_cast<std::uint16_t>(arg.substr(colon + 1));
-    auto plus = arg.find("+", 0, colon);
-    if (plus != std::string::npos)
+    auto plus = arg.find('+');
+    if (plus < colon)
     {
-        std::string start_str = arg.substr(0, plus - 1);
+        std::string start_str = arg.substr(0, plus);
         auto start = boost::asio::ip::address_v4::from_string(start_str);
         int count = boost::lexical_cast<int>(arg.substr(plus + 1, colon - plus - 1));
         for (int i = 0; i <= count; i++)
@@ -153,7 +153,7 @@ struct digitiser
         stream(pool, endpoints[0][0],
                spead2::send::stream_config(
                    packet_size + 128,  // Doesn't matter, just needs to be bigger than actual size
-                   opts.adc_rate * 10.0 / 8.0 * (packet_size + 72) / packet_size,
+                   endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (packet_size + 72) / packet_size,
                    65536, opts.max_heaps),
                interface_address),
         next_sem(opts.max_heaps)
