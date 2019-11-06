@@ -39,7 +39,7 @@ class DisplayFrame:
     def __init__(self, frame: Frame) -> None:
         cplex = frame.data.astype(np.float32).view(np.complex64)[..., 0]
         self.mag = np.abs(cplex)
-        self.phase = np.angle(cplex)
+        self.phase = np.where(cplex != 0, np.angle(cplex), np.nan)
 
 
 class Backend:
@@ -83,10 +83,10 @@ class Backend:
         return None
 
     def _update_document(self, doc: bokeh.document.document.Document, display: DisplayFrame) -> None:
-        print(f'Updating {doc}')
         source = doc.get_model_by_name('source')
         new_data = copy.copy(source.data)
-        new_data['mag'] = [display.mag[..., 0]]
+        new_data['mag'] = [display.mag[..., 0].T]
+        new_data['phase'] = [display.phase[..., 0].T]
         source.data = new_data
 
     async def _update_sessions(self, frame: Frame) -> None:
