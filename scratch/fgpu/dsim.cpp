@@ -15,14 +15,14 @@ struct options
     std::string interface;
     std::vector<std::string> addresses;
     int max_heaps = 128;
+    int signal_heaps = 512;
     double adc_rate = 1712000000.0;
-    double signal_freq = 400e6;
+    double signal_freq = 432101234.0;
 };
 
-static constexpr int capacity = 128;
 static constexpr int sample_bits = 10;
-static constexpr int packet_samples = 4096;
-static constexpr std::size_t packet_size = packet_samples * sample_bits / 8;
+static constexpr int heap_samples = 4096;
+static constexpr std::size_t heap_size = heap_samples * sample_bits / 8;
 static const spead2::flavour flavour(4, 64, 48);
 
 template<typename T>
@@ -39,6 +39,8 @@ static options parse_options(int argc, const char **argv)
         ("interface", po::value(&opts.interface)->required(), "Interface address")
         ("max-heaps", make_opt(opts.max_heaps), "Depth of send queue (per polarisation)")
         ("adc-rate", make_opt(opts.adc_rate), "Sampling rate")
+        ("signal-freq", make_opt(opts.signal_freq), "Frequency of simulated tone")
+        ("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create")
     ;
 
     hidden.add_options()
@@ -57,6 +59,14 @@ static options parse_options(int argc, const char **argv)
             .positional(positional)
             .run(), vm);
         po::notify(vm);
+        if (opts.max_heaps <= 0)
+            throw po::error("--max-heaps must be positive");
+        if (opts.signal_heaps <= 0)
+            throw po::error("--signal-heaps must be positive");
+        // Round target frequency to fit an integer number of waves into signal_heaps
+        double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_rate;
+        waves = std::max(1.0, std::round(waves));
+        opts.signal_freq = waves * opts.adc_rate / opts.signal_heaps / heap_samples;
     }
     catch (po::error &e)
     {
@@ -101,20 +111,20 @@ struct heap_data
     spead2::send::heap::item_handle timestamp_handle;
 
     explicit heap_data(const options &opts, std::int64_t timestamp)
-        : data(std::make_unique<std::uint8_t[]>(packet_size)),
+        : data(std::make_unique<std::uint8_t[]>(heap_size)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, 0))
     {
         heap.add_item(0x3101, 0);
         heap.add_item(0x3102, 0);
-        heap.add_item(0x3300, data.get(), packet_size, false);
+        heap.add_item(0x3300, data.get(), heap_size, false);
         heap.set_repeat_pointers(true);
 
         float angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
         unsigned int buffer = 0;
         int buffer_bits = 0;
         int pos = 0;
-        for (std::size_t i = 0; i < packet_samples; i++)
+        for (std::size_t i = 0; i < heap_samples; i++)
         {
             float angle = angle_scale * (timestamp + i);
             int sample = (int) std::round(std::sin(angle) * 256.0);
@@ -139,20 +149,22 @@ struct polarisation
     std::int64_t timestamp = 0;
 
     polarisation(const options &opts,
-                 std::size_t capacity,
                  const std::vector<boost::asio::ip::udp::endpoint> &endpoints)
         : endpoints(endpoints)
     {
+        std::size_t capacity = opts.signal_heaps;
+        while (capacity < std::size_t(opts.max_heaps))
+            capacity *= 2;
         heaps.reserve(capacity);
         for (std::size_t i = 0; i < capacity; i++)
-            heaps.emplace_back(opts, i * packet_samples);
+            heaps.emplace_back(opts, (i % opts.signal_heaps) * heap_samples);
     }
 
     template<typename Callback>
     void send_next(spead2::send::udp_ibv_stream &stream, Callback &&callback)
     {
         heaps[next].heap.get_item(heaps[next].timestamp_handle).data.immediate = timestamp;
-        timestamp += packet_samples;
+        timestamp += heap_samples;
         stream.async_send_heap(heaps[next].heap, callback, -1, endpoints[next_endpoint]);
         next = (next + 1) % heaps.size();
         next_endpoint = (next_endpoint + 1) % endpoints.size();
@@ -168,21 +180,20 @@ struct digitiser
     std::size_t next_pol = 0;
 
     digitiser(const options &opts,
-              std::size_t capacity,
               const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
               const boost::asio::ip::address &interface_address)
         : pool(1),
         stream(pool, endpoints[0][0],
                spead2::send::stream_config(
-                   packet_size + 128,  // Doesn't matter, just needs to be bigger than actual size
-                   endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (packet_size + 72) / packet_size,
+                   heap_size + 128,  // Doesn't matter, just needs to be bigger than actual size
+                   endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size,
                    65536, opts.max_heaps),
                interface_address),
         next_sem(opts.max_heaps)
     {
         pols.reserve(endpoints.size());
         for (const auto &ep : endpoints)
-            pols.emplace_back(opts, capacity, ep);
+            pols.emplace_back(opts, ep);
     }
 
     void wait_next()
@@ -214,7 +225,7 @@ int main(int argc, const char **argv)
     std::vector<std::vector<boost::asio::ip::udp::endpoint>> endpoints;
     for (const std::string &address : opts.addresses)
         endpoints.push_back(parse_endpoint_list(address));
-    digitiser d(opts, capacity, {endpoints}, interface_address);
+    digitiser d(opts, {endpoints}, interface_address);
     while (true)
     {
         d.wait_next();
