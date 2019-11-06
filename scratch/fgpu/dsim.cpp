@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <cstdint>
 #include <cstdlib>
@@ -17,7 +18,7 @@ struct options
     int max_heaps = 128;
     int signal_heaps = 512;
     double adc_rate = 1712000000.0;
-    double signal_freq = 432101234.0;
+    double signal_freq = 232101234.0;
 };
 
 static constexpr int sample_bits = 10;
@@ -67,6 +68,7 @@ static options parse_options(int argc, const char **argv)
         double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_rate;
         waves = std::max(1.0, std::round(waves));
         opts.signal_freq = waves * opts.adc_rate / opts.signal_heaps / heap_samples;
+        std::cout << "Using frequency of " << std::setprecision(12) << opts.signal_freq << '\n';
     }
     catch (po::error &e)
     {
