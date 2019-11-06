@@ -40,7 +40,8 @@ class Engine:
                  dst_affinity: int,
                  adc_rate: float,
                  spectra: int, acc_len: int,
-                 channels: int, taps: int) -> None:
+                 channels: int, taps: int,
+                 quant_scale: float) -> None:
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -50,6 +51,7 @@ class Engine:
             queue, chunk_samples + extra_samples, spectra, acc_len, channels)
         device_weights = compute.slots['weights'].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
+        compute.quant_scale = quant_scale
         pols = compute.pols
         self._processor = Processor(compute, self.delay_model)
 

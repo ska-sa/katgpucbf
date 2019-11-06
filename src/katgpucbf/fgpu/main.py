@@ -84,6 +84,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--taps', type=int, default=16,
         help='Number of taps in polyphase filter bank [%(default)s]')
+    parser.add_argument(
+        '--quant-scale', type=float, default=70.0,
+        help='Rescaling before 8-bit quantisation [%(default)s]')
 
     parser.add_argument('src', type=parse_source, nargs=N_POL,
                         help='Source endpoints (or pcap file)')
@@ -120,7 +123,8 @@ async def async_main() -> None:
         spectra=chunk_samples // (2 * args.channels),
         acc_len=args.acc_len,
         channels=args.channels,
-        taps=args.taps)
+        taps=args.taps,
+        quant_scale=args.quant_scale)
     await engine.run()
 
 

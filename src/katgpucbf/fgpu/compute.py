@@ -83,3 +83,11 @@ class Compute(accel.OperationSequence):
         for fft in self.fft:
             fft()
         self.postproc()
+
+    @property
+    def quant_scale(self) -> float:
+        return self.postproc.quant_scale
+
+    @quant_scale.setter
+    def quant_scale(self, value: float) -> None:
+        self.postproc.quant_scale = value
