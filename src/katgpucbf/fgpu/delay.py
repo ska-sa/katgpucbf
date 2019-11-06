@@ -98,10 +98,10 @@ class LinearDelayModel(AbstractDelayModel):
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
         time = np.arange(start, stop, step)
         rel_time = time - self.start
-        rel_orig = np.rint((rel_time - self.delay) / (self.rate + 1)).astype(np.int64)
-        delay = rel_orig * self.rate + self.delay
-        residual = delay - (rel_time - rel_orig)
-        return rel_orig + self.start, residual
+        rel_orig = (rel_time - self.delay) / (self.rate + 1)
+        rel_orig_rnd = np.rint(rel_orig).astype(np.int64)
+        residual = rel_orig_rnd - rel_orig
+        return rel_orig_rnd + self.start, residual
 
 
 class MultiDelayModel(AbstractDelayModel):
