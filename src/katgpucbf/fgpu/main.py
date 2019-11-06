@@ -85,7 +85,7 @@ def parse_args() -> argparse.Namespace:
         '--taps', type=int, default=16,
         help='Number of taps in polyphase filter bank [%(default)s]')
     parser.add_argument(
-        '--quant-scale', type=float, default=70.0,
+        '--quant-scale', type=float, default=0.001,
         help='Rescaling before 8-bit quantisation [%(default)s]')
 
     parser.add_argument('src', type=parse_source, nargs=N_POL,
