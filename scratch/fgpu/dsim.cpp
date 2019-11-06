@@ -2,6 +2,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstdlib>
+#include <cmath>
 #include <memory>
 #include <boost/program_options.hpp>
 #include <spead2/send_udp_ibv.h>
@@ -15,6 +16,7 @@ struct options
     std::vector<std::string> addresses;
     int max_heaps = 128;
     double adc_rate = 1712000000.0;
+    double signal_freq = 400e6;
 };
 
 static constexpr int capacity = 128;
@@ -98,7 +100,7 @@ struct heap_data
     spead2::send::heap heap;
     spead2::send::heap::item_handle timestamp_handle;
 
-    heap_data()
+    explicit heap_data(const options &opts, std::int64_t timestamp)
         : data(std::make_unique<std::uint8_t[]>(packet_size)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, 0))
@@ -107,6 +109,24 @@ struct heap_data
         heap.add_item(0x3102, 0);
         heap.add_item(0x3300, data.get(), packet_size, false);
         heap.set_repeat_pointers(true);
+
+        float angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
+        unsigned int buffer = 0;
+        int buffer_bits = 0;
+        int pos = 0;
+        for (std::size_t i = 0; i < packet_samples; i++)
+        {
+            float angle = angle_scale * (timestamp + i);
+            int sample = (int) std::round(std::sin(angle) * 256.0);
+            buffer = (buffer << 10) | (sample & 0x3ff);
+            buffer_bits += 10;
+            while (buffer_bits >= 8)
+            {
+                buffer_bits -= 8;
+                data[pos] = buffer >> buffer_bits;
+                pos++;
+            }
+        }
     }
 };
 
@@ -118,12 +138,14 @@ struct polarisation
     std::size_t next = 0;
     std::int64_t timestamp = 0;
 
-    polarisation(std::size_t capacity, const std::vector<boost::asio::ip::udp::endpoint> &endpoints)
+    polarisation(const options &opts,
+                 std::size_t capacity,
+                 const std::vector<boost::asio::ip::udp::endpoint> &endpoints)
         : endpoints(endpoints)
     {
         heaps.reserve(capacity);
         for (std::size_t i = 0; i < capacity; i++)
-            heaps.emplace_back();
+            heaps.emplace_back(opts, i * packet_samples);
     }
 
     template<typename Callback>
@@ -160,7 +182,7 @@ struct digitiser
     {
         pols.reserve(endpoints.size());
         for (const auto &ep : endpoints)
-            pols.emplace_back(capacity, ep);
+            pols.emplace_back(opts, capacity, ep);
     }
 
     void wait_next()
