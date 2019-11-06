@@ -57,7 +57,7 @@ class Compute(accel.OperationSequence):
         for pol in range(self.pols):
             compounds[f'in{pol}'] = [f'pfb_fir{pol}:in']
             compounds[f'fft_in{pol}'] = [f'pfb_fir{pol}:out', f'fft{pol}:in']
-            compounds[f'fft_out{pol}'] = [f'fft{pol}:out', 'postproc:in{pol}']
+            compounds[f'fft_out{pol}'] = [f'fft{pol}:out', f'postproc:in{pol}']
         super().__init__(command_queue, operations, compounds)
 
     def run_frontend(self, samples: Sequence[accel.DeviceArray],
