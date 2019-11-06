@@ -1,6 +1,7 @@
 *.o
 *.egg-info
 __pycache__
+.mypy_cache
 /demo
 /build
 /katfgpu/*.so
