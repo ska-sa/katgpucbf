@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <memory>
+#include <random>
 #include <boost/program_options.hpp>
 #include <spead2/send_udp_ibv.h>
 #include <spead2/common_semaphore.h>
@@ -25,6 +26,7 @@ static constexpr int sample_bits = 10;
 static constexpr int heap_samples = 4096;
 static constexpr std::size_t heap_size = heap_samples * sample_bits / 8;
 static const spead2::flavour flavour(4, 64, 48);
+static std::mt19937 rand_engine;
 
 template<typename T>
 static po::typed_value<T> *make_opt(T &var)
@@ -68,7 +70,7 @@ static options parse_options(int argc, const char **argv)
         double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_rate;
         waves = std::max(1.0, std::round(waves));
         opts.signal_freq = waves * opts.adc_rate / opts.signal_heaps / heap_samples;
-        std::cout << "Using frequency of " << std::setprecision(12) << opts.signal_freq << '\n';
+        std::cout << "Using frequency of " << std::setprecision(15) << opts.signal_freq << '\n';
     }
     catch (po::error &e)
     {
@@ -126,10 +128,11 @@ struct heap_data
         unsigned int buffer = 0;
         int buffer_bits = 0;
         int pos = 0;
+        std::uniform_real_distribution<float> noise(-0.5f, 0.5f);
         for (std::size_t i = 0; i < heap_samples; i++)
         {
             float angle = angle_scale * (timestamp + i);
-            int sample = (int) std::round(std::sin(angle) * 256.0);
+            int sample = (int) std::round(std::sin(angle) * 256.0f + noise(rand_engine));
             buffer = (buffer << 10) | (sample & 0x3ff);
             buffer_bits += 10;
             while (buffer_bits >= 8)
