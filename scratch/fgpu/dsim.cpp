@@ -124,15 +124,15 @@ struct heap_data
         heap.add_item(0x3300, data.get(), heap_size, false);
         heap.set_repeat_pointers(true);
 
-        float angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
+        double angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
         unsigned int buffer = 0;
         int buffer_bits = 0;
         int pos = 0;
-        std::uniform_real_distribution<float> noise(-0.5f, 0.5f);
+        std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
         for (std::size_t i = 0; i < heap_samples; i++)
         {
-            float angle = angle_scale * (timestamp + i);
-            int sample = (int) std::round(std::sin(angle) * 256.0f + noise(rand_engine));
+            double angle = angle_scale * (timestamp + i);
+            int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
             buffer = (buffer << 10) | (sample & 0x3ff);
             buffer_bits += 10;
             while (buffer_bits >= 8)
