@@ -119,9 +119,6 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
             ctx->free_ring.push(std::move(ctx->c));
     };
 
-    std::cout << "About to send: frames=" << ctx->c->frames << " channels=" << ctx->c->channels
-        << " acc_len=" << ctx->c->acc_len << " pols=" << ctx->c->pols << '\n';
-    std::cout << "heap_bytes = " << heap_bytes << '\n';
     int frames = ctx->c->frames;
     for (int i = 0; i < frames; i++)
         for (std::size_t j = 0; j < streams.size(); j++)
@@ -143,7 +140,6 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
             // After the last call to async_send_heap we must be careful not
             // to access ctx->c, because it will be cleared by the callback.
         }
-    std::cout << "Sent " << frames * streams.size() << " heaps\n";
 }
 
 ringbuffer_t &sender::get_free_ring()

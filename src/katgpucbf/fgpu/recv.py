@@ -21,8 +21,9 @@ async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]
             total = len(chunk.present)
             good = sum(chunk.present)
             lost += total - good
-            print(f'Received chunk: timestamp={chunk.timestamp} '
-                  f'pol={chunk.pol} ({good}/{total}, lost {lost})')
+            if good < total:
+                print(f'Received chunk: timestamp={chunk.timestamp} '
+                      f'pol={chunk.pol} ({good}/{total}, lost {lost})')
             old = buf[chunk.pol]
             if old is not None:
                 # Chunk was passed by without getting used. Return to the pool.
