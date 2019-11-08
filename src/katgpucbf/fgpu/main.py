@@ -64,8 +64,8 @@ def parse_args() -> argparse.Namespace:
         '--dst-ibv', action='store_true',
         help='Use ibverbs for output [no]')
     parser.add_argument(
-        '--dst-max-packet-size', type=int, default=8872, metavar='BYTES',
-        help='Maximum size for output packets [%(default)s]')
+        '--dst-packet-payload', type=int, default=1024, metavar='BYTES',
+        help='Size for output packets (voltage payload only) [%(default)s]')
     parser.add_argument(
         '--dst-affinity', type=int, default=-1,
         help='Cores for output-handling threads [not bound]')
@@ -117,7 +117,7 @@ async def async_main() -> None:
         dst_interface=args.dst_interface,
         dst_ttl=args.dst_ttl,
         dst_ibv=args.dst_ibv,
-        dst_max_packet_size=args.dst_max_packet_size,
+        dst_packet_payload=args.dst_packet_payload,
         dst_affinity=args.dst_affinity,
         adc_rate=args.adc_rate,
         spectra=chunk_samples // (2 * args.channels),
