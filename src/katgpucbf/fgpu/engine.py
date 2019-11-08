@@ -37,7 +37,7 @@ class Engine:
                  dst_ttl: int,
                  dst_ibv: bool,
                  dst_packet_payload: int,
-                 dst_affinity: int,
+                 dst_affinity: List[int],
                  adc_rate: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int,

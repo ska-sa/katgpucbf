@@ -3,7 +3,7 @@
 import argparse
 import asyncio
 import ipaddress
-from typing import List, Tuple, Union, TypeVar, Callable
+from typing import List, Tuple, Union, Optional, TypeVar, Callable
 
 import katsdpservices
 from katsdpservices import get_interface_address
@@ -27,11 +27,12 @@ def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
         return value
 
 
-def comma_split(count: int, base_type: Callable[[str], _T]) -> Callable[[str], List[_T]]:
+def comma_split(base_type: Callable[[str], _T],
+                count: Optional[int] = None) -> Callable[[str], List[_T]]:
     def func(value: str) -> List[_T]:
         parts = value.split(',')
         n = len(parts)
-        if n != count:
+        if count is not None and n != count:
             raise ValueError(f'Expected {count} comma-separated fields, received {n}')
         return [base_type(part) for part in parts]
     return func
@@ -46,7 +47,7 @@ def parse_args() -> argparse.Namespace:
         '--src-ibv', action='store_true',
         help='Use ibverbs for input [no]')
     parser.add_argument(
-        '--src-affinity', type=comma_split(N_POL, int), metavar='CORE,CORE',
+        '--src-affinity', type=comma_split(int, N_POL), metavar='CORE,CORE',
         default=[-1] * N_POL,
         help='Cores for input-handling threads (comma-separated) [not bound]')
     parser.add_argument(
@@ -68,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         '--dst-packet-payload', type=int, default=1024, metavar='BYTES',
         help='Size for output packets (voltage payload only) [%(default)s]')
     parser.add_argument(
-        '--dst-affinity', type=int, default=-1,
+        '--dst-affinity', type=comma_split(int), default=[], metavar='CORE,...',
         help='Cores for output-handling threads [not bound]')
     parser.add_argument(
         '--adc-rate', type=float, default=0.0, metavar='HZ',

@@ -24,10 +24,15 @@ struct context
     {
         heaps.reserve(n_heaps);
     }
+
+    ~context()
+    {
+        free_ring.push(std::move(c));
+    }
 };
 
-sender::sender(int streams, int free_ring_space, int thread_affinity)
-    : worker(1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
+sender::sender(int streams, int free_ring_space, const std::vector<int> &thread_affinity)
+    : worker(thread_affinity.empty() ? streams : thread_affinity.size(), thread_affinity),
     free_ring(free_ring_space)
 {
     if (streams <= 0)
@@ -115,8 +120,6 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
             ctx->c->error = ec;
             std::cout << "Error in send: " << ec << '\n';
         }
-        if (--ctx->remaining == 0)
-            ctx->free_ring.push(std::move(ctx->c));
     };
 
     int frames = ctx->c->frames;
@@ -137,8 +140,6 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
                           boost::asio::buffer_size(heap_data),
                           false);
             streams[j]->async_send_heap(heap, callback);
-            // After the last call to async_send_heap we must be careful not
-            // to access ctx->c, because it will be cleared by the callback.
         }
 }
 

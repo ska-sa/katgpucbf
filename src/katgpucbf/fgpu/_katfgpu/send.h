@@ -47,7 +47,7 @@ private:
     ringbuffer_t free_ring;
 
 public:
-    sender(int streams, int free_ring_space, int thread_affinity = -1);
+    sender(int streams, int free_ring_space, const std::vector<int> &thread_affinity = {});
     ~sender();
 
     template<typename Stream, typename... Args>
