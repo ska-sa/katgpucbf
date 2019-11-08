@@ -30,6 +30,8 @@ The following features have been implemented, although they are not all fully te
 
 ## Other TODOs
 
+Apart from this list, there are TODO comments all over the code.
+
 - Get rid of the print statements and provide a better monitoring interface.
 - The frontend processing tends to be run in two pieces on each chunk.
 - Use fixed seeds in unit tests.
@@ -44,3 +46,4 @@ The following features have been implemented, although they are not all fully te
   narrowband.
 - Experiment with doing smaller transfers between host and GPU to better
   exploit L3 cache with DDIO.
+- Better handling of shutdown.
