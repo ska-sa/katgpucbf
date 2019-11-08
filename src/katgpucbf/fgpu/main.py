@@ -5,6 +5,7 @@ import asyncio
 import ipaddress
 from typing import List, Tuple, Union, TypeVar, Callable
 
+import katsdpservices
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 import katsdpsigproc.accel as accel
@@ -129,6 +130,7 @@ async def async_main() -> None:
 
 
 def main() -> None:
+    katsdpservices.setup_logging()
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(async_main())

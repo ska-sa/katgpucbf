@@ -1,7 +1,11 @@
+import logging
 from typing import List, Optional, AsyncGenerator
 
 from .ringbuffer import AsyncRingbuffer
 from ._katfgpu.recv import Stream, Chunk, Ringbuffer
+
+
+logger = logging.getLogger(__name__)
 
 
 async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]:
@@ -22,8 +26,8 @@ async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]
             good = sum(chunk.present)
             lost += total - good
             if good < total:
-                print(f'Received chunk: timestamp={chunk.timestamp} '
-                      f'pol={chunk.pol} ({good}/{total}, lost {lost})')
+                logger.warning('Received chunk: timestamp=%d pol=%d (%d/%d, lost %d)',
+                               chunk.timestamp, chunk.pol, good, total, lost)
             old = buf[chunk.pol]
             if old is not None:
                 # Chunk was passed by without getting used. Return to the pool.
