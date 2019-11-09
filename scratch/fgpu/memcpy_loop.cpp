@@ -6,26 +6,21 @@
 #include <chrono>
 
 #include <sys/mman.h>
+#include <omp.h>
 
 using namespace std;
 using namespace std::chrono;
 
 static constexpr std::size_t buffer_size = 128 * 1024 * 1024;
-static constexpr int reps = 10;
-static constexpr int passes = 5;
+static constexpr int passes = 10;
+
+#define HUGE_PAGES 0
 
 static char *allocate(std::size_t size)
 {
     int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-    if (0)
-    {
+    if (HUGE_PAGES)
         flags |= MAP_HUGETLB;
-        std::cout << "Using huge pages\n";
-    }
-    else
-    {
-        std::cout << "Using normal pages\n";
-    }
     void *addr = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
     assert(addr != MAP_FAILED);
     return (char *) addr;
@@ -33,6 +28,9 @@ static char *allocate(std::size_t size)
 
 int main()
 {
+    int reps = omp_get_max_threads();
+    std::cout << "Using " << reps << " threads\n";
+    std::cout << "Using " << (HUGE_PAGES ? "huge" : "normal") << " pages\n";
     vector<char *> src, dst;
     for (int i = 0; i < reps; i++)
     {
