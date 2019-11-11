@@ -23,29 +23,32 @@ args = backend.parse_args(sys.argv[1:])
 doc = curdoc()
 
 shape = (args.acc_len, args.channels)
-source = ColumnDataSource(
-    name='source',
-    data={
-        'mag': [np.zeros(shape)],
-        'phase': [np.zeros(shape)],
-        'x': [0],
-        'y': [0],
-        'dw': [args.channels],
-        'dh': [args.channels]
-    })
-
+plots = []
 x_range = Range1d(0, args.channels, bounds=(0, args.channels))
 y_range = Range1d(0, args.acc_len, bounds=(0, args.acc_len))
-pmag = make_figure(x_range, y_range)
-mapper = LogColorMapper(colorcet.fire, low=0.0, high=128.0 * math.sqrt(2))
-pmag.image(image='mag', x='x', y='y', dw='dw', dh='dh',
-           color_mapper=mapper, source=source)
+for pol in range(2):
+    source = ColumnDataSource(
+        name=f'source{pol}',
+        data={
+            'mag': [np.zeros(shape)],
+            'phase': [np.zeros(shape)],
+            'x': [0],
+            'y': [0],
+            'dw': [args.channels],
+            'dh': [args.channels]
+        })
 
-pphase = make_figure(x_range, y_range)
-mapper = LinearColorMapper(colorcet.colorwheel, low=-math.pi, high=math.pi)
-pphase.image(image='phase', x='x', y='y', dw='dw', dh='dh',
-             color_mapper=mapper, source=source)
+    pmag = make_figure(x_range, y_range)
+    mapper = LogColorMapper(colorcet.fire, low=0.0, high=128.0 * math.sqrt(2))
+    pmag.image(image='mag', x='x', y='y', dw='dw', dh='dh',
+               color_mapper=mapper, source=source)
 
-grid = gridplot([[pmag, pphase]], sizing_mode='stretch_both')
+    pphase = make_figure(x_range, y_range)
+    mapper = LinearColorMapper(colorcet.colorwheel, low=-math.pi, high=math.pi)
+    pphase.image(image='phase', x='x', y='y', dw='dw', dh='dh',
+                 color_mapper=mapper, source=source)
+    plots.append([pmag, pphase])
+
+grid = gridplot(plots, sizing_mode='stretch_both')
 
 doc.add_root(grid)

@@ -87,11 +87,12 @@ class Backend:
         return None
 
     def _update_document(self, doc: bokeh.document.document.Document, display: DisplayFrame) -> None:
-        source = doc.get_model_by_name('source')
-        new_data = copy.copy(source.data)
-        new_data['mag'] = [display.mag[..., 0].T]
-        new_data['phase'] = [display.phase[..., 0].T]
-        source.data = new_data
+        for pol in range(2):
+            source = doc.get_model_by_name(f'source{pol}')
+            new_data = copy.copy(source.data)
+            new_data['mag'] = [display.mag[..., pol].T]
+            new_data['phase'] = [display.phase[..., pol].T]
+            source.data = new_data
 
     async def _update_sessions(self, frame: Frame) -> None:
         display = await asyncio.get_event_loop().run_in_executor(None, DisplayFrame, frame)
