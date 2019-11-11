@@ -146,8 +146,8 @@ class Processor:
 
     async def _next_in(self) -> None:
         self._in_items.append(await self.in_queue.get())
-        print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
-              f'{self._in_items[-1].n_samples} samples')
+        # print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
+        #       f'{self._in_items[-1].n_samples} samples')
         self._in_items[-1].enqueue_wait(self.compute.command_queue)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
@@ -246,7 +246,7 @@ class Processor:
                 batch_spectra = len(orig_timestamps)
 
             if batch_spectra > 0:
-                print(f'Processing {batch_spectra} spectra')
+                # print(f'Processing {batch_spectra} spectra')
                 self._out_item.fine_delay[self._out_item.n_spectra
                                           : self._out_item.n_spectra + batch_spectra] = fine_delays
                 self.compute.run_frontend(self._in_items[0].samples,
