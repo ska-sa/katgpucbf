@@ -22,9 +22,11 @@ FENG_RAW_ID = 0x4300
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--channels', '-c', type=int, required=True)
-    parser.add_argument('--substreams', '-s', type=int, default=1)
+    parser.add_argument('--substreams', '-s', type=int)
     parser.add_argument('--acc-len', '-a', type=int, default=256)
     parser.add_argument('--keep-ratio', '-k', type=int, default=64)
+    parser.add_argument('--interface', '-i', required=True)
+    parser.add_argument('address')
     return parser.parse_args(args)
 
 
@@ -44,12 +46,14 @@ class DisplayFrame:
 
 class Backend:
     def __init__(self, address: str, interface: str,
-                 channels: int, channels_per_substream: int, acc_len: int,
+                 channels: int, substreams: Optional[int], acc_len: int,
                  keep_ratio: int,
                  server_context: bokeh.server.contexts.BokehServerContext) -> None:
         endpoints = endpoint_list_parser(7148)(address)
         endpoint_tuples = [(ep.host, ep.port) for ep in endpoints]
-        substreams = channels // channels_per_substream
+        if substreams is None:
+            substreams = len(endpoints)
+        channels_per_substream = channels // substreams
         self.channels = channels
         self.channels_per_substream = channels_per_substream
         self.acc_len = acc_len
