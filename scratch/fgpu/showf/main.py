@@ -3,7 +3,7 @@ import argparse
 import math
 
 import numpy as np
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, Range1d
 from bokeh.models.mappers import LinearColorMapper, LogColorMapper
 from bokeh.plotting import curdoc, figure
 from bokeh.layouts import gridplot
@@ -12,8 +12,8 @@ import colorcet
 import backend
 
 
-def make_figure(args):
-    return figure(x_range=[0, args.channels], y_range=[0, args.acc_len],
+def make_figure(x_range, y_range):
+    return figure(x_range=x_range, y_range=y_range,
                   tooltips=[("x", "$x"), ("y", "$y"),
                             ("mag", "@mag"), ("phase", "@phase")])
 
@@ -34,12 +34,14 @@ source = ColumnDataSource(
         'dh': [args.channels]
     })
 
-pmag = make_figure(args)
+x_range = Range1d(0, args.channels, bounds=(0, args.channels))
+y_range = Range1d(0, args.acc_len, bounds=(0, args.acc_len))
+pmag = make_figure(x_range, y_range)
 mapper = LogColorMapper(colorcet.fire, low=0.0, high=128.0 * math.sqrt(2))
 pmag.image(image='mag', x='x', y='y', dw='dw', dh='dh',
            color_mapper=mapper, source=source)
 
-pphase = make_figure(args)
+pphase = make_figure(x_range, y_range)
 mapper = LinearColorMapper(colorcet.colorwheel, low=-math.pi, high=math.pi)
 pphase.image(image='phase', x='x', y='y', dw='dw', dh='dh',
              color_mapper=mapper, source=source)
