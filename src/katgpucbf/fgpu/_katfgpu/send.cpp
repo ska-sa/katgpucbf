@@ -139,6 +139,8 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
                           boost::asio::buffer_cast<const void *>(heap_data),
                           boost::asio::buffer_size(heap_data),
                           false);
+            for (int pad = 0; pad < 3; pad++)
+                heap.add_item(0, 0);
             streams[j]->async_send_heap(heap, callback);
         }
 }
