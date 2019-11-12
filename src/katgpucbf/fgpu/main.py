@@ -89,6 +89,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--quant-scale', type=float, default=0.001,
         help='Rescaling before 8-bit quantisation [%(default)s]')
+    parser.add_argument(
+        '--mask-timestamp', action='store_true',
+        help='Mask off bottom bits of timestamp (workaround for broken digitiser)')
 
     parser.add_argument('src', type=parse_source, nargs=N_POL,
                         help='Source endpoints (or pcap file)')
@@ -126,7 +129,8 @@ async def async_main() -> None:
         acc_len=args.acc_len,
         channels=args.channels,
         taps=args.taps,
-        quant_scale=args.quant_scale)
+        quant_scale=args.quant_scale,
+        mask_timestamp=args.mask_timestamp)
     await engine.run()
 
 

@@ -23,7 +23,8 @@ class Ringbuffer:
 
 class Stream:
     def __init__(self, pol: int, sample_bits: int, packet_samples: int,
-                 chunk_samples: int, ringbuffer: Ringbuffer, thread_affinity: int) -> None: ...
+                 chunk_samples: int, ringbuffer: Ringbuffer,
+                 thread_affinity: int = ..., *, mask_timestamp: bool = ...) -> None: ...
     @property
     def ringbuffer(self) -> Ringbuffer: ...
     @property

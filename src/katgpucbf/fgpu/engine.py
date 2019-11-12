@@ -41,7 +41,8 @@ class Engine:
                  adc_rate: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int,
-                 quant_scale: float) -> None:
+                 quant_scale: float,
+                 mask_timestamp: bool) -> None:
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -60,7 +61,8 @@ class Engine:
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
-                                         chunk_samples, ring, src_affinity[pol])
+                                         chunk_samples, ring, src_affinity[pol],
+                                         mask_timestamp=mask_timestamp)
                              for pol in range(pols)]
         self._sender = send.Sender(len(dst), 2, dst_affinity)
         for stream in self._src_streams:

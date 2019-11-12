@@ -71,6 +71,7 @@ private:
     const std::size_t chunk_packets;         ///< Number of packets in each chunk
     const std::size_t packet_bytes;          ///< Number of payload bytes in each packet
     const std::size_t chunk_bytes;           ///< Number of payload bytes in each chunk
+    const std::uint64_t timestamp_mask;      ///< Anded with incoming timestamp to clear low bits
 
     std::int64_t first_timestamp = -1;       ///< Very first timestamp observed
 
@@ -115,7 +116,7 @@ private:
 
 public:
     stream(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
-           ringbuffer_t &ringbuffer, int thread_affinity = -1);
+           ringbuffer_t &ringbuffer, int thread_affinity = -1, bool mask_timestamp = false);
     ~stream();
 
     void add_udp_pcap_file_reader(const std::string &filename);

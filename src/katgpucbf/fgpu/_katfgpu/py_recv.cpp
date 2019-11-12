@@ -42,9 +42,10 @@ py::module register_module(py::module &parent)
     ;
 
     py::class_<stream>(m, "Stream", "SPEAD stream receiver")
-        .def(py::init<int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int>(),
+        .def(py::init<int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int, bool>(),
              "pol"_a, "sample_bits"_a, "packet_samples"_a, "chunk_samples"_a,
-             "ringbuffer"_a, "thread_affinity"_a = -1, py::keep_alive<1, 6>())
+             "ringbuffer"_a, "thread_affinity"_a = -1, "mask_timestamp"_a = false,
+             py::keep_alive<1, 6>())
         .def_property_readonly("ringbuffer", [](stream &self) -> stream::ringbuffer_t &
         {
             return self.get_ringbuffer();

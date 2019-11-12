@@ -36,7 +36,8 @@ void allocator::free(std::uint8_t *ptr, void *user)
 
 
 stream::stream(int pol, int sample_bits, std::size_t packet_samples,
-                   std::size_t chunk_samples, ringbuffer_t &ringbuffer, int thread_affinity)
+                   std::size_t chunk_samples, ringbuffer_t &ringbuffer,
+                   int thread_affinity, bool mask_timestamp)
     : spead2::thread_pool(
         1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
     spead2::recv::stream(*static_cast<thread_pool *>(this), 0, 1),
@@ -47,6 +48,7 @@ stream::stream(int pol, int sample_bits, std::size_t packet_samples,
     chunk_packets(chunk_samples / packet_samples),
     packet_bytes(packet_samples / 8 * sample_bits),
     chunk_bytes(chunk_samples / 8 * sample_bits),
+    timestamp_mask(mask_timestamp ? ~std::uint64_t(packet_samples - 1) : ~std::uint64_t(0)),
     ringbuffer(ringbuffer)
 {
     if (sample_bits <= 0)
@@ -184,7 +186,7 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
         pointer = spead2::load_be<spead2::item_pointer_t>(packet.pointers + i * sizeof(pointer));
         if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == TIMESTAMP_ID)
         {
-            timestamp = decoder.get_immediate(pointer);
+            timestamp = decoder.get_immediate(pointer) & timestamp_mask;
             break;
         }
     }
@@ -210,7 +212,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     for (const auto &item : heap.get_items())
     {
         if (item.id == TIMESTAMP_ID && item.is_immediate)
-            timestamp = item.immediate_value;
+            timestamp = item.immediate_value & timestamp_mask;
         else if (item.id == DATA_ID)
         {
             actual_ptr = item.ptr;
