@@ -2,7 +2,7 @@
 
 This is proof-of-concept code, not a fully working F-engine. For a more
 detailed report on the design and lessons learned, refer to
-[doc/report.rst](doc/report.rst).
+[doc/design.rst](doc/design.rst).
 
 ## Features
 
