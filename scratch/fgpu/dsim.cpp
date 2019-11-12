@@ -20,6 +20,7 @@ struct options
     int signal_heaps = 512;
     double adc_rate = 1712000000.0;
     double signal_freq = 232101234.0;
+    int ttl = 4;
 };
 
 static constexpr int sample_bits = 10;
@@ -42,6 +43,7 @@ static options parse_options(int argc, const char **argv)
         ("interface", po::value(&opts.interface)->required(), "Interface address")
         ("max-heaps", make_opt(opts.max_heaps), "Depth of send queue (per polarisation)")
         ("adc-rate", make_opt(opts.adc_rate), "Sampling rate")
+        ("ttl", make_opt(opts.ttl), "Output TTL")
         ("signal-freq", make_opt(opts.signal_freq), "Frequency of simulated tone")
         ("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create")
     ;
@@ -114,12 +116,12 @@ struct heap_data
     spead2::send::heap heap;
     spead2::send::heap::item_handle timestamp_handle;
 
-    explicit heap_data(const options &opts, std::int64_t timestamp)
+    explicit heap_data(const options &opts, std::int64_t timestamp, int pol)
         : data(std::make_unique<std::uint8_t[]>(heap_size)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, 0))
     {
-        heap.add_item(0x3101, 0);
+        heap.add_item(0x3101, pol);
         heap.add_item(0x3102, 0);
         heap.add_item(0x3300, data.get(), heap_size, false);
         heap.set_repeat_pointers(true);
@@ -154,7 +156,8 @@ struct polarisation
     std::int64_t timestamp = 0;
 
     polarisation(const options &opts,
-                 const std::vector<boost::asio::ip::udp::endpoint> &endpoints)
+                 const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
+                 int pol)
         : endpoints(endpoints)
     {
         std::size_t capacity = opts.signal_heaps;
@@ -162,7 +165,7 @@ struct polarisation
             capacity *= 2;
         heaps.reserve(capacity);
         for (std::size_t i = 0; i < capacity; i++)
-            heaps.emplace_back(opts, (i % opts.signal_heaps) * heap_samples);
+            heaps.emplace_back(opts, (i % opts.signal_heaps) * heap_samples, pol);
     }
 
     template<typename Callback>
@@ -193,12 +196,17 @@ struct digitiser
                    heap_size + 128,  // Doesn't matter, just needs to be bigger than actual size
                    endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size,
                    65536, opts.max_heaps),
-               interface_address),
+               interface_address, spead2::send::udp_ibv_stream::default_buffer_size,
+               opts.ttl),
         next_sem(opts.max_heaps)
     {
         pols.reserve(endpoints.size());
+        int pol = 0;
         for (const auto &ep : endpoints)
-            pols.emplace_back(opts, ep);
+        {
+            pols.emplace_back(opts, ep, pol);
+            pol++;
+        }
     }
 
     void wait_next()
