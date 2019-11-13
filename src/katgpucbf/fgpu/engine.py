@@ -76,9 +76,10 @@ class Engine:
         # Send a bit faster than nominal rate to account for header overheads
         rate = pols * adc_rate * buf.dtype.itemsize * 1.1
         for i, (host, port) in enumerate(dst):
-            # There is a SPEAD header and 8 item pointers, for a 72 byte header.
+            # There is a SPEAD header, 8 item pointers,
+            # and 3 padding pointers, for a 96 byte header.
             self._sender.add_udp_stream(host, port, dst_ttl, dst_interface, dst_ibv,
-                                        dst_packet_payload + 72, rate, 2 * spectra // acc_len)
+                                        dst_packet_payload + 96, rate, 2 * spectra // acc_len)
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
