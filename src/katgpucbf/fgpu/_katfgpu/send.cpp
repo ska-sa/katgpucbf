@@ -32,12 +32,18 @@ struct context
 };
 
 sender::sender(int streams, int free_ring_space, const std::vector<int> &thread_affinity)
-    : worker(thread_affinity.empty() ? streams : thread_affinity.size(), thread_affinity),
-    free_ring(free_ring_space)
+    : free_ring(free_ring_space)
 {
     if (streams <= 0)
         throw std::invalid_argument("streams must be positive");
     this->streams.reserve(streams);
+    if (thread_affinity.empty())
+        workers.push_back(std::make_unique<spead2::thread_pool>(1));
+    else
+    {
+        for (int core : thread_affinity)
+            workers.push_back(std::make_unique<spead2::thread_pool>(1, std::vector<int>{core}));
+    }
 }
 
 sender::~sender()
@@ -50,7 +56,7 @@ void sender::emplace_stream(Args&&... args)
 {
     if (streams.size() == streams.capacity())
         throw std::length_error("too many streams");
-    streams.push_back(std::make_unique<Stream>(worker.get_io_service(),
+    streams.push_back(std::make_unique<Stream>(workers[streams.size() % workers.size()]->get_io_service(),
                                                std::forward<Args>(args)...));
     streams.back()->set_cnt_sequence(streams.size(), streams.capacity());
 }
@@ -85,7 +91,8 @@ void sender::stop()
     free_ring.stop();
     for (auto &stream : streams)
         stream->flush();
-    worker.stop();
+    for (auto &worker : workers)
+        worker->stop();
 }
 
 void sender::send_chunk(std::unique_ptr<chunk> &&c)

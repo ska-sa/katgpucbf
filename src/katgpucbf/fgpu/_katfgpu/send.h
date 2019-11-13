@@ -42,7 +42,7 @@ using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>, spead2::semaphor
 class sender
 {
 private:
-    spead2::thread_pool worker;
+    std::vector<std::unique_ptr<spead2::thread_pool>> workers;
     std::vector<std::unique_ptr<spead2::send::stream>> streams;
     ringbuffer_t free_ring;
 
