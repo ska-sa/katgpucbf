@@ -211,10 +211,10 @@ class Processor:
                 # Might not be needed, since max delay is not many multiples of
                 # align.
                 while True:
-                    timestamp += align
                     orig_timestamp, fine_delay = self.delay_model.invert(timestamp)
                     if orig_timestamp >= self._in_items[0].timestamp:
                         break
+                    timestamp += align
                 await self._flush_out(timestamp)
             assert timestamp == self._out_item.end_timestamp
 
