@@ -243,18 +243,18 @@ faster CPU and RAM did not mitigate the problem.
 This problem seems to be exacerbated by memory thrashing. There are a few ways
 the memory traffic can be reduced:
 
- 1. Don't do SPEAD decoding on the CPU. Receive packets directly into CUDA
-    pinned memory and transfer it to the GPU, and sort it out on the GPU. If
-    the packet structure is hard-coded it would also be possible to use memory
-    scatter to split off the timestamps from the samples.
- 2. Do transfers to the GPU in smaller increments. PCI devices do DMA directly
-    into the last-level cache, and if the data can be moved out again before
-    it is flushed the GPU can read it from cache without touching memory.
-    Ideally it would also be overwritten again by the NIC before it is
-    flushed, but that would require the buffer to fit entirely in the LLC.
- 3. Similarly to the above, transfer data from the GPU in small pieces, and
-    transmit them directly from where they're placed rather than copying the
-    data into packets.
+1. Don't do SPEAD decoding on the CPU. Receive packets directly into CUDA
+   pinned memory and transfer it to the GPU, and sort it out on the GPU. If
+   the packet structure is hard-coded it would also be possible to use memory
+   scatter to split off the timestamps from the samples.
+2. Do transfers to the GPU in smaller increments. PCI devices do DMA directly
+   into the last-level cache, and if the data can be moved out again before
+   it is flushed the GPU can read it from cache without touching memory.
+   Ideally it would also be overwritten again by the NIC before it is
+   flushed, but that would require the buffer to fit entirely in the LLC.
+3. Similarly to the above, transfer data from the GPU in small pieces, and
+   transmit them directly from where they're placed rather than copying the
+   data into packets.
 
 A second anomaly is that if the receiver does not make buffers available to
 the NIC in time, then not only are packets dropped, but the multicast transmit
@@ -288,3 +288,5 @@ old chunks once new data arrives, etc. This is quite similar to existing code
 in katsdpbfingest_, and a similar problem is likely to occur for a software
 X-engine. It may be worth creating a higher-level library on top of spead2
 to implement these patterns.
+
+.. _katsdpbfingest: https://github.com/ska-sa/katsdpbfingest
