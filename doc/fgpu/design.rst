@@ -182,13 +182,65 @@ The current transmit system is quite simple and could use optimisations. A
 separate SPEAD stream is created for each X-engine, and C++ code splits each
 output chunk into heaps.
 
-Proposed F-X ICD changes
-------------------------
-If a software F-engine is combined with a software X-engine, there would be
-opportunity to more easily change the interface.
+Challenges and lessons learnt
+-----------------------------
 
-While the transmit code could still be optimised, the 1 KiB output packet size
-adds significant CPU load. If the X-engines could support it, a larger (e.g.,
-8 KiB) packet size would reduce load. Similarly, with many X-engines and few
-channels, the heap size becomes extremely small, and this would ideally be
-compensated for by an increase in the number of spectra per heap.
+Packet size
+^^^^^^^^^^^
+The FPGA F-engine outputs packets with 1 KiB of payload. Matching this in
+software is challenging as the packet rate is high (over 3 million per
+second). The transmit code can still be optimised, but we were not able to
+make transmission reliable even with multiple threads (see more details
+below). The small packets (together with the padding needed by the X-engines)
+also increases the bandwidth significantly: 27.4 Gb/s of payload requires 31.2
+Gb/s total bandwidth.
+
+Simultaneous receive and transmit
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The Mellanox ConnectX-5 exhibits some performance anomalies when
+simultaneously receiving and transmitting at high speed. When running two
+antennas (four polarisations) with a 100 Gb/s, packets were occasionally
+dropped by the NIC. This seems to be caused by PCIe bottlenecks, possibly
+exacerbated by heavy memory traffic on the host. It seems to be triggered by
+micro-second scale jitter rather than a lack of throughput: upgrading to a
+faster CPU and RAM did not mitigate the problem.
+
+This problem seems to be exacerbated by memory thrashing. There are a few ways
+the memory traffic can be reduced:
+
+ 1. Don't do SPEAD decoding on the CPU. Receive packets directly into CUDA
+    pinned memory and transfer it to the GPU, and sort it out on the GPU. If
+    the packet structure is hard-coded it would also be possible to use memory
+    scatter to split off the timestamps from the samples.
+ 2. Do transfers to the GPU in smaller increments. PCI devices do DMA directly
+    into the last-level cache, and if the data can be moved out again before
+    it is flushed the GPU can read it from cache without touching memory.
+    Ideally it would also be overwritten again by the NIC before it is
+    flushed, but that would require the buffer to fit entirely in the LLC.
+ 3. Similarly to the above, transfer data from the GPU in small pieces, and
+    transmit them directly from where they're placed rather than copying the
+    data into packets.
+
+A second anomaly is that if the receiver does not make buffers available to
+the NIC in time, then not only are packets dropped, but the multicast transmit
+stalls every few seconds. This in turn prevents the transmit from keeping up
+with the processed data, putting back-pressure on the receiver and causing it
+to run out of buffers.
+
+Cases 00690992 and 00699262 have been opened with Mellanox for these problems.
+
+NUMA
+^^^^
+One machine used for testing had the GPU on a different NUMA node to the NIC.
+The transfers to/from the GPU went across the QPI bus, which limited the
+bandwidth and exacerbated the packet drops. This was an older Haswell Xeon;
+the newer Skylake Xeon used for these tests uses UPI which provides the full
+12-13 GB/s I/O for the GPU, but still exacerbates lost packets. It is
+highly recommended that any system using this design has the GPU and NIC on
+the same NUMA node.
+
+We also found that single-threaded memcpy bandwidth on the Skylake Xeon
+improved from about 4 GB/s to about 7 GB/s when removing the second CPU from
+the system. With better memcpy performance it may be possible to use fewer
+cores (and conversely, fewer cores on a die tends may reduce the latency to
+memory and hence the memcpy performance).
