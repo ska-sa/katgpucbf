@@ -5,6 +5,41 @@ The actual GPU kernels are reasonably straight-forward, because they're
 generally memory-bound rather than compute-bound. The main challenges are in
 data movement through the system.
 
+.. tikz:: Data Flow. Double-headed arrows represent data passed through a
+   queue and returned via a free queue.
+   :libs: chains
+
+   \tikzset{proc/.style={draw, rounded corners, minimum width=4.5cm, minimum height=1cm},
+            pproc/.style={proc, minimum width=2cm},
+            flow/.style={->, >=latex, thick},
+            queue/.style={flow, <->},
+            fqueue/.style={queue, color=blue}}
+   \node[proc, start chain=going below, on chain] (align) {Align, copy to GPU};
+   \node[pproc, draw=none, anchor=west,
+         start chain=rx0 going above, on chain=rx0] (align0) at (align.west) {};
+   \node[pproc, draw=none, anchor=east,
+         start chain=rx1 going above, on chain=rx1] (align1) at (align.east) {};
+   \node[proc, on chain] (process) {GPU processing};
+   \node[proc, on chain] (download) {Copy from GPU};
+   \node[proc, on chain] (transmit) {Transmit};
+   \node[pproc, draw=none, anchor=west,
+         start chain=tx0 going below, on chain=tx0] (transmit0) at (transmit.west) {};
+   \node[pproc, draw=none, anchor=east,
+         start chain=tx1 going below, on chain=tx1] (transmit1) at (transmit.east) {};
+   \foreach \i in {0, 1} {
+     \node[pproc, on chain=rx\i] (receive\i) {Receive};
+     \node[pproc, on chain=rx\i] (stream\i) {Stream};
+     \node[pproc, on chain=tx\i] (outstream\i) {Stream};
+   }
+   \foreach \i in {0, 1} {
+     \draw[flow] (stream\i) -- (receive\i);
+     \draw[queue] (receive\i) -- (align\i);
+     \draw[flow] (transmit\i) -- (outstream\i);
+   }
+   \draw[queue] (align) -- (process);
+   \draw[queue] (process) -- (download);
+   \draw[queue] (download) -- (transmit);
+
 Chunking
 --------
 GPUs have massive parallelism, and to exploit them fully requires large batch
@@ -244,3 +279,12 @@ improved from about 4 GB/s to about 7 GB/s when removing the second CPU from
 the system. With better memcpy performance it may be possible to use fewer
 cores (and conversely, fewer cores on a die tends may reduce the latency to
 memory and hence the memcpy performance).
+
+Reordering
+^^^^^^^^^^
+The receive path contains code to place data into the correct positions in
+chunks based on the timestamp, managing a sliding window of chunks, flushing
+old chunks once new data arrives, etc. This is quite similar to existing code
+in katsdpbfingest_, and a similar problem is likely to occur for a software
+X-engine. It may be worth creating a higher-level library on top of spead2
+to implement these patterns.
