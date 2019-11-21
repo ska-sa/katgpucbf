@@ -31,8 +31,11 @@ struct context
     }
 };
 
-sender::sender(int streams, int free_ring_space, const std::vector<int> &thread_affinity)
-    : free_ring(free_ring_space)
+sender::sender(int streams, int free_ring_space,
+               const std::vector<int> &thread_affinity,
+               const std::vector<int> &comp_vector)
+    : comp_vector(comp_vector),
+    free_ring(free_ring_space)
 {
     if (streams <= 0)
         throw std::invalid_argument("streams must be positive");
@@ -44,6 +47,8 @@ sender::sender(int streams, int free_ring_space, const std::vector<int> &thread_
         for (int core : thread_affinity)
             workers.push_back(std::make_unique<spead2::thread_pool>(1, std::vector<int>{core}));
     }
+    if (this->comp_vector.empty())
+        this->comp_vector.push_back(0);
 }
 
 sender::~sender()
@@ -76,7 +81,8 @@ void sender::add_udp_stream(const std::string &address, std::uint16_t port,
     {
         emplace_stream<spead2::send::udp_ibv_stream>(
             endpoint, config, interface,
-            spead2::send::udp_ibv_stream::default_buffer_size, ttl);
+            spead2::send::udp_ibv_stream::default_buffer_size, ttl,
+            comp_vector[streams.size() % comp_vector.size()]);
     }
     else
     {

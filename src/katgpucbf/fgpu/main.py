@@ -51,6 +51,10 @@ def parse_args() -> argparse.Namespace:
         default=[-1] * N_POL,
         help='Cores for input-handling threads (comma-separated) [not bound]')
     parser.add_argument(
+        '--src-comp-vector', type=comma_split(int, N_POL), metavar='VECTOR,VECTOR',
+        default=[0] * N_POL,
+        help='Completion vectors for source streams, or -1 for polling [0]')
+    parser.add_argument(
         '--src-packet-samples', type=int, default=4096,
         help='Number of samples per digitiser packet [%(default)s]')
     parser.add_argument(
@@ -71,6 +75,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--dst-affinity', type=comma_split(int), default=[], metavar='CORE,...',
         help='Cores for output-handling threads [not bound]')
+    parser.add_argument(
+        '--dst-comp-vector', type=comma_split(int), default=[], metavar='VECTOR,...',
+        help='Completion vectors for transmission, or -1 for polling [0]')
     parser.add_argument(
         '--adc-rate', type=float, default=0.0, metavar='HZ',
         help='Digitiser sampling rate, used to determine transmission rate [fast as possible]')
@@ -116,6 +123,7 @@ async def async_main() -> None:
         src_interface=args.src_interface,
         src_ibv=args.src_ibv,
         src_affinity=args.src_affinity,
+        src_comp_vector=args.src_comp_vector,
         src_packet_samples=args.src_packet_samples,
         src_buffer=args.src_buffer,
         dst=args.dst,
@@ -124,6 +132,7 @@ async def async_main() -> None:
         dst_ibv=args.dst_ibv,
         dst_packet_payload=args.dst_packet_payload,
         dst_affinity=args.dst_affinity,
+        dst_comp_vector=args.dst_comp_vector,
         adc_rate=args.adc_rate,
         spectra=chunk_samples // (2 * args.channels),
         acc_len=args.acc_len,

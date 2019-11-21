@@ -30,6 +30,7 @@ class Engine:
                  src_interface: Optional[str],
                  src_ibv: bool,
                  src_affinity: List[int],
+                 src_comp_vector: List[int],
                  src_packet_samples: int,
                  src_buffer: int,
                  dst: List[Tuple[str, int]],
@@ -38,6 +39,7 @@ class Engine:
                  dst_ibv: bool,
                  dst_packet_payload: int,
                  dst_affinity: List[int],
+                 dst_comp_vector: List[int],
                  adc_rate: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int,
@@ -58,13 +60,14 @@ class Engine:
 
         ring = recv.Ringbuffer(2)
         self._srcs = list(srcs)
+        self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
                                          chunk_samples, ring, src_affinity[pol],
                                          mask_timestamp=mask_timestamp)
                              for pol in range(pols)]
-        self._sender = send.Sender(len(dst), 2, dst_affinity)
+        self._sender = send.Sender(len(dst), 2, dst_affinity, dst_comp_vector)
         for stream in self._src_streams:
             for i in range(4):
                 buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
@@ -92,7 +95,8 @@ class Engine:
                     if self._src_interface is None:
                         raise ValueError('src_interface is required for UDP sources')
                     # TODO: use src_ibv
-                    stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer, pol)
+                    stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer,
+                                              self._src_comp_vector[pol])
             tasks = [
                 loop.create_task(self._processor.run_processing()),
                 loop.create_task(self._processor.run_receive(self._src_streams)),

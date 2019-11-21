@@ -44,10 +44,13 @@ class sender
 private:
     std::vector<std::unique_ptr<spead2::thread_pool>> workers;
     std::vector<std::unique_ptr<spead2::send::stream>> streams;
+    std::vector<int> comp_vector;
     ringbuffer_t free_ring;
 
 public:
-    sender(int streams, int free_ring_space, const std::vector<int> &thread_affinity = {});
+    sender(int streams, int free_ring_space,
+           const std::vector<int> &thread_affinity = {},
+           const std::vector<int> &comp_vector = {});
     ~sender();
 
     template<typename Stream, typename... Args>

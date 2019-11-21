@@ -24,7 +24,9 @@ class Ringbuffer:
 
 
 class Sender:
-    def __init__(self, streams: int, free_ring_space: int, thread_affinity: List[int] = ...) -> None: ...
+    def __init__(self, streams: int, free_ring_space: int,
+                 thread_affinity: List[int] = ...,
+                 comp_vector: List[int] = ...) -> None: ...
     def add_udp_stream(self, address: str, port: int, ttl: int,
                        interface_address: str, ibv: bool,
                        max_packet_size: int, rate: float, max_heaps: int) -> None: ...
