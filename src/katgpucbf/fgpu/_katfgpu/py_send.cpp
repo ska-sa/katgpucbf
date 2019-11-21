@@ -46,8 +46,9 @@ py::module register_module(py::module &parent)
     register_ringbuffer<ringbuffer_t, py_chunk>(m, "Ringbuffer", "Ringbuffer of chunks");
 
     py::class_<sender>(m, "Sender", "Converts Chunks to heaps and transmit them")
-        .def(py::init<int, int, const std::vector<int> &>(),
-             "streams"_a, "free_ring_space"_a, "thread_affinity"_a = py::list())
+        .def(py::init<int, int, const std::vector<int> &, const std::vector<int> &>(),
+             "streams"_a, "free_ring_space"_a,
+             "thread_affinity"_a = py::list(), "comp_vector"_a = py::list())
         .def("add_udp_stream", &sender::add_udp_stream,
              "address"_a, "port"_a, "ttl"_a, "interface_address"_a, "ibv"_a,
              "max_packet_size"_a, "rate"_a, "max_heaps"_a)
