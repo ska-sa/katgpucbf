@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from typing import Deque, List
+from typing import Deque, List, cast
 
 import numpy as np
 from katsdpsigproc import accel
@@ -49,7 +49,8 @@ class InItem(EventItem):
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.sample_bits = compute.sample_bits
         self.samples = [
-            _device_allocate_slot(compute.template.context, compute.slots[f'in{pol}'])
+            _device_allocate_slot(compute.template.context,
+                                  cast(accel.IOSlot, compute.slots[f'in{pol}']))
             for pol in range(compute.pols)
         ]
         super().__init__(timestamp)
@@ -77,8 +78,10 @@ class OutItem(EventItem):
     n_spectra: int
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
-        self.spectra = _device_allocate_slot(compute.template.context, compute.slots['out'])
-        self.fine_delay = _host_allocate_slot(compute.template.context, compute.slots['fine_delay'])
+        self.spectra = _device_allocate_slot(compute.template.context,
+                                             cast(accel.IOSlot, compute.slots['out']))
+        self.fine_delay = _host_allocate_slot(compute.template.context,
+                                              cast(accel.IOSlot, compute.slots['fine_delay']))
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:

@@ -1,6 +1,6 @@
 """Combines all the device operations"""
 
-from typing import Sequence
+from typing import List, Tuple, Sequence
 
 from katsdpsigproc import accel
 
@@ -41,7 +41,7 @@ class Compute(accel.OperationSequence):
         ]
         self.postproc = template.postproc.instantiate(command_queue, spectra, acc_len, channels)
 
-        operations = []
+        operations: List[Tuple[str, accel.Operation]] = []
         for pol in range(self.pols):
             operations.append((f'pfb_fir{pol}', self.pfb_fir[pol]))
         for pol in range(self.pols):
