@@ -77,7 +77,7 @@ class Engine:
                                   context=context)
             self._sender.free_ring.try_push(send.Chunk(buf))
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_rate * buf.dtype.itemsize * 1.1
+        rate = pols * adc_rate * buf.dtype.itemsize * 1.1 / len(dst)
         for i, (host, port) in enumerate(dst):
             # There is a SPEAD header, 8 item pointers,
             # and 3 padding pointers, for a 96 byte header.
