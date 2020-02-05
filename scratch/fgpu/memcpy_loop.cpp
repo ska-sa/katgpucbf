@@ -51,7 +51,7 @@ int main()
         auto now = high_resolution_clock::now();
         duration<double> elapsed = now - start;
         double rate = passes / elapsed.count() * reps * buffer_size;
-        cout << rate / 1e9 << " GB/s\n";
+        cout << rate / 1e9 << " GB/s" << endl;
         start = now;
     }
 }
