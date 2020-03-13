@@ -4,53 +4,165 @@
 #include <cstddef>
 #include <cstring>
 #include <chrono>
+#include <future>
 
 #include <sys/mman.h>
-#include <omp.h>
+#include <unistd.h>
+#include <semaphore.h>
+#include <pthread.h>
 
 using namespace std;
 using namespace std::chrono;
+using namespace std::literals::string_literals;
 
-static constexpr std::size_t buffer_size = 128 * 1024 * 1024;
-static constexpr int passes = 10;
-
-#define HUGE_PAGES 0
-
-static char *allocate(std::size_t size)
+enum class memory_type
 {
-    int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-    if (HUGE_PAGES)
-        flags |= MAP_HUGETLB;
-    void *addr = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
-    assert(addr != MAP_FAILED);
+    MALLOC,
+    MMAP,
+    MMAP_HUGE,
+    MADV_HUGE
+};
+
+static string memory_type_name(memory_type type)
+{
+    switch (type)
+    {
+    case memory_type::MALLOC:    return "malloc";
+    case memory_type::MMAP:      return "mmap";
+    case memory_type::MMAP_HUGE: return "mmap_huge";
+    case memory_type::MADV_HUGE: return "madv_huge";
+    default: abort();
+    }
+}
+
+static char *allocate(std::size_t size, memory_type type)
+{
+    void *addr;
+    if (type == memory_type::MALLOC)
+    {
+        addr = malloc(size);
+        if (addr == nullptr)
+            throw std::bad_alloc();
+    }
+    else
+    {
+        int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+        if (type == memory_type::MMAP_HUGE)
+            flags |= MAP_HUGETLB;
+        addr = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+        if (addr == MAP_FAILED)
+            throw std::bad_alloc();
+        if (type == memory_type::MADV_HUGE)
+            madvise(addr, size, MADV_HUGEPAGE);
+    }
+    memset(addr, 1, size);  // ensure it has real pages
     return (char *) addr;
 }
 
-int main()
+struct thread_data
 {
-    int reps = omp_get_max_threads();
-    std::cout << "Using " << reps << " threads\n";
-    std::cout << "Using " << (HUGE_PAGES ? "huge" : "normal") << " pages\n";
-    vector<char *> src, dst;
-    for (int i = 0; i < reps; i++)
+    sem_t start_sem;
+    sem_t done_sem;
+    std::future<void> future;
+
+    thread_data()
     {
-        src.push_back(allocate(buffer_size));
-        dst.push_back(allocate(buffer_size));
-        memset(src.back(), 1, buffer_size);
-        memset(dst.back(), 1, buffer_size);
+        int result;
+        result = sem_init(&start_sem, 0, 0);
+        assert(result == 0);
+        result = sem_init(&done_sem, 0, 0);
+        assert(result == 0);
     }
+};
+
+static void worker(int core, std::size_t buffer_size, memory_type mem_type, int passes, thread_data &data)
+{
+    if (core >= 0)
+    {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(core, &cpuset);
+        int result = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+        assert(result == 0);
+    }
+    char *src = allocate(buffer_size, mem_type);
+    char *dst = allocate(buffer_size, mem_type);
+    while (true)
+    {
+        int result = sem_wait(&data.start_sem);
+        assert(result == 0);
+        for (int p = 0; p < passes; p++)
+            memcpy(dst, src, buffer_size);
+        result = sem_post(&data.done_sem);
+        assert(result == 0);
+    }
+}
+
+int main(int argc, char *const argv[])
+{
+    memory_type mem_type = memory_type::MMAP;
+    std::size_t buffer_size = 128 * 1024 * 1024;
+    std::vector<int> cores;
+    int passes = 10;
+    int opt;
+    while ((opt = getopt(argc, argv, "t:b:p:")) != -1)
+    {
+        switch (opt)
+        {
+        case 't':
+            if (optarg == "malloc"s)
+                mem_type = memory_type::MALLOC;
+            else if (optarg == "mmap"s)
+                mem_type = memory_type::MMAP;
+            else if (optarg == "mmap_huge"s)
+                mem_type = memory_type::MMAP_HUGE;
+            else if (optarg == "madv_huge"s)
+                mem_type = memory_type::MADV_HUGE;
+            else
+            {
+                std::cerr << "Invalid memory type (must be malloc, mmap, mmap_huge or madv_huge)\n";
+                return 1;
+            }
+            break;
+        case 'b':
+            buffer_size = atoll(optarg);
+            break;
+        case 'p':
+            passes = atoi(optarg);
+            break;
+        default:
+            return 1;
+        }
+    }
+    for (int i = optind; i < argc; i++)
+        cores.push_back(atoi(argv[i]));
+    if (cores.empty())
+        cores.push_back(-1);
+
+    std::cout << "Using " << cores.size() << " threads, each with " << buffer_size << " bytes of "
+        << memory_type_name(mem_type) << " memory (" << passes << " passes)\n";
+
+    size_t n = cores.size();
+    std::vector<thread_data> data(n);
+    for (size_t i = 0; i < n; i++)
+        data[i].future = std::async(
+            std::launch::async, worker, cores[i], buffer_size, mem_type, passes, std::ref(data[i]));
     auto start = high_resolution_clock::now();
     while (true)
     {
-        for (int pass = 0; pass < passes; pass++)
+        for (size_t i = 0; i < n; i++)
         {
-#pragma omp parallel for
-            for (int i = 0; i < reps; i++)
-                std::memcpy(dst[i], src[i], buffer_size);
+            int result = sem_post(&data[i].start_sem);
+            assert(result == 0);
+        }
+        for (size_t i = 0; i < n; i++)
+        {
+            int result = sem_wait(&data[i].done_sem);
+            assert(result == 0);
         }
         auto now = high_resolution_clock::now();
         duration<double> elapsed = now - start;
-        double rate = passes / elapsed.count() * reps * buffer_size;
+        double rate = passes / elapsed.count() * n * buffer_size;
         cout << rate / 1e9 << " GB/s" << endl;
         start = now;
     }
