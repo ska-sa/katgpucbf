@@ -69,8 +69,7 @@ smooth out jitter in processing times.
 Network receive
 ---------------
 Each polarisation is handled as a separate SPEAD stream, with a separate
-thread. Separate streams are necessary because the packets themselves don't
-distinguish between the polarisations, and separate threads are necessary
+thread. Separate threads are necessary
 because a single core is not fast enough to load the data. This introduces
 some challenges in aligning the polarisations, because locking a shared
 structure on every packet would be prohibitively expensive. Instead, the
@@ -262,7 +261,8 @@ stalls every few seconds. This in turn prevents the transmit from keeping up
 with the processed data, putting back-pressure on the receiver and causing it
 to run out of buffers.
 
-Cases 00690992 and 00699262 have been opened with Mellanox for these problems.
+Cases 00690992 and 00699262 were opened with Mellanox for these problems, and
+it has since been fixed in the latest firmware.
 
 NUMA
 ^^^^
@@ -277,7 +277,7 @@ the same NUMA node.
 We also found that single-threaded memcpy bandwidth on the Skylake Xeon
 improved from about 4 GB/s to about 7 GB/s when removing the second CPU from
 the system. With better memcpy performance it may be possible to use fewer
-cores (and conversely, fewer cores on a die tends may reduce the latency to
+cores (and conversely, fewer cores on a die may reduce the latency to
 memory and hence the memcpy performance).
 
 Reordering
