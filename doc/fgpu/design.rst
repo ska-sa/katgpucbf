@@ -52,7 +52,7 @@ windows.
 
 Chunking also helps reduce the impact of slow Python code. Digitiser heaps
 consist of only a single packet, and involving Python on a per-heap basis
-would be far to slow. The code for assembling chunks is all implemented in
+would be far too slow. The code for assembling chunks is all implemented in
 C++, with Python working mostly at chunk granularity.
 
 Queues
