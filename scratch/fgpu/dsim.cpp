@@ -8,7 +8,6 @@
 #include <random>
 #include <boost/program_options.hpp>
 #include <spead2/send_udp_ibv.h>
-#include <spead2/common_semaphore.h>
 
 namespace po = boost::program_options;
 
@@ -181,24 +180,21 @@ struct polarisation
 
 struct digitiser
 {
-    spead2::thread_pool pool;
+    boost::asio::io_service io_service;
     spead2::send::udp_ibv_stream stream;
     std::vector<polarisation> pols;
-    spead2::semaphore next_sem;
     std::size_t next_pol = 0;
 
     digitiser(const options &opts,
               const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
               const boost::asio::ip::address &interface_address)
-        : pool(1),
-        stream(pool, endpoints[0][0],
-               spead2::send::stream_config(
-                   heap_size + 128,  // Doesn't matter, just needs to be bigger than actual size
-                   endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size,
-                   65536, opts.max_heaps),
-               interface_address, spead2::send::udp_ibv_stream::default_buffer_size,
-               opts.ttl),
-        next_sem(opts.max_heaps)
+        : stream(io_service, endpoints[0][0],
+                 spead2::send::stream_config(
+                     heap_size + 128,  // Doesn't matter, just needs to be bigger than actual size
+                     endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size,
+                     65536, opts.max_heaps),
+                 interface_address, spead2::send::udp_ibv_stream::default_buffer_size,
+                 opts.ttl)
     {
         pols.reserve(endpoints.size());
         int pol = 0;
@@ -209,21 +205,21 @@ struct digitiser
         }
     }
 
-    void wait_next()
+    void callback(const boost::system::error_code &ec, std::size_t)
     {
-        spead2::semaphore_get(next_sem);
+        if (ec)
+        {
+            std::cerr << "Error: " << ec;
+            std::exit(1);
+        }
+        else
+            send_next();
     }
 
     void send_next()
     {
-        auto callback = [this] (const boost::system::error_code &ec, std::size_t)
-        {
-            if (ec)
-                std::cerr << "Error: " << ec;
-            else
-                next_sem.put();
-        };
-        pols[next_pol].send_next(stream, callback);
+        using namespace std::placeholders;
+        pols[next_pol].send_next(stream, std::bind(&digitiser::callback, this, _1, _2));
         next_pol++;
         if (next_pol == pols.size())
             next_pol = 0;
@@ -239,10 +235,8 @@ int main(int argc, const char **argv)
     for (const std::string &address : opts.addresses)
         endpoints.push_back(parse_endpoint_list(address));
     digitiser d(opts, {endpoints}, interface_address);
-    while (true)
-    {
-        d.wait_next();
-        d.send_next();
-    }
+    for (int i = 0; i < opts.max_heaps; i++)
+        d.io_service.post(std::bind(&digitiser::send_next, &d));
+    d.io_service.run();
     return 0;
 }
