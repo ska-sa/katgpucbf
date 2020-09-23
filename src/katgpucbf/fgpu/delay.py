@@ -129,7 +129,7 @@ class MultiDelayModel(AbstractDelayModel):
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
         orig, fine_delay = self._models[0].invert_range(start, stop, step)
-        if len(orig) == 0:  # This seems to me like just a corner case. Can't see it being a big problem.
+        if len(orig) == 0:  # Defence against corner case breaking things.
             return orig, fine_delay
 
         if orig[0] < self._models[0].start:
