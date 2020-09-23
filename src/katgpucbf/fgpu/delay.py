@@ -17,8 +17,8 @@ class AbstractDelayModel(ABC):
     def __call__(self, time: float) -> float:
         """Determine delay at a given sample.
 
-        No check is made that the sample comes after `start` - it will
-        happily interpolate backwards.
+        Note that this returns only the delay that was applied to the original timestamp, not the timestamp itself.
+        No check is made that the sample comes after `start` - the function will happily interpolate backwards.
         """
 
     @abstractmethod
@@ -97,7 +97,10 @@ class LinearDelayModel(AbstractDelayModel):
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
         time = np.arange(start, stop, step)
+         # Variables with names prefixed rel_ treat start of delay model as t_0. Makes it easier to apply the rate.
         rel_time = time - self.start
+        # Solve `rel_time = rel_orig + delay + rel_orig*rate` for rel_orig and you end up with this:
+        # (rel_time is the corrected timestamp, i.e. after the delay-model has been applied.)
         rel_orig = (rel_time - self.delay) / (self.rate + 1)
         rel_orig_rnd = np.rint(rel_orig).astype(np.int64)
         residual = rel_orig_rnd - rel_orig
@@ -121,26 +124,23 @@ class MultiDelayModel(AbstractDelayModel):
         while len(self._models) > 1 and time >= self._models[1].start:
             self._models.popleft()
         if time < self._models[0].start:
-            warnings.warn('Timestamp is before start of first linear model - '
-                          'possibly due to non-monotonic queries')
+            warnings.warn('Timestamp is before start of first linear model - possibly due to non-monotonic queries')
         return self._models[0](time)
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
         orig, fine_delay = self._models[0].invert_range(start, stop, step)
-        if len(orig) == 0:
+        if len(orig) == 0:  # This seems to me like just a corner case. Can't see it being a big problem.
             return orig, fine_delay
 
         if orig[0] < self._models[0].start:
-            warnings.warn('Timestamp is before start of first linear model - '
-                          'possibly due to non-monotonic queries')
-        # Step through later models and apply them where valid. This is not
-        # particularly optimal since we evaluate the full range for each
-        # combination of model and timestamp. However, we expect to have
-        # only a small number of models.
+            warnings.warn('Timestamp is before start of first linear model - possibly due to non-monotonic queries')
+        # Step through later models and overwrite the first one where later ones are valid.
+        # This is not particularly optimal since we evaluate the full range for each combination of model and timestamp.
+        # However, we expect to have only a small number of models.
         cull = 0
         for i, model in enumerate(self._models):
             if i == 0:
-                continue    # We've already done it
+                continue    # We've already done the first one
             if stop <= model.start:
                 # Models are assumed to have positive delays, so the
                 # inverse of stop in any model is <= stop.
