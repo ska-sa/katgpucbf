@@ -97,7 +97,7 @@ class LinearDelayModel(AbstractDelayModel):
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
         time = np.arange(start, stop, step)
-         # Variables with names prefixed rel_ treat start of delay model as t_0. Makes it easier to apply the rate.
+        # Variables with names prefixed rel_ treat start of delay model as t_0. Makes it easier to apply the rate.
         rel_time = time - self.start
         # Solve `rel_time = rel_orig + delay + rel_orig*rate` for rel_orig and you end up with this:
         # (rel_time is the corrected timestamp, i.e. after the delay-model has been applied.)
