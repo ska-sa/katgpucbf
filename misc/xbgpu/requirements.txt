@@ -1,0 +1,3 @@
+llvmlite==0.31.0
+pycuda
+katsdpsigproc
