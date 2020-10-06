@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 120
+include = '\.pyi?$'
+exclude ='''
+/(
+		  \.eggs	# exclude a few common directories
+		| \.git		# in the root of the project
+		| \.hg
+		| \.mypy_cache
+		| \.nox
+		| \.tox
+		| \.venv
+		| _build
+		| buck-out
+		| build
+		| dist
+)/
+'''

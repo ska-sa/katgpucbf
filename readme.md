@@ -1,5 +1,4 @@
-# katxgpu
-A tensor-core accelerated GPU-based X-engine.
+# MeerKAT GPU X-Engine Repository
 
 TODO: Update as development happens
 
@@ -16,11 +15,9 @@ using this will make people unhappy and your commits will be rejected with extre
 
 1. Enter a python 3.6 virtual environment
 2. Run `pip install -r requirements-dev.txt`
-3. Run `pre-commit install`
 
 ## Test Framework
 The test framework has been implemented using [pytest](https://docs.pytest.org).
 
 To run the framework, run the command `python -m pytest` from the katxgpu parent directory.
 To install all required packages
-
