@@ -13,35 +13,36 @@ sample_bitwidth = 8
 channels = 16
 polarizastions = 2
 samples_per_channel = 3072
-baselines = int(dual_pol_ants * (dual_pol_ants + 1) / 2)
+baselines = int(dual_pol_ants * (dual_pol_ants + 1) // 2)
+times_per_block = 128 // sample_bitwidth
 
 if ants_per_block == 48:
     nrBlocks = int(
-        ((dual_pol_ants + ants_per_block - 1) / ants_per_block)
-        * ((dual_pol_ants + ants_per_block - 1) / ants_per_block + 1)
-        / 2
+        ((dual_pol_ants + ants_per_block - 1) // ants_per_block)
+        * ((dual_pol_ants + ants_per_block - 1) // ants_per_block + 1)
+        // 2
     )
 elif ants_per_block == 64:
     nrBlocks = int(
-        ((dual_pol_ants + ants_per_block - 1) / ants_per_block)
-        * ((dual_pol_ants + ants_per_block - 1) / ants_per_block)
+        ((dual_pol_ants + ants_per_block - 1) // ants_per_block)
+        * ((dual_pol_ants + ants_per_block - 1) // ants_per_block)
     )
 else:
     raise ValueError("ants_per_block must equal either 64 or 48, currently equal to {0}.".format(ants_per_block))
 
 
-if samples_per_channel % 16 != 0:
-    raise ValueError("samples_per_channel must be devisible by 8.")
+if samples_per_channel % times_per_block != 0:
+    raise ValueError("samples_per_channel must be devisible by {0}.".format(times_per_block))
 
 ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
-inputShape = (channels, samples_per_channel // 16, dual_pol_ants, polarizastions, 16)
+inputShape = (channels, samples_per_channel // times_per_block, dual_pol_ants, polarizastions, times_per_block)
 outputShape = (channels, baselines, polarizastions, polarizastions)
 
-bufSamples_device = accel.DeviceArray(ctx, inputShape, np.int32)
+bufSamples_device = accel.DeviceArray(ctx, inputShape, np.int16)
 bufSamples_host = bufSamples_device.empty_like()
 
-bufVisibilities_device = accel.DeviceArray(ctx, inputShape, np.int64)
+bufVisibilities_device = accel.DeviceArray(ctx, outputShape, np.int64)
 bufVisibilities_host = bufVisibilities_device.empty_like()
 
 queue = ctx.create_command_queue()
@@ -56,6 +57,8 @@ program = accel.build(
         "channels": channels,
         "polarizastions": polarizastions,
         "samples_per_channel": samples_per_channel,
+        "baselines": baselines,
+        "times_per_block": times_per_block,
     },
     extra_dirs=[pkg_resources.resource_filename(__name__, "")],
 )
@@ -77,7 +80,8 @@ bufVisibilities_device.get(queue, bufVisibilities_host)
 
 print("Total threads: ", 32 * nrBlocks * 2 * channels * 2 * 1)
 print("Input Shape: ", inputShape, bufSamples_host.nbytes)
-print("Output Shape: ", outputShape, bufVisibilities_host.nbytes)
+print("Output Shape: ", outputShape, bufVisibilities_host.size)
+print("Nr Blocks: ", nrBlocks)
 
 
 # import pycuda.driver as cuda

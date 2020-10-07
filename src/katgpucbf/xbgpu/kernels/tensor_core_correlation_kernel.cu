@@ -20,10 +20,10 @@
 #define NR_SAMPLES_PER_CHANNEL ${samples_per_channel}
 #define NR_POLARIZATIONS ${polarizastions}
 
-#define NR_BASELINES		(NR_STATIONS * (NR_STATIONS + 1) / 2)
+#define NR_BASELINES ${baselines}
 #define ALIGN(A,N)		(((A)+(N)-1)/(N)*(N))
 
-#define NR_TIMES_PER_BLOCK	(128 / (NR_BITS))
+#define NR_TIMES_PER_BLOCK	(${times_per_block})
 #define NR_STATIONS_PER_TCM_X	((NR_BITS) == 4 ? 2 : 4)
 #define NR_STATIONS_PER_TCM_Y	((NR_BITS) == 4 ? 4 : 8)
 
@@ -435,8 +435,9 @@ void correlate(Visibilities visibilities, const Samples samples)
   unsigned block = blockIdx.x;
   if(block == 0 && threadIdx.x == 0){
     int iSamples = NR_CHANNELS * NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK * sizeof(char2);
-    int iVisibilities = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS*sizeof(int2);
-    printf("%d %d\n",iSamples,iVisibilities);
+    int iVisibilities = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
+    //printf("%d %d\n",iSamples,iVisibilities);
+    printf("%d %d %d %d %d\n",NR_CHANNELS,NR_BASELINES,NR_POLARIZATIONS,NR_POLARIZATIONS, iVisibilities);
   }
 
 #if NR_STATIONS_PER_BLOCK == 48
