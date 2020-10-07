@@ -130,12 +130,12 @@ def calculate_baseline_index(ant1, ant2):
 
     The visibilities matrix indexing is as follows:
         ant1 = 0  1  2  3  4
-            +---------------
+             +---------------
     ant2 = 0 | 00 01 03 06 10
-        1 |    02 04 07 11
-        2 |       05 08 12
-        3 |          09 13
-        4 |             14
+           1 |    02 04 07 11
+           2 |       05 08 12
+           3 |          09 13
+           4 |             14
 
     This function requires that ant1>=ant2
     """
