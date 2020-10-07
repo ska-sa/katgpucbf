@@ -433,12 +433,6 @@ void correlate(Visibilities visibilities, const Samples samples)
   const unsigned nrFragmentsY = NR_STATIONS_PER_BLOCK / NR_STATIONS_PER_TCM_Y / 2;
 
   unsigned block = blockIdx.x;
-  if(block == 0 && threadIdx.x == 0){
-    int iSamples = NR_CHANNELS * NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK * sizeof(char2);
-    int iVisibilities = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
-    //printf("%d %d\n",iSamples,iVisibilities);
-    printf("%d %d %d %d %d\n",NR_CHANNELS,NR_BASELINES,NR_POLARIZATIONS,NR_POLARIZATIONS, iVisibilities);
-  }
 
 #if NR_STATIONS_PER_BLOCK == 48
   unsigned blockY = (unsigned) (sqrtf(8 * block + 1) - .99999f) / 2;
