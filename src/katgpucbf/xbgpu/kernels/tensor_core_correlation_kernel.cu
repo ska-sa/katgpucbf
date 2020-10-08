@@ -1,3 +1,11 @@
+/* This code is based on the work done by John Romein at Astron to develop a correlator that uses Nvidias Tensor core
+ * correlator. This is almost an exact replica of version 0.3 of his TensorCoreCorrelator package. Slight modifications 
+ * have been made so that it uses mako templating provided by the SARAO katsdpsigproc python package to set the values
+ * of some of the macros.
+ *
+ * No attempt has been made to document the functioning of this kernel. 
+ */
+
 /* Yes, the first line of a file is a closing brace. Dont run away, dont panic, there is a reason for this. By default
  * pycuda surrounds a source file with `extern "C" {}`. However if #include <mma.h> is within an `extern "C"{}` block
  * it throws all sorts of errors. The actual solution to this is to pass a the `no_extern_c=True` argument to the 
