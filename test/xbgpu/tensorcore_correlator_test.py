@@ -13,7 +13,7 @@ TODO:
 """
 import pytest
 import numpy as np
-import tensorcore_correlator
+from katxgpu import tensorcore_correlator
 from katsdpsigproc import accel
 
 # Array specifying different array sizes that could potentially be used by MeerKAT
