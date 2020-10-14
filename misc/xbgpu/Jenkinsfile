@@ -6,11 +6,22 @@ pipeline {
 
   }
   stages {
-    stage('Hello') {
+    stage('Configure Environment') {
       steps {
-        echo 'Hey!'
-        sh 'pwd'
-        sh 'ls -latr'
+        sh 'pip install -r requirements-dev.txt'
+        sh 'pip install -r requirements.txt'
+      }
+    }
+
+    stage('Install katxgpu package') {
+      steps {
+        sh 'pip install -e .'
+      }
+    }
+
+    stage('Run pytest') {
+      steps {
+        sh 'pytest -v --junitxml=reports/result.xml'
       }
     }
 
