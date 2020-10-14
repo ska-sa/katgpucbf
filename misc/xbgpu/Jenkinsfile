@@ -9,6 +9,8 @@ pipeline {
     stage('Hello') {
       steps {
         echo 'Hey!'
+        sh 'pwd'
+        sh 'ls -latr'
       }
     }
 
