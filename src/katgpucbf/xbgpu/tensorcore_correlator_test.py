@@ -102,7 +102,7 @@ def test_correlator_exhaustive(num_ants):
         high=128,
         size=bufSamplesInt8Shape,
         dtype=np.int8,
-    )  # np.ones(bufSamples_host.shape, dtype=np.int8)
+    )
     bufSamples_host.dtype = np.int16
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
