@@ -1,13 +1,15 @@
 pipeline {
   agent {
     docker {
-      image 'python:3.6'
+      image 'ubuntu:18.04'
+      args '--network=host'
     }
 
   }
   stages {
     stage('Configure Environment') {
       steps {
+        sh 'apt-get update && apt-get install -y python3.6 python3-pip'
         sh 'pip install -r requirements-dev.txt'
         sh 'pip install -r requirements.txt'
       }
