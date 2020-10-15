@@ -1,7 +1,8 @@
 pipeline {
   agent {
-    node {
-      label 'tensor_core_gpu'
+    docker {
+      args '--network=host -u root'
+      image 'cuda:10.1-devel-ubuntu18.04'
     }
 
   }
