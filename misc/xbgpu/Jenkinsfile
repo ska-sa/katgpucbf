@@ -1,7 +1,7 @@
 pipeline {
   agent {
     node {
-      label 'katxgpu_test'
+      label 'tensor_core_gpu'
     }
 
   }
