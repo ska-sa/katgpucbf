@@ -76,13 +76,14 @@ void sender::add_udp_stream(const std::string &address, std::uint16_t port,
     config.set_max_packet_size(max_packet_size);
     config.set_rate(rate);
     config.set_max_heaps(max_heaps);  // TODO: get sender to compute it, given shape of chunks?
-    // TODO: allow comp_vector to be set too
     if (ibv)
     {
-        emplace_stream<spead2::send::udp_ibv_stream>(
-            endpoint, config, interface,
-            spead2::send::udp_ibv_stream::default_buffer_size, ttl,
-            comp_vector[streams.size() % comp_vector.size()]);
+        spead2::send::udp_ibv_config ibv_config;
+        ibv_config.add_endpoint(endpoint);
+        ibv_config.set_interface_address(interface);
+        ibv_config.set_ttl(ttl);
+        ibv_config.set_comp_vector(comp_vector[streams.size() % comp_vector.size()]);
+        emplace_stream<spead2::send::udp_ibv_stream>(config, ibv_config);
     }
     else
     {
