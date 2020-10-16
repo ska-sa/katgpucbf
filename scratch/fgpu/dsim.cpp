@@ -189,25 +189,15 @@ static std::vector<T> flatten(const std::vector<std::vector<T>> &in)
 struct digitiser
 {
     boost::asio::io_service io_service;
-    spead2::send::udp_ibv_stream stream;
     std::vector<polarisation> pols;
+    spead2::send::udp_ibv_stream stream;
     std::size_t next_pol = 0;
 
-    digitiser(const options &opts,
-              const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
-              const boost::asio::ip::address &interface_address)
-        : stream(
-            io_service,
-            spead2::send::stream_config()
-                // Value doesn't matter, just needs to be bigger than actual size
-                .set_max_packet_size(heap_size + 128)
-                .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
-                .set_max_heaps(opts.max_heaps),
-            spead2::send::udp_ibv_config()
-                .set_endpoints(flatten(endpoints))
-                .set_interface_address(interface_address)
-                .set_ttl(opts.ttl))
+    static std::vector<polarisation> make_pols(
+        const options &opts,
+        const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints)
     {
+        std::vector<polarisation> pols;
         pols.reserve(endpoints.size());
         int pol = 0;
         std::size_t base_substream = 0;
@@ -217,6 +207,37 @@ struct digitiser
             pol++;
             base_substream += ep.size();
         }
+        return pols;
+    }
+
+    static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
+        const std::vector<polarisation> &pols)
+    {
+        std::vector<std::pair<const void *, std::size_t>> memory_regions;
+        for (const auto &pol : pols)
+            for (const auto &heap : pol.heaps)
+                memory_regions.emplace_back(heap.data.get(), heap_size);
+        return memory_regions;
+    }
+
+    digitiser(const options &opts,
+              const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
+              const boost::asio::ip::address &interface_address)
+        : pols(make_pols(opts, endpoints)),
+        stream(
+            io_service,
+            spead2::send::stream_config()
+                // Value doesn't matter, just needs to be bigger than actual size
+                .set_max_packet_size(heap_size + 128)
+                .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
+                .set_max_heaps(opts.max_heaps),
+            spead2::send::udp_ibv_config()
+                .set_endpoints(flatten(endpoints))
+                .set_interface_address(interface_address)
+                .set_ttl(opts.ttl)
+                .set_memory_regions(get_memory_regions(pols))
+        )
+    {
     }
 
     void callback(const boost::system::error_code &ec, std::size_t)
