@@ -17,7 +17,7 @@ import tensorcore_correlator
 from katsdpsigproc import accel
 
 # Array specifying different array sizes that could potentially be used by MeerKAT
-array_size = [4, 8, 16, 32, 64, 84, 192, 256]
+array_size = [4, 8]#, 16, 32, 64, 84, 192, 256]
 
 
 def get_simple_test_ant_value(channel_index, ant_index):
@@ -36,7 +36,7 @@ def generate_antpair_visibilities_host(bufSamples_host, channel_index, ant1, ant
     Host side code to generate visibilities between two antennas.
 
     Will generate visibilities for a particular channel and antenna combination from an array of input samples that has
-    the shape (channels, samples_per_channel // times_per_block, dual_pol_ants, polarizastions, times_per_block)
+    the shape (n_channels, n_samples_per_channel // n_times_per_block, n_ants, n_polarizastions, n_times_per_block)
     required by the Tensor core correlation kernels.
 
     This is a naive implementation of the correlation algorithm and is computationally very slow.
@@ -68,16 +68,16 @@ def test_correlator_exhaustive(num_ants):
     array size has been kept small to speed this up. For MeerKAT sizes, the input sample array will be much bigger.
     """
     # 1. Array parameters
-    dual_pol_ants = num_ants
-    channels = 2
-    samples_per_channel = 16
+    n_ants = num_ants
+    n_channels = 2
+    n_samples_per_channel = 16
 
     # 2. Initialise GPU kernels and buffers.
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
     template = tensorcore_correlator.TensorCoreCorrelatorTemplate(
-        ctx, dual_pol_ants=dual_pol_ants, channels=channels, samples_per_channel=samples_per_channel
+        ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
     )
     tensorCoreCorrelator = template.instantiate(queue)
     tensorCoreCorrelator.ensure_all_bound()
@@ -98,7 +98,7 @@ def test_correlator_exhaustive(num_ants):
 
     bufSamples_host.dtype = np.int8
     bufSamples_host[:] = np.random.randint(
-        -127,
+        low=-127,
         high=128,
         size=bufSamplesInt8Shape,
         dtype=np.int8,
@@ -126,11 +126,11 @@ def test_correlator_exhaustive(num_ants):
     # 5.2 Generate the visibilities on the CPU - this is not a simple matrix operation due to the indexing of the input
     # samples, I am just going to do a naive brute force for now to be optomised later if needs be.
 
-    time_outer_range = samples_per_channel // template._times_per_block
-    time_inner_range = template._times_per_block
+    time_outer_range = n_samples_per_channel // template._n_times_per_block
+    time_inner_range = template._n_times_per_block
 
-    for channel_index in range(0, channels):
-        for ant1_index in range(0, dual_pol_ants):
+    for channel_index in range(0, n_channels):
+        for ant1_index in range(0, n_ants):
             for ant2_index in range(0, ant1_index + 1):
                 hh, hv, vh, vv = generate_antpair_visibilities_host(
                     bufSamples_host, channel_index, ant1_index, ant2_index, time_outer_range, time_inner_range
@@ -157,21 +157,21 @@ def test_correlator_quick(num_ants):
     It is used to perform a quick check for the correctness on much larger input sample array sizes.
     """
     # 1. Array parameters
-    dual_pol_ants = num_ants
-    channels = 64
-    samples_per_channel = 3072
+    n_ants = num_ants
+    n_channels = 64
+    n_samples_per_channel = 3072
 
     # 2. Initialise GPU kernels and buffers.
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
     template = tensorcore_correlator.TensorCoreCorrelatorTemplate(
-        ctx, dual_pol_ants=dual_pol_ants, channels=channels, samples_per_channel=samples_per_channel
+        ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
     )
     correlator = template.instantiate(queue)
     correlator.ensure_all_bound()
 
-    time_outer_range = samples_per_channel // template._times_per_block
+    time_outer_range = n_samples_per_channel // template._n_times_per_block
 
     bufSamples_device = correlator.buffer("inSamples")
     bufSamples_host = bufSamples_device.empty_like()
@@ -181,8 +181,8 @@ def test_correlator_quick(num_ants):
 
     # 3. Generate predictable input data. The time samples remain constant for every antenna-channel combination.
     bufSamples_host.dtype = np.int8
-    for channel_index in range(channels):
-        for ant_index in range(dual_pol_ants):
+    for channel_index in range(n_channels):
+        for ant_index in range(n_ants):
             sample_value = get_simple_test_ant_value(channel_index, ant_index)
             for time_outer_index in range(time_outer_range):
                 bufSamples_host[channel_index][time_outer_index][ant_index] = np.full(
@@ -204,8 +204,8 @@ def test_correlator_quick(num_ants):
 
     # 5.2 Generate the visibilities on the CPU and check they match the expected value. The output values are simple to
     # calculate and do not require performing the matrix multiple as it is performed on the GPU.
-    for channel_index in range(0, channels):
-        for ant1_index in range(0, dual_pol_ants):
+    for channel_index in range(0, n_channels):
+        for ant1_index in range(0, n_ants):
             for ant2_index in range(0, ant1_index + 1):
                 ant1_value = get_simple_test_ant_value(channel_index, ant1_index)
                 ant1_value = ant1_value + ant1_value * 1j
@@ -215,7 +215,7 @@ def test_correlator_quick(num_ants):
 
                 bufSamples_host.dtype = np.int8
                 product = ant1_value * np.conj(ant2_value)
-                productAccumulated = product * samples_per_channel
+                productAccumulated = product * n_samples_per_channel
 
                 assert bufVisibilities_host[channel_index][baseline_index][0][0] == productAccumulated
                 assert bufVisibilities_host[channel_index][baseline_index][1][0] == productAccumulated
