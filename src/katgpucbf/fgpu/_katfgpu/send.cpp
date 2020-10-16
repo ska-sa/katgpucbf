@@ -31,46 +31,19 @@ struct context
     }
 };
 
-sender::sender(int streams, int free_ring_space,
-               const std::vector<int> &thread_affinity,
-               const std::vector<int> &comp_vector)
-    : comp_vector(comp_vector),
-    free_ring(free_ring_space)
+sender::sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
+               int thread_affinity, int comp_vector,
+               const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+               int ttl, const std::string &interface_address, bool ibv,
+               std::size_t max_packet_size, double rate, std::size_t max_heaps)
+    : thread_pool(1, thread_affinity >= 0 ? std::vector<int>{thread_affinity} : std::vector<int>{}),
+    free_ring(initial_chunks.size())
 {
-    if (streams <= 0)
-        throw std::invalid_argument("streams must be positive");
-    this->streams.reserve(streams);
-    if (thread_affinity.empty())
-        workers.push_back(std::make_unique<spead2::thread_pool>(1));
-    else
-    {
-        for (int core : thread_affinity)
-            workers.push_back(std::make_unique<spead2::thread_pool>(1, std::vector<int>{core}));
-    }
-    if (this->comp_vector.empty())
-        this->comp_vector.push_back(0);
-}
-
-sender::~sender()
-{
-    stop();
-}
-
-template<typename Stream, typename... Args>
-void sender::emplace_stream(Args&&... args)
-{
-    if (streams.size() == streams.capacity())
-        throw std::length_error("too many streams");
-    streams.push_back(std::make_unique<Stream>(workers[streams.size() % workers.size()]->get_io_service(),
-                                               std::forward<Args>(args)...));
-    streams.back()->set_cnt_sequence(streams.size(), streams.capacity());
-}
-
-void sender::add_udp_stream(const std::string &address, std::uint16_t port,
-                            int ttl, const std::string &interface_address, bool ibv,
-                            std::size_t max_packet_size, double rate, std::size_t max_heaps)
-{
-    boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address::from_string(address), port);
+    if (endpoints.empty())
+        throw std::invalid_argument("must have at least one endpoint");
+    std::vector<boost::asio::ip::udp::endpoint> ep;
+    for (const auto &e : endpoints)
+        ep.emplace_back(boost::asio::ip::address::from_string(e.first), e.second);
     boost::asio::ip::address interface = boost::asio::ip::address::from_string(interface_address);
     spead2::send::stream_config config;
     config.set_max_packet_size(max_packet_size);
@@ -79,41 +52,52 @@ void sender::add_udp_stream(const std::string &address, std::uint16_t port,
     if (ibv)
     {
         spead2::send::udp_ibv_config ibv_config;
-        ibv_config.add_endpoint(endpoint);
+        ibv_config.set_endpoints(ep);
         ibv_config.set_interface_address(interface);
         ibv_config.set_ttl(ttl);
-        ibv_config.set_comp_vector(comp_vector[streams.size() % comp_vector.size()]);
-        emplace_stream<spead2::send::udp_ibv_stream>(config, ibv_config);
+        ibv_config.set_comp_vector(comp_vector);
+        for (const auto &c : initial_chunks)
+        {
+            const void *ptr = boost::asio::buffer_cast<const void *>(c->storage);
+            std::size_t length = boost::asio::buffer_size(c->storage);
+            ibv_config.add_memory_region(ptr, length);
+        }
+        stream = std::make_unique<spead2::send::udp_ibv_stream>(thread_pool, config, ibv_config);
     }
     else
     {
-        emplace_stream<spead2::send::udp_stream>(
-            endpoint, config, spead2::send::udp_stream::default_buffer_size,
+        stream = std::make_unique<spead2::send::udp_stream>(
+            thread_pool, ep, config, spead2::send::udp_stream::default_buffer_size,
             ttl, interface);
     }
+
+    for (auto &c : initial_chunks)
+        free_ring.try_push(std::move(c));
+}
+
+sender::~sender()
+{
+    stop();
 }
 
 void sender::stop()
 {
     free_ring.stop();
-    for (auto &stream : streams)
-        stream->flush();
-    for (auto &worker : workers)
-        worker->stop();
+    stream->flush();
+    thread_pool.stop();
 }
 
 void sender::send_chunk(std::unique_ptr<chunk> &&c)
 {
-    if (streams.size() != streams.capacity())
-        throw std::invalid_argument("cannot use send_chunk until streams have been added");
-    if (c->channels % streams.size() != 0)
-        throw std::invalid_argument("channels must be divisible by the number of streams");
+    std::size_t n_substreams = stream->get_num_substreams();
+    if (c->channels % n_substreams != 0)
+        throw std::invalid_argument("channels must be divisible by the number of substreams");
 
     const spead2::flavour flavour(spead2::maximum_version, 64, 48);
-    const std::size_t n_heaps = streams.size() * c->frames;
-    const int channels_per_stream = c->channels / streams.size();
+    const std::size_t n_heaps = n_substreams * c->frames;
+    const int channels_per_substream = c->channels / n_substreams;
     const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->acc_len * c->pols * 2;
-    const std::size_t heap_bytes = frame_bytes / streams.size();
+    const std::size_t heap_bytes = frame_bytes / n_substreams;
     const std::int64_t timestamp_step = c->acc_len * c->channels * 2;
     if (boost::asio::buffer_size(c->storage) < c->frames * frame_bytes)
         throw std::invalid_argument("send_chunk storage is too small");
@@ -138,7 +122,7 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
 
     int frames = ctx->c->frames;
     for (int i = 0; i < frames; i++)
-        for (std::size_t j = 0; j < streams.size(); j++)
+        for (std::size_t j = 0; j < n_substreams; j++)
         {
             auto heap_data = boost::asio::buffer(ctx->c->storage + i * frame_bytes + j * heap_bytes,
                                                  heap_bytes);
@@ -148,14 +132,14 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
             heap.set_repeat_pointers(true);
             heap.add_item(TIMESTAMP_ID, ctx->c->timestamp + i * timestamp_step);
             heap.add_item(FENG_ID_ID, 0);    // TODO: take feng_id in constructor
-            heap.add_item(FREQUENCY_ID, j * channels_per_stream);
+            heap.add_item(FREQUENCY_ID, j * channels_per_substream);
             heap.add_item(FENG_RAW_ID,
                           boost::asio::buffer_cast<const void *>(heap_data),
                           boost::asio::buffer_size(heap_data),
                           false);
             for (int pad = 0; pad < 3; pad++)
                 heap.add_item(0, 0);
-            streams[j]->async_send_heap(heap, callback);
+            stream->async_send_heap(heap, callback, j);
         }
 }
 

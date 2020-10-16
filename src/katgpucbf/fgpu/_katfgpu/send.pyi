@@ -24,12 +24,11 @@ class Ringbuffer:
 
 
 class Sender:
-    def __init__(self, streams: int, free_ring_space: int,
-                 thread_affinity: List[int] = ...,
-                 comp_vector: List[int] = ...) -> None: ...
-    def add_udp_stream(self, address: str, port: int, ttl: int,
-                       interface_address: str, ibv: bool,
-                       max_packet_size: int, rate: float, max_heaps: int) -> None: ...
+    def __init__(self, initial_buffers: List[object],
+                 thread_affinity: int, comp_vector: int,
+                 endpoints: List[Tuple[str, int]],
+                 ttl: int, interface_address: str, ibv: bool,
+                 max_packet_size: int, rate: float, max_heaps: int) -> None: ...
     def send_chunk(self, chunk: Chunk) -> None: ...
     def stop(self) -> None: ...
     @property

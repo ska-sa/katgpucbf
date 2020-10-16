@@ -67,22 +67,23 @@ class Engine:
                                          chunk_samples, ring, src_affinity[pol],
                                          mask_timestamp=mask_timestamp)
                              for pol in range(pols)]
-        self._sender = send.Sender(len(dst), 2, dst_affinity, dst_comp_vector)
         for stream in self._src_streams:
             for i in range(4):
                 buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
                 stream.add_chunk(recv.Chunk(buf))
+        send_bufs = []
         for i in range(2):
             buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
                                   context=context)
-            self._sender.free_ring.try_push(send.Chunk(buf))
+            send_bufs.append(buf)
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_rate * buf.dtype.itemsize * 1.1 / len(dst)
-        for i, (host, port) in enumerate(dst):
-            # There is a SPEAD header, 8 item pointers,
-            # and 3 padding pointers, for a 96 byte header.
-            self._sender.add_udp_stream(host, port, dst_ttl, dst_interface, dst_ibv,
-                                        dst_packet_payload + 96, rate, 2 * spectra // acc_len)
+        rate = pols * adc_rate * buf.dtype.itemsize * 1.1
+        # There is a SPEAD header, 8 item pointers,
+        # and 3 padding pointers, for a 96 byte header.
+        self._sender = send.Sender(
+            send_bufs, dst_affinity, dst_comp_vector,
+            [(d.host, d.port) for d in dst], dst_ttl, dst_interface, dst_ibv,
+            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst))
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()

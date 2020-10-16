@@ -73,11 +73,11 @@ def parse_args() -> argparse.Namespace:
         '--dst-packet-payload', type=int, default=1024, metavar='BYTES',
         help='Size for output packets (voltage payload only) [%(default)s]')
     parser.add_argument(
-        '--dst-affinity', type=comma_split(int), default=[], metavar='CORE,...',
+        '--dst-affinity', type=int, default=-1, metavar='CORE,...',
         help='Cores for output-handling threads [not bound]')
     parser.add_argument(
-        '--dst-comp-vector', type=comma_split(int), default=[], metavar='VECTOR,...',
-        help='Completion vectors for transmission, or -1 for polling [0]')
+        '--dst-comp-vector', type=int, default=0, metavar='VECTOR,...',
+        help='Completion vector for transmission, or -1 for polling [0]')
     parser.add_argument(
         '--adc-rate', type=float, default=0.0, metavar='HZ',
         help='Digitiser sampling rate, used to determine transmission rate [fast as possible]')
