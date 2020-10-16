@@ -2,8 +2,8 @@
 Module for performing unit tests on the Tensor core correlation kernel.
 
 Contains two unit tests:
-    1. @test_correlator_exhaustive - this test takes very long to run, but generates a high degree of certainty
-    over the results.
+    1. @test_correlator_exhaustive - this test is time consuming, taking many hours to run for larger input sizes. It 
+    generates a high degree of certainty over the results.
     2. @test_correlator_quick - this test runs very quickly but is less exhaustive. It is used for quickly testing
     much larger array sizes.
 
@@ -21,9 +21,9 @@ array_size = [4, 8]#, 16, 32, 64, 84, 192, 256]
 
 
 def get_simple_test_ant_value(channel_index, ant_index):
-    """Hashing function to generate a unique int8 number for a specific antenna channel combination.
+    """Hashing function to generate a repeatable int8 number for a specific antenna channel combination.
 
-    The value returned is between -127 and 127(inclusive) of type np.int8.
+    The value returned is between -127 and 127 (inclusive) of type np.int8.
     """
     ant_value = np.uint8(channel_index * ant_index) - 128
     if ant_value == -128:
@@ -33,7 +33,7 @@ def get_simple_test_ant_value(channel_index, ant_index):
 
 def generate_antpair_visibilities_host(bufSamples_host, channel_index, ant1, ant2, time_outer_range, time_inner_range):
     """
-    Host side code to generate visibilities between two antennas.
+    Host-side code to generate visibilities between two antennas.
 
     Will generate visibilities for a particular channel and antenna combination from an array of input samples that has
     the shape (n_channels, n_samples_per_channel // n_times_per_block, n_ants, n_polarizastions, n_times_per_block)
@@ -62,9 +62,9 @@ def generate_antpair_visibilities_host(bufSamples_host, channel_index, ant1, ant
 @pytest.mark.parametrize("num_ants", array_size)
 def test_correlator_exhaustive(num_ants):
     """
-    Intensive unit test of the Tensor core correlation algorithm.
+    Exhaustive unit test of the Tensor core correlation algorithm.
 
-    This unit test runs on random input data. The CPU side check for correctness is very slow - the input sample
+    This unit test runs on random input data. The CPU-side check for correctness is very slow - the input sample
     array size has been kept small to speed this up. For MeerKAT sizes, the input sample array will be much bigger.
     """
     # 1. Array parameters
@@ -124,7 +124,7 @@ def test_correlator_exhaustive(num_ants):
     bufCorrectVisibilities_host = np.empty_like(bufVisibilities_host)
 
     # 5.2 Generate the visibilities on the CPU - this is not a simple matrix operation due to the indexing of the input
-    # samples, I am just going to do a naive brute force for now to be optomised later if needs be.
+    # samples, I am just going to do a naive brute-force for now to be optomised later if needs be.
 
     time_outer_range = n_samples_per_channel // template._n_times_per_block
     time_inner_range = template._n_times_per_block

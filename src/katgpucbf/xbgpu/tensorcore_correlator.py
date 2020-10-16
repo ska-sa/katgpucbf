@@ -52,24 +52,27 @@ class TensorCoreCorrelatorTemplate:
         self.n_channels = n_channels
         self.n_samples_per_channel = n_samples_per_channel
         self.n_polarizastions = 2  # Hardcoded to 2. No other values are supported
-        self.n_baselines = int(self.n_ants * (self.n_ants + 1) // 2)
+        self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
-        self._n_times_per_block = 128 // self._sample_bitwidth
+        
+        # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
+        self._n_times_per_block = 128 // self._sample_bitwidth 
 
-        if self._sample_bitwidth != 4 and self._sample_bitwidth != 8 and self._sample_bitwidth != 16:
+        valid_bitwidths = [4, 8, 16]
+        if self._sample_bitwidth not in valid_bitwidths:
             raise ValueError(
-                "sample_bitwidth must equal either 4, 8 or 16, currently equal to {0}.".format(self._sample_bitwidth)
+                f"Sample_bitwidth must equal either 4, 8 or 16, currently equal to {self._sample_bitwidth}."
             )
         if self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
             raise ValueError(
-                "Sample bitwidth of {0} will eventually be supported but has not yet been implemented.".format(self._sample_bitwidth)
+                f"Sample bitwidth of {self._sample_bitwidth} will eventually be supported but has not yet been implemented."
             )
 
         if self.n_samples_per_channel % self._n_times_per_block != 0:
-            raise ValueError("samples_per_channel must be divisible by {0}.".format(self._n_times_per_block))
+            raise ValueError(f"samples_per_channel must be divisible by {self._n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
         self.inputDataShape = (
@@ -81,7 +84,8 @@ class TensorCoreCorrelatorTemplate:
         )
         self.outputDataShape = (self.n_channels, self.n_baselines, self.n_polarizastions, self.n_polarizastions)
 
-        # 4. Calculate the number of blocks - this remains constant for the lifetime of the object
+        # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
+        # of the object.
         if self._n_ants_per_block == 48:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
