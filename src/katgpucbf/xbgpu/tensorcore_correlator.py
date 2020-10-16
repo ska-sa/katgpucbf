@@ -29,9 +29,7 @@ class TensorCoreXEngineCoreTemplate:
     This object will be used to create a TensorCoreXEngineCore object that will be able to run the created kernel.
     """
 
-    def __init__(
-        self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int
-    ) -> None:
+    def __init__(self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int) -> None:
         """
         Initialise the TensorCoreXEngineCoreTemplate class and compile the Tensor core correlation kernel.
 
@@ -57,9 +55,9 @@ class TensorCoreXEngineCoreTemplate:
         # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
-        
+
         # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
-        self._n_times_per_block = 128 // self._sample_bitwidth 
+        self._n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
         if self._sample_bitwidth not in valid_bitwidths:

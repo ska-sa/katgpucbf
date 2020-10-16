@@ -2,7 +2,7 @@
 Module for performing unit tests on the Tensor core correlation kernel.
 
 Contains two unit tests:
-    1. @test_correlator_exhaustive - this test is time consuming, taking many hours to run for larger input sizes. It 
+    1. @test_correlator_exhaustive - this test is time consuming, taking many hours to run for larger input sizes. It
     generates a high degree of certainty over the results.
     2. @test_correlator_quick - this test runs very quickly but is less exhaustive. It is used for quickly testing
     much larger array sizes.
@@ -17,7 +17,7 @@ import tensorcore_correlator
 from katsdpsigproc import accel
 
 # Array specifying different array sizes that could potentially be used by MeerKAT
-array_size = [4, 8]#, 16, 32, 64, 84, 192, 256]
+array_size = [4, 8, 16, 32, 64, 84, 192, 256]
 
 
 def get_simple_test_ant_value(channel_index, ant_index):
