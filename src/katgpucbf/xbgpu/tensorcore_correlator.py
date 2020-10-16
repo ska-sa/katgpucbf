@@ -2,10 +2,10 @@
 Module wrapping the ASTRON Tensor Core Correlation Kernels in the MeerKAT katsdpsig proc framework.
 
 This module has two classes:
-    1. TensorCoreCorrelatorTemplate - This class allows for multiple different compilations of the same kernel with
+    1. TensorCoreXEngineCoreTemplate - This class allows for multiple different compilations of the same kernel with
     parameters to take place.
-    2. TensorCoreCorrelator - This class provides the interface to call the kernel created in a
-    TensorCoreCorrelatorTemplate object.
+    2. TensorCoreXEngineCore - This class provides the interface to call the kernel created in a
+    TensorCoreXEngineCoreTemplate object.
 
 TODO:
     1. Modify the kernel so that the visibility matrix is not zeroed after every kernel call. This will allow for much
@@ -22,21 +22,21 @@ from katsdpsigproc import accel
 from katsdpsigproc import cuda
 
 
-class TensorCoreCorrelatorTemplate:
+class TensorCoreXEngineCoreTemplate:
     """
     Template class for compiling different variations of the Tensor core correlation kernel.
 
-    This object will be used to create a TensorCoreCorrelator object that will be able to run the created kernel.
+    This object will be used to create a TensorCoreXEngineCore object that will be able to run the created kernel.
     """
 
     def __init__(
         self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int
     ) -> None:
         """
-        Initialise the TensorCoreCorrelatorTemplate class and compile the Tensor core correlation kernel.
+        Initialise the TensorCoreXEngineCoreTemplate class and compile the Tensor core correlation kernel.
 
         The parameters given to this function are used by this class to compile the kernel and by the
-        TensorCoreCorrelator to specify the shape of the memory buffers connected to this kernel.
+        TensorCoreXEngineCore to specify the shape of the memory buffers connected to this kernel.
 
         Parameters
         ----------
@@ -120,17 +120,17 @@ class TensorCoreCorrelatorTemplate:
         )
         self.kernel = program.get_kernel("correlate")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "TensorCoreCorrelator":
-        """Create a TensorCoreCorrelator class using this template to build the kernel."""
-        return TensorCoreCorrelator(self, command_queue)
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "TensorCoreXEngineCore":
+        """Create a TensorCoreXEngineCore object using this template to build the kernel."""
+        return TensorCoreXEngineCore(self, command_queue)
 
 
-class TensorCoreCorrelator(accel.Operation):
+class TensorCoreXEngineCore(accel.Operation):
     """
-    Class containing a Tensor core kernel compiled from a TensorCoreCorrelatorTemplate.
+    Class containing a Tensor core kernel compiled from a TensorCoreXEngineCoreTemplate.
 
     This class specifies the shape of the input sample and output visibility buffers required by the kernel. The
-    parameters specified in the TensorCoreCorrelatorTemplate object are used to determine the shape of the buffers.
+    parameters specified in the TensorCoreXEngineCoreTemplate object are used to determine the shape of the buffers.
 
     The input sample buffer must have the shape:
     [channels][samples_per_channel//times_per_block][n_ants][polarizations][times_per_block]
@@ -145,8 +145,8 @@ class TensorCoreCorrelator(accel.Operation):
     Currently only 8-bit input sample mode is supported.
     """
 
-    def __init__(self, template: TensorCoreCorrelatorTemplate, command_queue: accel.AbstractCommandQueue) -> None:
-        """Initialise the TensorCoreCorrelator object and specify the size of the memory buffers."""
+    def __init__(self, template: TensorCoreXEngineCoreTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+        """Initialise the TensorCoreXEngineCore object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
         self.slots["inSamples"] = accel.IOSlot(

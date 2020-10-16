@@ -8,7 +8,7 @@ Contains two unit tests:
     much larger array sizes.
 
 TODO:
-    1. Once the functionality has been added to the TensorCoreCorrelator class, add a unit test to verify that the
+    1. Once the functionality has been added to the TensorCoreXEngineCore class, add a unit test to verify that the
     kernel can be called multiple times without zeroing the visibility matrix.
 """
 import pytest
@@ -76,16 +76,16 @@ def test_correlator_exhaustive(num_ants):
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = tensorcore_correlator.TensorCoreCorrelatorTemplate(
+    template = tensorcore_correlator.TensorCoreXEngineCoreTemplate(
         ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
     )
-    tensorCoreCorrelator = template.instantiate(queue)
-    tensorCoreCorrelator.ensure_all_bound()
+    tensorCoreXEngineCore = template.instantiate(queue)
+    tensorCoreXEngineCore.ensure_all_bound()
 
-    bufSamples_device = tensorCoreCorrelator.buffer("inSamples")
+    bufSamples_device = tensorCoreXEngineCore.buffer("inSamples")
     bufSamples_host = bufSamples_device.empty_like()
 
-    bufVisibilities_device = tensorCoreCorrelator.buffer("outVisibilities")
+    bufVisibilities_device = tensorCoreXEngineCore.buffer("outVisibilities")
     bufVisibilities_host = bufVisibilities_device.empty_like()
 
     # 3. Generate random input data - need to modify the dtype and  shape of the array as numpy does not have a packet
@@ -107,7 +107,7 @@ def test_correlator_exhaustive(num_ants):
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
     bufSamples_device.set(queue, bufSamples_host)
-    tensorCoreCorrelator()
+    tensorCoreXEngineCore()
     bufVisibilities_device.get(queue, bufVisibilities_host)
 
     # 5. Check that the GPU visibilities are correct.
@@ -135,7 +135,7 @@ def test_correlator_exhaustive(num_ants):
                 hh, hv, vh, vv = generate_antpair_visibilities_host(
                     bufSamples_host, channel_index, ant1_index, ant2_index, time_outer_range, time_inner_range
                 )
-                baseline_index = tensorcore_correlator.TensorCoreCorrelator.get_baseline_index(ant1_index, ant2_index)
+                baseline_index = tensorcore_correlator.TensorCoreXEngineCore.get_baseline_index(ant1_index, ant2_index)
                 bufCorrectVisibilities_host[channel_index][baseline_index][0][0] = hh
                 bufCorrectVisibilities_host[channel_index][baseline_index][1][0] = hv
                 bufCorrectVisibilities_host[channel_index][baseline_index][0][1] = vh
@@ -165,7 +165,7 @@ def test_correlator_quick(num_ants):
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = tensorcore_correlator.TensorCoreCorrelatorTemplate(
+    template = tensorcore_correlator.TensorCoreXEngineCoreTemplate(
         ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
     )
     correlator = template.instantiate(queue)
@@ -211,7 +211,7 @@ def test_correlator_quick(num_ants):
                 ant1_value = ant1_value + ant1_value * 1j
                 ant2_value = get_simple_test_ant_value(channel_index, ant2_index)
                 ant2_value = ant2_value + ant2_value * 1j
-                baseline_index = tensorcore_correlator.TensorCoreCorrelator.get_baseline_index(ant1_index, ant2_index)
+                baseline_index = tensorcore_correlator.TensorCoreXEngineCore.get_baseline_index(ant1_index, ant2_index)
 
                 bufSamples_host.dtype = np.int8
                 product = ant1_value * np.conj(ant2_value)
