@@ -258,16 +258,19 @@ void stream::add_udp_pcap_file_reader(const std::string &filename)
 }
 
 void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
-                                  const std::string &interface_address,
-                                  std::size_t buffer_size, int comp_vector, int max_poll)
+                                const std::string &interface_address,
+                                std::size_t buffer_size, int comp_vector, int max_poll)
 {
-    std::vector<boost::asio::ip::udp::endpoint> endpoints2;
+    spead2::recv::udp_ibv_config config;
     for (const auto &ep : endpoints)
-        endpoints2.emplace_back(boost::asio::ip::address::from_string(ep.first), ep.second);
-    auto interface_address2 = boost::asio::ip::address::from_string(interface_address);
-    emplace_reader<spead2::recv::udp_ibv_reader>(
-        endpoints2, interface_address2, chunk_bytes + 128,
-        buffer_size, comp_vector, max_poll);
+        config.add_endpoint(boost::asio::ip::udp::endpoint(
+            boost::asio::ip::address::from_string(ep.first), ep.second));
+    config.set_interface_address(boost::asio::ip::address::from_string(interface_address));
+    config.set_max_size(chunk_bytes + 128);
+    config.set_buffer_size(buffer_size);
+    config.set_comp_vector(comp_vector);
+    config.set_max_poll(max_poll);
+    emplace_reader<spead2::recv::udp_ibv_reader>(config);
 }
 
 stream::ringbuffer_t &stream::get_ringbuffer()

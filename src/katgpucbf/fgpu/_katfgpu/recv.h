@@ -124,7 +124,7 @@ public:
     void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                             const std::string &interface_address,
                             std::size_t buffer_size, int comp_vector = 0,
-                            int max_poll = spead2::recv::udp_ibv_reader::default_max_poll);
+                            int max_poll = spead2::recv::udp_ibv_config::default_max_poll);
 
     /// Get the referenced ringbuffer
     ringbuffer_t &get_ringbuffer();

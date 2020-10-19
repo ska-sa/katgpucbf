@@ -65,7 +65,7 @@ py::module register_module(py::module &parent)
         .def("add_udp_ibv_reader", &stream::add_udp_ibv_reader,
              "endpoints"_a, "interface_address"_a, "buffer_size"_a,
              "comp_vector"_a = 0,
-             "max_poll"_a = spead2::recv::udp_ibv_reader::default_max_poll)
+             "max_poll"_a = spead2::recv::udp_ibv_config::default_max_poll)
         .def("stop", &stream::stop)
     ;
 
