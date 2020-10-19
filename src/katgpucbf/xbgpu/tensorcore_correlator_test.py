@@ -2,7 +2,7 @@
 Module for performing unit tests on the Tensor core correlation kernel.
 
 Contains two unit tests:
-    1. @test_correlator_exhaustive - this test is time consuming, taking many hours to run for larger input sizes. It
+    1. @test_correlator_exhaustive - this test is time-consuming, taking many hours to run for larger input sizes. It
     generates a high degree of certainty over the results.
     2. @test_correlator_quick - this test runs very quickly but is less exhaustive. It is used for quickly testing
     much larger array sizes.

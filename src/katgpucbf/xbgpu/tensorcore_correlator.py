@@ -64,7 +64,7 @@ class TensorCoreXEngineCoreTemplate:
             raise ValueError(
                 f"Sample_bitwidth must equal either 4, 8 or 16, currently equal to {self._sample_bitwidth}."
             )
-        if self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
+        elif self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
             raise ValueError(
                 f"Sample bitwidth of {self._sample_bitwidth} will eventually be supported but has not yet been implemented."
             )
