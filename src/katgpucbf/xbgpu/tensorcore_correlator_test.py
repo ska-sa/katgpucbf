@@ -126,8 +126,8 @@ def test_correlator_exhaustive(num_ants):
     # 5.2 Generate the visibilities on the CPU - this is not a simple matrix operation due to the indexing of the input
     # samples, I am just going to do a naive brute-force for now to be optomised later if needs be.
 
-    time_outer_range = n_samples_per_channel // template._n_times_per_block
-    time_inner_range = template._n_times_per_block
+    time_outer_range = n_samples_per_channel // template.n_times_per_block
+    time_inner_range = template.n_times_per_block
 
     for channel_index in range(0, n_channels):
         for ant1_index in range(0, n_ants):
@@ -171,7 +171,7 @@ def test_correlator_quick(num_ants):
     correlator = template.instantiate(queue)
     correlator.ensure_all_bound()
 
-    time_outer_range = n_samples_per_channel // template._n_times_per_block
+    time_outer_range = n_samples_per_channel // template.n_times_per_block
 
     bufSamples_device = correlator.buffer("inSamples")
     bufSamples_host = bufSamples_device.empty_like()

@@ -49,7 +49,7 @@ class TensorCoreXEngineCoreTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_samples_per_channel = n_samples_per_channel
-        self.n_polarizastions = 2  # Hardcoded to 2. No other values are supported
+        self.n_polarizations = 2  # Hardcoded to 2. No other values are supported
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
@@ -57,7 +57,7 @@ class TensorCoreXEngineCoreTemplate:
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
 
         # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
-        self._n_times_per_block = 128 // self._sample_bitwidth
+        self.n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
         if self._sample_bitwidth not in valid_bitwidths:
@@ -69,18 +69,18 @@ class TensorCoreXEngineCoreTemplate:
                 f"Sample bitwidth of {self._sample_bitwidth} will eventually be supported but has not yet been implemented."
             )
 
-        if self.n_samples_per_channel % self._n_times_per_block != 0:
-            raise ValueError(f"samples_per_channel must be divisible by {self._n_times_per_block}.")
+        if self.n_samples_per_channel % self.n_times_per_block != 0:
+            raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
         self.inputDataShape = (
             self.n_channels,
-            self.n_samples_per_channel // self._n_times_per_block,
+            self.n_samples_per_channel // self.n_times_per_block,
             self.n_ants,
-            self.n_polarizastions,
-            self._n_times_per_block,
+            self.n_polarizations,
+            self.n_times_per_block,
         )
-        self.outputDataShape = (self.n_channels, self.n_baselines, self.n_polarizastions, self.n_polarizastions)
+        self.outputDataShape = (self.n_channels, self.n_baselines, self.n_polarizations, self.n_polarizations)
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
         # of the object.
@@ -109,10 +109,10 @@ class TensorCoreXEngineCoreTemplate:
                 "n_ants": self.n_ants,
                 "sample_bitwidth": self._sample_bitwidth,
                 "n_channels": self.n_channels,
-                "n_polarizastions": self.n_polarizastions,
+                "n_polarizastions": self.n_polarizations,
                 "n_samples_per_channel": self.n_samples_per_channel,
                 "n_baselines": self.n_baselines,
-                "n_times_per_block": self._n_times_per_block,
+                "n_times_per_block": self.n_times_per_block,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
@@ -132,7 +132,13 @@ class TensorCoreXEngineCore(accel.Operation):
 
     The input sample buffer must have the shape:
     [channels][samples_per_channel//times_per_block][n_ants][polarizations][times_per_block]
-    In 8-bit input mode times_per_block is equal to 16. Each element is an complex 8-bit integer sample. Numpy does
+
+    A complexity that is introduced by the Tensor core kernel is that the samples_per_channel index is split over two
+    different indices. The first index ranges from 0 to samples_per_channel//times_per_block and the second index
+    ranges from 0 to times_per_block. Times per block is calculated by the TensorCoreXEngineCoreTemplate object.
+    In 8-bit input mode times_per_block is equal to 16.
+
+    Each input element is n complex 8-bit integer sample. Numpy does
     not support 8-bit complex numbers, so the input sample array has dtype of np.int16 as a placeholder.
     With 8-bit input samples, the value -128i is not supported by the kernel as there is no 8-bit complex conjugate
     representation of this number. Passing -128i into the kernel will produce incorrect values at the output.
