@@ -2,7 +2,7 @@ pipeline {
   agent {
     docker {
       image 'nvidia/cuda:10.1-devel-ubuntu18.04'
-      args '--network=host -u root'
+      args '--network=host -u root --gpus all'
     }
 
   }
