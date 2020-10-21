@@ -10,7 +10,6 @@ pipeline {
     stage('Configure Environment') {
       steps {
         sh 'pwd'
-        sh 'whoami'
         sh 'apt-get update && apt-get install -y python3.6 python3-pip'
         sh 'pip3 install -r requirements-dev.txt'
         sh 'pip3 install -r requirements.txt'
