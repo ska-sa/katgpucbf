@@ -1,17 +1,65 @@
+/* This file tells Jenkins how to test this repo. Everything runs in docker 
+ * containers, so in theory any Jenkins server should be able to parse this 
+ * file. However in the katxgpu case, the Jenkins server needs access to a GPU. 
+ * This means that the docker engine being used needs to have been configured to
+ * use the Nvidia Container Runtime and the node the container run on needs a 
+ * Nvidia GPU with the Nvidia Driver installed.
+ * 
+ * TODO:
+ *    1. Create a Dockerfile taking over the functionality of the "Configure
+ *     Environment" stage.
+ */
+
+
 pipeline {
   agent {
     docker {
+
+      /* This nvidia/cuda:10.1-devel-ubuntu18.04 docker image contains the CUDA 
+       * developement environment which is required to compile the kernels used
+       * by PyCUDA.
+       */
       image 'nvidia/cuda:10.1-devel-ubuntu18.04'
+
+      /* --gpus all: This argument passes the Nvidia driver and devices from the
+       * host to the container. It requires the NVIDIA Container Runtime to be 
+       * installed on the host.
+       * 
+       * --network=host: I was having trouble getting the docker container to 
+       * connect to the internet. This occured when I was using Jenkins in
+       * conjunction with docker in docker (dind). This flag resolved that
+       * issue. There are probably more elegant solutions, but I have not had a 
+       * chance to look into them.
+       *
+       * -u root: The container needs to be root when running the "apt-get
+       * install" commands. When that is moved to a docker file, this flag can 
+       * be removed.
+       */
       args '--gpus all --network=host -u root '
     }
-
   }
+
   stages {
+
+    /* This stage should ideally be part of the initial Docker image, as it
+     * takes time and downloads multple Gigabytes from the internet. A new 
+     * Dockerfile needs to be created that will extend the 
+     * nvidia/cuda:10.1-devel-ubuntu18.04 image to include this install.
+     */
     stage('Configure Environment') {
       steps {
-        sh 'pwd'
         sh 'apt-get update && apt-get install -y python3.6 python3-pip'
-        sh 'pip3 install -r requirements-dev.txt'
+      }
+    }
+
+    /* This stage is kept seperate from the "Install katxgpu package" stage
+     * below as the stage one will fail when something external goes wrong while
+     * the next stage will fail if we have done something wrong in the katxgpu
+     * package. It seems best to split them to make it easier to pinpoint the 
+     * source of the problem.
+     */
+    stage('Install required python packages'){
+      steps{
         sh 'pip3 install -r requirements.txt'
       }
     }
