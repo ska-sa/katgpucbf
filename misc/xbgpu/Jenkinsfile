@@ -61,6 +61,7 @@ pipeline {
      */
     stage('Install required python packages') {
       steps {
+        sh 'whoami'
         sh 'pip3 install -u -r requirements.txt'
         sh 'pip3 install -u -r requirements-dev.txt'
       }
