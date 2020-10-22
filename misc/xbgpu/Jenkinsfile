@@ -32,7 +32,7 @@ pipeline {
        * install" commands. When that is moved to a docker file, this flag can 
        * be removed.
        */
-      args '--gpus all --network=host -u root '
+      args '--gpus all --network=host'
     }
 
   }
@@ -47,7 +47,6 @@ pipeline {
       steps {
         sh 'apt-get update && apt-get install -y python3.6 python3-pip'
         sh 'pwd'
-        sh 'su jenkins'
       }
     }
 
