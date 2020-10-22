@@ -7,17 +7,17 @@
  * 
  * TODO:
  *    1. Create a Dockerfile taking over the functionality of the "Configure
- *     Environment" stage and commit it somewhere relevant
+ *     Environment" stage. Then set the container to not launch as root. This 
+ *     will solve many problems.
  */
 pipeline {
   agent {
     docker {
-      /* This custom image is built on the nvidia/cuda:10.1-devel-ubuntu18.04 
-       * image. It contains the CUDA developement environment which is required
-       * to compile the kernels as well as the python3 which is required to run
-       * katxgpu
+      /* This nvidia/cuda:10.1-devel-ubuntu18.04 docker image contains the CUDA 
+       * developement environment which is required to compile the kernels used
+       * by PyCUDA.
        */
-      image 'ubuntu18.04_cuda10.1_python3'
+      image 'nvidia/cuda:10.1-devel-ubuntu18.04'
 
       /* --gpus all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be 
@@ -28,30 +28,28 @@ pipeline {
        * conjunction with docker in docker (dind). This flag resolved that
        * issue. There are probably more elegant solutions, but I have not had a 
        * chance to look into them.
+       *
+       * -u root: The container needs to be root when running the "apt-get
+       * install" commands. When that is moved to a docker file, this flag can 
+       * be removed.
        */
-      args '--gpus all --network=host'
+      args '--gpus all --network=host -u root '
     }
 
   }
 
+  /* This stage should ideally be part of the initial Docker image, as it
+   * takes time and downloads multple Gigabytes from the internet. A new 
+   * Dockerfile needs to be created that will extend the 
+   * nvidia/cuda:10.1-devel-ubuntu18.04 image to include this install.
+   */
   stages {
-
-    /* This stage should ideally be part of the initial Docker image, as it
-     * takes time and downloads multple Gigabytes from the internet. A new 
-     * Dockerfile needs to be created that will extend the 
-     * nvidia/cuda:10.1-devel-ubuntu18.04 image to include this install.
-     *
-     * EDIT: I have put this stage into a Dockerfile, which has not yet been
-     * commited anywhere. I will do this eventually. The code has been left here
-     * a reminder of what to put in the docker file. The new image is called:
-     * ubuntu18.04_cuda10.1_python3
-     */
-    /*stage('Configure Environment') {
+    stage('Configure Environment') {
       steps {
         sh 'apt-get update && apt-get install -y python3.6 python3-pip'
-        sh 'su jenkins'
+
       }
-    }*/
+    }
 
     /* This stage is kept seperate from the "Install katxgpu package" stage
      * below as the stage one will fail when something external goes wrong while
@@ -61,8 +59,8 @@ pipeline {
      */
     stage('Install required python packages') {
       steps {
-        sh 'pip3 install --user -r requirements.txt'
-        sh 'pip3 install --user -r requirements-dev.txt'
+        sh 'pip3 install -r requirements.txt'
+        sh 'pip3 install -r requirements-dev.txt'
       }
     }
 
@@ -75,6 +73,18 @@ pipeline {
     stage('Run pytest') {
       steps {
         sh 'pytest -v --junitxml=reports/result.xml'
+      }
+    }
+
+    /* Required as the container executes as root, so jenkins cannot
+     * clean up all the generated files. This is definitly not ideal and 
+     * needs to be fixed. If the pipeline fails, these files need to be
+     * manually deleted as this stage will not run.
+     */
+    stage('Cleanup') {
+      steps {
+        sh 'rm -r *'
+        sh 'rm -r .[!.]*'
       }
     }
   }
