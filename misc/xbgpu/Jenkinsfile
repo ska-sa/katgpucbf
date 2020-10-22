@@ -32,9 +32,10 @@ pipeline {
       }
     }
 
-    stage('pwd') {
+    stage('Clean Up') {
       steps {
         sh 'pwd'
+        sh 'rm -r *'
       }
     }
 
