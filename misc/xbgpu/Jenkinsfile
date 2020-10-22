@@ -7,7 +7,7 @@
  * 
  * TODO:
  *    1. Create a Dockerfile taking over the functionality of the "Configure
- *     Environment" stage. Then set the container to not launch as root. This
+ *     Environment" stage. Then set the container to not launch as root. This 
  *     will solve many problems.
  */
 pipeline {
