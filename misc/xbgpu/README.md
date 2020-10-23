@@ -3,6 +3,14 @@ A tensor-core accelerated GPU-based X-engine.
 
 TODO: Update as development happens
 
+## License
+The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
+When it eventually goes public, this will need to be specified. We need to check with John Romein (the author of the 
+Tensor core X-Engine core kernel that is central to this repo) what license he is using. This will inform the choice of.
+license here.
+
+__DO NOT__ make this repo public before specifying the license.
+
 ## Requirements
 python3.6 and above
 
