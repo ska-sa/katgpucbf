@@ -10,7 +10,7 @@ setuptools.setup(
     version="0.0.1",
     author="Gareth Callanan",
     author_email="gcallanan@ska.ac.za",
-    description="GPU-accelerated X-Engine for the MeerKAT extension correlator",
+    description="GPU-accelerated X-Engine for the MeerKAT-Extension correlator",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/ska-sa/katxgpu",
