@@ -2,10 +2,10 @@
 Module wrapping the ASTRON Tensor Core Correlation Kernels in the MeerKAT katsdpsig proc framework.
 
 This module has two classes:
-    1. TensorCoreCorrelatorTemplate - This class allows for multiple different compilations of the same kernel with
+    1. TensorCoreXEngineCoreTemplate - This class allows for multiple different compilations of the same kernel with
     parameters to take place.
-    2. TensorCoreCorrelator - This class provides the interface to call the kernel created in a
-    TensorCoreCorrelatorTemplate object.
+    2. TensorCoreXEngineCore - This class provides the interface to call the kernel created in a
+    TensorCoreXEngineCoreTemplate object.
 
 TODO:
     1. Modify the kernel so that the visibility matrix is not zeroed after every kernel call. This will allow for much
@@ -19,78 +19,85 @@ TODO:
 import pkg_resources
 import numpy as np
 from katsdpsigproc import accel
+from katsdpsigproc import cuda
 
 
-class TensorCoreCorrelatorTemplate:
+class TensorCoreXEngineCoreTemplate:
     """
     Template class for compiling different variations of the Tensor core correlation kernel.
 
-    This object will be used to create a TensorCoreCorrelator object that will be able to run the created kernel.
+    This object will be used to create a TensorCoreXEngineCore object that will be able to run the created kernel.
     """
 
-    def __init__(
-        self, context: accel.AbstractContext, dual_pol_ants: int, channels: int, samples_per_channel: int
-    ) -> None:
+    def __init__(self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int) -> None:
         """
-        Initialise the TensorCoreCorrelatorTemplate class and compile the Tensor core correlation kernel.
+        Initialise the TensorCoreXEngineCoreTemplate class and compile the Tensor core correlation kernel.
 
         The parameters given to this function are used by this class to compile the kernel and by the
-        TensorCoreCorrelator to specify the shape of the memory buffers connected to this kernel.
+        TensorCoreXEngineCore to specify the shape of the memory buffers connected to this kernel.
 
         Parameters
         ----------
-        dual_pol_ants: int
+        n_ants: int
             The number of antennas that will be correlated. Each antennas is expected to produce two polarisations.
-        channels: int
+        n_channels: int
             The number of frequency channels to be processed.
-        samples_per_channel: int
+        n_samples_per_channel: int
             The number of time samples to be processed per frequency channel.
         """
         # 1. Set accesible member functions that are used to calculate indices to the input and output buffers.
-        self.dual_pol_ants = dual_pol_ants
-        self.channels = channels
-        self.samples_per_channel = samples_per_channel
-        self.polarizastions = 2  # Hardcoded to 2. No other values are supported
-        self.baselines = int(self.dual_pol_ants * (self.dual_pol_ants + 1) // 2)
+        self.n_ants = n_ants
+        self.n_channels = n_channels
+        self.n_samples_per_channel = n_samples_per_channel
+        self.n_polarizations = 2  # Hardcoded to 2. No other values are supported
+        self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
-        self._times_per_block = 128 // self._sample_bitwidth
+        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
 
-        if self._sample_bitwidth != 4 and self._sample_bitwidth != 8 and self._sample_bitwidth != 16:
+        # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
+        self.n_times_per_block = 128 // self._sample_bitwidth
+
+        valid_bitwidths = [4, 8, 16]
+        if self._sample_bitwidth not in valid_bitwidths:
             raise ValueError(
-                "sample_bitwidth must equal either 4, 8 or 16, currently equal to {0}.".format(self._sample_bitwidth)
+                f"Sample_bitwidth must equal either 4, 8 or 16, currently equal to {self._sample_bitwidth}."
+            )
+        elif self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
+            raise ValueError(
+                f"Sample bitwidth of {self._sample_bitwidth} will eventually be supported but has not yet been implemented."
             )
 
-        if self.samples_per_channel % self._times_per_block != 0:
-            raise ValueError("samples_per_channel must be divisible by {0}.".format(self._times_per_block))
+        if self.n_samples_per_channel % self.n_times_per_block != 0:
+            raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
         self.inputDataShape = (
-            self.channels,
-            self.samples_per_channel // self._times_per_block,
-            self.dual_pol_ants,
-            self.polarizastions,
-            self._times_per_block,
+            self.n_channels,
+            self.n_samples_per_channel // self.n_times_per_block,
+            self.n_ants,
+            self.n_polarizations,
+            self.n_times_per_block,
         )
-        self.outputDataShape = (self.channels, self.baselines, self.polarizastions, self.polarizastions)
+        self.outputDataShape = (self.n_channels, self.n_baselines, self.n_polarizations, self.n_polarizations)
 
-        # 4. Calculate the number of blocks - this remains constant for the lifetime of the object
-        if self._ants_per_block == 48:
-            self.nrBlocks = int(
-                ((self.dual_pol_ants + self._ants_per_block - 1) // self._ants_per_block)
-                * ((self.dual_pol_ants + self._ants_per_block - 1) // self._ants_per_block + 1)
+        # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
+        # of the object.
+        if self._n_ants_per_block == 48:
+            self.n_blocks = int(
+                ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
+                * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
                 // 2
             )
-        elif self._ants_per_block == 64:
-            self.nrBlocks = int(
-                ((self.dual_pol_ants + self._ants_per_block - 1) // self._ants_per_block)
-                * ((self.dual_pol_ants + self._ants_per_block - 1) // self._ants_per_block)
+        elif self._n_ants_per_block == 64:
+            self.n_blocks = int(
+                ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
+                * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
             )
         else:
             raise ValueError(
-                "ants_per_block must equal either 64 or 48, currently equal to {0}.".format(self._ants_per_block)
+                "ants_per_block must equal either 64 or 48, currently equal to {0}.".format(self._n_ants_per_block)
             )
 
         # 5. Compile the kernel
@@ -98,34 +105,40 @@ class TensorCoreCorrelatorTemplate:
             context,
             "kernels/tensor_core_correlation_kernel.cu",
             {
-                "ants_per_block": self._ants_per_block,
-                "dual_pol_ants": self.dual_pol_ants,
+                "n_ants_per_block": self._n_ants_per_block,
+                "n_ants": self.n_ants,
                 "sample_bitwidth": self._sample_bitwidth,
-                "channels": self.channels,
-                "polarizastions": self.polarizastions,
-                "samples_per_channel": self.samples_per_channel,
-                "baselines": self.baselines,
-                "times_per_block": self._times_per_block,
+                "n_channels": self.n_channels,
+                "n_polarizastions": self.n_polarizations,
+                "n_samples_per_channel": self.n_samples_per_channel,
+                "n_baselines": self.n_baselines,
+                "n_times_per_block": self.n_times_per_block,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("correlate")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "TensorCoreCorrelator":
-        """Create a TensorCoreCorrelator class using this template to build the kernel."""
-        return TensorCoreCorrelator(self, command_queue)
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "TensorCoreXEngineCore":
+        """Create a TensorCoreXEngineCore object using this template to build the kernel."""
+        return TensorCoreXEngineCore(self, command_queue)
 
 
-class TensorCoreCorrelator(accel.Operation):
+class TensorCoreXEngineCore(accel.Operation):
     """
-    Class containing a Tensor core kernel compiled from a TensorCoreCorrelatorTemplate.
+    Class containing a Tensor core kernel compiled from a TensorCoreXEngineCoreTemplate.
 
     This class specifies the shape of the input sample and output visibility buffers required by the kernel. The
-    parameters specified in the TensorCoreCorrelatorTemplate object are used to determine the shape of the buffers.
+    parameters specified in the TensorCoreXEngineCoreTemplate object are used to determine the shape of the buffers.
 
     The input sample buffer must have the shape:
-    [channels][samples_per_channel//times_per_block][dual_pol_ants][polarizations][times_per_block]
-    In 8-bit input mode times_per_block is equal to 16. Each element is an complex 8-bit integer sample. Numpy does
+    [channels][samples_per_channel//times_per_block][n_ants][polarizations][times_per_block]
+
+    A complexity that is introduced by the Tensor core kernel is that the samples_per_channel index is split over two
+    different indices. The first index ranges from 0 to samples_per_channel//times_per_block and the second index
+    ranges from 0 to times_per_block. Times per block is calculated by the TensorCoreXEngineCoreTemplate object.
+    In 8-bit input mode times_per_block is equal to 16.
+
+    Each input element is n complex 8-bit integer sample. Numpy does
     not support 8-bit complex numbers, so the input sample array has dtype of np.int16 as a placeholder.
     With 8-bit input samples, the value -128i is not supported by the kernel as there is no 8-bit complex conjugate
     representation of this number. Passing -128i into the kernel will produce incorrect values at the output.
@@ -136,8 +149,8 @@ class TensorCoreCorrelator(accel.Operation):
     Currently only 8-bit input sample mode is supported.
     """
 
-    def __init__(self, template: TensorCoreCorrelatorTemplate, command_queue: accel.AbstractCommandQueue) -> None:
-        """Initialise the TensorCoreCorrelator object and specify the size of the memory buffers."""
+    def __init__(self, template: TensorCoreXEngineCoreTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+        """Initialise the TensorCoreXEngineCore object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
         self.slots["inSamples"] = accel.IOSlot(
@@ -154,7 +167,7 @@ class TensorCoreCorrelator(accel.Operation):
             [outVisibilities_buffer.buffer, inSamples_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
             # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
-            global_size=(32 * self.template.nrBlocks, 2 * self.template.channels, 2 * 1),
+            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * 1),
             local_size=(32, 2, 2),
         )
 

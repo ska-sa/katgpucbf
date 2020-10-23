@@ -21,17 +21,17 @@
 #include <mma.h>
 
 <%include file="/port.mako"/>
-#define NR_STATIONS ${dual_pol_ants}
-#define NR_STATIONS_PER_BLOCK ${ants_per_block}
+#define NR_STATIONS ${n_ants}
+#define NR_STATIONS_PER_BLOCK ${n_ants_per_block}
 #define NR_BITS ${sample_bitwidth}
-#define NR_CHANNELS ${channels}
-#define NR_SAMPLES_PER_CHANNEL ${samples_per_channel}
-#define NR_POLARIZATIONS ${polarizastions}
+#define NR_CHANNELS ${n_channels}
+#define NR_SAMPLES_PER_CHANNEL ${n_samples_per_channel}
+#define NR_POLARIZATIONS ${n_polarizastions}
 
-#define NR_BASELINES ${baselines}
+#define NR_BASELINES ${n_baselines}
 #define ALIGN(A,N)		(((A)+(N)-1)/(N)*(N))
 
-#define NR_TIMES_PER_BLOCK	(${times_per_block})
+#define NR_TIMES_PER_BLOCK	(${n_times_per_block})
 #define NR_STATIONS_PER_TCM_X	((NR_BITS) == 4 ? 2 : 4)
 #define NR_STATIONS_PER_TCM_Y	((NR_BITS) == 4 ? 4 : 8)
 
