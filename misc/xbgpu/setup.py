@@ -18,7 +18,8 @@ setuptools.setup(
     package_data={"": ["kernels/*.mako"]},
     include_package_data=True,
     classifiers=[
-        # "License :: OSI Approved :: GNU General Public License v2 (GPLv2)", #I am not sure what is required here
+        # "License :: OSI Approved :: GNU General Public License v2 (GPLv2)", # TBD before taking this repo public
+        "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.6",
         "Topic :: Scientific/Engineering :: Astronomy",
     ],
