@@ -13,7 +13,7 @@ TODO:
 """
 import pytest
 import numpy as np
-import tensorcore_correlator
+from katxgpu import tensorcore_xengine_core
 from katsdpsigproc import accel
 
 # Array specifying different array sizes that could potentially be used by MeerKAT
@@ -76,7 +76,7 @@ def test_correlator_exhaustive(num_ants):
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = tensorcore_correlator.TensorCoreXEngineCoreTemplate(
+    template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
         ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
     )
     tensorCoreXEngineCore = template.instantiate(queue)
@@ -135,7 +135,9 @@ def test_correlator_exhaustive(num_ants):
                 hh, hv, vh, vv = generate_antpair_visibilities_host(
                     bufSamples_host, channel_index, ant1_index, ant2_index, time_outer_range, time_inner_range
                 )
-                baseline_index = tensorcore_correlator.TensorCoreXEngineCore.get_baseline_index(ant1_index, ant2_index)
+                baseline_index = tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(
+                    ant1_index, ant2_index
+                )
                 bufCorrectVisibilities_host[channel_index][baseline_index][0][0] = hh
                 bufCorrectVisibilities_host[channel_index][baseline_index][1][0] = hv
                 bufCorrectVisibilities_host[channel_index][baseline_index][0][1] = vh
@@ -165,7 +167,7 @@ def test_correlator_quick(num_ants):
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = tensorcore_correlator.TensorCoreXEngineCoreTemplate(
+    template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
         ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
     )
     correlator = template.instantiate(queue)
@@ -211,7 +213,9 @@ def test_correlator_quick(num_ants):
                 ant1_value = ant1_value + ant1_value * 1j
                 ant2_value = get_simple_test_ant_value(channel_index, ant2_index)
                 ant2_value = ant2_value + ant2_value * 1j
-                baseline_index = tensorcore_correlator.TensorCoreXEngineCore.get_baseline_index(ant1_index, ant2_index)
+                baseline_index = tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(
+                    ant1_index, ant2_index
+                )
 
                 bufSamples_host.dtype = np.int8
                 product = ant1_value * np.conj(ant2_value)
