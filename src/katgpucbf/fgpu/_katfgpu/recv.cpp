@@ -266,7 +266,7 @@ void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::ui
         config.add_endpoint(boost::asio::ip::udp::endpoint(
             boost::asio::ip::address::from_string(ep.first), ep.second));
     config.set_interface_address(boost::asio::ip::address::from_string(interface_address));
-    config.set_max_size(chunk_bytes + 128);
+    config.set_max_size(packet_bytes + 128);
     config.set_buffer_size(buffer_size);
     config.set_comp_vector(comp_vector);
     config.set_max_poll(max_poll);
