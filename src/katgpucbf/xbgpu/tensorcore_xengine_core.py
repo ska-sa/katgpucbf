@@ -13,7 +13,7 @@ TODO:
     2. Fix the floating close brace in the tensor_core_correlation_kernel.cu file. The reasons for it are described in
     that file.
     3. Eventually modify the classes to support 4 and 16 bit input samples. The kernel supports this, but it is not
-    exposed to the reader. There is no use case for this at the moment, so this is a low priority.
+    exposed to the reader. There is no use case for this at the moment, so this is a low priority. 
 """
 
 import pkg_resources

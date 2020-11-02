@@ -12,9 +12,9 @@ license here.
 __DO NOT__ make this repo public before specifying the license.
 
 ## Requirements
-python3.6 and above.
-GPU of compute capability 7.5 or above.
-CUDA version 10.1 or above.
+1. python3.6 and above.
+2. Nvidia GPU of compute capability 7.5 or above.
+3. CUDA version 10.1 or above.
 
 ## Installation
 1. Create a python 3.6 virtual environment: `virtualenv -p python3.6 <venv name>`.
