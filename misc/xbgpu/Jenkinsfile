@@ -17,7 +17,7 @@ pipeline {
        * developement environment which is required to compile the kernels used
        * by PyCUDA.
        */
-      image 'ubuntu18.04_cuda10.1_python3'
+      image 'nvidia/cuda:10.1-devel-ubuntu18.04'
 
       /* --gpus all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be 
@@ -33,7 +33,7 @@ pipeline {
        * install" commands. When that is moved to a docker file, this flag can 
        * be removed.
        */
-      args '--gpus all --network=host'
+      args '--gpus all --network=host -u root '
     }
 
   }
@@ -44,16 +44,10 @@ pipeline {
    * nvidia/cuda:10.1-devel-ubuntu18.04 image to include this install.
    */
   stages {
-    //stage('Configure Environment') {
-    //  steps {
-    //    sh 'apt-get update && apt-get install -y python3.6 python3-pip git'
-    //
-    //  }
-    //}
-
-    stage('Create a virtual environment') {
+    stage('Configure Environment') {
       steps {
-        sh 'virtualenv -p python3.6 venv'
+        sh 'apt-get update && apt-get install -y python3.6 python3-pip git'
+
       }
     }
 
@@ -65,8 +59,8 @@ pipeline {
      */
     stage('Install required python packages') {
       steps {
-        sh 'venv/bin/pip install -r requirements.txt'
-        sh 'venv/bin/pip install -r requirements-dev.txt'
+        sh 'pip3 install -r requirements.txt'
+        sh 'pip3 install -r requirements-dev.txt'
       }
     }
 
@@ -76,20 +70,20 @@ pipeline {
      */
     stage('Check pre-commit hooks have been applied') {
       steps {
-        sh 'venv/bin/pre-commit install'
-        sh 'venv/bin/pre-commit run --all-files'
+        sh 'pre-commit install'
+        sh 'pre-commit run --all-files'
       }
     }
 
     stage('Install katxgpu package') {
       steps {
-        sh 'venv/bin/pip install -e .'
+        sh 'pip3 install -e .'
       }
     }
 
     stage('Run pytest') {
       steps {
-        sh 'venv/bin/pytest -v --junitxml=reports/result.xml'
+        sh 'pytest -v --junitxml=reports/result.xml'
       }
     }
 
