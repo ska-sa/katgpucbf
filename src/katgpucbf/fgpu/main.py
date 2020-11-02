@@ -152,7 +152,7 @@ async def async_main() -> None:
             quant_scale=args.quant_scale,
             mask_timestamp=args.mask_timestamp,
             monitor=monitor)
-    await engine.run()
+        await engine.run()
 
 
 def main() -> None:

@@ -119,6 +119,7 @@ class Processor:
         self.out_queue = monitor.make_queue('out_queue', n_out)   # type: asyncio.Queue[OutItem]
         self.out_free_queue = monitor.make_queue(
             'out_free_queue', n_out)                              # type: asyncio.Queue[OutItem]
+        self.monitor = monitor
         for i in range(n_in):
             self.in_free_queue.put_nowait(InItem(compute))
         for i in range(n_out):
@@ -153,13 +154,15 @@ class Processor:
         return self.compute.pols
 
     async def _next_in(self) -> None:
-        self._in_items.append(await self.in_queue.get())
+        with self.monitor.with_state('run_processing', 'wait in_queue'):
+            self._in_items.append(await self.in_queue.get())
         # print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
         #       f'{self._in_items[-1].n_samples} samples')
         self._in_items[-1].enqueue_wait(self.compute.command_queue)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
-        item = await self.out_free_queue.get()
+        with self.monitor.with_state('run_processing', 'wait out_free_queue'):
+            item = await self.out_free_queue.get()
         item.enqueue_wait(self.compute.command_queue)
         item.reset(new_timestamp)
         return item
@@ -278,8 +281,10 @@ class Processor:
 
     async def run_receive(self, streams: List[recv.Stream]) -> None:
         async for chunks in recv.chunk_sets(streams):
-            in_item = await self.in_free_queue.get()
-            await async_wait_for_events(in_item.events)
+            with self.monitor.with_state('run_receive', 'wait in_free_queue'):
+                in_item = await self.in_free_queue.get()
+            with self.monitor.with_state('run_receive', 'wait events'):
+                await async_wait_for_events(in_item.events)
             in_item.reset(chunks[0].timestamp)
             in_item.n_samples = chunks[0].base.nbytes * 8 // self.sample_bits
             transfer_events = []
@@ -292,15 +297,18 @@ class Processor:
             in_item.events.extend(transfer_events)
             self.in_queue.put_nowait(in_item)
             for pol in range(len(chunks)):
-                await async_wait_for_events([transfer_events[pol]])
+                with self.monitor.with_state('run_receive', 'wait transfer'):
+                    await async_wait_for_events([transfer_events[pol]])
                 streams[pol].add_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
         free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring)
         while True:
-            out_item = await self.out_queue.get()
+            with self.monitor.with_state('run_transmit', 'wait out_queue'):
+                out_item = await self.out_queue.get()
             self._download_queue.enqueue_wait_for_events(out_item.events)
-            chunk = await free_ring.async_pop()
+            with self.monitor.with_state('run_transmit', 'wait free_ring'):
+                chunk = await free_ring.async_pop()
             # TODO: use get_region since it might be partial
             out_item.spectra.get_async(self._download_queue, chunk.base)
             chunk.timestamp = out_item.timestamp
@@ -309,7 +317,8 @@ class Processor:
             chunk.frames = out_item.n_spectra // self.acc_len
             chunk.pols = self.pols
             transfer_event = self._download_queue.enqueue_marker()
-            await async_wait_for_events([transfer_event])
+            with self.monitor.with_state('run_transmit', 'wait transfer'):
+                await async_wait_for_events([transfer_event])
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             sender.send_chunk(chunk)

@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 import asyncio
+import contextlib
 import json
 from time import monotonic
 from typing import TypeVar, Any
@@ -20,6 +21,16 @@ class Monitor(ABC):
     @abstractmethod
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
         pass
+
+    @abstractmethod
+    def event_state(self, name: str, state: str) -> None:
+        pass
+
+    @contextlib.contextmanager
+    def with_state(self, name: str, state: str, return_state: str = 'other') -> None:
+        self.event_state(name, state)
+        yield
+        self.event_state(name, return_state)
 
     def make_queue(self, name: str, maxsize: int = 0) -> asyncio.Queue:
         self.event_qsize(name, 0, maxsize)
@@ -57,9 +68,24 @@ class FileMonitor(Monitor):
         )
         print(file=self._file)
 
+    def event_state(self, name: str, state: str) -> None:
+        json.dump(
+            {
+                'time': self.time(),
+                'type': 'state',
+                'name': name,
+                'state': state
+            },
+            self._file
+        )
+        print(file=self._file)
+
 
 class NullMonitor(Monitor):
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
+        pass
+
+    def event_state(self, name: str, state: str) -> None:
         pass
 
     def make_queue(self, name: str, maxsize: int = 0) -> asyncio.Queue:
