@@ -86,27 +86,6 @@ pipeline {
         sh 'pytest -v --junitxml=reports/result.xml'
       }
     }
-
-    /* Required as the container executes as root, so jenkins cannot
-     * clean up all the generated files. This is definitly not ideal and 
-     * needs to be fixed. If the pipeline fails, these files need to be
-     * manually deleted as this stage will not run.
-     */
-    stage('Cleanup') {
-      steps {
-        sh 'rm -r *'
-        sh 'rm -r .[!.]*'
-      }
-    }
-  }
-
-  post {
-    always {
-      /* Deleting the working directory is especially important when running the
-       * container as root as the Jenkins pipeline is unable to clear the 
-       * necessary files when running the next test.
-       */
-      deleteDir() 
-    }
+    
   }
 }

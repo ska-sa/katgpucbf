@@ -55,14 +55,6 @@ installed.
 3. The Nvidia driver installed on the host machine needs to be compatible with the cuda 10.1 as the unit test will run
 on an image based on the nvidia/cuda:10.1-devel-ubuntu18.04 container.
 
-Known bugs:
-1. __critical__: When the Jenkins build fails, it does not clean up its working directory properly. This is because the 
-docker container running the pipeline is run as root(more details in the [Jenkinsfile](./Jenkinsfile). When the container 
-quits, the docker user does not have the correct permission to delete these files. All succesive builds will fail unless 
-the katxgpu_jenkins_test folder in /var/jenkins_home/workspace of the Jenkins servier is manually deleted. On a success,
-the Jenkinsfile has been hacked a bit to delete these files automatically. This should not take too long to fix, but I
-do not have the time at the moment.
-
 This should all be happening automatically on SARAO's servers, but if you fork this repo and want to set up your own CI
 server, these steps should help you on your way. A [document](https://docs.google.com/document/d/1iiZk7aEjsAcewM-wDX3Iz9osiTiyOhr3sYYzcmsv4mM/edit?usp=sharing) describes in more detail how Jenkins is configured on SARAO's servers. This document is a work in progress.
 
