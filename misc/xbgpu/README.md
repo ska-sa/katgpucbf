@@ -38,9 +38,10 @@ This assumes the package installation and pre-commit configuration has already b
 
 ## Jenkins CI
 
-Jenkins has been integrated into this repo. Everytime a commit is pushed to github, a Jenkins server will pull a copy of
-the commit and run the unit tests. The test configuration is specified in the [Jenkinsfile](./Jenkinsfile) in this repo.
-The Jenkins build pipeline will execute this pipeline in a docker container.
+Jenkins has been integrated into this repo. On every PR and at least once a day, Jenkins will scan the repo for changes
+and if detected, will run the test pipeline. The test will run on the PR branch or the branch where there are detected 
+changes (as long as the branch has a Jenkinsfile). The test configuration is specified in the
+[Jenkinsfile](./Jenkinsfile) in this repo. The Jenkins build pipeline will execute this pipeline in a docker container.
 
 In theory, any Jenkins server should be able run the pipeline from the Jenkinsfile, however for this repo, there are a 
 few additional requirements:
