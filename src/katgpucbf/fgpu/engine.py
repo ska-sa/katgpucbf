@@ -8,6 +8,7 @@ from . import recv, send
 from .compute import ComputeTemplate
 from .process import Processor
 from .delay import MultiDelayModel
+from .monitor import Monitor
 from .types import AbstractContext
 
 
@@ -44,7 +45,8 @@ class Engine:
                  spectra: int, acc_len: int,
                  channels: int, taps: int,
                  quant_scale: float,
-                 mask_timestamp: bool) -> None:
+                 mask_timestamp: bool,
+                 monitor: Monitor) -> None:
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -56,7 +58,7 @@ class Engine:
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model)
+        self._processor = Processor(compute, self.delay_model, monitor)
 
         ring = recv.Ringbuffer(2)
         self._srcs = list(srcs)

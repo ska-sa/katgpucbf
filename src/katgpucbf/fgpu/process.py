@@ -9,6 +9,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .delay import AbstractDelayModel
 from .compute import Compute
 from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
+from .monitor import Monitor
 from . import recv, send, ringbuffer
 
 
@@ -107,16 +108,20 @@ class OutItem(EventItem):
 
 
 class Processor:
-    def __init__(self, compute: Compute, delay_model: AbstractDelayModel) -> None:
+    def __init__(self, compute: Compute, delay_model: AbstractDelayModel, monitor: Monitor) -> None:
         self.compute = compute
         self.delay_model = delay_model
-        self.in_queue = asyncio.Queue()        # type: asyncio.Queue[InItem]
-        self.in_free_queue = asyncio.Queue()   # type: asyncio.Queue[InItem]
-        self.out_queue = asyncio.Queue()       # type: asyncio.Queue[OutItem]
-        self.out_free_queue = asyncio.Queue()  # type: asyncio.Queue[OutItem]
-        for i in range(3):
+        n_in = 3
+        n_out = 1
+        self.in_queue = monitor.make_queue('in_queue', n_in)      # type: asyncio.Queue[InItem]
+        self.in_free_queue = monitor.make_queue(
+            'in_free_queue', n_in)                                # type: asyncio.Queue[InItem]
+        self.out_queue = monitor.make_queue('out_queue', n_out)   # type: asyncio.Queue[OutItem]
+        self.out_free_queue = monitor.make_queue(
+            'out_free_queue', n_out)                              # type: asyncio.Queue[OutItem]
+        for i in range(n_in):
             self.in_free_queue.put_nowait(InItem(compute))
-        for i in range(1):
+        for i in range(n_out):
             self.out_free_queue.put_nowait(OutItem(compute))
         self._in_items: Deque[InItem] = deque()
         self._out_item = OutItem(compute)
