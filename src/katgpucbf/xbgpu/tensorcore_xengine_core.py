@@ -8,11 +8,9 @@ This module has two classes:
     TensorCoreXEngineCoreTemplate object.
 
 TODO:
-    1. Modify the kernel so that the visibility matrix is not zeroed after every kernel call. This will allow for much
-    longer integration times to occur without consuming all GPU memory.
-    2. Fix the floating close brace in the tensor_core_correlation_kernel.cu file. The reasons for it are described in
+    1. Fix the floating close brace in the tensor_core_correlation_kernel.cu file. The reasons for it are described in
     that file.
-    3. Eventually modify the classes to support 4 and 16 bit input samples. The kernel supports this, but it is not
+    2. Eventually modify the classes to support 4 and 16 bit input samples. The kernel supports this, but it is not
     exposed to the reader. There is no use case for this at the moment, so this is a low priority.
 """
 
@@ -159,7 +157,7 @@ class TensorCoreXEngineCore(accel.Operation):
         self.slots["outVisibilities"] = accel.IOSlot(dimensions=self.template.outputDataShape, dtype=np.int64)
 
     def _run(self) -> None:
-        """Run the correlation kernel."""
+        """Run the correlation kernel and add the generated values to the outVisibilities buffer."""
         inSamples_buffer = self.buffer("inSamples")
         outVisibilities_buffer = self.buffer("outVisibilities")
         self.command_queue.enqueue_kernel(
