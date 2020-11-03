@@ -171,6 +171,10 @@ class TensorCoreXEngineCore(accel.Operation):
             local_size=(32, 2, 2),
         )
 
+    def zero_visibilities(self):
+        """TODO: Fill this out."""
+        self.buffer("outVisibilities").zero(self.command_queue)
+
     @staticmethod
     def get_baseline_index(ant1, ant2):
         """
