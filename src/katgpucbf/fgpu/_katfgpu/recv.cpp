@@ -36,11 +36,17 @@ void allocator::free(std::uint8_t *ptr, void *user)
 
 
 stream::stream(int pol, int sample_bits, std::size_t packet_samples,
-                   std::size_t chunk_samples, ringbuffer_t &ringbuffer,
-                   int thread_affinity, bool mask_timestamp)
+               std::size_t chunk_samples, ringbuffer_t &ringbuffer,
+               int thread_affinity, bool mask_timestamp)
     : spead2::thread_pool(
         1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
-    spead2::recv::stream(*static_cast<thread_pool *>(this), 0, 1),
+    spead2::recv::stream(
+        *static_cast<thread_pool *>(this),
+        spead2::recv::stream_config()
+            .set_max_heaps(1)
+            .set_allow_unsized_heaps(false)
+            .set_memory_allocator(std::make_shared<katfgpu::recv::allocator>(*this))
+    ),
     pol(pol),
     sample_bits(sample_bits),
     packet_samples(packet_samples),
@@ -61,8 +67,6 @@ stream::stream(int pol, int sample_bits, std::size_t packet_samples,
         throw std::invalid_argument("packet_samples must be a multiple of 8");
     if (chunk_samples % packet_samples != 0)
         throw std::invalid_argument("chunk_samples must be a multiple of packet_samples");
-    set_allow_unsized_heaps(false);
-    set_memory_allocator(std::make_shared<katfgpu::recv::allocator>(*this));
 }
 
 stream::~stream()
@@ -254,16 +258,19 @@ void stream::add_udp_pcap_file_reader(const std::string &filename)
 }
 
 void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
-                                  const std::string &interface_address,
-                                  std::size_t buffer_size, int comp_vector, int max_poll)
+                                const std::string &interface_address,
+                                std::size_t buffer_size, int comp_vector, int max_poll)
 {
-    std::vector<boost::asio::ip::udp::endpoint> endpoints2;
+    spead2::recv::udp_ibv_config config;
     for (const auto &ep : endpoints)
-        endpoints2.emplace_back(boost::asio::ip::address::from_string(ep.first), ep.second);
-    auto interface_address2 = boost::asio::ip::address::from_string(interface_address);
-    emplace_reader<spead2::recv::udp_ibv_reader>(
-        endpoints2, interface_address2, chunk_bytes + 128,
-        buffer_size, comp_vector, max_poll);
+        config.add_endpoint(boost::asio::ip::udp::endpoint(
+            boost::asio::ip::address::from_string(ep.first), ep.second));
+    config.set_interface_address(boost::asio::ip::address::from_string(interface_address));
+    config.set_max_size(packet_bytes + 128);
+    config.set_buffer_size(buffer_size);
+    config.set_comp_vector(comp_vector);
+    config.set_max_poll(max_poll);
+    emplace_reader<spead2::recv::udp_ibv_reader>(config);
 }
 
 stream::ringbuffer_t &stream::get_ringbuffer()

@@ -148,16 +148,15 @@ struct heap_data
 
 struct polarisation
 {
-    std::vector<boost::asio::ip::udp::endpoint> endpoints;
     std::vector<heap_data> heaps;
-    std::size_t next_endpoint = 0;
+    std::size_t base_substream;
+    std::size_t n_substreams;
+    std::size_t next_substream = 0;   // relative to base_substream
     std::size_t next = 0;
     std::int64_t timestamp = 0;
 
-    polarisation(const options &opts,
-                 const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
-                 int pol)
-        : endpoints(endpoints)
+    polarisation(const options &opts, std::size_t base_substream, std::size_t n_substreams, int pol)
+        : base_substream(base_substream), n_substreams(n_substreams)
     {
         std::size_t capacity = opts.signal_heaps;
         while (capacity < std::size_t(opts.max_heaps))
@@ -172,37 +171,73 @@ struct polarisation
     {
         heaps[next].heap.get_item(heaps[next].timestamp_handle).data.immediate = timestamp;
         timestamp += heap_samples;
-        stream.async_send_heap(heaps[next].heap, callback, -1, endpoints[next_endpoint]);
+        stream.async_send_heap(heaps[next].heap, callback, -1, base_substream + next_substream);
         next = (next + 1) % heaps.size();
-        next_endpoint = (next_endpoint + 1) % endpoints.size();
+        next_substream = (next_substream + 1) % n_substreams;
     }
 };
+
+template<typename T>
+static std::vector<T> flatten(const std::vector<std::vector<T>> &in)
+{
+    std::vector<T> out;
+    for (const auto &x : in)
+        out.insert(out.end(), x.begin(), x.end());
+    return out;
+}
 
 struct digitiser
 {
     boost::asio::io_service io_service;
-    spead2::send::udp_ibv_stream stream;
     std::vector<polarisation> pols;
+    spead2::send::udp_ibv_stream stream;
     std::size_t next_pol = 0;
+
+    static std::vector<polarisation> make_pols(
+        const options &opts,
+        const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints)
+    {
+        std::vector<polarisation> pols;
+        pols.reserve(endpoints.size());
+        int pol = 0;
+        std::size_t base_substream = 0;
+        for (const auto &ep : endpoints)
+        {
+            pols.emplace_back(opts, base_substream, ep.size(), pol);
+            pol++;
+            base_substream += ep.size();
+        }
+        return pols;
+    }
+
+    static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
+        const std::vector<polarisation> &pols)
+    {
+        std::vector<std::pair<const void *, std::size_t>> memory_regions;
+        for (const auto &pol : pols)
+            for (const auto &heap : pol.heaps)
+                memory_regions.emplace_back(heap.data.get(), heap_size);
+        return memory_regions;
+    }
 
     digitiser(const options &opts,
               const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
               const boost::asio::ip::address &interface_address)
-        : stream(io_service, endpoints[0][0],
-                 spead2::send::stream_config(
-                     heap_size + 128,  // Doesn't matter, just needs to be bigger than actual size
-                     endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size,
-                     65536, opts.max_heaps),
-                 interface_address, spead2::send::udp_ibv_stream::default_buffer_size,
-                 opts.ttl)
+        : pols(make_pols(opts, endpoints)),
+        stream(
+            io_service,
+            spead2::send::stream_config()
+                // Value doesn't matter, just needs to be bigger than actual size
+                .set_max_packet_size(heap_size + 128)
+                .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
+                .set_max_heaps(opts.max_heaps),
+            spead2::send::udp_ibv_config()
+                .set_endpoints(flatten(endpoints))
+                .set_interface_address(interface_address)
+                .set_ttl(opts.ttl)
+                .set_memory_regions(get_memory_regions(pols))
+        )
     {
-        pols.reserve(endpoints.size());
-        int pol = 0;
-        for (const auto &ep : endpoints)
-        {
-            pols.emplace_back(opts, ep, pol);
-            pol++;
-        }
     }
 
     void callback(const boost::system::error_code &ec, std::size_t)

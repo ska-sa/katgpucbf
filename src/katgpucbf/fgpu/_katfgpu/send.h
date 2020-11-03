@@ -42,23 +42,17 @@ using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>, spead2::semaphor
 class sender
 {
 private:
-    std::vector<std::unique_ptr<spead2::thread_pool>> workers;
-    std::vector<std::unique_ptr<spead2::send::stream>> streams;
-    std::vector<int> comp_vector;
+    spead2::thread_pool thread_pool;
+    std::unique_ptr<spead2::send::stream> stream;
     ringbuffer_t free_ring;
 
 public:
-    sender(int streams, int free_ring_space,
-           const std::vector<int> &thread_affinity = {},
-           const std::vector<int> &comp_vector = {});
+    sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
+           int thread_affinity, int comp_vector,
+           const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+           int ttl, const std::string &interface_address, bool ibv,
+           std::size_t max_packet_size, double rate, std::size_t max_heaps);
     ~sender();
-
-    template<typename Stream, typename... Args>
-    void emplace_stream(Args&&... args);
-
-    void add_udp_stream(const std::string &address, std::uint16_t port,
-                        int ttl, const std::string &interface_address, bool ibv,
-                        std::size_t max_packet_size, double rate, std::size_t max_heaps);
 
     /// Send a chunk asynchronously, and put it onto the free ring when complete.
     void send_chunk(std::unique_ptr<chunk> &&c);
