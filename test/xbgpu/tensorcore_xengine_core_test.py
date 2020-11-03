@@ -17,7 +17,7 @@ from katxgpu import tensorcore_xengine_core
 from katsdpsigproc import accel
 
 # Array specifying different array sizes that could potentially be used by MeerKAT
-array_size = [4]  # , 8, 16, 32, 64, 84, 192, 256]
+array_size = [4, 8, 16, 32, 64, 84, 192, 256]
 
 
 def get_simple_test_ant_value(channel_index, ant_index):
@@ -57,66 +57,6 @@ def generate_antpair_visibilities_host(bufSamples_host, channel_index, ant1, ant
             vv += ant1v * np.conj(ant2v)
 
     return hh, hv, vh, vv
-
-
-@pytest.mark.parametrize("num_ants", array_size)
-def test_multikernel_accumulation(num_ants):
-    """TODO: Fill this out."""
-    # 1. Array parameters
-    n_ants = num_ants
-    n_channels = 16
-    n_samples_per_channel = 16
-
-    # 2. Initialise GPU kernels and buffers.
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    queue = ctx.create_command_queue()
-
-    template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
-    )
-    tensorCoreXEngineCore = template.instantiate(queue)
-    tensorCoreXEngineCore.ensure_all_bound()
-
-    bufSamples_device = tensorCoreXEngineCore.buffer("inSamples")
-    bufSamples_host = bufSamples_device.empty_like()
-
-    bufVisibilities_device = tensorCoreXEngineCore.buffer("outVisibilities")
-    bufVisibilities_host = bufVisibilities_device.empty_like()
-
-    # 3. Populate sample buffer so that all real and complex values samples are the same.
-    sample_value_i8 = 8
-    sample_value_i16 = ((sample_value_i8 << 8) + sample_value_i8) & 0xFFFF
-    bufSamples_host = np.full(bufSamples_host.shape, sample_value_i16, dtype=np.int16)
-
-    # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
-    bufSamples_device.set(queue, bufSamples_host)
-    tensorCoreXEngineCore()
-    bufVisibilities_device.get(queue, bufVisibilities_host)
-
-    # 5. Check that first accumulation works
-    expected_output_real = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
-    expected_output_imaginary = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
-    output_value_i64 = (expected_output_imaginary * n_samples_per_channel) << 32
-    output_value_i64 = output_value_i64 + (expected_output_real * n_samples_per_channel)
-    np.testing.assert_equal(bufVisibilities_host, output_value_i64)
-
-    # 6. Run kernel on same data, transfer output visibilities array to the CPU.
-    bufSamples_device.set(queue, bufSamples_host)
-    tensorCoreXEngineCore()
-    bufVisibilities_device.get(queue, bufVisibilities_host)
-
-    # 7. Check that the second accumulation works
-    expected_output_real = expected_output_real * 2
-    expected_output_imaginary = expected_output_imaginary * 2
-    output_value_i64 = (expected_output_imaginary * n_samples_per_channel) << 32
-    output_value_i64 = output_value_i64 + (expected_output_real * n_samples_per_channel)
-    np.testing.assert_equal(bufVisibilities_host, output_value_i64)
-
-    # TODO. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is
-    # actually zero.
-    tensorCoreXEngineCore.zero_visibilities()
-    bufVisibilities_device.get(queue, bufVisibilities_host)
-    np.testing.assert_equal(bufVisibilities_host, 0)
 
 
 @pytest.mark.parametrize("num_ants", array_size)
@@ -285,3 +225,81 @@ def test_correlator_quick(num_ants):
                 assert bufVisibilities_host[channel_index][baseline_index][1][0] == productAccumulated
                 assert bufVisibilities_host[channel_index][baseline_index][0][1] == productAccumulated
                 assert bufVisibilities_host[channel_index][baseline_index][1][1] == productAccumulated
+
+
+@pytest.mark.parametrize("num_ants", array_size)
+def test_multikernel_accumulation(num_ants):
+    """
+    Unit test that checks that the Tensor correlation algorithm can accumulate over a number of kernel calls.
+
+    This unit test sets all the input samples to the same value. The output visibilities values are then all the same.
+    This dramatically reduces the time taken to check that the multikernel accumulation works correctly. It is not
+    required that these values all be random, as that is tested in the @test_correlator_exhaustive function.
+    """
+    # 1. Array parameters
+    n_ants = num_ants
+    n_channels = 16
+    n_samples_per_channel = 16
+    n_kernel_launches = 10
+
+    # 2. Initialise GPU kernels and buffers.
+    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
+    queue = ctx.create_command_queue()
+
+    template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
+        ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
+    )
+    tensorCoreXEngineCore = template.instantiate(queue)
+    tensorCoreXEngineCore.ensure_all_bound()
+
+    bufSamples_device = tensorCoreXEngineCore.buffer("inSamples")
+    bufSamples_host = bufSamples_device.empty_like()
+
+    bufVisibilities_device = tensorCoreXEngineCore.buffer("outVisibilities")
+    bufVisibilities_host = bufVisibilities_device.empty_like()
+
+    # 3. Populate sample buffer so that all real and complex values samples are the same. The real and complex 8-bit
+    # values are combined into a single 16-bit integer. This is easier to duplicate across the entire buffer.
+    sample_value_i8 = 8
+    sample_value_i16 = ((sample_value_i8 << 8) + sample_value_i8) & 0xFFFF
+    bufSamples_host = np.full(bufSamples_host.shape, sample_value_i16, dtype=np.int16)
+
+    # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
+    bufSamples_device.set(queue, bufSamples_host)
+    tensorCoreXEngineCore()
+    bufVisibilities_device.get(queue, bufVisibilities_host)
+
+    # 5. Test that the data on the output array is not zero, so that the next tests are meaningful.
+    #
+    # For each multiplication, if each input real and imaginary value has the same value "x", then the result should be:
+    # (x + jx)(x - jx) = x^2 + jx^2 - jx^2 + x^2 = 2x^2
+    # The real value is 2x^2 and the imaginary value is 0. A single kernel launch will accumulate n_samples_per_channel
+    # times, giving an output real visibility value of n_samples_per_channel * 2 * 2x^2.
+    #
+    # The dtype of the array is int64, the real value being packed in the bottom 32 bits and the imaginary value being
+    # packed in the top 32 bits.
+    expected_output_real = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
+    expected_output_imaginary = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
+    output_value_i64 = (expected_output_imaginary * n_samples_per_channel) << 32
+    output_value_i64 = output_value_i64 + (expected_output_real * n_samples_per_channel)
+    np.testing.assert_equal(bufVisibilities_host, output_value_i64)
+
+    # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is
+    # actually zero.
+    tensorCoreXEngineCore.zero_visibilities()
+    bufVisibilities_device.get(queue, bufVisibilities_host)
+    np.testing.assert_equal(bufVisibilities_host, 0)
+
+    # 7. Run kernel on the same input data, transfer output visibilities array to the CPU. Zeroing is not necessary,
+    # as its done above - function is left in to make it clear that the matrix needs to be zeroed at the start of a new
+    # accumulation.
+    tensorCoreXEngineCore.zero_visibilities()
+    bufSamples_device.set(queue, bufSamples_host)
+    for _ in range(n_kernel_launches):
+        tensorCoreXEngineCore()
+    bufVisibilities_device.get(queue, bufVisibilities_host)
+
+    # 8. Check that multikernel accumulation produces the correct results
+    output_value_i64 = (expected_output_imaginary * n_samples_per_channel * n_kernel_launches) << 32
+    output_value_i64 = output_value_i64 + (expected_output_real * n_samples_per_channel * n_kernel_launches)
+    np.testing.assert_equal(bufVisibilities_host, output_value_i64)
