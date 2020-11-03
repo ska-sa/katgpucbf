@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 import asyncio
 import contextlib
 import json
+import threading
 from time import monotonic
 from typing import TypeVar, Any
 
@@ -20,6 +21,10 @@ class Monitor(ABC):
 
     @abstractmethod
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
+        pass
+
+    @abstractmethod
+    def event_qsize_delta(self, name: str, delta: int) -> None:
         pass
 
     @abstractmethod
@@ -49,40 +54,55 @@ class Monitor(ABC):
 class FileMonitor(Monitor):
     def __init__(self, filename: str) -> None:
         super().__init__()
+        self._lock = threading.Lock()
         self._file = open(filename, 'w')
 
     def close(self) -> None:
         super().close()
         self._file.close()
 
+    def _event(self, data) -> None:
+        with self._lock:
+            json.dump(data, self._file)
+            print(file=self._file)
+
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
-        json.dump(
+        self._event(
             {
                 'time': self.time(),
                 'type': 'qsize',
                 'name': name,
                 'qsize': qsize,
                 'maxsize': maxsize
-            },
-            self._file
+            }
         )
-        print(file=self._file)
+
+    def event_qsize_delta(self, name: str, delta: int) -> None:
+        self._event(
+            {
+                'time': self.time(),
+                'type': 'qsize-delta',
+                'name': name,
+                'delta': delta
+            }
+        )
 
     def event_state(self, name: str, state: str) -> None:
-        json.dump(
+        self._event(
             {
                 'time': self.time(),
                 'type': 'state',
                 'name': name,
                 'state': state
-            },
-            self._file
+            }
         )
-        print(file=self._file)
 
 
 class NullMonitor(Monitor):
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
+        pass
+
+    def event_qsize_delta(self, name: str, delta: int) -> None:
         pass
 
     def event_state(self, name: str, state: str) -> None:

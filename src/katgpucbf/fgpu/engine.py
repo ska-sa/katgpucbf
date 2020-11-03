@@ -67,10 +67,13 @@ class Engine:
         self._src_buffer = src_buffer
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
                                          chunk_samples, ring, src_affinity[pol],
-                                         mask_timestamp=mask_timestamp)
+                                         mask_timestamp=mask_timestamp,
+                                         monitor=monitor)
                              for pol in range(pols)]
+        src_chunks_per_stream = 4
+        monitor.event_qsize('free_chunks', 0, src_chunks_per_stream * len(self._src_streams))
         for stream in self._src_streams:
-            for i in range(4):
+            for i in range(src_chunks_per_stream):
                 buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
                 stream.add_chunk(recv.Chunk(buf))
         send_bufs = []
