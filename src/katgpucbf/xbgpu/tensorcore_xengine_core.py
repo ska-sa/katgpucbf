@@ -170,7 +170,7 @@ class TensorCoreXEngineCore(accel.Operation):
         )
 
     def zero_visibilities(self):
-        """TODO: Fill this out."""
+        """Zero all the values in the outVisibilities buffer."""
         self.buffer("outVisibilities").zero(self.command_queue)
 
     @staticmethod
