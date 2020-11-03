@@ -1,6 +1,7 @@
 import logging
 from typing import List, Optional, AsyncGenerator
 
+from .monitor import Monitor
 from .ringbuffer import AsyncRingbuffer
 from ._katfgpu.recv import Stream, Chunk, Ringbuffer
 
@@ -8,7 +9,8 @@ from ._katfgpu.recv import Stream, Chunk, Ringbuffer
 logger = logging.getLogger(__name__)
 
 
-async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]:
+async def chunk_sets(streams: List[Stream],
+                     monitor: Monitor) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
     The input streams must all share the same ringbuffer, and their array
@@ -18,7 +20,7 @@ async def chunk_sets(streams: List[Stream]) -> AsyncGenerator[List[Chunk], None]
     """
     n_pol = len(streams)
     buf: List[Optional[Chunk]] = [None] * n_pol
-    ring = AsyncRingbuffer(streams[0].ringbuffer)
+    ring = AsyncRingbuffer(streams[0].ringbuffer, monitor, 'run_receive')
     lost = 0
     try:
         async for chunk in ring:

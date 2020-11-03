@@ -4,6 +4,7 @@ from typing import Optional, AsyncIterator, Generic, TypeVar
 from typing_extensions import Protocol
 
 from . import Empty, Stopped
+from .monitor import Monitor
 
 
 _T = TypeVar('_T')
@@ -32,9 +33,11 @@ class AsyncRingbuffer(Generic[_T]):
     same event loop.
     """
 
-    def __init__(self, base: RingbufferProtocol[_T]) -> None:
+    def __init__(self, base: RingbufferProtocol[_T], monitor: Monitor, task_name: str) -> None:
         self._base = base
         self._waiter = None     # type: Optional[asyncio.Future[_T]]
+        self._monitor = monitor
+        self._task_name = task_name
 
     @property
     def base(self) -> RingbufferProtocol[_T]:
@@ -49,7 +52,8 @@ class AsyncRingbuffer(Generic[_T]):
         self._waiter = future
         loop.add_reader(self._base.data_fd, self._ready_callback)
         try:
-            return await future
+            with self._monitor.with_state(self._task_name, 'wait ringbuffer'):
+                return await future
         finally:
             self._waiter = None
             loop.remove_reader(self._base.data_fd)

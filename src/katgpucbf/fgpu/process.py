@@ -280,7 +280,7 @@ class Processor:
                 self.in_free_queue.put_nowait(item)
 
     async def run_receive(self, streams: List[recv.Stream]) -> None:
-        async for chunks in recv.chunk_sets(streams):
+        async for chunks in recv.chunk_sets(streams, self.monitor):
             with self.monitor.with_state('run_receive', 'wait in_free_queue'):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state('run_receive', 'wait events'):
@@ -302,7 +302,7 @@ class Processor:
                 streams[pol].add_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
-        free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring)
+        free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring, self.monitor, 'run_transmit')
         while True:
             with self.monitor.with_state('run_transmit', 'wait out_queue'):
                 out_item = await self.out_queue.get()
