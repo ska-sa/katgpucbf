@@ -33,10 +33,12 @@ class AsyncRingbuffer(Generic[_T]):
     same event loop.
     """
 
-    def __init__(self, base: RingbufferProtocol[_T], monitor: Monitor, task_name: str) -> None:
+    def __init__(self, base: RingbufferProtocol[_T], monitor: Monitor,
+                 name: str, task_name: str) -> None:
         self._base = base
         self._waiter = None     # type: Optional[asyncio.Future[_T]]
         self._monitor = monitor
+        self._name = name
         self._task_name = task_name
 
     @property
@@ -53,7 +55,9 @@ class AsyncRingbuffer(Generic[_T]):
         loop.add_reader(self._base.data_fd, self._ready_callback)
         try:
             with self._monitor.with_state(self._task_name, 'wait ringbuffer'):
-                return await future
+                item = await future
+            self._monitor.event_qsize_delta(self._name, -1)
+            return item
         finally:
             self._waiter = None
             loop.remove_reader(self._base.data_fd)

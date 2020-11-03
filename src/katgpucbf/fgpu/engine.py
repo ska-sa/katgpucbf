@@ -60,7 +60,9 @@ class Engine:
         pols = compute.pols
         self._processor = Processor(compute, self.delay_model, monitor)
 
-        ring = recv.Ringbuffer(2)
+        ringbuffer_capacity = 2
+        ring = recv.Ringbuffer(ringbuffer_capacity)
+        monitor.event_qsize('recv_ringbuffer', 0, ringbuffer_capacity)
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
@@ -89,6 +91,7 @@ class Engine:
             send_bufs, dst_affinity, dst_comp_vector,
             [(d.host, d.port) for d in dst], dst_ttl, dst_interface, dst_ibv,
             dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst))
+        monitor.event_qsize('send_free_ringbuffer', len(send_bufs), len(send_bufs))
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()

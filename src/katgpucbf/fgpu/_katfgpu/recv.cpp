@@ -108,7 +108,9 @@ bool stream::flush_chunk()
     assert(!active_chunks.empty());
     try
     {
+        pre_ringbuffer_push();
         ringbuffer.push(std::move(active_chunks[0]));
+        post_ringbuffer_push();
         active_chunks.pop_front();
         return true;
     }

@@ -31,6 +31,8 @@ class py_stream : public stream
 private:
     virtual void pre_wait_chunk() override final;
     virtual void post_wait_chunk() override final;
+    virtual void pre_ringbuffer_push() override final;
+    virtual void post_ringbuffer_push() override final;
 
 public:
     py::object monitor;
@@ -59,6 +61,23 @@ void py_stream::post_wait_chunk()
     {
         monitor.attr("event_state")("recv", "other");
         monitor.attr("event_qsize_delta")("free_chunks", -1);
+    }
+}
+
+void py_stream::pre_ringbuffer_push()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+        monitor.attr("event_state")("recv", "push ringbuffer");
+}
+
+void py_stream::post_ringbuffer_push()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+    {
+        monitor.attr("event_state")("recv", "other");
+        monitor.attr("event_qsize_delta")("recv_ringbuffer", 1);
     }
 }
 

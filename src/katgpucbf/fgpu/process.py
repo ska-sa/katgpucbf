@@ -302,7 +302,8 @@ class Processor:
                 streams[pol].add_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
-        free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring, self.monitor, 'run_transmit')
+        free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring, self.monitor,
+                                               'send_free_ringbuffer', 'run_transmit')
         while True:
             with self.monitor.with_state('run_transmit', 'wait out_queue'):
                 out_item = await self.out_queue.get()

@@ -20,7 +20,7 @@ async def chunk_sets(streams: List[Stream],
     """
     n_pol = len(streams)
     buf: List[Optional[Chunk]] = [None] * n_pol
-    ring = AsyncRingbuffer(streams[0].ringbuffer, monitor, 'run_receive')
+    ring = AsyncRingbuffer(streams[0].ringbuffer, monitor, 'recv_ringbuffer', 'run_receive')
     lost = 0
     try:
         async for chunk in ring:
