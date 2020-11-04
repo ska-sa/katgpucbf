@@ -38,8 +38,8 @@ public:
     py::object monitor;
 
     py_stream(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
-              ringbuffer_t &ringbuffer, int thread_affinity = -1, bool mask_timestamp = false,
-              py::object monitor = py::none())
+              ringbuffer_t &ringbuffer, int thread_affinity, bool mask_timestamp,
+              py::object monitor)
         : stream(pol, sample_bits, packet_samples, chunk_samples, ringbuffer, thread_affinity,
                  mask_timestamp),
         monitor(std::move(monitor))

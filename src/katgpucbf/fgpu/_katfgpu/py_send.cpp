@@ -25,6 +25,46 @@ public:
     }
 };
 
+class py_sender : public sender
+{
+private:
+    py::object monitor;
+
+    virtual void pre_push_free_ring() override final;
+    virtual void post_push_free_ring() override final;
+
+public:
+    py_sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
+              int thread_affinity, int comp_vector,
+              const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+              int ttl, const std::string &interface_address, bool ibv,
+              std::size_t max_packet_size, double rate, std::size_t max_heaps,
+              py::object monitor)
+        : sender(std::move(initial_chunks),
+                 thread_affinity, comp_vector, endpoints,
+                 ttl, interface_address, ibv, max_packet_size, rate, max_heaps),
+        monitor(std::move(monitor))
+    {
+    }
+};
+
+void py_sender::pre_push_free_ring()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+        monitor.attr("event_state")("send", "push free_ringbuffer");
+}
+
+void py_sender::post_push_free_ring()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+    {
+        monitor.attr("event_state")("send", "other");
+        monitor.attr("event_qsize_delta")("send_free_ringbuffer", 1);
+    }
+}
+
 py::module register_module(py::module &parent)
 {
     using namespace pybind11::literals;
@@ -45,21 +85,22 @@ py::module register_module(py::module &parent)
 
     register_ringbuffer<ringbuffer_t, py_chunk>(m, "Ringbuffer", "Ringbuffer of chunks");
 
-    py::class_<sender>(m, "Sender", "Converts Chunks to heaps and transmit them")
+    py::class_<py_sender>(m, "Sender", "Converts Chunks to heaps and transmit them")
         .def(py::init([](
                 const std::vector<py::buffer> &initial_buffers,
                 int thread_affinity, int comp_vector,
                 const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                 int ttl, const std::string &interface_address, bool ibv,
-                std::size_t max_packet_size, double rate, std::size_t max_heaps)
+                std::size_t max_packet_size, double rate, std::size_t max_heaps,
+                py::object monitor)
             {
                 std::vector<std::unique_ptr<chunk>> initial_chunks;
                 for (const auto &buffer : initial_buffers)
                     initial_chunks.push_back(std::make_unique<py_chunk>(buffer));
-                return std::make_unique<sender>(
+                return std::make_unique<py_sender>(
                     std::move(initial_chunks),
                     thread_affinity, comp_vector, endpoints, ttl, interface_address,
-                    ibv, max_packet_size, rate, max_heaps);
+                    ibv, max_packet_size, rate, max_heaps, std::move(monitor));
             }),
             "initial_buffers"_a,
             "thread_affinity"_a,
@@ -70,14 +111,15 @@ py::module register_module(py::module &parent)
             "ibv"_a,
             "max_packet_size"_a,
             "rate"_a,
-            "max_heaps"_a)
-        .def("send_chunk", [](sender &self, py_chunk &chunk)
+            "max_heaps"_a,
+            "monitor"_a = py::none())
+        .def("send_chunk", [](py_sender &self, py_chunk &chunk)
         {
             auto c = std::make_unique<py_chunk>(std::move(chunk));
             self.send_chunk(std::move(c));
         }, "chunk"_a)
-        .def("stop", &sender::stop)
-        .def_property_readonly("free_ring", [](sender &self) -> ringbuffer_t &
+        .def("stop", &py_sender::stop)
+        .def_property_readonly("free_ring", [](py_sender &self) -> ringbuffer_t &
         {
             return self.get_free_ring();
         })

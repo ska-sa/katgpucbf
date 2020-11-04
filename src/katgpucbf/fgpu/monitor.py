@@ -6,7 +6,7 @@ import contextlib
 import json
 import threading
 from time import monotonic
-from typing import TypeVar, Any
+from typing import Generator, TypeVar, Any
 
 
 _M = TypeVar('_M', bound='Monitor')
@@ -32,7 +32,8 @@ class Monitor(ABC):
         pass
 
     @contextlib.contextmanager
-    def with_state(self, name: str, state: str, return_state: str = 'other') -> None:
+    def with_state(self, name: str, state: str,
+                   return_state: str = 'other') -> Generator[None, None, None]:
         self.event_state(name, state)
         yield
         self.event_state(name, return_state)

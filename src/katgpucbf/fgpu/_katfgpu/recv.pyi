@@ -1,6 +1,6 @@
 from typing import Optional, Sequence, Tuple, Any
 
-from katfgpu import Monitor
+from .monitor import Monitor
 
 
 class Chunk:

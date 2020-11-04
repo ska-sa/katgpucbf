@@ -90,7 +90,8 @@ class Engine:
         self._sender = send.Sender(
             send_bufs, dst_affinity, dst_comp_vector,
             [(d.host, d.port) for d in dst], dst_ttl, dst_interface, dst_ibv,
-            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst))
+            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst),
+            monitor)
         monitor.event_qsize('send_free_ringbuffer', len(send_bufs), len(send_bufs))
 
     async def run(self) -> None:
