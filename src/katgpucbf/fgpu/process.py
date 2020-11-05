@@ -112,7 +112,7 @@ class Processor:
         self.compute = compute
         self.delay_model = delay_model
         n_in = 3
-        n_out = 1
+        n_out = 2
         self.in_queue = monitor.make_queue('in_queue', n_in)      # type: asyncio.Queue[InItem]
         self.in_free_queue = monitor.make_queue(
             'in_free_queue', n_in)                                # type: asyncio.Queue[InItem]
@@ -122,7 +122,7 @@ class Processor:
         self.monitor = monitor
         for i in range(n_in):
             self.in_free_queue.put_nowait(InItem(compute))
-        for i in range(n_out):
+        for i in range(n_out - 1):
             self.out_free_queue.put_nowait(OutItem(compute))
         self._in_items: Deque[InItem] = deque()
         self._out_item = OutItem(compute)
