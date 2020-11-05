@@ -28,11 +28,11 @@ async def chunk_sets(streams: List[Stream],
             good = sum(chunk.present)
             lost += total - good
             if good < total:
-                logger.warning('Received chunk: timestamp=%d pol=%d (%d/%d, lost %d)',
+                logger.warning('Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)',
                                chunk.timestamp, chunk.pol, good, total, lost)
             old = buf[chunk.pol]
             if old is not None:
-                logger.warning('Chunk not matched: timestamp=%d pol=%d',
+                logger.warning('Chunk not matched: timestamp=%#x pol=%d',
                                old.timestamp, old.pol)
                 # Chunk was passed by without getting used. Return to the pool.
                 streams[chunk.pol].add_chunk(old)
