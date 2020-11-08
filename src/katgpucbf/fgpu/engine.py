@@ -79,7 +79,7 @@ class Engine:
                 buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
                 stream.add_chunk(recv.Chunk(buf))
         send_bufs = []
-        for i in range(2):
+        for i in range(4):
             buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
                                   context=context)
             send_bufs.append(buf)
