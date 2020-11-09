@@ -42,9 +42,18 @@ using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>, spead2::semaphor
 class sender
 {
 private:
+    friend class context;
+
     spead2::thread_pool thread_pool;
     std::unique_ptr<spead2::send::stream> stream;
     ringbuffer_t free_ring;
+
+    // Hooks for monitoring
+    virtual void pre_push_free_ring() {}
+    virtual void post_push_free_ring() {}
+
+    // Wraps free_ring.push with calls to hook functions above
+    void push_free_ring(std::unique_ptr<chunk> &&c);
 
 public:
     sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,

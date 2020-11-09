@@ -61,8 +61,14 @@ public:
 private:
     friend class allocator;
 
-    virtual void heap_ready(spead2::recv::live_heap &&heap) override;
-    virtual void stop_received() override;
+    virtual void heap_ready(spead2::recv::live_heap &&heap) override final;
+    virtual void stop_received() override final;
+
+    // Profiling hooks
+    virtual void pre_wait_chunk() {}
+    virtual void post_wait_chunk() {}
+    virtual void pre_ringbuffer_push() {}
+    virtual void post_ringbuffer_push() {}
 
     const int pol;                           ///< Polarisation index
     const int sample_bits;                   ///< Number of bits per sample

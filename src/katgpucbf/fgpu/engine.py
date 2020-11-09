@@ -8,6 +8,7 @@ from . import recv, send
 from .compute import ComputeTemplate
 from .process import Processor
 from .delay import MultiDelayModel
+from .monitor import Monitor
 from .types import AbstractContext
 
 
@@ -44,7 +45,8 @@ class Engine:
                  spectra: int, acc_len: int,
                  channels: int, taps: int,
                  quant_scale: float,
-                 mask_timestamp: bool) -> None:
+                 mask_timestamp: bool,
+                 monitor: Monitor) -> None:
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -56,23 +58,28 @@ class Engine:
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model)
+        self._processor = Processor(compute, self.delay_model, monitor)
 
-        ring = recv.Ringbuffer(2)
+        ringbuffer_capacity = 2
+        ring = recv.Ringbuffer(ringbuffer_capacity)
+        monitor.event_qsize('recv_ringbuffer', 0, ringbuffer_capacity)
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
                                          chunk_samples, ring, src_affinity[pol],
-                                         mask_timestamp=mask_timestamp)
+                                         mask_timestamp=mask_timestamp,
+                                         monitor=monitor)
                              for pol in range(pols)]
+        src_chunks_per_stream = 4
+        monitor.event_qsize('free_chunks', 0, src_chunks_per_stream * len(self._src_streams))
         for stream in self._src_streams:
-            for i in range(4):
+            for i in range(src_chunks_per_stream):
                 buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
                 stream.add_chunk(recv.Chunk(buf))
         send_bufs = []
-        for i in range(2):
+        for i in range(4):
             buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
                                   context=context)
             send_bufs.append(buf)
@@ -83,7 +90,9 @@ class Engine:
         self._sender = send.Sender(
             send_bufs, dst_affinity, dst_comp_vector,
             [(d.host, d.port) for d in dst], dst_ttl, dst_interface, dst_ibv,
-            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst))
+            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst),
+            monitor)
+        monitor.event_qsize('send_free_ringbuffer', len(send_bufs), len(send_bufs))
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()

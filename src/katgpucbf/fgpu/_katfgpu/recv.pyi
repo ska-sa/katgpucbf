@@ -1,4 +1,6 @@
-from typing import Sequence, Tuple, Any
+from typing import Optional, Sequence, Tuple, Any
+
+from .monitor import Monitor
 
 
 class Chunk:
@@ -24,7 +26,8 @@ class Ringbuffer:
 class Stream:
     def __init__(self, pol: int, sample_bits: int, packet_samples: int,
                  chunk_samples: int, ringbuffer: Ringbuffer,
-                 thread_affinity: int = ..., *, mask_timestamp: bool = ...) -> None: ...
+                 thread_affinity: int = ..., *, mask_timestamp: bool = ...,
+                 monitor: Optional[Monitor] = ...) -> None: ...
     @property
     def ringbuffer(self) -> Ringbuffer: ...
     @property

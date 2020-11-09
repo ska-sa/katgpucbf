@@ -1,4 +1,6 @@
-from typing import List, Any
+from typing import List, Tuple, Any
+
+from .monitor import Monitor
 
 
 class Chunk:
@@ -28,7 +30,8 @@ class Sender:
                  thread_affinity: int, comp_vector: int,
                  endpoints: List[Tuple[str, int]],
                  ttl: int, interface_address: str, ibv: bool,
-                 max_packet_size: int, rate: float, max_heaps: int) -> None: ...
+                 max_packet_size: int, rate: float, max_heaps: int,
+                 monitor: Monitor = ...) -> None: ...
     def send_chunk(self, chunk: Chunk) -> None: ...
     def stop(self) -> None: ...
     @property

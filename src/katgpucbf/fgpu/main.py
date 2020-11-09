@@ -11,6 +11,7 @@ from katsdptelstate.endpoint import endpoint_list_parser
 import katsdpsigproc.accel as accel
 
 from .engine import Engine
+from .monitor import Monitor, FileMonitor, NullMonitor
 
 
 _T = TypeVar('_T')
@@ -99,6 +100,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--mask-timestamp', action='store_true',
         help='Mask off bottom bits of timestamp (workaround for broken digitiser)')
+    parser.add_argument(
+        '--monitor-log',
+        help='File to write performance-monitoring data to')
 
     parser.add_argument('src', type=parse_source, nargs=N_POL,
                         help='Source endpoints (or pcap file)')
@@ -117,30 +121,38 @@ async def async_main() -> None:
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
     chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.acc_len)
-    engine = Engine(
-        context=ctx,
-        srcs=args.src,
-        src_interface=args.src_interface,
-        src_ibv=args.src_ibv,
-        src_affinity=args.src_affinity,
-        src_comp_vector=args.src_comp_vector,
-        src_packet_samples=args.src_packet_samples,
-        src_buffer=args.src_buffer,
-        dst=args.dst,
-        dst_interface=args.dst_interface,
-        dst_ttl=args.dst_ttl,
-        dst_ibv=args.dst_ibv,
-        dst_packet_payload=args.dst_packet_payload,
-        dst_affinity=args.dst_affinity,
-        dst_comp_vector=args.dst_comp_vector,
-        adc_rate=args.adc_rate,
-        spectra=chunk_samples // (2 * args.channels),
-        acc_len=args.acc_len,
-        channels=args.channels,
-        taps=args.taps,
-        quant_scale=args.quant_scale,
-        mask_timestamp=args.mask_timestamp)
-    await engine.run()
+
+    monitor: Monitor
+    if args.monitor_log is not None:
+        monitor = FileMonitor(args.monitor_log)
+    else:
+        monitor = NullMonitor()
+    with monitor:
+        engine = Engine(
+            context=ctx,
+            srcs=args.src,
+            src_interface=args.src_interface,
+            src_ibv=args.src_ibv,
+            src_affinity=args.src_affinity,
+            src_comp_vector=args.src_comp_vector,
+            src_packet_samples=args.src_packet_samples,
+            src_buffer=args.src_buffer,
+            dst=args.dst,
+            dst_interface=args.dst_interface,
+            dst_ttl=args.dst_ttl,
+            dst_ibv=args.dst_ibv,
+            dst_packet_payload=args.dst_packet_payload,
+            dst_affinity=args.dst_affinity,
+            dst_comp_vector=args.dst_comp_vector,
+            adc_rate=args.adc_rate,
+            spectra=chunk_samples // (2 * args.channels),
+            acc_len=args.acc_len,
+            channels=args.channels,
+            taps=args.taps,
+            quant_scale=args.quant_scale,
+            mask_timestamp=args.mask_timestamp,
+            monitor=monitor)
+        await engine.run()
 
 
 def main() -> None:

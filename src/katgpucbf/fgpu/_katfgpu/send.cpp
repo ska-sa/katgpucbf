@@ -14,20 +14,20 @@ static constexpr int FENG_RAW_ID = 0x4300;
 
 struct context
 {
-    ringbuffer_t &free_ring;
+    send::sender &sender;
     std::unique_ptr<chunk> c;
     std::vector<spead2::send::heap> heaps;
     std::size_t remaining;
 
-    context(ringbuffer_t &free_ring, std::unique_ptr<chunk> &&c, std::size_t n_heaps)
-        : free_ring(free_ring), c(std::move(c)), remaining(n_heaps)
+    context(send::sender &sender, std::unique_ptr<chunk> &&c, std::size_t n_heaps)
+        : sender(sender), c(std::move(c)), remaining(n_heaps)
     {
         heaps.reserve(n_heaps);
     }
 
     ~context()
     {
-        free_ring.push(std::move(c));
+        sender.push_free_ring(std::move(c));
     }
 };
 
@@ -72,12 +72,19 @@ sender::sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
     }
 
     for (auto &c : initial_chunks)
-        free_ring.try_push(std::move(c));
+        push_free_ring(std::move(c));
 }
 
 sender::~sender()
 {
     stop();
+}
+
+void sender::push_free_ring(std::unique_ptr<chunk> &&c)
+{
+    pre_push_free_ring();
+    free_ring.push(std::move(c));
+    post_push_free_ring();
 }
 
 void sender::stop()
@@ -106,11 +113,11 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     if (c->frames <= 0 || c->channels <= 0 || c->acc_len <= 0)
     {
         // Chunk contains no data, so send it directly to the free ring
-        free_ring.push(std::move(c));
+        push_free_ring(std::move(c));
         return;
     }
 
-    auto ctx = std::make_shared<context>(free_ring, std::move(c), n_heaps);
+    auto ctx = std::make_shared<context>(*this, std::move(c), n_heaps);
     auto callback = [ctx] (const boost::system::error_code &ec, spead2::item_pointer_t bytes_transferred)
     {
         if (ec)

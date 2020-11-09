@@ -91,7 +91,9 @@ void stream::add_chunk(std::unique_ptr<chunk> &&c)
 
 void stream::grab_chunk(std::int64_t timestamp)
 {
+    pre_wait_chunk();
     semaphore_get(free_chunks_sem);
+    post_wait_chunk();
     {
         std::lock_guard<std::mutex> lock(free_chunks_lock);
         assert(!free_chunks.empty());
@@ -106,7 +108,9 @@ bool stream::flush_chunk()
     assert(!active_chunks.empty());
     try
     {
+        pre_ringbuffer_push();
         ringbuffer.push(std::move(active_chunks[0]));
+        post_ringbuffer_push();
         active_chunks.pop_front();
         return true;
     }
