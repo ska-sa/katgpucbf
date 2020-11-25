@@ -146,7 +146,7 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
                           false);
             for (int pad = 0; pad < 3; pad++)
                 heap.add_item(0, 0);
-            stream->async_send_heap(heap, callback, j);
+            stream->async_send_heap(heap, callback, -1, j);
         }
 }
 
