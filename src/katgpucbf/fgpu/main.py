@@ -101,6 +101,9 @@ def parse_args() -> argparse.Namespace:
         '--mask-timestamp', action='store_true',
         help='Mask off bottom bits of timestamp (workaround for broken digitiser)')
     parser.add_argument(
+        '--use-gdrcopy', action='store_true',
+        help='Assemble chunks directly in GPU memory (requires supported GPU)')
+    parser.add_argument(
         '--monitor-log',
         help='File to write performance-monitoring data to')
 
@@ -151,6 +154,7 @@ async def async_main() -> None:
             taps=args.taps,
             quant_scale=args.quant_scale,
             mask_timestamp=args.mask_timestamp,
+            use_gdrcopy=args.use_gdrcopy,
             monitor=monitor)
         await engine.run()
 

@@ -39,14 +39,19 @@ class Engine:
                  dst_ttl: int,
                  dst_ibv: bool,
                  dst_packet_payload: int,
-                 dst_affinity: List[int],
-                 dst_comp_vector: List[int],
+                 dst_affinity: int,
+                 dst_comp_vector: int,
                  adc_rate: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int,
                  quant_scale: float,
                  mask_timestamp: bool,
+                 use_gdrcopy: bool,
                  monitor: Monitor) -> None:
+        if use_gdrcopy:
+            import gdrcopy.pycuda
+            gdr = gdrcopy.Gdr()
+
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -58,7 +63,7 @@ class Engine:
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model, monitor)
+        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor)
 
         ringbuffer_capacity = 2
         ring = recv.Ringbuffer(ringbuffer_capacity)
@@ -70,14 +75,32 @@ class Engine:
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
                                          chunk_samples, ring, src_affinity[pol],
                                          mask_timestamp=mask_timestamp,
+                                         use_gdrcopy=use_gdrcopy,
                                          monitor=monitor)
                              for pol in range(pols)]
         src_chunks_per_stream = 4
         monitor.event_qsize('free_chunks', 0, src_chunks_per_stream * len(self._src_streams))
-        for stream in self._src_streams:
+        for pol, stream in enumerate(self._src_streams):
             for i in range(src_chunks_per_stream):
-                buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
-                stream.add_chunk(recv.Chunk(buf))
+                if use_gdrcopy:
+                    device_bytes = compute.slots[f'in{pol}'].required_bytes()
+                    with context:
+                        device_raw, buf_raw = gdrcopy.pycuda.allocate_raw(
+                            gdr, device_bytes)
+                    buf = np.frombuffer(buf_raw, np.uint8)
+                    # The device buffer contains extra space for copying the head
+                    # of the following chunk, but we don't need that in the host
+                    # mapping.
+                    buf = buf[:stream.chunk_bytes]
+                    # Hack to work around limitations in katsdpsigproc and pycuda
+                    device_array = accel.DeviceArray(
+                        context, (device_bytes,), np.uint8, raw=int(device_raw))
+                    device_array.buffer.base = device_raw
+                    chunk = recv.Chunk(buf, device_array)
+                else:
+                    buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
+                    chunk = recv.Chunk(buf)
+                stream.add_chunk(chunk)
         send_bufs = []
         for i in range(4):
             buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
@@ -108,7 +131,7 @@ class Engine:
                     stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer,
                                               self._src_comp_vector[pol])
             tasks = [
-                loop.create_task(self._processor.run_processing()),
+                loop.create_task(self._processor.run_processing(self._src_streams)),
                 loop.create_task(self._processor.run_receive(self._src_streams)),
                 loop.create_task(self._processor.run_transmit(self._sender))
             ]

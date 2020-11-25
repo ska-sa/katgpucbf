@@ -44,16 +44,26 @@ class EventItem(BaseItem):
 
 class InItem(EventItem):
     samples: List[accel.DeviceArray]
+    # Chunks to return to recv after processing (used with gdrcopy only)
+    chunks: List[recv.Chunk]
     n_samples: int
     sample_bits: int
+    pols: int
 
-    def __init__(self, compute: Compute, timestamp: int = 0) -> None:
+    def __init__(self, compute: Compute, timestamp: int = 0, use_gdrcopy: bool = False) -> None:
         self.sample_bits = compute.sample_bits
-        self.samples = [
-            _device_allocate_slot(compute.template.context,
-                                  cast(accel.IOSlot, compute.slots[f'in{pol}']))
-            for pol in range(compute.pols)
-        ]
+        self.pols = compute.pols
+        if use_gdrcopy:
+            # Memory belongs to the chunks, and we set samples when
+            # initialising the item from the chunks.
+            self.samples = []
+        else:
+            self.samples = [
+                _device_allocate_slot(compute.template.context,
+                                      cast(accel.IOSlot, compute.slots[f'in{pol}']))
+                for pol in range(compute.pols)
+            ]
+        self.chunks = []
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -63,10 +73,6 @@ class InItem(EventItem):
     @property
     def capacity(self) -> int:
         return self.samples[0].shape[0] * 8 // self.sample_bits
-
-    @property
-    def pols(self) -> int:
-        return len(self.samples)
 
     @property
     def end_timestamp(self) -> int:
@@ -108,7 +114,8 @@ class OutItem(EventItem):
 
 
 class Processor:
-    def __init__(self, compute: Compute, delay_model: AbstractDelayModel, monitor: Monitor) -> None:
+    def __init__(self, compute: Compute, delay_model: AbstractDelayModel, use_gdrcopy: bool,
+                 monitor: Monitor) -> None:
         self.compute = compute
         self.delay_model = delay_model
         n_in = 3
@@ -121,13 +128,14 @@ class Processor:
             'out_free_queue', n_out)                              # type: asyncio.Queue[OutItem]
         self.monitor = monitor
         for i in range(n_in):
-            self.in_free_queue.put_nowait(InItem(compute))
+            self.in_free_queue.put_nowait(InItem(compute, use_gdrcopy=use_gdrcopy))
         for i in range(n_out - 1):
             self.out_free_queue.put_nowait(OutItem(compute))
         self._in_items: Deque[InItem] = deque()
         self._out_item = OutItem(compute)
         self._upload_queue = compute.template.context.create_command_queue()
         self._download_queue = compute.template.context.create_command_queue()
+        self._use_gdrcopy = use_gdrcopy
 
     @property
     def channels(self) -> int:
@@ -187,7 +195,17 @@ class Processor:
         else:
             self._out_item.timestamp = new_timestamp
 
-    async def run_processing(self) -> None:
+    @staticmethod
+    async def _push_chunks(streams, chunks, event):
+        """Return chunks to the streams once `event` has fired.
+
+        This is only used when using gdrcopy.
+        """
+        await async_wait_for_events([event])
+        for stream, chunk in zip(streams, chunks):
+            stream.add_chunk(chunk)
+
+    async def run_processing(self, streams: List[recv.Stream]) -> None:
         # TODO: add a final flush on CancelledError?
         while True:
             if len(self._in_items) == 0:
@@ -276,7 +294,14 @@ class Processor:
                 # TODO: should also do this if _in_items[1] would work just as well and we've
                 # filled the output buffer.
                 item = self._in_items.popleft()
-                item.events.append(self.compute.command_queue.enqueue_marker())
+                event = self.compute.command_queue.enqueue_marker()
+                if self._use_gdrcopy:
+                    item.samples = []
+                    chunks = item.chunks
+                    item.chunks = []
+                    asyncio.get_event_loop().create_task(self._push_chunks(streams, chunks, event))
+                else:
+                    item.events.append(event)
                 self.in_free_queue.put_nowait(item)
 
     async def run_receive(self, streams: List[recv.Stream]) -> None:
@@ -288,18 +313,24 @@ class Processor:
             in_item.reset(chunks[0].timestamp)
             in_item.n_samples = chunks[0].base.nbytes * 8 // self.sample_bits
             transfer_events = []
-            for pol, chunk in enumerate(chunks):
-                in_item.samples[pol].set_region(
-                    self._upload_queue, chunk.base,
-                    np.s_[:chunk.base.nbytes], np.s_[:],
-                    blocking=False)
-                transfer_events.append(self._upload_queue.enqueue_marker())
-            in_item.events.extend(transfer_events)
-            self.in_queue.put_nowait(in_item)
-            for pol in range(len(chunks)):
-                with self.monitor.with_state('run_receive', 'wait transfer'):
-                    await async_wait_for_events([transfer_events[pol]])
-                streams[pol].add_chunk(chunks[pol])
+            if self._use_gdrcopy:
+                assert len(in_item.samples) == 0
+                in_item.samples = [chunk.device for chunk in chunks]  # type: ignore
+                in_item.chunks = chunks
+                self.in_queue.put_nowait(in_item)
+            else:
+                for pol, chunk in enumerate(chunks):
+                    in_item.samples[pol].set_region(
+                        self._upload_queue, chunk.base,
+                        np.s_[:chunk.base.nbytes], np.s_[:],
+                        blocking=False)
+                    transfer_events.append(self._upload_queue.enqueue_marker())
+                in_item.events.extend(transfer_events)
+                self.in_queue.put_nowait(in_item)
+                for pol in range(len(chunks)):
+                    with self.monitor.with_state('run_receive', 'wait transfer'):
+                        await async_wait_for_events([transfer_events[pol]])
+                    streams[pol].add_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
         free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring, self.monitor,
