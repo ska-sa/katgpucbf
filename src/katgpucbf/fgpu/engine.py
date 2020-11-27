@@ -47,6 +47,7 @@ class Engine:
                  quant_scale: float,
                  mask_timestamp: bool,
                  use_gdrcopy: bool,
+                 use_peerdirect: bool,
                  monitor: Monitor) -> None:
         if use_gdrcopy:
             import gdrcopy.pycuda
@@ -101,21 +102,33 @@ class Engine:
                     buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
                     chunk = recv.Chunk(buf)
                 stream.add_chunk(chunk)
-        send_bufs = []
+        send_chunks = []
+        send_shape = (spectra // acc_len, channels, acc_len, pols, 2)
+        send_dtype = np.dtype(np.int8)
         for i in range(4):
-            buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
-                                  context=context)
-            send_bufs.append(buf)
+            if use_peerdirect:
+                dev = accel.DeviceArray(context, send_shape, send_dtype)
+                buf = dev.buffer.gpudata.as_buffer(
+                    int(np.product(send_shape) * send_dtype.itemsize))
+                send_chunks.append(send.Chunk(buf, dev))
+            else:
+                buf = accel.HostArray(send_shape, send_dtype, context=context)
+                send_chunks.append(send.Chunk(buf))
+        memory_regions = [chunk.base for chunk in send_chunks]
+        if use_peerdirect:
+            memory_regions.extend(self._processor.peerdirect_memory_regions)
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_rate * buf.dtype.itemsize * 1.1
+        rate = pols * adc_rate * send_dtype.itemsize * 1.1
         # There is a SPEAD header, 8 item pointers,
         # and 3 padding pointers, for a 96 byte header.
         self._sender = send.Sender(
-            send_bufs, dst_affinity, dst_comp_vector,
+            len(send_chunks), memory_regions, dst_affinity, dst_comp_vector,
             [(d.host, d.port) for d in dst], dst_ttl, dst_interface, dst_ibv,
-            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst),
+            dst_packet_payload + 96, rate, len(send_chunks) * spectra // acc_len * len(dst),
             monitor)
-        monitor.event_qsize('send_free_ringbuffer', len(send_bufs), len(send_bufs))
+        monitor.event_qsize('send_free_ringbuffer', 0, len(send_chunks))
+        for schunk in send_chunks:
+            self._sender.push_free_ring(schunk)
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()

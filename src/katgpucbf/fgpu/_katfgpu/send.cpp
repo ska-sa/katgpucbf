@@ -31,13 +31,14 @@ struct context
     }
 };
 
-sender::sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
+sender::sender(std::size_t free_ring_capacity,
+               const std::vector<std::pair<const void *, std::size_t>> &memory_regions,
                int thread_affinity, int comp_vector,
                const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                int ttl, const std::string &interface_address, bool ibv,
                std::size_t max_packet_size, double rate, std::size_t max_heaps)
     : thread_pool(1, thread_affinity >= 0 ? std::vector<int>{thread_affinity} : std::vector<int>{}),
-    free_ring(initial_chunks.size())
+    free_ring(free_ring_capacity)
 {
     if (endpoints.empty())
         throw std::invalid_argument("must have at least one endpoint");
@@ -56,12 +57,8 @@ sender::sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
         ibv_config.set_interface_address(interface);
         ibv_config.set_ttl(ttl);
         ibv_config.set_comp_vector(comp_vector);
-        for (const auto &c : initial_chunks)
-        {
-            const void *ptr = boost::asio::buffer_cast<const void *>(c->storage);
-            std::size_t length = boost::asio::buffer_size(c->storage);
-            ibv_config.add_memory_region(ptr, length);
-        }
+        for (const auto &c : memory_regions)
+            ibv_config.add_memory_region(c.first, c.second);
         stream = std::make_unique<spead2::send::udp_ibv_stream>(thread_pool, config, ibv_config);
     }
     else
@@ -70,9 +67,6 @@ sender::sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
             thread_pool, ep, config, spead2::send::udp_stream::default_buffer_size,
             ttl, interface);
     }
-
-    for (auto &c : initial_chunks)
-        push_free_ring(std::move(c));
 }
 
 sender::~sender()

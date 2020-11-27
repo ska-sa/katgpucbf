@@ -104,6 +104,9 @@ def parse_args() -> argparse.Namespace:
         '--use-gdrcopy', action='store_true',
         help='Assemble chunks directly in GPU memory (requires supported GPU)')
     parser.add_argument(
+        '--use-peerdirect', action='store_true',
+        help='Send chunks directly from GPU memory (requires supported GPU)')
+    parser.add_argument(
         '--monitor-log',
         help='File to write performance-monitoring data to')
 
@@ -113,6 +116,8 @@ def parse_args() -> argparse.Namespace:
                         help='Destination endpoints')
     args = parser.parse_args()
 
+    if args.use_peerdirect and not args.dst_ibv:
+        parser.error('--use-peerdirect requires --dst-ibv')
     for src in args.src:
         if not isinstance(src, str) and args.src_interface is None:
             parser.error('Live source requires --src-interface')
@@ -155,6 +160,7 @@ async def async_main() -> None:
             quant_scale=args.quant_scale,
             mask_timestamp=args.mask_timestamp,
             use_gdrcopy=args.use_gdrcopy,
+            use_peerdirect=args.use_peerdirect,
             monitor=monitor)
         await engine.run()
 

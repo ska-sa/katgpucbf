@@ -52,16 +52,17 @@ private:
     virtual void pre_push_free_ring() {}
     virtual void post_push_free_ring() {}
 
-    // Wraps free_ring.push with calls to hook functions above
-    void push_free_ring(std::unique_ptr<chunk> &&c);
-
 public:
-    sender(std::vector<std::unique_ptr<chunk>> &&initial_chunks,
+    sender(std::size_t free_ring_capacity,
+           const std::vector<std::pair<const void *, std::size_t>> &memory_regions,
            int thread_affinity, int comp_vector,
            const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
            int ttl, const std::string &interface_address, bool ibv,
            std::size_t max_packet_size, double rate, std::size_t max_heaps);
     ~sender();
+
+    // Wraps free_ring.push with calls to hook functions above
+    void push_free_ring(std::unique_ptr<chunk> &&c);
 
     /// Send a chunk asynchronously, and put it onto the free ring when complete.
     void send_chunk(std::unique_ptr<chunk> &&c);

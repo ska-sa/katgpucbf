@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from typing import Deque, List, cast
+from typing import Deque, List, Sequence, cast
 
 import numpy as np
 from katsdpsigproc import accel
@@ -127,12 +127,15 @@ class Processor:
         self.out_free_queue = monitor.make_queue(
             'out_free_queue', n_out)                              # type: asyncio.Queue[OutItem]
         self.monitor = monitor
+        self._spectra = []
         for i in range(n_in):
             self.in_free_queue.put_nowait(InItem(compute, use_gdrcopy=use_gdrcopy))
-        for i in range(n_out - 1):
-            self.out_free_queue.put_nowait(OutItem(compute))
+        for i in range(n_out):
+            item = OutItem(compute)
+            self._spectra.append(item.spectra)
+            self.out_free_queue.put_nowait(item)
         self._in_items: Deque[InItem] = deque()
-        self._out_item = OutItem(compute)
+        self._out_item = self.out_free_queue.get_nowait()
         self._upload_queue = compute.template.context.create_command_queue()
         self._download_queue = compute.template.context.create_command_queue()
         self._use_gdrcopy = use_gdrcopy
@@ -160,6 +163,13 @@ class Processor:
     @property
     def pols(self) -> int:
         return self.compute.pols
+
+    @property
+    def peerdirect_memory_regions(self) -> Sequence[object]:
+        return [
+            spectra.buffer.gpudata.as_buffer(spectra.buffer.nbytes)
+            for spectra in self._spectra
+        ]
 
     async def _next_in(self) -> None:
         with self.monitor.with_state('run_processing', 'wait in_queue'):
@@ -338,19 +348,26 @@ class Processor:
         while True:
             with self.monitor.with_state('run_transmit', 'wait out_queue'):
                 out_item = await self.out_queue.get()
-            self._download_queue.enqueue_wait_for_events(out_item.events)
             with self.monitor.with_state('run_transmit', 'wait free_ring'):
                 chunk = await free_ring.async_pop()
             # TODO: use get_region since it might be partial
-            out_item.spectra.get_async(self._download_queue, chunk.base)
+            if chunk.device:
+                old_spectra = chunk.device
+                chunk.device = out_item.spectra
+                chunk.base = chunk.device.buffer.gpudata.as_buffer(chunk.device.buffer.nbytes)
+                out_item.spectra = old_spectra
+                events = out_item.events
+            else:
+                self._download_queue.enqueue_wait_for_events(out_item.events)
+                out_item.spectra.get_async(self._download_queue, chunk.base)
+                events = [self._download_queue.enqueue_marker()]
             chunk.timestamp = out_item.timestamp
             chunk.acc_len = self.acc_len
             chunk.channels = self.channels
             chunk.frames = out_item.n_spectra // self.acc_len
             chunk.pols = self.pols
-            transfer_event = self._download_queue.enqueue_marker()
             with self.monitor.with_state('run_transmit', 'wait transfer'):
-                await async_wait_for_events([transfer_event])
+                await async_wait_for_events(events)
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             sender.send_chunk(chunk)
