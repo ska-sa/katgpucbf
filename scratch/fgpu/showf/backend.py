@@ -58,13 +58,13 @@ class Backend:
         self.channels_per_substream = channels_per_substream
         self.acc_len = acc_len
         self.keep_step = 2 * channels * acc_len * keep_ratio
-        self.stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
-                                                 max_heaps=2 * substreams,
-                                                 ring_heaps=32 * substreams)
         heap_size = channels_per_substream * acc_len * 4 * np.dtype(np.int8).itemsize
         pool_items = 36 * substreams + 2  # TODO: total thumb suck
         pool = spead2.MemoryPool(heap_size, heap_size, pool_items, pool_items)
-        self.stream.set_memory_allocator(pool)
+        self.stream = spead2.recv.asyncio.Stream(
+            spead2.ThreadPool(),
+            spead2.recv.StreamConfig(max_heaps=2 * substreams, memory_allocator=pool),
+            spead2.recv.RingStreamConfig(heaps=32 * substreams))
         self.stream.add_udp_ibv_reader(endpoint_tuples,
                                        get_interface_address(interface),
                                        buffer_size=64 * 1024 * 1024)
