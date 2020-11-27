@@ -85,7 +85,7 @@ class Engine:
                 if use_gdrcopy:
                     device_bytes = compute.slots[f'in{pol}'].required_bytes()
                     with context:
-                        device_raw, buf_raw = gdrcopy.pycuda.allocate_raw(
+                        device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(
                             gdr, device_bytes)
                     buf = np.frombuffer(buf_raw, np.uint8)
                     # The device buffer contains extra space for copying the head
