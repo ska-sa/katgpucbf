@@ -1,4 +1,10 @@
+[build-system]
+# 1. setuptools and wheel are required to install all python packages.
+# TODO: It may be worth combining the requirements here and in requirements.txt into one location.
+requires = ["setuptools", "wheel"]
+
 [tool.black]
+# Configuration for Black, the tools used for auto-formatting the python code in katxgpu
 line-length = 120
 include = '\.pyi?$'
 exclude ='''

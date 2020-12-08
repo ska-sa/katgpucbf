@@ -1,0 +1,3 @@
+[submodule "3rdparty/spead2"]
+	path = 3rdparty/spead2
+	url = git@github.com:ska-sa/spead2.git

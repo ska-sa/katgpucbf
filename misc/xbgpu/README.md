@@ -58,4 +58,10 @@ on an image based on the nvidia/cuda:10.1-devel-ubuntu18.04 container.
 This should all be happening automatically on SARAO's servers, but if you fork this repo and want to set up your own CI
 server, these steps should help you on your way. A [document](https://docs.google.com/document/d/1iiZk7aEjsAcewM-wDX3Iz9osiTiyOhr3sYYzcmsv4mM/edit?usp=sharing) describes in more detail how Jenkins is configured on SARAO's servers. This document is a work in progress.
 
+## SPEAD2 Network Side Software
+
+ibverbs
+Need to include as submodule as we are using custom C++ code for performance, not the python wrappings
+Submodule is included in 3rdparty folder
+
 
