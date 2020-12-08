@@ -63,5 +63,6 @@ server, these steps should help you on your way. A [document](https://docs.googl
 ibverbs
 Need to include as submodule as we are using custom C++ code for performance, not the python wrappings
 Submodule is included in 3rdparty folder
+Wraps C++ code in python susing pybind11. If you want to understand more go to: https://pybind11.readthedocs.io/en/stable/basics.html, however its quite complicated. Avoid the C++ code until you are ready.
 
 

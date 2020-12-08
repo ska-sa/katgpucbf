@@ -2,4 +2,3 @@ llvmlite==0.31.0
 numpy
 pycuda
 katsdpsigproc
-pybind11==2.5.0

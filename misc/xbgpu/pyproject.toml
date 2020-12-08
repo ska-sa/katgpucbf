@@ -1,7 +1,8 @@
 [build-system]
 # 1. setuptools and wheel are required to install all python packages.
+# 2. pybind11 is used for wrapping C++ functions in python. Required to be here so it is available when pip install is run.
 # TODO: It may be worth combining the requirements here and in requirements.txt into one location.
-requires = ["setuptools", "wheel"]
+requires = ["setuptools", "wheel", "pybind11==2.6.0"]
 
 [tool.black]
 # Configuration for Black, the tools used for auto-formatting the python code in katxgpu
