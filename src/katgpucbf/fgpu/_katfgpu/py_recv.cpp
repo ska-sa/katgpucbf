@@ -14,10 +14,11 @@ class py_chunk : public chunk
 {
 public:
     py::buffer base;
+    py::object device;
     std::shared_ptr<py::buffer_info> buffer_info;
 
-    py_chunk(py::buffer base)
-        : base(std::move(base)),
+    py_chunk(py::buffer base, py::object device)
+        : base(std::move(base)), device(std::move(device)),
         buffer_info(std::make_shared<py::buffer_info>(
             request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
     {
@@ -38,10 +39,10 @@ public:
     py::object monitor;
 
     py_stream(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
-              ringbuffer_t &ringbuffer, int thread_affinity, bool mask_timestamp,
+              ringbuffer_t &ringbuffer, int thread_affinity, bool mask_timestamp, bool use_gdrcopy,
               py::object monitor)
         : stream(pol, sample_bits, packet_samples, chunk_samples, ringbuffer, thread_affinity,
-                 mask_timestamp),
+                 mask_timestamp, use_gdrcopy),
         monitor(std::move(monitor))
     {
     }
@@ -89,19 +90,20 @@ py::module register_module(py::module &parent)
     m.doc() = "receiver for katfgpu";
 
     py::class_<py_chunk>(m, "Chunk", "Chunk of samples")
-        .def(py::init<py::buffer>(), "base"_a)
+        .def(py::init<py::buffer, py::object>(), "base"_a, "device"_a = py::none())
         .def_readwrite("timestamp", &py_chunk::timestamp)
         .def_readwrite("pol", &py_chunk::pol)
         .def_readonly("present", &py_chunk::present)
         .def_readonly("base", &py_chunk::base)
+        .def_readonly("device", &py_chunk::device)
     ;
 
     py::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
-        .def(py::init<int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int, bool,
+        .def(py::init<int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int, bool, bool,
                       py::object>(),
              "pol"_a, "sample_bits"_a, "packet_samples"_a, "chunk_samples"_a,
              "ringbuffer"_a, "thread_affinity"_a = -1, "mask_timestamp"_a = false,
-             "monitor"_a = py::none(),
+             "use_gdrcopy"_a = false, "monitor"_a = py::none(),
              py::keep_alive<1, 6>())
         .def_property_readonly("ringbuffer", [](py_stream &self) -> stream::ringbuffer_t &
         {

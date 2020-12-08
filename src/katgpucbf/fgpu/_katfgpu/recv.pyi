@@ -7,11 +7,13 @@ class Chunk:
     timestamp: int
     pol: int
 
-    def __init__(self, base: Any) -> None: ...
+    def __init__(self, base: Any, device: Any = None) -> None: ...
     @property
     def present(self) -> Sequence[bool]: ...
     @property
     def base(self) -> Any: ...
+    @property
+    def device(self) -> Any: ...
 
 
 class Ringbuffer:
@@ -26,7 +28,9 @@ class Ringbuffer:
 class Stream:
     def __init__(self, pol: int, sample_bits: int, packet_samples: int,
                  chunk_samples: int, ringbuffer: Ringbuffer,
-                 thread_affinity: int = ..., *, mask_timestamp: bool = ...,
+                 thread_affinity: int = ..., *,
+                 mask_timestamp: bool = ...,
+                 use_gdrcopy: bool = ...,
                  monitor: Optional[Monitor] = ...) -> None: ...
     @property
     def ringbuffer(self) -> Ringbuffer: ...

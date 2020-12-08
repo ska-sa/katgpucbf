@@ -1,6 +1,8 @@
 import logging
 from typing import List, Optional, AsyncGenerator
 
+import katsdpsigproc.accel
+
 from .monitor import Monitor
 from .ringbuffer import AsyncRingbuffer
 from ._katfgpu.recv import Stream, Chunk, Ringbuffer

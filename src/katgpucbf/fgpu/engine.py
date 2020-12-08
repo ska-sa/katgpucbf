@@ -39,14 +39,20 @@ class Engine:
                  dst_ttl: int,
                  dst_ibv: bool,
                  dst_packet_payload: int,
-                 dst_affinity: List[int],
-                 dst_comp_vector: List[int],
+                 dst_affinity: int,
+                 dst_comp_vector: int,
                  adc_rate: float,
                  spectra: int, acc_len: int,
                  channels: int, taps: int,
                  quant_scale: float,
                  mask_timestamp: bool,
+                 use_gdrcopy: bool,
+                 use_peerdirect: bool,
                  monitor: Monitor) -> None:
+        if use_gdrcopy:
+            import gdrcopy.pycuda
+            gdr = gdrcopy.Gdr()
+
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -58,7 +64,7 @@ class Engine:
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model, monitor)
+        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor)
 
         ringbuffer_capacity = 2
         ring = recv.Ringbuffer(ringbuffer_capacity)
@@ -70,29 +76,59 @@ class Engine:
         self._src_streams = [recv.Stream(pol, compute.sample_bits, src_packet_samples,
                                          chunk_samples, ring, src_affinity[pol],
                                          mask_timestamp=mask_timestamp,
+                                         use_gdrcopy=use_gdrcopy,
                                          monitor=monitor)
                              for pol in range(pols)]
         src_chunks_per_stream = 4
         monitor.event_qsize('free_chunks', 0, src_chunks_per_stream * len(self._src_streams))
-        for stream in self._src_streams:
+        for pol, stream in enumerate(self._src_streams):
             for i in range(src_chunks_per_stream):
-                buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
-                stream.add_chunk(recv.Chunk(buf))
-        send_bufs = []
+                if use_gdrcopy:
+                    device_bytes = compute.slots[f'in{pol}'].required_bytes()
+                    with context:
+                        device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(
+                            gdr, device_bytes)
+                    buf = np.frombuffer(buf_raw, np.uint8)
+                    # The device buffer contains extra space for copying the head
+                    # of the following chunk, but we don't need that in the host
+                    # mapping.
+                    buf = buf[:stream.chunk_bytes]
+                    # Hack to work around limitations in katsdpsigproc and pycuda
+                    device_array = accel.DeviceArray(
+                        context, (device_bytes,), np.uint8, raw=int(device_raw))
+                    device_array.buffer.base = device_raw
+                    chunk = recv.Chunk(buf, device_array)
+                else:
+                    buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
+                    chunk = recv.Chunk(buf)
+                stream.add_chunk(chunk)
+        send_chunks = []
+        send_shape = (spectra // acc_len, channels, acc_len, pols, 2)
+        send_dtype = np.dtype(np.int8)
         for i in range(4):
-            buf = accel.HostArray((spectra // acc_len, channels, acc_len, pols, 2), np.int8,
-                                  context=context)
-            send_bufs.append(buf)
+            if use_peerdirect:
+                dev = accel.DeviceArray(context, send_shape, send_dtype)
+                buf = dev.buffer.gpudata.as_buffer(
+                    int(np.product(send_shape) * send_dtype.itemsize))
+                send_chunks.append(send.Chunk(buf, dev))
+            else:
+                buf = accel.HostArray(send_shape, send_dtype, context=context)
+                send_chunks.append(send.Chunk(buf))
+        memory_regions = [chunk.base for chunk in send_chunks]
+        if use_peerdirect:
+            memory_regions.extend(self._processor.peerdirect_memory_regions)
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_rate * buf.dtype.itemsize * 1.1
+        rate = pols * adc_rate * send_dtype.itemsize * 1.1
         # There is a SPEAD header, 8 item pointers,
         # and 3 padding pointers, for a 96 byte header.
         self._sender = send.Sender(
-            send_bufs, dst_affinity, dst_comp_vector,
+            len(send_chunks), memory_regions, dst_affinity, dst_comp_vector,
             [(d.host, d.port) for d in dst], dst_ttl, dst_interface, dst_ibv,
-            dst_packet_payload + 96, rate, len(send_bufs) * spectra // acc_len * len(dst),
+            dst_packet_payload + 96, rate, len(send_chunks) * spectra // acc_len * len(dst),
             monitor)
-        monitor.event_qsize('send_free_ringbuffer', len(send_bufs), len(send_bufs))
+        monitor.event_qsize('send_free_ringbuffer', 0, len(send_chunks))
+        for schunk in send_chunks:
+            self._sender.push_free_ring(schunk)
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -108,7 +144,7 @@ class Engine:
                     stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer,
                                               self._src_comp_vector[pol])
             tasks = [
-                loop.create_task(self._processor.run_processing()),
+                loop.create_task(self._processor.run_processing(self._src_streams)),
                 loop.create_task(self._processor.run_receive(self._src_streams)),
                 loop.create_task(self._processor.run_transmit(self._sender))
             ]

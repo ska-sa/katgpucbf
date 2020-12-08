@@ -122,7 +122,8 @@ private:
 
 public:
     stream(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
-           ringbuffer_t &ringbuffer, int thread_affinity = -1, bool mask_timestamp = false);
+           ringbuffer_t &ringbuffer, int thread_affinity = -1, bool mask_timestamp = false,
+           bool use_gdrcopy = false);
     ~stream();
 
     void add_udp_pcap_file_reader(const std::string &filename);
