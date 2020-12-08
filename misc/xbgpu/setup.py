@@ -1,16 +1,19 @@
-"""Script for installing the katxgpu package."""
+"""
+Script for installing the katxgpu package.
+
+TODO: Expand upon pybind11 installation stuff
+"""
 
 import setuptools
-
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-# Points to the pybind11 C++ source to build
+# List of C++ files to turn in to python modules. All the modules fall under katxgpu._katxgpu
 ext_modules = [
     Pybind11Extension(
-        "example",
+        "_katxgpu",
         ["src/example.cpp"],
     ),
 ]
@@ -34,7 +37,11 @@ setuptools.setup(
         "Topic :: Scientific/Engineering :: Astronomy",
     ],
     python_requires=">=3.6",
-    # The following two lines are needed to install the pybind11 C++ files
+    # The following three lines are needed to install the pybind11 C++ modules:
+    # 1. ext_package ensures that the pybind modules fall under the katxgpu module when importing
+    # 2. ext_modules lists the pybind modules to install
+    # 3. build_ext ensures the highest supported C++ standard is used to build the pybind11 modules
+    ext_package="katxgpu",
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
 )

@@ -7,7 +7,7 @@ namespace py = pybind11;
 
 int add(int i, int j);
 
-PYBIND11_MODULE(example, m) {
+PYBIND11_MODULE(_katxgpu, m) {
     m.doc() = "pybind11 example plugin"; // optional module docstring
 
 
