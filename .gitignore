@@ -1,5 +1,4 @@
 .vscode
-doc
 *.o
 *__pycache__
 *.so
