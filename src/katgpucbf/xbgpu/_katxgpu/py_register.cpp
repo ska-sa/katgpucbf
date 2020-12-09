@@ -1,14 +1,18 @@
+// Top level file for binding C++ functions to python
 #include <pybind11/pybind11.h>
-
-#ifndef EXAMPLE_H
-#define EXAMPLE_H
 
 namespace py = pybind11;
 
-int add(int i, int j);
+int add(int i, int j)
+{
+    return i + j;
+}
 
+/* This macro creates a function that will be called when calling "import katxgpu._katxgpu" in 
+ * python. Code within this macro will bind C++ functions, classes and attributes to python.
+ */
 PYBIND11_MODULE(_katxgpu, m) {
-    m.doc() = "pybind11 example plugin"; // optional module docstring
+    m.doc() = "C++ backend for katxgpu."; // optional module docstring
 
 
     m.def("add1", &add, "A function which adds two numbers");
@@ -28,6 +32,3 @@ PYBIND11_MODULE(_katxgpu, m) {
     py::object world = py::cast("World");
     m.attr("what") = world;    
 }
-
-
-#endif

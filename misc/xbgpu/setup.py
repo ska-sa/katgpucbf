@@ -14,7 +14,7 @@ with open("README.md", "r") as fh:
 ext_modules = [
     Pybind11Extension(
         "_katxgpu",
-        ["src/example.cpp"],
+        ["src/py_register.cpp"],
     ),
 ]
 

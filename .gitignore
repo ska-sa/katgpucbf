@@ -1,4 +1,7 @@
 .vscode
 doc
 *.o
-__pycache__
+*__pycache_
+*.so_
+/build
+*.egg-info
