@@ -1,22 +1,58 @@
-"""
-Script for installing the katxgpu package.
-
-TODO: Expand upon pybind11 installation stuff
-"""
+"""Script for installing the katxgpu package."""
 
 import setuptools
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 
-with open("README.md", "r") as fh:
-    long_description = fh.read()
+# These three imports are used in the BuildExt class.
+import configparser
+import subprocess
+import os
+from glob import glob
 
-# List of C++ files to turn in to python modules. All the modules fall under katxgpu._katxgpu
+
+class BuildExt(build_ext):
+    """Class to manage the building of the SPEAD2 C++ submodule."""
+
+    def run(self):
+        """Run the spead2 compilation."""
+        self.mkpath(self.build_temp)
+        subprocess.check_call(["./bootstrap.sh"], cwd="3rdparty/spead2")
+        subprocess.check_call(os.path.abspath("3rdparty/spead2/configure"), cwd=self.build_temp)
+        config = configparser.ConfigParser()
+        config.read(os.path.join(self.build_temp, "python-build.cfg"))
+        for extension in self.extensions:
+            extension.extra_compile_args.extend(config["compiler"]["CFLAGS"].split())
+            extension.extra_link_args.extend(config["compiler"]["LIBS"].split())
+            extension.include_dirs.insert(0, os.path.join(self.build_temp, "include"))
+        super().run()
+
+    def build_extensions(self):
+        """Stop GCC complaining about -Wstrict-prototypes in C++ code."""
+        try:
+            self.compiler.compiler_so.remove("-Wstrict-prototypes")
+        except ValueError:
+            pass
+        super().build_extensions()
+
+
+# Points to the pybind11 C++ sources to build. Includes paths to spead2 header and source files required for building
 ext_modules = [
     Pybind11Extension(
         "_katxgpu",
-        ["src/py_register.cpp"],
+        sources=(
+            glob("3rdparty/spead2/src/common_*.cpp")
+            + glob("3rdparty/spead2/src/recv_*.cpp")
+            + glob("3rdparty/spead2/src/send_*.cpp")
+            + glob("src/*.cpp")
+        ),
+        depends=["3rdparty/spead2/include/spead2/*.h"],  # Header files
+        include_dirs=["src", "3rdparty/spead2/include"],
+        extra_compile_args=["-std=c++17", "-g3", "-O3", "-fvisibility=hidden"],
     ),
 ]
+
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
 setuptools.setup(
     name="katxgpu",
@@ -40,8 +76,8 @@ setuptools.setup(
     # The following three lines are needed to install the pybind11 C++ modules:
     # 1. ext_package ensures that the pybind modules fall under the katxgpu module when importing
     # 2. ext_modules lists the pybind modules to install
-    # 3. build_ext ensures the highest supported C++ standard is used to build the pybind11 modules
+    # 3. build_ext installs ensures the SPEAD2 submodule is part of the C++ compilation.
     ext_package="katxgpu",
     ext_modules=ext_modules,
-    cmdclass={"build_ext": build_ext},
+    cmdclass={"build_ext": BuildExt},
 )
