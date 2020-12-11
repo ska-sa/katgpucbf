@@ -14,7 +14,7 @@ namespace po = boost::program_options;
 struct options
 {
     std::string interface;
-    std::vector<std::string> addresses;
+    std::string address;
     int max_heaps = 128;
     int signal_heaps = 512;
     double adc_rate = 1712000000.0;
@@ -25,6 +25,8 @@ struct options
 // Size of the heap:
 // NOTE: that in this case the heap is made out of 1 KiB packets. Each packet encapsualtes a single channel and is 
 // xeng_acc_length * pols * complexity = 1024 B in size
+
+static constexpr int n_ants = 16; // TODO: make configurable
 static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
 static constexpr int n_chans = 32768; //TODO: Make configurable
 static constexpr int n_xengs = 256; //TODO: Make configurable, generally n_ants * 4
@@ -61,8 +63,8 @@ static options parse_options(int argc, const char **argv)
     ;
 
     hidden.add_options()
-        ("address", po::value<std::vector<std::string>>(&opts.addresses)->composing(),
-         "destination addresses, in form x.x.x.x+N:port (one per polarisation)")
+        ("address", po::value<std::string>(&opts.address)->composing(),
+         "destination address, in form x.x.x.x:port")
     ;
     all.add(desc);
     all.add(hidden);
@@ -94,7 +96,7 @@ static options parse_options(int argc, const char **argv)
     return opts;
 }
 
-static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint_list(const std::string &arg)
+static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::string &arg)
 {
     std::vector<boost::asio::ip::udp::endpoint> out;
 
@@ -102,20 +104,9 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint_list(const std
     if (colon == std::string::npos)
         throw std::invalid_argument("Address must contain a colon");
     std::uint16_t port = boost::lexical_cast<std::uint16_t>(arg.substr(colon + 1));
-    auto plus = arg.find('+');
-    if (plus < colon)
+    for (int i = 0; i < 8; i++)
     {
-        std::string start_str = arg.substr(0, plus);
-        auto start = boost::asio::ip::address_v4::from_string(start_str);
-        int count = boost::lexical_cast<int>(arg.substr(plus + 1, colon - plus - 1));
-        for (int i = 0; i <= count; i++)
-        {
-            boost::asio::ip::address_v4 addr(start.to_ulong() + i);
-            out.emplace_back(addr, port);
-        }
-    }
-    else
-    {
+
         auto addr = boost::asio::ip::address_v4::from_string(arg.substr(0, colon));
         out.emplace_back(addr, port);
     }
@@ -290,8 +281,8 @@ int main(int argc, const char **argv)
 
     auto interface_address = boost::asio::ip::address::from_string(opts.interface);
     std::vector<std::vector<boost::asio::ip::udp::endpoint>> endpoints;
-    for (const std::string &address : opts.addresses)
-        endpoints.push_back(parse_endpoint_list(address));
+    for (int i = 0; i < 2; i++)
+        endpoints.push_back(parse_endpoint(opts.address));
     digitiser d(opts, {endpoints}, interface_address);
     for (int i = 0; i < opts.max_heaps; i++)
         d.io_service.post(std::bind(&digitiser::send_next, &d));
