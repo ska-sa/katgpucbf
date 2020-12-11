@@ -22,11 +22,24 @@ struct options
     int ttl = 4;
 };
 
-static constexpr int sample_bits = 10;
-static constexpr int heap_samples = 4096;
-static constexpr std::size_t heap_size = heap_samples * sample_bits / 8;
-static const spead2::flavour flavour(4, 64, 48);
-static std::mt19937 rand_engine;
+// Size of the heap:
+// NOTE: that in this case the heap is made out of 1 KiB packets. Each packet encapsualtes a single channel and is 
+// xeng_acc_length * pols * complexity = 1024 B in size
+static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
+static constexpr int n_chans = 32768; //TODO: Make configurable
+static constexpr int n_xengs = 256; //TODO: Make configurable, generally n_ants * 4
+static constexpr int xeng_acc_length = 256; //Hardcoded to 256 for MeerKAT
+static constexpr int n_pols = 2; //Dual polarisation antennas
+static constexpr int complexity = 2; //real and imaginary components
+static constexpr std::size_t heap_size = n_chans / n_xengs * xeng_acc_length * n_pols * complexity * sample_bits / 8;
+static constexpr std::size_t heap_samples = n_chans / n_xengs * xeng_acc_length * n_pols * complexity; // Probably redundant
+
+//static constexpr int sample_bits = 8;
+//static constexpr int heap_samples = 104850;
+//static constexpr std::size_t heap_size = heap_samples * sample_bits / 8;
+
+static const spead2::flavour flavour(4, 64, 48); //Not sure what this should actually be
+static std::mt19937 rand_engine; //TODO: decide if this line is needed
 
 template<typename T>
 static po::typed_value<T> *make_opt(T &var)
@@ -115,14 +128,19 @@ struct heap_data
     spead2::send::heap heap;
     spead2::send::heap::item_handle timestamp_handle;
 
+    //STEP 2: Generate heap data correctly.
     explicit heap_data(const options &opts, std::int64_t timestamp, int pol)
         : data(std::make_unique<std::uint8_t[]>(heap_size)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, 0))
     {
-        heap.add_item(0x3101, pol);
-        heap.add_item(0x3102, 0);
-        heap.add_item(0x3300, data.get(), heap_size, false);
+        /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control 
+         * Document for Correlator Beamformer Visibilities and Tied Array Data" 
+         * (Document ID: M1000-0001-020 rev 4)
+         */
+        heap.add_item(0x4101, pol); //feng_id
+        heap.add_item(0x4103, 0); //frequency 
+        heap.add_item(0x4300, data.get(), heap_size, false); //feng_raw
         heap.set_repeat_pointers(true);
 
         double angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
@@ -132,16 +150,16 @@ struct heap_data
         std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
         for (std::size_t i = 0; i < heap_samples; i++)
         {
-            double angle = angle_scale * (timestamp + i);
-            int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
-            buffer = (buffer << 10) | (sample & 0x3ff);
-            buffer_bits += 10;
-            while (buffer_bits >= 8)
-            {
-                buffer_bits -= 8;
-                data[pos] = buffer >> buffer_bits;
-                pos++;
-            }
+            // double angle = angle_scale * (timestamp + i);
+            // int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
+            // buffer = (buffer << 10) | (sample & 0x3ff);
+            // buffer_bits += 10;
+            // while (buffer_bits >= 8)
+            // {
+            //     buffer_bits -= 8;
+            //     data[pos] = buffer >> buffer_bits;
+            //     pos++;
+            // }
         }
     }
 };
@@ -186,6 +204,11 @@ static std::vector<T> flatten(const std::vector<std::vector<T>> &in)
     return out;
 }
 
+struct fengine
+{
+    
+};
+
 struct digitiser
 {
     boost::asio::io_service io_service;
@@ -227,9 +250,9 @@ struct digitiser
         stream(
             io_service,
             spead2::send::stream_config()
-                // Value doesn't matter, just needs to be bigger than actual size
-                .set_max_packet_size(heap_size + 128)
-                .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
+           // eap_size = n_chans / n_xengs * xeng_acc_length * pols * complexity * sample_bits / 8;
+                .set_max_packet_size(xeng_acc_length * n_pols * complexity) //STEP 1: Set this right - comment how this rate is not quite right
+                .set_rate(endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size)
                 .set_max_heaps(opts.max_heaps),
             spead2::send::udp_ibv_config()
                 .set_endpoints(flatten(endpoints))
