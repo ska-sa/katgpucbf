@@ -4,3 +4,4 @@
 *.so
 /build
 *.egg-info
+fsim

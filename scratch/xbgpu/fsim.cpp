@@ -96,6 +96,7 @@ static options parse_options(int argc, const char **argv)
     return opts;
 }
 
+// Parse endpoint (multicast ip address and port in this case). Need to make n_ants of them as one stream per F-Engine, expand
 static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::string &arg)
 {
     std::vector<boost::asio::ip::udp::endpoint> out;
@@ -103,8 +104,9 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::str
     auto colon = arg.find(':');
     if (colon == std::string::npos)
         throw std::invalid_argument("Address must contain a colon");
+        
     std::uint16_t port = boost::lexical_cast<std::uint16_t>(arg.substr(colon + 1));
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < n_ants; i++)
     {
 
         auto addr = boost::asio::ip::address_v4::from_string(arg.substr(0, colon));
@@ -120,7 +122,7 @@ struct heap_data
     spead2::send::heap::item_handle timestamp_handle;
 
     //STEP 2: Generate heap data correctly.
-    explicit heap_data(const options &opts, std::int64_t timestamp, int pol)
+    explicit heap_data(const options &opts, std::int64_t timestamp, int feng_id)
         : data(std::make_unique<std::uint8_t[]>(heap_size)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, 0))
@@ -129,7 +131,7 @@ struct heap_data
          * Document for Correlator Beamformer Visibilities and Tied Array Data" 
          * (Document ID: M1000-0001-020 rev 4)
          */
-        heap.add_item(0x4101, pol); //feng_id
+        heap.add_item(0x4101, feng_id); //feng_id
         heap.add_item(0x4103, 0); //frequency 
         heap.add_item(0x4300, data.get(), heap_size, false); //feng_raw
         heap.set_repeat_pointers(true);
@@ -195,9 +197,57 @@ static std::vector<T> flatten(const std::vector<std::vector<T>> &in)
     return out;
 }
 
-struct fengine
+struct fengines
 {
-    
+    boost::asio::io_service io_service;
+    std::vector<heap_data> heaps;
+    spead2::send::udp_ibv_stream stream;
+    std::size_t n_substreams;
+    std::int64_t timestamp = 0;
+
+    fengines(const options &opts,
+              const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
+              const boost::asio::ip::address &interface_address):
+        heaps(make_heaps(opts)),
+        stream(
+            io_service,
+            spead2::send::stream_config()
+                .set_max_packet_size(xeng_acc_length * n_pols * complexity) //STEP 1: Set this right - comment how this rate is not quite right
+                .set_rate(endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size)
+                .set_max_heaps(opts.max_heaps),
+            spead2::send::udp_ibv_config()
+                .set_endpoints(flatten(endpoints))
+                .set_interface_address(interface_address)
+                .set_ttl(opts.ttl)
+                .set_memory_regions(get_memory_regions(heaps))
+        )
+    {
+    }
+
+    static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
+        const std::vector<heap_data>  &heaps)
+    {
+        std::vector<std::pair<const void *, std::size_t>> memory_regions;
+        int i = 0;
+        for (const auto &heap : heaps){
+            memory_regions.emplace_back(heap.data.get(), heap_size);
+        }
+        return memory_regions;
+    }
+
+    static std::vector<heap_data> make_heaps(
+        const options &opts)
+    {
+        std::cout << "make_heaps :" << n_ants << std::endl;
+        std::vector<heap_data> heaps;
+        heaps.reserve(n_ants);
+        for (int feng_id = 0; feng_id < n_ants; feng_id ++)
+        {
+            std::cout << "heap created: " << feng_id << std::endl;
+            heaps.emplace_back(opts, 0, feng_id);
+        }
+        return heaps;
+    }
 };
 
 struct digitiser
@@ -281,11 +331,13 @@ int main(int argc, const char **argv)
 
     auto interface_address = boost::asio::ip::address::from_string(opts.interface);
     std::vector<std::vector<boost::asio::ip::udp::endpoint>> endpoints;
-    for (int i = 0; i < 2; i++)
-        endpoints.push_back(parse_endpoint(opts.address));
-    digitiser d(opts, {endpoints}, interface_address);
-    for (int i = 0; i < opts.max_heaps; i++)
-        d.io_service.post(std::bind(&digitiser::send_next, &d));
-    d.io_service.run();
+    endpoints.push_back(parse_endpoint(opts.address));
+
+    fengines f(opts, {endpoints}, interface_address);
+    
+    
+    //for (int i = 0; i < opts.max_heaps; i++)
+    //    d.io_service.post(std::bind(&digitiser::send_next, &d));
+    //d.io_service.run();
     return 0;
 }
