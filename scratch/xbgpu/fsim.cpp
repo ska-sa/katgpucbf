@@ -35,6 +35,7 @@ static constexpr int n_pols = 2; //Dual polarisation antennas
 static constexpr int complexity = 2; //real and imaginary components
 static constexpr std::size_t heap_size = n_chans / n_xengs * xeng_acc_length * n_pols * complexity * sample_bits / 8;
 static constexpr std::size_t heap_samples = n_chans / n_xengs * xeng_acc_length * n_pols * complexity; // Probably redundant
+static constexpr int timestamp_step = 0x800000; //real and imaginary components
 
 //static constexpr int sample_bits = 8;
 //static constexpr int heap_samples = 104850;
@@ -141,7 +142,7 @@ struct heap_data
         int buffer_bits = 0;
         int pos = 0;
         std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
-        for (std::size_t i = 0; i < heap_samples; i++)
+        for (std::size_t i = 0; i < heap_samples; i++) //STEP 3: Generate Simulated data.
         {
             // double angle = angle_scale * (timestamp + i);
             // int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
@@ -188,35 +189,30 @@ struct polarisation
     }
 };
 
-template<typename T>
-static std::vector<T> flatten(const std::vector<std::vector<T>> &in)
-{
-    std::vector<T> out;
-    for (const auto &x : in)
-        out.insert(out.end(), x.begin(), x.end());
-    return out;
-}
-
 struct fengines
 {
+    std::int64_t n_heaps_per_fengine;
     boost::asio::io_service io_service;
-    std::vector<heap_data> heaps;
+    std::vector<std::vector<heap_data>> heaps;
     spead2::send::udp_ibv_stream stream;
     std::size_t n_substreams;
     std::int64_t timestamp = 0;
+    std::int64_t next_fengine = 0;
+    std::int64_t next_heap = 0;
 
     fengines(const options &opts,
-              const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
+              const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
               const boost::asio::ip::address &interface_address):
+        n_heaps_per_fengine(opts.max_heaps/n_ants),
         heaps(make_heaps(opts)),
         stream(
             io_service,
             spead2::send::stream_config()
-                .set_max_packet_size(xeng_acc_length * n_pols * complexity) //STEP 1: Set this right - comment how this rate is not quite right
-                .set_rate(endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size)
+                .set_max_packet_size(xeng_acc_length * n_pols * complexity) 
+                .set_rate(endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size) //STEP 1: Set this right - comment how this rate is not quite right
                 .set_max_heaps(opts.max_heaps),
             spead2::send::udp_ibv_config()
-                .set_endpoints(flatten(endpoints))
+                .set_endpoints(endpoints)
                 .set_interface_address(interface_address)
                 .set_ttl(opts.ttl)
                 .set_memory_regions(get_memory_regions(heaps))
@@ -225,119 +221,109 @@ struct fengines
     }
 
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
-        const std::vector<heap_data>  &heaps)
+        const std::vector<std::vector<heap_data>>  &all_heaps)
     {
         std::vector<std::pair<const void *, std::size_t>> memory_regions;
         int i = 0;
-        for (const auto &heap : heaps){
-            memory_regions.emplace_back(heap.data.get(), heap_size);
+        for (const auto &single_fengine_heaps : all_heaps){
+            for (const auto &heap : single_fengine_heaps){
+                memory_regions.emplace_back(heap.data.get(), heap_size);
+            }
         }
         return memory_regions;
     }
 
-    static std::vector<heap_data> make_heaps(
+    static std::vector<std::vector<heap_data>> make_heaps(
         const options &opts)
     {
         std::cout << "make_heaps :" << n_ants << std::endl;
-        std::vector<heap_data> heaps;
-        heaps.reserve(n_ants);
+        std::vector<std::vector<heap_data>> all_fengine_heaps;
+        all_fengine_heaps.reserve(n_ants);
+        int heaps_per_fengine = opts.max_heaps/n_ants; //TODO: Neaten this up a bit
+        std::cout << "heaps_per_fengine: " << heaps_per_fengine << std::endl;
         for (int feng_id = 0; feng_id < n_ants; feng_id ++)
         {
+            std::vector<heap_data> fengine_heaps;
+            fengine_heaps.reserve(heaps_per_fengine);
+            for (int heap_index = 0; heap_index < heaps_per_fengine; heap_index ++)
+            {
+                std::cout << "wtf" << std::endl;
+                fengine_heaps.emplace_back(opts, heap_index * timestamp_step, feng_id);
+            }
             std::cout << "heap created: " << feng_id << std::endl;
-            heaps.emplace_back(opts, 0, feng_id);
+            all_fengine_heaps.emplace_back(std::move(fengine_heaps));
         }
-        return heaps;
-    }
-};
-
-struct digitiser
-{
-    boost::asio::io_service io_service;
-    std::vector<polarisation> pols;
-    spead2::send::udp_ibv_stream stream;
-    std::size_t next_pol = 0;
-
-    static std::vector<polarisation> make_pols(
-        const options &opts,
-        const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints)
-    {
-        std::vector<polarisation> pols;
-        pols.reserve(endpoints.size());
-        int pol = 0;
-        std::size_t base_substream = 0;
-        for (const auto &ep : endpoints)
-        {
-            pols.emplace_back(opts, base_substream, ep.size(), pol);
-            pol++;
-            base_substream += ep.size();
-        }
-        return pols;
-    }
-
-    static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
-        const std::vector<polarisation> &pols)
-    {
-        std::vector<std::pair<const void *, std::size_t>> memory_regions;
-        for (const auto &pol : pols)
-            for (const auto &heap : pol.heaps)
-                memory_regions.emplace_back(heap.data.get(), heap_size);
-        return memory_regions;
-    }
-
-    digitiser(const options &opts,
-              const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
-              const boost::asio::ip::address &interface_address)
-        : pols(make_pols(opts, endpoints)),
-        stream(
-            io_service,
-            spead2::send::stream_config()
-           // eap_size = n_chans / n_xengs * xeng_acc_length * pols * complexity * sample_bits / 8;
-                .set_max_packet_size(xeng_acc_length * n_pols * complexity) //STEP 1: Set this right - comment how this rate is not quite right
-                .set_rate(endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size)
-                .set_max_heaps(opts.max_heaps),
-            spead2::send::udp_ibv_config()
-                .set_endpoints(flatten(endpoints))
-                .set_interface_address(interface_address)
-                .set_ttl(opts.ttl)
-                .set_memory_regions(get_memory_regions(pols))
-        )
-    {
-    }
-
-    void callback(const boost::system::error_code &ec, std::size_t)
-    {
-        if (ec)
-        {
-            std::cerr << "Error: " << ec;
-            std::exit(1);
-        }
-        else
-            send_next();
+        return all_fengine_heaps;
     }
 
     void send_next()
     {
         using namespace std::placeholders;
-        pols[next_pol].send_next(stream, std::bind(&digitiser::callback, this, _1, _2));
-        next_pol++;
-        if (next_pol == pols.size())
-            next_pol = 0;
+        
+        heaps[next_fengine][next_heap].heap.get_item(heaps[next_fengine][next_heap].timestamp_handle).data.immediate = timestamp;
+        //stream.async_send_heap(heaps[next_fengine][next_heap].heap, callback, -1, next_fengine;
+        std::cout << "F-Engines: " << next_fengine << " heap: " << next_heap << std::endl;
+
+        next_fengine++;
+        if (next_fengine == n_ants){
+            timestamp += timestamp_step;
+            next_fengine = 0;
+            next_heap++;
+        }
+
+        if (next_heap == n_heaps_per_fengine)
+            next_heap = 0;
+
     }
+
+    // void callback(const boost::system::error_code &ec, std::size_t)
+    // {
+    //     if (ec)
+    //     {
+    //         std::cerr << "Error: " << ec;
+    //         std::exit(1);
+    //     }
+    //     else
+    //         send_next();
+    // }
 };
+
+
+
+    // void callback(const boost::system::error_code &ec, std::size_t)
+    // {
+    //     if (ec)
+    //     {
+    //         std::cerr << "Error: " << ec;
+    //         std::exit(1);
+    //     }
+    //     else
+    //         send_next();
+    // }
+
+    // void send_next() //STEP 1: Get send next working
+    // {
+    //     using namespace std::placeholders;
+    //     pols[next_pol].send_next(stream, std::bind(&digitiser::callback, this, _1, _2));
+    //     next_pol++;
+    //     if (next_pol == pols.size())
+    //         next_pol = 0;
+    // }
+
 
 int main(int argc, const char **argv)
 {
     options opts = parse_options(argc, argv);
 
     auto interface_address = boost::asio::ip::address::from_string(opts.interface);
-    std::vector<std::vector<boost::asio::ip::udp::endpoint>> endpoints;
-    endpoints.push_back(parse_endpoint(opts.address));
+    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts.address);
 
-    fengines f(opts, {endpoints}, interface_address);
-    
-    
-    //for (int i = 0; i < opts.max_heaps; i++)
-    //    d.io_service.post(std::bind(&digitiser::send_next, &d));
-    //d.io_service.run();
+    fengines f(opts, endpoints, interface_address);
+    for (int j = 0; j < opts.max_heaps/n_ants; j++){
+        for (int i = 0; i < n_ants; i++){
+            f.io_service.post(std::bind(&fengines::send_next, &f));
+        }
+    }
+    f.io_service.run();
     return 0;
 }
