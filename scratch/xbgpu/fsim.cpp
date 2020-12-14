@@ -137,11 +137,11 @@ struct heap_data
         heap.add_item(0x4300, data.get(), heap_size, false); //feng_raw
         heap.set_repeat_pointers(true);
 
-        double angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
-        unsigned int buffer = 0;
-        int buffer_bits = 0;
-        int pos = 0;
-        std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
+        // double angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
+        // unsigned int buffer = 0;
+        // int buffer_bits = 0;
+        // int pos = 0;
+        // std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
         for (std::size_t i = 0; i < heap_samples; i++) //STEP 3: Generate Simulated data.
         {
             // double angle = angle_scale * (timestamp + i);
@@ -193,7 +193,6 @@ struct fengines
         const std::vector<std::vector<heap_data>>  &all_heaps)
     {
         std::vector<std::pair<const void *, std::size_t>> memory_regions;
-        int i = 0;
         for (const auto &single_fengine_heaps : all_heaps){
             for (const auto &heap : single_fengine_heaps){
                 memory_regions.emplace_back(heap.data.get(), heap_size);
