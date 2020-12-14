@@ -158,37 +158,6 @@ struct heap_data
     }
 };
 
-struct polarisation
-{
-    std::vector<heap_data> heaps;
-    std::size_t base_substream;
-    std::size_t n_substreams;
-    std::size_t next_substream = 0;   // relative to base_substream
-    std::size_t next = 0;
-    std::int64_t timestamp = 0;
-
-    polarisation(const options &opts, std::size_t base_substream, std::size_t n_substreams, int pol)
-        : base_substream(base_substream), n_substreams(n_substreams)
-    {
-        std::size_t capacity = opts.signal_heaps;
-        while (capacity < std::size_t(opts.max_heaps))
-            capacity *= 2;
-        heaps.reserve(capacity);
-        for (std::size_t i = 0; i < capacity; i++)
-            heaps.emplace_back(opts, (i % opts.signal_heaps) * heap_samples, pol);
-    }
-
-    template<typename Callback>
-    void send_next(spead2::send::udp_ibv_stream &stream, Callback &&callback)
-    {
-        heaps[next].heap.get_item(heaps[next].timestamp_handle).data.immediate = timestamp;
-        timestamp += heap_samples;
-        stream.async_send_heap(heaps[next].heap, callback, -1, base_substream + next_substream);
-        next = (next + 1) % heaps.size();
-        next_substream = (next_substream + 1) % n_substreams;
-    }
-};
-
 struct fengines
 {
     std::int64_t n_heaps_per_fengine;
@@ -283,29 +252,6 @@ struct fengines
             send_next();
     }
 };
-
-
-
-    // void callback(const boost::system::error_code &ec, std::size_t)
-    // {
-    //     if (ec)
-    //     {
-    //         std::cerr << "Error: " << ec;
-    //         std::exit(1);
-    //     }
-    //     else
-    //         send_next();
-    // }
-
-    // void send_next() //STEP 1: Get send next working
-    // {
-    //     using namespace std::placeholders;
-    //     pols[next_pol].send_next(stream, std::bind(&digitiser::callback, this, _1, _2));
-    //     next_pol++;
-    //     if (next_pol == pols.size())
-    //         next_pol = 0;
-    // }
-
 
 int main(int argc, const char **argv)
 {
