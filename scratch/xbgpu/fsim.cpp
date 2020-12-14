@@ -209,7 +209,7 @@ struct fengines
             io_service,
             spead2::send::stream_config()
                 .set_max_packet_size(xeng_acc_length * n_pols * complexity) 
-                .set_rate(endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size) //STEP 1: Set this right - comment how this rate is not quite right
+                .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 * (heap_size + 72) / heap_size) //STEP 1: Set this right - comment how this rate is not quite right
                 .set_max_heaps(opts.max_heaps),
             spead2::send::udp_ibv_config()
                 .set_endpoints(endpoints)
@@ -218,10 +218,6 @@ struct fengines
                 .set_memory_regions(get_memory_regions(heaps))
         )
     {
-            std::cout << endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size << std::endl;
-            std::cout << endpoints.size() << std::endl;
-            std::cout << opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size << std::endl;
-            std::cout << endpoints.size() << " " << opts.adc_rate << std::endl;
     }
 
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
