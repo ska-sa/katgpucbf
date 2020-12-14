@@ -218,6 +218,10 @@ struct fengines
                 .set_memory_regions(get_memory_regions(heaps))
         )
     {
+            std::cout << endpoints.size() * opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size << std::endl;
+            std::cout << endpoints.size() << std::endl;
+            std::cout << opts.adc_rate * sample_bits / 8.0 * (heap_size + 72) / heap_size << std::endl;
+            std::cout << endpoints.size() << " " << opts.adc_rate << std::endl;
     }
 
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
@@ -236,21 +240,17 @@ struct fengines
     static std::vector<std::vector<heap_data>> make_heaps(
         const options &opts)
     {
-        std::cout << "make_heaps :" << n_ants << std::endl;
         std::vector<std::vector<heap_data>> all_fengine_heaps;
         all_fengine_heaps.reserve(n_ants);
         int heaps_per_fengine = opts.max_heaps/n_ants; //TODO: Neaten this up a bit
-        std::cout << "heaps_per_fengine: " << heaps_per_fengine << std::endl;
         for (int feng_id = 0; feng_id < n_ants; feng_id ++)
         {
             std::vector<heap_data> fengine_heaps;
             fengine_heaps.reserve(heaps_per_fengine);
             for (int heap_index = 0; heap_index < heaps_per_fengine; heap_index ++)
             {
-                std::cout << "wtf" << std::endl;
                 fengine_heaps.emplace_back(opts, heap_index * timestamp_step, feng_id);
             }
-            std::cout << "heap created: " << feng_id << std::endl;
             all_fengine_heaps.emplace_back(std::move(fengine_heaps));
         }
         return all_fengine_heaps;
@@ -261,8 +261,8 @@ struct fengines
         using namespace std::placeholders;
         
         heaps[next_fengine][next_heap].heap.get_item(heaps[next_fengine][next_heap].timestamp_handle).data.immediate = timestamp;
-        //stream.async_send_heap(heaps[next_fengine][next_heap].heap, callback, -1, next_fengine;
-        std::cout << "F-Engines: " << next_fengine << " heap: " << next_heap << std::endl;
+        stream.async_send_heap(heaps[next_fengine][next_heap].heap, std::bind(&fengines::callback, this, _1, _2), -1, next_fengine);
+        //std::cout << "F-Engines: " << next_fengine << " heap: " << next_heap << std::endl;
 
         next_fengine++;
         if (next_fengine == n_ants){
@@ -276,16 +276,16 @@ struct fengines
 
     }
 
-    // void callback(const boost::system::error_code &ec, std::size_t)
-    // {
-    //     if (ec)
-    //     {
-    //         std::cerr << "Error: " << ec;
-    //         std::exit(1);
-    //     }
-    //     else
-    //         send_next();
-    // }
+    void callback(const boost::system::error_code &ec, std::size_t)
+    {
+        if (ec)
+        {
+            std::cerr << "Error: " << ec;
+            std::exit(1);
+        }
+        else
+            send_next();
+    }
 };
 
 
