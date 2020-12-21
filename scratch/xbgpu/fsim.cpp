@@ -29,14 +29,15 @@ struct options
 static constexpr int n_ants = 16; // TODO: make configurable
 static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
 static constexpr int n_chans = 32768; //TODO: Make configurable
-static constexpr int n_xengs = 256; //TODO: Make configurable, generally n_ants * 4
+static constexpr int multicast_streams_per_antenna = 4;
+static constexpr int n_xengs = n_ants*multicast_streams_per_antenna; //TODO: Make configurable, generally n_ants * 4
 static constexpr int xeng_acc_length = 256; //Hardcoded to 256 for MeerKAT
 static constexpr int n_pols = 2; //Dual polarisation antennas
 static constexpr int complexity = 2; //real and imaginary components
 static constexpr std::size_t heap_size = n_chans / n_xengs * xeng_acc_length * n_pols * complexity * sample_bits / 8;
 static constexpr std::size_t heap_samples = n_chans / n_xengs * xeng_acc_length * n_pols * complexity; // Probably redundant
-static constexpr int timestamp_step = 0x800000; //real and imaginary components
 
+static constexpr int timestamp_step = 0x800000; //real and imaginary components
 //static constexpr int sample_bits = 8;
 //static constexpr int heap_samples = 104850;
 //static constexpr std::size_t heap_size = heap_samples * sample_bits / 8;
@@ -123,10 +124,10 @@ struct heap_data
     spead2::send::heap::item_handle timestamp_handle;
 
     //STEP 2: Generate heap data correctly.
-    explicit heap_data(const options &opts, std::int64_t timestamp, int feng_id)
+    heap_data(const options &opts, std::int64_t heap_index, int feng_id)
         : data(std::make_unique<std::uint8_t[]>(heap_size)),
         heap(flavour),
-        timestamp_handle(heap.add_item(0x1600, 0))
+        timestamp_handle(heap.add_item(0x1600, timestamp_step * heap_index))
     {
         /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control 
          * Document for Correlator Beamformer Visibilities and Tied Array Data" 
@@ -144,6 +145,8 @@ struct heap_data
         // std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
         for (std::size_t i = 0; i < heap_samples; i++) //STEP 3: Generate Simulated data.
         {
+            data[i] = feng_id;
+            
             // double angle = angle_scale * (timestamp + i);
             // int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
             // buffer = (buffer << 10) | (sample & 0x3ff);
@@ -178,7 +181,7 @@ struct fengines
             io_service,
             spead2::send::stream_config()
                 .set_max_packet_size(xeng_acc_length * n_pols * complexity) 
-                .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 * (heap_size + 72) / heap_size) //STEP 1: Set this right - comment how this rate is not quite right
+                .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 * (heap_size + 72) / heap_size / multicast_streams_per_antenna)
                 .set_max_heaps(opts.max_heaps),
             spead2::send::udp_ibv_config()
                 .set_endpoints(endpoints)
@@ -213,7 +216,7 @@ struct fengines
             fengine_heaps.reserve(heaps_per_fengine);
             for (int heap_index = 0; heap_index < heaps_per_fengine; heap_index ++)
             {
-                fengine_heaps.emplace_back(opts, heap_index * timestamp_step, feng_id);
+                fengine_heaps.emplace_back(opts, heap_index, feng_id);
             }
             all_fengine_heaps.emplace_back(std::move(fengine_heaps));
         }
@@ -226,7 +229,6 @@ struct fengines
         
         heaps[next_fengine][next_heap].heap.get_item(heaps[next_fengine][next_heap].timestamp_handle).data.immediate = timestamp;
         stream.async_send_heap(heaps[next_fengine][next_heap].heap, std::bind(&fengines::callback, this, _1, _2), -1, next_fengine);
-        //std::cout << "F-Engines: " << next_fengine << " heap: " << next_heap << std::endl;
 
         next_fengine++;
         if (next_fengine == n_ants){
