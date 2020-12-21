@@ -24,23 +24,23 @@ struct options
 
 // Size of the heap:
 // NOTE: that in this case the heap is made out of 1 KiB packets. Each packet encapsualtes a single channel and is 
-// xeng_acc_length * pols * complexity = 1024 B in size
+// n_time_samples_per_channel * pols * complexity = 1024 B in size
 
 static constexpr int n_ants = 16; // TODO: make configurable
 static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
 static constexpr int n_chans = 32768; //TODO: Make configurable
-static constexpr int multicast_streams_per_antenna = 4;
-static constexpr int n_xengs = n_ants*multicast_streams_per_antenna; //TODO: Make configurable, generally n_ants * 4
-static constexpr int xeng_acc_length = 256; //Hardcoded to 256 for MeerKAT
+static constexpr int n_multicast_streams_per_antenna = 4;
+static constexpr int n_xengs = n_ants*n_multicast_streams_per_antenna; //TODO: Make configurable, generally n_ants * 4
+static constexpr int n_time_samples_per_channel = 256; //Hardcoded to 256 for MeerKAT
 static constexpr int n_pols = 2; //Dual polarisation antennas
 static constexpr int complexity = 2; //real and imaginary components
-static constexpr std::size_t heap_size = n_chans / n_xengs * xeng_acc_length * n_pols * complexity * sample_bits / 8;
-static constexpr std::size_t heap_samples = n_chans / n_xengs * xeng_acc_length * n_pols * complexity; // Probably redundant
+static constexpr std::size_t heap_size_bytes = n_chans / n_xengs * n_time_samples_per_channel * n_pols * complexity * sample_bits / 8;
+static constexpr std::size_t heap_samples = n_chans / n_xengs * n_time_samples_per_channel * n_pols; // Probably redundant
 
 static constexpr int timestamp_step = 0x800000; //real and imaginary components
 //static constexpr int sample_bits = 8;
 //static constexpr int heap_samples = 104850;
-//static constexpr std::size_t heap_size = heap_samples * sample_bits / 8;
+//static constexpr std::size_t heap_size_bytes = heap_samples * sample_bits / 8;
 
 static const spead2::flavour flavour(4, 64, 48); //Not sure what this should actually be
 static std::mt19937 rand_engine; //TODO: decide if this line is needed
@@ -123,9 +123,9 @@ struct heap_data
     spead2::send::heap heap;
     spead2::send::heap::item_handle timestamp_handle;
 
-    //STEP 2: Generate heap data correctly.
+    //TODO: Get shape of array correct
     heap_data(const options &opts, std::int64_t heap_index, int feng_id)
-        : data(std::make_unique<std::uint8_t[]>(heap_size)),
+        : data(std::make_unique<std::uint8_t[]>(heap_size_bytes)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, timestamp_step * heap_index))
     {
@@ -133,31 +133,64 @@ struct heap_data
          * Document for Correlator Beamformer Visibilities and Tied Array Data" 
          * (Document ID: M1000-0001-020 rev 4)
          */
+        int channels_per_heap = n_chans/n_xengs;
+
         heap.add_item(0x4101, feng_id); //feng_id
         heap.add_item(0x4103, 0); //frequency 
-        heap.add_item(0x4300, data.get(), heap_size, false); //feng_raw
+        heap.add_item(0x4300, data.get(), (channels_per_heap, n_time_samples_per_channel, n_pols, complexity), false); //feng_raw
         heap.set_repeat_pointers(true);
 
-        // double angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
-        // unsigned int buffer = 0;
-        // int buffer_bits = 0;
-        // int pos = 0;
-        // std::uniform_real_distribution<double> noise(-0.5f, 0.5f);
-        for (std::size_t i = 0; i < heap_samples; i++) //STEP 3: Generate Simulated data.
+        int initial_offset = heap_index * n_time_samples_per_channel; 
+        double sample_angle_pol0 = 2.0 * M_PI / ((double) (n_ants*n_pols)) * (feng_id*n_pols + 0);
+        double sample_angle_pol1 = 2.0 * M_PI / ((double) (n_ants*n_pols)) * (feng_id*n_pols + 1);
+
+        // if(heap_index == 0){
+        //     std::cout << "Ant: " << feng_id << " Pol: 0 Angle: " << sample_angle_pol0 << std::endl;
+        //     std::cout << "Ant: " << feng_id << " Pol: 1 Angle: " << sample_angle_pol1 << std::endl;
+        // }
+
+
+        for (size_t c = 0; c < channels_per_heap; c++)
         {
-            data[i] = feng_id;
-            
-            // double angle = angle_scale * (timestamp + i);
-            // int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
-            // buffer = (buffer << 10) | (sample & 0x3ff);
-            // buffer_bits += 10;
-            // while (buffer_bits >= 8)
-            // {
-            //     buffer_bits -= 8;
-            //     data[pos] = buffer >> buffer_bits;
-            //     pos++;
-            // }
-        }
+            for (std::size_t t = 0; t < n_time_samples_per_channel; t++) //STEP 3: Generate Simulated data.
+            {
+                //TODO: Document this %250 correctly 
+                double sample_amplitude = (initial_offset + c*10 + t) % 125;
+                double sample_value_pol0_real = sample_amplitude * std::cos(sample_angle_pol0);
+                double sample_value_pol0_imag = sample_amplitude * std::sin(sample_angle_pol0);
+                double sample_value_pol1_real = sample_amplitude * std::cos(sample_angle_pol1);
+                double sample_value_pol1_imag = sample_amplitude * std::sin(sample_angle_pol1);
+
+                //if(feng_id == 2 && c == 0){
+                //    std::cout << "Heap index: " << heap_index << " Time: " << t << " amplitude: " << sample_amplitude << " cos: " << sample_value_pol0_real << " sin: " << sample_value_pol0_imag << std::endl;
+                    //std::cout << "Heap index: " << heap_index << " Time: " << t << " angle_0: " << sample_angle_pol0 << " cos: " << std::cos(sample_angle_pol0) << " sin: " << std::sin(sample_angle_pol0) << std::endl;
+                //}
+                
+                int sample_index_base = c * n_time_samples_per_channel * n_pols * complexity
+                                        + t * n_pols * complexity;
+                
+                data[sample_index_base + 0] = (uint8_t) sample_value_pol0_real;
+                data[sample_index_base + 1] = (uint8_t) sample_value_pol0_imag;
+                data[sample_index_base + 2] = (uint8_t) sample_value_pol1_real;
+                data[sample_index_base + 3] = (uint8_t) sample_value_pol1_imag;
+
+                if(feng_id == 2 && c == 0){
+                    std::cout << "Heap index: " << heap_index << " Time: " << t << " amplitude: " << sample_amplitude << " p0 r:" << (int32_t)data[sample_index_base + 0] << " p0 i:" << (int32_t)data[sample_index_base + 1] << " p1 r:" << (int32_t)data[sample_index_base + 2] << " p1 i:" << (int32_t)data[sample_index_base + 3] << std::endl;
+                    std::cout << "\tangle p0: " << sample_angle_pol0 << " angle p1: " << sample_angle_pol1 << " p0 r:" << sample_value_pol0_real << " p0 i:" << sample_value_pol0_imag << " p1 r:" << sample_value_pol1_real << " p1 i:" << sample_value_pol1_imag << std::endl;
+                }
+                
+                // double angle = angle_scale * (timestamp + i);
+                // int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
+                // buffer = (buffer << 10) | (sample & 0x3ff);
+                // buffer_bits += 10;
+                // while (buffer_bits >= 8)
+                // {
+                //     buffer_bits -= 8;
+                //     data[pos] = buffer >> buffer_bits;
+                //     pos++;
+                // }
+            }
+        }        
     }
 };
 
@@ -180,8 +213,8 @@ struct fengines
         stream(
             io_service,
             spead2::send::stream_config()
-                .set_max_packet_size(xeng_acc_length * n_pols * complexity) 
-                .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 * (heap_size + 72) / heap_size / multicast_streams_per_antenna)
+                .set_max_packet_size(n_time_samples_per_channel * n_pols * complexity) 
+                .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 * (heap_size_bytes + 72) / heap_size_bytes / n_multicast_streams_per_antenna)
                 .set_max_heaps(opts.max_heaps),
             spead2::send::udp_ibv_config()
                 .set_endpoints(endpoints)
@@ -198,7 +231,7 @@ struct fengines
         std::vector<std::pair<const void *, std::size_t>> memory_regions;
         for (const auto &single_fengine_heaps : all_heaps){
             for (const auto &heap : single_fengine_heaps){
-                memory_regions.emplace_back(heap.data.get(), heap_size);
+                memory_regions.emplace_back(heap.data.get(), heap_size_bytes);
             }
         }
         return memory_regions;

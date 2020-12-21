@@ -2,3 +2,4 @@ llvmlite==0.31.0
 numpy
 pycuda
 katsdpsigproc
+spead2
