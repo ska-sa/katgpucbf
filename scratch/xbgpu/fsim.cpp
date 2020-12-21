@@ -123,7 +123,6 @@ struct heap_data
     spead2::send::heap heap;
     spead2::send::heap::item_handle timestamp_handle;
 
-    //TODO: Get shape of array correct
     heap_data(const options &opts, std::int64_t heap_index, int feng_id)
         : data(std::make_unique<std::uint8_t[]>(heap_size_bytes)),
         heap(flavour),
@@ -137,18 +136,20 @@ struct heap_data
 
         heap.add_item(0x4101, feng_id); //feng_id
         heap.add_item(0x4103, 0); //frequency 
-        heap.add_item(0x4300, data.get(), (channels_per_heap, n_time_samples_per_channel, n_pols, complexity), false); //feng_raw
-        heap.set_repeat_pointers(true);
+        
+        /*This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
+         * [n_chans / n_xengs][n_time_samples_per_channel][n_pols][complexity] instead of a single long string.
+         */
+        heap.add_item(0x4300, data.get(), heap_size_bytes, false); //feng_raw field
+        /* I think this is meant to be true. As far as I can tell, it will send the single field items in 
+         * every packet instead of once per heap (i.e. 0x4101, 0x4103 and 0x1600). This is needed to emulate the 
+         * SKARAB F-Engines as the SKARAB F-Engine duplicates these values in each packet.
+         */
+        heap.set_repeat_pointers(true); 
 
         int initial_offset = heap_index * n_time_samples_per_channel; 
         double sample_angle_pol0 = 2.0 * M_PI / ((double) (n_ants*n_pols)) * (feng_id*n_pols + 0);
         double sample_angle_pol1 = 2.0 * M_PI / ((double) (n_ants*n_pols)) * (feng_id*n_pols + 1);
-
-        // if(heap_index == 0){
-        //     std::cout << "Ant: " << feng_id << " Pol: 0 Angle: " << sample_angle_pol0 << std::endl;
-        //     std::cout << "Ant: " << feng_id << " Pol: 1 Angle: " << sample_angle_pol1 << std::endl;
-        // }
-
 
         for (size_t c = 0; c < channels_per_heap; c++)
         {
@@ -160,35 +161,13 @@ struct heap_data
                 double sample_value_pol0_imag = sample_amplitude * std::sin(sample_angle_pol0);
                 double sample_value_pol1_real = sample_amplitude * std::cos(sample_angle_pol1);
                 double sample_value_pol1_imag = sample_amplitude * std::sin(sample_angle_pol1);
-
-                //if(feng_id == 2 && c == 0){
-                //    std::cout << "Heap index: " << heap_index << " Time: " << t << " amplitude: " << sample_amplitude << " cos: " << sample_value_pol0_real << " sin: " << sample_value_pol0_imag << std::endl;
-                    //std::cout << "Heap index: " << heap_index << " Time: " << t << " angle_0: " << sample_angle_pol0 << " cos: " << std::cos(sample_angle_pol0) << " sin: " << std::sin(sample_angle_pol0) << std::endl;
-                //}
                 
                 int sample_index_base = c * n_time_samples_per_channel * n_pols * complexity
-                                        + t * n_pols * complexity;
-                
+                                        + t * n_pols * complexity;                
                 data[sample_index_base + 0] = (uint8_t) sample_value_pol0_real;
                 data[sample_index_base + 1] = (uint8_t) sample_value_pol0_imag;
                 data[sample_index_base + 2] = (uint8_t) sample_value_pol1_real;
                 data[sample_index_base + 3] = (uint8_t) sample_value_pol1_imag;
-
-                if(feng_id == 2 && c == 0){
-                    std::cout << "Heap index: " << heap_index << " Time: " << t << " amplitude: " << sample_amplitude << " p0 r:" << (int32_t)data[sample_index_base + 0] << " p0 i:" << (int32_t)data[sample_index_base + 1] << " p1 r:" << (int32_t)data[sample_index_base + 2] << " p1 i:" << (int32_t)data[sample_index_base + 3] << std::endl;
-                    std::cout << "\tangle p0: " << sample_angle_pol0 << " angle p1: " << sample_angle_pol1 << " p0 r:" << sample_value_pol0_real << " p0 i:" << sample_value_pol0_imag << " p1 r:" << sample_value_pol1_real << " p1 i:" << sample_value_pol1_imag << std::endl;
-                }
-                
-                // double angle = angle_scale * (timestamp + i);
-                // int sample = (int) std::round(std::sin(angle) * 256.0 + noise(rand_engine));
-                // buffer = (buffer << 10) | (sample & 0x3ff);
-                // buffer_bits += 10;
-                // while (buffer_bits >= 8)
-                // {
-                //     buffer_bits -= 8;
-                //     data[pos] = buffer >> buffer_bits;
-                //     pos++;
-                // }
             }
         }        
     }
