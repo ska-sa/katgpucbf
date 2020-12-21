@@ -18,13 +18,8 @@ struct options
     int max_heaps = 128;
     int signal_heaps = 512;
     double adc_rate = 1712000000.0;
-    double signal_freq = 232101234.0;
     int ttl = 4;
 };
-
-// Size of the heap:
-// NOTE: that in this case the heap is made out of 1 KiB packets. Each packet encapsualtes a single channel and is 
-// n_time_samples_per_channel * pols * complexity = 1024 B in size
 
 static constexpr int n_ants = 16; // TODO: make configurable
 static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
@@ -34,16 +29,16 @@ static constexpr int n_xengs = n_ants*n_multicast_streams_per_antenna; //TODO: M
 static constexpr int n_time_samples_per_channel = 256; //Hardcoded to 256 for MeerKAT
 static constexpr int n_pols = 2; //Dual polarisation antennas
 static constexpr int complexity = 2; //real and imaginary components
+/*
+ * NOTE: That in this case each heap is quite large but containes much smaller samples. Each packet encapsualtes a single channels worth of samples and is 
+ * n_time_samples_per_channel * pols * complexity = 1024 B samples. Each packet also contains other SPEAD data and is thus slightly larger than 1 KiB.
+ */
 static constexpr std::size_t heap_size_bytes = n_chans / n_xengs * n_time_samples_per_channel * n_pols * complexity * sample_bits / 8;
 static constexpr std::size_t heap_samples = n_chans / n_xengs * n_time_samples_per_channel * n_pols; // Probably redundant
-
 static constexpr int timestamp_step = 0x800000; //real and imaginary components
-//static constexpr int sample_bits = 8;
-//static constexpr int heap_samples = 104850;
-//static constexpr std::size_t heap_size_bytes = heap_samples * sample_bits / 8;
 
 static const spead2::flavour flavour(4, 64, 48); //Not sure what this should actually be
-static std::mt19937 rand_engine; //TODO: decide if this line is needed
+
 
 template<typename T>
 static po::typed_value<T> *make_opt(T &var)
@@ -60,7 +55,6 @@ static options parse_options(int argc, const char **argv)
         ("max-heaps", make_opt(opts.max_heaps), "Depth of send queue (per polarisation)")
         ("adc-rate", make_opt(opts.adc_rate), "Sampling rate")
         ("ttl", make_opt(opts.ttl), "Output TTL")
-        ("signal-freq", make_opt(opts.signal_freq), "Frequency of simulated tone")
         ("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create")
     ;
 
@@ -84,11 +78,6 @@ static options parse_options(int argc, const char **argv)
             throw po::error("--max-heaps must be positive");
         if (opts.signal_heaps <= 0)
             throw po::error("--signal-heaps must be positive");
-        // Round target frequency to fit an integer number of waves into signal_heaps
-        double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_rate;
-        waves = std::max(1.0, std::round(waves));
-        opts.signal_freq = waves * opts.adc_rate / opts.signal_heaps / heap_samples;
-        std::cout << "Using frequency of " << std::setprecision(15) << opts.signal_freq << '\n';
     }
     catch (po::error &e)
     {
@@ -123,7 +112,7 @@ struct heap_data
     spead2::send::heap heap;
     spead2::send::heap::item_handle timestamp_handle;
 
-    heap_data(const options &opts, std::int64_t heap_index, int feng_id)
+    heap_data(std::int64_t heap_index, int feng_id)
         : data(std::make_unique<std::uint8_t[]>(heap_size_bytes)),
         heap(flavour),
         timestamp_handle(heap.add_item(0x1600, timestamp_step * heap_index))
@@ -132,7 +121,7 @@ struct heap_data
          * Document for Correlator Beamformer Visibilities and Tied Array Data" 
          * (Document ID: M1000-0001-020 rev 4)
          */
-        int channels_per_heap = n_chans/n_xengs;
+        size_t channels_per_heap = n_chans/n_xengs;
 
         heap.add_item(0x4101, feng_id); //feng_id
         heap.add_item(0x4103, 0); //frequency 
@@ -147,13 +136,13 @@ struct heap_data
          */
         heap.set_repeat_pointers(true); 
 
+
         int initial_offset = heap_index * n_time_samples_per_channel; 
         double sample_angle_pol0 = 2.0 * M_PI / ((double) (n_ants*n_pols)) * (feng_id*n_pols + 0);
         double sample_angle_pol1 = 2.0 * M_PI / ((double) (n_ants*n_pols)) * (feng_id*n_pols + 1);
-
         for (size_t c = 0; c < channels_per_heap; c++)
         {
-            for (std::size_t t = 0; t < n_time_samples_per_channel; t++) //STEP 3: Generate Simulated data.
+            for (size_t t = 0; t < n_time_samples_per_channel; t++) //STEP 3: Generate Simulated data.
             {
                 //TODO: Document this %250 correctly 
                 double sample_amplitude = (initial_offset + c*10 + t) % 125;
@@ -228,7 +217,7 @@ struct fengines
             fengine_heaps.reserve(heaps_per_fengine);
             for (int heap_index = 0; heap_index < heaps_per_fengine; heap_index ++)
             {
-                fengine_heaps.emplace_back(opts, heap_index, feng_id);
+                fengine_heaps.emplace_back(heap_index, feng_id);
             }
             all_fengine_heaps.emplace_back(std::move(fengine_heaps));
         }
