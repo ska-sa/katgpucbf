@@ -22,7 +22,8 @@ TODO: update this to reflect SPEAD2 installation instructions
 1. Create a python 3.6 virtual environment: `virtualenv -p python3.6 <venv name>`.
 2. Activate virtual environment: `source <venv name>/bin/activate`
 3. Install all required python packages: `pip install -r requirements.txt`
-4. Install the katxgpu package: `pip install -e .`
+4. Checkout spead2 submodule: `git submodule update --init --recursive`
+5. Install the katxgpu package: `pip install -e .`
 
 SPEAD2 C++ install for simulator:
 1. cd /3rdparty/spead2
