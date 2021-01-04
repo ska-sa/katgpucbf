@@ -22,7 +22,7 @@ struct options
     int ttl = 4;
 };
 
-static constexpr int n_ants = 16;     // TODO: make configurable
+static constexpr int n_ants = 64;     // TODO: make configurable
 static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
 static constexpr int n_chans = 32768; // TODO: Make configurable
 static constexpr int n_multicast_streams_per_antenna = 4;

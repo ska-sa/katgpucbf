@@ -26,7 +26,7 @@ PYBIND11_MODULE(_katxgpu, m)
     // m.def("add4", &add, "A function which adds two numbers",
     // "i"_a = 10, "j"_a = 11);
 
-    //m.attr("the_answer") = 42;
+    // m.attr("the_answer") = 42;
     // py::object world = py::cast("World");
     // m.attr("what") = world;
 }
