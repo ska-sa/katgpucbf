@@ -53,18 +53,22 @@ static constexpr int packets_per_heap = heap_size_bytes / packet_payload_size_by
 // The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value is not too important for the F-Engine.
 static const spead2::flavour flavour(4, 64, 48);
 
+// Function to assist with parsing command line parameters
 template <typename T> static boost::program_options::typed_value<T> *make_opt(T &var)
 {
     return boost::program_options::value<T>(&var)->default_value(var);
 }
 
+// Parse command line parameters
 static options parse_options(int argc, const char **argv)
 {
     options opts;
     boost::program_options::options_description desc, hidden, all;
-    desc.add_options()("interface", boost::program_options::value(&opts.interface)->required(), "Interface address");
+    desc.add_options()("interface", boost::program_options::value(&opts.interface)->required(),
+                       "Interface address to send data out on.");
     desc.add_options()("max-heaps", make_opt(opts.max_heaps), "Maximum number of heaps per F-Engine.");
-    desc.add_options()("adc-rate", make_opt(opts.adc_rate), "Sampling rate")("ttl", make_opt(opts.ttl), "Output TTL");
+    desc.add_options()("adc-rate", make_opt(opts.adc_rate),
+                       "Sampling rate of digitisers feeding the F-Engine")("ttl", make_opt(opts.ttl), "Output TTL");
     desc.add_options()("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create");
     hidden.add_options()("address", boost::program_options::value<std::string>(&opts.address)->composing(),
                          "destination address, in form x.x.x.x:port");
@@ -91,9 +95,17 @@ static options parse_options(int argc, const char **argv)
     return opts;
 }
 
-// Parse endpoint (multicast ip address and port in this case). Need to make n_ants of them as one stream per F-Engine,
-// expand on this explanation
-// Does not need to go here, could be part of the fengines class
+/* This function parses the endpoing argument passed in the program as a command line argument.
+ *
+ * It seperates the endpoint into its multicast ip address and port number and uses this to create an endpoint object.
+ *
+ * Instead of returning a single endpoint, it returns n_ants duplicates of the same endpoint. This is because the SPEAD2
+ * stream object uses one substream for each antenna and each substream needs its own entry in endpoint list.
+ * Duplication is the simplest way to achieve this.
+ *
+ * The location of this function is not too important. It could be a static method in the fengines class but has not
+ * been moves as its not a priority.
+ */
 static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::string &arg)
 {
     std::vector<boost::asio::ip::udp::endpoint> out;
@@ -136,12 +148,12 @@ struct heap_data
         size_t channels_per_heap = n_chans / n_xengs;
 
         heap.add_item(0x4101, feng_id); // feng_id
-        heap.add_item(0x4103, 0);       // frequency
+        heap.add_item(0x4103, 32);      // frequency
 
         /* This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
          * [n_chans / n_xengs][n_time_samples_per_channel][n_pols][complexity] instead of a single long dimension.
          *
-         * This function adds a 32 byte ItemPointer to the header and will append the data in data.get() to the packet
+         * This function adds an ItemPointer to the header and will append the data in data.get() to the packet
          * payload.
          */
         heap.add_item(0x4300, data.get(), heap_size_bytes, false); // feng_raw field
@@ -214,6 +226,10 @@ struct heap_data
  */
 struct fengines
 {
+    // This variable needs to go first so it is initialised first - it is used during the initialisation of other
+    // variables.
+    std::int64_t n_heaps_per_fengine;
+
     // SPEAD2 has its own set of threads that manage transmitting data. When SPEAD2 finishes sending a heap, it queues a
     // handler on this IO loops that is then called.
     boost::asio::io_service io_service;
@@ -226,18 +242,17 @@ struct fengines
     spead2::send::udp_ibv_stream stream;
 
     // General variables for coordinating sending of heaps.
-    std::int64_t n_heaps_per_fengine;
     std::size_t n_substreams;
     std::int64_t timestamp = 0;
     std::int64_t next_fengine = 0;
     std::int64_t next_heap = 0;
 
-    /* Constructor for the fengines simulator. 
-     * 
+    /* Constructor for the fengines simulator.
+     *
      * Initialises the SPEAD2 stream. The stream requires two main objects, the
      * stream_config() for general stream parameters and the udp_ibv_config() for more specific parameters required when
      * using ibverbs to accelerate the packet transmission.
-     * 
+     *
      * Creates all heaps that will queued on the SPEAD2 stream.
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
@@ -258,8 +273,11 @@ struct fengines
     {
     }
 
-    /* Memory regions are an ibverbs concept. A memory region is the 
+    /* Registers all heap data in memory regions and returns a vector of these regions to be used by SPEAD2.
      *
+     * Memory regions are an ibverbs concept. Any collection of data that ibverbs needs to send on the network needs to
+     * be in a memory region. The channel data in each heap is what is being sent in this case, and each one of these
+     * needs to be added to a memory region.
      */
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
         const std::vector<std::vector<heap_data>> &all_heaps)
@@ -275,6 +293,10 @@ struct fengines
         return memory_regions;
     }
 
+    /* Creates all the heaps required to be transmitted by the F-Engine simulator.
+     *
+     * This static method is a bit messy, there is probably a simpler way to do it.
+     */
     static std::vector<std::vector<heap_data>> make_heaps(const options &opts)
     {
         std::vector<std::vector<heap_data>> all_fengine_heaps;
@@ -293,6 +315,13 @@ struct fengines
         return all_fengine_heaps;
     }
 
+    /* Adds the next heap to the SPEAD2 stream queue.
+     *
+     * This function keeps track of the index of the next heap to send.
+     *
+     * It is non-blocking, once a heap has been addeded to the stream, this function will return - there is no guarentee
+     * that the heap will have been sent.
+     */
     void send_next()
     {
         using namespace std::placeholders;
@@ -314,6 +343,10 @@ struct fengines
             next_heap = 0;
     }
 
+    /* Callback function called when SPEAD2 finishes sending a heap.
+     *
+     * This function immediatley queues the next heap to be sent on the network.
+     */
     void callback(const boost::system::error_code &ec, std::size_t)
     {
         if (ec)
@@ -326,6 +359,8 @@ struct fengines
     }
 };
 
+/* Create fengines object and start IO loop to kick off packet tranmission.
+ */
 int main(int argc, const char **argv)
 {
     options opts = parse_options(argc, argv);
@@ -341,6 +376,8 @@ int main(int argc, const char **argv)
             f.io_service.post(std::bind(&fengines::send_next, &f));
         }
     }
+
+    // Will run forever.
     f.io_service.run();
     return 0;
 }
