@@ -1,7 +1,8 @@
 """
-Script that will receive SPEAD packets from the fsim. It will print all the important SPEAD heap information in each packet.
+Script that receives SPEAD packets from the fsim. It will print all the important SPEAD heap information in each packet.
 
-This script does not use any optomised networking code. If the fsim transmits at a data rate that is too high, then overflows will happen. Its up to the user to make sure that this does not happen.
+This script does not use any optomised networking code. If the F-Engine transmits at a data rate that is too high, then
+overflows will happen. Its up to the user to reduce the fsim data rates.
 
 This script is hardcoded to expect multicast data on address 239.10.10.10 and port 7149.
 
