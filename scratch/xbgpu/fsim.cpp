@@ -1,3 +1,5 @@
+// sudo ./fsim --interface 10.100.44.1 239.102.50.0:7148
+
 #include <spead2/send_udp_ibv.h>
 
 #include <boost/program_options.hpp>
@@ -10,69 +12,78 @@
 #include <random>
 #include <vector>
 
-namespace po = boost::program_options;
-
 struct options
 {
     std::string interface;
     std::string address;
-    int max_heaps = 128;
+    int max_heaps = 8;
     int signal_heaps = 512;
     double adc_rate = 1712000000.0;
     int ttl = 4;
 };
 
+// TODO: These constexpr should be thought about a bit. Some of them are only used in one place and they should really
+// only be calculated there.
 static constexpr int n_ants = 64;     // TODO: make configurable
-static constexpr int sample_bits = 8; // Not very meaningful for the X-Engine but this argument is left here.
+static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
+                                      // be consistent with the F-Engine packet simulator.
 static constexpr int n_chans = 32768; // TODO: Make configurable
 static constexpr int n_multicast_streams_per_antenna = 4;
 static constexpr int n_xengs = n_ants * n_multicast_streams_per_antenna;
 static constexpr int n_time_samples_per_channel = 256; // Hardcoded to 256 for MeerKAT
 static constexpr int n_pols = 2;                       // Dual polarisation antennas
 static constexpr int complexity = 2;                   // real and imaginary components
+
+static constexpr int timestamp_step = 0x800000; // real and imaginary components
+
 /*
- * NOTE: That in this case each heap is quite large but containes much smaller samples. Each packet encapsualtes a
- * single channels worth of samples and is n_time_samples_per_channel * pols * complexity = 1024 B samples. Each packet
- * also contains other SPEAD data and is thus slightly larger than 1 KiB.
+ * NOTE: For the F-Engine output case, each heap is quite large but contains much smaller samples. Each packet
+ * encapsualtes a single channel's worth of samples. Each packet also contains other SPEAD data and is thus slightly
+ * larger than 1 KiB.
  */
 static constexpr std::size_t heap_size_bytes =
     n_chans / n_xengs * n_time_samples_per_channel * n_pols * complexity * sample_bits / 8;
 static constexpr std::size_t heap_samples =
     n_chans / n_xengs * n_time_samples_per_channel * n_pols; // Probably redundant
-static constexpr int timestamp_step = 0x800000;              // real and imaginary components
+static constexpr int packet_header_size_bytes = 96;          // Nine header fields and three padding fields.
+static constexpr int packet_payload_size_bytes = n_time_samples_per_channel * n_pols * complexity;
+static constexpr int packet_size_bytes = packet_payload_size_bytes + packet_header_size_bytes;
+static constexpr int packets_per_heap = heap_size_bytes / packet_payload_size_bytes;
 
-static const spead2::flavour flavour(4, 64, 48); // Not sure what this should actually be
+// The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value is not too important for the F-Engine.
+static const spead2::flavour flavour(4, 64, 48);
 
-template <typename T> static po::typed_value<T> *make_opt(T &var)
+template <typename T> static boost::program_options::typed_value<T> *make_opt(T &var)
 {
-    return po::value<T>(&var)->default_value(var);
+    return boost::program_options::value<T>(&var)->default_value(var);
 }
 
 static options parse_options(int argc, const char **argv)
 {
     options opts;
-    po::options_description desc, hidden, all;
-    desc.add_options()("interface", po::value(&opts.interface)->required(), "Interface address");
-    desc.add_options()("max-heaps", make_opt(opts.max_heaps), "Depth of send queue (per polarisation)");
+    boost::program_options::options_description desc, hidden, all;
+    desc.add_options()("interface", boost::program_options::value(&opts.interface)->required(), "Interface address");
+    desc.add_options()("max-heaps", make_opt(opts.max_heaps), "Maximum number of heaps per F-Engine.");
     desc.add_options()("adc-rate", make_opt(opts.adc_rate), "Sampling rate")("ttl", make_opt(opts.ttl), "Output TTL");
     desc.add_options()("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create");
-    hidden.add_options()("address", po::value<std::string>(&opts.address)->composing(),
+    hidden.add_options()("address", boost::program_options::value<std::string>(&opts.address)->composing(),
                          "destination address, in form x.x.x.x:port");
     all.add(desc);
     all.add(hidden);
-    po::positional_options_description positional;
+    boost::program_options::positional_options_description positional;
     positional.add("address", -1);
     try
     {
-        po::variables_map vm;
-        po::store(po::command_line_parser(argc, argv).options(all).positional(positional).run(), vm);
-        po::notify(vm);
+        boost::program_options::variables_map vm;
+        boost::program_options::store(
+            boost::program_options::command_line_parser(argc, argv).options(all).positional(positional).run(), vm);
+        boost::program_options::notify(vm);
         if (opts.max_heaps <= 0)
-            throw po::error("--max-heaps must be positive");
+            throw boost::program_options::error("--max-heaps must be positive");
         if (opts.signal_heaps <= 0)
-            throw po::error("--signal-heaps must be positive");
+            throw boost::program_options::error("--signal-heaps must be positive");
     }
-    catch (po::error &e)
+    catch (boost::program_options::error &e)
     {
         std::cerr << e.what() << '\n';
         std::exit(2);
@@ -81,7 +92,8 @@ static options parse_options(int argc, const char **argv)
 }
 
 // Parse endpoint (multicast ip address and port in this case). Need to make n_ants of them as one stream per F-Engine,
-// expand
+// expand on this explanation
+// Does not need to go here, could be part of the fengines class
 static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::string &arg)
 {
     std::vector<boost::asio::ip::udp::endpoint> out;
@@ -99,79 +111,145 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::str
     return out;
 }
 
+/* Class containing an F-Engine output heap as well as the buffer storing data pointed to by the heap. This class
+ * generates simulated data to populate the heap buffer.
+ */
 struct heap_data
 {
     std::unique_ptr<std::uint8_t[]> data;
     spead2::send::heap heap;
+
+    // The timestamp handle is used to modify the heap timestamp after creation. This is needed as this heap will be
+    // sent multiple times to reduce processing load and the timestamp needs to be updated each time it is sent.
     spead2::send::heap::item_handle timestamp_handle;
 
     heap_data(std::int64_t heap_index, int feng_id)
         : data(std::make_unique<std::uint8_t[]>(heap_size_bytes)), heap(flavour),
           timestamp_handle(heap.add_item(0x1600, timestamp_step * heap_index))
     {
-        /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control
-         * Document for Correlator Beamformer Visibilities and Tied Array Data"
-         * (Document ID: M1000-0001-020 rev 4)
+        /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control Document for
+         * Correlator Beamformer Visibilities and Tied Array Data" (Document ID: M1000-0001-020 rev 4)
+         *
+         * A rough document has been put together showing the exact packet format and byte offsets produced by the
+         * F-Engine: https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg/edit
          */
         size_t channels_per_heap = n_chans / n_xengs;
 
         heap.add_item(0x4101, feng_id); // feng_id
         heap.add_item(0x4103, 0);       // frequency
 
-        /*This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
-         * [n_chans / n_xengs][n_time_samples_per_channel][n_pols][complexity] instead of a single long string.
+        /* This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
+         * [n_chans / n_xengs][n_time_samples_per_channel][n_pols][complexity] instead of a single long dimension.
+         *
+         * This function adds a 32 byte ItemPointer to the header and will append the data in data.get() to the packet
+         * payload.
          */
         heap.add_item(0x4300, data.get(), heap_size_bytes, false); // feng_raw field
-        /* I think this is meant to be true. As far as I can tell, it will send the single field items in
-         * every packet instead of once per heap (i.e. 0x4101, 0x4103 and 0x1600). This is needed to emulate the
-         * SKARAB F-Engines as the SKARAB F-Engine duplicates these values in each packet.
+
+        /* The SPEAD header out of the F-Engines is aligned to 256-bit boundaries. To emulate this with SPEAD2, padding
+         * needs to be added until the 256-bit boundary is reached.
+         */
+        for (int pad = 0; pad < 3; pad++)
+            heap.add_item(0, 0);
+
+        /* This must be set to true. It will force all immediate values to be sent in every packet instead of once per
+         * heap (This applies to the 0x4101, 0x4103 and 0x1600 fields). This is needed to emulate the SKARAB F-Engines
+         * as the SKARAB F-Engine duplicates these values in each packet.
          */
         heap.set_repeat_pointers(true);
 
+        /* This section generates the sample data. A patterns is chosen that will hopefully be easy to verify at the
+         * receiver graphically. On each F-Engine, the signal amplitude will increase linearly over time for each
+         * channel. Each channel will have a different starting amplitude but the rate of increase will be the same for
+         * all channels.
+         *
+         * Each F-Engine will have the same same signal amplitude for the same timestamp, but the signal phase will be
+         * different. The signal phase remains constant across all channels in a single F-Engine. By examining the
+         * signal phase it can be verified that correct feng_id is attached to the correct data.
+         *
+         * These samples need to be stored as 8 bit samples. As such, the amplitude is wrapped each time it reaches 127.
+         * 127 is used as the amplitude when multiplied by the phase can reach -127. The full range of values is
+         * covered.
+         *
+         * This current format is not fixed and it is likely that it will be adjusted to be suited for different
+         * verification needs.
+         */
         int initial_offset = heap_index * n_time_samples_per_channel;
         double sample_angle_pol0 = 2.0 * M_PI / ((double)(n_ants * n_pols)) * (feng_id * n_pols + 0);
         double sample_angle_pol1 = 2.0 * M_PI / ((double)(n_ants * n_pols)) * (feng_id * n_pols + 1);
         for (size_t c = 0; c < channels_per_heap; c++)
         {
-            for (size_t t = 0; t < n_time_samples_per_channel; t++) // STEP 3: Generate Simulated data.
+            for (size_t t = 0; t < n_time_samples_per_channel; t++)
             {
-                // TODO: Document this %250 correctly
-                double sample_amplitude = (initial_offset + c * 10 + t) % 125;
+                double sample_amplitude = (initial_offset + c * 10 + t) % 127;
                 double sample_value_pol0_real = sample_amplitude * std::cos(sample_angle_pol0);
                 double sample_value_pol0_imag = sample_amplitude * std::sin(sample_angle_pol0);
                 double sample_value_pol1_real = sample_amplitude * std::cos(sample_angle_pol1);
                 double sample_value_pol1_imag = sample_amplitude * std::sin(sample_angle_pol1);
 
                 int sample_index_base = c * n_time_samples_per_channel * n_pols * complexity + t * n_pols * complexity;
-                data[sample_index_base + 0] = (uint8_t)sample_value_pol0_real;
-                data[sample_index_base + 1] = (uint8_t)sample_value_pol0_imag;
-                data[sample_index_base + 2] = (uint8_t)sample_value_pol1_real;
-                data[sample_index_base + 3] = (uint8_t)sample_value_pol1_imag;
+                data[sample_index_base + 0] = (int8_t)sample_value_pol0_real;
+                data[sample_index_base + 1] = (int8_t)sample_value_pol0_imag;
+                data[sample_index_base + 2] = (int8_t)sample_value_pol1_real;
+                data[sample_index_base + 3] = (int8_t)sample_value_pol1_imag;
             }
         }
     }
 };
 
+/*
+ * Class to generate simulated data for a number of different F-Engines and transmit them all on a single multicast
+ * address.
+ *
+ * SPEAD2 has the concept of substreams. Different heaps can be queued on different substreams and then the packets on
+ * each heap will be interleaved. This emulates sending data from multiple sources to a single receiver with the caveat
+ * that the interleaving is much more predictable than what can be expected from multiple F-Engines. One substream is
+ * assigned per F-Engine. (TODO: Force interleaving by using async_send_heaps instead of async_send_heap).
+ *
+ * This class generates heaps for n_ants F-Engines. A heap is generated once and the transmitted multiple times so that
+ * no processing time is spent creating new data.
+ *
+ * A number of heaps per F-Engine can be queued for flight at any one time - this allows higher transmit rates to be
+ * reached. To accomodate this, each F-Engine will have max_heaps pre-generated by this class.
+ */
 struct fengines
 {
-    std::int64_t n_heaps_per_fengine;
+    // SPEAD2 has its own set of threads that manage transmitting data. When SPEAD2 finishes sending a heap, it queues a
+    // handler on this IO loops that is then called.
     boost::asio::io_service io_service;
+
+    // This vector of vectors stores all the heaps. The outer vector will have one entry for each F-Engine and the inner
+    // one will store the heaps per F-Engine.
     std::vector<std::vector<heap_data>> heaps;
+
+    // SPEAD 2 stream that every heap will be queued on.
     spead2::send::udp_ibv_stream stream;
+
+    // General variables for coordinating sending of heaps.
+    std::int64_t n_heaps_per_fengine;
     std::size_t n_substreams;
     std::int64_t timestamp = 0;
     std::int64_t next_fengine = 0;
     std::int64_t next_heap = 0;
 
+    /* Constructor for the fengines simulator. 
+     * 
+     * Initialises the SPEAD2 stream. The stream requires two main objects, the
+     * stream_config() for general stream parameters and the udp_ibv_config() for more specific parameters required when
+     * using ibverbs to accelerate the packet transmission.
+     * 
+     * Creates all heaps that will queued on the SPEAD2 stream.
+     */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address)
-        : n_heaps_per_fengine(opts.max_heaps / n_ants), heaps(make_heaps(opts)),
+        : n_heaps_per_fengine(opts.max_heaps), heaps(make_heaps(opts)),
           stream(io_service,
                  spead2::send::stream_config()
-                     .set_max_packet_size(n_time_samples_per_channel * n_pols * complexity)
-                     .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 * (heap_size_bytes + 72) / heap_size_bytes /
+                     .set_max_packet_size(packet_size_bytes)
+                     .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 *
+                               (heap_size_bytes + packets_per_heap * packet_header_size_bytes) / heap_size_bytes /
                                n_multicast_streams_per_antenna)
-                     .set_max_heaps(opts.max_heaps),
+                     .set_max_heaps(opts.max_heaps * n_ants),
                  spead2::send::udp_ibv_config()
                      .set_endpoints(endpoints)
                      .set_interface_address(interface_address)
@@ -180,6 +258,9 @@ struct fengines
     {
     }
 
+    /* Memory regions are an ibverbs concept. A memory region is the 
+     *
+     */
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
         const std::vector<std::vector<heap_data>> &all_heaps)
     {
@@ -198,7 +279,7 @@ struct fengines
     {
         std::vector<std::vector<heap_data>> all_fengine_heaps;
         all_fengine_heaps.reserve(n_ants);
-        int heaps_per_fengine = opts.max_heaps / n_ants; // TODO: Neaten this up a bit
+        int heaps_per_fengine = opts.max_heaps;
         for (int feng_id = 0; feng_id < n_ants; feng_id++)
         {
             std::vector<heap_data> fengine_heaps;
@@ -253,7 +334,7 @@ int main(int argc, const char **argv)
     std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts.address);
 
     fengines f(opts, endpoints, interface_address);
-    for (int j = 0; j < opts.max_heaps / n_ants; j++)
+    for (int j = 0; j < opts.max_heaps; j++)
     {
         for (int i = 0; i < n_ants; i++)
         {
