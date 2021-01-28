@@ -50,7 +50,8 @@ static constexpr int packet_payload_size_bytes = n_time_samples_per_channel * n_
 static constexpr int packet_size_bytes = packet_payload_size_bytes + packet_header_size_bytes;
 static constexpr int packets_per_heap = heap_size_bytes / packet_payload_size_bytes;
 
-// The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value is not too important for the F-Engine.
+// The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value means that the ItemPointers will have 48
+// bits representing the immediate value or pointer to payload. The other 16 bits will be used for the item ID.
 static const spead2::flavour flavour(4, 64, 48);
 
 // Function to assist with parsing command line parameters
@@ -355,7 +356,9 @@ struct fengines
             std::exit(1);
         }
         else
+        {
             send_next();
+        }
     }
 };
 
@@ -373,7 +376,7 @@ int main(int argc, const char **argv)
     {
         for (int i = 0; i < n_ants; i++)
         {
-            f.io_service.post(std::bind(&fengines::send_next, &f));
+        f.io_service.post(std::bind(&fengines::send_next, &f));
         }
     }
 
