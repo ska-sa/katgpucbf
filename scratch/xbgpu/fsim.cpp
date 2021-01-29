@@ -1,4 +1,27 @@
-// sudo ./fsim --interface 10.100.44.1 239.102.50.0:7148
+/* This program in creates a simulator for channelised data from the MeerKAT F-Engines destined for a single X-Engine.
+ * When there are N antennas, the X-Engine recieves channels from N F-Engines. This simulator emulates this behaviour
+ * by interleaving packets with differently populated fields designed to mimick the different antennas. One caveat to
+ * this simulator is that the data is perfectly interleaved and ordered. It does not simulate the messier environment
+ * that occurs when running multiple real F-Engines all transmitting along different paths.
+ *
+ * This simulator was modified from the dsim.cpp document found within katfgpu:
+ * https://github.com/ska-sa/katfgpu/blob/master/scratch/dsim.cpp
+ *
+ * This simulator uses the SPEAD2 library to transmit the F-Engine data. SPEAD2 uses ibverbs to accelerate packet packet
+ * transmission. Lossless transmit rates up to 34 Gbps have been tested, but it is expected that higher rates can be
+ * achieved. By default root access is required to use ibverbs.
+ *
+ * The minimum command to run the fsim is: sudo ./fsim --interface <interface_address> <multicast_address>:<port>
+ * Where:
+ * <interface_address> is the ip address of the network interface to transmit the data out on.
+ * <multicast_address> is the multicast address all packets are destined for
+ * <port> is the UDP port to transmit data to.
+ *
+ * By default the fsim transmits data at 6.8 Gbps + packet overhead. This depends on the sample rate of the antenna ADCs
+ * and the number of pols. The data rate is equal to adc_rate * number_of_pols * sample_size_bits / 4 = 1712000000 * 2 *
+ * 8 / 4 = 6.8 Gbps. To change the rate pass a differet value into the program with the --adc_rate <adc sample rate in
+ * hz> argument.
+ */
 
 #include <spead2/send_udp_ibv.h>
 
@@ -210,8 +233,7 @@ struct heap_data
     }
 };
 
-/*
- * Class to generate simulated data for a number of different F-Engines and transmit them all on a single multicast
+/* Class to generate simulated data for a number of different F-Engines and transmit them all on a single multicast
  * address.
  *
  * SPEAD2 has the concept of substreams. Different heaps can be queued on different substreams and then the packets on
@@ -293,7 +315,7 @@ struct fengines
         return memory_regions;
     }
 
-    /* Creates all the heaps required to be transmitted by the F-Engine simulator.
+    /* Creates vector of heaps required to be transmitted by the F-Engine simulator.
      *
      * This static method is a bit messy, there is probably a simpler way to do it.
      */
