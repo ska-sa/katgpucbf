@@ -245,7 +245,6 @@ struct fengines
     // General variables for coordinating sending of heaps.
     std::size_t n_substreams;
     std::int64_t timestamp = 0;
-    std::int64_t next_fengine = 0;
     std::int64_t next_heap = 0;
 
     /* Constructor for the fengines simulator.
@@ -316,37 +315,52 @@ struct fengines
         return all_fengine_heaps;
     }
 
-    /* Adds the next heap to the SPEAD2 stream queue.
+    /* Adds the next collection of heaps to the SPEAD2 stream queue.
      *
-     * This function keeps track of the index of the next heap to send.
+     * Heaps from multiple different indexes with
      *
-     * It is non-blocking, once a heap has been addeded to the stream, this function will return - there is no guarentee
+     * This function keeps track of the index of the next collection of heaps to send.
+     *
+     * It is non-blocking, once heaps have been added to the stream, this function will return - there is no guarentee
      * that the heap will have been sent.
      */
     void send_next()
     {
-        using namespace std::placeholders;
-
-        heaps[next_fengine][next_heap].heap.get_item(heaps[next_fengine][next_heap].timestamp_handle).data.immediate =
-            timestamp;
-        stream.async_send_heap(heaps[next_fengine][next_heap].heap, std::bind(&fengines::callback, this, _1, _2), -1,
-                               next_fengine);
-
-        next_fengine++;
-        if (next_fengine == n_ants)
+        /* In order to send a collection of heaps with packets interleaved, they need to be given to SPEAD2 to in one
+         * collection using the stream.async_send_heaps function. This function requires iterators of type
+         * spead2::send::heap_reference. A heap_reference points to an underlying heap. Here we construct the vector of
+         * heap references as required.
+         */
+        std::vector<spead2::send::heap_reference> heaps_to_interleave;
+        heaps_to_interleave.reserve(n_ants);
+        for (size_t f_engine_index = 0; f_engine_index < n_ants; f_engine_index++)
         {
-            timestamp += timestamp_step;
-            next_fengine = 0;
-            next_heap++;
+            heaps[f_engine_index][next_heap]
+                .heap.get_item(heaps[f_engine_index][next_heap].timestamp_handle)
+                .data.immediate = timestamp;
+            heaps_to_interleave.emplace_back(heaps[f_engine_index][next_heap].heap, -1, f_engine_index);
         }
+
+        bool bQueueSuccesful =
+            stream.async_send_heaps(heaps_to_interleave.begin(), heaps_to_interleave.end(),
+                                    std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
+                                    spead2::send::group_mode::ROUND_ROBIN);
+        if (bQueueSuccesful == false)
+        { // TODO: Make a proper error
+            std::cerr << "Error: Heaps not queued succesfully on queue" << std::endl;
+            std::exit(1);
+        }
+
+        timestamp += timestamp_step;
+        next_heap++;
 
         if (next_heap == n_heaps_per_fengine)
             next_heap = 0;
     }
 
-    /* Callback function called when SPEAD2 finishes sending a heap.
+    /* Callback function called when SPEAD2 finishes sending a collection of heaps sent by @ref send_next().
      *
-     * This function immediatley queues the next heap to be sent on the network.
+     * This function immediatley queues the next collection of heaps to be sent on the network.
      */
     void callback(const boost::system::error_code &ec, std::size_t)
     {
@@ -376,7 +390,7 @@ int main(int argc, const char **argv)
     {
         for (int i = 0; i < n_ants; i++)
         {
-        f.io_service.post(std::bind(&fengines::send_next, &f));
+            f.io_service.post(std::bind(&fengines::send_next, &f));
         }
     }
 
