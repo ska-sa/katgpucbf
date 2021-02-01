@@ -1,47 +1,86 @@
-#include "py_recv.h"
-#include "recv.h"
+#include <memory>
+#include <utility>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include "recv.h"
+#include "py_common.h"
 
 namespace py = pybind11;
-
-namespace katxgpu
-{
-
-//Copied straight from SPEAD2 
-py::buffer_info request_buffer_info(py::buffer &buffer, int extra_flags)
-{
-    std::unique_ptr<Py_buffer> view(new Py_buffer);
-    int flags = PyBUF_STRIDES | PyBUF_FORMAT | extra_flags;
-    if (PyObject_GetBuffer(buffer.ptr(), view.get(), flags) != 0)
-        throw py::error_already_set();
-    py::buffer_info info(view.get());
-    view.release();
-    return info;
-}
-
-} // namespace katxgpu
 
 namespace katxgpu::recv
 {
 
 class py_chunk : public chunk
 {
-  public:
+public:
     py::buffer base;
+    py::object device;
     std::shared_ptr<py::buffer_info> buffer_info;
 
-    py_chunk(py::buffer base)
-        : base(std::move(base)), buffer_info(std::make_shared<py::buffer_info>(
-                                     request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
+    py_chunk(py::buffer base, py::object device)
+        : base(std::move(base)), device(std::move(device)),
+        buffer_info(std::make_shared<py::buffer_info>(
+            request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
     {
-        uint8_t *ptr = (uint8_t *)buffer_info->ptr;
-        py::print(ptr[0], ptr[1], ptr[2]);
-        py::print(1, 2.0, "three");
-        ptr[0] = 11;
-        py::print(ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7], ptr[8], ptr[9], ptr[10], ptr[11]);
-        storage = boost::asio::mutable_buffer(buffer_info->ptr, buffer_info->size * buffer_info->itemsize);
+        storage = boost::asio::mutable_buffer(buffer_info->ptr,
+                                              buffer_info->size * buffer_info->itemsize);
     }
 };
+
+class py_stream : public stream
+{
+private:
+    virtual void pre_wait_chunk() override final;
+    virtual void post_wait_chunk() override final;
+    virtual void pre_ringbuffer_push() override final;
+    virtual void post_ringbuffer_push() override final;
+
+public:
+    py::object monitor;
+
+    py_stream(int pol, int sample_bits, std::size_t packet_samples, std::size_t chunk_samples,
+              ringbuffer_t &ringbuffer, int thread_affinity, bool mask_timestamp, bool use_gdrcopy,
+              py::object monitor)
+        : stream(pol, sample_bits, packet_samples, chunk_samples, ringbuffer, thread_affinity,
+                 mask_timestamp, use_gdrcopy),
+        monitor(std::move(monitor))
+    {
+    }
+};
+
+void py_stream::pre_wait_chunk()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+        monitor.attr("event_state")("recv", "wait free_chunk");
+}
+
+void py_stream::post_wait_chunk()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+    {
+        monitor.attr("event_state")("recv", "other");
+        monitor.attr("event_qsize_delta")("free_chunks", -1);
+    }
+}
+
+void py_stream::pre_ringbuffer_push()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+        monitor.attr("event_state")("recv", "push ringbuffer");
+}
+
+void py_stream::post_ringbuffer_push()
+{
+    py::gil_scoped_acquire gil;
+    if (!monitor.is_none())
+    {
+        monitor.attr("event_state")("recv", "other");
+        monitor.attr("event_qsize_delta")("recv_ringbuffer", 1);
+    }
+}
 
 py::module register_module(py::module &parent)
 {
@@ -49,14 +88,49 @@ py::module register_module(py::module &parent)
 
     py::module m = parent.def_submodule("recv");
     m.doc() = "receiver for katxgpu";
-    m.attr("the_answer") = 47;
 
-    py::class_<py_chunk>(m, "Chunk", "Chunk of samples").def(py::init<py::buffer>(), "base"_a);
-    // .def_readwrite("timestamp", &py_chunk::timestamp)
-    // .def_readwrite("pol", &py_chunk::pol)
-    // .def_readonly("present", &py_chunk::present)
-    // .def_readonly("base", &py_chunk::base)
-    // .def_readonly("device", &py_chunk::device);
+    py::class_<py_chunk>(m, "Chunk", "Chunk of samples")
+        .def(py::init<py::buffer, py::object>(), "base"_a, "device"_a = py::none())
+        .def_readwrite("timestamp", &py_chunk::timestamp)
+        .def_readwrite("pol", &py_chunk::pol)
+        .def_readonly("present", &py_chunk::present)
+        .def_readonly("base", &py_chunk::base)
+        .def_readonly("device", &py_chunk::device)
+    ;
+
+    py::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
+        .def(py::init<int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int, bool, bool,
+                      py::object>(),
+             "pol"_a, "sample_bits"_a, "packet_samples"_a, "chunk_samples"_a,
+             "ringbuffer"_a, "thread_affinity"_a = -1, "mask_timestamp"_a = false,
+             "use_gdrcopy"_a = false, "monitor"_a = py::none(),
+             py::keep_alive<1, 6>())
+        .def_property_readonly("ringbuffer", [](py_stream &self) -> stream::ringbuffer_t &
+        {
+            return self.get_ringbuffer();
+        })
+        .def_property_readonly("pol", &py_stream::get_pol)
+        .def_property_readonly("sample_bits", &py_stream::get_sample_bits)
+        .def_property_readonly("packet_samples", &py_stream::get_packet_samples)
+        .def_property_readonly("chunk_samples", &py_stream::get_chunk_samples)
+        .def_property_readonly("chunk_packets", &py_stream::get_chunk_packets)
+        .def_property_readonly("chunk_bytes", &py_stream::get_chunk_bytes)
+        .def("add_chunk", [](py_stream &self, const py_chunk &chunk)
+        {
+            if (!self.monitor.is_none())
+                self.monitor.attr("event_qsize_delta")("free_chunks", 1);
+            self.add_chunk(std::make_unique<py_chunk>(std::move(chunk)));
+        }, "chunk"_a)
+        .def("add_udp_pcap_file_reader", &py_stream::add_udp_pcap_file_reader,
+             "filename"_a)
+        .def("add_udp_ibv_reader", &py_stream::add_udp_ibv_reader,
+             "endpoints"_a, "interface_address"_a, "buffer_size"_a,
+             "comp_vector"_a = 0,
+             "max_poll"_a = spead2::recv::udp_ibv_config::default_max_poll)
+        .def("stop", &py_stream::stop)
+    ;
+
+    register_ringbuffer<stream::ringbuffer_t, py_chunk>(m, "Ringbuffer", "Ringbuffer for samples");
 
     return m;
 }

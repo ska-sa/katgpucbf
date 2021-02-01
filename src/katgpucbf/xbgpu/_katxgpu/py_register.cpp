@@ -1,32 +1,16 @@
-// Top level file for binding C++ functions to python
-#include "py_recv.h"
 #include <pybind11/pybind11.h>
+#include <spead2/common_ringbuffer.h>
+#include "py_recv.h"
+//#include "py_send.h"
 
 namespace py = pybind11;
 
-/* This macro creates a function that will be called when calling "import katxgpu._katxgpu" in
- * python. Code within this macro will bind C++ functions, classes and attributes to python.
- */
 PYBIND11_MODULE(_katxgpu, m)
 {
-    m.doc() = "C++ backend for katxgpu."; // optional module docstring
+    m.doc() = "C++ backend for katxgpu";
+    py::register_exception<spead2::ringbuffer_stopped>(m, "Stopped");
+    py::register_exception<spead2::ringbuffer_empty>(m, "Empty");
+
     katxgpu::recv::register_module(m);
-    // katxgpu::recv::register_module(m);
-
-    // m.def("add1", &add, "A function which adds two numbers");
-
-    // m.def("add2", &add, "A function which adds two numbers",
-    // py::arg("i"), py::arg("j"));
-
-    // using namespace pybind11::literals;
-
-    // m.def("add3", &add, "A function which adds two numbers",
-    // "i"_a, "j"_a);
-
-    // m.def("add4", &add, "A function which adds two numbers",
-    // "i"_a = 10, "j"_a = 11);
-
-    // m.attr("the_answer") = 42;
-    // py::object world = py::cast("World");
-    // m.attr("what") = world;
+    //katxgpu::send::register_module(m);
 }

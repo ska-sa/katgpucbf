@@ -16,3 +16,10 @@ print(buf)
 chunk = recv.Chunk(buf)
 
 print(buf)
+
+print(chunk.timestamp)
+print(chunk.present)
+
+print(recv.Ringbuffer.__doc__)
+
+# import katxgpu.ringbuffer
