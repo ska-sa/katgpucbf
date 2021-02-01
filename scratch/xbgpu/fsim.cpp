@@ -46,7 +46,8 @@ struct options
 };
 
 // TODO: These constexpr should be thought about a bit. Some of them are only used in one place and they should really
-// only be calculated there.
+// only be calculated there. I have used constexpr instead of #defines as that is how it was done in dsim.cpp. This can 
+// change
 static constexpr int n_ants = 64;     // TODO: make configurable
 static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
                                       // be consistent with the F-Engine packet simulator.
@@ -368,7 +369,7 @@ struct fengines
                                     std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
                                     spead2::send::group_mode::ROUND_ROBIN);
         if (bQueueSuccesful == false)
-        { // TODO: Make a proper error
+        {
             std::cerr << "Error: Heaps not queued succesfully on queue" << std::endl;
             std::exit(1);
         }
@@ -408,13 +409,7 @@ int main(int argc, const char **argv)
     std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts.address);
 
     fengines f(opts, endpoints, interface_address);
-    for (int j = 0; j < opts.max_heaps; j++)
-    {
-        for (int i = 0; i < n_ants; i++)
-        {
-            f.io_service.post(std::bind(&fengines::send_next, &f));
-        }
-    }
+    f.io_service.post(std::bind(&fengines::send_next, &f));
 
     // Will run forever.
     f.io_service.run();
