@@ -37,17 +37,18 @@
 
 struct options
 {
-    std::string interface;
-    std::string address;
-    int max_heaps = 8;
-    int signal_heaps = 512;
-    double adc_rate = 1712000000.0;
-    int ttl = 4;
+    std::string strInterface;
+    std::string strAddress;
+    int iMaxHeaps = 8;
+    double dAdcRate = 1712000000.0;
+    int iTtl = 4;
 };
 
 // TODO: These constexpr should be thought about a bit. Some of them are only used in one place and they should really
-// only be calculated there. I have used constexpr instead of #defines as that is how it was done in dsim.cpp. This can 
-// change
+// only be calculated there. I have used constexpr instead of #defines as that is how it was done in dsim.cpp. This
+// should change when this section is reworked. Additionally the variable names dont follow any convention and should be
+// changed too.
+
 static constexpr int n_ants = 64;     // TODO: make configurable
 static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
                                       // be consistent with the F-Engine packet simulator.
@@ -58,7 +59,8 @@ static constexpr int n_time_samples_per_channel = 256; // Hardcoded to 256 for M
 static constexpr int n_pols = 2;                       // Dual polarisation antennas
 static constexpr int complexity = 2;                   // real and imaginary components
 
-static constexpr int timestamp_step = 0x800000; // real and imaginary components
+static constexpr int timestamp_step =
+    0x800000; // This is the amount the timestamp must increment between successive heaps of the same F-Engine.
 
 /*
  * NOTE: For the F-Engine output case, each heap is quite large but contains much smaller samples. Each packet
@@ -76,7 +78,7 @@ static constexpr int packets_per_heap = heap_size_bytes / packet_payload_size_by
 
 // The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value means that the ItemPointers will have 48
 // bits representing the immediate value or pointer to payload. The other 16 bits will be used for the item ID.
-static const spead2::flavour flavour(4, 64, 48);
+static const spead2::flavour oFlavour(4, 64, 48);
 
 // Function to assist with parsing command line parameters
 template <typename T> static boost::program_options::typed_value<T> *make_opt(T &var)
@@ -89,13 +91,12 @@ static options parse_options(int argc, const char **argv)
 {
     options opts;
     boost::program_options::options_description desc, hidden, all;
-    desc.add_options()("interface", boost::program_options::value(&opts.interface)->required(),
+    desc.add_options()("interface", boost::program_options::value(&opts.strInterface)->required(),
                        "Interface address to send data out on.");
-    desc.add_options()("max-heaps", make_opt(opts.max_heaps), "Maximum number of heaps per F-Engine.");
-    desc.add_options()("adc-rate", make_opt(opts.adc_rate),
-                       "Sampling rate of digitisers feeding the F-Engine")("ttl", make_opt(opts.ttl), "Output TTL");
-    desc.add_options()("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create");
-    hidden.add_options()("address", boost::program_options::value<std::string>(&opts.address)->composing(),
+    desc.add_options()("max-heaps", make_opt(opts.iMaxHeaps), "Maximum number of heaps per F-Engine.");
+    desc.add_options()("adc-rate", make_opt(opts.dAdcRate),
+                       "Sampling rate of digitisers feeding the F-Engine")("ttl", make_opt(opts.iTtl), "Output TTL");
+    hidden.add_options()("address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
                          "destination address, in form x.x.x.x:port");
     all.add(desc);
     all.add(hidden);
@@ -107,10 +108,8 @@ static options parse_options(int argc, const char **argv)
         boost::program_options::store(
             boost::program_options::command_line_parser(argc, argv).options(all).positional(positional).run(), vm);
         boost::program_options::notify(vm);
-        if (opts.max_heaps <= 0)
+        if (opts.iMaxHeaps <= 0)
             throw boost::program_options::error("--max-heaps must be positive");
-        if (opts.signal_heaps <= 0)
-            throw boost::program_options::error("--signal-heaps must be positive");
     }
     catch (boost::program_options::error &e)
     {
@@ -139,11 +138,11 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::str
     if (colon == std::string::npos)
         throw std::invalid_argument("Address must contain a colon");
 
-    std::uint16_t port = boost::lexical_cast<std::uint16_t>(arg.substr(colon + 1));
+    std::uint16_t u16Port = boost::lexical_cast<std::uint16_t>(arg.substr(colon + 1));
     for (int i = 0; i < n_ants; i++)
     {
         auto addr = boost::asio::ip::address_v4::from_string(arg.substr(0, colon));
-        out.emplace_back(addr, port);
+        out.emplace_back(addr, u16Port);
     }
     return out;
 }
@@ -153,16 +152,16 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const std::str
  */
 struct heap_data
 {
-    std::unique_ptr<std::uint8_t[]> data;
+    std::unique_ptr<std::uint8_t[]> pu8Data;
     spead2::send::heap heap;
 
     // The timestamp handle is used to modify the heap timestamp after creation. This is needed as this heap will be
     // sent multiple times to reduce processing load and the timestamp needs to be updated each time it is sent.
-    spead2::send::heap::item_handle timestamp_handle;
+    spead2::send::heap::item_handle timestampHandle;
 
-    heap_data(std::int64_t heap_index, int feng_id)
-        : data(std::make_unique<std::uint8_t[]>(heap_size_bytes)), heap(flavour),
-          timestamp_handle(heap.add_item(0x1600, timestamp_step * heap_index))
+    heap_data(std::int64_t i64HeapIndex, int iFengId)
+        : pu8Data(std::make_unique<std::uint8_t[]>(heap_size_bytes)), heap(oFlavour),
+          timestampHandle(heap.add_item(0x1600, timestamp_step * i64HeapIndex))
     {
         /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control Document for
          * Correlator Beamformer Visibilities and Tied Array Data" (Document ID: M1000-0001-020 rev 4)
@@ -170,9 +169,9 @@ struct heap_data
          * A rough document has been put together showing the exact packet format and byte offsets produced by the
          * F-Engine: https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg/edit
          */
-        size_t channels_per_heap = n_chans / n_xengs;
+        size_t iChannelsPerHeap = n_chans / n_xengs;
 
-        heap.add_item(0x4101, feng_id); // feng_id
+        heap.add_item(0x4101, iFengId); // The index of the F-Engine data is sent from
         heap.add_item(0x4103, 32);      // frequency
 
         /* This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
@@ -181,7 +180,7 @@ struct heap_data
          * This function adds an ItemPointer to the header and will append the data in data.get() to the packet
          * payload.
          */
-        heap.add_item(0x4300, data.get(), heap_size_bytes, false); // feng_raw field
+        heap.add_item(0x4300, pu8Data.get(), heap_size_bytes, false); // feng_raw field
 
         /* The SPEAD header out of the F-Engines is aligned to 256-bit boundaries. To emulate this with SPEAD2, padding
          * needs to be added until the 256-bit boundary is reached.
@@ -211,24 +210,24 @@ struct heap_data
          * This current format is not fixed and it is likely that it will be adjusted to be suited for different
          * verification needs.
          */
-        int initial_offset = heap_index * n_time_samples_per_channel;
-        double sample_angle_pol0 = 2.0 * M_PI / ((double)(n_ants * n_pols)) * (feng_id * n_pols + 0);
-        double sample_angle_pol1 = 2.0 * M_PI / ((double)(n_ants * n_pols)) * (feng_id * n_pols + 1);
-        for (size_t c = 0; c < channels_per_heap; c++)
+        int iInitialOffset = i64HeapIndex * n_time_samples_per_channel;
+        double dSampleAnglePol0 = 2.0 * M_PI / ((double)(n_ants * n_pols)) * (iFengId * n_pols + 0);
+        double dSampleAnglePol1 = 2.0 * M_PI / ((double)(n_ants * n_pols)) * (iFengId * n_pols + 1);
+        for (size_t c = 0; c < iChannelsPerHeap; c++)
         {
             for (size_t t = 0; t < n_time_samples_per_channel; t++)
             {
-                double sample_amplitude = (initial_offset + c * 10 + t) % 127;
-                double sample_value_pol0_real = sample_amplitude * std::cos(sample_angle_pol0);
-                double sample_value_pol0_imag = sample_amplitude * std::sin(sample_angle_pol0);
-                double sample_value_pol1_real = sample_amplitude * std::cos(sample_angle_pol1);
-                double sample_value_pol1_imag = sample_amplitude * std::sin(sample_angle_pol1);
+                double dSampleAmplitude = (iInitialOffset + c * 10 + t) % 127;
+                double dSampleValuePol0Real = dSampleAmplitude * std::cos(dSampleAnglePol0);
+                double dSampleValuePol0Imag = dSampleAmplitude * std::sin(dSampleAnglePol0);
+                double dSampleValuePol1Real = dSampleAmplitude * std::cos(dSampleAnglePol1);
+                double dSampleValuePol1Imag = dSampleAmplitude * std::sin(dSampleAnglePol1);
 
-                int sample_index_base = c * n_time_samples_per_channel * n_pols * complexity + t * n_pols * complexity;
-                data[sample_index_base + 0] = (int8_t)sample_value_pol0_real;
-                data[sample_index_base + 1] = (int8_t)sample_value_pol0_imag;
-                data[sample_index_base + 2] = (int8_t)sample_value_pol1_real;
-                data[sample_index_base + 3] = (int8_t)sample_value_pol1_imag;
+                int iSampleIndexBase = c * n_time_samples_per_channel * n_pols * complexity + t * n_pols * complexity;
+                pu8Data[iSampleIndexBase + 0] = (int8_t)dSampleValuePol0Real;
+                pu8Data[iSampleIndexBase + 1] = (int8_t)dSampleValuePol0Imag;
+                pu8Data[iSampleIndexBase + 2] = (int8_t)dSampleValuePol1Real;
+                pu8Data[iSampleIndexBase + 3] = (int8_t)dSampleValuePol1Imag;
             }
         }
     }
@@ -252,23 +251,22 @@ struct fengines
 {
     // This variable needs to go first so it is initialised first - it is used during the initialisation of other
     // variables.
-    std::int64_t n_heaps_per_fengine;
+    std::int64_t i64HeapsPerFEngine;
 
     // SPEAD2 has its own set of threads that manage transmitting data. When SPEAD2 finishes sending a heap, it queues a
     // handler on this IO loops that is then called.
-    boost::asio::io_service io_service;
+    boost::asio::io_service ioService;
 
     // This vector of vectors stores all the heaps. The outer vector will have one entry for each F-Engine and the inner
     // one will store the heaps per F-Engine.
-    std::vector<std::vector<heap_data>> heaps;
+    std::vector<std::vector<heap_data>> vvHeaps;
 
     // SPEAD 2 stream that every heap will be queued on.
     spead2::send::udp_ibv_stream stream;
 
     // General variables for coordinating sending of heaps.
-    std::size_t n_substreams;
-    std::int64_t timestamp = 0;
-    std::int64_t next_heap = 0;
+    std::int64_t i64Timestamp = 0;
+    std::int64_t iNextHeap = 0;
 
     /* Constructor for the fengines simulator.
      *
@@ -280,19 +278,19 @@ struct fengines
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address)
-        : n_heaps_per_fengine(opts.max_heaps), heaps(make_heaps(opts)),
-          stream(io_service,
+        : i64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)),
+          stream(ioService,
                  spead2::send::stream_config()
                      .set_max_packet_size(packet_size_bytes)
-                     .set_rate(opts.adc_rate * n_pols * sample_bits / 8.0 *
+                     .set_rate(opts.dAdcRate * n_pols * sample_bits / 8.0 *
                                (heap_size_bytes + packets_per_heap * packet_header_size_bytes) / heap_size_bytes /
                                n_multicast_streams_per_antenna)
-                     .set_max_heaps(opts.max_heaps * n_ants),
+                     .set_max_heaps(opts.iMaxHeaps * n_ants),
                  spead2::send::udp_ibv_config()
                      .set_endpoints(endpoints)
                      .set_interface_address(interface_address)
-                     .set_ttl(opts.ttl)
-                     .set_memory_regions(get_memory_regions(heaps)))
+                     .set_ttl(opts.iTtl)
+                     .set_memory_regions(get_memory_regions(vvHeaps)))
     {
     }
 
@@ -303,17 +301,17 @@ struct fengines
      * needs to be added to a memory region.
      */
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
-        const std::vector<std::vector<heap_data>> &all_heaps)
+        const std::vector<std::vector<heap_data>> &vvAllHeaps)
     {
-        std::vector<std::pair<const void *, std::size_t>> memory_regions;
-        for (const auto &single_fengine_heaps : all_heaps)
+        std::vector<std::pair<const void *, std::size_t>> vMemoryRegions;
+        for (const auto &single_fengine_heaps : vvAllHeaps)
         {
             for (const auto &heap : single_fengine_heaps)
             {
-                memory_regions.emplace_back(heap.data.get(), heap_size_bytes);
+                vMemoryRegions.emplace_back(heap.pu8Data.get(), heap_size_bytes);
             }
         }
-        return memory_regions;
+        return vMemoryRegions;
     }
 
     /* Creates vector of heaps required to be transmitted by the F-Engine simulator.
@@ -322,20 +320,20 @@ struct fengines
      */
     static std::vector<std::vector<heap_data>> make_heaps(const options &opts)
     {
-        std::vector<std::vector<heap_data>> all_fengine_heaps;
-        all_fengine_heaps.reserve(n_ants);
-        int heaps_per_fengine = opts.max_heaps;
+        std::vector<std::vector<heap_data>> vv2AllFengineHeaps;
+        vv2AllFengineHeaps.reserve(n_ants);
+        int iHeapsPerFengine = opts.iMaxHeaps;
         for (int feng_id = 0; feng_id < n_ants; feng_id++)
         {
-            std::vector<heap_data> fengine_heaps;
-            fengine_heaps.reserve(heaps_per_fengine);
-            for (int heap_index = 0; heap_index < heaps_per_fengine; heap_index++)
+            std::vector<heap_data> vFengineHeaps;
+            vFengineHeaps.reserve(iHeapsPerFengine);
+            for (int heap_index = 0; heap_index < iHeapsPerFengine; heap_index++)
             {
-                fengine_heaps.emplace_back(heap_index, feng_id);
+                vFengineHeaps.emplace_back(heap_index, feng_id);
             }
-            all_fengine_heaps.emplace_back(std::move(fengine_heaps));
+            vv2AllFengineHeaps.emplace_back(std::move(vFengineHeaps));
         }
-        return all_fengine_heaps;
+        return vv2AllFengineHeaps;
     }
 
     /* Adds the next collection of heaps to the SPEAD2 stream queue.
@@ -354,18 +352,22 @@ struct fengines
          * spead2::send::heap_reference. A heap_reference points to an underlying heap. Here we construct the vector of
          * heap references as required.
          */
-        std::vector<spead2::send::heap_reference> heaps_to_interleave;
-        heaps_to_interleave.reserve(n_ants);
-        for (size_t f_engine_index = 0; f_engine_index < n_ants; f_engine_index++)
+        std::vector<spead2::send::heap_reference> vHeapsToInterleave;
+        vHeapsToInterleave.reserve(n_ants);
+        for (size_t ulFEngineIndex = 0; ulFEngineIndex < n_ants; ulFEngineIndex++)
         {
-            heaps[f_engine_index][next_heap]
-                .heap.get_item(heaps[f_engine_index][next_heap].timestamp_handle)
-                .data.immediate = timestamp;
-            heaps_to_interleave.emplace_back(heaps[f_engine_index][next_heap].heap, -1, f_engine_index);
+            vvHeaps[ulFEngineIndex][iNextHeap]
+                .heap.get_item(vvHeaps[ulFEngineIndex][iNextHeap].timestampHandle)
+                .data.immediate = i64Timestamp;
+            /* The f_engine_index argument tells SPEAD2 which substream to queue the heap on. It is important that each
+             * F-Engine gets its own unique substream index as heaps with different indexes will be interleaved which is
+             * desired.
+             */
+            vHeapsToInterleave.emplace_back(vvHeaps[ulFEngineIndex][iNextHeap].heap, -1, ulFEngineIndex);
         }
 
         bool bQueueSuccesful =
-            stream.async_send_heaps(heaps_to_interleave.begin(), heaps_to_interleave.end(),
+            stream.async_send_heaps(vHeapsToInterleave.begin(), vHeapsToInterleave.end(),
                                     std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
                                     spead2::send::group_mode::ROUND_ROBIN);
         if (bQueueSuccesful == false)
@@ -374,11 +376,11 @@ struct fengines
             std::exit(1);
         }
 
-        timestamp += timestamp_step;
-        next_heap++;
+        i64Timestamp += timestamp_step;
+        iNextHeap++;
 
-        if (next_heap == n_heaps_per_fengine)
-            next_heap = 0;
+        if (iNextHeap == i64HeapsPerFEngine)
+            iNextHeap = 0;
     }
 
     /* Callback function called when SPEAD2 finishes sending a collection of heaps sent by @ref send_next().
@@ -405,13 +407,13 @@ int main(int argc, const char **argv)
 {
     options opts = parse_options(argc, argv);
 
-    auto interface_address = boost::asio::ip::address::from_string(opts.interface);
-    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts.address);
+    auto interfaceAddress = boost::asio::ip::address::from_string(opts.strInterface);
+    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts.strAddress);
 
-    fengines f(opts, endpoints, interface_address);
-    f.io_service.post(std::bind(&fengines::send_next, &f));
+    fengines f(opts, endpoints, interfaceAddress);
+    f.ioService.post(std::bind(&fengines::send_next, &f));
 
     // Will run forever.
-    f.io_service.run();
+    f.ioService.run();
     return 0;
 }
