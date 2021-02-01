@@ -79,6 +79,28 @@ Wraps C++ code in python susing pybind11. If you want to understand more go to: 
 Long build times - use ccache(may be worth putting in the install section)
 fsim.cpp in /scratch
 
+The SPEAD format is used for 
+
+A rough description of the ingest packet format is described [here](https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg/edit).
+
 ### F-Engine Packet Simulator
+
+In order to test the X-Engine code, data from the F-Engines needs to be received. In general an X-Engine needs to 
+receive data for a subset of channels from N F-Engines where N is the telescope array size. This is complicated to 
+configure and requires many F-Engines. In order to bypass this, an F-Engine simulator has been created that simulates
+packets recieved at the X-Engine (i.e Packets from multiple F-Engines destined for the same X-Engine.) This simulator
+requires a single server with a Mellanox NIC to run. This server must be different from the server katxgpu is running 
+on. This fsim simulates the exact packet format from the SKARAB F-Engines. The SKARAB X-Engines ingest data from 4 
+different multicast streams. This simulator only simulates data from a single multicast stream.
+
+The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>:<port>`
+
+Where:
+ * `<interface_address>` is the ip address of the network interface to transmit the data out on.
+ * `<multicast_address>` is the multicast address all packets are destined to.
+ * `<port>` is the UDP port to transmit data to.
+
+The above command will transmit data at about 7 Gbps by default. See the fsim [source code](./scratch/fsim.cpp) for a 
+detailed description of how the F-Engine simulator works and the useful configuration arguments.
 
 
