@@ -46,14 +46,22 @@ monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
 packet_size_bytes = 1024
 thread_affinity = 2
 
+n_ants = 64
+n_channels = 128
+n_samples_per_channel = 256
+n_pols = 2
+sample_bits = 8
+heaps_per_fengine_per_chunk = 10
+
 receiverStream = recv.Stream(
-    2,
-    8,
-    packet_size_bytes,
-    packet_size_bytes * 8192,
+    n_ants,
+    n_channels,
+    n_samples_per_channel,
+    n_pols,
+    sample_bits,
+    heaps_per_fengine_per_chunk,
     ringbuffer,
     thread_affinity,
-    mask_timestamp=True,
     use_gdrcopy=False,
     monitor=monitor,
 )

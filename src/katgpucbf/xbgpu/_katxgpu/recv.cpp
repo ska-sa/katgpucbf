@@ -1,28 +1,29 @@
-#include <utility>
+#include "recv.h"
 #include <cassert>
-#include <map>     // TODO: workaround for it missing in recv_heap.h
-#include <iostream>  // TODO: for debugging
-#include <stdexcept>
-#include <spead2/recv_heap.h>
-#include <spead2/recv_udp_pcap.h>
+#include <iostream> // TODO: for debugging
+#include <map>      // TODO: workaround for it missing in recv_heap.h
 #include <spead2/common_endian.h>
 #include <spead2/common_logging.h>
-#include "recv.h"
-
+#include <spead2/recv_heap.h>
+#include <spead2/recv_udp_pcap.h>
+#include <stdexcept>
+#include <utility>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 namespace py = pybind11;
 
-
 namespace katxgpu::recv
 {
 
+static constexpr int HEAP_OFFSET_ID = 0x0003;
 static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int FENGINE_ID = 0x4101;
 static constexpr int DATA_ID = 0x4300;
 
-allocator::allocator(stream &recv) : recv(recv) {}
+allocator::allocator(stream &recv) : recv(recv)
+{
+}
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
@@ -32,7 +33,7 @@ auto allocator::allocate(std::size_t size, void *hint) -> pointer
         void *ptr = recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
         if (ptr)
             return pointer(reinterpret_cast<std::uint8_t *>(ptr),
-                           deleter(shared_from_this(), (void *) std::uintptr_t(true)));
+                           deleter(shared_from_this(), (void *)std::uintptr_t(true)));
     }
     return spead2::memory_allocator::allocate(size, hint);
 }
@@ -43,42 +44,41 @@ void allocator::free(std::uint8_t *ptr, void *user)
         delete[] ptr;
 }
 
-
-stream::stream(int pol, int sample_bits, std::size_t packet_samples,
-               std::size_t chunk_samples, ringbuffer_t &ringbuffer,
-               int thread_affinity, bool mask_timestamp, bool use_gdrcopy)
-    : spead2::thread_pool(
-        1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
-    spead2::recv::stream(
-        *static_cast<thread_pool *>(this),
-        spead2::recv::stream_config()
-            .set_max_heaps(1)
-            .set_allow_unsized_heaps(false)
-            .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
-            .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
-    ),
-    pol(pol),
-    sample_bits(sample_bits),
-    packet_samples(packet_samples),
-    chunk_samples(chunk_samples),
-    chunk_packets(chunk_samples / packet_samples),
-    packet_bytes(packet_samples / 8 * sample_bits),
-    chunk_bytes(chunk_samples / 8 * sample_bits),
-    timestamp_mask(mask_timestamp ? ~std::uint64_t(packet_samples - 1) : ~std::uint64_t(0)),
-    ringbuffer(ringbuffer)
+stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits,
+               size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy)
+    : spead2::thread_pool(1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
+      spead2::recv::stream(*static_cast<thread_pool *>(this),
+                           spead2::recv::stream_config()
+                               .set_max_heaps(1)
+                               .set_allow_unsized_heaps(false)
+                               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
+                               .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)),
+      n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
+      sample_bits(sample_bits), heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
+      packet_bytes(n_samples_per_channel * n_pols * complexity / 8 * sample_bits),
+      chunk_packets(n_channels * n_ants * heaps_per_fengine_per_chunk), chunk_bytes(packet_bytes * chunk_packets),
+      ringbuffer(ringbuffer)
 {
     py::print("Stream Created");
 
-    if (sample_bits <= 0)
-        throw std::invalid_argument("sample_bits must be greater than 0");
-    if (packet_samples <= 0)
-        throw std::invalid_argument("packet_samples must be greater than 0");
-    if (chunk_samples <= 0)
-        throw std::invalid_argument("chunk_samples must be greater than 0");
-    if (packet_samples % 8 != 0)
-        throw std::invalid_argument("packet_samples must be a multiple of 8");
-    if (chunk_samples % packet_samples != 0)
-        throw std::invalid_argument("chunk_samples must be a multiple of packet_samples");
+    if (sample_bits != 8)
+        throw std::invalid_argument("sample_bits must equal 8 - logic for other sample sizes has not been tested.");
+    if (n_pols != 2)
+        throw std::invalid_argument(
+            "n_pols must equal 8 - logic for other types of polarisations has not been added yet.");
+    if (n_ants <= 0)
+        throw std::invalid_argument("n_ants must be greater than 0");
+    if (n_channels <= 0)
+        throw std::invalid_argument("n_channels must be greater than 0");
+    if (n_samples_per_channel <= 0)
+        throw std::invalid_argument("n_samples_per_channel must be greater than 0");
+    if (packet_bytes <= 0)
+        throw std::invalid_argument("packet_bytes must be greater than 0");
+    if (chunk_packets <= 0)
+        throw std::invalid_argument("n_channels * n_ants * heaps_per_fengine_per_chunk must be greater than 0");
+
+    spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
+                     n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
 }
 
 stream::~stream()
@@ -93,7 +93,6 @@ void stream::add_chunk(std::unique_ptr<chunk> &&c)
 
     c->present.clear();
     c->present.resize(chunk_packets);
-    c->pol = pol;
     {
         std::lock_guard<std::mutex> lock(free_chunks_lock);
         free_chunks.push(std::move(c));
@@ -133,41 +132,51 @@ bool stream::flush_chunk()
     }
 }
 
-std::tuple<void *, chunk *, std::size_t>
-stream::calculate_packet_destination(std::int64_t timestamp, std::int64_t fengine_id, chunk &c)
+std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(std::int64_t timestamp,
+                                                                              std::int64_t fengine_id, chunk &c)
 {
-    spead2::log_info("Determine packet position in chunk specific");
-    std::size_t sample_idx = timestamp - c.timestamp;
-    std::size_t packet_idx = sample_idx / packet_samples;
-    std::size_t byte_idx = sample_idx / 8 * sample_bits;
+    //spead2::log_info("Determine packet position in chunk specific %1% %2% %3%",timestamp,c.timestamp);
+    std::size_t timestamp_idx = (timestamp - c.timestamp)/(timestamp_step);
+    std::size_t fengine_idx = fengine_id;
+    std::size_t heap_idx = timestamp_idx * n_ants + fengine_idx;
+    std::size_t byte_idx = heap_idx * n_channels * packet_bytes;
+    spead2::log_info("\tTimestamp Index (%1%), Fengine Index (%2%), HeapIdx (%3%), Byte Index (%4%)",timestamp_idx, fengine_idx, heap_idx, byte_idx);
     void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + byte_idx;
-    return std::make_tuple(ptr, &c, packet_idx);
+    return std::make_tuple(ptr, &c, heap_idx);
 }
 
-std::tuple<void *, chunk *, std::size_t>
-stream::calculate_packet_destination(std::int64_t timestamp, std::int64_t fengine_id,)
+std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(std::int64_t timestamp,
+                                                                              std::int64_t fengine_id)
 {
     spead2::log_info("Determine packet position in chunk broad");
     if (first_timestamp == -1)
     {
-        first_timestamp = timestamp / chunk_samples * chunk_samples;
+        first_timestamp = timestamp;
         grab_chunk(first_timestamp);
     }
-    if ((timestamp - first_timestamp) % packet_samples != 0)
+    if ((timestamp - first_timestamp) % timestamp_step != 0)
     {
         // TODO: log/count. The timestamp is broken.
+        spead2::log_info("Timestamp is broken");
         return std::make_tuple(nullptr, nullptr, 0);
     }
     std::int64_t base = active_chunks[0]->timestamp;
     for (const auto &c : active_chunks)
     {
-        if (timestamp >= c->timestamp
-            && timestamp < c->timestamp + std::int64_t(chunk_samples))
-            return calculate_packet_destination(timestamp, *c);
+        spead2::log_info("\t Timestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp, c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
+    }
+
+    for (const auto &c : active_chunks)
+    {
+        spead2::log_info("\t\tTimestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp, c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
+        if (timestamp >= c->timestamp && timestamp < c->timestamp + timestamp_step * heaps_per_fengine_per_chunk){
+                spead2::log_info("\t\tIn above ^");   
+                return calculate_packet_destination(timestamp, fengine_id, *c);
+        }
     }
     if (timestamp < base)
     {
-        // TODO: log/count. Have gone backwards in time.
+        spead2::log_info("Seem to have gone backwards in time");
         return std::make_tuple(nullptr, nullptr, 0);
     }
     else
@@ -191,14 +200,14 @@ stream::calculate_packet_destination(std::int64_t timestamp, std::int64_t fengin
                 return std::make_tuple(nullptr, nullptr, 0);
             }
         grab_chunk(start);
-        return calculate_packet_destination(timestamp, *active_chunks.back());
+        return calculate_packet_destination(timestamp, fengine_id, *active_chunks.back());
     }
 }
 
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
     spead2::log_info("Receiver allocator 0");
-    spead2::log_info("Receiver allocator 1 %1% %2% %3%",size,packet_bytes, packet.n_items);
+    spead2::log_info("Receiver allocator 1 %1% %2% %3%", size, packet_bytes, packet.n_items);
     if (size != 131072)
         return nullptr;
     spead2::log_info("Receiver allocator 2");
@@ -208,28 +217,31 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
     // Extract timestamp
     for (int i = 0; i < packet.n_items; i++)
     {
-        
+
         spead2::item_pointer_t pointer;
         pointer = spead2::load_be<spead2::item_pointer_t>(packet.pointers + i * sizeof(pointer));
-        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == TIMESTAMP_ID){
+        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == TIMESTAMP_ID)
+        {
             timestamp = decoder.get_immediate(pointer);
         }
 
-        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == FENGINE_ID){
+        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == FENGINE_ID)
+        {
             fengine_id = decoder.get_immediate(pointer);
         }
     }
-    spead2::log_info("Packet Information Timestamp: %1% fengine_id %2%",timestamp,fengine_id);
+    spead2::log_info("Packet Information Timestamp: %1% fengine_id %2%", timestamp, fengine_id);
     if (timestamp == -1 || fengine_id == -1)
         return nullptr;
 
-    return std::get<0>(calculate_packet_destination(timestamp));
+    return std::get<0>(calculate_packet_destination(timestamp, fengine_id));
 }
 
 void stream::heap_ready(spead2::recv::live_heap &&live_heap)
 {
+    spead2::log_info("Heap Ready Called");
     if (!live_heap.is_complete())
-        return;      // should never happen: digitiser heaps are single packet
+        return; // should never happen: digitiser heaps are single packet
     spead2::recv::heap heap(std::move(live_heap));
     std::int64_t timestamp = -1;
     void *actual_ptr = nullptr;
@@ -237,12 +249,12 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
 
     void *expected_ptr;
     chunk *c;
-    std::size_t packet_idx;
+    std::size_t heap_idx;
 
     for (const auto &item : heap.get_items())
     {
         if (item.id == TIMESTAMP_ID && item.is_immediate)
-            timestamp = item.immediate_value & timestamp_mask;
+            timestamp = item.immediate_value;
         else if (item.id == DATA_ID)
         {
             actual_ptr = item.ptr;
@@ -260,13 +272,13 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
         return;
     }
 
-    std::tie(expected_ptr, c, packet_idx) = calculate_packet_destination(timestamp);
+    std::tie(expected_ptr, c, heap_idx) = calculate_packet_destination(timestamp, 0);
     if (expected_ptr != actual_ptr)
     {
         // TODO: log. This should only happen if we receive data that is too old.
         return;
     }
-    c->present[packet_idx] = true;
+    c->present[heap_idx] = true;
 }
 
 void stream::stop_received()
@@ -284,13 +296,12 @@ void stream::add_udp_pcap_file_reader(const std::string &filename)
 }
 
 void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
-                                const std::string &interface_address,
-                                std::size_t buffer_size, int comp_vector, int max_poll)
+                                const std::string &interface_address, std::size_t buffer_size, int comp_vector,
+                                int max_poll)
 {
     spead2::recv::udp_ibv_config config;
     for (const auto &ep : endpoints)
-        config.add_endpoint(boost::asio::ip::udp::endpoint(
-            boost::asio::ip::address::from_string(ep.first), ep.second));
+        config.add_endpoint(boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(ep.first), ep.second));
     config.set_interface_address(boost::asio::ip::address::from_string(interface_address));
     config.set_max_size(packet_bytes + 128);
     config.set_buffer_size(buffer_size);
@@ -304,24 +315,9 @@ stream::ringbuffer_t &stream::get_ringbuffer()
     return ringbuffer;
 }
 
-int stream::get_pol() const
-{
-    return pol;
-}
-
 int stream::get_sample_bits() const
 {
     return sample_bits;
-}
-
-std::size_t stream::get_packet_samples() const
-{
-    return packet_samples;
-}
-
-std::size_t stream::get_chunk_samples() const
-{
-    return chunk_samples;
 }
 
 std::size_t stream::get_chunk_packets() const
