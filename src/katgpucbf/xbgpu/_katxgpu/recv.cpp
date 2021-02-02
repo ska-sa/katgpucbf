@@ -6,18 +6,27 @@
 #include <spead2/recv_heap.h>
 #include <spead2/recv_udp_pcap.h>
 #include <spead2/common_endian.h>
+#include <spead2/common_logging.h>
 #include "recv.h"
+
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+namespace py = pybind11;
+
 
 namespace katxgpu::recv
 {
 
 static constexpr int TIMESTAMP_ID = 0x1600;
-static constexpr int DATA_ID = 0x3300;
+static constexpr int FENGINE_ID = 0x4101;
+static constexpr int DATA_ID = 0x4300;
 
 allocator::allocator(stream &recv) : recv(recv) {}
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
+    spead2::log_info("Shared allocator");
     if (hint)
     {
         void *ptr = recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
@@ -58,6 +67,8 @@ stream::stream(int pol, int sample_bits, std::size_t packet_samples,
     timestamp_mask(mask_timestamp ? ~std::uint64_t(packet_samples - 1) : ~std::uint64_t(0)),
     ringbuffer(ringbuffer)
 {
+    py::print("Stream Created");
+
     if (sample_bits <= 0)
         throw std::invalid_argument("sample_bits must be greater than 0");
     if (packet_samples <= 0)
@@ -123,8 +134,9 @@ bool stream::flush_chunk()
 }
 
 std::tuple<void *, chunk *, std::size_t>
-stream::decode_timestamp(std::int64_t timestamp, chunk &c)
+stream::calculate_packet_destination(std::int64_t timestamp, std::int64_t fengine_id, chunk &c)
 {
+    spead2::log_info("Determine packet position in chunk specific");
     std::size_t sample_idx = timestamp - c.timestamp;
     std::size_t packet_idx = sample_idx / packet_samples;
     std::size_t byte_idx = sample_idx / 8 * sample_bits;
@@ -133,8 +145,9 @@ stream::decode_timestamp(std::int64_t timestamp, chunk &c)
 }
 
 std::tuple<void *, chunk *, std::size_t>
-stream::decode_timestamp(std::int64_t timestamp)
+stream::calculate_packet_destination(std::int64_t timestamp, std::int64_t fengine_id,)
 {
+    spead2::log_info("Determine packet position in chunk broad");
     if (first_timestamp == -1)
     {
         first_timestamp = timestamp / chunk_samples * chunk_samples;
@@ -150,7 +163,7 @@ stream::decode_timestamp(std::int64_t timestamp)
     {
         if (timestamp >= c->timestamp
             && timestamp < c->timestamp + std::int64_t(chunk_samples))
-            return decode_timestamp(timestamp, *c);
+            return calculate_packet_destination(timestamp, *c);
     }
     if (timestamp < base)
     {
@@ -178,31 +191,39 @@ stream::decode_timestamp(std::int64_t timestamp)
                 return std::make_tuple(nullptr, nullptr, 0);
             }
         grab_chunk(start);
-        return decode_timestamp(timestamp, *active_chunks.back());
+        return calculate_packet_destination(timestamp, *active_chunks.back());
     }
 }
 
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
-    if (size != packet_bytes)
+    spead2::log_info("Receiver allocator 0");
+    spead2::log_info("Receiver allocator 1 %1% %2% %3%",size,packet_bytes, packet.n_items);
+    if (size != 131072)
         return nullptr;
+    spead2::log_info("Receiver allocator 2");
     std::int64_t timestamp = -1;
+    std::int64_t fengine_id = -1;
     spead2::recv::pointer_decoder decoder(packet.heap_address_bits);
     // Extract timestamp
     for (int i = 0; i < packet.n_items; i++)
     {
+        
         spead2::item_pointer_t pointer;
         pointer = spead2::load_be<spead2::item_pointer_t>(packet.pointers + i * sizeof(pointer));
-        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == TIMESTAMP_ID)
-        {
-            timestamp = decoder.get_immediate(pointer) & timestamp_mask;
-            break;
+        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == TIMESTAMP_ID){
+            timestamp = decoder.get_immediate(pointer);
+        }
+
+        if (decoder.is_immediate(pointer) && decoder.get_id(pointer) == FENGINE_ID){
+            fengine_id = decoder.get_immediate(pointer);
         }
     }
-    if (timestamp == -1)
+    spead2::log_info("Packet Information Timestamp: %1% fengine_id %2%",timestamp,fengine_id);
+    if (timestamp == -1 || fengine_id == -1)
         return nullptr;
 
-    return std::get<0>(decode_timestamp(timestamp));
+    return std::get<0>(calculate_packet_destination(timestamp));
 }
 
 void stream::heap_ready(spead2::recv::live_heap &&live_heap)
@@ -239,7 +260,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
         return;
     }
 
-    std::tie(expected_ptr, c, packet_idx) = decode_timestamp(timestamp);
+    std::tie(expected_ptr, c, packet_idx) = calculate_packet_destination(timestamp);
     if (expected_ptr != actual_ptr)
     {
         // TODO: log. This should only happen if we receive data that is too old.

@@ -70,8 +70,12 @@ private:
     virtual void pre_ringbuffer_push() {}
     virtual void post_ringbuffer_push() {}
 
-    const int pol;                           ///< Polarisation index
     const int sample_bits;                   ///< Number of bits per sample
+    const int n_ants;                        ///< Number of antennas in the array
+    const int n_channels;                    ///< Number of channels in each packet
+    const int n_samples_per_channel;         ///< Number of samples stored in a single channel
+    const int n_pols;                        ///< Number of polarisations in each sample
+    const int complexity = 2;                ///< Indicates two values per sample - one real and one imaginary.
     const std::size_t packet_samples;        ///< Number of samples in each packet
     const std::size_t chunk_samples;         ///< Number of samples in each chunk
     const std::size_t chunk_packets;         ///< Number of packets in each chunk
@@ -100,23 +104,25 @@ private:
     bool flush_chunk();
 
     /**
-     * Determine data pointer, chunk and packet index from packet timestamp.
+     * Determine data pointer, chunk and packet index from packet timestamp and
+     * F-Engine ID.
      *
      * If the timestamp is beyond the last active chunk, old chunks may be
      * flushed and new chunks appended.
      */
     std::tuple<void *, chunk *, std::size_t>
-    decode_timestamp(std::int64_t timestamp);
+    calculate_packet_destination(std::int64_t timestamp, std::int64_t fengine_id);
 
     /**
-     * Determine data pointer, chunk and packet index from packet timestamp.
+     * Determine data pointer, chunk and packet index from packet timestamp and
+     * F-Engine ID.
      *
      * This overload operates on a specific chunk. Returning the same chunk is
      * redundant, but allows this function to be tail-called from the main
      * overload.
      */
     std::tuple<void *, chunk *, std::size_t>
-    decode_timestamp(std::int64_t timestamp, chunk &c);
+    calculate_packet_destination(std::int64_t timestamp, std::int64_t fengine_id, chunk &c);
 
     void *allocate(std::size_t size, spead2::recv::packet_header &packet);
 

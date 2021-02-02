@@ -130,7 +130,7 @@ py::module register_module(py::module &parent)
         .def("stop", &py_stream::stop)
     ;
 
-    register_ringbuffer<stream::ringbuffer_t, py_chunk>(m, "Ringbuffer", "Ringbuffer for samples");
+    register_ringbuffer<stream::ringbuffer_t, py_chunk>(m, "Ringbuffer", "Ringbuffer for received channelised data.");
 
     return m;
 }
