@@ -215,8 +215,10 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
     //    spead2::log_info("Receiver allocator 0");
     //    spead2::log_info("Receiver allocator 1 %1% %2% %3%", size, packet_bytes, packet.n_items);
-    if (size != 131072)
+    if (size != packet_bytes * n_channels){
+        spead2::log_info("Allocating incorrect size");
         return nullptr;
+    }
     //    spead2::log_info("Receiver allocator 2");
     std::int64_t timestamp = -1;
     std::int64_t fengine_id = -1;
@@ -291,7 +293,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     std::tie(expected_ptr, c, heap_idx) = calculate_packet_destination(timestamp, fengine_id);
     if (expected_ptr != actual_ptr)
     {
-        spead2::log_info("This should only happen if we receive data that is too old");
+        spead2::log_info("This should only happen if we receive data that is too old (%1%)",timestamp_step);
         // TODO: log. This should only happen if we receive data that is too old.
         return;
     }
