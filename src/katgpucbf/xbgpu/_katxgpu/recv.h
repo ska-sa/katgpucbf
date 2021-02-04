@@ -85,7 +85,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     const int heaps_per_fengine_per_chunk;
     const int chunk_samples = 1048576;  //Needs to be deleted
     const int packet_samples = 4096; //Needs to be deleted
-    const int timestamp_step = 0x800000;  ///< Needs to be passed as an argument or configured somewhere.
+    const int timestamp_step;  ///< Needs to be passed as an argument or configured somewhere.
     const std::size_t packet_bytes;  ///< Number of payload bytes in each packet
     const std::size_t chunk_packets; ///< Number of packets in each chunk
     const std::size_t chunk_bytes;   ///< Number of payload bytes in each chunk
@@ -134,7 +134,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     void *allocate(std::size_t size, spead2::recv::packet_header &packet);
 
   public:
-    stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits,
+    stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
            size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity = -1,
            bool use_gdrcopy = false);
     ~stream();

@@ -12,25 +12,8 @@ import katsdpsigproc.accel as accel
 
 logger = logging.getLogger(__name__)
 
-context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-buf = accel.HostArray((1024 * 1024 * 1024,), np.uint8, context=context)
-
-buf[2] = 15
-
-print(buf)
-
-chunk = recv.Chunk(buf)
-
-print(buf)
-
-print(chunk.timestamp)
-print(chunk.present)
-
-print(recv.Ringbuffer.__doc__)
-
-use_file_monitor = False
-
 # Create monitor for file
+use_file_monitor = False
 if use_file_monitor:
     monitor = katxgpu.monitor.FileMonitor("temp_file.log")
 else:
@@ -43,22 +26,30 @@ monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
 
 # Create SPEAD2 receiver
 
+
 packet_size_bytes = 1024
 thread_affinity = 2
 
 n_ants = 64
-n_channels = 128
+n_channels_total = 32768
+n_channels_per_stream = 128
 n_samples_per_channel = 256
 n_pols = 2
 sample_bits = 8
 heaps_per_fengine_per_chunk = 10
 
+# Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
+timestamp_step = n_channels_total * 2 * n_samples_per_channel
+
+print("Timestamp step: ", hex(timestamp_step))
+
 receiverStream = recv.Stream(
     n_ants,
-    n_channels,
+    n_channels_per_stream,
     n_samples_per_channel,
     n_pols,
     sample_bits,
+    timestamp_step,
     heaps_per_fengine_per_chunk,
     ringbuffer,
     thread_affinity,
@@ -67,6 +58,7 @@ receiverStream = recv.Stream(
 )
 
 # Add free chunks to SPEAD2 receiver
+context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 src_chunks_per_stream = 8
 monitor.event_qsize("free_chunks", 0, src_chunks_per_stream)
 for i in range(src_chunks_per_stream):

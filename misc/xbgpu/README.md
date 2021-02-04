@@ -105,6 +105,6 @@ detailed description of how the F-Engine simulator works and the useful configur
 
 ### Eliminating Packet Drops
 
-1. Cstates
+1. Cstates - `cpupower frequency-set --governor performance`
 2. Pstates
 3. NUMA boundaries

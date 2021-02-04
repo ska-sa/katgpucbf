@@ -44,7 +44,7 @@ void allocator::free(std::uint8_t *ptr, void *user)
         delete[] ptr;
 }
 
-stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits,
+stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
                size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy)
     : spead2::thread_pool(1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
       spead2::recv::stream(
@@ -57,7 +57,7 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
               .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)),
       n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
-      sample_bits(sample_bits), heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
+      sample_bits(sample_bits), timestamp_step(timestamp_step), heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
       packet_bytes(n_samples_per_channel * n_pols * complexity / 8 * sample_bits),
       chunk_packets(n_channels * n_ants * heaps_per_fengine_per_chunk), chunk_bytes(packet_bytes * chunk_packets),
       ringbuffer(ringbuffer)

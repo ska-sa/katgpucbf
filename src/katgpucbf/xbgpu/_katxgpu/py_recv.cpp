@@ -38,10 +38,10 @@ class py_stream : public stream
     py::object monitor;
 
     py_stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits,
-              std::size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy,
-              py::object monitor)
-        : stream(n_ants, n_channels, n_samples_per_channel, n_pols, sample_bits, heaps_per_fengine_per_chunk,
-                 ringbuffer, thread_affinity, use_gdrcopy),
+              int timestamp_step, std::size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity,
+              bool use_gdrcopy, py::object monitor)
+        : stream(n_ants, n_channels, n_samples_per_channel, n_pols, sample_bits, timestamp_step,
+                 heaps_per_fengine_per_chunk, ringbuffer, thread_affinity, use_gdrcopy),
           monitor(std::move(monitor))
     {
     }
@@ -96,13 +96,14 @@ py::module register_module(py::module &parent)
         .def_readonly("device", &py_chunk::device);
 
     py::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
-        .def(py::init<int, int, int, int, int, std::size_t, stream::ringbuffer_t &, int, bool, py::object>(),
+        .def(py::init<int, int, int, int, int, int, std::size_t, stream::ringbuffer_t &, int, bool, py::object>(),
              "n_ants"_a, "n_channels"_a, "n_samples_per_channel"_a, "n_pols"_a, "sample_bits"_a,
-             "heaps_per_fengine_per_chunk"_a, "ringbuffer"_a, "thread_affinity"_a = -1, "use_gdrcopy"_a = false,
-             "monitor"_a = py::none(), py::keep_alive<1, 6>())
+             "timestamp_step"_a,
+             "heaps_per_fengine_per_chunk"_a,
+             "ringbuffer"_a, "thread_affinity"_a = -1, "use_gdrcopy"_a = false, "monitor"_a = py::none(),
+             py::keep_alive<1, 6>())
         .def_property_readonly("ringbuffer",
                                [](py_stream &self) -> stream::ringbuffer_t & { return self.get_ringbuffer(); })
-        .def_property_readonly("sample_bits", &py_stream::get_sample_bits)
         .def_property_readonly("chunk_packets", &py_stream::get_chunk_packets)
         .def_property_readonly("chunk_bytes", &py_stream::get_chunk_bytes)
         .def(
