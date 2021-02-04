@@ -27,7 +27,7 @@ allocator::allocator(stream &recv) : recv(recv)
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
-    spead2::log_info("Shared allocator");
+    // spead2::log_info("Shared allocator");
     if (hint)
     {
         void *ptr = recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
@@ -47,19 +47,22 @@ void allocator::free(std::uint8_t *ptr, void *user)
 stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits,
                size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy)
     : spead2::thread_pool(1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
-      spead2::recv::stream(*static_cast<thread_pool *>(this),
-                           spead2::recv::stream_config()
-                               .set_max_heaps(1)
-                               .set_allow_unsized_heaps(false)
-                               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
-                               .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)),
+      spead2::recv::stream(
+          *static_cast<thread_pool *>(this),
+          spead2::recv::stream_config()
+              .set_max_heaps(n_ants *
+                             heaps_per_fengine_per_chunk) // Set max heaps needs to be large enough to accomodate
+                                                          // packets interleaved from multiple F-Engines.
+              .set_allow_unsized_heaps(false)
+              .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
+              .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)),
       n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
       sample_bits(sample_bits), heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
       packet_bytes(n_samples_per_channel * n_pols * complexity / 8 * sample_bits),
       chunk_packets(n_channels * n_ants * heaps_per_fengine_per_chunk), chunk_bytes(packet_bytes * chunk_packets),
       ringbuffer(ringbuffer)
 {
-    py::print("Stream Created");
+    //py::print("Stream Created");
 
     if (sample_bits != 8)
         throw std::invalid_argument("sample_bits must equal 8 - logic for other sample sizes has not been tested.");
@@ -77,8 +80,8 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
     if (chunk_packets <= 0)
         throw std::invalid_argument("n_channels * n_ants * heaps_per_fengine_per_chunk must be greater than 0");
 
-    spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
-                     n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
+    //spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
+     //                n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
 }
 
 stream::~stream()
@@ -135,12 +138,13 @@ bool stream::flush_chunk()
 std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(std::int64_t timestamp,
                                                                               std::int64_t fengine_id, chunk &c)
 {
-    //spead2::log_info("Determine packet position in chunk specific %1% %2% %3%",timestamp,c.timestamp);
-    std::size_t timestamp_idx = (timestamp - c.timestamp)/(timestamp_step);
+    // spead2::log_info("Determine packet position in chunk specific %1% %2% %3%",timestamp,c.timestamp);
+    std::size_t timestamp_idx = (timestamp - c.timestamp) / (timestamp_step);
     std::size_t fengine_idx = fengine_id;
     std::size_t heap_idx = timestamp_idx * n_ants + fengine_idx;
     std::size_t byte_idx = heap_idx * n_channels * packet_bytes;
-    spead2::log_info("\tTimestamp Index (%1%), Fengine Index (%2%), HeapIdx (%3%), Byte Index (%4%)",timestamp_idx, fengine_idx, heap_idx, byte_idx);
+    //spead2::log_info("\tTimestamp Index (%1%), Fengine Index (%2%), HeapIdx (%3%), Byte Index (%4%)", timestamp_idx,
+    //                 fengine_idx, heap_idx, byte_idx);
     void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + byte_idx;
     return std::make_tuple(ptr, &c, heap_idx);
 }
@@ -148,7 +152,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
 std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(std::int64_t timestamp,
                                                                               std::int64_t fengine_id)
 {
-    spead2::log_info("Determine packet position in chunk broad");
+    //  spead2::log_info("Determine packet position in chunk broad");
     if (first_timestamp == -1)
     {
         first_timestamp = timestamp;
@@ -161,17 +165,20 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         return std::make_tuple(nullptr, nullptr, 0);
     }
     std::int64_t base = active_chunks[0]->timestamp;
-    for (const auto &c : active_chunks)
-    {
-        spead2::log_info("\t Timestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp, c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
-    }
+    // for (const auto &c : active_chunks)
+    // {
+    //     spead2::log_info("\t Timestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp,
+    //                      c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
+    // }
 
     for (const auto &c : active_chunks)
     {
-        spead2::log_info("\t\tTimestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp, c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
-        if (timestamp >= c->timestamp && timestamp < c->timestamp + timestamp_step * heaps_per_fengine_per_chunk){
-                spead2::log_info("\t\tIn above ^");   
-                return calculate_packet_destination(timestamp, fengine_id, *c);
+        // spead2::log_info("\t\tTimestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp,
+        //                  c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
+        if (timestamp >= c->timestamp && timestamp < c->timestamp + timestamp_step * heaps_per_fengine_per_chunk)
+        {
+            //spead2::log_info("\t\tIn above ^");
+            return calculate_packet_destination(timestamp, fengine_id, *c);
         }
     }
     if (timestamp < base)
@@ -206,11 +213,11 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
 
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
-    spead2::log_info("Receiver allocator 0");
-    spead2::log_info("Receiver allocator 1 %1% %2% %3%", size, packet_bytes, packet.n_items);
+    //    spead2::log_info("Receiver allocator 0");
+    //    spead2::log_info("Receiver allocator 1 %1% %2% %3%", size, packet_bytes, packet.n_items);
     if (size != 131072)
         return nullptr;
-    spead2::log_info("Receiver allocator 2");
+    //    spead2::log_info("Receiver allocator 2");
     std::int64_t timestamp = -1;
     std::int64_t fengine_id = -1;
     spead2::recv::pointer_decoder decoder(packet.heap_address_bits);
@@ -230,7 +237,7 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
             fengine_id = decoder.get_immediate(pointer);
         }
     }
-    spead2::log_info("Packet Information Timestamp: %1% fengine_id %2%", timestamp, fengine_id);
+    //    spead2::log_info("Packet Information Timestamp: %1% fengine_id %2%", timestamp, fengine_id);
     if (timestamp == -1 || fengine_id == -1)
         return nullptr;
 
@@ -239,11 +246,16 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 
 void stream::heap_ready(spead2::recv::live_heap &&live_heap)
 {
-    spead2::log_info("Heap Ready Called");
+    //    spead2::log_info("Heap Ready Called");
     if (!live_heap.is_complete())
+    {
+        spead2::log_info("Heap not complete. Received Length %1% Expected Length %2%.", live_heap.get_received_length(),
+                         live_heap.get_heap_length());
         return; // should never happen: digitiser heaps are single packet
+    }
     spead2::recv::heap heap(std::move(live_heap));
     std::int64_t timestamp = -1;
+    std::int64_t fengine_id = -1;
     void *actual_ptr = nullptr;
     std::size_t length = 0;
 
@@ -255,6 +267,8 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     {
         if (item.id == TIMESTAMP_ID && item.is_immediate)
             timestamp = item.immediate_value;
+        if (item.id == FENGINE_ID && item.is_immediate)
+            fengine_id = item.immediate_value;
         else if (item.id == DATA_ID)
         {
             actual_ptr = item.ptr;
@@ -263,22 +277,26 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     }
     if (timestamp == -1 || length == 0)
     {
+        spead2::log_info("It's not a valid digitiser packet");
         // TODO: log. It's not a valid digitiser packet.
         return;
     }
-    if (length != packet_bytes)
+    if (length != packet_bytes * n_channels)
     {
         // TODO: log. It's the wrong size.
+        spead2::log_info("Heap size incorrect. Received (%1%), expected (%2%)", length, packet_bytes * n_channels);
         return;
     }
 
-    std::tie(expected_ptr, c, heap_idx) = calculate_packet_destination(timestamp, 0);
+    std::tie(expected_ptr, c, heap_idx) = calculate_packet_destination(timestamp, fengine_id);
     if (expected_ptr != actual_ptr)
     {
+        spead2::log_info("This should only happen if we receive data that is too old");
         // TODO: log. This should only happen if we receive data that is too old.
         return;
     }
     c->present[heap_idx] = true;
+    //    spead2::log_info("Heap Ready Finished");
 }
 
 void stream::stop_received()
@@ -303,7 +321,7 @@ void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::ui
     for (const auto &ep : endpoints)
         config.add_endpoint(boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(ep.first), ep.second));
     config.set_interface_address(boost::asio::ip::address::from_string(interface_address));
-    config.set_max_size(packet_bytes + 128);
+    config.set_max_size(packet_bytes + 96); // Header is 12 fields of 8 bytes each: So 96 bytes of header
     config.set_buffer_size(buffer_size);
     config.set_comp_vector(comp_vector);
     config.set_max_poll(max_poll);

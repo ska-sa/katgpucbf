@@ -103,4 +103,8 @@ Where:
 The above command will transmit data at about 7 Gbps by default. See the fsim [source code](./scratch/fsim.cpp) for a 
 detailed description of how the F-Engine simulator works and the useful configuration arguments.
 
+### Eliminating Packet Drops
 
+1. Cstates
+2. Pstates
+3. NUMA boundaries
