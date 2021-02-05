@@ -25,9 +25,6 @@ ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
 monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
 
 # Create SPEAD2 receiver
-
-
-packet_size_bytes = 1024
 thread_affinity = 2
 
 n_ants = 64
@@ -83,7 +80,7 @@ async def get_chunks():
         received += len(chunk.present)
         dropped += len(chunk.present) - sum(chunk.present)
         print(
-            f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}."
+            f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. {len(chunk.base)}"
         )
         receiverStream.add_chunk(chunk)
         i += 1

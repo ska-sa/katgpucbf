@@ -73,10 +73,6 @@ struct options
 
 static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
                                       // be consistent with the F-Engine packet simulator.
-<<<<<<< HEAD
-static constexpr int n_chans = 32768; // TODO: Make configurable, make it so that it only lists the number of channels per multicast stream
-=======
->>>>>>> initial_spead2_branch
 static constexpr int n_multicast_streams_per_antenna = 4;
 static constexpr int n_pols = 2;                    // Dual polarisation antennas
 static constexpr int complexity = 2;                // real and imaginary components
