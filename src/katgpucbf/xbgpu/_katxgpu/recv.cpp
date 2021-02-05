@@ -95,7 +95,7 @@ void stream::add_chunk(std::unique_ptr<chunk> &&c)
         throw std::invalid_argument("Chunk has incorrect size");
 
     c->present.clear();
-    c->present.resize(chunk_packets);
+    c->present.resize(n_ants * heaps_per_fengine_per_chunk);
     {
         std::lock_guard<std::mutex> lock(free_chunks_lock);
         free_chunks.push(std::move(c));

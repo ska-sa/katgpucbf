@@ -13,7 +13,7 @@ import katsdpsigproc.accel as accel
 logger = logging.getLogger(__name__)
 
 # Create monitor for file
-use_file_monitor = False
+use_file_monitor = True
 if use_file_monitor:
     monitor = katxgpu.monitor.FileMonitor("temp_file.log")
 else:
@@ -33,7 +33,7 @@ thread_affinity = 2
 n_ants = 64
 n_channels_total = 32768
 n_channels_per_stream = 128
-n_samples_per_channel = 1024
+n_samples_per_channel = 256
 n_pols = 2
 sample_bits = 8
 heaps_per_fengine_per_chunk = 10
@@ -74,9 +74,26 @@ asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(ringbuffer, monitor, "recv_
 async def get_chunks():
     """TODO: Create docstring."""
     print("Starting Main Loop")
+    i = 0
+    dropped = 0
+    received = 0
     async for chunk in asyncRingbuffer:
-        print("Here", chunk)
+        received += len(chunk.present)
+        dropped += len(chunk.present) - sum(chunk.present)
+        print(
+            "Chunk:",
+            i,
+            "Received:",
+            sum(chunk.present),
+            "of",
+            len(chunk.present),
+            "expected heaps. All time dropped/received heaps:",
+            dropped,
+            "/",
+            received,
+        )
         receiverStream.add_chunk(chunk)
+        i += 1
 
 
 print("Here")
