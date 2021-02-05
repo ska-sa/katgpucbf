@@ -13,7 +13,7 @@ import katsdpsigproc.accel as accel
 logger = logging.getLogger(__name__)
 
 # Create monitor for file
-use_file_monitor = True
+use_file_monitor = False
 if use_file_monitor:
     monitor = katxgpu.monitor.FileMonitor("temp_file.log")
 else:
@@ -41,7 +41,7 @@ heaps_per_fengine_per_chunk = 10
 # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 timestamp_step = n_channels_total * 2 * n_samples_per_channel
 
-print("Timestamp step: ", hex(timestamp_step))
+print(f"Timestamp step: {hex(timestamp_step)}")
 
 receiverStream = recv.Stream(
     n_ants,
@@ -68,12 +68,14 @@ for i in range(src_chunks_per_stream):
 
 receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
 
-asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(ringbuffer, monitor, "recv_ringbuffer", "get_chunks")
+asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
+    receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
+)
 
 
 async def get_chunks():
     """TODO: Create docstring."""
-    print("Starting Main Loop")
+    print("Main asyncio loop now running.")
     i = 0
     dropped = 0
     received = 0
@@ -81,22 +83,11 @@ async def get_chunks():
         received += len(chunk.present)
         dropped += len(chunk.present) - sum(chunk.present)
         print(
-            "Chunk:",
-            i,
-            "Received:",
-            sum(chunk.present),
-            "of",
-            len(chunk.present),
-            "expected heaps. All time dropped/received heaps:",
-            dropped,
-            "/",
-            received,
+            f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}."
         )
         receiverStream.add_chunk(chunk)
         i += 1
 
-
-print("Here")
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete(get_chunks())

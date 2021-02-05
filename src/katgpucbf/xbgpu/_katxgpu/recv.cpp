@@ -57,12 +57,13 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
               .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)),
       n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
-      sample_bits(sample_bits), timestamp_step(timestamp_step), heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
+      sample_bits(sample_bits), timestamp_step(timestamp_step),
+      heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
       packet_bytes(n_samples_per_channel * n_pols * complexity / 8 * sample_bits),
       chunk_packets(n_channels * n_ants * heaps_per_fengine_per_chunk), chunk_bytes(packet_bytes * chunk_packets),
       ringbuffer(ringbuffer)
 {
-    //py::print("Stream Created");
+    // py::print("Stream Created");
 
     if (sample_bits != 8)
         throw std::invalid_argument("sample_bits must equal 8 - logic for other sample sizes has not been tested.");
@@ -80,8 +81,8 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
     if (chunk_packets <= 0)
         throw std::invalid_argument("n_channels * n_ants * heaps_per_fengine_per_chunk must be greater than 0");
 
-    //spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
-     //                n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
+    // spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
+    //                n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
 }
 
 stream::~stream()
@@ -143,7 +144,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     std::size_t fengine_idx = fengine_id;
     std::size_t heap_idx = timestamp_idx * n_ants + fengine_idx;
     std::size_t byte_idx = heap_idx * n_channels * packet_bytes;
-    //spead2::log_info("\tTimestamp Index (%1%), Fengine Index (%2%), HeapIdx (%3%), Byte Index (%4%)", timestamp_idx,
+    // spead2::log_info("\tTimestamp Index (%1%), Fengine Index (%2%), HeapIdx (%3%), Byte Index (%4%)", timestamp_idx,
     //                 fengine_idx, heap_idx, byte_idx);
     void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + byte_idx;
     return std::make_tuple(ptr, &c, heap_idx);
@@ -177,7 +178,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         //                  c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
         if (timestamp >= c->timestamp && timestamp < c->timestamp + timestamp_step * heaps_per_fengine_per_chunk)
         {
-            //spead2::log_info("\t\tIn above ^");
+            // spead2::log_info("\t\tIn above ^");
             return calculate_packet_destination(timestamp, fengine_id, *c);
         }
     }
@@ -193,11 +194,11 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
          * a new one. Usually this will be the next sequential chunk. If not,
          * we flush all chunks rather than leaving active_chunks discontiguous.
          */
-        std::int64_t start = active_chunks.back()->timestamp + chunk_samples;
-        if (timestamp >= start + std::int64_t(chunk_samples))
+        std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
+        if (timestamp >= start + std::int64_t(timestamp_step)) // True if the next chunk is not the next sequential one
         {
-            // TODO: log/count.
-            start += (timestamp - start) / chunk_samples * chunk_samples;
+            // I have not actually seen this line in action yet - it could produce an error.
+            start += (timestamp - start);
             max_active = 0;
         }
         while (active_chunks.size() > max_active)
@@ -215,7 +216,8 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
     //    spead2::log_info("Receiver allocator 0");
     //    spead2::log_info("Receiver allocator 1 %1% %2% %3%", size, packet_bytes, packet.n_items);
-    if (size != packet_bytes * n_channels){
+    if (size != packet_bytes * n_channels)
+    {
         spead2::log_info("Allocating incorrect size");
         return nullptr;
     }
@@ -293,7 +295,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     std::tie(expected_ptr, c, heap_idx) = calculate_packet_destination(timestamp, fengine_id);
     if (expected_ptr != actual_ptr)
     {
-        spead2::log_info("This should only happen if we receive data that is too old (%1%)",timestamp_step);
+        spead2::log_info("This should only happen if we receive data that is too old (%1%)", timestamp_step);
         // TODO: log. This should only happen if we receive data that is too old.
         return;
     }

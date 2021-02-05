@@ -82,10 +82,8 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     const int n_samples_per_channel; ///< Number of samples stored in a single channel
     const int n_pols;                ///< Number of polarisations in each sample
     const int complexity = 2;        ///< Indicates two values per sample - one real and one imaginary.
-    const int heaps_per_fengine_per_chunk;
-    const int chunk_samples = 1048576;  //Needs to be deleted
-    const int packet_samples = 4096; //Needs to be deleted
-    const int timestamp_step;  ///< Needs to be passed as an argument or configured somewhere.
+    const int heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
+    const int timestamp_step;        ///< Increase in timestamp between successive heaps from the same F-Engine.
     const std::size_t packet_bytes;  ///< Number of payload bytes in each packet
     const std::size_t chunk_packets; ///< Number of packets in each chunk
     const std::size_t chunk_bytes;   ///< Number of payload bytes in each chunk
@@ -97,7 +95,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     std::stack<std::unique_ptr<chunk>> free_chunks;   ///< Chunks available for allocation
     std::deque<std::unique_ptr<chunk>> active_chunks; ///< Chunks currently being filled
 
-    ringbuffer_t &ringbuffer; ///< Chunks ready to be processed
+    ringbuffer_t &ringbuffer; ///< When a chunk has been fully assembled it is put on this ringbuffer.
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
     void grab_chunk(std::int64_t timestamp);
