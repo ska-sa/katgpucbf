@@ -22,6 +22,11 @@
  * 8 / 4 = 6.8 Gbps. To change the rate pass a different value into the program with the --adc_rate <adc sample rate in
  * hz> argument.
  *
+ * This file has an "fengines" class that manages the SPEAD streams and packet transmission. The fengines object 
+ * contains a 2 dimensional vector of heaps. The outer dimension represents the different F-Engines and the inner
+ * dimension contains the heaps to send per F-Engine. The array of heaps is generated once and then transmitted 
+ * repeatedly on the network.
+ *
  * n_chans_per_output_stream and n_chans_total can be specified individually as command line parameters. For
  * MeerKAT, this is not necessary as n_chans_per_output_stream can be calculated from n_chans_total, for the MeerKAT
  * Extension, this relationship may not hold true for non-power-of-two array sizes so the values have been kept
