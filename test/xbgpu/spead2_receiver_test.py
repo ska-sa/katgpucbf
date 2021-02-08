@@ -32,38 +32,18 @@ timestamp_step = (
     n_channels_total * 2 * n_samples_per_channel
 )  # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 
-n_heaps_in_flight_per_antenna = 1
+n_heaps_in_flight_per_antenna = 3
 
-# 2. Set up receiver and transmitter - link together via queues for an "in process" transport. One queue is required per
-# substream.
-queues = []
-for ant_index in range(n_ants):
-    queues.append(spead2.InprocQueue())
-
+# 2. Set up receiver
 max_packet_size = (
     n_samples_per_channel * n_pols * complexity * sample_bits // 8 + 96
 )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
 thread_pool = spead2.ThreadPool()
-streamSource = spead2.send.InprocStream(
+streamSource = spead2.send.BytesStream(
     thread_pool,
-    queues,
     spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
 )
 del thread_pool
-
-receiver_buffer_size_bytes = 838860800
-
-thread_pool = spead2.ThreadPool()
-streamDest = spead2.recv.Stream(
-    thread_pool,
-    spead2.recv.StreamConfig(
-        memory_allocator=spead2.MemoryPool(receiver_buffer_size_bytes, receiver_buffer_size_bytes, 12, 8)
-    ),
-)
-del thread_pool
-
-for ant_index in range(n_ants):
-    streamDest.add_inproc_reader(queues[ant_index])
 
 # 3. Define Heap Format
 shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
@@ -73,6 +53,7 @@ item_fengine = ig.add_item(FENGINE_ID, "fengine id", "F-Engine heap is received 
 item_channel = ig.add_item(
     CHANNEL_OFFSET, "Channel offset", "Value of first channel in collections stored here", shape=[], format=[("u", 48)]
 )
+item_data = ig.add_item(DATA_ID, "FENG_RAW", "Raw Channelised data", shape=shape, dtype=np.int8)
 # Adding padding
 item_padding = []
 for i in range(3):
@@ -85,8 +66,6 @@ for i in range(3):
             format=[("u", 48)],
         )
     )
-
-item_data = ig.add_item(DATA_ID, "FENG_RAW", "Raw Channelised data", shape=shape, dtype=np.int8)
 
 
 # 4. Create and array of heaps to send
@@ -106,7 +85,9 @@ def createHeaps(timestamp: int):
             item.value = 0
         heap = ig.get_heap()
         heap.repeat_pointers = True
-        heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=ant_index))
+
+        # NOTE: The substream_index is set to zero as the SPEAD BytesStream transport has not had the concept of substreams introduced. It has not been updated along with the rest of the transports. As such the unit test cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to lok at using the inproc transport. The inproc transport would be much better, but requires porting a bunch of things from SPEAD2 python to katxgpu python. So it will require much more work.
+        heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
     return heaps
 
 
@@ -115,14 +96,25 @@ for i in range(n_heaps_in_flight_per_antenna):
     heaps = createHeaps(timestamp_step * i)
     streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
-# 6. Loop through all data
+# 6. Create all receiver data
+receiver_buffer_size_bytes = 838860800
+
+thread_pool = spead2.ThreadPool()
+streamDest = spead2.recv.Stream(
+    thread_pool,
+    spead2.recv.StreamConfig(
+        memory_allocator=spead2.MemoryPool(receiver_buffer_size_bytes, receiver_buffer_size_bytes, 12, 8)
+    ),
+)
+del thread_pool
+
+streamDest.add_buffer_reader(streamSource.getvalue())
 
 print("Starting Receiver")
 
 timestamp_index = n_heaps_in_flight_per_antenna
 i = 0
 for heap in streamDest:
-
     print("Got heap", heap.cnt)
     items = ig.update(heap)
     for item in items.values():
@@ -131,14 +123,6 @@ for heap in streamDest:
         else:
             print(f"\t {item.name}, {item.shape}")
 
-    if (i - 1) % n_ants == 0:
-        heaps = createHeaps(timestamp_step * timestamp_index)
-        streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
-        timestamp_index += 1
-
     i += 1
-
-    if i > 50000:
-        streamSource.send_heap(ig.get_end())
 
 print("Done")
