@@ -55,7 +55,8 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
                                                           // packets interleaved from multiple F-Engines.
               .set_allow_unsized_heaps(false)
               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
-              .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)),
+              .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
+              .set_allow_out_of_order(true)),
       n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
       sample_bits(sample_bits), timestamp_step(timestamp_step),
       heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
