@@ -25,20 +25,22 @@ CHANNEL_OFFSET = 0x4103
 DATA_ID = 0x4300
 
 # Configuration parameters
-n_ants = 16
+n_ants = 4
 n_channels_total = 32768
 n_channels_per_stream = 128
 n_samples_per_channel = 256
 n_pols = 2
 sample_bits = 8
-heaps_per_fengine_per_chunk = 10
+heaps_per_fengine_per_chunk = 5
 complexity = 2
 
 timestamp_step = (
     n_channels_total * 2 * n_samples_per_channel
 )  # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 
-n_heaps_in_flight_per_antenna = 10
+n_heaps_in_flight_per_antenna = 20
+
+print(1)
 
 # 2. Set up receiver
 max_packet_size = (
@@ -50,6 +52,8 @@ streamSource = spead2.send.BytesStream(
     spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
 )
 del thread_pool
+
+print(2)
 
 # 3. Define Heap Format
 shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
@@ -74,12 +78,14 @@ for i in range(3):
     )
 heap = (
     ig.get_heap()
-)  # Throwaway heap - need to get this as it contains a bunch of descriptor information that we dont want for the purposes of this test.
+)  # Throwaway first heap - need to get this as it contains a bunch of descriptor information that we dont want for the purposes of this test.
 
 
 # 4. Create and array of heaps to send
 
 sample_value = 1
+
+print(3)
 
 
 def createHeaps(timestamp: int):
@@ -106,10 +112,29 @@ def createHeaps(timestamp: int):
     return heaps
 
 
-# 5. Transmit initial few heaps
+print(4)
+
+# 5. Transmit Data
+
+# 5.1 Transmit initial few heaps
 for i in range(n_heaps_in_flight_per_antenna):
     heaps = createHeaps(timestamp_step * i)
     streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+# 5.2 Transmit data that skips a few heaps verifying that the pipeline can flush properly
+offset_timestamp = timestamp_step * (n_heaps_in_flight_per_antenna + 3 * heaps_per_fengine_per_chunk)
+for i in range(heaps_per_fengine_per_chunk):
+    heaps = createHeaps(offset_timestamp + i * timestamp_step)
+    streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+# 5.3 Transmit data backwards in time and check that it is dropped
+offset_timestamp = timestamp_step * (n_heaps_in_flight_per_antenna + 2 * heaps_per_fengine_per_chunk)
+for i in range(heaps_per_fengine_per_chunk):
+    heaps = createHeaps(offset_timestamp + i * timestamp_step)
+    streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+
+print(5)
 
 # 6. Create all receiver data
 
@@ -121,9 +146,11 @@ else:
     monitor = katxgpu.monitor.NullMonitor()
 
 # 6.2 Create ringbuffer
-ringbuffer_capacity = 8
+ringbuffer_capacity = 10
 ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
 monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
+
+print(6)
 
 # 6.3 Create Receiver
 thread_affinity = 2
@@ -141,6 +168,8 @@ receiverStream = recv.Stream(
     monitor=monitor,
 )
 
+print(7)
+
 # 6.4 Add free chunks to SPEAD2 receiver
 context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 src_chunks_per_stream = 8
@@ -150,12 +179,18 @@ for i in range(src_chunks_per_stream):
     chunk = recv.Chunk(buf)
     receiverStream.add_chunk(chunk)
 
-receiverStream.add_buffer_reader(streamSource.getvalue())
-# receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
+print(7.1)
 
 asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
     receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
 )
+
+print(7.2)
+
+receiverStream.add_buffer_reader(streamSource.getvalue())
+# receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
+
+print(8)
 
 
 async def get_chunks():
@@ -168,12 +203,18 @@ async def get_chunks():
         received += len(chunk.present)
         dropped += len(chunk.present) - sum(chunk.present)
         print(
-            f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. {len(chunk.base)}"
+            f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}"
         )
         receiverStream.add_chunk(chunk)
         i += 1
 
 
+print(9)
+print(f"Timestamp Step {timestamp_step}")
+
 loop = asyncio.get_event_loop()
 loop.run_until_complete(get_chunks())
+
+print(10)
+
 loop.close()

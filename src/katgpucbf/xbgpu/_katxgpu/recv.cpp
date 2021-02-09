@@ -52,9 +52,8 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
       spead2::recv::stream(
           *static_cast<thread_pool *>(this),
           spead2::recv::stream_config()
-              .set_max_heaps(n_ants *
-                             heaps_per_fengine_per_chunk) // Set max heaps needs to be large enough to accomodate
-                                                          // packets interleaved from multiple F-Engines.
+              .set_max_heaps(
+                  n_ants * heaps_per_fengine_per_chunk)
               .set_allow_unsized_heaps(false)
               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
               .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
@@ -192,24 +191,32 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     }
     else
     {
+        //spead2::log_info("Gone beyond active chunks. (%1%)",active_chunks.size() );
         std::size_t max_active = 1;
         /* We've gone forward beyond the last active chunk. Make room to add
          * a new one. Usually this will be the next sequential chunk. If not,
          * we flush all chunks rather than leaving active_chunks discontiguous.
          */
         std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
+        //spead2::log_info("Active Chunks: %1% %2%", active_chunks.back()->timestamp, start);
         if (timestamp >= start + std::int64_t(timestamp_step)) // True if the next chunk is not the next sequential one
         {
+            spead2::log_info("The next chunk is not the next sequential one.");
             // I have not actually seen this line in action yet - it could produce an error.
             start += (timestamp - start);
             max_active = 0;
         }
+        //spead2::log_info("max active %1% active.chunks.size %2%",max_active,active_chunks.size());
         while (active_chunks.size() > max_active)
+        {
+            //spead2::log_info("Flushing chunks %1% %2%",active_chunks.size(),max_active);
             if (!flush_chunk())
             {
+                //spead2::log_info("No chunk to flush");
                 // ringbuffer was stopped, so no point in continuing.
                 return std::make_tuple(nullptr, nullptr, 0);
             }
+        }
         grab_chunk(start);
         return calculate_packet_destination(timestamp, fengine_id, *active_chunks.back());
     }
@@ -217,8 +224,9 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
 
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
-    //    spead2::log_info("Receiver allocator 0");
-    //    spead2::log_info("Receiver allocator 1 %1% %2% %3%", size, packet_bytes, packet.n_items);
+    //spead2::log_info("Receiver allocator 0");
+    // spead2::log_info("Receiver allocator 1 %1% %2% %3% %4%", size, packet_bytes, packet.n_items, packet_bytes *
+    // n_channels);
     if (size != packet_bytes * n_channels)
     {
         spead2::log_info("Allocating incorrect size");
@@ -244,7 +252,7 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
             fengine_id = decoder.get_immediate(pointer);
         }
     }
-    //    spead2::log_info("Packet Information Timestamp: %1% fengine_id %2%", timestamp, fengine_id);
+    //spead2::log_info("Packet Information Timestamp: %1% fengine_id %2% size %3%", timestamp, fengine_id, size);
     if (timestamp == -1 || fengine_id == -1)
         return nullptr;
 
@@ -317,14 +325,12 @@ void stream::stop_received()
 
 void stream::add_buffer_reader(pybind11::buffer buffer)
 {
-    spead2::log_info("Buffer reader called.");
     pybind11::buffer_info info = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
 
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
     // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
     emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(info.ptr),
                                              info.itemsize * info.size);
-    spead2::log_info("Buffer reader added.");
 }
 
 void stream::add_udp_pcap_file_reader(const std::string &filename)
