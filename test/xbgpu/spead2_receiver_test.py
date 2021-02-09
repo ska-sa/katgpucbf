@@ -38,7 +38,7 @@ timestamp_step = (
     n_channels_total * 2 * n_samples_per_channel
 )  # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 
-n_heaps_in_flight_per_antenna = 3
+n_heaps_in_flight_per_antenna = 10
 
 # 2. Set up receiver
 max_packet_size = (
@@ -72,25 +72,34 @@ for i in range(3):
             format=[("u", 48)],
         )
     )
+heap = (
+    ig.get_heap()
+)  # Throwaway heap - need to get this as it contains a bunch of descriptor information that we dont want for the purposes of this test.
 
 
 # 4. Create and array of heaps to send
+
+sample_value = 1
+
+
 def createHeaps(timestamp: int):
     """
     Generate a list of heaps to send in an interleaved manner.
 
     The list is of HeapReference objects which point to the heaps as this is what the send_heaps() function requires.
     """
+    global sample_value
     heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
     for ant_index in range(n_ants):
         item_timestamp.value = timestamp
         item_fengine.value = ant_index
         item_channel.value = n_channels_per_stream * 4  # Arbitrary multiple for now
-        item_data.value = np.zeros(shape, np.int8)
+        item_data.value = np.full(shape, sample_value, np.int8)
         for item in item_padding:
             item.value = 0
         heap = ig.get_heap()
         heap.repeat_pointers = True
+        sample_value += 1
 
         # NOTE: The substream_index is set to zero as the SPEAD BytesStream transport has not had the concept of substreams introduced. It has not been updated along with the rest of the transports. As such the unit test cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to lok at using the inproc transport. The inproc transport would be much better, but requires porting a bunch of things from SPEAD2 python to katxgpu python. So it will require much more work.
         heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
