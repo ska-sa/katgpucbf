@@ -7,6 +7,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <pybind11/pybind11.h>
 #include <spead2/common_memory_allocator.h>
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_semaphore.h>
@@ -138,6 +139,8 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     ~stream();
 
     void add_udp_pcap_file_reader(const std::string &filename);
+
+    void add_buffer_reader(pybind11::buffer buffer);
 
     void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                             const std::string &interface_address, std::size_t buffer_size, int comp_vector = 0,

@@ -10,6 +10,7 @@ namespace py = pybind11;
 namespace katxgpu::recv
 {
 
+
 class py_chunk : public chunk
 {
   public:
@@ -115,6 +116,7 @@ py::module register_module(py::module &parent)
             },
             "chunk"_a)
         .def("add_udp_pcap_file_reader", &py_stream::add_udp_pcap_file_reader, "filename"_a)
+        .def("add_buffer_reader", &py_stream::add_buffer_reader, "buffer"_a)
         .def("add_udp_ibv_reader", &py_stream::add_udp_ibv_reader, "endpoints"_a, "interface_address"_a,
              "buffer_size"_a, "comp_vector"_a = 0, "max_poll"_a = spead2::recv::udp_ibv_config::default_max_poll)
         .def("stop", &py_stream::stop);

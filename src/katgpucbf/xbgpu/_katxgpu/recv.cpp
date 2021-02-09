@@ -1,17 +1,19 @@
 #include "recv.h"
+#include "py_common.h"
+
 #include <cassert>
 #include <iostream> // TODO: for debugging
 #include <map>      // TODO: workaround for it missing in recv_heap.h
 #include <spead2/common_endian.h>
 #include <spead2/common_logging.h>
 #include <spead2/recv_heap.h>
+#include <spead2/recv_mem.h>
 #include <spead2/recv_udp_pcap.h>
 #include <stdexcept>
 #include <utility>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-namespace py = pybind11;
 
 namespace katxgpu::recv
 {
@@ -311,6 +313,18 @@ void stream::stop_received()
             break;
     ringbuffer.stop();
     spead2::recv::stream::stop_received();
+}
+
+void stream::add_buffer_reader(pybind11::buffer buffer)
+{
+    spead2::log_info("Buffer reader called.");
+    pybind11::buffer_info info = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
+
+    // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
+    // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
+    emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(info.ptr),
+                                             info.itemsize * info.size);
+    spead2::log_info("Buffer reader added.");
 }
 
 void stream::add_udp_pcap_file_reader(const std::string &filename)

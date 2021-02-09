@@ -1,12 +1,18 @@
-"""TODO: Write a description."""
+"""TODO: Add a comment."""
 
+# import katxgpu
+import katxgpu._katxgpu.recv as recv
+import katxgpu.monitor
+import katxgpu.ringbuffer
 import spead2
 import spead2.send
-import spead2.recv
-import logging
-import numpy as np
 
-logging.basicConfig(level=logging.INFO)
+import logging
+import asyncio
+import numpy as np
+import katsdpsigproc.accel as accel
+
+logger = logging.getLogger(__name__)
 
 # TODO: Check data format is correct
 # TODO: Add katxgpu receiver to this
@@ -97,32 +103,68 @@ for i in range(n_heaps_in_flight_per_antenna):
     streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
 # 6. Create all receiver data
-receiver_buffer_size_bytes = 838860800
 
-thread_pool = spead2.ThreadPool()
-streamDest = spead2.recv.Stream(
-    thread_pool,
-    spead2.recv.StreamConfig(
-        memory_allocator=spead2.MemoryPool(receiver_buffer_size_bytes, receiver_buffer_size_bytes, 12, 8)
-    ),
+# 6.1 Create monitor for file
+use_file_monitor = False
+if use_file_monitor:
+    monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+else:
+    monitor = katxgpu.monitor.NullMonitor()
+
+# 6.2 Create ringbuffer
+ringbuffer_capacity = 8
+ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
+monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
+
+# 6.3 Create Receiver
+thread_affinity = 2
+receiverStream = recv.Stream(
+    n_ants,
+    n_channels_per_stream,
+    n_samples_per_channel,
+    n_pols,
+    sample_bits,
+    timestamp_step,
+    heaps_per_fengine_per_chunk,
+    ringbuffer,
+    thread_affinity,
+    use_gdrcopy=False,
+    monitor=monitor,
 )
-del thread_pool
 
-streamDest.add_buffer_reader(streamSource.getvalue())
+# 6.4 Add free chunks to SPEAD2 receiver
+context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
+src_chunks_per_stream = 8
+monitor.event_qsize("free_chunks", 0, src_chunks_per_stream)
+for i in range(src_chunks_per_stream):
+    buf = accel.HostArray((receiverStream.chunk_bytes,), np.uint8, context=context)
+    chunk = recv.Chunk(buf)
+    receiverStream.add_chunk(chunk)
 
-print("Starting Receiver")
+receiverStream.add_buffer_reader(streamSource.getvalue())
+# receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
 
-timestamp_index = n_heaps_in_flight_per_antenna
-i = 0
-for heap in streamDest:
-    print("Got heap", heap.cnt)
-    items = ig.update(heap)
-    for item in items.values():
-        if item.shape == ():
-            print(f"\t {item.name}, {hex(item.value)}")
-        else:
-            print(f"\t {item.name}, {item.shape}")
+asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
+    receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
+)
 
-    i += 1
 
-print("Done")
+async def get_chunks():
+    """TODO: Create docstring."""
+    print("Main asyncio loop now running.")
+    i = 0
+    dropped = 0
+    received = 0
+    async for chunk in asyncRingbuffer:
+        received += len(chunk.present)
+        dropped += len(chunk.present) - sum(chunk.present)
+        print(
+            f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. {len(chunk.base)}"
+        )
+        receiverStream.add_chunk(chunk)
+        i += 1
+
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(get_chunks())
+loop.close()
