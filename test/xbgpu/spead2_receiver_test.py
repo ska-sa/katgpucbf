@@ -25,7 +25,7 @@ CHANNEL_OFFSET = 0x4103
 DATA_ID = 0x4300
 
 # Configuration parameters
-n_ants = 4
+n_ants = 64
 n_channels_total = 32768
 n_channels_per_stream = 128
 n_samples_per_channel = 256
@@ -40,8 +40,6 @@ timestamp_step = (
 
 n_heaps_in_flight_per_antenna = 20
 
-print(1)
-
 # 2. Set up receiver
 max_packet_size = (
     n_samples_per_channel * n_pols * complexity * sample_bits // 8 + 96
@@ -52,8 +50,6 @@ streamSource = spead2.send.BytesStream(
     spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
 )
 del thread_pool
-
-print(2)
 
 # 3. Define Heap Format
 shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
@@ -85,8 +81,6 @@ heap = (
 
 sample_value = 1
 
-print(3)
-
 
 def createHeaps(timestamp: int):
     """
@@ -112,8 +106,6 @@ def createHeaps(timestamp: int):
     return heaps
 
 
-print(4)
-
 # 5. Transmit Data
 
 # 5.1 Transmit initial few heaps
@@ -134,8 +126,6 @@ for i in range(heaps_per_fengine_per_chunk):
     streamSource.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
 
-print(5)
-
 # 6. Create all receiver data
 
 # 6.1 Create monitor for file
@@ -149,8 +139,6 @@ else:
 ringbuffer_capacity = 10
 ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
 monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
-
-print(6)
 
 # 6.3 Create Receiver
 thread_affinity = 2
@@ -168,8 +156,6 @@ receiverStream = recv.Stream(
     monitor=monitor,
 )
 
-print(7)
-
 # 6.4 Add free chunks to SPEAD2 receiver
 context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 src_chunks_per_stream = 8
@@ -179,18 +165,13 @@ for i in range(src_chunks_per_stream):
     chunk = recv.Chunk(buf)
     receiverStream.add_chunk(chunk)
 
-print(7.1)
 
 asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
     receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
 )
 
-print(7.2)
-
 receiverStream.add_buffer_reader(streamSource.getvalue())
 # receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
-
-print(8)
 
 
 async def get_chunks():
@@ -209,12 +190,9 @@ async def get_chunks():
         i += 1
 
 
-print(9)
 print(f"Timestamp Step {timestamp_step}")
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete(get_chunks())
-
-print(10)
 
 loop.close()

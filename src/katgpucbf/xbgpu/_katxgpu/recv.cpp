@@ -49,15 +49,13 @@ void allocator::free(std::uint8_t *ptr, void *user)
 stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
                size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy)
     : spead2::thread_pool(1, thread_affinity < 0 ? std::vector<int>{} : std::vector<int>{thread_affinity}),
-      spead2::recv::stream(
-          *static_cast<thread_pool *>(this),
-          spead2::recv::stream_config()
-              .set_max_heaps(
-                  n_ants * heaps_per_fengine_per_chunk)
-              .set_allow_unsized_heaps(false)
-              .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
-              .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
-              .set_allow_out_of_order(true)),
+      spead2::recv::stream(*static_cast<thread_pool *>(this),
+                           spead2::recv::stream_config()
+                               .set_max_heaps(n_ants * heaps_per_fengine_per_chunk * 10)
+                               .set_allow_unsized_heaps(false)
+                               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
+                               .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
+                               .set_allow_out_of_order(true)),
       n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
       sample_bits(sample_bits), timestamp_step(timestamp_step),
       heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
@@ -191,14 +189,14 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     }
     else
     {
-        //spead2::log_info("Gone beyond active chunks. (%1%)",active_chunks.size() );
+        // spead2::log_info("Gone beyond active chunks. (%1%)",active_chunks.size() );
         std::size_t max_active = 1;
         /* We've gone forward beyond the last active chunk. Make room to add
          * a new one. Usually this will be the next sequential chunk. If not,
          * we flush all chunks rather than leaving active_chunks discontiguous.
          */
         std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
-        //spead2::log_info("Active Chunks: %1% %2%", active_chunks.back()->timestamp, start);
+        // spead2::log_info("Active Chunks: %1% %2%", active_chunks.back()->timestamp, start);
         if (timestamp >= start + std::int64_t(timestamp_step)) // True if the next chunk is not the next sequential one
         {
             spead2::log_info("The next chunk is not the next sequential one.");
@@ -206,13 +204,13 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
             start += (timestamp - start);
             max_active = 0;
         }
-        //spead2::log_info("max active %1% active.chunks.size %2%",max_active,active_chunks.size());
+        // spead2::log_info("max active %1% active.chunks.size %2%",max_active,active_chunks.size());
         while (active_chunks.size() > max_active)
         {
-            //spead2::log_info("Flushing chunks %1% %2%",active_chunks.size(),max_active);
+            // spead2::log_info("Flushing chunks %1% %2%",active_chunks.size(),max_active);
             if (!flush_chunk())
             {
-                //spead2::log_info("No chunk to flush");
+                // spead2::log_info("No chunk to flush");
                 // ringbuffer was stopped, so no point in continuing.
                 return std::make_tuple(nullptr, nullptr, 0);
             }
@@ -224,7 +222,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
 
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
-    //spead2::log_info("Receiver allocator 0");
+    // spead2::log_info("Receiver allocator 0");
     // spead2::log_info("Receiver allocator 1 %1% %2% %3% %4%", size, packet_bytes, packet.n_items, packet_bytes *
     // n_channels);
     if (size != packet_bytes * n_channels)
@@ -252,7 +250,7 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
             fengine_id = decoder.get_immediate(pointer);
         }
     }
-    //spead2::log_info("Packet Information Timestamp: %1% fengine_id %2% size %3%", timestamp, fengine_id, size);
+    // spead2::log_info("Packet Information Timestamp: %1% fengine_id %2% size %3%", timestamp, fengine_id, size);
     if (timestamp == -1 || fengine_id == -1)
         return nullptr;
 
@@ -325,12 +323,13 @@ void stream::stop_received()
 
 void stream::add_buffer_reader(pybind11::buffer buffer)
 {
-    pybind11::buffer_info info = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
-
+    // This view needs to be stored persistently. If it is released, Python will release the buffer back to the OS
+    // causing segfaults when C++ tries to access the buffer. Took me a while to figure this - dont make my mistakes.
+    view = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
     // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
-    emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(info.ptr),
-                                             info.itemsize * info.size);
+    emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(view.ptr),
+                                             view.itemsize * view.size);
 }
 
 void stream::add_udp_pcap_file_reader(const std::string &filename)

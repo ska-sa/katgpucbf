@@ -77,17 +77,17 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     {
     }
 
-    const int sample_bits;           ///< Number of bits per sample
-    const int n_ants;                ///< Number of antennas in the array
-    const int n_channels;            ///< Number of channels in each packet
-    const int n_samples_per_channel; ///< Number of samples stored in a single channel
-    const int n_pols;                ///< Number of polarisations in each sample
-    const int complexity = 2;        ///< Indicates two values per sample - one real and one imaginary.
+    const int sample_bits;                 ///< Number of bits per sample
+    const int n_ants;                      ///< Number of antennas in the array
+    const int n_channels;                  ///< Number of channels in each packet
+    const int n_samples_per_channel;       ///< Number of samples stored in a single channel
+    const int n_pols;                      ///< Number of polarisations in each sample
+    const int complexity = 2;              ///< Indicates two values per sample - one real and one imaginary.
     const int heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
-    const int timestamp_step;        ///< Increase in timestamp between successive heaps from the same F-Engine.
-    const std::size_t packet_bytes;  ///< Number of payload bytes in each packet
-    const std::size_t chunk_packets; ///< Number of packets in each chunk
-    const std::size_t chunk_bytes;   ///< Number of payload bytes in each chunk
+    const int timestamp_step;              ///< Increase in timestamp between successive heaps from the same F-Engine.
+    const std::size_t packet_bytes;        ///< Number of payload bytes in each packet
+    const std::size_t chunk_packets;       ///< Number of packets in each chunk
+    const std::size_t chunk_bytes;         ///< Number of payload bytes in each chunk
 
     std::int64_t first_timestamp = -1; ///< Very first timestamp observed
 
@@ -97,6 +97,11 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     std::deque<std::unique_ptr<chunk>> active_chunks; ///< Chunks currently being filled
 
     ringbuffer_t &ringbuffer; ///< When a chunk has been fully assembled it is put on this ringbuffer.
+
+    /* This view is only used during unit testing. It stores the python view of the buffer containing simulated packets.
+     * More detail in "add_buffer_reader()" function. 
+     */
+    pybind11::buffer_info view;
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
     void grab_chunk(std::int64_t timestamp);
