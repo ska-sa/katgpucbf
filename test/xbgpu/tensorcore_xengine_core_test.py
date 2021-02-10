@@ -16,8 +16,7 @@ import numpy as np
 from katxgpu import tensorcore_xengine_core
 from katsdpsigproc import accel
 
-# Array specifying different array sizes that could potentially be used by MeerKAT
-array_size = [4, 8, 16, 32, 64, 84, 192, 256]
+import test_parameters
 
 
 def get_simple_test_ant_value(channel_index, ant_index):
@@ -59,7 +58,7 @@ def generate_antpair_visibilities_host(bufSamples_host, channel_index, ant1, ant
     return hh, hv, vh, vv
 
 
-@pytest.mark.parametrize("num_ants", array_size)
+@pytest.mark.parametrize("num_ants", test_parameters.array_size)
 def test_correlator_exhaustive(num_ants):
     """
     Exhaustive unit test of the Tensor core correlation algorithm.
@@ -147,7 +146,7 @@ def test_correlator_exhaustive(num_ants):
     np.testing.assert_array_equal(bufCorrectVisibilities_host, bufVisibilities_host)
 
 
-@pytest.mark.parametrize("num_ants", array_size)
+@pytest.mark.parametrize("num_ants", test_parameters.array_size)
 def test_correlator_quick(num_ants):
     """
     Lightweight unit test of the Tensor core correlation algorithm.
