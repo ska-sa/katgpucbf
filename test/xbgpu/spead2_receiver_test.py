@@ -30,14 +30,14 @@ complexity = 2
 
 
 def createTestObjects(
-    n_ants,
-    n_channels_per_stream,
-    n_samples_per_channel,
-    n_pols,
-    sample_bits,
-    heaps_per_fengine_per_chunk,
-    complexity,
-    timestamp_step,
+    n_ants: int,
+    n_channels_per_stream: int,
+    n_samples_per_channel: int,
+    n_pols: int,
+    sample_bits: int,
+    heaps_per_fengine_per_chunk: int,
+    complexity: int,
+    timestamp_step: int,
 ):
     """TODO: Add a comment."""
     max_packet_size = (
@@ -118,14 +118,16 @@ def createHeaps(
     id: int,
     n_ants: int,
     n_channels_per_stream: int,
-    n_samples_per_channel,
-    n_pols,
+    n_samples_per_channel: int,
+    n_pols: int,
     ig: spead2.send.ItemGroup,
 ):
     """
     Generate a list of heaps to send in an interleaved manner.
 
     The list is of HeapReference objects which point to the heaps as this is what the send_heaps() function requires.
+
+    TODO: Mention the ID
     """
     modified_shape = (
         n_channels_per_stream,
@@ -154,6 +156,7 @@ def createHeaps(
     return heaps
 
 
+# NOTE: Split tests here differently
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
 def test_recv_simple(event_loop, num_ants):
     """TODO: Add a comment."""
@@ -164,15 +167,16 @@ def test_recv_simple(event_loop, num_ants):
     n_samples_per_channel = 256
     n_pols = 2
     sample_bits = 8
-    heaps_per_fengine_per_chunk = 4
+    heaps_per_fengine_per_chunk = 8
 
     timestamp_step = (
         n_channels_total * 2 * n_samples_per_channel
     )  # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 
-    n_heaps_in_flight_per_antenna = heaps_per_fengine_per_chunk * 10
+    total_chunks = 10
+    n_heaps_in_flight_per_antenna = heaps_per_fengine_per_chunk * total_chunks
 
-    # 2. Set up receiver
+    # 2. Set up test
     sourceStream, ig, receiverStream, asyncRingbuffer = createTestObjects(
         n_ants,
         n_channels_per_stream,
@@ -184,33 +188,112 @@ def test_recv_simple(event_loop, num_ants):
         timestamp_step,
     )
 
-    # 3. Define Heap Format
+    # 5. "Transmit" mutiple simulated heaps. These heaps will placed in a single ByteArray that SPEAD2 can understand
+    # decode. NOTE: A few different things are tested here:
+    #    1. Simple test - will heaps transmitted in order be received correctly. This is carried out on the first 5
+    #       chunks.
+    #    2. Out of order heaps in same chunk - heaps destined to the same chunk are sent out of order to verify that
+    #       they are placed correctly in the chunk at the receiver.
+    #    3. Out of order heaps in a different chunk - heaps destined to two different chunks are sent slightly out of
+    #       order to check that two chunks can assembled in parallel.
+    # It may be better for clarity to have each of these tests run in a different test functions. However that would
+    # require dupicating lots of code and the tests would take much longer to run. Also, I am lazy.
 
-    # 4. Create and array of heaps to send
-
-    # 5. Transmit Data
-
-    # 5.1 Transmit initial few heaps
-    for i in range(n_heaps_in_flight_per_antenna):
-        heaps = createHeaps(timestamp_step * i, i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig)
+    # 5.1 Transmit first 5 chunks completly in order
+    heap_index = 0
+    print("In order")
+    print(heap_index)
+    for i in range(5):
+        heaps = createHeaps(
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        )
         sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        heap_index += 1
 
-    # # 5.2 Transmit data that skips a few heaps verifying that the pipeline can flush properly
-    # offset_timestamp = timestamp_step * (n_heaps_in_flight_per_antenna + 3 * heaps_per_fengine_per_chunk)
-    # for i in range(heaps_per_fengine_per_chunk):
-    #     heaps = createHeaps(offset_timestamp + i * timestamp_step)
-    #     sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    # 5.2 For chunk 6, transmit the second collection of heaps before the first to ensure that heaps received out of order can be processed
 
-    # # 5.3 Transmit data backwards in time and check that it is dropped
-    # offset_timestamp = timestamp_step * (n_heaps_in_flight_per_antenna + 2 * heaps_per_fengine_per_chunk)
-    # for i in range(heaps_per_fengine_per_chunk):
-    #     heaps = createHeaps(offset_timestamp + i * timestamp_step)
-    #     sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    # 5.2.1 Transmit the second heap first
+    heaps = createHeaps(
+        timestamp_step * (heap_index + 1),
+        (heap_index + 1),
+        n_ants,
+        n_channels_per_stream,
+        n_samples_per_channel,
+        n_pols,
+        ig,
+    )
+    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+    # 5.2.2 Transmit the first heap second
+    heaps = createHeaps(
+        timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+    )
+    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+    heap_index += 2
+
+    # 5.2.3 Transmit the rest of the heaps in chunk 6 in order
+    for i in range(heaps_per_fengine_per_chunk - 2):
+        heaps = createHeaps(
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        )
+        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        heap_index += 1
+
+    # 5.3 For chunk 7 and 8 transmit the first set of heaps of chunk 8 before the last set of heaps of chunk 7.
+
+    # 5.3.1 Transmit all but the last collection of heaps of chunk 7
+    for i in range(heaps_per_fengine_per_chunk - 1):
+        heaps = createHeaps(
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        )
+        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        heap_index += 1
+
+    # 5.3.2 Transmit the first collection of heaps of chunk 8
+    heaps = createHeaps(
+        timestamp_step * (heap_index + 1),
+        (heap_index + 1),
+        n_ants,
+        n_channels_per_stream,
+        n_samples_per_channel,
+        n_pols,
+        ig,
+    )
+    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+    # 5.3.3 Transmit the last collection of heaps of chunk 7
+    heaps = createHeaps(
+        timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+    )
+    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+    heap_index += 2
+
+    # 5.3.4 Transmit the rest of the heaps in chunk 8 in order
+    for i in range(heaps_per_fengine_per_chunk - 2):
+        heaps = createHeaps(
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        )
+        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        heap_index += 1
+
+    # 5.4 Transmit the remaining chunks
+    for i in range(heap_index, n_heaps_in_flight_per_antenna):
+        heaps = createHeaps(
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        )
+        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        heap_index += 1
 
     buffer = sourceStream.getvalue()
     receiverStream.add_buffer_reader(buffer)
 
-    async def get_chunks(asyncRingbuffer, receiverStream):
+    async def get_chunks(
+        asyncRingbuffer: katxgpu.ringbuffer.AsyncRingbuffer,
+        receiverStream: katxgpu._katxgpu.recv.Stream,
+        total_chunks: int,
+    ):
         """TODO: Create docstring."""
         chunk_index = 0
         dropped = 0
@@ -225,9 +308,11 @@ def test_recv_simple(event_loop, num_ants):
                 chunk.present
             ), f"{sum(chunk.present)} dropped heaps in chunk"  # Should not be dropping anything when just reading a buffer
             chunk.base.dtype = np.uint16  # We read the real and imaginary samples together
-            # print(
-            #    f"Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.base.shape}"
-            # )
+            print(
+                f"Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.base.shape}"
+            )
+
+            print(chunk.present)
 
             for heap_index in range(heaps_per_fengine_per_chunk):
                 for ant_index in range(n_ants):
@@ -246,8 +331,9 @@ def test_recv_simple(event_loop, num_ants):
             # Give chunk back to receiver
             receiverStream.add_chunk(chunk)
             chunk_index += 1
+        assert chunk_index == total_chunks, f"Expected to receive {total_chunks} chunks. Only received {chunk_index}"
 
-    event_loop.run_until_complete(get_chunks(asyncRingbuffer, receiverStream))
+    event_loop.run_until_complete(get_chunks(asyncRingbuffer, receiverStream, total_chunks))
 
     # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that is run
     del sourceStream, ig, receiverStream, asyncRingbuffer
@@ -255,9 +341,11 @@ def test_recv_simple(event_loop, num_ants):
 
 if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
+    print("Running tests")
     loop = asyncio.get_event_loop()
     test_recv_simple(loop, 4)
-    test_recv_simple(loop, 8)
-    test_recv_simple(loop, 16)
-    test_recv_simple(loop, 32)
-    test_recv_simple(loop, 64)
+    # test_recv_simple(loop, 8)
+    # test_recv_simple(loop, 16)
+    # test_recv_simple(loop, 32)
+    # test_recv_simple(loop, 64)
+    print("Tests complete")
