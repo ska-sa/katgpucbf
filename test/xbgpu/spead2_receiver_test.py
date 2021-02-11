@@ -158,13 +158,19 @@ def createHeaps(
 
 # NOTE: Split tests here differently
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
-def test_recv_simple(event_loop, num_ants):
+@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
+@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels):
     """TODO: Add a comment."""
     # Configuration parameters
     n_ants = num_ants
-    n_channels_total = 32768
-    n_channels_per_stream = 128
-    n_samples_per_channel = 256
+    n_channels_total = num_channels
+
+    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
+    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
+    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
+    n_channels_per_stream = num_channels // n_ants // 4
+    n_samples_per_channel = num_samples_per_channel
     n_pols = 2
     sample_bits = 8
     heaps_per_fengine_per_chunk = 8
