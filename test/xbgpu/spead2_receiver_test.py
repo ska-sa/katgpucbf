@@ -1,21 +1,20 @@
 """TODO: Add a comment."""
 
 # import katxgpu
+import test_parameters
 import katxgpu._katxgpu.recv as recv
 import katxgpu.monitor
 import katxgpu.ringbuffer
-import spead2
-import spead2.send
 
+import pytest
 import logging
 import asyncio
 import numpy as np
 import katsdpsigproc.accel as accel
+import spead2
+import spead2.send
 
-logger = logging.getLogger(__name__)
-
-# TODO: Check data format is correct
-# TODO: Add katxgpu receiver to this
+logging.basicConfig(level=logging.INFO)
 
 # 1. Define Constants
 # SPEAD IDs
@@ -25,6 +24,8 @@ CHANNEL_OFFSET = 0x4103
 DATA_ID = 0x4300
 
 complexity = 2
+
+# Test on random data is missing, this means that if the packets within a heap are not interelaved properly, we wont be able to tell
 
 
 def createTestObjects(
@@ -79,7 +80,6 @@ def createTestObjects(
     # 6.2 Create ringbuffer
     ringbuffer_capacity = 10
     ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
-    monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
 
     # 6.3 Create Receiver
     thread_affinity = 2
@@ -100,7 +100,6 @@ def createTestObjects(
     # 6.4 Add free chunks to SPEAD2 receiver
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = 8
-    monitor.event_qsize("free_chunks", 0, src_chunks_per_stream)
     for i in range(src_chunks_per_stream):
         buf = accel.HostArray((receiverStream.chunk_bytes,), np.uint8, context=context)
         chunk = recv.Chunk(buf)
@@ -114,20 +113,35 @@ def createTestObjects(
 
 
 def createHeaps(
-    timestamp: int, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig: spead2.send.ItemGroup
+    timestamp: int,
+    id: int,
+    n_ants: int,
+    n_channels_per_stream: int,
+    n_samples_per_channel,
+    n_pols,
+    ig: spead2.send.ItemGroup,
 ):
     """
     Generate a list of heaps to send in an interleaved manner.
 
     The list is of HeapReference objects which point to the heaps as this is what the send_heaps() function requires.
     """
-    shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
+    modified_shape = (
+        n_channels_per_stream,
+        n_samples_per_channel,
+        n_pols,
+        complexity // 2,
+    )  # Comment on this divide by 2
     heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
     for ant_index in range(n_ants):
+        coded_sample_value = (np.uint8(id) << 8) + np.uint8(ant_index)
+        sample_array = np.full(modified_shape, coded_sample_value, np.uint16)
+        sample_array.dtype = np.int8
+
         ig["timestamp"].value = timestamp
         ig["fengine id"].value = ant_index
         ig["channel offset"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
-        ig["feng_raw"].value = np.full(shape, ant_index, np.int8)
+        ig["feng_raw"].value = sample_array
         ig["padding 0"].value = 0
         ig["padding 1"].value = 0
         ig["padding 2"].value = 0
@@ -139,22 +153,23 @@ def createHeaps(
     return heaps
 
 
-def test_recv_simple():
+@pytest.mark.parametrize("num_ants", test_parameters.array_size)
+def test_recv_simple(num_ants):
     """TODO: Add a comment."""
     # Configuration parameters
-    n_ants = 64
+    n_ants = num_ants
     n_channels_total = 32768
     n_channels_per_stream = 128
     n_samples_per_channel = 256
     n_pols = 2
     sample_bits = 8
-    heaps_per_fengine_per_chunk = 5
+    heaps_per_fengine_per_chunk = 4
 
     timestamp_step = (
         n_channels_total * 2 * n_samples_per_channel
     )  # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 
-    n_heaps_in_flight_per_antenna = 20
+    n_heaps_in_flight_per_antenna = heaps_per_fengine_per_chunk * 10
 
     # 2. Set up receiver
     sourceStream, ig, receiverStream, asyncRingbuffer = createTestObjects(
@@ -176,7 +191,7 @@ def test_recv_simple():
 
     # 5.1 Transmit initial few heaps
     for i in range(n_heaps_in_flight_per_antenna):
-        heaps = createHeaps(timestamp_step * i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig)
+        heaps = createHeaps(timestamp_step * i, i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig)
         sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # # 5.2 Transmit data that skips a few heaps verifying that the pipeline can flush properly
@@ -196,27 +211,55 @@ def test_recv_simple():
 
     async def get_chunks():
         """TODO: Create docstring."""
-        print("Main asyncio loop now running.")
-        i = 0
+        chunk_index = 0
         dropped = 0
         received = 0
         async for chunk in asyncRingbuffer:
             received += len(chunk.present)
             dropped += len(chunk.present) - sum(chunk.present)
-            print(
-                f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}"
-            )
-            receiverStream.add_chunk(chunk)
-            i += 1
+            assert (
+                len(chunk.present) == n_ants * heaps_per_fengine_per_chunk
+            ), f"Incorrect number of heaps in chunk. Expected: {n_ants*heaps_per_fengine_per_chunk}. actual: {len(chunk.present)}"
+            assert len(chunk.present) == sum(
+                chunk.present
+            ), f"{sum(chunk.present)} dropped heaps in chunk"  # Should not be dropping anything when just reading a buffer
+            chunk.base.dtype = np.uint16  # We read the real and imaginary samples together
+            # print(
+            #    f"Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.base.shape}"
+            # )
 
-    print(f"Timestamp Step {timestamp_step}")
+            for heap_index in range(heaps_per_fengine_per_chunk):
+                for ant_index in range(n_ants):
+                    expected_sample_value = (
+                        np.uint8(chunk_index * heaps_per_fengine_per_chunk + heap_index) << 8
+                    ) + np.uint8(ant_index)
+                    fengine_start_index = (
+                        (heap_index * n_ants + ant_index) * n_channels_per_stream * n_samples_per_channel * n_pols
+                    )
+                    fengine_stop_index = fengine_start_index + n_channels_per_stream * n_samples_per_channel * n_pols
+                    # print(hex(expected_sample_value), chunk.base[fengine_start_index:fengine_stop_index], np.all(chunk.base[fengine_start_index:fengine_stop_index] == expected_sample_value)  ,sum(chunk.base[fengine_start_index:fengine_stop_index]))
+                    assert np.all(
+                        chunk.base[fengine_start_index:fengine_stop_index] == expected_sample_value
+                    ), f"Chunk {chunk_index}, heap {heap_index}, ant {ant_index}. Expected all values to equal: {hex(expected_sample_value)}"
+
+            # Give chunk back to receiver
+            receiverStream.add_chunk(chunk)
+            chunk_index += 1
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(get_chunks())
 
-    loop.close()
+    import time
 
-    print("Done")
+    time.sleep(1)
+
+    # loop.close()
+
+    import time
+
+    time.sleep(1)
 
 
-test_recv_simple()
+if __name__ == "__main__":
+    np.set_printoptions(formatter={"int": hex})
+    test_recv_simple(64)
