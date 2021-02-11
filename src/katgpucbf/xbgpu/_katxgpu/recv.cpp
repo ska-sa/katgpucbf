@@ -189,19 +189,25 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     }
     else
     {
-        // spead2::log_info("Gone beyond active chunks. (%1%)",active_chunks.size() );
+
         std::size_t max_active = 1;
         /* We've gone forward beyond the last active chunk. Make room to add
          * a new one. Usually this will be the next sequential chunk. If not,
          * we flush all chunks rather than leaving active_chunks discontiguous.
          */
         std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
+        // spead2::log_info("Gone beyond active chunks.")
         // spead2::log_info("Active Chunks: %1% %2%", active_chunks.back()->timestamp, start);
-        if (timestamp >= start + std::int64_t(timestamp_step)) // True if the next chunk is not the next sequential one
+        if (timestamp >=
+            start + std::int64_t(timestamp_step *
+                                 heaps_per_fengine_per_chunk)) // True if the next chunk is not the next sequential one
         {
-            spead2::log_info("The next chunk is not the next sequential one.");
-            // I have not actually seen this line in action yet - it could produce an error.
-            start += (timestamp - start);
+            spead2::log_info("The next chunk is not the next sequential one. SPEAD RX pipeline is being flushed");
+            // The start timestamp of the next chunk needs to be aligned correctly to multiples of timestamp_step *
+            // heaps_per_fengine_per_chunk. The step variable below is calculed using integer division to calculate how
+            // many multiples the new chhunk is off from the old.
+            int64_t step = (timestamp - start) / (timestamp_step * heaps_per_fengine_per_chunk);
+            start += (step * timestamp_step * heaps_per_fengine_per_chunk);
             max_active = 0;
         }
         // spead2::log_info("max active %1% active.chunks.size %2%",max_active,active_chunks.size());
