@@ -25,7 +25,8 @@ DATA_ID = 0x4300
 
 complexity = 2
 
-# Test on random data is missing, this means that if the packets within a heap are not interelaved properly, we wont be able to tell
+# TO NOTE: Test on random data is missing, this means that if the packets within a heap are not interelaved properly, we wont be able to tell
+# To NOTE: Interleaving does not take plce correctly.
 
 
 def createTestObjects(
@@ -154,7 +155,7 @@ def createHeaps(
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
-def test_recv_simple(num_ants):
+def test_recv_simple(event_loop, num_ants):
     """TODO: Add a comment."""
     # Configuration parameters
     n_ants = num_ants
@@ -206,10 +207,10 @@ def test_recv_simple(num_ants):
     #     heaps = createHeaps(offset_timestamp + i * timestamp_step)
     #     sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
-    receiverStream.add_buffer_reader(sourceStream.getvalue())
-    # receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
+    buffer = sourceStream.getvalue()
+    receiverStream.add_buffer_reader(buffer)
 
-    async def get_chunks():
+    async def get_chunks(asyncRingbuffer, receiverStream):
         """TODO: Create docstring."""
         chunk_index = 0
         dropped = 0
@@ -246,20 +247,17 @@ def test_recv_simple(num_ants):
             receiverStream.add_chunk(chunk)
             chunk_index += 1
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(get_chunks())
+    event_loop.run_until_complete(get_chunks(asyncRingbuffer, receiverStream))
 
-    import time
-
-    time.sleep(1)
-
-    # loop.close()
-
-    import time
-
-    time.sleep(1)
+    # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that is run
+    del sourceStream, ig, receiverStream, asyncRingbuffer
 
 
 if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
-    test_recv_simple(64)
+    loop = asyncio.get_event_loop()
+    test_recv_simple(loop, 4)
+    test_recv_simple(loop, 8)
+    test_recv_simple(loop, 16)
+    test_recv_simple(loop, 32)
+    test_recv_simple(loop, 64)
