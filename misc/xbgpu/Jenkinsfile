@@ -59,8 +59,8 @@ pipeline {
      */
     stage('Install required python packages') {
       steps {
-        sh 'pip3 install -r requirements.txt'
-        sh 'pip3 install -r requirements-dev.txt'
+        sh 'python3.7 -m install -r requirements.txt'
+        sh 'python3.7 -m install -r requirements-dev.txt'
       }
     }
 
@@ -77,7 +77,7 @@ pipeline {
 
     stage('Install katxgpu package') {
       steps {
-        sh 'pip3 install -e .'
+        sh 'python3.7 -m install -e .'
       }
     }
 
