@@ -1,5 +1,5 @@
 llvmlite==0.31.0
-numpy==1.17.3
-pycuda==2019.1.2
+numpy
+pycuda
+pybind11
 katsdpsigproc
-spead2
