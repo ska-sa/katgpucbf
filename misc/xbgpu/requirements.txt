@@ -3,3 +3,5 @@ numpy
 pycuda
 pybind11
 katsdpsigproc
+jinja2==2.10.1
+pycparser
