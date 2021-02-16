@@ -56,11 +56,18 @@ pipeline {
      * the next stage will fail if we have done something wrong in the katxgpu
      * package. It seems best to split them to make it easier to pinpoint the 
      * source of the problem.
+     *
+     * NOTE: Jinja2 and pycparser are installed using pip3 as this will install
+     * these two packages into the containers default python3 version. This is
+     * needed as the SPEAD2 installation occasionally runs python scripts using
+     * the python3 command not python3.7 and these commands require Jinja2 and
+     * pycparser to be installed.
      */
     stage('Install required python packages') {
       steps {
         sh 'python3.7 -m pip install -r requirements.txt'
         sh 'python3.7 -m pip install -r requirements-dev.txt'
+        sh 'pip3 install pycparser jinja2'
       }
     }
 
