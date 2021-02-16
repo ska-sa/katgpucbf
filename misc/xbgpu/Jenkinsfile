@@ -48,7 +48,7 @@ pipeline {
       steps {
         sh 'apt-get update'
         sh 'apt-get install -y python3.6 python3-pip python-pybind11 python3.6-dev git' //Required for python
-        sh 'apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev rdma-core' //Required for installing SPEAD2. Much of this is installed when using MLNX_OFED, TODO: Clarify
+        sh 'apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev' //Required for installing SPEAD2. Much of this is installed when using MLNX_OFED, TODO: Clarify
       }
     } 
 
