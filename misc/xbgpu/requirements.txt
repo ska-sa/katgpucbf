@@ -1,7 +1,11 @@
-#Versions of numpy and pycuda are chosen to work with python 3.6. Later versions require python 3.7 at a minimum 
+# Versions of numpy and pycuda are chosen to work with python 3.6. Later versions require python 3.7 at a minimum 
+
+# At the moment spead2 is only used in the spead2_receiver_test.py file. All other instances of SPEAD2 are using the 
+# custom katxgpu bindings.
 
 llvmlite==0.31.0
 numpy==1.19.5
 pycuda==2019.1.2
 pybind11
 katsdpsigproc
+spead2

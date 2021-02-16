@@ -48,10 +48,10 @@ pipeline {
       steps {
         sh 'apt-get update'
         sh 'apt-get install -y python3.6 python3-pip python-pybind11 python3.6-dev git' //Required for python
-        sh 'apt-get install -y autoconf' //Required for installing SPEAD2
+        sh 'apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev' //Required for installing SPEAD2
       }
     } 
-    
+
     /* This stage is kept seperate from the "Install katxgpu package" stage
      * below as the stage one will fail when something external goes wrong while
      * the next stage will fail if we have done something wrong in the katxgpu
