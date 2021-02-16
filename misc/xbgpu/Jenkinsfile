@@ -46,8 +46,9 @@ pipeline {
   stages {
     stage('Configure Environment') {
       steps {
-        sh 'apt-get update && apt-get install -y python3.7 python3-pip python-pybind11 python3.7-dev git'
-
+        sh 'apt-get update'
+        sh 'apt-get install -y python3.7 python3-pip python-pybind11 python3.7-dev git' //Required for python
+        sh 'apt-get install -y autoconf' //Required for installing SPEAD2
       }
     }
 
