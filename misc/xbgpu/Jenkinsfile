@@ -84,7 +84,6 @@ pipeline {
 
     stage('Install katxgpu package') {
       steps {
-        sh 'git submodule update --init --recursive'
         sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
         sh 'pip3 install -e .'
         sh 'pip3 install -e .' //Have to install twice for some reason or else something does not link properly - not sure what the reason for this is
