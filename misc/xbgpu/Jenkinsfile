@@ -47,28 +47,29 @@ pipeline {
     stage('Configure Environment') {
       steps {
         sh 'apt-get update'
-        sh 'apt-get install -y python3.7 python3-pip python-pybind11 python3.7-dev git' //Required for python
+        sh 'apt-get install -y python3.6 python3-pip python-pybind11 python3.6-dev git' //Required for python
         sh 'apt-get install -y autoconf' //Required for installing SPEAD2
       }
-    }
-
+    } 
+    
     /* This stage is kept seperate from the "Install katxgpu package" stage
      * below as the stage one will fail when something external goes wrong while
      * the next stage will fail if we have done something wrong in the katxgpu
      * package. It seems best to split them to make it easier to pinpoint the 
      * source of the problem.
      *
-     * NOTE: Jinja2 and pycparser are installed using pip3 as this will install
-     * these two packages into the containers default python3 version. This is
-     * needed as the SPEAD2 installation occasionally runs python scripts using
-     * the python3 command not python3.7 and these commands require Jinja2 and
-     * pycparser to be installed.
+     * NOTE: Numpy is installed first because if it is installed as part of the
+     * requirements.txt install, pycuda tries to install a later version of
+     * numpy which requires python 3.7 or greater.
+     *
+     * NOTE: Jinja2 and pycparser are used by SPEAD2 for generating some source 
+     * files. They are not used in the running program
      */
     stage('Install required python packages') {
       steps {
+        sh 'pip3 install numpy==1.19.5 pycparser jinja2'
         sh 'pip3 install -r requirements.txt'
         sh 'pip3 install -r requirements-dev.txt'
-        sh 'pip3 install pycparser jinja2'
       }
     }
 
@@ -86,7 +87,8 @@ pipeline {
     stage('Install katxgpu package') {
       steps {
         sh 'git submodule update --init --recursive'
-        sh 'python3.7 -m pip install -e .'
+        sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
+        sh 'pip3 install -e .'
       }
     }
 
