@@ -4,12 +4,8 @@
  * This means that the docker engine being used needs to have been configured to
  * use the Nvidia Container Runtime and the node the container run on needs a 
  * Nvidia GPU with the Nvidia Driver installed.
- * 
- * TODO:
- *    1. Create a Dockerfile taking over the functionality of the "Configure
- *     Environment" stage. Then set the container to not launch as root. This 
- *     will solve many problems.
  */
+ 
 pipeline {
   agent {
     docker {
@@ -60,10 +56,12 @@ pipeline {
      *
      * NOTE: Numpy is installed first because if it is installed as part of the
      * requirements.txt install, pycuda tries to install a later version of
-     * numpy which requires python 3.7 or greater.
+     * numpy which requires python 3.7 or greater. Pybind11 is also installed
+     * like this for a similar reason. It will not install when part of 
+     * requirements.txt. This has not been investigated
      *
      * NOTE: Jinja2 and pycparser are used by SPEAD2 for generating some source 
-     * files. They are not used in the running program
+     * files. They are not used in the running program.
      */
     stage('Install required python packages') {
       steps {
@@ -93,9 +91,15 @@ pipeline {
       }
     }
 
+    /* This stage actually runs pytest. Pytest has a number of flags that are not required but make life easier:
+     * 1. -n X: Launches X threads and runs the tests in parallel across multiple threads. This speeds up testing significantly.
+     *     NOTE: This can create resource contention over things like GPU RAM. If it starts becoming an issue set X to 1.
+     * 2. -v: Increases verbosity
+     * 3. --junitxml=reports/result.xml' Writes the results to a file for later examination.
+     */
     stage('Run pytest') {
       steps {
-        sh 'pytest -v --junitxml=reports/result.xml'
+        sh 'pytest -n 10 -v --junitxml=reports/result.xml'
       }
     }
     
