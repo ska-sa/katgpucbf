@@ -1,7 +1,7 @@
+#Versions of numpy and pycuda are chosen to work with python 3.6. Later versions require python 3.7 at a minimum 
+
 llvmlite==0.31.0
-numpy
-pycuda
+numpy==1.19.5
+pycuda==2019.1.2
 pybind11
 katsdpsigproc
-jinja2==2.10.1
-pycparser
