@@ -6,16 +6,22 @@ overflows will happen. Its up to the user to reduce the fsim data rates.
 
 This script is hardcoded to expect multicast data on address 239.10.10.10 and port 7149.
 
-TODO: Make this script display the feng_raw data graphically.
+See https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg for a description of F-Engine
+output/X-Engine input packet format.
+
+TODO: It would be useful to make this script display the feng_raw data graphically.
 """
 
+# 1. Imports
 import socket
 import struct
 
+# 2. Hardcoded address and ports
 MCAST_GRP = "239.10.10.10"
 MCAST_PORT = 7149
 IS_ALL_GROUPS = True
 
+# 3. Opens socket listening for multicast data on MCAST_GRP:PORT
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 if IS_ALL_GROUPS:
@@ -28,11 +34,13 @@ mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
 
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
+# 4. Infinite loop interating waiting for recieved packets. NOTE: Expect buffer overflows at any reasonable data rate.
 i = 0
 while True:
-    # For Python 3, change next line to "print(sock.recv(10240))"
+    # 4.1. Wait for packet to be received from socket.
     data = sock.recv(10240)
 
+    # 4.2. Print packet information
     print("Packet:", i, "Length:", len(data))
     i += 1
 
