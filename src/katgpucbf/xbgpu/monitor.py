@@ -1,4 +1,17 @@
-"""Utilities for performance monitoring."""
+"""Utilities for performance monitoring.
+
+This file was copied directly from katfgpu and has not been extenisvly modified or examined. Most of the
+documentation is also a straight copy from katfgpu. As such the documentation could probably be reworked and updated.
+
+This class defines a Monitor. A monitor records events. A FileMonitor will write these events to file for examination
+at a later date. This adds a performance overhead to a program. If this is causing issues or monitoring is not
+important, then the FileMonitor can be replaced with a NullMonitor which implements the abstract functions as an empty
+function. Some components of the katxgpu SPEAD interface require a monitor to be passed - this is why the NullMonitor is
+needed.
+
+Additionally this class also defines a Queue object. This object has a monitor and wraps an asyncio.Queue so. Whenever
+an item is pushed to or removed from the queue it is recorded in the monitor.
+"""
 
 from abc import ABC, abstractmethod
 import asyncio
@@ -20,7 +33,7 @@ class Monitor(ABC):
     """
 
     def __init__(self) -> None:
-        """TODO: Create docstring."""
+        """Initialise monitor base class."""
         self._time_base = monotonic()
 
     def time(self) -> float:
@@ -92,32 +105,35 @@ class FileMonitor(Monitor):
     """
 
     def __init__(self, filename: str) -> None:
-        """TODO: Create docstring."""
+        """Initialise monitor. Opens file monitor writes to."""
         super().__init__()
         self._lock = threading.Lock()
         self._file = open(filename, "w")
 
     def close(self) -> None:
-        """TODO: Create docstring."""
+        """Close file that monitor writes to."""
         super().close()
         self._file.close()
 
     def _event(self, data) -> None:
-        """TODO: Create docstring."""
+        """Write actual events to file.
+
+        This is a private function that should not be called externally.
+        """
         with self._lock:
             json.dump(data, self._file)
             print(file=self._file)
 
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         self._event({"time": self.time(), "type": "qsize", "name": name, "qsize": qsize, "maxsize": maxsize})
 
     def event_qsize_delta(self, name: str, delta: int) -> None:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         self._event({"time": self.time(), "type": "qsize-delta", "name": name, "delta": delta})
 
     def event_state(self, name: str, state: str) -> None:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         self._event({"time": self.time(), "type": "state", "name": name, "state": state})
 
 
@@ -125,24 +141,28 @@ class NullMonitor(Monitor):
     """A do-nothing monitor that presents the required interface."""
 
     def event_qsize(self, name: str, qsize: int, maxsize: int) -> None:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         pass
 
     def event_qsize_delta(self, name: str, delta: int) -> None:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         pass
 
     def event_state(self, name: str, state: str) -> None:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         pass
 
     def make_queue(self, name: str, maxsize: int = 0) -> asyncio.Queue:
-        """TODO: Create docstring."""
+        """Implement abstract function."""
         return asyncio.Queue(maxsize)
 
 
 class Queue(asyncio.Queue):
-    """Wrap a :class:`asyncio.Queue` to call :meth:`Monitor.event_qsize`."""
+    """Wrap a :class:`asyncio.Queue` to call :meth:`Monitor.event_qsize`.
+
+    This can be used in place of a base asyncio.Queue so that whenver an item
+    is added or removed to the queue it is recorded in the monitor.
+    """
 
     def __init__(self, monitor: Monitor, name: str, maxsize: int = 0):
         """TODO: Create docstring."""
@@ -151,23 +171,23 @@ class Queue(asyncio.Queue):
         self.name = name
 
     def put_nowait(self, item: object) -> None:
-        """TODO: Create docstring."""
+        """Override the asyncio.Queue function of the same name."""
         super().put_nowait(item)
         self.monitor.event_qsize(self.name, self.qsize(), self.maxsize)
 
     def get_nowait(self) -> Any:
-        """TODO: Create docstring."""
+        """Override the asyncio.Queue function of the same name."""
         item = super().get_nowait()
         self.monitor.event_qsize(self.name, self.qsize(), self.maxsize)
         return item
 
     async def put(self, item: object) -> None:
-        """TODO: Create docstring."""
+        """Override the asyncio.Queue function of the same name."""
         await super().put(item)
         self.monitor.event_qsize(self.name, self.qsize(), self.maxsize)
 
     async def get(self) -> Any:
-        """TODO: Create docstring."""
+        """Override the asyncio.Queue function of the same name."""
         item = await super().get()
         self.monitor.event_qsize(self.name, self.qsize(), self.maxsize)
         return item
