@@ -12,8 +12,6 @@
 
 #include <pybind11/pybind11.h>
 
-namespace py = pybind11;
-
 namespace katxgpu::recv
 {
 
@@ -31,7 +29,7 @@ namespace katxgpu::recv
  *
  * These three classes are all described in more detail in  py_recv.cpp.
  */
-py::module register_module(py::module &parent);
+pybind11::module register_module(pybind11::module &parent);
 
 } // namespace katxgpu::recv
 

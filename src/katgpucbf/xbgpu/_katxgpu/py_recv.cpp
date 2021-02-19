@@ -5,41 +5,48 @@
 #include <pybind11/stl.h>
 #include <utility>
 
-namespace py = pybind11;
-
 namespace katxgpu::recv
 {
 
+/* This class wraps a chunk class so that it can be registered in a python module.
+ *
+ * More information on the methods exposed to python can be seen in register_module() below.
+ */
 class py_chunk : public chunk
 {
   public:
-    py::buffer base;
-    py::object device;
-    std::shared_ptr<py::buffer_info> buffer_info;
+    pybind11::buffer base;
+    pybind11::object device;
+    std::shared_ptr<pybind11::buffer_info> buffer_info;
 
-    py_chunk(py::buffer base, py::object device)
+    py_chunk(pybind11::buffer base, pybind11::object device)
         : base(std::move(base)), device(std::move(device)),
-          buffer_info(
-              std::make_shared<py::buffer_info>(request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
+          buffer_info(std::make_shared<pybind11::buffer_info>(
+              request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
     {
         storage = boost::asio::mutable_buffer(buffer_info->ptr, buffer_info->size * buffer_info->itemsize);
     }
 };
 
+/* This class wraps a stream class so that it can be registered in a python module.
+ *
+ * More information on the methods exposed to python can be seen in register_module() below.
+ */
 class py_stream : public stream
 {
   private:
+    // Profiling hooks used when using the python monitor class for metric tracking.
     virtual void pre_wait_chunk() override final;
     virtual void post_wait_chunk() override final;
     virtual void pre_ringbuffer_push() override final;
     virtual void post_ringbuffer_push() override final;
 
   public:
-    py::object monitor;
+    pybind11::object monitor;
 
     py_stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
               std::size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy,
-              py::object monitor)
+              pybind11::object monitor)
         : stream(n_ants, n_channels, n_samples_per_channel, n_pols, sample_bits, timestamp_step,
                  heaps_per_fengine_per_chunk, ringbuffer, thread_affinity, use_gdrcopy),
           monitor(std::move(monitor))
@@ -49,14 +56,14 @@ class py_stream : public stream
 
 void py_stream::pre_wait_chunk()
 {
-    py::gil_scoped_acquire gil;
+    pybind11::gil_scoped_acquire gil;
     if (!monitor.is_none())
         monitor.attr("event_state")("recv", "wait free_chunk");
 }
 
 void py_stream::post_wait_chunk()
 {
-    py::gil_scoped_acquire gil;
+    pybind11::gil_scoped_acquire gil;
     if (!monitor.is_none())
     {
         monitor.attr("event_state")("recv", "other");
@@ -66,14 +73,14 @@ void py_stream::post_wait_chunk()
 
 void py_stream::pre_ringbuffer_push()
 {
-    py::gil_scoped_acquire gil;
+    pybind11::gil_scoped_acquire gil;
     if (!monitor.is_none())
         monitor.attr("event_state")("recv", "push ringbuffer");
 }
 
 void py_stream::post_ringbuffer_push()
 {
-    py::gil_scoped_acquire gil;
+    pybind11::gil_scoped_acquire gil;
     if (!monitor.is_none())
     {
         monitor.attr("event_state")("recv", "other");
@@ -81,15 +88,15 @@ void py_stream::post_ringbuffer_push()
     }
 }
 
-py::module register_module(py::module &parent)
+pybind11::module register_module(pybind11::module &parent)
 {
     using namespace pybind11::literals;
 
-    py::module m = parent.def_submodule("recv");
+    pybind11::module m = parent.def_submodule("recv");
     m.doc() = "receiver for katxgpu";
 
-    py::class_<py_chunk>(m, "Chunk", "Chunk of samples")
-        .def(py::init<py::buffer, py::object>(), "base"_a, "device"_a = py::none(),
+    pybind11::class_<py_chunk>(m, "Chunk", "Chunk of samples")
+        .def(pybind11::init<pybind11::buffer, pybind11::object>(), "base"_a, "device"_a = pybind11::none(),
              "Initialises the chunk object.\n\n"
              "Parameters\n"
              "----------\n"
@@ -102,12 +109,14 @@ py::module register_module(py::module &parent)
         .def_readonly("base", &py_chunk::base)
         .def_readonly("device", &py_chunk::device);
 
-    py::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
-        .def(py::init<int, int, int, int, int, int, std::size_t, stream::ringbuffer_t &, int, bool, py::object>(),
+    pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
+        .def(pybind11::init<int, int, int, int, int, int, std::size_t, stream::ringbuffer_t &, int, bool,
+                            pybind11::object>(),
              "n_ants"_a, "n_channels"_a, "n_samples_per_channel"_a, "n_pols"_a, "sample_bits"_a, "timestamp_step"_a,
              "heaps_per_fengine_per_chunk"_a, "ringbuffer"_a, "thread_affinity"_a = -1, "use_gdrcopy"_a = false,
-             "monitor"_a = py::none(), py::keep_alive<1, 9>(), // The keep_alive is used to tell python not to release
-                                                               // the ringbuffer until the pystream object is destroyed.
+             "monitor"_a = pybind11::none(),
+             pybind11::keep_alive<1, 9>(), // The keep_alive is used to tell python not to release
+                                           // the ringbuffer until the pystream object is destroyed.
              "Initialises a custom high performance SPEAD2 receiver to receive F-Engine output data on a specific "
              "multicast stream at high data rates. This receiver stores received data in chunks and passes those "
              "chunks to the user.\n"
