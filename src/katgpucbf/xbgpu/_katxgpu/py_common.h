@@ -1,3 +1,9 @@
+/* This file defines common functions and classes that will be used in multiple different pybind11 submodules. 
+ *
+ * Currently this file provides a method for registering a ringbuffer object in pybind11 submodules and the 
+ * request_buffer_info() function for converting python buffer objects into a C++ memory object.
+ */
+
 #ifndef KATXGPU_PY_COMMON_H
 #define KATXGPU_PY_COMMON_H
 
