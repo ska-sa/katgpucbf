@@ -465,14 +465,14 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
             chunk_index += 1
 
             # 5.4 Exit condition
-            # I am nost sure if I am happy that this is here - some of my Jenkins unit tests fail when this is not here
+            # I am not sure if I am happy that this is here - some of my Jenkins unit tests fail when this is not here
             # throwing a "spead2._spead2.Stopped: ring buffer has been stopped" error. I think its still trying to
             # iterate through the asyncRingbuffer once the buffer is "finished" but I dont know enough about the
             # internal workings of asyncio to be sure. Just going to leave it for now and can revisit it later if we
             # decide the coverage is not enough. It does make the assert (chunk_index == total_chunk) test below a
             # bit less useful.
-            if chunk_index == total_chunks:
-                break
+            # if chunk_index == total_chunks:
+            #    break
 
         assert chunk_index == total_chunks, f"Expected to receive {total_chunks} chunks. Only received {chunk_index}"
 
@@ -482,7 +482,8 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 7. Final cleanup
     # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that
     # is run.
-    del sourceStream, ig, receiverStream, asyncRingbuffer
+    receiverStream.stop()
+    # del sourceStream, ig, receiverStream, asyncRingbuffer
 
 
 if __name__ == "__main__":
