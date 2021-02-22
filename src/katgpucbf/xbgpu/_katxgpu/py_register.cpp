@@ -24,7 +24,7 @@ PYBIND11_MODULE(_katxgpu, m)
 {
     m.doc() = "C++ backend for katxgpu";
 
-    // Not quite sure where these exceptions occur or what they do but they seemed important
+    // Not quite sure where these exceptions occur or what they do but they seem important.
     pybind11::register_exception<spead2::ringbuffer_stopped>(m, "Stopped");
     pybind11::register_exception<spead2::ringbuffer_empty>(m, "Empty");
 

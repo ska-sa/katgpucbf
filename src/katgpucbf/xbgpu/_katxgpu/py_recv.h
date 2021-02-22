@@ -27,7 +27,8 @@ namespace katxgpu::recv
  * 3. katxgpu._katxgpu.recv.Ringbuffer - Once the receiver has copied all the required heaps into a chunk, the chunk is
  * moved to this ringbuffer. The user can then pop the chunks off of this ringbuffer for processing.
  *
- * These three classes are all described in more detail in  py_recv.cpp.
+ * These three classes are all described in more detail in py_recv.cpp. The main description can be found in the
+ * register_module(...) definition so that the documentation is also available in python.
  */
 pybind11::module register_module(pybind11::module &parent);
 

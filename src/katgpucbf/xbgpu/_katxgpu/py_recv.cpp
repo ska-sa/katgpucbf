@@ -15,8 +15,15 @@ namespace katxgpu::recv
 class py_chunk : public chunk
 {
   public:
+    // Pointer to the buffer object the chunk wraps.
     pybind11::buffer base;
+
+    // If GPUDirect is being used to copy, this function stores a pointer to the GPU object. See src/README/md for more
+    // information.
     pybind11::object device;
+
+    // Pointer to the python view of the buffer being used. Holding this view ensures that python does not garbage
+    // collect the buffer while it is being used in C++.
     std::shared_ptr<pybind11::buffer_info> buffer_info;
 
     py_chunk(pybind11::buffer base, pybind11::object device)
@@ -35,7 +42,10 @@ class py_chunk : public chunk
 class py_stream : public stream
 {
   private:
-    // Profiling hooks used when using the python monitor class for metric tracking.
+    // Profiling hooks used when using the python monitor class for metric tracking. The *_wait_chunk() methods are
+    // called in the stream::grab_chunk() function - one while trying to grab the chunk semaphor and the next once the
+    // semaphor has been grabbed. *_ringbuffer_push(...) is called in the stream::flush_chunk() function. One before the
+    // active chunk is pushed to the ringbuffer and one after.
     virtual void pre_wait_chunk() override final;
     virtual void post_wait_chunk() override final;
     virtual void pre_ringbuffer_push() override final;
@@ -214,7 +224,7 @@ pybind11::module register_module(pybind11::module &parent)
     register_ringbuffer<stream::ringbuffer_t, py_chunk>(
         m, "Ringbuffer",
         "Ringbuffer for received channelised data. Once the receiver assembles a chunk it places it on this "
-        "ringbuffer. The user can then pop this completed chunk off the ringbuffer.");
+        "ringbuffer. The user can then pop this completed chunk off of the ringbuffer.");
 
     return m;
 }
