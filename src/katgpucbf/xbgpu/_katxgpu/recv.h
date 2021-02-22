@@ -63,7 +63,11 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     virtual void heap_ready(spead2::recv::live_heap &&heap) override final;
     virtual void stop_received() override final;
 
-    // Profiling hooks
+    // The four functions below are hooks that can be used in child classes for metric tracking. These functions are
+    // empty in this class. The
+    // *_wait_chunk() methods are called in the stream::grab_chunk() function - one while trying to grab the chunk
+    // semaphor and the next once the semaphor has been grabbed. The *_ringbuffer_push(...) methods are called in the
+    // stream::flush_chunk() function. One before the active chunk is pushed to the ringbuffer and one after.
     virtual void pre_wait_chunk()
     {
     }
@@ -86,7 +90,6 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     const int heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
     const int timestamp_step;              ///< Increase in timestamp between successive heaps from the same F-Engine.
     const std::size_t packet_bytes;        ///< Number of payload bytes in each packet
-    const std::size_t chunk_packets;       ///< Number of packets in each chunk
     const std::size_t chunk_bytes;         ///< Number of payload bytes in each chunk
 
     std::int64_t first_timestamp = -1; ///< Very first timestamp observed
@@ -99,7 +102,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     ringbuffer_t &ringbuffer; ///< When a chunk has been fully assembled it is put on this ringbuffer.
 
     /* This view is only used during unit testing. It stores the python view of the buffer containing simulated packets.
-     * More detail in "add_buffer_reader()" function. 
+     * More detail in "add_buffer_reader()" function.
      */
     pybind11::buffer_info view;
 
@@ -114,9 +117,8 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      */
     bool flush_chunk();
 
-    /**
-     * Determine data pointer, chunk and packet index from packet timestamp and
-     * F-Engine ID.
+    /** TODO: Clarify what the packet index means, mention what its called in katfgpu and say why the overloading is
+     * used. Determine data pointer, chunk and packet index from packet timestamp and F-Engine ID.
      *
      * If the timestamp is beyond the last active chunk, old chunks may be
      * flushed and new chunks appended.
@@ -145,6 +147,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
 
     void add_udp_pcap_file_reader(const std::string &filename);
 
+    // Not sure how I feel about the different
     void add_buffer_reader(pybind11::buffer buffer);
 
     void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
@@ -156,7 +159,6 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     const ringbuffer_t &get_ringbuffer() const;
 
     int get_sample_bits() const;
-    std::size_t get_chunk_packets() const;
     std::size_t get_chunk_bytes() const;
 
     /// Add a chunk to the free pool

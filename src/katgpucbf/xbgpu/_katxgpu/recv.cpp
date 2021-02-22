@@ -60,7 +60,7 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
       sample_bits(sample_bits), timestamp_step(timestamp_step),
       heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
       packet_bytes(n_samples_per_channel * n_pols * complexity / 8 * sample_bits),
-      chunk_packets(n_channels * n_ants * heaps_per_fengine_per_chunk), chunk_bytes(packet_bytes * chunk_packets),
+      chunk_bytes(packet_bytes * n_channels * n_ants * heaps_per_fengine_per_chunk),
       ringbuffer(ringbuffer)
 {
     // py::print("Stream Created");
@@ -78,8 +78,6 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
         throw std::invalid_argument("n_samples_per_channel must be greater than 0");
     if (packet_bytes <= 0)
         throw std::invalid_argument("packet_bytes must be greater than 0");
-    if (chunk_packets <= 0)
-        throw std::invalid_argument("n_channels * n_ants * heaps_per_fengine_per_chunk must be greater than 0");
 
     // spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
     //                n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
@@ -330,7 +328,8 @@ void stream::stop_received()
 void stream::add_buffer_reader(pybind11::buffer buffer)
 {
     // This view needs to be stored persistently. If it is released, Python will release the buffer back to the OS
-    // causing segfaults when C++ tries to access the buffer. Took me a while to figure this - dont make my mistakes.
+    // causing segfaults when C++ tries to access the buffer. Took me a while to figure this out - dont make my
+    // mistakes.
     view = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
     // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
@@ -366,11 +365,6 @@ stream::ringbuffer_t &stream::get_ringbuffer()
 int stream::get_sample_bits() const
 {
     return sample_bits;
-}
-
-std::size_t stream::get_chunk_packets() const
-{
-    return chunk_packets;
 }
 
 std::size_t stream::get_chunk_bytes() const
