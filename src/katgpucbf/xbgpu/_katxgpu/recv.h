@@ -1,7 +1,24 @@
-/**
- * TAlk a bit about chunk lifecycle - free pool, active pool, ringbuffer
+/* This file contains the collection of classes used to implement a C++ SPEAD2 receiver for a single X-Engine that
+ * receives data from multiple F-Engines.
  *
- * TODO: Move 'pybind11::buffer_info view' and associated functions to;
+ * The three classes that are defined here are:
+ * 1. katxgpu::recv::chunk - A chunk is a class containing a buffer and associated metadata where a number of
+ * received heaps are stored in a single contigous manner.
+ * 2. katxgpu::recv::stream - A stream manages the process of receiving network packets and reassembling them
+ * into SPEAD heaps. These heaps are then copied to the relevant chunk.
+ * 3. katxgp::recv::allocator - This allocator is used for telling the SPEAD receiver where in a chunk a specific heap
+ * must be copied. This allocator also determines the specific chunk that this heap belongs to. The allocator is very
+ * lightweight with most of its logic being shifted to sub-functions within the katxgpu::recv::stream class.
+ *
+ * This class is registered as a C++ module. SPEAD2 already has a python module. The reason a custom module is used over
+ * the standard SPEAD2 module is because the data rates being dealt with are very high. The standard SPEAD2 python
+ * library would be producing heaps too quickly for Python to keep up. This class combines a number of heaps into a
+ * single chunk significantly reducing the amount of computation that is required to be done in Python.
+ *
+ * The functioning of this class is explained in more detail in katxgpu/src/README.md
+ *
+ * TODO: Move 'pybind11::buffer_info view' and associated functions to py_recv.h
+ * TODO: Implement logging slightly differently - at the moment, logs are part
  */
 
 #ifndef KATXGPU_RECV_H
@@ -203,7 +220,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      * heap to. This function will call the calculate_packet_destination(...) function to determine the actual location
      * to store this data in.
      *
-     * See the allocator class and calculate_packet_destination() documentation above for more information.
+     * See the allocator class and calculate_packet_destination() comments above for more information.
      */
     void *allocate(std::size_t size, spead2::recv::packet_header &packet);
 

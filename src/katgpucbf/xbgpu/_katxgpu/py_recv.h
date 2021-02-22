@@ -29,6 +29,9 @@ namespace katxgpu::recv
  *
  * These three classes are all described in more detail in py_recv.cpp. The main description can be found in the
  * register_module(...) definition so that the documentation is also available in python.
+ *
+ * Lots of the syntax here is specific to pybind11 and should be looked at in conjunction with pybind11s documentation
+ * if a deeper understanding is required.
  */
 pybind11::module register_module(pybind11::module &parent);
 

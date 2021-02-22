@@ -29,9 +29,8 @@ allocator::allocator(stream &recv) : recv(recv)
 
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
-    // spead2::log_info("Shared allocator");
     if (hint)
-    {
+    { 
         void *ptr = recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
         if (ptr)
             return pointer(reinterpret_cast<std::uint8_t *>(ptr),
@@ -60,11 +59,8 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
       sample_bits(sample_bits), timestamp_step(timestamp_step),
       heaps_per_fengine_per_chunk(heaps_per_fengine_per_chunk),
       packet_bytes(n_samples_per_channel * n_pols * complexity / 8 * sample_bits),
-      chunk_bytes(packet_bytes * n_channels * n_ants * heaps_per_fengine_per_chunk),
-      ringbuffer(ringbuffer)
+      chunk_bytes(packet_bytes * n_channels * n_ants * heaps_per_fengine_per_chunk), ringbuffer(ringbuffer)
 {
-    // py::print("Stream Created");
-
     if (sample_bits != 8)
         throw std::invalid_argument("sample_bits must equal 8 - logic for other sample sizes has not been tested.");
     if (n_pols != 2)
@@ -78,9 +74,6 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
         throw std::invalid_argument("n_samples_per_channel must be greater than 0");
     if (packet_bytes <= 0)
         throw std::invalid_argument("packet_bytes must be greater than 0");
-
-    // spead2::log_info("a: %1% c: %2% t: %3% p: %4% packet bytes %5% chunk bytes: %6%", n_ants, n_channels,
-    //                n_samples_per_channel, n_pols, packet_bytes, chunk_bytes);
 }
 
 stream::~stream()
@@ -122,8 +115,10 @@ bool stream::flush_chunk()
     try
     {
         pre_ringbuffer_push();
+        // Take the oldest active chunk and add it to the ringbuffer.
         ringbuffer.push(std::move(active_chunks[0]));
         post_ringbuffer_push();
+        // Once the chunk has been put on the ringbuffer, remove it from the active chunks queue.
         active_chunks.pop_front();
         return true;
     }
@@ -137,49 +132,59 @@ bool stream::flush_chunk()
 std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(std::int64_t timestamp,
                                                                               std::int64_t fengine_id, chunk &c)
 {
-    // spead2::log_info("Determine packet position in chunk specific %1% %2% %3%",timestamp,c.timestamp);
+    // The timestamp index is a number of  timestamp_steps from the chunks base timestamp.
     std::size_t timestamp_idx = (timestamp - c.timestamp) / (timestamp_step);
+
+    // The fengine index is very simple to calculate/
     std::size_t fengine_idx = fengine_id;
+
+    // The heap index in the chunk is a combination of the heap timestamp and f-engine id.
     std::size_t heap_idx = timestamp_idx * n_ants + fengine_idx;
-    std::size_t byte_idx = heap_idx * n_channels * packet_bytes;
-    // spead2::log_info("\tTimestamp Index (%1%), Fengine Index (%2%), HeapIdx (%3%), Byte Index (%4%)", timestamp_idx,
-    //                 fengine_idx, heap_idx, byte_idx);
-    void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + byte_idx;
+
+    // The buffer offset is the number of bytes the current heap is offset from the chunk buffer's base address. It is
+    // basically the heap index multiplied by the heap size (n_channels * packet_bytes).
+    std::size_t buffer_offset = heap_idx * n_channels * packet_bytes;
+
+    // Use the buffer offset to calculate the actual pointer to allocate the heap to.
+    void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + buffer_offset;
+
+    // Return all pertinent values in a tuple.
     return std::make_tuple(ptr, &c, heap_idx);
 }
 
 std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(std::int64_t timestamp,
                                                                               std::int64_t fengine_id)
 {
-    //  spead2::log_info("Determine packet position in chunk broad");
+    // 1. The very first heap is used to populate the first timestamp.
     if (first_timestamp == -1)
     {
         first_timestamp = timestamp;
         grab_chunk(first_timestamp);
     }
+    // 2. We check that the heap timestamp is a multiple of timestamp_step from the first timestamp. If not, then
+    // something has gone very wrong.
     if ((timestamp - first_timestamp) % timestamp_step != 0)
     {
-        // TODO: log/count. The timestamp is broken.
         spead2::log_info("Timestamp is broken");
         return std::make_tuple(nullptr, nullptr, 0);
     }
-    std::int64_t base = active_chunks[0]->timestamp;
-    // for (const auto &c : active_chunks)
-    // {
-    //     spead2::log_info("\t Timestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp,
-    //                      c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
-    // }
 
+    // 3. We search through all active chunks in the active_chunks queue to see if the new heap falls within one of
+    // these chunks.
+    std::int64_t base = active_chunks[0]->timestamp;
     for (const auto &c : active_chunks)
     {
-        // spead2::log_info("\t\tTimestamp %1%, Timestamp Low %2%, Timestamp High %3%", timestamp, c->timestamp,
-        //                  c->timestamp + timestamp_step * heaps_per_fengine_per_chunk);
         if (timestamp >= c->timestamp && timestamp < c->timestamp + timestamp_step * heaps_per_fengine_per_chunk)
         {
-            // spead2::log_info("\t\tIn above ^");
+            // 3.1. If the heap falls within a specific active chunk we use the timestamp and the fengine_id to
+            // determine the exact destination in the timestamp by calling the overloaded calculate_packet_destination()
+            // function.
             return calculate_packet_destination(timestamp, fengine_id, *c);
         }
     }
+
+    // 4. If the heap does not fall within the active chunks, then we need to decide what to do with it.
+    // 4.1 If the heap is older than the oldest active heap then we drops it.
     if (timestamp < base)
     {
         spead2::log_info("Seem to have gone backwards in time");
@@ -187,38 +192,45 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     }
     else
     {
-
-        std::size_t max_active = 1;
-        /* We've gone forward beyond the last active chunk. Make room to add
-         * a new one. Usually this will be the next sequential chunk. If not,
-         * we flush all chunks rather than leaving active_chunks discontiguous.
-         */
+        // 4.2. If the heap is newer in time than the last active heap, then we need to add a new chunk to the active
+        // chunks list. We can only have max_active numbers of chunks on the queue at any one time. So we need to make
+        // room if needed. Usually the next chunk will be the next sequential chunk. If not, we flush all chunks rather
+        // than leaving active_chunks discontiguous.
+        std::size_t max_active = 2;
         std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
-        // spead2::log_info("Gone beyond active chunks.")
-        // spead2::log_info("Active Chunks: %1% %2%", active_chunks.back()->timestamp, start);
+
+        // 4.2.1 If the next chunk is not the next sequential one, then the pipeline is flushed. This is done by setting
+        // max_chunks to zero.
         if (timestamp >=
             start + std::int64_t(timestamp_step *
                                  heaps_per_fengine_per_chunk)) // True if the next chunk is not the next sequential one
         {
             spead2::log_info("The next chunk is not the next sequential one. SPEAD RX pipeline is being flushed");
-            // The start timestamp of the next chunk needs to be aligned correctly to multiples of timestamp_step *
-            // heaps_per_fengine_per_chunk. The step variable below is calculed using integer division to calculate how
-            // many multiples the new chhunk is off from the old.
+            // 4.2.2 The start timestamp of the next chunk needs to be aligned correctly to multiples of timestamp_step
+            // * heaps_per_fengine_per_chunk. The step variable below is calculated using integer division to determine
+            // how many multiples the new chunk is off from the old.
             int64_t step = (timestamp - start) / (timestamp_step * heaps_per_fengine_per_chunk);
             start += (step * timestamp_step * heaps_per_fengine_per_chunk);
             max_active = 0;
         }
-        // spead2::log_info("max active %1% active.chunks.size %2%",max_active,active_chunks.size());
+
+        // 4.2.2 Flush the active chunks queue. Only one chunk is flushed if its a continious stream of data - this is
+        // the most likley case. Otherwise all chunks are flushed - this will mostly likely occur if a stream is
+        // interrupted or stopped and a new stream is started.
         while (active_chunks.size() > max_active)
         {
             // spead2::log_info("Flushing chunks %1% %2%",active_chunks.size(),max_active);
             if (!flush_chunk())
             {
-                // spead2::log_info("No chunk to flush");
+                // 4.2.3. This should not really happen - flush chunk should normally return true.
+                spead2::log_info("No chunk to flush");
                 // ringbuffer was stopped, so no point in continuing.
                 return std::make_tuple(nullptr, nullptr, 0);
             }
         }
+
+        // 4.2.3 Grab a new chunk from the free_chunk stack and add it to the active chunks queue. The received heap is
+        // assigned to this chunk.
         grab_chunk(start);
         return calculate_packet_destination(timestamp, fengine_id, *active_chunks.back());
     }
@@ -226,19 +238,17 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
 
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
-    // spead2::log_info("Receiver allocator 0");
-    // spead2::log_info("Receiver allocator 1 %1% %2% %3% %4%", size, packet_bytes, packet.n_items, packet_bytes *
-    // n_channels);
+    // 1. Perform some basic checks on the received packet of the new heap to confirm that it is what we expect.
     if (size != packet_bytes * n_channels)
     {
         spead2::log_info("Allocating incorrect size");
         return nullptr;
     }
-    //    spead2::log_info("Receiver allocator 2");
     std::int64_t timestamp = -1;
     std::int64_t fengine_id = -1;
     spead2::recv::pointer_decoder decoder(packet.heap_address_bits);
-    // Extract timestamp
+
+    // 2. Extract the timestamp and F-Engine ID from the packet
     for (int i = 0; i < packet.n_items; i++)
     {
 
@@ -254,22 +264,25 @@ void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
             fengine_id = decoder.get_immediate(pointer);
         }
     }
-    // spead2::log_info("Packet Information Timestamp: %1% fengine_id %2% size %3%", timestamp, fengine_id, size);
+    // This should not happen - if either is zero, it means some expected fields are missing from this packet.
     if (timestamp == -1 || fengine_id == -1)
         return nullptr;
 
+    // 3. Use the fengine_id and timestamp to decide which chunk the packet must be allocated to.
     return std::get<0>(calculate_packet_destination(timestamp, fengine_id));
 }
 
 void stream::heap_ready(spead2::recv::live_heap &&live_heap)
 {
-    //    spead2::log_info("Heap Ready Called");
+    // 1. Check that all required packets in a heap have been received.
     if (!live_heap.is_complete())
     {
         spead2::log_info("Heap not complete. Received Length %1% Expected Length %2%.", live_heap.get_received_length(),
                          live_heap.get_heap_length());
-        return; // should never happen: digitiser heaps are single packet
+        return;
     }
+
+    // 2. Get the required heap details
     spead2::recv::heap heap(std::move(live_heap));
     std::int64_t timestamp = -1;
     std::int64_t fengine_id = -1;
@@ -292,28 +305,35 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
             length = item.length;
         }
     }
+
+    // 3. Perform some basic checks on the heap.
     if (timestamp == -1 || length == 0)
     {
         spead2::log_info("It's not a valid digitiser packet");
-        // TODO: log. It's not a valid digitiser packet.
         return;
     }
     if (length != packet_bytes * n_channels)
     {
-        // TODO: log. It's the wrong size.
-        spead2::log_info("Heap size incorrect. Received (%1%), expected (%2%)", length, packet_bytes * n_channels);
+        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes", length,
+                         packet_bytes * n_channels);
         return;
     }
 
+    // 4. Run the calculate_packet_destination() function again (It was last called in the allocater when the first
+    // packet was received.). This function should ideally return a pointer equal to the current heaps pointer. This
+    // would not be equal if for some reason the chunk this heap belongs to has been moved off of the active pile - this
+    // means a stale heap was received. If this occurs frequently, the number of allowed active chunks is probably not
+    // high enough (set it higher in the calculate_packet_destination(...) function.).
     std::tie(expected_ptr, c, heap_idx) = calculate_packet_destination(timestamp, fengine_id);
     if (expected_ptr != actual_ptr)
     {
         spead2::log_info("This should only happen if we receive data that is too old (%1%)", timestamp_step);
-        // TODO: log. This should only happen if we receive data that is too old.
+        // TODO: Figure out what to do in this case.
         return;
     }
+
+    // 5. Mark the heap location in the chunk as filled.
     c->present[heap_idx] = true;
-    //    spead2::log_info("Heap Ready Finished");
 }
 
 void stream::stop_received()
@@ -357,19 +377,14 @@ void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::ui
     emplace_reader<spead2::recv::udp_ibv_reader>(config);
 }
 
-stream::ringbuffer_t &stream::get_ringbuffer()
-{
-    return ringbuffer;
-}
-
-int stream::get_sample_bits() const
-{
-    return sample_bits;
-}
-
 std::size_t stream::get_chunk_bytes() const
 {
     return chunk_bytes;
+}
+
+stream::ringbuffer_t &stream::get_ringbuffer()
+{
+    return ringbuffer;
 }
 
 const stream::ringbuffer_t &stream::get_ringbuffer() const
