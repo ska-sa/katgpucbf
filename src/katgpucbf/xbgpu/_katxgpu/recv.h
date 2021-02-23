@@ -18,7 +18,8 @@
  * The functioning of this class is explained in more detail in katxgpu/src/README.md
  *
  * TODO: Move 'pybind11::buffer_info view' and associated functions to py_recv.h
- * TODO: Implement logging slightly differently - at the moment, logs are part
+ * TODO: Implement logging slightly differently - at the moment, the SPEAD2 logger is used. It may be worthwhile to have
+ * a seperate katxgpu logger to seperate a SPEAD2 log from a katxgpu log.
  */
 
 #ifndef KATXGPU_RECV_H
@@ -51,12 +52,12 @@ namespace katxgpu::recv
  * guaranteed that it will not be destroyed from the worker thread.
  *
  * The samples are stored as a 1 dimensional array contiguous array. If the array were indexed  as a multidimensional
- * array, the indexing would be as follows:
- * [timestamp_index][f_engine_index][channel_index][spectrum_index][polarisation_index]. It is left to the user to
- * calculate the strides for multidimensional indexing in a 1 dimensional array.
+ * array, the dimensions would be as follows:
+ * [heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]. It is left to the user
+ * to calculate the strides for multidimensional indexing in a 1 dimensional array.
  *
- * The timestamp_index and f_engine_index correspond to different packets while the remaining indexes correspond to how
- * data is arranged within a chunk.
+ * The heaps_per_fengine_per_chunk and n_ants correspond to different packets while the remaining indexes correspond to
+ * how data is arranged within a chunk.
  */
 struct chunk
 {
