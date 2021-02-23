@@ -52,9 +52,10 @@ network data, it can be added to SPEAD2 without the user having to change their 
 transfer a completed heap to the main program no matter the transport being used.
 
 In this repository, the main example of where these transports are useful is when unit testing. During normal
-operation, the udp_ibv transport is used for high performance receiving of packets off of the ethernet network. It is not practical to run unit tests on the network. When performing unit tests, a buffer transport is used instead and SPEAD2 assembles simulated
-packets from a memory buffer into heaps, thereby testing the SPEAD2 functionality without having to be connected to the
-network.
+operation, the udp_ibv transport is used for high performance receiving of packets off of the ethernet network. It is
+not practical to run unit tests on the network. When performing unit tests, a buffer transport is used instead and
+SPEAD2 assembles simulated packets from a memory buffer into heaps, thereby testing the SPEAD2 functionality without
+having to be connected to the network.
 
 The only intervention required by the user is to tell SPEAD2 what transport to use. When receiving data, this is done
 using functions such as `add_udp_ibv_reader`, `add_udp_pcap_reader` or `add_memory_reader`.
@@ -121,45 +122,101 @@ handles turning these C++ files into python modules. The [py_register.cpp](./py_
 
 ## 2. Receiver
 
+The image below gives conceptual overview of how the katxgpu receive code is implemented:
+
 ![Receiver](./katxgpu_receiver.png)
 
-### 2.1 Top level view
+The above diagram shows how the receiver code is broken up into three main sections:
+1. katxgpu Python - This is the python code that the main program will interact with to use the receiver. Once the
+receiver is configured the main program gives the katxgpu python code new chunks (or old chunks that no longer have any
+use) and the katxgpu python code returns filled chunks. The underlying assembly and management of these chunks is
+abstracted away at this level. The classes relevant at this level can be found in the [py_recv.cpp](./py_recv.cpp),
+[py_recv.h](./py_recv.h), [py_common.cpp](./py_recv.cpp) and [py_common.h](./py_recv.h). These files are slightly
+difficult to read, but the python modules they create will produce standard python documentation that can be read in an
+iPython session once the module has been installed.
+2. katxgpu C++ - The katxgpu python code interfaces with the katxgpu C++ code. The katxgpu C++ code manages the chunks
+received from katxgpu python. When the SPEAD2 stream receives a heap, the katxgpu C++ software tells it both to which
+chunk the heap must be copied to and the offset within the chunk buffer that the heap data belongs. The katxgpu receiver
+monitors the active chunks that are being filled by the SPEAD2 stream and when a chunk is complete, it sends it back to
+the katxgpu Python module via a ringbuffer.
+3. SPEAD2 Stream - This is the underlying SPEAD2 code that receives packets, assembles them into heaps and passes them
+to the katxgpu C++ software. This code creates its own thread pool and runs concurrently with the main katxgpu program.
 
-bindings can be found [py_recv.cpp](./py_recv.cpp) and [py_recv.h](./py_recv.h)
-
-logic can be found [recv.cpp](./recv.cpp) and [py_recv.h](./recv.h)
-
-Example can be found here: [example](../scratch/receiver_example.py)
-
-Discuss user side functionality
+An example of how to use the receiver can be found in the [receiver_example](../scratch/receiver_example.py) script in
+the katxgpu/scratch folder.
 
 ### 2.2 Chunk Lifecycle
 
-### 2.3 Allocating heaps to chunks
+A chunk is the main mechanism that allows for data to be transferred around the katxgpu program
 
-#### 2.3.1 Timestamp Alignment
+A chunk has to be created by the main program. The user assigns a buffer of a specific size to the chunk and then passes
+the chunk to the receiver using the `add_chunk()` function. This chunk is added to a free chunks stack. Chunks on this
+stack are not being used. They will be popped off of this stack when a new chunk is required.
 
-#### 2.3.2 Data layout in a chunk
+The katxgpu C++ code maintains a queue of chunks that are in an "active" state. Active chunks are chunks that are being
+assembled - this means that the SPEAD2 stream is busy receiving and assembling heaps from the underlying transport.
+These heaps are assembled in the various chunks in the active hunks queue. When a packet belonging to a chunk that is
+not in the active queue is received, a chunk is moved from the free chunks stack by calling the
+`katxgpu::recv::stream::grab_chunk()` function.
+
+Once a chunk has been fully assembled it is moved off of the active queue and put on a ringbuffer using the
+`katxgpu::recv::stream::flush()` function. The main program can then access the underlying chunks asynchronously in
+Python using an asyncio for loop (`async for chunk in asyncRingbuffer`) which calls the underlying `ringbuffer.pop()`
+function.
+
+Once a chunk has been popped off the ringbuffer and its data has been consumed by the GPU, it should be given back to
+the receiver again using the `add_chunk()` function. By reusing the chunk, the system memory use remains tightly
+controlled preventing excessive memory use. Additionally allocating new memory is an expensive operation. By reusing
+chunks, this expensive operation is eliminated.
+
+The main program only knows about the ringbuffer, the free chunks stack and the active chunks queue are managed within
+the katxgpu C++ code.
+
+### 2.3 Chunk and heap coordination and management
+
+The SPEAD2 stream creates its own thread pools which manages the internals of the SPEAD2 transports and heap assembly. 
+Tracing through these threads is a time consuming process and is not necessary to understand the katxgpu receiver. The
+SPEAD2 stream interacts with the main program using callback functions. When the first packet in a heap is received, the
+SPEAD2 stream calls the `katxgpu::recv::allocator::allocate()` function. When the last packet is received, the SPEAD2
+stream calls the `katxgpu::recv::stream::heap_ready()` function. Both of these functions eventually call the
+`katxgpu::recv::stream::calculate_packet_destination()` function. 
+
+The `calculate_packet_destination()` function can be thought of as the main coordinating funtion within the katxgpu C++
+code. It determines when to move data from the free chunks stack to the active chunks queue to the ringbuffer. It also
+calculates where in a chunk the heap must be copied and passes this information to the SPEAD2 stream. Understanding this
+function will give a great deal of insight into the operation of the entire receiver.
+
+### 2.4 Chunk Internal Construction
+
+### 2.4.1 Timestamp Alignment
+
+### 2.4.2 Data layout in a chunk
 
 [heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]
 
-### 2.4 Transport and readers
+### 2.5 Transport and readers
 
-Only a few readers have been implemented yet
+As mentioned in 1.2.1 above, SPEAD2 defines a number of transports. This receiver only exposes three of these
+transports. The most important one is the udb_ibv transport for normal operation. Additionally, the PCAP and memory
+transports are also exposed for debugging and unit tests.
+
+### 2.6 Unit Tests
+
+As mentioned previously, the memory transport is used to unit test the receiver software on simulated packets stored
+within a buffer. The unit test can be found [here](../test/spead2_receiver_test.py) in the katxgpu/test folder.
 
 ## 3. Sender
 
-Sender logic still needs to be implemented. This section will be updated once this has occured.
+TODO: Sender logic still needs to be implemented. This section will be updated once this has occured.
 
 ## 4. Peerdirect Support
 
-TODO: Write a script demonstrating how to use Peerdirect support
+SPEAD2 provides support for Nvidias GPU Direct technology. This allows data to be copied directly from a Mellanox NIC
+to a Nvidia GPU without having to go through system memory. SPEAD2 needs to be using the udp_ibv transport to make use
+of GPU direct. By using GPU direct, the system memory bandwidth requirements are significantly reduced as the data never
+does not pass through system RAM.
 
-## 5. Testing
+Currently GPU Direct is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server grade
+cards (such as the A100.).
 
-### Unit Tests
-
-`spead2.send.InprocStream` object to feed the `inproc_queue` added to the   `add_inproc_reader`
- [receiver unit test](../test/spead2_receiver_test.py)
-
-### Receiveing from a pcap file
+TODO: Write a script demonstrating how to use Peerdirect works. Update this descrption once this script has been written.
