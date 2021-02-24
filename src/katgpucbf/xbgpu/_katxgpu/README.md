@@ -149,6 +149,9 @@ the katxgpu/scratch folder. Understanding this [receiver_example.py](../scratch/
 required to use the receiver. The remaining information in this document is only relevant when trying to modify or 
 duplicate the katxgpu receiver functionality.
 
+Once the katxgpu module has been installed, the receiver module can be accesed using `import katxgpu._katxgpu.recv` in
+Python.
+
 ### 2.2 Chunk Lifecycle
 
 A chunk is the main mechanism that allows for data to be transferred around the katxgpu program
