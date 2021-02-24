@@ -132,18 +132,22 @@ receiver is configured the main program gives the katxgpu python code new chunks
 use) and the katxgpu python code returns filled chunks. The underlying assembly and management of these chunks is
 abstracted away at this level. The classes relevant at this level can be found in the [py_recv.cpp](./py_recv.cpp),
 [py_recv.h](./py_recv.h), [py_common.cpp](./py_recv.cpp) and [py_common.h](./py_recv.h). These files are slightly
-difficult to read, but the python modules they create will produce standard python documentation that can be read in an
+difficult to read, but the python modules they create will have standard python docstrings that can be read in an
 iPython session once the module has been installed.
 2. katxgpu C++ - The katxgpu python code interfaces with the katxgpu C++ code. The katxgpu C++ code manages the chunks
 received from katxgpu python. When the SPEAD2 stream receives a heap, the katxgpu C++ software tells it both to which
 chunk the heap must be copied to and the offset within the chunk buffer that the heap data belongs. The katxgpu receiver
 monitors the active chunks that are being filled by the SPEAD2 stream and when a chunk is complete, it sends it back to
-the katxgpu Python module via a ringbuffer.
+the katxgpu Python module via a ringbuffer. The classes relevant to this section can be found in [recv.h](./recv.h) and
+[recv.cpp](./recv.cpp). 
 3. SPEAD2 Stream - This is the underlying SPEAD2 code that receives packets, assembles them into heaps and passes them
 to the katxgpu C++ software. This code creates its own thread pool and runs concurrently with the main katxgpu program.
+This code is all part of the standrd SPEAD2 package.
 
-An example of how to use the receiver can be found in the [receiver_example](../scratch/receiver_example.py) script in
-the katxgpu/scratch folder.
+An example of how to use the receiver can be found in the [receiver_example.py](../scratch/receiver_example.py) script in
+the katxgpu/scratch folder. Understanding this [receiver_example.py](../scratch/receiver_example.py) is all that is 
+required to use the receiver. The remaining information in this document is only relevant when trying to modify or 
+duplicate the katxgpu receiver functionality.
 
 ### 2.2 Chunk Lifecycle
 
@@ -186,13 +190,40 @@ code. It determines when to move data from the free chunks stack to the active c
 calculates where in a chunk the heap must be copied and passes this information to the SPEAD2 stream. Understanding this
 function will give a great deal of insight into the operation of the entire receiver.
 
-### 2.4 Chunk Internal Construction
+### 2.4 Receiver Chunk Internal Construction
 
-### 2.4.1 Timestamp Alignment
+A chunk contains both a buffer object and associated metadata. For the receiver chunk this metadata contains a `present` boolean array and a timestamp field. 
 
-### 2.4.2 Data layout in a chunk
+This array will contains as many elements as heaps in the chunk. A true value at a specific index indicates that the corresponding chunk is present. A false value indicates that the chunk was either not received or was corrupted and has not been copied correctly into the chunk. It is expected that 99.999999% of heaps will be received over the receiver lifetime. Large numbers of missing heaps point to a system issue that must be resolved.
 
-[heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]
+### 2.4.1 Data layout
+
+Each heap contains a single contigous set of data. Indexed as a multidimensional array, this array looks like:
+`heap_data[n_channels_per_stream][n_samples_per_channel][n_pols]`. As mentioned above, this
+[document](https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg) describes these heaps in
+more detail.
+
+The X-Engine receives data from each F-Engine. There is one F-Engine per antenna (`n_ants`). For a single timestamp, a
+chunk combines data from all these F-Engines that can be indexed as follows:
+`chunk_buffer_temp[n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]`
+
+In order to make chunks larger to get the benefits described in 1.4 above, a number of heaps from every F-Engine are
+combined into a single chunk. There are `heaps_per_fengine_per_chunk` heaps per F-Engine. The final chunk array looks
+like: `chunk_buffer[heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]`
+
+NOTE: While the data layout is shown here as a multidimensional array, this has only been done for conceptual purposes.
+The actual data is stored in a contigous buffer with one dimension. The user is responsible for striding throught this
+array correctly.
+
+### 2.4.2 Timestamp Alignment
+
+The timestamp field in the chunk represents the timestamp of the earliest received set of F-Engine heaps within the chunk. 
+
+Between succesive heaps from a specific F-Engine, the difference in timestamp is known as the `timestamp_step`. This value is calculated as follows: `timestamp_step = n_channels_total * 2 * n_samples_per_channel`. It must be noted that `n_channels_total` is not equal to `n_channels_per_stream`. The first represents the total number of channels out of the F-Engine while the second represents the total number of channels in a single heap. These values are related for power-of-two array sizes but the difference becomes more nuanced when using arbitrary array sizes. (The exact mechanism calculating `n_channels_per_stream` for arbitrary array sizes is still TBD.) The `*2` in the equation above is due to the F-Engines discarding half of the spectrum due to symmetric properties of a fourier transform on real input data.
+
+As mentioned in 2.4.1, chunk contains `heaps_per_fengine_per_chunk` consecutive heaps from a particular F-Engine. The step in time between timestamps of two consecutive chunks can be calculated using the following: `timestamp_step_per_chunk = heaps_per_fengine_per_chunk * timestamp_step`. 
+
+TODO: Update this section when the channel division for non-power-of-2 array sizes is decided upon.
 
 ### 2.5 Transport and readers
 
