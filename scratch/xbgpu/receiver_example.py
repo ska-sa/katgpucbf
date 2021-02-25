@@ -13,6 +13,7 @@ import katxgpu.monitor
 import katxgpu.ringbuffer
 
 # 1.1 External imports
+import argparse
 import logging
 import asyncio
 import numpy as np
@@ -20,7 +21,26 @@ import katsdpsigproc.accel as accel
 
 logger = logging.getLogger(__name__)
 
-# 2. Relevant variables declaration
+# 2. Relevant variables
+
+# 2.1 Parsing command line arguments
+
+parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxgpu receiver software.")
+parser.add_argument("--mcast_src_ip", default="239.10.10.10", help="IP address of multicast stream to subscribe to.")
+parser.add_argument("--mcast_src_port", default="7149", type=int, help="Port of multicast stream to subscribe to.")
+parser.add_argument(
+    "--src_interface", default="10.100.44.1", help="IP Address of interface that will receive the data."
+)
+args = parser.parse_args()
+print(args)
+src_multicast_ip = args.mcast_src_ip
+src_multicast_port = args.mcast_src_port
+src_interface_ip = args.src_interface
+
+print(src_multicast_ip, src_multicast_port, src_interface_ip)
+
+
+# 2.2 Hard coded variables declaration
 thread_affinity = 2
 n_ants = 64
 n_channels_total = 32768
@@ -90,7 +110,8 @@ for i in range(src_chunks_per_stream):
 # 7. Add a "transport" to the reciever. The add_udp_ibv_reader() transport tells the receiver to listen on a specific
 # ethernet interface using the ibverbs acceleration tools. Once this transport is added, the receiver stream will start
 # receiving any relevant packets off of the network.
-receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
+
+receiverStream.add_udp_ibv_reader([(src_multicast_ip, src_multicast_port)], src_interface_ip, 10000000, 0)
 
 # 8. Receive chunks asyncronously in python from the receiver.
 
