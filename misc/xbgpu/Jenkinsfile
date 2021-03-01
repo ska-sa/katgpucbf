@@ -96,17 +96,19 @@ pipeline {
     stage('Run fsim') {
       steps {
         sh 'pwd'
-        sh 'cd 3rdparty/spead2/'
+        dir('3rdparty/spead2'){
+          sh 'pwd'
+          sh 'ls'
+          sh './bootstrap.sh'
+          sh './configure'
+          sh 'make'
+          sh 'make install'
+        }
         sh 'pwd'
-        sh 'ls'
-        sh './bootstrap.sh'
-        sh './configure'
-        sh 'make'
-        sh 'make install'
-        sh 'cd ../../scratch'
-        sh 'make'
-        sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --help' //Replace this with a run once flag 
-        sh 'cd ..'
+        dir('scratch'){
+          sh 'make'
+          sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --help' //Replace this with a run once flag 
+        }
       }
     }
 
