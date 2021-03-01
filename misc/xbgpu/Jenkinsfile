@@ -92,6 +92,20 @@ pipeline {
       }
     }
 
+    stage('Run fsim') {
+      steps {
+        sh 'cd 3rdparty/spead2/'
+        sh './bootstrap.sh'
+        sh './configure'
+        sh 'make'
+        sh 'make install'
+        sh 'cd ../../scratch'
+        sh 'make'
+        sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --help' //Replace this with a run once flag 
+        sh 'cd ..'
+      }
+    }
+
     /* This stage actually runs pytest. Pytest has a number of flags that are not required but make life easier:
      * 1. -n X: Launches X threads and runs the tests in parallel across multiple threads. This speeds up testing significantly.
      *     NOTE: This can create resource contention over things like GPU RAM. If it starts becoming an issue set X to 1. I have noticed some issues where sometimes one thread just hangs and it stalls the pipeline. If this persists, remove this argument entirely
