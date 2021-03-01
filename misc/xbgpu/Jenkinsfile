@@ -92,9 +92,13 @@ pipeline {
       }
     }
 
+    // TODO: Comment what this is for
     stage('Run fsim') {
       steps {
+        sh 'pwd'
         sh 'cd 3rdparty/spead2/'
+        sh 'pwd'
+        sh 'ls'
         sh './bootstrap.sh'
         sh './configure'
         sh 'make'
