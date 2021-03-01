@@ -81,6 +81,10 @@ server, these steps should help you on your way. A
 [document](https://docs.google.com/document/d/1iiZk7aEjsAcewM-wDX3Iz9osiTiyOhr3sYYzcmsv4mM/edit?usp=sharing) describes
 in more detail how Jenkins is configured on SARAO's servers. This document is a work in progress.
 
+## Running within a Docker container
+
+TODO: Fill this in
+
 ## SPEAD2 Network Side Software
 
 This software uses the high performance SPEAD2 networking library for all high speed data transmission and reception.

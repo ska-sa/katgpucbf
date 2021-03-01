@@ -15,21 +15,23 @@ pipeline {
        */
       image 'nvidia/cuda:10.1-devel-ubuntu18.04'
 
-      /* --gpus all: This argument passes the Nvidia driver and devices from the
+      /* TODO: Update documents 
+       *
+       * --gpus all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be 
        * installed on the host.
        * 
-       * --network=host: I was having trouble getting the docker container to 
+       * --network host: I was having trouble getting the docker container to 
        * connect to the internet. This occured when I was using Jenkins in
        * conjunction with docker in docker (dind). This flag resolved that
        * issue. There are probably more elegant solutions, but I have not had a 
-       * chance to look into them.
+       * chance to look into them. TDOD: Update this comment
        *
        * -u root: The container needs to be root when running the "apt-get
        * install" commands. When that is moved to a docker file, this flag can 
-       * be removed.
+       * be removed. TODO: Update this comment
        */
-      args '--gpus all --network=host -u root '
+      args '--gpus=all --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
     }
 
   }
@@ -92,7 +94,7 @@ pipeline {
 
     /* This stage actually runs pytest. Pytest has a number of flags that are not required but make life easier:
      * 1. -n X: Launches X threads and runs the tests in parallel across multiple threads. This speeds up testing significantly.
-     *     NOTE: This can create resource contention over things like GPU RAM. If it starts becoming an issue set X to 1.
+     *     NOTE: This can create resource contention over things like GPU RAM. If it starts becoming an issue set X to 1. I have noticed some issues where sometimes one thread just hangs and it stalls the pipeline. If this persists, remove this argument entirely
      * 2. -v: Increases verbosity
      * 3. --junitxml=reports/result.xml' Writes the results to a file for later examination.
      */
