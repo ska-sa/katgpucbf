@@ -75,6 +75,8 @@ jenkins container takes care of addings this flag, but the user needs to ensure 
 installed.
 3. The Nvidia driver installed on the host machine needs to be compatible with the cuda 10.1 as the unit test will run
 on an image based on the nvidia/cuda:10.1-devel-ubuntu18.04 container.
+4. The node the server runs on requires a a Mellanox ConnectX-5 (or newer) NIC. The Mellanox OFED drivers enabling 
+ibverbs functionality on the NIC must also be installed.
 
 This should all be happening automatically on SARAO's servers, but if you fork this repo and want to set up your own CI
 server, these steps should help you on your way. A 
@@ -83,7 +85,18 @@ in more detail how Jenkins is configured on SARAO's servers. This document is a 
 
 ## Running within a Docker container
 
-TODO: Fill this in
+This repository contains a Dockerfile for building a docker image that can launch katxgpu.
+
+In order to build the container, the following command needs to be run from the top level katxgpu directory:
+`sudo docker image build -t katxgpu`
+
+In order to launch the container, the following commands needs to be run:
+`sudo docker run --gpus all --network host --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0 -it katxgpu`
+
+__NOTE__: There is quite a bit of overlap between the commands in the [Dockerfile](./Dockerfile) and the
+[Jenkinsfile](./Jenkinsfile) and the requirements for running a docker container are the same requirements as mentioned
+in the Jenkins CI section above. The explanation for the different arguments required to launch the docker container can
+be found in the Jenkinsfile.
 
 ## SPEAD2 Network Side Software
 
