@@ -95,7 +95,7 @@ routed correctly on the network.
 
 In order to reduce the load on the slow Python controlling code, multiple SPEAD heaps are combined into a single chunk
 in the high performance C++ code before being passed to Python. Python then launches GPU kernels to operate on a single 
-chunk.
+chunk. The actual chunk object contains a buffer. The buffer holds the collection of heaps.
 
 An example of why this is necessary: a single F-Engine output heap is 0.125 MiB. At 7 Gbps, ~60 000 heaps are passed to
 python every second. This is a very high load on the CPU and results in the python thread not being able to keep up. A

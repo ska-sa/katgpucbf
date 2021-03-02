@@ -11,6 +11,8 @@ needed.
 
 Additionally this class also defines a Queue object. This object has a monitor and wraps an asyncio.Queue so. Whenever
 an item is pushed to or removed from the queue it is recorded in the monitor.
+
+TODO: Look at moving this class to a different repo to avoid repitition between here and katxgpu.
 """
 
 from abc import ABC, abstractmethod

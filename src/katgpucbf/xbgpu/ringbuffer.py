@@ -14,6 +14,8 @@ Defines two classes that enable the SPEAD2 C++ ringbuffer to operate in Python:
    ---
 
 This file has been copied directly from the katfgpu documentation. The functionality is not fully understood.
+
+TODO: Look at moving this class to a different repo to avoid repitition between here and katxgpu.
 """
 
 import asyncio
