@@ -4,7 +4,8 @@ A tensor-core accelerated GPU-based X-engine.
 TODO: Update as development happens
 TODO: A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
-[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) also has a link that must be updated.
+[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp)  also has
+a link that must be updated.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.

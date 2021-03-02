@@ -41,7 +41,7 @@ pybind11::class_<R> register_ringbuffer(pybind11::module &m, const char *name, c
                 auto item = self.try_pop();
                 return std::unique_ptr<T>(&dynamic_cast<T &>(*item.release()));
             },
-            "Similar to try_pop(), but if no item is available, throws a 'ringbuffer_empty' error.")
+            "Similar to pop(), but if no item is available, throws a 'ringbuffer_empty' error.")
         .def(
             "try_push",
             [](R &self, T &item) {

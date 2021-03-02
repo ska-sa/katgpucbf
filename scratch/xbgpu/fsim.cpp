@@ -1,13 +1,13 @@
-/* This program in creates a simulator for channelised data from the MeerKAT F-Engines destined for a single X-Engine.
- * When there are N antennas, the X-Engine recieves channels from N F-Engines. This simulator emulates this behaviour
- * by interleaving packets with differently populated fields designed to mimick the different antennas. One caveat to
+/* This program creates a simulator for channelised data from the MeerKAT F-Engines destined for a single X-Engine.
+ * When there are N antennas, the X-Engine recieves channels from N F-Engines. This simulator simulates this behaviour
+ * by interleaving packets with differently-populated fields designed to mimic the different antennas. One caveat to
  * this simulator is that the data is perfectly interleaved and ordered. It does not simulate the messier environment
  * that occurs when running multiple real F-Engines all transmitting along different paths.
  *
  * This simulator was modified from the dsim.cpp document found within katfgpu:
  * https://github.com/ska-sa/katfgpu/blob/master/scratch/dsim.cpp
  *
- * This simulator uses the SPEAD2 library to transmit the F-Engine data. SPEAD2 uses ibverbs to accelerate packet packet
+ * This simulator uses the SPEAD2 library to transmit the F-Engine data. SPEAD2 uses ibverbs to accelerate packet
  * transmission. Lossless transmit rates up to 34 Gbps have been tested, but it is expected that higher rates can be
  * achieved. By default root access is required to use ibverbs.
  *
@@ -19,8 +19,8 @@
  *
  * By default the fsim transmits data at 6.8 Gbps + packet overhead. This depends on the sample rate of the antenna ADCs
  * and the number of pols. The data rate is equal to adc_rate * number_of_pols * sample_size_bits / 4 = 1712000000 * 2 *
- * 8 / 4 = 6.8 Gbps. To change the rate pass a different value into the program with the --adc_rate <adc sample rate in
- * hz> argument.
+ * 8 / 4 = 6.8 Gbps. The /4 accounts for there being 4 multicast streams for every 1 F-Engine .To change the rate pass
+ * a different value into the program with the --adc_rate <adc sample rate in hz> argument.
  *
  * This file has an "fengines" class that manages the SPEAD streams and packet transmission. The fengines object 
  * contains a 2 dimensional vector of heaps. The outer dimension represents the different F-Engines and the inner
@@ -60,7 +60,7 @@ struct options
     int n_chans_total = 32768;
     int n_time_samples_per_channel = 256;
 
-    // The variables below are not command line arguments, they are just calculated based on values provided by the
+    // The variables below are not command-line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
     size_t heap_size_bytes;
     int packet_payload_size_bytes;
@@ -98,7 +98,7 @@ static options parse_options(int argc, const char **argv)
                        "Interface address to send data out on.");
     desc.add_options()("max-heaps", make_opt(opts.iMaxHeaps), "Maximum number of heaps per F-Engine.");
     desc.add_options()("adc-rate", make_opt(opts.dAdcRate), "Sampling rate of digitisers feeding the F-Engine");
-    desc.add_options()("ttl", make_opt(opts.iTtl), "Output TTL");
+    desc.add_options()("ttl", make_opt(opts.iTtl), "Output TTL (Time to live)");
     desc.add_options()("array-size", make_opt(opts.n_ants), "Number of antennas in the array");
     desc.add_options()("fft-channels", make_opt(opts.n_chans_total),
                        "Number of channels out of the FFT. (Normally half of FFT size)");
@@ -148,7 +148,7 @@ static options parse_options(int argc, const char **argv)
     return opts;
 }
 
-/* This function parses the endpoing argument passed in the program as a command line argument.
+/* This function parses the endpoint argument passed in the program as a command line argument.
  *
  * It seperates the endpoint into its multicast ip address and port number and uses this to create an endpoint object.
  *
@@ -253,10 +253,10 @@ struct heap_data
 
                 int iSampleIndexBase =
                     c * opts.n_time_samples_per_channel * n_pols * complexity + t * n_pols * complexity;
-                pu8Data[iSampleIndexBase + 0] = (int8_t)dSampleValuePol0Real;
-                pu8Data[iSampleIndexBase + 1] = (int8_t)dSampleValuePol0Imag;
-                pu8Data[iSampleIndexBase + 2] = (int8_t)dSampleValuePol1Real;
-                pu8Data[iSampleIndexBase + 3] = (int8_t)dSampleValuePol1Imag;
+                pu8Data[iSampleIndexBase + 0] = static_cast<int8_t>(dSampleValuePol0Real);
+                pu8Data[iSampleIndexBase + 1] = static_cast<int8_t>(dSampleValuePol0Imag);
+                pu8Data[iSampleIndexBase + 2] = static_cast<int8_t>(dSampleValuePol1Real);
+                pu8Data[iSampleIndexBase + 3] = static_cast<int8_t>(dSampleValuePol1Imag);
             }
         }
     }
@@ -283,7 +283,7 @@ struct fengines
     std::int64_t i64HeapsPerFEngine;
 
     // SPEAD2 has its own set of threads that manage transmitting data. When SPEAD2 finishes sending a heap, it queues a
-    // handler on this IO loops that is then called.
+    // handler on this IO loop that is then called.
     boost::asio::io_service ioService;
 
     // This vector of vectors stores all the heaps. The outer vector will have one entry for each F-Engine and the inner
@@ -338,9 +338,9 @@ struct fengines
         const options &opts, const std::vector<std::vector<heap_data>> &vvAllHeaps)
     {
         std::vector<std::pair<const void *, std::size_t>> vMemoryRegions;
-        for (const auto &single_fengine_heaps : vvAllHeaps)
+        for (const std::vector<heap_data> &vSingleFengineHeaps : vvAllHeaps)
         {
-            for (const auto &heap : single_fengine_heaps)
+            for (const heap_data &heap : vSingleFengineHeaps)
             {
                 vMemoryRegions.emplace_back(heap.pu8Data.get(), opts.heap_size_bytes);
             }
@@ -388,7 +388,7 @@ struct fengines
          */
         std::vector<spead2::send::heap_reference> vHeapsToInterleave;
         vHeapsToInterleave.reserve(iNumAnts);
-        for (int ulFEngineIndex = 0; ulFEngineIndex < iNumAnts; ulFEngineIndex++)
+        for (size_t ulFEngineIndex = 0; ulFEngineIndex < iNumAnts; ulFEngineIndex++)
         {
             vvHeaps[ulFEngineIndex][iNextHeap]
                 .heap.get_item(vvHeaps[ulFEngineIndex][iNextHeap].timestampHandle)

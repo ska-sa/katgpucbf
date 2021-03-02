@@ -7,7 +7,7 @@ be used for testing the receiver in once process. The two transports are an inpr
 inproc transport is more flexible but requires porting the inproc code to katxgpu. So we use the buffer one instead.
 It is more limited but easier to work with. One downside of the buffer transport is that it cannot interleave packets
 from different antennas. This functionality has not yet been added to the buffer transport but it is available in the
-buffer transport.
+inproc transport.
 """
 
 # 1. Import local modules
@@ -33,6 +33,8 @@ TIMESTAMP_ID = 0x1600
 FENGINE_ID = 0x4101
 CHANNEL_OFFSET = 0x4103
 DATA_ID = 0x4300
+
+default_spead_flavour = {"version": 4, "item_pointer_bits": 64, "heap_address_bits": 48, "bug_compat": 0}
 
 # 3.2 Explicit note a complex sample has real and imaginay samples.
 complexity = 2
@@ -102,18 +104,30 @@ def createTestObjects(
         thread_pool,
         spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
     )
-    del thread_pool
+    del thread_pool  # This line is copied from the SPEAD2 examples.
 
     # 3. Create ItemGroup and add all the required fields.
-    ig = spead2.send.ItemGroup(flavour=spead2.Flavour(4, 64, 48, 0))
-    ig.add_item(TIMESTAMP_ID, "timestamp", "timestamp description", shape=[], format=[("u", 48)])
-    ig.add_item(FENGINE_ID, "fengine id", "F-Engine heap is received from", shape=[], format=[("u", 48)])
+    ig = spead2.send.ItemGroup(flavour=spead2.Flavour(**default_spead_flavour))
+    ig.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "timestamp description",
+        shape=[],
+        format=[("u", default_spead_flavour["heap_address_bits"])],
+    )
+    ig.add_item(
+        FENGINE_ID,
+        "fengine id",
+        "F-Engine heap is received from",
+        shape=[],
+        format=[("u", default_spead_flavour["heap_address_bits"])],
+    )
     ig.add_item(
         CHANNEL_OFFSET,
         "channel offset",
         "Value of first channel in collections stored here",
         shape=[],
-        format=[("u", 48)],
+        format=[("u", default_spead_flavour["heap_address_bits"])],
     )
     ig.add_item(DATA_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
     # 3.1 Adding padding to header so it is the required width.
@@ -123,7 +137,7 @@ def createTestObjects(
             f"padding {i}",
             "Padding field {i} to align header to 256-bit boundary.",
             shape=[],
-            format=[("u", 48)],
+            format=[("u", default_spead_flavour["heap_address_bits"])],
         )
     # 3.2 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
     # for the purposes of this test.
@@ -139,7 +153,7 @@ def createTestObjects(
     ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
 
     # 4.3 Create Receiver
-    thread_affinity = 2
+    thread_affinity = 2  # 2 is chosen at random.
     receiverStream = recv.Stream(
         n_ants,
         n_channels_per_stream,
