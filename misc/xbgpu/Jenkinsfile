@@ -3,7 +3,11 @@
  * file. However in the katxgpu case, the Jenkins server needs access to a GPU. 
  * This means that the docker engine being used needs to have been configured to
  * use the Nvidia Container Runtime and the node the container run on needs a 
- * Nvidia GPU with the Nvidia Driver installed.
+ * Nvidia GPU with the Nvidia Driver installed. 
+ *
+ * Additionally the Jenkins server also needs access to a Mellanox NIC that 
+ * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
+ * container using specific flags.
  */
  
 pipeline {
@@ -11,25 +15,34 @@ pipeline {
     docker {
       /* This nvidia/cuda:10.1-devel-ubuntu18.04 docker image contains the CUDA 
        * developement environment which is required to compile the kernels used
-       * by PyCUDA.
+       * by PyCUDA. 
        */
       image 'nvidia/cuda:10.1-devel-ubuntu18.04'
 
-      /* TODO: Update documents 
+      /* A number of arguments need to be  specified in order for the container
+       * to luanch correctly.
        *
-       * --gpus all: This argument passes the Nvidia driver and devices from the
+       * --gpus=all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be 
        * installed on the host.
        * 
-       * --network host: I was having trouble getting the docker container to 
-       * connect to the internet. This occured when I was using Jenkins in
-       * conjunction with docker in docker (dind). This flag resolved that
-       * issue. There are probably more elegant solutions, but I have not had a 
-       * chance to look into them. TDOD: Update this comment
+       * --network=host: The docker container needs access to the internet to
+       * install packages and an interface to transmit test networking code.
+       * This command passes all the host interfaces to the container to be 
+       * used as required.
        *
-       * -u root: The container needs to be root when running the "apt-get
-       * install" commands. When that is moved to a docker file, this flag can 
-       * be removed. TODO: Update this comment
+       * -u=root: The container needs to be root when running the "apt-get
+       * install" commands. Additionally, programs running with ibverbs 
+       * generally need to be run as root unless the CAP_NET_RAW capability
+       * flag is set (Have not looked into how to do that). 
+       *
+       * -ulimit=memlock=-1: Not sure what this is for. The author of SPEAD2
+       * recommended that this flag be here.
+       *
+       * --device=/dev/infiniband/rdma_cm and --device=/dev/infiniband/uverbs0:
+       * These flags pass the drivers required for ibverbs to the container.
+       * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
+       * 2 etc. The correct once needs to be specified.
        */
       args '--gpus=all --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
     }
@@ -88,35 +101,58 @@ pipeline {
       steps {
         sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
         sh 'pip3 install -e .'
-        sh 'pip3 install -e .' //Have to install twice for some reason or else something does not link properly - not sure what the reason for this is
+        sh 'pip3 install -e .' //Have to install twice for some reason or else something does not link properly - not sure what the reason for this is. A ticket is open to investigate this.
       }
     }
 
-    // TODO: Comment what this is for
+    /* This test verifies that the fsim can send a burst of traffic on the
+     * network. Currently no unit tests run on the network, so this stage
+     * serves to catch a few issues that could be missed by the unit tests when
+     * it comes to networking  This stage verifies two things:
+     * 1. SPEAD2 normaly installs with ibverbs settings enabled but under some
+     *    conditions SPEAD2 will not install ibverbs functions. When running
+     *    make on the fsim, an error will be thrown if SPEAD2 does not install
+     *    correctly.
+     * 2. The commands required to to run a docker container that makes use of
+     *    ibverbs are not trivial to determine. Attempting to send a burst of
+     *    data out on the network with the fsim will quickly reveal if there are
+     *    any issues with mechanism
+     */
     stage('Run fsim') {
       steps {
-        sh 'pwd'
+        // Install SPEAD2 C++ library so that we can install the fsim
         dir('3rdparty/spead2'){
-          sh 'pwd'
-          sh 'ls'
           sh './bootstrap.sh'
           sh './configure'
           sh 'make'
           sh 'make install'
         }
-        sh 'pwd'
+        /* Make and run the fsim. NOTE: The interface IP has been hardcoded to
+         * 10.100.44.1. This corresponds to the 100 GBE interface on qgpu02
+         * within the SARAO test lab. If testing will happen on a different
+         * machine, this interface needs to be changed. An ideal way of
+         * running this test would be for the IP address for an interface
+         * supporting ibverbs to be determined automatically. This would make
+         * the test machine agnostic.
+         */
         dir('scratch'){
           sh 'make'
-          sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --help' //Replace this with a run once flag 
+          sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --run-once=true'
         }
       }
     }
 
-    /* This stage actually runs pytest. Pytest has a number of flags that are not required but make life easier:
-     * 1. -n X: Launches X threads and runs the tests in parallel across multiple threads. This speeds up testing significantly.
-     *     NOTE: This can create resource contention over things like GPU RAM. If it starts becoming an issue set X to 1. I have noticed some issues where sometimes one thread just hangs and it stalls the pipeline. If this persists, remove this argument entirely
+    /* This stage actually runs pytest. Pytest has a number of flags that are
+     * not required but make life easier:
+     * 1. -n X: Launches X threads and runs the tests in parallel across
+     *     multiple threads. This speeds up testing significantly. NOTE: This
+     *     can create resource contention over things like GPU RAM. If it
+     *     starts becoming an issue set X to 1. I have noticed an issue once
+     *     where sometimes one thread got stuck and it stalled the pipeline.
+     *     If this persists, remove this argument entirely
      * 2. -v: Increases verbosity
-     * 3. --junitxml=reports/result.xml' Writes the results to a file for later examination.
+     * 3. --junitxml=reports/result.xml' Writes the results to a file for later
+     *    examination.
      */
     stage('Run pytest') {
       steps {

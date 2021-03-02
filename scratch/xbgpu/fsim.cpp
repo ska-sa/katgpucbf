@@ -59,6 +59,7 @@ struct options
     int n_chans_per_output_stream = 128;
     int n_chans_total = 32768;
     int n_time_samples_per_channel = 256;
+    bool bRunOnce = false;
 
     // The variables below are not command line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
@@ -106,6 +107,8 @@ static options parse_options(int argc, const char **argv)
                        "Each F-Engine output substream transmits a subset of the FFT channels.");
     desc.add_options()("samples-per-channel", make_opt(opts.n_time_samples_per_channel),
                        "The F-Engine cornerturn groups a number of samples into each channel per packet.");
+    desc.add_options()("run-once", make_opt(opts.bRunOnce),
+                       "Transmit a single collection of heaps before exiting.");
     hidden.add_options()("address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
                          "destination address, in form x.x.x.x:port");
     all.add(desc);
@@ -298,6 +301,9 @@ struct fengines
     // Step between timestamps of succesive heaps belonging to the same antenna.
     const std::int64_t iTimestampStep;
 
+    // Only transmit a single collection of heaps and then end the transmission.
+    const bool bRunOnce;
+
     // SPEAD 2 stream that every heap will be queued on.
     spead2::send::udp_ibv_stream stream;
 
@@ -312,7 +318,7 @@ struct fengines
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address)
         : i64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), iNumAnts(opts.n_ants),
-          iTimestampStep(opts.timestamp_step),
+          iTimestampStep(opts.timestamp_step), bRunOnce(opts.bRunOnce),
           stream(ioService,
                  spead2::send::stream_config()
                      .set_max_packet_size(opts.packet_payload_size_bytes + packet_header_size_bytes)
@@ -428,7 +434,7 @@ struct fengines
             std::cerr << "Error: " << ec;
             std::exit(1);
         }
-        else
+        else if (!bRunOnce)
         {
             send_next();
         }
@@ -445,9 +451,10 @@ int main(int argc, const char **argv)
     std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts);
 
     fengines f(opts, endpoints, interfaceAddress);
+    std::cout << "Beginning fsim data transmission..." << std::endl;
     f.ioService.post(std::bind(&fengines::send_next, &f));
 
-    // Will run forever.
+    // Will run forever unless bRunOnce is set to true.
     f.ioService.run();
     return 0;
 }
