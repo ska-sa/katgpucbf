@@ -17,7 +17,7 @@ The Streaming Protocol for Exchanging Astronomical Data (SPEAD) is a protocol fo
 over a network at high data rates. SPEAD functions as a layer on top of UDP. The documentation for SPEAD can be found
 [here](https://casper.ssl.berkeley.edu/wiki/SPEAD).
 
-SPEAD transmits logical collections of data known as heaps. A heap consists of multiple UDP packets. A SPEAD 
+SPEAD transmits logical collections of data known as heaps. A heap consists of one or more UDP packets. A SPEAD 
 transmitter will decompose a heap into packets and the receiver will collect all the packets and reassemble the heap.
 
 The heaps and corresponding packet formats received by katxgpu have already been defined. This 
@@ -27,7 +27,7 @@ detail.
 ### 1.2 SPEAD2
 
 SPEAD2 is a software package that implements the SPEAD protocol. It can be used to both send and receive SPEAD heaps.
-SPEAD2 is designed to be very high performance, able to receive and transmit data losslessly at 100 GbE data rates when
+SPEAD2 is designed to be very high-performance, able to receive and transmit data losslessly at 100 GbE data rates when
 used correctly.
 
 SPEAD2 has both Python and C++ bindings. Python is the conventional way to use SPEAD2 with C++ being used to implement 
@@ -65,10 +65,11 @@ TODO: List the functions required to specify what transport to use for transmitt
 #### 1.2.2 ibverbs
 
 SPEAD2 implements a transport using the ibverbs library for high performance networking. This is the udp_ibv transport.
-Using ibverbs for ethernet NIC acceleration is not very well documented online. SARAO has produced this 
+The udp_ibv transport uses ibverbs both for sending and receiving data. Using ibverbs for ethernet NIC acceleration is 
+not very well documented online. SARAO has produced this 
 [ibverbs sample project](https://github.com/ska-sa/dc_sand/tree/master/ibverbs_sample_project) to demonstrate how to 
 use ibverbs and explain how it functions. A deep understanding of ibverbs is not required here as SPEAD2 handles all
-of the complexity. 
+of the complexity.
 
 Ibverbs requires Mellanox ConnectX NICs and the Mellanox OFED drivers to be installed in order to function. This is
 explained in more detail in the top level [README](../README.md).
@@ -81,8 +82,8 @@ When a heap is received or sent, SPEAD2 puts an event on a specified IO loop ind
 ### 1.3 Multicast
 
 All SARAO SPEAD traffic is transmitted as ethernet multicast data. Ethernet multicast is not as simple as unicast. In
-general the switches need to be configured to handle multicast data (using an implementation of the PIM protocol for L3
-or the IGMP protocol for L2 networks.). A receiver also needs to subscribe to multicast data in order for the network
+general the switches need to be configured to handle multicast data (using the PIM protocol (in SARAO's case) for L3
+or the IGMP protocol for L2 networks). A receiver also needs to subscribe to multicast data in order for the network
 to transmit it to the receiver. SPEAD2 handles issuing the subscription on the server, the network needs to be
 configured to propegate these subscriptions correctly. Ethernet routes stored in the server OS need to be correctly
 configured to ensure multicast trafficis being received or transmitted through the correct interface.
@@ -181,8 +182,8 @@ the katxgpu C++ code.
 
 ### 2.3 Chunk and heap coordination and management
 
-The SPEAD2 stream creates its own thread pools which manages the internals of the SPEAD2 transports and heap assembly. 
-Tracing through these threads is a time consuming process and is not necessary to understand the katxgpu receiver. The
+The SPEAD2 stream creates its own thread pool to manage the internals of the SPEAD2 transport and heap assembly. 
+Tracing through these threads is a time-consuming process and is not necessary to understand the katxgpu receiver. The
 SPEAD2 stream interacts with the main program using callback functions. When the first packet in a heap is received, the
 SPEAD2 stream calls the `katxgpu::recv::allocator::allocate()` function. When the last packet is received, the SPEAD2
 stream calls the `katxgpu::recv::stream::heap_ready()` function. Both of these functions eventually call the
@@ -215,7 +216,7 @@ combined into a single chunk. There are `heaps_per_fengine_per_chunk` heaps per 
 like: `chunk_buffer[heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]`
 
 NOTE: While the data layout is shown here as a multidimensional array, this has only been done for conceptual purposes.
-The actual data is stored in a contigous buffer with one dimension. The user is responsible for striding throught this
+The actual data is stored in a contigous buffer with one dimension. The user is responsible for striding through this
 array correctly.
 
 ### 2.4.2 Timestamp Alignment
@@ -245,12 +246,12 @@ TODO: Sender logic still needs to be implemented. This section will be updated o
 
 ## 4. Peerdirect Support
 
-SPEAD2 provides support for Nvidias GPU Direct technology. This allows data to be copied directly from a Mellanox NIC
+SPEAD2 provides support for Nvidia's GPUDirect technology. This allows data to be copied directly from a Mellanox NIC
 to a Nvidia GPU without having to go through system memory. SPEAD2 needs to be using the udp_ibv transport to make use
-of GPU direct. By using GPU direct, the system memory bandwidth requirements are significantly reduced as the data never
+of GPUDirect. By using GPUDirect, the system memory bandwidth requirements are significantly reduced as the data never
 does not pass through system RAM.
 
-Currently GPU Direct is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server grade
+Currently GPUDirect is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server-grade
 cards (such as the A100.).
 
 TODO: Write a script demonstrating how to use Peerdirect works. Update this descrption once this script has been written.

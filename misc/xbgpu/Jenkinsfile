@@ -84,7 +84,7 @@ pipeline {
 
     stage('Install katxgpu package') {
       steps {
-        sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
+        sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations. In ubuntu 20.04 this line can be removed by running `sudo apt install python-is-python3` instead.
         sh 'pip3 install -e .'
         sh 'pip3 install -e .' //Have to install twice for some reason or else something does not link properly - not sure what the reason for this is
       }
@@ -94,15 +94,12 @@ pipeline {
      * 1. -n X: Launches X threads and runs the tests in parallel across multiple threads. This speeds up testing significantly.
      *     NOTE: This can create resource contention over things like GPU RAM. If it starts becoming an issue set X to 1.
      * 2. -v: Increases verbosity
-     * 3. --junitxml=reports/result.xml' Writes the results to a file for later examination.
      */
     stage('Run pytest') {
       steps {
-        sh 'pytest -n 10 -v --junitxml=reports/result.xml'
+        sh 'pytest -n 10 -v'
       }
     }
     
   }
 }
-
-//apt-get update && apt-get install -y git vim && git clone --branch spead2_rx_code https://github.com/ska-sa/katxgpu.git && cd katxgpu && git submodule update --init --recursive && apt-get install -y python3 python3-pip python-pybind11 python3-dev git && apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev rdma-core && pip3 install numpy==1.19.5 jinja2 pycparser pybind11 && pip3 install -r requirements.txt && pip3 install -r requirements-dev.txt && rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python && pip3 install -e . && pip3 install -e .
