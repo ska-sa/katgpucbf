@@ -63,9 +63,9 @@ struct options
     // The variables below are not command-line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
     size_t heap_size_bytes;
-    int packet_payload_size_bytes;
-    int packets_per_heap;
-    int timestamp_step; // This is the amount the timestamp must increment between successive heaps of the same
+    size_t packet_payload_size_bytes;
+    size_t packets_per_heap;
+    size_t timestamp_step; // This is the amount the timestamp must increment between successive heaps of the same
                         // F-Engine.
 };
 
@@ -73,10 +73,10 @@ struct options
 
 static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
                                       // be consistent with the F-Engine packet simulator.
-static constexpr int n_multicast_streams_per_antenna = 4;
-static constexpr int n_pols = 2;                    // Dual polarisation antennas
-static constexpr int complexity = 2;                // real and imaginary components
-static constexpr int packet_header_size_bytes = 96; // Nine 8-byte header fields and three padding fields.
+static constexpr size_t n_multicast_streams_per_antenna = 4;
+static constexpr size_t n_pols = 2;                    // Dual polarisation antennas
+static constexpr size_t complexity = 2;                // real and imaginary components
+static constexpr size_t packet_header_size_bytes = 96; // Nine 8-byte header fields and three padding fields.
 
 // The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value means that the ItemPointers will have 48
 // bits representing the immediate value or pointer to payload. The other 16 bits will be used for the item ID.
@@ -88,11 +88,11 @@ template <typename T> static boost::program_options::typed_value<T> *make_opt(T 
     return boost::program_options::value<T>(&var)->default_value(var);
 }
 
-// Parse command line parameters
+// Parse command line parameters - this has been kludged  together. It can probably be done in a neater way.
 static options parse_options(int argc, const char **argv)
 {
     options opts;
-    boost::program_options::options_description desc, hidden, all("F- to X- Engine simulator.");
+    boost::program_options::options_description desc, hidden, all("F- to X- Engine simulator");
     desc.add_options()("help", "produce help message");
     desc.add_options()("interface", boost::program_options::value(&opts.strInterface)->required(),
                        "Interface address to send data out on.");
@@ -280,7 +280,7 @@ struct fengines
 {
     // This variable needs to go first so it is initialised first - it is used during the initialisation of other
     // variables.
-    std::int64_t i64HeapsPerFEngine;
+    std::uint64_t u64HeapsPerFEngine;
 
     // SPEAD2 has its own set of threads that manage transmitting data. When SPEAD2 finishes sending a heap, it queues a
     // handler on this IO loop that is then called.
@@ -291,12 +291,12 @@ struct fengines
     std::vector<std::vector<heap_data>> vvHeaps;
 
     // General variables for coordinating sending of heaps.
-    const std::int64_t iNumAnts;
-    std::int64_t i64Timestamp = 0;
-    std::int64_t iNextHeap = 0;
+    const std::uint64_t uNumAnts;
+    std::uint64_t u64Timestamp = 0;
+    std::uint64_t uNextHeap = 0;
 
     // Step between timestamps of succesive heaps belonging to the same antenna.
-    const std::int64_t iTimestampStep;
+    const std::int64_t u64TimestampStep;
 
     // SPEAD 2 stream that every heap will be queued on.
     spead2::send::udp_ibv_stream stream;
@@ -311,8 +311,8 @@ struct fengines
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address)
-        : i64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), iNumAnts(opts.n_ants),
-          iTimestampStep(opts.timestamp_step),
+        : u64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), uNumAnts(opts.n_ants),
+          u64TimestampStep(opts.timestamp_step),
           stream(ioService,
                  spead2::send::stream_config()
                      .set_max_packet_size(opts.packet_payload_size_bytes + packet_header_size_bytes)
@@ -387,17 +387,17 @@ struct fengines
          * heap references as required.
          */
         std::vector<spead2::send::heap_reference> vHeapsToInterleave;
-        vHeapsToInterleave.reserve(iNumAnts);
-        for (size_t ulFEngineIndex = 0; ulFEngineIndex < iNumAnts; ulFEngineIndex++)
+        vHeapsToInterleave.reserve(uNumAnts);
+        for (size_t ulFEngineIndex = 0; ulFEngineIndex < uNumAnts; ulFEngineIndex++)
         {
-            vvHeaps[ulFEngineIndex][iNextHeap]
-                .heap.get_item(vvHeaps[ulFEngineIndex][iNextHeap].timestampHandle)
-                .data.immediate = i64Timestamp;
+            vvHeaps[ulFEngineIndex][uNextHeap]
+                .heap.get_item(vvHeaps[ulFEngineIndex][uNextHeap].timestampHandle)
+                .data.immediate = u64Timestamp;
             /* The f_engine_index argument tells SPEAD2 which substream to queue the heap on. It is important that each
              * F-Engine gets its own unique substream index as heaps with different indexes will be interleaved which is
              * desired.
              */
-            vHeapsToInterleave.emplace_back(vvHeaps[ulFEngineIndex][iNextHeap].heap, -1, ulFEngineIndex);
+            vHeapsToInterleave.emplace_back(vvHeaps[ulFEngineIndex][uNextHeap].heap, -1, ulFEngineIndex);
         }
 
         bool bQueueSuccesful =
@@ -410,11 +410,11 @@ struct fengines
             std::exit(1);
         }
 
-        i64Timestamp += iTimestampStep;
-        iNextHeap++;
+        u64Timestamp += u64TimestampStep;
+        uNextHeap++;
 
-        if (iNextHeap == i64HeapsPerFEngine)
-            iNextHeap = 0;
+        if (uNextHeap == u64HeapsPerFEngine)
+            uNextHeap = 0;
     }
 
     /* Callback function called when SPEAD2 finishes sending a collection of heaps sent by @ref send_next().
