@@ -10,6 +10,9 @@
 # See the Jenkinsfile or README.md file in this repo for an explanation of the 
 # different flags above. All these flags are required. Additionally the user
 # within the container must be root for ibverbs programs to run.
+#
+# TODO: Look at best practices for the "COPY . ." command. It seems a bit clunky
+# at the moment. 
 
 # 1. Use the nvidia development image as a base. This gives access to all 
 # nvidia and cuda runtime and development tools.

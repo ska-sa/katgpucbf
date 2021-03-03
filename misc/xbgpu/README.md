@@ -2,6 +2,7 @@
 A tensor-core accelerated GPU-based X-engine.
 
 TODO: Update as development happens
+TODO: Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
