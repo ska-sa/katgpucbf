@@ -5,7 +5,7 @@
  * 1. katxgpu::recv::chunk - A chunk is a class containing a buffer and associated metadata where a number of
  * received heaps are stored in a single contigous manner.
  * 2. katxgpu::recv::stream - A stream manages the process of receiving network packets and reassembling them
- * into SPEAD heaps. These heaps are then copied to the relevant chunk.
+ * into SPEAD heaps. The stream then copies these heaps into the relevant chunk.
  * 3. katxgp::recv::allocator - This allocator is used for telling the SPEAD receiver where in a chunk a specific heap
  * must be copied. This allocator also determines the specific chunk that this heap belongs to. The allocator is very
  * lightweight with most of its logic being shifted to sub-functions within the katxgpu::recv::stream class.
@@ -20,6 +20,7 @@
  * TODO: Move 'pybind11::buffer_info view' and associated functions to py_recv.h
  * TODO: Implement logging slightly differently - at the moment, the SPEAD2 logger is used. It may be worthwhile to have
  * a seperate katxgpu logger to seperate a SPEAD2 log from a katxgpu log.
+ * TODO: Class member variables should start with an m_ for clarity. 
  */
 
 #ifndef KATXGPU_RECV_H
@@ -155,7 +156,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      */
     std::stack<std::unique_ptr<chunk>> free_chunks;
 
-    /* Chunks that are activly being assembled from multiple heaps are stored in this queue. The receiver can be
+    /* Chunks that are actively being assembled from multiple heaps are stored in this queue. The receiver can be
      * assembling multiple chunks at any one time. Once a chunk is fully assembled, the receiver will move it to the
      * ringbuffer object.
      */
@@ -166,9 +167,9 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      */
     ringbuffer_t &ringbuffer;
 
-    /* This view is only used during unit testing. It stores the python view of the buffer containing simulated packets.
-     * More detail in "add_buffer_reader()" function. I do not think that this file is the best place for this object.
-     * Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would need to be
+    /* TODO: This view is only used during unit testing. It stores the python view of the buffer containing simulated
+     * packets. More detail in "add_buffer_reader()" function. I do not think that this file is the best place for this
+     * object. Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would need to be
      * modified too to accomodate this change. I would need to move a bunch of other functions around to make that
      * happen, so I will wait until I have a spare moment.
      */

@@ -1,11 +1,19 @@
 # katxgpu
 A tensor-core accelerated GPU-based X-engine.
 
-TODO: Update as development happens
-TODO: A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
+## TODOs
+
+katxgpu is still in early development with more modules being added every few weeks. Attempts are made for each of these
+modules to be complete, but when there are lingering issues that eventually need to be resolved but are not critical
+to development. Many of these TODOs are listed in the relevant files, but sometimes the TODO has no associated file.
+In this case the TODO is listed here.
+1. A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
-[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp)  also has
-a link that must be updated.
+[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) and [fsim.cpp](scratch/fsim.cpp)  also
+have links that must be updated.
+2. When installing katxgpu for the first time the command `pip install -e .` needs to be run twice instead of once, the
+`-e` flag is also required. This needs to be diagnosed. The first step should be to look at the setup.py files in
+katxgpu and katfgpu and examine the differences.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
