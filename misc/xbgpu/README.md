@@ -88,11 +88,38 @@ in more detail how Jenkins is configured on SARAO's servers. This document is a 
 
 This repository contains a Dockerfile for building a docker image that can launch katxgpu.
 
-In order to build the container, the following command needs to be run from the top level katxgpu directory:
-`sudo docker image build -t katxgpu`
+In order to build the container, the following command needs to be run from the top level katxgpu directory: 
+`docker image build -t katxgpu .`
 
-In order to launch the container, the following commands needs to be run:
-`sudo docker run --gpus all --network host --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0 -it katxgpu`
+To run the container and open a terminal within the container run:
+```
+docker run \
+    --gpus all \
+    --network host \
+    --ulimit=memlock=-1 \
+    --device=/dev/infiniband/rdma_cm \
+    --device=/dev/infiniband/uverbs0 \
+    -it \
+    katxgpu
+```
+
+
+To launch the [receiver_example.py](scratch/receiver_example.py) in a container run the following command:
+```
+docker run \
+    --gpus all \
+    --network host \
+    --ulimit=memlock=-1 \
+    --device=/dev/infiniband/rdma_cm \
+    --device=/dev/infiniband/uverbs0 \
+    --rm \
+    -d \
+    --name=katxgpu_container \
+    katxgpu \
+    python scratch/receiver_example.py
+```
+
+To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_containe`
 
 __NOTE__: There is quite a bit of overlap between the commands in the [Dockerfile](./Dockerfile) and the
 [Jenkinsfile](./Jenkinsfile) and the requirements for running a docker container are the same requirements as mentioned
