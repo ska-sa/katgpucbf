@@ -8,6 +8,8 @@ inproc transport is more flexible but requires porting the inproc code to katxgp
 It is more limited but easier to work with. One downside of the buffer transport is that it cannot interleave packets
 from different antennas. This functionality has not yet been added to the buffer transport but it is available in the
 inproc transport.
+
+TODO: Turn createTestObjects() into a pytest fixture.
 """
 
 # 1. Import local modules
@@ -153,7 +155,7 @@ def createTestObjects(
     ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
 
     # 4.3 Create Receiver
-    thread_affinity = 2  # 2 is chosen at random.
+    thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
     receiverStream = recv.Stream(
         n_ants,
         n_channels_per_stream,

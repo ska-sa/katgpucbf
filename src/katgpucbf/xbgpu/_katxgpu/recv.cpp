@@ -196,6 +196,10 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         // chunks list. We can only have max_active numbers of chunks on the queue at any one time. So we need to make
         // room if needed. Usually the next chunk will be the next sequential chunk. If not, we flush all chunks rather
         // than leaving active_chunks discontiguous.
+        //
+        // This discontiunity will happen very rarely as data is being received from multiple senders and the chance of
+        // all senders being down is negligible. The most likely cause of this issue would be an interruption in the
+        // link between the katxgpu host server and the network.
         std::size_t max_active = 2;
         std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
 
@@ -347,8 +351,8 @@ void stream::stop_received()
 
 void stream::add_buffer_reader(pybind11::buffer buffer)
 {
-    // This view object needs to held as long as receiver is making use of the buffer. If it is released, Python will
-    // release the buffer back to the OS causing segfaults when C++ tries to access the buffer. Took me a while to
+    // This view object needs to be held as long as the receiver is making use of the buffer. If it is released, Python
+    // will release the buffer back to the OS causing segfaults when C++ tries to access the buffer. Took me a while to
     // figure this out - dont make my mistakes.
     view = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the

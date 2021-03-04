@@ -38,7 +38,7 @@ src_interface_ip = args.src_interface
 print(f"Subscribing to {src_multicast_ip}:{src_multicast_port} on the {src_interface_ip} interface.")
 
 
-# 2.2 Adjustable parameters - The exact desciption of these parameters can be found in the documentation for the
+# 2.2 Adjustable parameters - The description of these parameters can be found in the documentation for the
 # katxgpu._katxgpu.recv.Stream object.
 thread_affinity = 2
 n_ants = 64
@@ -52,7 +52,7 @@ heaps_per_fengine_per_chunk = 10
 # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
 # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
-# argument to the reciever for cases where the n_samples_per_channel changes across streams (likely for non-power-of-
+# argument to the reciever for cases where the n_channels_per_stream changes across streams (likely for non-power-of-
 # two array sizes).
 timestamp_step = n_channels_total * 2 * n_samples_per_channel
 
