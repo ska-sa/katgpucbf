@@ -281,7 +281,7 @@ def test_multikernel_accumulation(num_ants):
     expected_output_real = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
     expected_output_imaginary = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
     output_value_i64 = (expected_output_imaginary * n_samples_per_channel) << 32
-    output_value_i64 = output_value_i64 + (expected_output_real * n_samples_per_channel)
+    output_value_i64 += (expected_output_real * n_samples_per_channel)
     np.testing.assert_equal(bufVisibilities_host, output_value_i64)
 
     # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is
@@ -301,5 +301,5 @@ def test_multikernel_accumulation(num_ants):
 
     # 8. Check that multikernel accumulation produces the correct results
     output_value_i64 = (expected_output_imaginary * n_samples_per_channel * n_kernel_launches) << 32
-    output_value_i64 = output_value_i64 + (expected_output_real * n_samples_per_channel * n_kernel_launches)
+    output_value_i64 += (expected_output_real * n_samples_per_channel * n_kernel_launches)
     np.testing.assert_equal(bufVisibilities_host, output_value_i64)
