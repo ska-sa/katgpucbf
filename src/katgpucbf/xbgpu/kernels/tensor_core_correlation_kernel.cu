@@ -172,7 +172,9 @@ __device__ inline float2 make_complex(float real, float imag)
 template <typename T> __device__ inline void storeVisibility(Visibilities visibilities, unsigned channel, unsigned baseline, unsigned statY, unsigned statX, unsigned tcY, unsigned tcX, unsigned polY, unsigned polX, bool skipCheckY, bool skipCheckX, T sumR, T sumI)
 {
   if ((skipCheckX || statX + tcX <= statY + tcY) && (skipCheckY || statY + tcY < NR_STATIONS))
-    visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] = make_complex(sumR, sumI);
+  visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] = 
+      make_complex(visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR, 
+                   visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y + sumI);
 }
 
 
