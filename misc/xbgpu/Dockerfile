@@ -64,6 +64,3 @@ RUN pip3 install -r requirements-dev.txt
 RUN rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python 
 
 RUN pip3 install -e .
-# NOTE: This command needs to be run twice for some unknown reason. This is
-# being investigated.
-RUN pip3 install -e . 
