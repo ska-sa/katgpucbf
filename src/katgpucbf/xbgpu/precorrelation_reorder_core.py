@@ -26,7 +26,8 @@ class PreCorrelationReorderCoreTemplate:
     This object will be used to create a PreCorrelationReorderCore object that will be able to run the created kernel.
     """
 
-    def __init__(self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int) -> None:
+    def __init__(self, context: cuda.Context, n_ants: int, n_channels: int,
+                    n_samples_per_channel: int, n_batches: int) -> None:
         """
         Initialise the PreCorrelationReorderCoreTemplate class and compile the pre-correlation reorder kernel.
 
@@ -41,14 +42,16 @@ class PreCorrelationReorderCoreTemplate:
             The number of frequency channels to be processed.
         n_samples_per_channel: int
             The number of time samples to be processed per frequency channel.
+        n_batches: int
+            The number of reorders to complete.
         """
         # 1. Set accesible member functions that are used to calculate indices to the input and output buffers.
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_samples_per_channel = n_samples_per_channel
         self.n_polarizations = 2  # Hardcoded to 2. No other values are supported
-        self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
-
+        self.n_batches = n_batches
+        
         # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
@@ -79,24 +82,18 @@ class PreCorrelationReorderCoreTemplate:
             self.n_polarizations,
             self.n_times_per_block,
         )
+
+        # Matrix size is the same for the Input and Output data shapes
+        self.matrix_size = self.n_ants * self.n_channels * self.n_samples_per_channel * self.n_polarizastions
+        # Seeing as we can't really define constants in Python
+        THREADS_PER_BLOCK = 1024
         
-        # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
-        # of the object.
-        if self._n_ants_per_block == 48:
-            self.n_blocks = int(
-                ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
-                * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
-                // 2
-            )
-        elif self._n_ants_per_block == 64:
-            self.n_blocks = int(
-                ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
-                * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
-            )
-        else:
-            raise ValueError(
-                "ants_per_block must equal either 64 or 48, currently equal to {0}.".format(self._n_ants_per_block)
-            )
+        # 4. Calculate the number of thread blocks to launch per kernel call 
+        # - This remains constant for the lifetime of the object.
+        # - Unlike the Tensor Core Correlation kernel, the size of this kernel does not depend on the number of ants_per_block
+        #   Rather, it simply depends on the individual matrix size and the number of batches.
+        # - But also, how should I error-check this value? (As in, bounds/values, not method)
+        self.n_blocks = (self.matrix_size + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK
 
         # 5. Compile the kernel
         program = accel.build(
@@ -108,6 +105,7 @@ class PreCorrelationReorderCoreTemplate:
                 "n_samples_per_channel": self.n_samples_per_channel,
                 "n_polarizastions": self.n_polarizations,
                 "n_times_per_block": self.n_times_per_block,
+                "n_batches": self.n_batches,
                 # "sample_bitwidth": self._sample_bitwidth,
                 # "n_ants_per_block": self._n_ants_per_block,
                 # "n_baselines": self.n_baselines,
@@ -140,10 +138,7 @@ class PreCorrelationReorderCore(accel.Operation):
     In 8-bit input mode times_per_block is equal to 16.
 
     Each input element is n complex 8-bit integer sample. Numpy does not support 8-bit complex numbers, 
-    so the input sample array has dtype of np.int16 as a placeholder. With 8-bit input samples, the value -128i 
-    is not supported by the kernel as there is no 8-bit complex conjugate representation of this number.
-    Passing -128i into the kernel will produce incorrect values at the output.
-
+    so the input sample array has dtype of np.int16 as a placeholder.
     """
 
     def __init__(self, template: PreCorrelationReorderCoreTemplate, command_queue: accel.AbstractCommandQueue) -> None:
@@ -164,8 +159,8 @@ class PreCorrelationReorderCore(accel.Operation):
             [outReordered_buffer.buffer, inSamples_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
             # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * 1),
-            local_size=(32, 2, 2),
+            global_size=(32 * self.template.n_blocks, self.template.n_batches, 1),
+            local_size=(32, 32, 1),
         )
 
     @staticmethod

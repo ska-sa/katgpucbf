@@ -41,16 +41,17 @@
 #define NR_SAMPLES_PER_CHANNEL ${n_samples_per_channel}
 #define NR_POLARIZATIONS ${n_polarizastions}
 #define NR_TIMES_PER_BLOCK $(n_times_per_block)
+#define NR_BATCHES $(n_batches)
 
 // Defines
 // - Altered for ease of visualisation
 /*
-#define ANTS 64
-#define CHANS 128
-#define TIME_SAMPLES_PER_CHAN 256
-#define POLS 2
-#define TIMES_PER_BLOCK 16
-#define BATCH 10
+#define NR_STATIONS 64
+#define NR_CHANNELS 128
+#define NR_SAMPLES_PER_CHANNEL 256
+#define NR_POLARIZATIONS 2
+#define NR_TIMES_PER_BLOCK 16
+#define NR_BATCHES 10
 */
 
 #define INPUT_RATE 28    // Gbps
@@ -101,31 +102,31 @@ void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
     // 2. Calculate indices for reorder
     // 2.1. Calculate 'current'/original indices for each dimension
     //      - Matrix Stride should be the same value for Original and Reordered matrices
-    iMatrixStride_y = iBatchCounter * ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS;
-    iAntIndex = iThreadIndex_x / (CHANS * TIME_SAMPLES_PER_CHAN * POLS);
-    iRemIndex = iThreadIndex_x % (CHANS * TIME_SAMPLES_PER_CHAN * POLS);
+    iMatrixStride_y = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+    iAntIndex = iThreadIndex_x / (NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
+    iRemIndex = iThreadIndex_x % (NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
 
-    iChanIndex = iRemIndex / (TIME_SAMPLES_PER_CHAN * POLS);
-    iRemIndex = iRemIndex % (TIME_SAMPLES_PER_CHAN * POLS);
+    iChanIndex = iRemIndex / (NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
+    iRemIndex = iRemIndex % (NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
 
-    iTimeIndex = iRemIndex / POLS;
-    iRemIndex = iRemIndex % POLS;
+    iTimeIndex = iRemIndex / NR_POLARIZATIONS;
+    iRemIndex = iRemIndex % NR_POLARIZATIONS;
     // 0 = Even = Pol-0, 1 = Odd = Pol-1
     iPolIndex = iRemIndex;
 
     // 2.2. Calculate reordered matrix's indices and stride accordingly
-    iNewChanOffset = iChanIndex * (TIME_SAMPLES_PER_CHAN/TIMES_PER_BLOCK)*ANTS*POLS*TIMES_PER_BLOCK;
-    iTimeOuterIndex = iTimeIndex / TIMES_PER_BLOCK;
-    iTimeOuterOffset = iTimeOuterIndex * ANTS*POLS*TIMES_PER_BLOCK;
-    iNewAntOffset = iAntIndex * POLS*TIMES_PER_BLOCK;
-    iNewPolOffset = iPolIndex * TIMES_PER_BLOCK;
-    iTimeInnerIndex = iTimeIndex % TIMES_PER_BLOCK; // ?
+    iNewChanOffset = iChanIndex * (NR_SAMPLES_PER_CHANNEL/NR_TIMES_PER_BLOCK)*NR_STATIONS*NR_POLARIZATIONS*NR_TIMES_PER_BLOCK;
+    iTimeOuterIndex = iTimeIndex / NR_TIMES_PER_BLOCK;
+    iTimeOuterOffset = iTimeOuterIndex * NR_STATIONS*NR_POLARIZATIONS*NR_TIMES_PER_BLOCK;
+    iNewAntOffset = iAntIndex * NR_POLARIZATIONS*NR_TIMES_PER_BLOCK;
+    iNewPolOffset = iPolIndex * NR_TIMES_PER_BLOCK;
+    iTimeInnerIndex = iTimeIndex % NR_TIMES_PER_BLOCK; // ?
     
     iNewIndex = iNewChanOffset + iTimeOuterOffset + iNewAntOffset + iNewPolOffset + iTimeInnerIndex;
 
     // 3. Perform the reorder (where necessary)
     uint16_t u16InputSample;
-    if (iThreadIndex_x < (ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS))
+    if (iThreadIndex_x < (NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS))
     {
         // 3.1. Read out from the original array
         u16InputSample = *(pu16Array + iThreadIndex_x + iMatrixStride_y);
@@ -160,9 +161,9 @@ int main()
     cudaEventCreate(&eventMemcpyD2HStart);
     cudaEventCreate(&eventMemcpyD2HStop);
 
-    int iMatrixSize = ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS;
-    int iTotalElements = ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS * BATCH;
-    // int iTotalElementsOut = CHANS * (TIME_SAMPLES_PER_CHAN / TIMES_PER_BLOCK) * ANTS * POLS * TIMES_PER_BLOCK;
+    int iMatrixSize = NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+    int iTotalElements = NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS * NR_BATCHES;
+    // int iTotalElementsOut = NR_CHANNELS * (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
     // - iTotalElementsOut = iTotalElements! Just with different dimensions
 
     uint16_t *pu16Array_host, *pu16ArrayReordered_host, *pu16Array_device, *pu16ArrayReordered_device;
@@ -214,7 +215,7 @@ int main()
     // Launch kernel on iTotalElements elements
     // - Need to calculate the number of blocks required at 1024 threads-per-block
     int iNumBlocks_x = ((iMatrixSize + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK);
-    int iNumBlocks_y = BATCH;
+    int iNumBlocks_y = NR_BATCHES;
     dim3 gridSize(iNumBlocks_x, iNumBlocks_y);
 
     cudaEventRecord(eventKernelStart, stream1);
@@ -293,20 +294,20 @@ void display_1d_strided(uint16_t *pu16Array, bool bDisplayHex)
 
     int iAntOffset, iChanOffset, iTimeOffset, iMatrixOffset, iOffset;
     
-    for (iBatchCounter = 0; iBatchCounter < BATCH; iBatchCounter++)
+    for (iBatchCounter = 0; iBatchCounter < NR_BATCHES; iBatchCounter++)
     {
         printf("\n\tBatch %d\n\n", iBatchCounter);
-        iMatrixOffset = iBatchCounter * ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS;
-        for (iAntIndex = 0; iAntIndex < ANTS; iAntIndex++)
+        iMatrixOffset = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+        for (iAntIndex = 0; iAntIndex < NR_STATIONS; iAntIndex++)
         {
-            iAntOffset = iAntIndex * CHANS * TIME_SAMPLES_PER_CHAN * POLS;
-            for (iChanIndex = 0; iChanIndex < CHANS; iChanIndex++)
+            iAntOffset = iAntIndex * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+            for (iChanIndex = 0; iChanIndex < NR_CHANNELS; iChanIndex++)
             {
-                iChanOffset = iChanIndex * TIME_SAMPLES_PER_CHAN * POLS;
-                for (iTimeIndex = 0; iTimeIndex < TIME_SAMPLES_PER_CHAN; iTimeIndex++)
+                iChanOffset = iChanIndex * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+                for (iTimeIndex = 0; iTimeIndex < NR_SAMPLES_PER_CHANNEL; iTimeIndex++)
                 {
-                    iTimeOffset = iTimeIndex * POLS;
-                    for (iPolIndex = 0; iPolIndex < POLS; iPolIndex++)
+                    iTimeOffset = iTimeIndex * NR_POLARIZATIONS;
+                    for (iPolIndex = 0; iPolIndex < NR_POLARIZATIONS; iPolIndex++)
                     {
                         iOffset = iAntOffset + iChanOffset + iTimeOffset + iPolIndex;
                         if (bDisplayHex)
@@ -333,23 +334,23 @@ void display_1d_reordered(uint16_t *pu16Array, bool bDisplayHex)
     
     int iChanOffset, iTimeOffset, iAntOffset, iPolOffset, iMatrixOffset, iOffset;
 
-    for (iBatchCounter = 0; iBatchCounter < BATCH; iBatchCounter++)
+    for (iBatchCounter = 0; iBatchCounter < NR_BATCHES; iBatchCounter++)
     {
         printf("\n\tBatch %d\n\n", iBatchCounter);
-        iMatrixOffset = iBatchCounter * ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS;
-        for (iChanIndex = 0; iChanIndex < CHANS; iChanIndex++)
+        iMatrixOffset = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+        for (iChanIndex = 0; iChanIndex < NR_CHANNELS; iChanIndex++)
         {
-            iChanOffset = iChanIndex * (TIME_SAMPLES_PER_CHAN / TIMES_PER_BLOCK) * ANTS * POLS * TIMES_PER_BLOCK;
-            for (iTimeOuterIndex = 0; iTimeOuterIndex < (TIME_SAMPLES_PER_CHAN / TIMES_PER_BLOCK); iTimeOuterIndex++)
+            iChanOffset = iChanIndex * (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
+            for (iTimeOuterIndex = 0; iTimeOuterIndex < (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK); iTimeOuterIndex++)
             {
-                iTimeOffset = iTimeOuterIndex * ANTS * POLS * TIMES_PER_BLOCK;
-                for (iAntIndex = 0; iAntIndex < ANTS; iAntIndex++)
+                iTimeOffset = iTimeOuterIndex * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
+                for (iAntIndex = 0; iAntIndex < NR_STATIONS; iAntIndex++)
                 {
-                    iAntOffset = iAntIndex * POLS * TIMES_PER_BLOCK;
-                    for (iPolIndex = 0; iPolIndex < POLS; iPolIndex++)
+                    iAntOffset = iAntIndex * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
+                    for (iPolIndex = 0; iPolIndex < NR_POLARIZATIONS; iPolIndex++)
                     {
-                        iPolOffset = iPolIndex * TIMES_PER_BLOCK;
-                        for (iTimeInnerIndex = 0; iTimeInnerIndex < TIMES_PER_BLOCK; iTimeInnerIndex++)
+                        iPolOffset = iPolIndex * NR_TIMES_PER_BLOCK;
+                        for (iTimeInnerIndex = 0; iTimeInnerIndex < NR_TIMES_PER_BLOCK; iTimeInnerIndex++)
                         {
                             iOffset = iChanOffset + iTimeOffset + iAntOffset + iPolOffset + iTimeInnerIndex;
                             if (bDisplayHex)
@@ -380,23 +381,23 @@ int verify_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered, int iMatri
     int iCurrIndex, iRemIndex, iBatchCounter;
     int iAntIndex, iChanIndex, iTimeIndex, iPolIndex;
     int iAntStride, iChanStride, iTimeStride, iMatrixStride;
-    iAntStride = CHANS * TIME_SAMPLES_PER_CHAN * POLS;
-    iChanStride = TIME_SAMPLES_PER_CHAN * POLS;
-    iTimeStride = POLS;
+    iAntStride = NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+    iChanStride = NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
+    iTimeStride = NR_POLARIZATIONS;
     // iPolStride = 1;
 
     // Declaring in their order of dimensionality for the new matrix
     int iNewIndex, iNewChanOffset, iTimeOuterOffset, iNewAntOffset, iNewPolOffset;
     int iTimeIndexOuter, iTimeIndexInner;
     int iNewAntStride, iNewChanStride, iNewSampleStride, iNewPolStride;
-    iNewChanStride = (TIME_SAMPLES_PER_CHAN / TIMES_PER_BLOCK) * ANTS * POLS * TIMES_PER_BLOCK;
-    iNewSampleStride = ANTS * POLS * TIMES_PER_BLOCK;
-    iNewAntStride = POLS * TIMES_PER_BLOCK;
-    iNewPolStride = TIMES_PER_BLOCK;
+    iNewChanStride = (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
+    iNewSampleStride = NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
+    iNewAntStride = NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
+    iNewPolStride = NR_TIMES_PER_BLOCK;
 
-    for (iBatchCounter = 0; iBatchCounter < BATCH; iBatchCounter++)
+    for (iBatchCounter = 0; iBatchCounter < NR_BATCHES; iBatchCounter++)
     {
-        iMatrixStride = iBatchCounter * ANTS * CHANS * TIME_SAMPLES_PER_CHAN * POLS;
+        iMatrixStride = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
         for (iCurrIndex = 0; iCurrIndex < iMatrixSize; iCurrIndex++)
         {
             iAntIndex = iCurrIndex / iAntStride;
@@ -412,11 +413,11 @@ int verify_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered, int iMatri
 
             // Now, stride them according to the new matrix's dimensions
             iNewChanOffset = iChanIndex * iNewChanStride;
-            iTimeIndexOuter = iTimeIndex / TIMES_PER_BLOCK;
+            iTimeIndexOuter = iTimeIndex / NR_TIMES_PER_BLOCK;
             iTimeOuterOffset = iTimeIndexOuter * iNewSampleStride;
             iNewAntOffset = iAntIndex * iNewAntStride;
             iNewPolOffset = iPolIndex * iNewPolStride;
-            iTimeIndexInner = iTimeIndex % TIMES_PER_BLOCK; // ?
+            iTimeIndexInner = iTimeIndex % NR_TIMES_PER_BLOCK; // ?
             
             iNewIndex = iNewChanOffset + iTimeOuterOffset + iNewAntOffset + \
                         iNewPolOffset + iTimeIndexInner + iMatrixStride;
