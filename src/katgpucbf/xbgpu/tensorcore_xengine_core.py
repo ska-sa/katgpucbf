@@ -101,7 +101,7 @@ class TensorCoreXEngineCoreTemplate:
         # 5. Compile the kernel
         program = accel.build(
             context,
-            "kernels/tensor_core_correlation_kernel.cu",
+            "kernels/tensor_core_correlation_kernel.mako",
             {
                 "n_ants_per_block": self._n_ants_per_block,
                 "n_ants": self.n_ants,

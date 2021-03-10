@@ -16,8 +16,7 @@ import numpy as np
 from katxgpu import tensorcore_xengine_core
 from katsdpsigproc import accel
 
-# Array specifying different array sizes that could potentially be used by MeerKAT
-array_size = [4, 8, 16, 32, 64, 84, 192, 256]
+import test_parameters
 
 
 def get_simple_test_ant_value(channel_index, ant_index):
@@ -59,7 +58,7 @@ def generate_antpair_visibilities_host(bufSamples_host, channel_index, ant1, ant
     return hh, hv, vh, vv
 
 
-@pytest.mark.parametrize("num_ants", array_size)
+@pytest.mark.parametrize("num_ants", test_parameters.array_size)
 def test_correlator_exhaustive(num_ants):
     """
     Exhaustive unit test of the Tensor core correlation algorithm.
@@ -147,7 +146,7 @@ def test_correlator_exhaustive(num_ants):
     np.testing.assert_array_equal(bufCorrectVisibilities_host, bufVisibilities_host)
 
 
-@pytest.mark.parametrize("num_ants", array_size)
+@pytest.mark.parametrize("num_ants", test_parameters.array_size)
 def test_correlator_quick(num_ants):
     """
     Lightweight unit test of the Tensor core correlation algorithm.
@@ -227,7 +226,7 @@ def test_correlator_quick(num_ants):
                 assert bufVisibilities_host[channel_index][baseline_index][1][1] == productAccumulated
 
 
-@pytest.mark.parametrize("num_ants", array_size)
+@pytest.mark.parametrize("num_ants", test_parameters.array_size)
 def test_multikernel_accumulation(num_ants):
     """
     Unit test that checks that the Tensor correlation algorithm can accumulate over a number of kernel calls.
@@ -281,7 +280,7 @@ def test_multikernel_accumulation(num_ants):
     expected_output_real = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
     expected_output_imaginary = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
     output_value_i64 = (expected_output_imaginary * n_samples_per_channel) << 32
-    output_value_i64 += (expected_output_real * n_samples_per_channel)
+    output_value_i64 += expected_output_real * n_samples_per_channel
     np.testing.assert_equal(bufVisibilities_host, output_value_i64)
 
     # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is
@@ -301,5 +300,5 @@ def test_multikernel_accumulation(num_ants):
 
     # 8. Check that multikernel accumulation produces the correct results
     output_value_i64 = (expected_output_imaginary * n_samples_per_channel * n_kernel_launches) << 32
-    output_value_i64 += (expected_output_real * n_samples_per_channel * n_kernel_launches)
+    output_value_i64 += expected_output_real * n_samples_per_channel * n_kernel_launches
     np.testing.assert_equal(bufVisibilities_host, output_value_i64)

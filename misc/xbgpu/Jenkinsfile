@@ -89,8 +89,44 @@ pipeline {
     stage('Install katxgpu package') {
       steps {
         sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
-        sh 'pip3 install -e .'
-        sh 'pip3 install -e .' //Have to install twice for some reason or else something does not link properly - not sure what the reason for this is. A ticket is open to investigate this.
+        sh 'pip3 install .'
+      }
+    }
+
+    /* This test verifies that the fsim can send a burst of traffic on the
+     * network. Currently no unit tests run on the network, so this stage
+     * serves to catch a few issues that could be missed by the unit tests when
+     * it comes to networking  This stage verifies two things:
+     * 1. SPEAD2 normaly installs with ibverbs settings enabled but under some
+     *    conditions SPEAD2 will not install ibverbs functions. When running
+     *    make on the fsim, an error will be thrown if SPEAD2 does not install
+     *    correctly.
+     * 2. The commands required to to run a docker container that makes use of
+     *    ibverbs are not trivial to determine. Attempting to send a burst of
+     *    data out on the network with the fsim will quickly reveal if there are
+     *    any issues with mechanism
+     */
+    stage('Run fsim') {
+      steps {
+        // Install SPEAD2 C++ library so that we can install the fsim
+        dir('3rdparty/spead2'){
+          sh './bootstrap.sh'
+          sh './configure'
+          sh 'make'
+          sh 'make install'
+        }
+        /* Make and run the fsim. NOTE: The interface IP has been hardcoded to
+         * 10.100.44.1. This corresponds to the 100 GBE interface on qgpu02
+         * within the SARAO test lab. If testing will happen on a different
+         * machine, this interface needs to be changed. An ideal way of
+         * running this test would be for the IP address for an interface
+         * supporting ibverbs to be determined automatically. This would make
+         * the test machine agnostic.
+         */
+        dir('scratch'){
+          sh 'make'
+          sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --run-once=true'
+        }
       }
     }
 
