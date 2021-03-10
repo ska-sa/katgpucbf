@@ -63,4 +63,4 @@ RUN pip3 install -r requirements-dev.txt
 # in most situations.
 RUN rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python 
 
-RUN pip3 install -e .
+RUN pip3 install .
