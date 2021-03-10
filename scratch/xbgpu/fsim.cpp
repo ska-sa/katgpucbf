@@ -329,8 +329,8 @@ struct fengines
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address, boost::asio::io_service &ios)
-        : i64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), iNumAnts(opts.n_ants),
-          iTimestampStep(opts.timestamp_step), bRunOnce(opts.bRunOnce),
+        : u64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), uNumAnts(opts.n_ants),
+          u64TimestampStep(opts.timestamp_step), bRunOnce(opts.bRunOnce),
           stream(ios,
                  spead2::send::stream_config()
                      .set_max_packet_size(opts.packet_payload_size_bytes + packet_header_size_bytes)
