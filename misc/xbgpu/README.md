@@ -1,8 +1,17 @@
 # katxgpu
 A tensor-core accelerated GPU-based X-engine.
 
-TODO: Update as development happens
-TODO: Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
+## TODOs
+
+katxgpu is still in early development with more modules being added every few weeks. Attempts are made for each of these
+modules to be complete, but when there are lingering issues that eventually need to be resolved but are not critical
+to development. Many of these TODOs are listed in the relevant files, but sometimes the TODO has no associated file.
+In this case the TODO is listed here.
+1. A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
+files must be converted to PDF and the links updated accordingly when this program nears release. The 
+[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) and [fsim.cpp](scratch/fsim.cpp)  also
+have links that must be updated.
+2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
@@ -24,6 +33,7 @@ __DO NOT__ make this repo public before specifying the license.
 libboost-all-dev, libibverbs-dev,librdmacm-dev, and libpcap-dev.
 
 ## Installation
+In order to install the katxgpu module, the following commands must be run:
 1. Create a python 3.6 virtual environment: `virtualenv -p python3.6 <venv name>`.
 2. Activate virtual environment: `source <venv name>/bin/activate`
 3. Install all required python packages: `pip install -r requirements.txt`
@@ -34,12 +44,16 @@ NOTE: Due to the underlying complexity of turning the SPEAD2 C++ code into a pyt
 module can take quite a while as the SPEAD2 software is installed each time. Build times over a minute long are quite
 normal. To reduce these build times look at using the [ccache](https://ccache.dev/) utility. 
 
-SPEAD2 C++ install for F-Engine simulator:
+If the F-Engine simulator needs to be run, the SPEAD2 C++ library needs to be installed. The following steps must be
+followed in order to do this:
 1. cd /3rdparty/spead2
 2. ./bootstrap
 3. ./configure
 4. make
 5. sudo make install
+
+The SPEAD2 C++ install and the katxgpu module install run different programs and as such the once can be installed 
+without the other.
 
 ## Configuring pre-commit workflow
 This makes use of [black](https://pypi.org/project/black/), [flake8](https://flake8.pycqa.org/en/latest/), 
@@ -141,15 +155,17 @@ quickest way to figure out how the receiver works.
 The `katxgpu._katxgpu` module uses the SPEAD2 C++ bindings (not the python bindings) and as such requires the SPEAD2
 submodule to be included in this repository. This module is located in the katxgpu/3rdparty directory.
 
+__NOTE:__ The F-Engine 
+
 ### F-Engine Packet Simulator
 
 In order to test the X-Engine code, data from the F-Engines needs to be received. In general an X-Engine needs to 
 receive data for a subset of channels from N F-Engines where N is the telescope array size. This is complicated to 
 configure and requires many F-Engines. In order to bypass this, an F-Engine simulator has been created that simulates
 packets recieved at the X-Engine (i.e Packets from multiple F-Engines destined for the same X-Engine.) This simulator
-requires a single server with a Mellanox NIC to run. This server must be different from the server katxgpu is running 
-on. This fsim simulates the exact packet format from the SKARAB F-Engines. The SKARAB X-Engines ingest data from 4 
-different multicast streams. This simulator only simulates data from a single multicast stream.
+requires a server with a Mellanox NIC to run. This fsim simulates the exact packet format from the SKARAB F-Engines. 
+The SKARAB X-Engines ingest data from 4 different multicast streams. This simulator only simulates data from a single
+multicast stream - if more streams are required, more instances of this simulator need to be run in parallel.
 
 The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>[+y]:<port>`
 
@@ -173,7 +189,7 @@ packet formats.
 
 ### Eliminating Packet Drops
 
-The receiver software has been made to receive data at up 68 Gbps per port on a dual-port Mellanox ConnectX-6 NIC
+The receiver software has been made to receive data at up to 68 Gbps per port on a dual-port Mellanox ConnectX-6 NIC
 without dropping any packets. A standard server will likely be unable to do to accomplish this with its default
 configuration. The following are recommended steps that can be taken to improve server performance - all these steps
 need to be followed to eliminate packet drops:

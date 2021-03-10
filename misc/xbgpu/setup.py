@@ -27,7 +27,11 @@ class BuildExt(build_ext):
         super().run()
 
     def build_extensions(self):
-        """Stop GCC complaining about -Wstrict-prototypes in C++ code."""
+        """
+        Stop GCC complaining about -Wstrict-prototypes in C++ code.
+
+        This function has been copied from katfgpu's setup.py file. The exact need for it is not understood.
+        """
         try:
             self.compiler.compiler_so.remove("-Wstrict-prototypes")
         except ValueError:

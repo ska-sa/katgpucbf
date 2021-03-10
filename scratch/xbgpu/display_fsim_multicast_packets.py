@@ -15,22 +15,28 @@ TODO: It would be useful to make this script display the feng_raw data graphical
 # 1. Imports
 import socket
 import struct
+import argparse
 
-# 2. Hardcoded address and ports
-MCAST_GRP = "239.10.10.10"
-MCAST_PORT = 7149
-IS_ALL_GROUPS = True
+# 2. Address and ports
+parser = argparse.ArgumentParser(description="Script for displaying key information from the fsim packets.")
+parser.add_argument("--mcast_src_ip", default="239.10.10.10", help="IP address of multicast stream to subscribe to.")
+parser.add_argument("--mcast_src_port", default="7149", type=int, help="Port of multicast stream to subscribe to.")
 
-# 3. Opens socket listening for multicast data on MCAST_GRP:PORT
+args = parser.parse_args()
+mcast_group = args.mcast_src_ip
+mcast_port = args.mcast_src_port
+is_all_group = True
+
+# 3. Opens socket listening for multicast data on mcast_group:PORT
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-if IS_ALL_GROUPS:
+if is_all_group:
     # on this port, receives ALL multicast groups
-    sock.bind(("", MCAST_PORT))
+    sock.bind(("", mcast_port))
 else:
-    # on this port, listen ONLY to MCAST_GRP
-    sock.bind((MCAST_GRP, MCAST_PORT))
-mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
+    # on this port, listen ONLY to mcast_group
+    sock.bind((mcast_group, mcast_port))
+mreq = struct.pack("4sl", socket.inet_aton(mcast_group), socket.INADDR_ANY)
 
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 

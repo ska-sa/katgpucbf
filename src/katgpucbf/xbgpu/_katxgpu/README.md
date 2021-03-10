@@ -17,7 +17,7 @@ The Streaming Protocol for Exchanging Astronomical Data (SPEAD) is a protocol fo
 over a network at high data rates. SPEAD functions as a layer on top of UDP. The documentation for SPEAD can be found
 [here](https://casper.ssl.berkeley.edu/wiki/SPEAD).
 
-SPEAD transmits logical collections of data known as heaps. A heap consists of multiple UDP packets. A SPEAD 
+SPEAD transmits logical collections of data known as heaps. A heap consists of one or more UDP packets. A SPEAD 
 transmitter will decompose a heap into packets and the receiver will collect all the packets and reassemble the heap.
 
 The heaps and corresponding packet formats received by katxgpu have already been defined. This 
@@ -27,7 +27,7 @@ detail.
 ### 1.2 SPEAD2
 
 SPEAD2 is a software package that implements the SPEAD protocol. It can be used to both send and receive SPEAD heaps.
-SPEAD2 is designed to be very high performance, able to receive and transmit data losslessly at 100 GbE data rates when
+SPEAD2 is designed to be very high-performance, able to receive and transmit data losslessly at 100 GbE data rates when
 used correctly.
 
 SPEAD2 has both Python and C++ bindings. Python is the conventional way to use SPEAD2 with C++ being used to implement 
@@ -65,10 +65,11 @@ TODO: List the functions required to specify what transport to use for transmitt
 #### 1.2.2 ibverbs
 
 SPEAD2 implements a transport using the ibverbs library for high performance networking. This is the udp_ibv transport.
-Using ibverbs for ethernet NIC acceleration is not very well documented online. SARAO has produced this 
+The udp_ibv transport uses ibverbs both for sending and receiving data. Using ibverbs for ethernet NIC acceleration is 
+not very well documented online. SARAO has produced this 
 [ibverbs sample project](https://github.com/ska-sa/dc_sand/tree/master/ibverbs_sample_project) to demonstrate how to 
 use ibverbs and explain how it functions. A deep understanding of ibverbs is not required here as SPEAD2 handles all
-of the complexity. 
+of the complexity.
 
 Ibverbs requires Mellanox ConnectX NICs and the Mellanox OFED drivers to be installed in order to function. This is
 explained in more detail in the top level [README](../README.md).
@@ -81,8 +82,8 @@ When a heap is received or sent, SPEAD2 puts an event on a specified IO loop ind
 ### 1.3 Multicast
 
 All SARAO SPEAD traffic is transmitted as ethernet multicast data. Ethernet multicast is not as simple as unicast. In
-general the switches need to be configured to handle multicast data (using an implementation of the PIM protocol for L3
-or the IGMP protocol for L2 networks.). A receiver also needs to subscribe to multicast data in order for the network
+general the switches need to be configured to handle multicast data (using the PIM protocol (in SARAO's case) for L3
+or the IGMP protocol for L2 networks). A receiver also needs to subscribe to multicast data in order for the network
 to transmit it to the receiver. SPEAD2 handles issuing the subscription on the server, the network needs to be
 configured to propegate these subscriptions correctly. Ethernet routes stored in the server OS need to be correctly
 configured to ensure multicast trafficis being received or transmitted through the correct interface.
@@ -94,7 +95,7 @@ routed correctly on the network.
 
 In order to reduce the load on the slow Python controlling code, multiple SPEAD heaps are combined into a single chunk
 in the high performance C++ code before being passed to Python. Python then launches GPU kernels to operate on a single 
-chunk.
+chunk. The actual chunk object contains a buffer. The buffer holds the collection of heaps.
 
 An example of why this is necessary: a single F-Engine output heap is 0.125 MiB. At 7 Gbps, ~60 000 heaps are passed to
 python every second. This is a very high load on the CPU and results in the python thread not being able to keep up. A
@@ -126,23 +127,25 @@ The image below gives conceptual overview of how the katxgpu receive code is imp
 
 ![Receiver](./katxgpu_receiver.png)
 
-The above diagram shows how the receiver code is broken up into three main sections:
-1. katxgpu Python - This is the python code that the main program will interact with to use the receiver. Once the
-receiver is configured the main program gives the katxgpu python code new chunks (or old chunks that no longer have any
-use) and the katxgpu python code returns filled chunks. The underlying assembly and management of these chunks is
-abstracted away at this level. The classes relevant at this level can be found in the [py_recv.cpp](./py_recv.cpp),
-[py_recv.h](./py_recv.h), [py_common.cpp](./py_recv.cpp) and [py_common.h](./py_recv.h). These files are slightly
-difficult to read, but the python modules they create will have standard python docstrings that can be read in an
-iPython session once the module has been installed.
-2. katxgpu C++ - The katxgpu python code interfaces with the katxgpu C++ code. The katxgpu C++ code manages the chunks
-received from katxgpu python. When the SPEAD2 stream receives a heap, the katxgpu C++ software tells it both to which
-chunk the heap must be copied to and the offset within the chunk buffer that the heap data belongs. The katxgpu receiver
+In the normal operational case, a main processing loop is running in python and this loop will interface with the
+katxgpu receiver module in order to get data from the network.
+
+The above diagram shows how the receiver module is broken up into three main layers:
+1. katxgpu Python layer - This is the layer that the main processing loop will interact with to use the receiver. Once
+the receiver is configured the main processing loop gives the katxgpu python layer new chunks (or old chunks that no
+longer have any use) and the katxgpu python layer returns filled chunks. The underlying assembly and management of these
+chunks is abstracted away at this layer. The classes relevant at this level can be found in the
+[py_recv.cpp](./py_recv.cpp), [py_recv.h](./py_recv.h), [py_common.cpp](./py_recv.cpp) and [py_common.h](./py_recv.h).
+These files are slightly difficult to read, but the python modules they create will have standard python docstrings 
+that can be read in an iPython session once the module has been installed.
+2. katxgpu C++ layer - The katxgpu python layer interfaces with the katxgpu C++ layer. The katxgpu C++ layer manages 
+the chunks received from the python layer. When the SPEAD2 stream receives a heap, the C++ layer tells it both to which
+chunk the heap must be copied to and the offset within the chunk buffer that the heap data belongs. The C++ layer
 monitors the active chunks that are being filled by the SPEAD2 stream and when a chunk is complete, it sends it back to
-the katxgpu Python module via a ringbuffer. The classes relevant to this section can be found in [recv.h](./recv.h) and
-[recv.cpp](./recv.cpp). 
-3. SPEAD2 Stream - This is the underlying SPEAD2 code that receives packets, assembles them into heaps and passes them
-to the katxgpu C++ software. This code creates its own thread pool and runs concurrently with the main katxgpu program.
-This code is all part of the standrd SPEAD2 package.
+the Python layer via a ringbuffer. The classes relevant to this section can be found in recv.h and recv.cpp.
+3. SPEAD2 Stream layer - This is the underlying SPEAD2 layer that receives packets, assembles them into heaps and passes
+them to the katxgpu C++ layer. This layer creates its own thread pool and runs concurrently with the main processing
+loop. This layer is part of the standrd SPEAD2 package.
 
 An example of how to use the receiver can be found in the [receiver_example.py](../scratch/receiver_example.py) script in
 the katxgpu/scratch folder. Understanding this [receiver_example.py](../scratch/receiver_example.py) is all that is 
@@ -152,7 +155,7 @@ duplicate the katxgpu receiver functionality.
 Once the katxgpu module has been installed, the receiver module can be accesed using `import katxgpu._katxgpu.recv` in
 Python.
 
-### 2.2 Chunk Lifecycle
+### 2.1 Chunk Lifecycle
 
 A chunk is the main mechanism that allows for data to be transferred around the katxgpu program
 
@@ -179,10 +182,10 @@ chunks, this expensive operation is eliminated.
 The main program only knows about the ringbuffer, the free chunks stack and the active chunks queue are managed within
 the katxgpu C++ code.
 
-### 2.3 Chunk and heap coordination and management
+### 2.2 Chunk and heap coordination and management
 
-The SPEAD2 stream creates its own thread pools which manages the internals of the SPEAD2 transports and heap assembly. 
-Tracing through these threads is a time consuming process and is not necessary to understand the katxgpu receiver. The
+The SPEAD2 stream creates its own thread pool to manage the internals of the SPEAD2 transport and heap assembly. 
+Tracing through these threads is a time-consuming process and is not necessary to understand the katxgpu receiver. The
 SPEAD2 stream interacts with the main program using callback functions. When the first packet in a heap is received, the
 SPEAD2 stream calls the `katxgpu::recv::allocator::allocate()` function. When the last packet is received, the SPEAD2
 stream calls the `katxgpu::recv::stream::heap_ready()` function. Both of these functions eventually call the
@@ -193,13 +196,13 @@ code. It determines when to move data from the free chunks stack to the active c
 calculates where in a chunk the heap must be copied and passes this information to the SPEAD2 stream. Understanding this
 function will give a great deal of insight into the operation of the entire receiver.
 
-### 2.4 Receiver Chunk Internal Construction
+### 2.3 Receiver Chunk Internal Construction
 
 A chunk contains both a buffer object and associated metadata. For the receiver chunk this metadata contains a `present` boolean array and a timestamp field. 
 
 This array will contains as many elements as heaps in the chunk. A true value at a specific index indicates that the corresponding chunk is present. A false value indicates that the chunk was either not received or was corrupted and has not been copied correctly into the chunk. It is expected that 99.999999% of heaps will be received over the receiver lifetime. Large numbers of missing heaps point to a system issue that must be resolved.
 
-### 2.4.1 Data layout
+### 2.3.1 Data layout
 
 Each heap contains a single contigous set of data. Indexed as a multidimensional array, this array looks like:
 `heap_data[n_channels_per_stream][n_samples_per_channel][n_pols]`. As mentioned above, this
@@ -215,10 +218,10 @@ combined into a single chunk. There are `heaps_per_fengine_per_chunk` heaps per 
 like: `chunk_buffer[heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]`
 
 NOTE: While the data layout is shown here as a multidimensional array, this has only been done for conceptual purposes.
-The actual data is stored in a contigous buffer with one dimension. The user is responsible for striding throught this
+The actual data is stored in a contigous buffer with one dimension. The user is responsible for striding through this
 array correctly.
 
-### 2.4.2 Timestamp Alignment
+### 2.3.2 Timestamp Alignment
 
 The timestamp field in the chunk represents the timestamp of the earliest received set of F-Engine heaps within the chunk. 
 
@@ -228,13 +231,13 @@ As mentioned in 2.4.1, chunk contains `heaps_per_fengine_per_chunk` consecutive 
 
 TODO: Update this section when the channel division for non-power-of-2 array sizes is decided upon.
 
-### 2.5 Transport and readers
+### 2.4 Transport and readers
 
 As mentioned in 1.2.1 above, SPEAD2 defines a number of transports. This receiver only exposes three of these
 transports. The most important one is the udb_ibv transport for normal operation. Additionally, the PCAP and memory
 transports are also exposed for debugging and unit tests.
 
-### 2.6 Unit Tests
+### 2.5 Unit Tests
 
 As mentioned previously, the memory transport is used to unit test the receiver software on simulated packets stored
 within a buffer. The unit test can be found [here](../test/spead2_receiver_test.py) in the katxgpu/test folder.
@@ -245,12 +248,12 @@ TODO: Sender logic still needs to be implemented. This section will be updated o
 
 ## 4. Peerdirect Support
 
-SPEAD2 provides support for Nvidias GPU Direct technology. This allows data to be copied directly from a Mellanox NIC
+SPEAD2 provides support for Nvidia's GPUDirect technology. This allows data to be copied directly from a Mellanox NIC
 to a Nvidia GPU without having to go through system memory. SPEAD2 needs to be using the udp_ibv transport to make use
-of GPU direct. By using GPU direct, the system memory bandwidth requirements are significantly reduced as the data never
-does not pass through system RAM.
+of GPUDirect. By using GPUDirect, the system memory bandwidth requirements are significantly reduced as the data does 
+not pass through system RAM.
 
-Currently GPU Direct is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server grade
+Currently GPUDirect is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server-grade
 cards (such as the A100.).
 
 TODO: Write a script demonstrating how to use Peerdirect works. Update this descrption once this script has been written.

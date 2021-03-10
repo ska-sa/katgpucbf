@@ -3,8 +3,7 @@
 This script demonstrates how to configure a katxgpu receiver object to receive data from an fsim or MeerKAT
 channelised voltage stream (or more simply an X-Engine input stream).
 
-It also shows how a chunks can be received asynchronously and shows how to pass a used chunk back to the katxgpu
-receiver.
+It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxgpu receiver.
 """
 # 1. Imports
 # 1.1 Local imports
@@ -32,15 +31,15 @@ parser.add_argument(
     "--src_interface", default="10.100.44.1", help="IP Address of interface that will receive the data."
 )
 args = parser.parse_args()
-print(args)
 src_multicast_ip = args.mcast_src_ip
 src_multicast_port = args.mcast_src_port
 src_interface_ip = args.src_interface
 
-print(src_multicast_ip, src_multicast_port, src_interface_ip)
+print(f"Subscribing to {src_multicast_ip}:{src_multicast_port} on the {src_interface_ip} interface.")
 
 
-# 2.2 Hard coded variables declaration
+# 2.2 Adjustable parameters - The description of these parameters can be found in the documentation for the
+# katxgpu._katxgpu.recv.Stream object.
 thread_affinity = 2
 n_ants = 64
 n_channels_total = 32768
@@ -53,7 +52,7 @@ heaps_per_fengine_per_chunk = 10
 # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
 # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
 # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
-# argument to the reciever for cases where the n_samples_per_channel changes across streams (likely for non-power-of-
+# argument to the reciever for cases where the n_channels_per_stream changes across streams (likely for non-power-of-
 # two array sizes).
 timestamp_step = n_channels_total * 2 * n_samples_per_channel
 
@@ -70,6 +69,8 @@ else:
     monitor = katxgpu.monitor.NullMonitor()
 
 # 4. Create ringbuffer - All chunks that the receiver assembles are placed on this ringbuffer.
+# The ringbuffer capacity has been set to 8 as its give a bit of a buffer to play with without consuming too much
+# memory. This number may need tuning in a running application.
 ringbuffer_capacity = 8
 ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
 
@@ -79,15 +80,15 @@ monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
 
 # 5. Create receiver object
 receiverStream = recv.Stream(
-    n_ants,
-    n_channels_per_stream,
-    n_samples_per_channel,
-    n_pols,
-    sample_bits,
-    timestamp_step,
-    heaps_per_fengine_per_chunk,
-    ringbuffer,
-    thread_affinity,
+    n_ants=n_ants,
+    n_channels=n_channels_per_stream,
+    n_samples_per_channel=n_samples_per_channel,
+    n_pols=n_pols,
+    sample_bits=sample_bits,
+    timestamp_step=timestamp_step,
+    heaps_per_fengine_per_chunk=heaps_per_fengine_per_chunk,
+    ringbuffer=ringbuffer,
+    thread_affinity=thread_affinity,
     use_gdrcopy=False,
     monitor=monitor,
 )
@@ -142,9 +143,10 @@ async def get_chunks():
 
 
 # 9. Run get_chunks() function in an asyncio event loop.
-loop = asyncio.get_event_loop()
-loop.run_until_complete(get_chunks())
-loop.close()
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(get_chunks())
+    loop.close()
 
 # 10. Cleanup - Sometimes closing everything is a bit of a pain. I have not quite got it right yet, so watch out for
-# crashes when
+# crashes.

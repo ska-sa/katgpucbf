@@ -161,5 +161,3 @@ pipeline {
     
   }
 }
-
-//apt-get update && apt-get install -y git vim && git clone --branch spead2_rx_code https://github.com/ska-sa/katxgpu.git && cd katxgpu && git submodule update --init --recursive && apt-get install -y python3 python3-pip python-pybind11 python3-dev git && apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev rdma-core && pip3 install numpy==1.19.5 jinja2 pycparser pybind11 && pip3 install -r requirements.txt && pip3 install -r requirements-dev.txt && rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python && pip3 install -e . && pip3 install -e .

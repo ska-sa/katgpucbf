@@ -107,7 +107,7 @@ pybind11::module register_module(pybind11::module &parent)
 
     pybind11::class_<py_chunk>(
         m, "Chunk",
-        "Chunk of samples. The samples are stored as a 1 dimensional array contiguous array. If the array were indexed "
+        "Chunk of samples. The samples are stored as a 1-dimensional array contiguous array. If the array were indexed "
         "as a multidimensional array, the indexing would be as follows: chunk.base[timestamp_index][f_engine "
         "_index][channel_index][spectrum_index][polarisation_index]. It is left to the user to calculate the strides "
         "for multidimensional indexing in a 1 dimensional array.")
@@ -139,9 +139,9 @@ pybind11::module register_module(pybind11::module &parent)
              "Parameters\n"
              "----------\n"
              "n_ants: int\n"
-             "    The number of antennas that data will be received from\n"
+             "    The number of antennas that data will be received from.\n"
              "n_channels: int\n"
-             "    The total number of frequency channels out of the F-Engine\n"
+             "    The total number of frequency channels out of the F-Engine.\n"
              "n_channels_per_stream: int\n"
              "    The number of frequency channels contained in the stream.\n"
              "n_samples_per_channel: int\n"
@@ -157,7 +157,7 @@ pybind11::module register_module(pybind11::module &parent)
              "parameters for power-of-two array sizes, but is configurable to allow for greater flexibility during "
              "testing.\n"
              "heaps_per_fengine_per_chunk: int\n"
-             "    Each chunk out of the SPEAD2 receiver will contain multiple heaps from each antenna. This parameters "
+             "    Each chunk out of the SPEAD2 receiver will contain multiple heaps from each antenna. This parameter "
              "specifies the number of heaps per antenna that each chunk will contain.\n"
              "ringbuffer: katxgpu._katxgpu.recv.Ringbuffer\n"
              "    All completed heaps will be queued on this ringbuffer object.\n"

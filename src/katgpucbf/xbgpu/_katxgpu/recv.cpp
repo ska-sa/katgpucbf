@@ -2,8 +2,8 @@
 #include "py_common.h"
 
 #include <cassert>
-#include <iostream> // TODO: for debugging
-#include <map>      // TODO: workaround for it missing in recv_heap.h
+#include <iostream> //For debugging
+#include <map>
 #include <spead2/common_endian.h>
 #include <spead2/common_logging.h>
 #include <spead2/recv_heap.h>
@@ -30,7 +30,7 @@ allocator::allocator(stream &recv) : recv(recv)
 auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
     if (hint)
-    { 
+    {
         void *ptr = recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
         if (ptr)
             return pointer(reinterpret_cast<std::uint8_t *>(ptr),
@@ -78,7 +78,7 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
 
 stream::~stream()
 {
-    stop();
+    this->stop();
 }
 
 void stream::add_chunk(std::unique_ptr<chunk> &&c)
@@ -196,6 +196,10 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         // chunks list. We can only have max_active numbers of chunks on the queue at any one time. So we need to make
         // room if needed. Usually the next chunk will be the next sequential chunk. If not, we flush all chunks rather
         // than leaving active_chunks discontiguous.
+        //
+        // This discontiunity will happen very rarely as data is being received from multiple senders and the chance of
+        // all senders being down is negligible. The most likely cause of this issue would be an interruption in the
+        // link between the katxgpu host server and the network.
         std::size_t max_active = 2;
         std::int64_t start = active_chunks.back()->timestamp + timestamp_step * heaps_per_fengine_per_chunk;
 
@@ -320,7 +324,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     }
 
     // 4. Run the calculate_packet_destination() function again (It was last called in the allocater when the first
-    // packet was received.). This function should ideally return a pointer equal to the current heaps pointer. This
+    // packet was received.). This function should ideally return a pointer equal to the current heap's pointer. This
     // would not be equal if for some reason the chunk this heap belongs to has been moved off of the active pile - this
     // means a stale heap was received. If this occurs frequently, the number of allowed active chunks is probably not
     // high enough (set it higher in the calculate_packet_destination(...) function.).
@@ -347,9 +351,9 @@ void stream::stop_received()
 
 void stream::add_buffer_reader(pybind11::buffer buffer)
 {
-    // This view needs to be stored persistently. If it is released, Python will release the buffer back to the OS
-    // causing segfaults when C++ tries to access the buffer. Took me a while to figure this out - dont make my
-    // mistakes.
+    // This view object needs to be held as long as the receiver is making use of the buffer. If it is released, Python
+    // will release the buffer back to the OS causing segfaults when C++ tries to access the buffer. Took me a while to
+    // figure this out - dont make my mistakes.
     view = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
     // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
