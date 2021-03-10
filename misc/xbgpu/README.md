@@ -99,6 +99,7 @@ docker run \
     --ulimit=memlock=-1 \
     --device=/dev/infiniband/rdma_cm \
     --device=/dev/infiniband/uverbs0 \
+    --rm \
     -it \
     katxgpu
 ```
