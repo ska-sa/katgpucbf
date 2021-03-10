@@ -64,3 +64,16 @@ RUN pip3 install -r requirements-dev.txt
 RUN rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python 
 
 RUN pip3 install .
+
+# Build the Fsim in case someone wants to use it.
+WORKDIR /katxgpu/3rdparty/spead2
+RUN ./bootstrap.sh
+RUN ./configure
+RUN make
+RUN make install
+
+WORKDIR /katxgpu/scratch
+RUN make
+
+# Change the workdir back
+WORKDIR /katxgpu
