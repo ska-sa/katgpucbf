@@ -11,9 +11,7 @@ In this case the TODO is listed here.
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
 [display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) and [fsim.cpp](scratch/fsim.cpp)  also
 have links that must be updated.
-2. When installing katxgpu for the first time the command `pip install -e .` needs to be run twice instead of once, the
-`-e` flag is also required. This needs to be diagnosed. The first step should be to look at the setup.py files in
-katxgpu and katfgpu and examine the differences.
+2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
@@ -40,11 +38,11 @@ In order to install the katxgpu module, the following commands must be run:
 2. Activate virtual environment: `source <venv name>/bin/activate`
 3. Install all required python packages: `pip install -r requirements.txt`
 4. Checkout spead2 submodule: `git submodule update --init --recursive`
-5. Install the katxgpu package: `pip install -e .`
+5. Install the katxgpu package: `pip install .`
 
 NOTE: Due to the underlying complexity of turning the SPEAD2 C++ code into a python module, installing the katxgpu 
 module can take quite a while as the SPEAD2 software is installed each time. Build times over a minute long are quite
-normal. To reduce these build times look at using the [ccache](https://ccache.dev/) utility.
+normal. To reduce these build times look at using the [ccache](https://ccache.dev/) utility. 
 
 If the F-Engine simulator needs to be run, the SPEAD2 C++ library needs to be installed. The following steps must be
 followed in order to do this:
@@ -92,11 +90,56 @@ jenkins container takes care of addings this flag, but the user needs to ensure 
 installed.
 3. The Nvidia driver installed on the host machine needs to be compatible with the cuda 10.1 as the unit test will run
 on an image based on the nvidia/cuda:10.1-devel-ubuntu18.04 container.
+4. The node the server runs on requires a a Mellanox ConnectX-5 (or newer) NIC. The Mellanox OFED drivers enabling 
+ibverbs functionality on the NIC must also be installed.
 
 This should all be happening automatically on SARAO's servers, but if you fork this repo and want to set up your own CI
 server, these steps should help you on your way. A 
 [document](https://docs.google.com/document/d/1iiZk7aEjsAcewM-wDX3Iz9osiTiyOhr3sYYzcmsv4mM/edit?usp=sharing) describes
 in more detail how Jenkins is configured on SARAO's servers. This document is a work in progress.
+
+## Running within a Docker container
+
+This repository contains a Dockerfile for building a docker image that can launch katxgpu.
+
+In order to build the container, the following command needs to be run from the top level katxgpu directory: 
+`docker image build -t katxgpu .`
+
+To run the container and open a terminal within the container run:
+```
+docker run \
+    --gpus all \
+    --network host \
+    --ulimit=memlock=-1 \
+    --device=/dev/infiniband/rdma_cm \
+    --device=/dev/infiniband/uverbs0 \
+    --rm \
+    -it \
+    katxgpu
+```
+
+
+To launch the [receiver_example.py](scratch/receiver_example.py) in a container run the following command:
+```
+docker run \
+    --gpus all \
+    --network host \
+    --ulimit=memlock=-1 \
+    --device=/dev/infiniband/rdma_cm \
+    --device=/dev/infiniband/uverbs0 \
+    --rm \
+    -d \
+    --name=katxgpu_container \
+    katxgpu \
+    python scratch/receiver_example.py
+```
+
+To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_containe`
+
+__NOTE__: There is quite a bit of overlap between the commands in the [Dockerfile](./Dockerfile) and the
+[Jenkinsfile](./Jenkinsfile) and the requirements for running a docker container are the same requirements as mentioned
+in the Jenkins CI section above. The explanation for the different arguments required to launch the docker container can
+be found in the Jenkinsfile.
 
 ## SPEAD2 Network Side Software
 
@@ -124,15 +167,19 @@ requires a server with a Mellanox NIC to run. This fsim simulates the exact pack
 The SKARAB X-Engines ingest data from 4 different multicast streams. This simulator only simulates data from a single
 multicast stream - if more streams are required, more instances of this simulator need to be run in parallel.
 
-The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>:<port>`
+The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>[+y]:<port>`
 
 Where:
  * `<interface_address>` is the ip address of the network interface to transmit the data out on.
- * `<multicast_address>` is the multicast address all packets are destined to.
+ * `<multicast_address>` is the multicast address all packets are destined to. The optional `[+y]` argument will create 
+`y` additional multicast streams with the same parameters each on a different multicast addresses consecutivly after the
+base `<multicast_address>`.
  * `<port>` is the UDP port to transmit data to.
 
-The above command will transmit data at about 7 Gbps by default. See the fsim [source code](./scratch/fsim.cpp) for a 
-detailed description of how the F-Engine simulator works and the useful configuration arguments.
+The above command will transmit data at about `7.8 * (y+1)` Gbps by default. 
+
+See the fsim [source code](./scratch/fsim.cpp) for a  detailed description of how the F-Engine simulator works and the 
+useful configuration arguments.
 
 A rough description of the ingest packet format is described 
 [here](https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg/edit). The

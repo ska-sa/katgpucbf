@@ -11,21 +11,25 @@
  * transmission. Lossless transmit rates up to 34 Gbps have been tested, but it is expected that higher rates can be
  * achieved. By default root access is required to use ibverbs.
  *
- * The minimum command to run the fsim is: sudo ./fsim --interface <interface_address> <multicast_address>:<port>
+ * The minimum command to run the fsim is: sudo ./fsim --interface <interface_address> <multicast_address>[+y]:<port>
  * Where:
  * <interface_address> is the ip address of the network interface to transmit the data out on.
- * <multicast_address> is the multicast address all packets are destined for
+ * <multicast_address> is the multicast address all packets are destined for. The optional [+y] argument will create
+ * [+7] multicast streams with the same parameters each on a different multicast addresses consecutivly after the base
+ * address.
  * <port> is the UDP port to transmit data to.
  *
  * By default the fsim transmits data at 6.8 Gbps + packet overhead. This depends on the sample rate of the antenna ADCs
  * and the number of pols. The data rate is equal to adc_rate * number_of_pols * sample_size_bits / 4 = 1712000000 * 2 *
- * 8 / 4 = 6.8 Gbps. The /4 accounts for there being 4 multicast streams for every 1 F-Engine .To change the rate pass
+ * 8 / 4 = 6.8 Gbps. To change the rate pass a different value into the program with the --adc_rate <adc sample rate in
+ * hz> argument. In this example if the [+y] argument is specified, the total rate out of the fsim is equal to
+ * 6.8 * (y + 1) Gbps. The /4 accounts for there being 4 multicast streams for every 1 F-Engine. To change the rate pass
  * a different value into the program with the --adc_rate <adc sample rate in hz> argument.
  *
- * This file has an "fengines" class that manages the SPEAD streams and packet transmission. The fengines object 
+ * This file has an "fengines" class that manages the SPEAD streams and packet transmission. The fengines object
  * contains a 2 dimensional vector of heaps. The outer dimension represents the different F-Engines and the inner
- * dimension contains the heaps to send per F-Engine. The array of heaps is generated once and then transmitted 
- * repeatedly on the network.
+ * dimension contains the heaps to send per F-Engine. The array of heaps is generated once and then transmitted
+ * repeatedly on the network. A seperate fengines object is generated for each multicast stream.
  *
  * n_chans_per_output_stream and n_chans_total can be specified individually as command line parameters. For
  * MeerKAT, this is not necessary as n_chans_per_output_stream can be calculated from n_chans_total, for the MeerKAT
@@ -45,6 +49,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -62,6 +67,7 @@ struct options
     int n_chans_per_output_stream = 128;
     int n_chans_total = 32768;
     int n_time_samples_per_channel = 256;
+    bool bRunOnce = false;
 
     // The variables below are not command-line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
@@ -109,8 +115,11 @@ static options parse_options(int argc, const char **argv)
                        "Each F-Engine output substream transmits a subset of the FFT channels.");
     desc.add_options()("samples-per-channel", make_opt(opts.n_time_samples_per_channel),
                        "The F-Engine cornerturn groups a number of samples into each channel per packet.");
-    hidden.add_options()("address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
-                         "destination address, in form x.x.x.x:port");
+    desc.add_options()("run-once", make_opt(opts.bRunOnce), "Transmit a single collection of heaps before exiting.");
+    hidden.add_options()(
+        "address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
+        "destination address, in form x.x.x.x[+y]:port where y represents the number of additional multicast streams "
+        "to launch in parallel. Each stream is assigned the next consecutive multicast address from the x.x.x.x base.");
     all.add(desc);
     all.add(hidden);
     boost::program_options::positional_options_description positional;
@@ -151,30 +160,37 @@ static options parse_options(int argc, const char **argv)
     return opts;
 }
 
-/* This function parses the endpoint argument passed in the program as a command line argument.
+/* Parses the endpoint argument passed into the program as a command line argument.
  *
  * It seperates the endpoint into its multicast ip address and port number and uses this to create an endpoint object.
  *
- * Instead of returning a single endpoint, it returns n_ants duplicates of the same endpoint. This is because the SPEAD2
- * stream object uses one substream for each antenna and each substream needs its own entry in endpoint list.
- * Duplication is the simplest way to achieve this.
- *
- * The location of this function is not too important. It could be a static method in the fengines class but has not
- * been moved as this is not a priority.
+ * It expects the endpoint argument to follow the x.x.x.x[+y]:port convention where x.x.x.x is the base address, [+y]
+ * represents the number of additional multicast streams to launch with consecutive addresses after x.x.x.x.
  */
-static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint(const options &opts)
+static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint_list(const std::string &arg)
 {
     std::vector<boost::asio::ip::udp::endpoint> out;
 
-    auto colon = opts.strAddress.find(':');
+    auto colon = arg.find(':');
     if (colon == std::string::npos)
         throw std::invalid_argument("Address must contain a colon");
-
-    std::uint16_t u16Port = boost::lexical_cast<std::uint16_t>(opts.strAddress.substr(colon + 1));
-    for (int i = 0; i < opts.n_ants; i++)
+    std::uint16_t port = boost::lexical_cast<std::uint16_t>(arg.substr(colon + 1));
+    auto plus = arg.find('+');
+    if (plus < colon)
     {
-        auto addr = boost::asio::ip::address_v4::from_string(opts.strAddress.substr(0, colon));
-        out.emplace_back(addr, u16Port);
+        std::string start_str = arg.substr(0, plus);
+        auto start = boost::asio::ip::address_v4::from_string(start_str);
+        int count = boost::lexical_cast<int>(arg.substr(plus + 1, colon - plus - 1));
+        for (int i = 0; i <= count; i++)
+        {
+            boost::asio::ip::address_v4 addr(start.to_ulong() + i);
+            out.emplace_back(addr, port);
+        }
+    }
+    else
+    {
+        auto addr = boost::asio::ip::address_v4::from_string(arg.substr(0, colon));
+        out.emplace_back(addr, port);
     }
     return out;
 }
@@ -285,10 +301,6 @@ struct fengines
     // variables.
     std::uint64_t u64HeapsPerFEngine;
 
-    // SPEAD2 has its own set of threads that manage transmitting data. When SPEAD2 finishes sending a heap, it queues a
-    // handler on this IO loop that is then called.
-    boost::asio::io_service ioService;
-
     // This vector of vectors stores all the heaps. The outer vector will have one entry for each F-Engine and the inner
     // one will store the heaps per F-Engine.
     std::vector<std::vector<heap_data>> vvHeaps;
@@ -300,6 +312,9 @@ struct fengines
 
     // Step between timestamps of succesive heaps belonging to the same antenna.
     const std::int64_t u64TimestampStep;
+
+    // Only transmit a single collection of heaps and then end the transmission.
+    const bool bRunOnce;
 
     // SPEAD 2 stream that every heap will be queued on.
     spead2::send::udp_ibv_stream stream;
@@ -313,10 +328,10 @@ struct fengines
      * Creates all heaps that will queued on the SPEAD2 stream.
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
-             const boost::asio::ip::address &interface_address)
-        : u64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), uNumAnts(opts.n_ants),
-          u64TimestampStep(opts.timestamp_step),
-          stream(ioService,
+             const boost::asio::ip::address &interface_address, boost::asio::io_service &ios)
+        : i64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), iNumAnts(opts.n_ants),
+          iTimestampStep(opts.timestamp_step), bRunOnce(opts.bRunOnce),
+          stream(ios,
                  spead2::send::stream_config()
                      .set_max_packet_size(opts.packet_payload_size_bytes + packet_header_size_bytes)
                      .set_rate(opts.dAdcRate * n_pols * sample_bits / 8.0 *
@@ -431,26 +446,61 @@ struct fengines
             std::cerr << "Error: " << ec;
             std::exit(1);
         }
-        else
+        else if (!bRunOnce)
         {
             send_next();
         }
     }
 };
 
-/* Create fengines object and start IO loop to kick off packet tranmission.
+/* Create fengines objects and start IO loop to kick off packet tranmission.
  */
 int main(int argc, const char **argv)
 {
+    // 1. IO loop that will be used by all multicast streams.
+    boost::asio::io_service ioService;
+
+    // 2. Parse all the command line parameters
     options opts = parse_options(argc, argv);
-
     auto interfaceAddress = boost::asio::ip::address::from_string(opts.strInterface);
-    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint(opts);
+    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint_list(opts.strAddress);
 
-    fengines f(opts, endpoints, interfaceAddress);
-    f.ioService.post(std::bind(&fengines::send_next, &f));
+    // 3. Create multicast stream objects
+    std::deque<fengines> vMulticastStreams; // We use a deque as unlike a vector it does not require the fengines object
+                                            // to have a copy constructor.
 
-    // Will run forever.
-    f.ioService.run();
+    // 3. Create a multicast stream for each endpoint specified in the command line.
+    for (size_t j = 0; j < endpoints.size(); j++)
+    {
+        // 3.1 Create an endpoint list to pass to the fengines object contructor.
+        // Instead of passing a single endpoint into the stream, we create a list continaing n_ants duplicates of the
+        // same endpoint. This is because the SPEAD2 stream object within the fengines object uses one substream for
+        // each antenna and each substream needs its own entry in an endpoint list. Duplication is the simplest way to
+        // achieve this. This duplication is really an internal working of the fengines class and should be moved to
+        // within that class. I have not yet figured out the best way to do this.
+        std::vector<boost::asio::ip::udp::endpoint> vEndpointsForSingleStream;
+        for (int i = 0; i < opts.n_ants; i++)
+        {
+            vEndpointsForSingleStream.emplace_back(endpoints[j]);
+        }
+
+        // 3.2 Construct the fengines object for a specific multicast stream
+        vMulticastStreams.emplace_back(opts, vEndpointsForSingleStream, interfaceAddress, ioService);
+        std::cout << "Created multicast stream: " << endpoints[j].address().to_string() << ":" << endpoints[j].port()
+                  << std::endl;
+    }
+
+    // 4. Kick off packet transmission
+    std::cout << "Beginning fsim data transmission..." << std::endl;
+    for (size_t i = 0; i < endpoints.size(); i++)
+    {
+        // 4.1 The first send_next() function of each multicast stream needs to be queued manually. Once these sends
+        // have completed, the callback function called will ensure that send_next() function is called again (assuming
+        // bRunOnce == false)
+        ioService.post(std::bind(&fengines::send_next, &vMulticastStreams[i]));
+    }
+
+    // 4.2 Start IO loop running.
+    ioService.run();
     return 0;
 }

@@ -39,16 +39,29 @@ class BuildExt(build_ext):
         super().build_extensions()
 
 
-# Points to the pybind11 C++ sources to build. Includes paths to spead2 header and source files required for building
+# Ext_modules is required as it points to the pybind11 C++ SPEAD2 sources to build. The sources list required by
+# ext_modules has some complexity to it as the files in gen_sources are not always present in the sources list. If they
+# are not present, they need to be added or strange runtime errors will occur. Before this gen_source logic was added,
+# the workaround was to run `pip install .` twice.
+sources = (
+    glob("3rdparty/spead2/src/common_*.cpp")
+    + glob("3rdparty/spead2/src/recv_*.cpp")
+    + glob("3rdparty/spead2/src/send_*.cpp")
+    + glob("src/*.cpp")
+)
+gen_sources = [
+    "3rdparty/spead2/src/common_loader_ibv.cpp",
+    "3rdparty/spead2/src/common_loader_rdmacm.cpp",
+    "3rdparty/spead2/src/common_loader_mlx5dv.cpp",
+]
+for source in gen_sources:
+    if source not in sources:
+        sources.append(source)
+
 ext_modules = [
     Pybind11Extension(
         "_katxgpu",
-        sources=(
-            glob("3rdparty/spead2/src/common_*.cpp")
-            + glob("3rdparty/spead2/src/recv_*.cpp")
-            + glob("3rdparty/spead2/src/send_*.cpp")
-            + glob("src/*.cpp")
-        ),
+        sources=sources,
         depends=["3rdparty/spead2/include/spead2/*.h"],  # Header files
         include_dirs=["src", "3rdparty/spead2/include"],
         extra_compile_args=["-std=c++17", "-g3", "-O3", "-fvisibility=hidden"],
@@ -68,7 +81,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/ska-sa/katxgpu",
     packages=setuptools.find_packages(),
-    package_data={"": ["kernels/*.mako"]},
+    package_data={
+        "": ["kernels/*.mako"]
+    },  # This line does not work as expected when using pip install - see MANIFEST.in file for fix.
     include_package_data=True,
     classifiers=[
         # "License :: OSI Approved :: GNU General Public License v2 (GPLv2)", # TBD before taking this repo public
