@@ -47,7 +47,7 @@ RUN pip3 install numpy==1.19.5 pycparser jinja2 pybind11
 
 # 3. Install katxgpu including all python packages specified in the requirements
 # files.
-WORKDIR katxgpu
+WORKDIR /katxgpu
 
 # Copy entire docker build context into katxgpu folder with the container.
 COPY . . 
