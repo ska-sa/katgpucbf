@@ -77,7 +77,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/ska-sa/katxgpu",
     packages=setuptools.find_packages(),
-    package_data={"": ["kernels/*.mako"]},
+    package_data={
+        "": ["kernels/*.mako"]
+    },  # This line does not work as expected when using pip install - see MANIFEST.in file for fix.
     include_package_data=True,
     classifiers=[
         # "License :: OSI Approved :: GNU General Public License v2 (GPLv2)", # TBD before taking this repo public
