@@ -65,7 +65,7 @@ print(f"Timestamp step: {hex(timestamp_step)}")
 # when this is set to true to see the format of the log file.
 use_file_monitor = False
 if use_file_monitor:
-    monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+    monitor = katxgpu.monitor.FileMonitor("temp_file.log")  # type: katxgpu.monitor.Monitor
 else:
     monitor = katxgpu.monitor.NullMonitor()
 
