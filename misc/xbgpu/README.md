@@ -150,15 +150,19 @@ requires a single server with a Mellanox NIC to run. This server must be differe
 on. This fsim simulates the exact packet format from the SKARAB F-Engines. The SKARAB X-Engines ingest data from 4 
 different multicast streams. This simulator only simulates data from a single multicast stream.
 
-The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>:<port>`
+The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>[+y]:<port>`
 
 Where:
  * `<interface_address>` is the ip address of the network interface to transmit the data out on.
- * `<multicast_address>` is the multicast address all packets are destined to.
+ * `<multicast_address>` is the multicast address all packets are destined to. The optional `[+y]` argument will create 
+`y` additional multicast streams with the same parameters each on a different multicast addresses consecutivly after the
+base `<multicast_address>`.
  * `<port>` is the UDP port to transmit data to.
 
-The above command will transmit data at about 7 Gbps by default. See the fsim [source code](./scratch/fsim.cpp) for a 
-detailed description of how the F-Engine simulator works and the useful configuration arguments.
+The above command will transmit data at about `7.8 * (y+1)` Gbps by default. 
+
+See the fsim [source code](./scratch/fsim.cpp) for a  detailed description of how the F-Engine simulator works and the 
+useful configuration arguments.
 
 A rough description of the ingest packet format is described 
 [here](https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg/edit). The
