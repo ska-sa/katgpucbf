@@ -17,10 +17,10 @@
  *
  * The functioning of this class is explained in more detail in katxgpu/src/README.md
  *
- * TODO: Move 'pybind11::buffer_info view' and associated functions to py_recv.h
+ * TODO: Move 'pybind11::buffer_info m_view' and associated functions to py_recv.h
  * TODO: Implement logging slightly differently - at the moment, the SPEAD2 logger is used. It may be worthwhile to have
  * a seperate katxgpu logger to seperate a SPEAD2 log from a katxgpu log.
- * TODO: Class member variables should start with an m_ for clarity. 
+ * TODO: Class member variables should start with an m_ for clarity.
  */
 
 #ifndef KATXGPU_RECV_H
@@ -134,46 +134,46 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     {
     }
 
-    const int sample_bits;                 ///< Number of bits per sample
-    const int n_ants;                      ///< Number of antennas in the array
-    const int n_channels;                  ///< Number of channels in each packet
-    const int n_samples_per_channel;       ///< Number of samples stored in a single channel
-    const int n_pols;                      ///< Number of polarisations in each sample
-    const int complexity = 2;              ///< Indicates two values per sample - one real and one imaginary.
-    const int heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
-    const int timestamp_step;              ///< Increase in timestamp between successive heaps from the same F-Engine.
-    const std::size_t packet_bytes;        ///< Number of payload bytes in each packet
-    const std::size_t chunk_bytes;         ///< Number of payload bytes in each chunk
+    const int m_sample_bits;                 ///< Number of bits per sample
+    const int n_ants;                        ///< Number of antennas in the array
+    const int n_channels;                    ///< Number of channels in each packet
+    const int n_samples_per_channel;         ///< Number of samples stored in a single channel
+    const int n_pols;                        ///< Number of polarisations in each sample
+    const int m_complexity = 2;              ///< Indicates two values per sample - one real and one imaginary.
+    const int m_heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
+    const int m_timestamp_step;              ///< Increase in timestamp between successive heaps from the same F-Engine.
+    const std::size_t m_packet_bytes;        ///< Number of payload bytes in each packet
+    const std::size_t m_chunk_bytes;         ///< Number of payload bytes in each chunk
 
-    std::int64_t first_timestamp = -1; ///< Very first timestamp observed. Populated when first packet is received.
+    std::int64_t m_first_timestamp = -1; ///< Very first timestamp observed. Populated when first packet is received.
 
-    mutable std::mutex free_chunks_lock; ///< Protects access to @ref free_chunks
-    spead2::semaphore free_chunks_sem;   ///< Semaphore that is put whenever chunks are added
+    mutable std::mutex m_free_chunks_lock; ///< Protects access to @ref m_free_chunks_stack
+    spead2::semaphore m_free_chunks_sem;   ///< Semaphore that is put whenever chunks are added
 
-    /* When the user gives a new chunk (or a recycled old chunk) to the receiver, it is added to the free_chunks stack.
-     * The chunks on this stack are not in use, but when they are required, they will be moved from this stack to the
-     * active chunks queue.
+    /* When the user gives a new chunk (or a recycled old chunk) to the receiver, it is added to the
+     * m_free_chunks_stack. The chunks on this stack are not in use, but when they are required, they will be moved from
+     * this stack to the active chunks queue.
      */
-    std::stack<std::unique_ptr<chunk>> free_chunks;
+    std::stack<std::unique_ptr<chunk>> m_free_chunks_stack;
 
     /* Chunks that are actively being assembled from multiple heaps are stored in this queue. The receiver can be
      * assembling multiple chunks at any one time. Once a chunk is fully assembled, the receiver will move it to the
-     * ringbuffer object.
+     * m_ringbuffer object.
      */
-    std::deque<std::unique_ptr<chunk>> active_chunks; ///< Chunks currently being filled
+    std::deque<std::unique_ptr<chunk>> m_active_chunks_queue; ///< Chunks currently being filled
 
     /* All chunks that have been assembled by the receiver and are ready to be passed to the user will be pushed onto
      * this ringbuffer.
      */
-    ringbuffer_t &ringbuffer;
+    ringbuffer_t &m_ringbuffer;
 
-    /* TODO: This view is only used during unit testing. It stores the python view of the buffer containing simulated
+    /* TODO: This m_view is only used during unit testing. It stores the python view of the buffer containing simulated
      * packets. More detail in "add_buffer_reader()" function. I do not think that this file is the best place for this
      * object. Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would need to be
      * modified too to accomodate this change. I would need to move a bunch of other functions around to make that
      * happen, so I will wait until I have a spare moment.
      */
-    pybind11::buffer_info view;
+    pybind11::buffer_info m_view;
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
     void grab_chunk(std::int64_t timestamp);
