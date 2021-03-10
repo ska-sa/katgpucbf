@@ -87,7 +87,7 @@ class stream;
 class allocator : public spead2::memory_allocator
 {
   private:
-    stream &recv;
+    stream &m_recv;
 
   public:
     explicit allocator(stream &recv);
@@ -197,9 +197,6 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      * 1. void* - A pointer to the location in memory that the received heap data must be allocated to.
      * 2. chunk* - A pointer to the specific chunk that contains the buffer the heaps data is being allocated to.
      * 3. std::size_t - An index indicating which heap within the chunk that the heap belongs to.
-     *
-     * TODO: Clarify what the packet index means, mention what its called in katfgpu and say why the overloading is
-     * used. Determine data pointer, chunk and packet index from packet timestamp and F-Engine ID.
      *
      * If the timestamp is beyond the last active chunk, old chunks may be flushed and new chunks appended.
      *

@@ -6,10 +6,6 @@ Contains two unit tests:
     generates a high degree of certainty over the results.
     2. @test_correlator_quick - this test runs very quickly but is less exhaustive. It is used for quickly testing
     much larger array sizes.
-
-TODO:
-    1. Once the functionality has been added to the TensorCoreXEngineCore class, add a unit test to verify that the
-    kernel can be called multiple times without zeroing the visibility matrix.
 """
 import pytest
 import numpy as np

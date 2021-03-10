@@ -23,7 +23,7 @@ static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int FENGINE_ID = 0x4101;
 static constexpr int DATA_ID = 0x4300;
 
-allocator::allocator(stream &recv) : recv(recv)
+allocator::allocator(stream &recv) : m_recv(recv)
 {
 }
 
@@ -31,7 +31,7 @@ auto allocator::allocate(std::size_t size, void *hint) -> pointer
 {
     if (hint)
     {
-        void *ptr = recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
+        void *ptr = m_recv.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
         if (ptr)
             return pointer(reinterpret_cast<std::uint8_t *>(ptr),
                            deleter(shared_from_this(), (void *)std::uintptr_t(true)));
