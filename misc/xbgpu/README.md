@@ -19,6 +19,9 @@ If this scripts folder does get created, I think that a step should be added in 
 scripts run on each change to the repo as there is a chance that some of them will not be run for many months 
 before they are needed. Additionally some of the documentation in this readme references the scripts in the scratch 
 folder, this will need to be updated to reflect the new links to prevent stale documentation.
+4. Figure out the repo license and update the license section below to reflect this.
+5. Most of the repos documentation is just in the form of readmes and inline commenting. It is worth investigating 
+something like [sphinx](http://www.sphinx-doc.org) that can generate a proper readthedocs page for this repo.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
