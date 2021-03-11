@@ -62,9 +62,9 @@ namespace katxgpu::recv
  */
 struct chunk
 {
-    std::int64_t timestamp;              ///< Timestamp of first collection of heaps
-    std::vector<bool> present;           ///< Bitmask of packets that are present
-    boost::asio::mutable_buffer storage; ///< Storage for samples
+    std::int64_t m_i64timestamp;         ///< Timestamp of first collection of heaps
+    std::vector<bool> m_vbPacketPresent; ///< Bitmask of packets that are present
+    boost::asio::mutable_buffer m_storage; ///< Storage for samples
 
     virtual ~chunk() = default; // makes it polymorphic
 };

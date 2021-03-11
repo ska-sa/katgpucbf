@@ -31,7 +31,7 @@ class py_chunk : public chunk
           buffer_info(std::make_shared<pybind11::buffer_info>(
               request_buffer_info(this->base, PyBUF_C_CONTIGUOUS | PyBUF_WRITEABLE)))
     {
-        storage = boost::asio::mutable_buffer(buffer_info->ptr, buffer_info->size * buffer_info->itemsize);
+        m_storage = boost::asio::mutable_buffer(buffer_info->ptr, buffer_info->size * buffer_info->itemsize);
     }
 };
 
@@ -119,8 +119,8 @@ pybind11::module register_module(pybind11::module &parent)
              "    Buffer object - needs to occupy a contiguous section of memory.\n"
              "device:\n"
              "    This parameter is only needs to be provided when using gpudirect.")
-        .def_readwrite("timestamp", &py_chunk::timestamp)
-        .def_readonly("present", &py_chunk::present)
+        .def_readwrite("timestamp", &py_chunk::m_i64timestamp)
+        .def_readonly("present", &py_chunk::m_vbPacketPresent)
         .def_readonly("base", &py_chunk::base)
         .def_readonly("device", &py_chunk::device);
 
