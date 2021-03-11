@@ -87,7 +87,7 @@ class stream;
 class allocator : public spead2::memory_allocator
 {
   private:
-    stream &m_recv;
+    stream &m_ReceiverStream;
 
   public:
     explicit allocator(stream &recv);
@@ -134,33 +134,36 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     {
     }
 
-    const int m_sample_bits;                 ///< Number of bits per sample
-    const int n_ants;                        ///< Number of antennas in the array
-    const int n_channels;                    ///< Number of channels in each packet
-    const int n_samples_per_channel;         ///< Number of samples stored in a single channel
-    const int n_pols;                        ///< Number of polarisations in each sample
-    const int m_complexity = 2;              ///< Indicates two values per sample - one real and one imaginary.
-    const int m_heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
-    const int m_timestamp_step;              ///< Increase in timestamp between successive heaps from the same F-Engine.
-    const std::size_t m_packet_bytes;        ///< Number of payload bytes in each packet
-    const std::size_t m_chunk_bytes;         ///< Number of payload bytes in each chunk
+    // Array configuration parameters
+    const int m_iSampleBits;         ///< Number of bits per sample
+    const int n_ants;                ///< Number of antennas in the array
+    const int n_channels;            ///< Number of channels in each packet
+    const int n_samples_per_channel; ///< Number of samples stored in a single channel
+    const int n_pols;                ///< Number of polarisations in each sample
+    const int m_iComplexity = 2;     ///< Indicates two values per sample - one real and one imaginary.
 
-    std::int64_t m_first_timestamp = -1; ///< Very first timestamp observed. Populated when first packet is received.
+    // Internal parameters
+    const int m_iHeapsPerFenginePerChunk;   ///< A chunk has this many heaps per F-Engine.
+    const int m_iTimestampStep;             ///< Increase in timestamp between successive heaps from the same F-Engine.
+    const std::size_t m_ulPacketSize_bytes; ///< Number of payload bytes in each packet
+    const std::size_t m_ulChunkSize_bytes;  ///< Number of payload bytes in each chunk
 
-    mutable std::mutex m_free_chunks_lock; ///< Protects access to @ref m_free_chunks_stack
-    spead2::semaphore m_free_chunks_sem;   ///< Semaphore that is put whenever chunks are added
+    std::int64_t m_i64FirstTimestamp = -1; ///< Very first timestamp observed. Populated when first packet is received.
+
+    mutable std::mutex m_freeChunksLock;     ///< Protects access to @ref m_freeChunksStack
+    spead2::semaphore m_freeChunksSemaphore; ///< Semaphore that is put whenever chunks are added
 
     /* When the user gives a new chunk (or a recycled old chunk) to the receiver, it is added to the
-     * m_free_chunks_stack. The chunks on this stack are not in use, but when they are required, they will be moved from
+     * m_freeChunksStack. The chunks on this stack are not in use, but when they are required, they will be moved from
      * this stack to the active chunks queue.
      */
-    std::stack<std::unique_ptr<chunk>> m_free_chunks_stack;
+    std::stack<std::unique_ptr<chunk>> m_freeChunksStack;
 
     /* Chunks that are actively being assembled from multiple heaps are stored in this queue. The receiver can be
      * assembling multiple chunks at any one time. Once a chunk is fully assembled, the receiver will move it to the
      * m_ringbuffer object.
      */
-    std::deque<std::unique_ptr<chunk>> m_active_chunks_queue; ///< Chunks currently being filled
+    std::deque<std::unique_ptr<chunk>> m_activeChunksQueue; ///< Chunks currently being filled
 
     /* All chunks that have been assembled by the receiver and are ready to be passed to the user will be pushed onto
      * this ringbuffer.
