@@ -30,10 +30,18 @@ parser.add_argument("--mcast_src_port", default="7149", type=int, help="Port of 
 parser.add_argument(
     "--src_interface", default="10.100.44.1", help="IP Address of interface that will receive the data."
 )
+parser.add_argument(
+    "--samples_per_channel",
+    default="256",
+    type=int,
+    help="Each channel within a heap is transmitted as a single packet. The size of the packets being received is expected to be equal to samples_per_channel*4 bytes",
+)
+
 args = parser.parse_args()
 src_multicast_ip = args.mcast_src_ip
 src_multicast_port = args.mcast_src_port
 src_interface_ip = args.src_interface
+samples_per_channel = args.samples_per_channel
 
 print(f"Subscribing to {src_multicast_ip}:{src_multicast_port} on the {src_interface_ip} interface.")
 
@@ -44,7 +52,7 @@ thread_affinity = 2
 n_ants = 64
 n_channels_total = 32768
 n_channels_per_stream = 128
-n_samples_per_channel = 256
+n_samples_per_channel = samples_per_channel
 n_pols = 2
 sample_bits = 8
 heaps_per_fengine_per_chunk = 10
