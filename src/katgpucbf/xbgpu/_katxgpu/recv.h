@@ -90,7 +90,7 @@ class allocator : public spead2::memory_allocator
     stream &m_receiverStream;
 
   public:
-    explicit allocator(stream &recv);
+    explicit allocator(stream &receiverStream);
 
     virtual pointer allocate(std::size_t ulHeapSize_bytes, void *receivedPacket) override;
     virtual void free(std::uint8_t *ptr, void *user) override;

@@ -23,20 +23,21 @@ static constexpr int TIMESTAMP_ID = 0x1600;
 static constexpr int FENGINE_ID = 0x4101;
 static constexpr int DATA_ID = 0x4300;
 
-allocator::allocator(stream &recv) : m_receiverStream(recv)
+allocator::allocator(stream &receiverStream) : m_receiverStream(receiverStream)
 {
 }
 
-auto allocator::allocate(std::size_t size, void *hint) -> pointer
+auto allocator::allocate(std::size_t ulHeapSize_bytes, void *receivedPacket) -> pointer
 {
-    if (hint)
+    if (receivedPacket)
     {
-        void *ptr = m_receiverStream.allocate(size, *reinterpret_cast<spead2::recv::packet_header *>(hint));
+        void *ptr = m_receiverStream.allocate(ulHeapSize_bytes,
+                                              *reinterpret_cast<spead2::recv::packet_header *>(receivedPacket));
         if (ptr)
             return pointer(reinterpret_cast<std::uint8_t *>(ptr),
                            deleter(shared_from_this(), (void *)std::uintptr_t(true)));
     }
-    return spead2::memory_allocator::allocate(size, hint);
+    return spead2::memory_allocator::allocate(ulHeapSize_bytes, receivedPacket);
 }
 
 void allocator::free(std::uint8_t *ptr, void *user)
