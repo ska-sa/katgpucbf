@@ -17,7 +17,7 @@
  *
  * The functioning of this class is explained in more detail in katxgpu/src/README.md
  *
- * TODO: Move 'pybind11::buffer_info m_view' and associated functions to py_recv.h
+ * TODO: Move 'pybind11::buffer_info m_BufferView' and associated functions to py_recv.h
  * TODO: Implement logging slightly differently - at the moment, the SPEAD2 logger is used. It may be worthwhile to have
  * a seperate katxgpu logger to seperate a SPEAD2 log from a katxgpu log.
  * TODO: Class member variables should start with an m_ for clarity.
@@ -135,12 +135,12 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     }
 
     // Array configuration parameters
-    const int m_iSampleBits;         ///< Number of bits per sample
-    const int n_ants;                ///< Number of antennas in the array
-    const int n_channels;            ///< Number of channels in each packet
-    const int n_samples_per_channel; ///< Number of samples stored in a single channel
-    const int n_pols;                ///< Number of polarisations in each sample
-    const int m_iComplexity = 2;     ///< Indicates two values per sample - one real and one imaginary.
+    const int m_iSampleBits;           ///< Number of bits per sample
+    const int m_iNumAnts;              ///< Number of antennas in the array
+    const int m_iNumChannels;          ///< Number of channels in each packet
+    const int m_iNumSamplesPerChannel; ///< Number of samples stored in a single channel
+    const int m_iNumPols;              ///< Number of polarisations in each sample
+    const int m_iComplexity = 2;       ///< Indicates two values per sample - one real and one imaginary.
 
     // Internal parameters
     const int m_iHeapsPerFenginePerChunk;   ///< A chunk has this many heaps per F-Engine.
@@ -161,22 +161,22 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
 
     /* Chunks that are actively being assembled from multiple heaps are stored in this queue. The receiver can be
      * assembling multiple chunks at any one time. Once a chunk is fully assembled, the receiver will move it to the
-     * m_ringbuffer object.
+     * m_completedChunksRingbuffer object.
      */
     std::deque<std::unique_ptr<chunk>> m_activeChunksQueue; ///< Chunks currently being filled
 
     /* All chunks that have been assembled by the receiver and are ready to be passed to the user will be pushed onto
      * this ringbuffer.
      */
-    ringbuffer_t &m_ringbuffer;
+    ringbuffer_t &m_completedChunksRingbuffer;
 
-    /* TODO: This m_view is only used during unit testing. It stores the python view of the buffer containing simulated
-     * packets. More detail in "add_buffer_reader()" function. I do not think that this file is the best place for this
-     * object. Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would need to be
-     * modified too to accomodate this change. I would need to move a bunch of other functions around to make that
-     * happen, so I will wait until I have a spare moment.
+    /* TODO: This m_BufferView is only used during unit testing. It stores the python view of the buffer containing
+     * simulated packets. More detail in "add_buffer_reader()" function. I do not think that this file is the best place
+     * for this object. Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would
+     * need to be modified too to accomodate this change. I would need to move a bunch of other functions around to make
+     * that happen, so I will wait until I have a spare moment.
      */
-    pybind11::buffer_info m_view;
+    pybind11::buffer_info m_BufferView;
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
     void grab_chunk(std::int64_t timestamp);

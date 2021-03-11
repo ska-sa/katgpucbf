@@ -55,12 +55,12 @@ stream::stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols
                                .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
                                .set_memcpy(use_gdrcopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
                                .set_allow_out_of_order(true)),
-      n_ants(n_ants), n_channels(n_channels), n_samples_per_channel(n_samples_per_channel), n_pols(n_pols),
+      m_iNumAnts(n_ants), m_iNumChannels(n_channels), m_iNumSamplesPerChannel(n_samples_per_channel), m_iNumPols(n_pols),
       m_iSampleBits(sample_bits), m_iTimestampStep(timestamp_step),
       m_iHeapsPerFenginePerChunk(heaps_per_fengine_per_chunk),
       m_ulPacketSize_bytes(n_samples_per_channel * n_pols * m_iComplexity / 8 * sample_bits),
       m_ulChunkSize_bytes(m_ulPacketSize_bytes * n_channels * n_ants * heaps_per_fengine_per_chunk),
-      m_ringbuffer(ringbuffer)
+      m_completedChunksRingbuffer(ringbuffer)
 {
     if (sample_bits != 8)
         throw std::invalid_argument("sample_bits must equal 8 - logic for other sample sizes has not been tested.");
@@ -88,7 +88,7 @@ void stream::add_chunk(std::unique_ptr<chunk> &&c)
         throw std::invalid_argument("Chunk has incorrect size");
 
     c->present.clear();
-    c->present.resize(n_ants * m_iHeapsPerFenginePerChunk);
+    c->present.resize(m_iNumAnts * m_iHeapsPerFenginePerChunk);
     {
         std::lock_guard<std::mutex> lock(m_freeChunksLock);
         m_freeChunksStack.push(std::move(c));
@@ -117,7 +117,7 @@ bool stream::flush_chunk()
     {
         pre_ringbuffer_push();
         // Take the oldest active chunk and add it to the ringbuffer.
-        m_ringbuffer.push(std::move(m_activeChunksQueue[0]));
+        m_completedChunksRingbuffer.push(std::move(m_activeChunksQueue[0]));
         post_ringbuffer_push();
         // Once the chunk has been put on the ringbuffer, remove it from the active chunks queue.
         m_activeChunksQueue.pop_front();
@@ -140,11 +140,11 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     std::size_t fengine_idx = fengine_id;
 
     // The heap index in the chunk is a combination of the heap timestamp and f-engine id.
-    std::size_t heap_idx = timestamp_idx * n_ants + fengine_idx;
+    std::size_t heap_idx = timestamp_idx * m_iNumAnts + fengine_idx;
 
     // The buffer offset is the number of bytes the current heap is offset from the chunk buffer's base address. It is
-    // basically the heap index multiplied by the heap size (n_channels * m_ulPacketSize_bytes).
-    std::size_t buffer_offset = heap_idx * n_channels * m_ulPacketSize_bytes;
+    // basically the heap index multiplied by the heap size (m_iNumChannels * m_ulPacketSize_bytes).
+    std::size_t buffer_offset = heap_idx * m_iNumChannels * m_ulPacketSize_bytes;
 
     // Use the buffer offset to calculate the actual pointer to allocate the heap to.
     void *ptr = boost::asio::buffer_cast<std::uint8_t *>(c.storage) + buffer_offset;
@@ -244,7 +244,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
 void *stream::allocate(std::size_t size, spead2::recv::packet_header &packet)
 {
     // 1. Perform some basic checks on the received packet of the new heap to confirm that it is what we expect.
-    if (size != m_ulPacketSize_bytes * n_channels)
+    if (size != m_ulPacketSize_bytes * m_iNumChannels)
     {
         spead2::log_info("Allocating incorrect size");
         return nullptr;
@@ -317,10 +317,10 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
         spead2::log_info("It's not a valid digitiser packet");
         return;
     }
-    if (length != m_ulPacketSize_bytes * n_channels)
+    if (length != m_ulPacketSize_bytes * m_iNumChannels)
     {
         spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes", length,
-                         m_ulPacketSize_bytes * n_channels);
+                         m_ulPacketSize_bytes * m_iNumChannels);
         return;
     }
 
@@ -346,7 +346,7 @@ void stream::stop_received()
     while (!m_activeChunksQueue.empty())
         if (!flush_chunk())
             break;
-    m_ringbuffer.stop();
+    m_completedChunksRingbuffer.stop();
     spead2::recv::stream::stop_received();
 }
 
@@ -355,11 +355,11 @@ void stream::add_buffer_reader(pybind11::buffer buffer)
     // This view object needs to be held as long as the receiver is making use of the buffer. If it is released, Python
     // will release the buffer back to the OS causing segfaults when C++ tries to access the buffer. Took me a while to
     // figure this out - dont make my mistakes.
-    m_view = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
+    m_BufferView = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
     // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
-    emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(m_view.ptr),
-                                             m_view.itemsize * m_view.size);
+    emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(m_BufferView.ptr),
+                                             m_BufferView.itemsize * m_BufferView.size);
 }
 
 void stream::add_udp_pcap_file_reader(const std::string &filename)
@@ -389,17 +389,17 @@ std::size_t stream::get_chunk_bytes() const
 
 stream::ringbuffer_t &stream::get_ringbuffer()
 {
-    return m_ringbuffer;
+    return m_completedChunksRingbuffer;
 }
 
 const stream::ringbuffer_t &stream::get_ringbuffer() const
 {
-    return m_ringbuffer;
+    return m_completedChunksRingbuffer;
 }
 
 void stream::stop()
 {
-    m_ringbuffer.stop();
+    m_completedChunksRingbuffer.stop();
     spead2::recv::stream::stop();
 }
 
