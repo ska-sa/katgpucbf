@@ -12,6 +12,13 @@ files must be converted to PDF and the links updated accordingly when this progr
 [display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) and [fsim.cpp](scratch/fsim.cpp)  also
 have links that must be updated.
 2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
+3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
+no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 
+own folder and then another folder called scripts should be added where things like receiver_example.py will go. 
+If this scripts folder does get created, I think that a step should be added in the Jenkinsfile to check that the 
+scripts run on each change to the repo as there is a chance that some of them will not be run for many months 
+before they are needed. Additionally some of the documentation in this readme references the scripts in the scratch 
+folder, this will need to be updated to reflect the new links to prevent stale documentation.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
