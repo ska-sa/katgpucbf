@@ -45,11 +45,12 @@ libboost-all-dev, libibverbs-dev,librdmacm-dev, and libpcap-dev.
 
 ## Installation
 In order to install the katxgpu module, the following commands must be run:
-1. Create a python 3.6 virtual environment: `virtualenv -p python3.6 <venv name>`.
-2. Activate virtual environment: `source <venv name>/bin/activate`
-3. Install all required python packages: `pip install -r requirements.txt`
-4. Checkout spead2 submodule: `git submodule update --init --recursive`
-5. Install the katxgpu package: `pip install .`
+1. Install required C++ libraries for SPEAD2: `apt-get install autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev`
+2. Create a python 3.6 virtual environment: `virtualenv -p python3.6 <venv name>`.
+3. Activate virtual environment: `source <venv name>/bin/activate`
+4. Install all required python packages: `pip install -r requirements.txt`
+5. Checkout spead2 submodule: `git submodule update --init --recursive`
+6. Install the katxgpu package: `pip install .`
 
 NOTE: Due to the underlying complexity of turning the SPEAD2 C++ code into a python module, installing the katxgpu 
 module can take quite a while as the SPEAD2 software is installed each time. Build times over a minute long are quite
@@ -57,7 +58,7 @@ normal. To reduce these build times look at using the [ccache](https://ccache.de
 
 If the F-Engine simulator needs to be run, the SPEAD2 C++ library needs to be installed. The following steps must be
 followed in order to do this:
-1. sudo  apt-get install autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev
+1. sudo apt-get install autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev
 2. pip install pycparser jinja2
 3. cd /3rdparty/spead2
 4. ./bootstrap
