@@ -57,12 +57,13 @@ normal. To reduce these build times look at using the [ccache](https://ccache.de
 
 If the F-Engine simulator needs to be run, the SPEAD2 C++ library needs to be installed. The following steps must be
 followed in order to do this:
-1. pip install pycparser jinja2
-2. cd /3rdparty/spead2
-3. ./bootstrap
-4. ./configure
-5. make
-6. sudo make install
+1. sudo  apt-get install autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev
+2. pip install pycparser jinja2
+3. cd /3rdparty/spead2
+4. ./bootstrap
+5. ./configure
+6. make
+7. sudo make install
 
 The SPEAD2 C++ install and the katxgpu module install run different programs and as such the once can be installed 
 without the other.
