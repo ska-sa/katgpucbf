@@ -9,8 +9,9 @@ to development. Many of these TODOs are listed in the relevant files, but someti
 In this case the TODO is listed here.
 1. A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
-[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) and [fsim.cpp](scratch/fsim.cpp)  also
-have links that must be updated.
+[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp) and 
+[display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py) also have links that must be
+updated.
 2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
 3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
 no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 
@@ -169,7 +170,7 @@ quickest way to figure out how the receiver works.
 The `katxgpu._katxgpu` module uses the SPEAD2 C++ bindings (not the python bindings) and as such requires the SPEAD2
 submodule to be included in this repository. This module is located in the katxgpu/3rdparty directory.
 
-__NOTE:__ The F-Engine 
+TODO: Discuss how the output heaps are at a much lower data rate and as such normal SPEAD2 is used.
 
 ### F-Engine Packet Simulator
 
