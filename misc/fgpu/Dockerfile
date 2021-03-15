@@ -7,7 +7,7 @@ USER kat
 
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
-RUN install-requirements.py -d ~/docker-base/base-requirements.txt -d ~/docker-base/gpu-requirements.txt -r /tmp/install/requirements.txt
+RUN install_pinned.py -r /tmp/install/requirements.txt
 
 COPY --chown=kat:kat . /tmp/install/katfgpu
 RUN pip install --no-deps /tmp/install/katfgpu

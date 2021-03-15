@@ -1,23 +1,10 @@
-appdirs
-decorator
-llvmlite
-mako
-markupsafe
-msgpack
-netifaces
-numba
-numpy==1.17.3
-pandas
-pycuda==2019.1.2
-pygelf
-python-dateutil
-pytools
-pytz
-redis
-scikit-cuda==0.5.3
-scipy
-typing_extensions==3.7.4.1
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-gpu-build/requirements.txt
+
+numpy
+scikit-cuda
+typing_extensions
 
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
-katsdpsigproc @ git+https://github.com/ska-sa/katsdpsigproc
+katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
