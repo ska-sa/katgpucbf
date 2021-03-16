@@ -49,42 +49,29 @@ class PreCorrelationReorderCoreTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_samples_per_channel = n_samples_per_channel
-        self.n_polarizations = 2  # Hardcoded to 2. No other values are supported
+        self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_batches = n_batches
-        
-        # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
-
-        # This 128 is hardcoded in the original Tensor Core kernel. The reason it is set to this needs to be determined.
+        
+        # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
-
-        valid_bitwidths = [4, 8, 16]
-        if self._sample_bitwidth not in valid_bitwidths:
-            raise ValueError(
-                f"Sample_bitwidth must equal either 4, 8 or 16, currently equal to {self._sample_bitwidth}."
-            )
-        elif self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
-            raise ValueError(
-                f"Sample bitwidth of {self._sample_bitwidth} will eventually be supported but has not yet been implemented."
-            )
-
+        
         if self.n_samples_per_channel % self.n_times_per_block != 0:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
-        self.inputDataShape = (self.n_ants, self.n_channels, self.n_samples_per_channel, self.n_polarizations)
+        self.inputDataShape = (self.n_ants, self.n_channels, self.n_samples_per_channel, self.n_polarisations)
 
         self.outputDataShape = (
             self.n_channels,
             self.n_samples_per_channel // self.n_times_per_block,
             self.n_ants,
-            self.n_polarizations,
+            self.n_polarisations,
             self.n_times_per_block,
         )
 
         # Matrix size is the same for the Input and Output data shapes
-        self.matrix_size = self.n_ants * self.n_channels * self.n_samples_per_channel * self.n_polarizastions
+        self.matrix_size = self.n_ants * self.n_channels * self.n_samples_per_channel * self.n_polarisations
         # Seeing as we can't really define constants in Python
         THREADS_PER_BLOCK = 1024
         
@@ -103,12 +90,9 @@ class PreCorrelationReorderCoreTemplate:
                 "n_ants": self.n_ants,
                 "n_channels": self.n_channels,
                 "n_samples_per_channel": self.n_samples_per_channel,
-                "n_polarizastions": self.n_polarizations,
+                "n_polarisations": self.n_polarisations,
                 "n_times_per_block": self.n_times_per_block,
                 "n_batches": self.n_batches,
-                # "sample_bitwidth": self._sample_bitwidth,
-                # "n_ants_per_block": self._n_ants_per_block,
-                # "n_baselines": self.n_baselines,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
@@ -130,7 +114,7 @@ class PreCorrelationReorderCore(accel.Operation):
     [antennas][channels][samples_per_channel][polarisations]
 
     The output sample buffer must have the shape:
-    [channels][samples_per_channel//times_per_block][n_ants][polarizations][times_per_block]
+    [channels][samples_per_channel//times_per_block][n_ants][polarisations][times_per_block]
 
     A complexity that is introduced by the pre-correlation reorder kernel is that the samples_per_channel index is split over two
     different indices. The first index ranges from 0 to samples_per_channel//times_per_block and the second index
@@ -163,22 +147,3 @@ class PreCorrelationReorderCore(accel.Operation):
             local_size=(32, 32, 1),
         )
 
-    @staticmethod
-    def get_baseline_index(ant1, ant2):
-        """
-        Return the index in the visibilities matrix of the visibility produced by ant1 and ant2.
-
-        The visibilities matrix indexing is as follows:
-             ant1 = 0  1  2  3  4
-                 +---------------
-        ant2 = 0 | 00 01 03 06 10
-               1 |    02 04 07 11
-               2 |       05 08 12
-               3 |          09 13
-               4 |             14
-
-        This function requires that ant1>=ant2
-        """
-        if ant2 > ant1:
-            raise ValueError("It is required that ant1 >= ant2 in all cases")
-        return ant1 * (ant1 + 1) // 2 + ant2

@@ -14,10 +14,8 @@
 */
 
 // Includes
-#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <sys/cdefs.h>
 
 /* Yes, the first line of a file is a closing brace. Dont run away, dont panic, there is a reason for this. By default
@@ -36,10 +34,11 @@
 #include <mma.h>
 
 <%include file="/port.mako"/>
+// Defines, now using mako parametrisation
 #define NR_STATIONS ${n_ants}
 #define NR_CHANNELS ${n_channels}
 #define NR_SAMPLES_PER_CHANNEL ${n_samples_per_channel}
-#define NR_POLARIZATIONS ${n_polarizastions}
+#define NR_POLARISATIONS ${n_polarisations}
 #define NR_TIMES_PER_BLOCK $(n_times_per_block)
 #define NR_BATCHES $(n_batches)
 
@@ -49,13 +48,10 @@
 #define NR_STATIONS 64
 #define NR_CHANNELS 128
 #define NR_SAMPLES_PER_CHANNEL 256
-#define NR_POLARIZATIONS 2
+#define NR_POLARISATIONS 2
 #define NR_TIMES_PER_BLOCK 16
 #define NR_BATCHES 10
 */
-
-#define INPUT_RATE 28    // Gbps
-#define ONE_MB 1000000.0 // For ease of calc
 
 // Maximum number of threads per block, as per:
 // - https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications__technical-specifications-per-compute-capability
@@ -82,8 +78,6 @@
 
 */
 
-
-
 __global__
 void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
 {
@@ -102,23 +96,23 @@ void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
     // 2. Calculate indices for reorder
     // 2.1. Calculate 'current'/original indices for each dimension
     //      - Matrix Stride should be the same value for Original and Reordered matrices
-    iMatrixStride_y = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-    iAntIndex = iThreadIndex_x / (NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
-    iRemIndex = iThreadIndex_x % (NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
+    iMatrixStride_y = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARISATIONS;
+    iAntIndex = iThreadIndex_x / (NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARISATIONS);
+    iRemIndex = iThreadIndex_x % (NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARISATIONS);
 
-    iChanIndex = iRemIndex / (NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
-    iRemIndex = iRemIndex % (NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS);
+    iChanIndex = iRemIndex / (NR_SAMPLES_PER_CHANNEL * NR_POLARISATIONS);
+    iRemIndex = iRemIndex % (NR_SAMPLES_PER_CHANNEL * NR_POLARISATIONS);
 
-    iTimeIndex = iRemIndex / NR_POLARIZATIONS;
-    iRemIndex = iRemIndex % NR_POLARIZATIONS;
+    iTimeIndex = iRemIndex / NR_POLARISATIONS;
+    iRemIndex = iRemIndex % NR_POLARISATIONS;
     // 0 = Even = Pol-0, 1 = Odd = Pol-1
     iPolIndex = iRemIndex;
 
     // 2.2. Calculate reordered matrix's indices and stride accordingly
-    iNewChanOffset = iChanIndex * (NR_SAMPLES_PER_CHANNEL/NR_TIMES_PER_BLOCK)*NR_STATIONS*NR_POLARIZATIONS*NR_TIMES_PER_BLOCK;
+    iNewChanOffset = iChanIndex * (NR_SAMPLES_PER_CHANNEL/NR_TIMES_PER_BLOCK)*NR_STATIONS*NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
     iTimeOuterIndex = iTimeIndex / NR_TIMES_PER_BLOCK;
-    iTimeOuterOffset = iTimeOuterIndex * NR_STATIONS*NR_POLARIZATIONS*NR_TIMES_PER_BLOCK;
-    iNewAntOffset = iAntIndex * NR_POLARIZATIONS*NR_TIMES_PER_BLOCK;
+    iTimeOuterOffset = iTimeOuterIndex * NR_STATIONS*NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
+    iNewAntOffset = iAntIndex * NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
     iNewPolOffset = iPolIndex * NR_TIMES_PER_BLOCK;
     iTimeInnerIndex = iTimeIndex % NR_TIMES_PER_BLOCK; // ?
     
@@ -126,313 +120,11 @@ void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
 
     // 3. Perform the reorder (where necessary)
     uint16_t u16InputSample;
-    if (iThreadIndex_x < (NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS))
+    if (iThreadIndex_x < (NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARISATIONS))
     {
         // 3.1. Read out from the original array
         u16InputSample = *(pu16Array + iThreadIndex_x + iMatrixStride_y);
         // 3.2. Store at its reordered index
         *(pu16ArrayReordered + iNewIndex + iMatrixStride_y) = u16InputSample;
     }
-}
-
-// Function declarations
-void display_1d_strided(uint16_t *pu16Array, bool bDisplayHex);
-void display_1d_reordered(uint16_t *pu16Array, bool bDisplayHex);
-int verify_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered, int iMatrixSize);
-
-int main()
-{
-    printf("Starting...\n\n");
-
-    #pragma region Variable Declaration
-
-    // Working outside the default stream (stream 'ID' == 0)
-    cudaStream_t stream1;
-    cudaStreamCreate(&stream1);
-
-    // For timing the kernel execution
-    cudaEvent_t eventKernelStart, eventKernelStop;         // To time the kernel
-    cudaEvent_t eventMemcpyH2DStart, eventMemcpyH2DStop;   // To time the H2D Memcpy
-    cudaEvent_t eventMemcpyD2HStart, eventMemcpyD2HStop;   // To time the D2H Memcpy
-    cudaEventCreate(&eventKernelStart);
-    cudaEventCreate(&eventKernelStop);
-    cudaEventCreate(&eventMemcpyH2DStart);
-    cudaEventCreate(&eventMemcpyH2DStop);
-    cudaEventCreate(&eventMemcpyD2HStart);
-    cudaEventCreate(&eventMemcpyD2HStop);
-
-    int iMatrixSize = NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-    int iTotalElements = NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS * NR_BATCHES;
-    // int iTotalElementsOut = NR_CHANNELS * (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-    // - iTotalElementsOut = iTotalElements! Just with different dimensions
-
-    uint16_t *pu16Array_host, *pu16ArrayReordered_host, *pu16Array_device, *pu16ArrayReordered_device;
-
-    #pragma endregion
-
-    #pragma region Memory Setup and Configuration
-
-    // Pinned host memory required
-    cudaMallocHost(&pu16Array_host, iTotalElements*sizeof(uint16_t));
-    cudaMallocHost(&pu16ArrayReordered_host, iTotalElements*sizeof(uint16_t));
-
-    cudaMalloc(&pu16Array_device, iTotalElements*sizeof(uint16_t));
-    cudaMalloc(&pu16ArrayReordered_device, iTotalElements*sizeof(uint16_t));
-
-    // Fill the host memory array
-    int i = 0;
-    uint16_t u16ArrayValue = 0;
-    for (i = 0; i < iTotalElements; i += 2)
-    {
-        // Increment by two to assign each polarisation the same value
-        pu16Array_host[i] = u16ArrayValue;
-        pu16Array_host[i+1] = u16ArrayValue++;
-    }
-    memset(pu16ArrayReordered_host, 0, iTotalElements*sizeof(uint16_t));
-
-    // Copy host memory into device memory buffer - asynchronously - and time it!
-    cudaEventRecord(eventMemcpyH2DStart, stream1);
-    cudaMemcpyAsync(pu16Array_device, pu16Array_host, iTotalElements*sizeof(uint16_t),\
-                    cudaMemcpyHostToDevice, stream1);
-    cudaEventRecord(eventMemcpyH2DStop, stream1);
-
-    // Seeing as our output host memory is empty/to be populated by the kernel,
-    // We can simply cudaMemset the output device memory to zero.
-    cudaMemsetAsync(pu16ArrayReordered_device, 0, iTotalElements*sizeof(uint16_t), stream1);
-
-    #pragma endregion
-
-    #pragma region Kernel Execution and Timing
-
-    // For ease of visualisation the [polarisation] data fields as a pair of uint8_t's
-    // bool bDisplayHex = false;
-    // display_1d_strided(pu16Array_host, bDisplayHex);
-
-    printf("\n=================================================\n");
-    printf("\nReordering...\n");
-    printf("\n=================================================\n");
-    
-    // Launch kernel on iTotalElements elements
-    // - Need to calculate the number of blocks required at 1024 threads-per-block
-    int iNumBlocks_x = ((iMatrixSize + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK);
-    int iNumBlocks_y = NR_BATCHES;
-    dim3 gridSize(iNumBlocks_x, iNumBlocks_y);
-
-    cudaEventRecord(eventKernelStart, stream1);
-    // Now executing on a non-default cudaStream
-    reorder_naive<<<gridSize, THREADS_PER_BLOCK, 0, stream1>>>(pu16Array_device, pu16ArrayReordered_device);
-    cudaEventRecord(eventKernelStop, stream1);
-
-    // Copy device memory back to host, and time it!
-    cudaEventRecord(eventMemcpyD2HStart, stream1);
-    cudaMemcpyAsync(pu16ArrayReordered_host, pu16ArrayReordered_device, iTotalElements*sizeof(uint16_t),\
-                    cudaMemcpyDeviceToHost, stream1);
-    cudaEventRecord(eventMemcpyD2HStop, stream1);
-
-    // Make sure we're all on the same page
-    cudaStreamSynchronize(stream1);
-    
-    // display_1d_reordered(pu16ArrayReordered_host, bDisplayHex);
-
-    #pragma endregion
-
-    printf("\n=================================================\n");
-    printf("\nVerifying...\n");
-    int iResult = verify_reorder(pu16Array_host, pu16ArrayReordered_host, iMatrixSize);
-
-    if (iResult)
-        printf("\nReorder was successful!\n");
-    else
-        printf("\nReorder failed.\n");
-    
-    printf("\n=================================================\n");
-    #pragma region Calculate GPU Utilisation
-    cudaEventSynchronize(eventMemcpyH2DStop);
-    cudaEventSynchronize(eventKernelStop);
-    cudaEventSynchronize(eventMemcpyD2HStop);
-    
-    float fMemcpyH2D_ms = 0;
-    float fKernelTime_ms = 0;
-    float fMemcpyD2H_ms = 0;
-    
-    cudaEventElapsedTime(&fMemcpyH2D_ms, eventMemcpyH2DStart, eventMemcpyH2DStop);
-    cudaEventElapsedTime(&fKernelTime_ms, eventKernelStart, eventKernelStop);
-    cudaEventElapsedTime(&fMemcpyD2H_ms, eventMemcpyD2HStart, eventMemcpyD2HStop);
-
-    float fGpuUtilRatio;
-    float fChunkSize_MB = sizeof(uint16_t) * iTotalElements / ONE_MB;
-    float fTransferTime_s = (fChunkSize_MB / 1000) / (INPUT_RATE / 8.0);
-    
-    fGpuUtilRatio = (fKernelTime_ms / 1000) / fTransferTime_s;
-
-    #pragma endregion
-
-    // Free at last
-    cudaFree(pu16Array_device);
-    cudaFree(pu16ArrayReordered_device);
-    // Now have to free pinned host memory using cudaFreeHost
-    cudaFreeHost(pu16Array_host);
-    cudaFreeHost(pu16ArrayReordered_host);
-
-    printf("\nWorking with a Chunk size of ~%.0f MB\n", fChunkSize_MB);
-    printf("\nHost-to-Device Memcpy executed in %.3f milliseconds.\n", fMemcpyH2D_ms);
-    printf("\nKernel executed in %.3f milliseconds.\n", fKernelTime_ms);
-    printf("\nDevice-to-Host Memcpy executed in %.3f milliseconds.\n\n", fMemcpyD2H_ms);
-    printf("\n=================================================\n");
-    printf("\nGPU Utilisation Ratio (%%) \n\t= [Kernel Exection time (s)]/[Data Transfer time (s)]\n\
-            = %.2f %%\n\n", (fGpuUtilRatio * 100));
-
-    return 0;
-}
-
-#pragma region Display Arrays
-
-void display_1d_strided(uint16_t *pu16Array, bool bDisplayHex)
-{
-    int iAntIndex, iChanIndex, iTimeIndex, iPolIndex, iBatchCounter;
-    // Treating each polarisation as a single uint16_t
-
-    int iAntOffset, iChanOffset, iTimeOffset, iMatrixOffset, iOffset;
-    
-    for (iBatchCounter = 0; iBatchCounter < NR_BATCHES; iBatchCounter++)
-    {
-        printf("\n\tBatch %d\n\n", iBatchCounter);
-        iMatrixOffset = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-        for (iAntIndex = 0; iAntIndex < NR_STATIONS; iAntIndex++)
-        {
-            iAntOffset = iAntIndex * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-            for (iChanIndex = 0; iChanIndex < NR_CHANNELS; iChanIndex++)
-            {
-                iChanOffset = iChanIndex * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-                for (iTimeIndex = 0; iTimeIndex < NR_SAMPLES_PER_CHANNEL; iTimeIndex++)
-                {
-                    iTimeOffset = iTimeIndex * NR_POLARIZATIONS;
-                    for (iPolIndex = 0; iPolIndex < NR_POLARIZATIONS; iPolIndex++)
-                    {
-                        iOffset = iAntOffset + iChanOffset + iTimeOffset + iPolIndex;
-                        if (bDisplayHex)
-                        {
-                            printf("0x%X ", *(pu16Array + iOffset + iMatrixOffset));
-                        }
-                        else
-                        {
-                            printf("%d ", *(pu16Array + iOffset + iMatrixOffset));
-                        }
-                    }
-                }
-                printf("\n");
-            }
-            printf("\n----------------------------------------------------\n");
-        }
-        printf("\n========================================================\n");
-    }
-}
-
-void display_1d_reordered(uint16_t *pu16Array, bool bDisplayHex)
-{
-    int iChanIndex, iTimeOuterIndex, iAntIndex, iPolIndex, iTimeInnerIndex, iBatchCounter;
-    
-    int iChanOffset, iTimeOffset, iAntOffset, iPolOffset, iMatrixOffset, iOffset;
-
-    for (iBatchCounter = 0; iBatchCounter < NR_BATCHES; iBatchCounter++)
-    {
-        printf("\n\tBatch %d\n\n", iBatchCounter);
-        iMatrixOffset = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-        for (iChanIndex = 0; iChanIndex < NR_CHANNELS; iChanIndex++)
-        {
-            iChanOffset = iChanIndex * (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-            for (iTimeOuterIndex = 0; iTimeOuterIndex < (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK); iTimeOuterIndex++)
-            {
-                iTimeOffset = iTimeOuterIndex * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-                for (iAntIndex = 0; iAntIndex < NR_STATIONS; iAntIndex++)
-                {
-                    iAntOffset = iAntIndex * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-                    for (iPolIndex = 0; iPolIndex < NR_POLARIZATIONS; iPolIndex++)
-                    {
-                        iPolOffset = iPolIndex * NR_TIMES_PER_BLOCK;
-                        for (iTimeInnerIndex = 0; iTimeInnerIndex < NR_TIMES_PER_BLOCK; iTimeInnerIndex++)
-                        {
-                            iOffset = iChanOffset + iTimeOffset + iAntOffset + iPolOffset + iTimeInnerIndex;
-                            if (bDisplayHex)
-                            {
-                                printf("0x%X ", *(pu16Array + iOffset + iMatrixOffset));
-                            }
-                            else
-                            {
-                                printf("%d ", *(pu16Array + iOffset + iMatrixOffset));
-                            }
-                        }
-                        printf("\n\t");    
-                    }
-                    printf("\n\n");
-                }
-                printf("\n-------------------------------------------------\n");
-            }
-            printf("\n===================================================\n");
-        }
-        printf("\n*********************************************************************\n");
-    }
-}
-
-#pragma endregion
-
-int verify_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered, int iMatrixSize)
-{
-    int iCurrIndex, iRemIndex, iBatchCounter;
-    int iAntIndex, iChanIndex, iTimeIndex, iPolIndex;
-    int iAntStride, iChanStride, iTimeStride, iMatrixStride;
-    iAntStride = NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-    iChanStride = NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-    iTimeStride = NR_POLARIZATIONS;
-    // iPolStride = 1;
-
-    // Declaring in their order of dimensionality for the new matrix
-    int iNewIndex, iNewChanOffset, iTimeOuterOffset, iNewAntOffset, iNewPolOffset;
-    int iTimeIndexOuter, iTimeIndexInner;
-    int iNewAntStride, iNewChanStride, iNewSampleStride, iNewPolStride;
-    iNewChanStride = (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) * NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-    iNewSampleStride = NR_STATIONS * NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-    iNewAntStride = NR_POLARIZATIONS * NR_TIMES_PER_BLOCK;
-    iNewPolStride = NR_TIMES_PER_BLOCK;
-
-    for (iBatchCounter = 0; iBatchCounter < NR_BATCHES; iBatchCounter++)
-    {
-        iMatrixStride = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SAMPLES_PER_CHANNEL * NR_POLARIZATIONS;
-        for (iCurrIndex = 0; iCurrIndex < iMatrixSize; iCurrIndex++)
-        {
-            iAntIndex = iCurrIndex / iAntStride;
-            iRemIndex = iCurrIndex % iAntStride;
-
-            iChanIndex = iRemIndex / iChanStride;
-            iRemIndex = iRemIndex % iChanStride;
-
-            iTimeIndex = iRemIndex / iTimeStride;
-            iRemIndex = iRemIndex % iTimeStride;
-            // 0 = Even = Pol-0, 1 = Odd = Pol-1
-            iPolIndex = iRemIndex;
-
-            // Now, stride them according to the new matrix's dimensions
-            iNewChanOffset = iChanIndex * iNewChanStride;
-            iTimeIndexOuter = iTimeIndex / NR_TIMES_PER_BLOCK;
-            iTimeOuterOffset = iTimeIndexOuter * iNewSampleStride;
-            iNewAntOffset = iAntIndex * iNewAntStride;
-            iNewPolOffset = iPolIndex * iNewPolStride;
-            iTimeIndexInner = iTimeIndex % NR_TIMES_PER_BLOCK; // ?
-            
-            iNewIndex = iNewChanOffset + iTimeOuterOffset + iNewAntOffset + \
-                        iNewPolOffset + iTimeIndexInner + iMatrixStride;
-
-            if (pu16ArrayReordered[iNewIndex] != pu16Array[iCurrIndex + iMatrixStride])
-            {
-                // Problem
-                printf("\nReordered: %d at index %d\n != Original: %d at index %d",\
-                        pu16ArrayReordered[iNewIndex], iNewIndex,\
-                        pu16Array[iCurrIndex + iMatrixStride], (iCurrIndex + iMatrixStride));
-                return 0;
-            }
-        }
-    }
-    
-    // If we get here, all is well
-    return 1;
 }
