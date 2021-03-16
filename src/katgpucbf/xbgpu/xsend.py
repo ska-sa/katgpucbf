@@ -80,14 +80,18 @@ ig.add_item(DATA_ID, "xeng_raw", "Integrated baseline correlation products", sha
 
 # 3.2 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
 # for the purposes of this test.
-# ig.get_heap()
+ig.get_heap()
 
 for i in range(n_send_chunks):
-    ig["timestamp"].value = i * 0x1000
+    ig["timestamp"].value = (i + 1) * 0x1000
     ig["channel offset"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
     ig["xeng_raw"].value = bufs[i]
     print("Sending", time.time())
-    futures = [sourceStream.async_send_heap(ig.get_heap())]
+
+    heap_to_send = ig.get_heap()
+    # Say why needed
+    heap_to_send.repeat_pointers = True
+    futures = [sourceStream.async_send_heap(heap_to_send)]
     asyncio.get_event_loop().run_until_complete(asyncio.wait(futures))
     print("Sent   ", time.time())
     print()
