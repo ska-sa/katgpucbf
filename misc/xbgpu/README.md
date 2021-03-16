@@ -181,7 +181,10 @@ requires a server with a Mellanox NIC to run. This fsim simulates the exact pack
 The SKARAB X-Engines ingest data from 4 different multicast streams. This simulator only simulates data from a single
 multicast stream - if more streams are required, more instances of this simulator need to be run in parallel.
 
-The minimum command to run the fsim is: `sudo ./fsim --interface <interface_address> <multicast_address>[+y]:<port>`
+In order to build the fsim, navigate to the [scratch](./scratch) folder and run `make`
+
+The minimum command to run the fsim from the [scratch](./scratch) folder is: 
+`sudo ./fsim --interface <interface_address> <multicast_address>[+y]:<port>`
 
 Where:
  * `<interface_address>` is the ip address of the network interface to transmit the data out on.
