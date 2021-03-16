@@ -491,7 +491,11 @@ int main(int argc, const char **argv)
     }
 
     // 4. Kick off packet transmission
-    std::cout << "Beginning fsim data transmission..." << std::endl;
+    float dDataRate_Gbps = opts.dAdcRate * n_pols * sample_bits *
+                           (opts.heap_size_bytes + opts.packets_per_heap * packet_header_size_bytes) /
+                           opts.heap_size_bytes / n_multicast_streams_per_antenna / 1024 / 1024 / 1024;
+    std::cout << "Beginning fsim data transmission at " << dDataRate_Gbps << " Gbps..." << std::endl;
+    
     for (size_t i = 0; i < endpoints.size(); i++)
     {
         // 4.1 The first send_next() function of each multicast stream needs to be queued manually. Once these sends
