@@ -132,7 +132,7 @@ class PreCorrelationReorderCore(accel.Operation):
         self.slots["inSamples"] = accel.IOSlot(
             dimensions=self.template.inputDataShape, dtype=np.int16
         )  # TODO: This must depend on input bitwidth
-        self.slots["outReordered"] = accel.IOSlot(dimensions=self.template.outputDataShape, dtype=np.int64)
+        self.slots["outReordered"] = accel.IOSlot(dimensions=self.template.outputDataShape, dtype=np.int16)
 
     def _run(self) -> None:
         """Run the correlation kernel."""
@@ -140,10 +140,10 @@ class PreCorrelationReorderCore(accel.Operation):
         outReordered_buffer = self.buffer("outReordered")
         self.command_queue.enqueue_kernel(
             self.template.kernel,
-            [outReordered_buffer.buffer, inSamples_buffer.buffer],
+            [inSamples_buffer.buffer, outReordered_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
             # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, 32 * self.template.n_batches, 1),
-            local_size=(32, 32, 1),
+            global_size=(1024 * self.template.n_blocks, self.template.n_batches),
+            local_size=(1024, 1),
         )
 

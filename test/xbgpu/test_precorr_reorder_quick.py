@@ -76,21 +76,21 @@ if __name__ == '__main__':
     # 5. Verify the processed/returned result
     # 5.1. Need to convert the input and output arrays to 32-bit float complex type as numpy has no 8-bit or 32-bit int
     #      complex type.
+    bufSamples_host.dtype = np.int16
+    bufSamples_host = bufSamples_host.astype(np.int8)
     bufSamples_host.dtype = np.int8
-    bufSamples_host = bufSamples_host.astype(np.float32)
-    bufSamples_host.dtype = np.csingle
 
-    bufReordered_host.dtype = np.int32
-    bufReordered_host = bufReordered_host.astype(np.float32)
-    bufReordered_host.dtype = np.csingle
+    bufReordered_host.dtype = np.int16
+    bufReordered_host = bufReordered_host.astype(np.int8)
+    bufReordered_host.dtype = np.int8
 
     # bufCorrectReordered_host = np.empty_like(bufReordered_host)
     print(bufReordered_host)
     print("\n------------------------------------\n")
-
-    for ant_index in range(0, args.ants):
-        for chan_index in range(0, args.chans):
-            for sample_index in range(0, args.samples_per_chan):
-                print(bufReordered_host[ant_index][chan_index][sample_index] + " ")
-            print("\n")
-        print("\n------------------------------------\n")
+    
+    # for ant_index in range(0, args.ants):
+    #     for chan_index in range(0, args.chans):
+    #         for sample_index in range(0, args.samples_per_chan):
+    #             print(bufReordered_host[ant_index][chan_index][sample_index] + " ")
+    #         print("\n")
+    #     print("\n------------------------------------\n")
