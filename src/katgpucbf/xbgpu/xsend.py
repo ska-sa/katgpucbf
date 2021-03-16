@@ -116,7 +116,7 @@ class XEngineSPEADSend:
         self.item_group["xeng_raw"].value = heap_buffer.buf
 
         heap_to_send = self.item_group.get_heap()
-        # Say why needed
+        # Say why this flag is needed
         heap_to_send.repeat_pointers = True
 
         future = self.sourceStream.async_send_heap(heap_to_send)
