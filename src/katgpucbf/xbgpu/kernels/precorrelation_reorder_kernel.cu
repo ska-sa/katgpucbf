@@ -18,29 +18,14 @@
 #include <stdlib.h>
 #include <sys/cdefs.h>
 
-/* Yes, the first line of a file is a closing brace. Dont run away, dont panic, there is a reason for this. By default
- * pycuda surrounds a source file with `extern "C" {}`. However if #include <mma.h> is within an `extern "C"{}` block
- * it throws all sorts of errors. The actual solution to this is to pass a the `no_extern_c=True` argument to the 
- * `pycuda.compiler.SourceModule(...)` function, however, katsdpsigproc does not provide the ability to do this at the 
- * moment. Therefore the quickest fix is to just add a } at the start of the file to close the extern function. The last
- * } in this file has also been commented out to compensate for the closing brace of the added `extern "C"{}`.
- *
- * When this code gets closer to production, the suggested fix is to modify the accel.build() and context.compile() 
- * functions in katsdpsigproc to take a no_extern_c flag as these ones are the ones that will call the SourceModule(...)
- * constructor.
- */
-
-}
-#include <mma.h>
-
 <%include file="/port.mako"/>
 // Defines, now using mako parametrisation
 #define NR_STATIONS ${n_ants}
 #define NR_CHANNELS ${n_channels}
 #define NR_SAMPLES_PER_CHANNEL ${n_samples_per_channel}
 #define NR_POLARISATIONS ${n_polarisations}
-#define NR_TIMES_PER_BLOCK $(n_times_per_block)
-#define NR_BATCHES $(n_batches)
+#define NR_TIMES_PER_BLOCK ${n_times_per_block}
+#define NR_BATCHES ${n_batches}
 
 // Defines
 // - Altered for ease of visualisation

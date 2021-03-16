@@ -80,7 +80,7 @@ class PreCorrelationReorderCoreTemplate:
         # - Unlike the Tensor Core Correlation kernel, the size of this kernel does not depend on the number of ants_per_block
         #   Rather, it simply depends on the individual matrix size and the number of batches.
         # - But also, how should I error-check this value? (As in, bounds/values, not method)
-        self.n_blocks = (self.matrix_size + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK
+        self.n_blocks = (self.matrix_size + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
 
         # 5. Compile the kernel
         program = accel.build(
@@ -143,7 +143,7 @@ class PreCorrelationReorderCore(accel.Operation):
             [outReordered_buffer.buffer, inSamples_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
             # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, self.template.n_batches, 1),
+            global_size=(32 * self.template.n_blocks, 32 * self.template.n_batches, 1),
             local_size=(32, 32, 1),
         )
 
