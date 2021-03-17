@@ -26,8 +26,9 @@ class PreCorrelationReorderCoreTemplate:
     This object will be used to create a PreCorrelationReorderCore object that will be able to run the created kernel.
     """
 
-    def __init__(self, context: cuda.Context, n_ants: int, n_channels: int,
-                    n_samples_per_channel: int, n_batches: int) -> None:
+    def __init__(
+        self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int, n_batches: int
+    ) -> None:
         """
         Initialise the PreCorrelationReorderCoreTemplate class and compile the pre-correlation reorder kernel.
 
@@ -52,10 +53,10 @@ class PreCorrelationReorderCoreTemplate:
         self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_batches = n_batches
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        
+
         # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
-        
+
         if self.n_samples_per_channel % self.n_times_per_block != 0:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
@@ -74,8 +75,8 @@ class PreCorrelationReorderCoreTemplate:
         self.matrix_size = self.n_ants * self.n_channels * self.n_samples_per_channel * self.n_polarisations
         # Seeing as we can't really define constants in Python
         THREADS_PER_BLOCK = 1024
-        
-        # 4. Calculate the number of thread blocks to launch per kernel call 
+
+        # 4. Calculate the number of thread blocks to launch per kernel call
         # - This remains constant for the lifetime of the object.
         # - Unlike the Tensor Core Correlation kernel, the size of this kernel does not depend on the number of ants_per_block
         #   Rather, it simply depends on the individual matrix size and the number of batches.
@@ -121,7 +122,7 @@ class PreCorrelationReorderCore(accel.Operation):
     ranges from 0 to times_per_block. Times per block is calculated by the PreCorrelationReorderCoreTemplate object.
     In 8-bit input mode times_per_block is equal to 16.
 
-    Each input element is n complex 8-bit integer sample. Numpy does not support 8-bit complex numbers, 
+    Each input element is n complex 8-bit integer sample. Numpy does not support 8-bit complex numbers,
     so the input sample array has dtype of np.int16 as a placeholder.
     """
 
@@ -146,4 +147,3 @@ class PreCorrelationReorderCore(accel.Operation):
             global_size=(1024 * self.template.n_blocks, self.template.n_batches),
             local_size=(1024, 1),
         )
-
