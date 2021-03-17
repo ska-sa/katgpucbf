@@ -60,17 +60,6 @@ def verify_reorder(
     timeStride_orig = template.n_polarisations
     # polStride_orig = 1
 
-    # 1.2. For the output, reordered array
-    chanStride_new = (
-        (template.n_samples_per_channel // template.n_times_per_block)
-        * template.n_ants
-        * template.n_polarisations
-        * template.n_times_per_block
-    )
-    sampleStride_new = template.n_ants * template.n_polarisations * template.n_times_per_block
-    antStride_new = template.n_polarisations * template.n_times_per_block
-    polStride_new = template.n_times_per_block
-
     # 2. Begin scrolling through the arrays and calculating relative indices on-the-fly
     # 2.1. Ultimately still calculating for each batch
     # for batchCounter in range(0, template.n_batches):
@@ -94,19 +83,15 @@ def verify_reorder(
         polIndex_orig = remIndex
 
         # 2.2.2. Calculate the new, reordered indices
-        chanOffset_new = chanIndex_orig * chanStride_new
+        #   - Turns out we can use most of the originals (which is nice),
+        #     the only difference being with the Samples-per-channel/times-per-block strides
         timeIndexOuter = timeIndex_orig // template.n_times_per_block
-        timeOuterOffset = timeIndexOuter * sampleStride_new
-        antOffset_new = antIndex_orig * antStride_new
-        polOffset_new = polIndex_orig * polStride_new
         timeIndexInner = timeIndex_orig % template.n_times_per_block
 
         # 2.2.3. Un/Fortunately, the input buffers have to be accessed using the specific dimensions
         #        and not with a single indexing value.
         currData_orig = array_host[antIndex_orig][chanIndex_orig][timeIndex_orig][polIndex_orig]
-        currData_new = arrayReordered_host[chanOffset_new][timeOuterOffset][antOffset_new][polOffset_new][
-            timeIndexInner
-        ]
+        currData_new = arrayReordered_host[chanIndex_orig][timeIndexOuter][antIndex_orig][polIndex_orig][timeIndexInner]
 
         if currData_new != currData_orig:
             # Problem
@@ -133,7 +118,7 @@ if __name__ == "__main__":
         "--ants",
         type=int,
         action="store",
-        default=4,  # choices=range(1, 64),
+        default=64,  # choices=range(1, 64),
         help="Number of Antennas to execute for the kernel, between 1 and 64.",
     )
     parser.add_argument(
@@ -141,7 +126,7 @@ if __name__ == "__main__":
         "--chans",
         type=int,
         action="store",
-        default=4,  # choices=range(1, 128),
+        default=128,  # choices=range(1, 128),
         help="Number of Channels to execute for the kernel, typically 128.",
     )
     parser.add_argument(
@@ -149,7 +134,7 @@ if __name__ == "__main__":
         "--samples_per_chan",
         type=int,
         action="store",
-        default=32,  # choices=range(1, 256),
+        default=256,  # choices=range(1, 256),
         help="Number of Samples per Channel, typically 256.",
     )
     parser.add_argument(
@@ -218,7 +203,9 @@ if __name__ == "__main__":
 
     # bufCorrectReordered_host = np.empty_like(bufReordered_host)
     print("\n------------------------------------\n")
+    print(bufSamples_host.shape)
     print(bufReordered_host.shape)
+    print("\n------------------------------------\n")
 
     result = verify_reorder(bufSamples_host, bufReordered_host, template)
     print(result)
