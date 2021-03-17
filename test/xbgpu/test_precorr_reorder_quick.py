@@ -94,15 +94,8 @@ def verify_reorder(
             if currData_new != currData_orig:
                 # Problem
                 errmsg = (
-                    "Reordered: "
-                    + str(currData_new)
-                    + " at index "
-                    + str(currIndex)
-                    + " != Original: "
-                    + str(currData_orig)
-                    + "\n"
+                    f"Reordered: {str(currData_new)} at index {str(currIndex)} != Original: {str(currData_orig)} \n"
                 )
-                # raise ValueError(errmsg)
                 return False, errmsg
 
     return True, ""
