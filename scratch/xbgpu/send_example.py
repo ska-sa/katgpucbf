@@ -5,7 +5,14 @@ import numpy as np
 
 
 x = katxgpu.xsend.XEngineSPEADIbvSend(
-    endpoint=("239.10.10.11", 7149), interface_address="10.100.44.1", thread_affinity=3
+    n_ants=64,
+    n_channels_per_stream=128,
+    n_pols=2,
+    dump_rate_s=0.4,
+    channel_offset=128 * 4,
+    endpoint=("239.10.10.11", 7149),
+    interface_address="10.100.44.1",
+    thread_affinity=3,
 )
 
 

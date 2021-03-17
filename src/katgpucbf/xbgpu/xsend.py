@@ -24,65 +24,92 @@ class XEngineSPEADSend(ABC):
             self.buffer: np.ndarray = buffer
 
     # SPEAD static constants
-    TIMESTAMP_ID: Final = 0x1600
-    CHANNEL_OFFSET: Final = 0x4103
-    DATA_ID: Final = 0x1800
-    default_spead_flavour: Final = {"version": 4, "item_pointer_bits": 64, "heap_address_bits": 48, "bug_compat": 0}
+    TIMESTAMP_ID: Final[int] = 0x1600
+    CHANNEL_OFFSET: Final[int] = 0x4103
+    DATA_ID: Final[int] = 0x1800
+    default_spead_flavour: Final[dict] = {
+        "version": 4,
+        "item_pointer_bits": 64,
+        "heap_address_bits": 48,
+        "bug_compat": 0,
+    }
 
     # Class static constants
-    max_payload_size: Final = 2048
-    header_size: Final = 64
-    max_packet_size: Final = max_payload_size + header_size
-    complexity: Final = 2
+    max_payload_size: Final[int] = 2048
+    header_size: Final[int] = 64
+    max_packet_size: Final[int] = max_payload_size + header_size
+    complexity: Final[int] = 2
 
     # Initialise class includng all variables
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        n_ants: int,
+        n_channels_per_stream: int,
+        n_pols: int,
+        dump_rate_s: float,
+        channel_offset: int,
+    ) -> None:
         """TODO: Write this docstring."""
-        self.n_ants: int = 64
-        self.n_channels_per_stream: int = 128
-        self.n_pols: int = 2
-        self.n_baselines: int = (self.n_pols * self.n_ants + 1) * (self.n_ants * self.n_pols) // 2
-        self.sample_bits: int = 32
-        self.dump_rate_s = 0.4
-        self.heap_size_bytes: int = (
-            self.n_channels_per_stream * self.n_baselines * XEngineSPEADSend.complexity * self.sample_bits // 8
+        # 1. Array Configuration Parameters
+        self.n_ants: Final[int] = n_ants
+        self.n_channels_per_stream: Final[int] = n_channels_per_stream
+        self.n_pols: Final[int] = n_pols
+        self.n_baselines: Final[int] = (self.n_pols * self.n_ants + 1) * (self.n_ants * self.n_pols) // 2
+        self.dump_rate_s: Final[float] = dump_rate_s
+        self._sample_bits: Final[int] = 32
+
+        # 2. Multicast Stream Parameters
+        self.channel_offset: Final[int] = channel_offset
+        self.heap_size_bytes: Final[int] = (
+            self.n_channels_per_stream * self.n_baselines * XEngineSPEADSend.complexity * self._sample_bits // 8
         )
-        self.context: katsdpsigproc.katsdpsigproc.abc.AbstractContext = accel.create_some_context(
+        self.n_send_heaps_in_flight: Final[int] = 5
+
+        # 3. Allocate memory buffers
+        self.context: Final[katsdpsigproc.katsdpsigproc.abc.AbstractContext] = accel.create_some_context(
             device_filter=lambda x: x.is_cuda
         )
-        self.n_send_heaps_in_flight: int = 5
-        self.channel_offset = 128
 
-        # THere may be scope to use asynio queues here instead - need to figure it out
+        # 3.1 There may be scope to use asynio queues here instead - need to figure it out
         self._heaps_queue: queue.Queue[
             typing.Tuple[asyncio.Future, XEngineSPEADSend.XEngineHeapBufferWrapper]
         ] = queue.Queue(maxsize=self.n_send_heaps_in_flight)
         self.buffers = []  # say if this is the best way to do things
 
+        # 3.2 Create buffers once-off to be reused for sending data.
+        for i in range(self.n_send_heaps_in_flight):
+            # 3.2.1 Create a buffer from the accel context.
+            buffer = accel.HostArray((self.heap_size_bytes,), np.uint8, context=self.context)
+
+            # 3.2.2 Create a dummy future object that is already marked as "done" Each buffer is paired with a future
+            # so these dummy onces are necessary for initial start up.
+            dummyFuture: asyncio.Future = asyncio.Future()
+            dummyFuture.set_result("")
+
+            # 3.2.3. Wrap buffer in XEngineHeapBufferWrapper, join it together with its future as a tuple and put it
+            # on the heaps queue
+            self._heaps_queue.put((dummyFuture, XEngineSPEADSend.XEngineHeapBufferWrapper(buffer)))
+
+            # 3.2.4 Store buffer in array so that it can be assigned to ibverbs memory regions in the
+            # XEngineSPEADIbvSend stream.
+            self.buffers.append(buffer)
+
+        # 4. Generate all required stream information that is not specific to the child classes
         packets_per_heap = math.ceil(self.heap_size_bytes / XEngineSPEADSend.max_payload_size)
         packet_header_overhead_bytes = packets_per_heap * XEngineSPEADSend.header_size
-        rate_Bps = (
+        send_rate_Bps = (
             (self.heap_size_bytes + packet_header_overhead_bytes) / self.dump_rate_s * 1.1
-        )  # 1.1 adds a 10 percent buffer
-        print(self.n_baselines, self.heap_size_bytes / 1024 / 1024 * 8, rate_Bps / 1024 / 1024 / 1.1 * 8)
+        )  # 1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+
         self.streamConfig = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
             max_heaps=self.n_send_heaps_in_flight,
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=rate_Bps,
+            rate=send_rate_Bps,
         )
         self.sourceStream: spead2.send.asyncio.AbstractStream
 
-        for i in range(self.n_send_heaps_in_flight):
-            # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
-            buffer = accel.HostArray((self.heap_size_bytes,), np.uint8, context=self.context)
-            # 6.2 Create a chunk - the buffer object is given to this chunk. This is where sample data in a chunk is stored.
-            dummyFuture: asyncio.Future = asyncio.Future()
-            dummyFuture.set_result("")
-
-            self._heaps_queue.put((dummyFuture, XEngineSPEADSend.XEngineHeapBufferWrapper(buffer)))
-            self.buffers.append(buffer)
-
+        # 5. Create item group - This is the SPEAD2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(flavour=spead2.Flavour(**XEngineSPEADSend.default_spead_flavour))
         self.item_group.add_item(
             XEngineSPEADSend.CHANNEL_OFFSET,
@@ -106,7 +133,7 @@ class XEngineSPEADSend(ABC):
             dtype=np.int8,
         )
 
-        # 3.2 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
+        # 5.1 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
         # for the purposes of this test.
         self.item_group.get_heap()
 
@@ -134,11 +161,26 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
     """TODO: Write this docstring."""
 
     def __init__(
-        self, endpoint: typing.Tuple[str, int], interface_address: str, thread_affinity: int
+        self,
+        n_ants: int,
+        n_channels_per_stream: int,
+        n_pols: int,
+        dump_rate_s: float,
+        channel_offset: int,
+        endpoint: typing.Tuple[str, int],
+        interface_address: str,
+        thread_affinity: int,
     ) -> None:  # Pass endpoint here
         """TODO: Write this docstring."""
         # 1. Initialise base class
-        XEngineSPEADSend.__init__(self)
+        XEngineSPEADSend.__init__(
+            self,
+            n_ants=n_ants,
+            n_channels_per_stream=n_channels_per_stream,
+            n_pols=n_pols,
+            dump_rate_s=dump_rate_s,
+            channel_offset=channel_offset,
+        )
 
         # 2. Assign simple member variables
         self.endpoint: Final[typing.Tuple[str, int]] = endpoint
@@ -162,10 +204,25 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
 class XEngineSPEADInprocSend(XEngineSPEADSend):
     """TODO: Write this docstring."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        n_ants: int,
+        n_channels_per_stream: int,
+        n_pols: int,
+        dump_rate_s: float,
+        channel_offset: int,
+        queue: spead2.InprocQueue,
+    ) -> None:
         """TODO: Write this docstring."""
-        XEngineSPEADSend.__init__(self)
-        self.queue: spead2.InprocQueue = spead2.InprocQueue()
+        XEngineSPEADSend.__init__(
+            self,
+            n_ants=n_ants,
+            n_channels_per_stream=n_channels_per_stream,
+            n_pols=n_pols,
+            dump_rate_s=dump_rate_s,
+            channel_offset=channel_offset,
+        )
+        self.queue: spead2.InprocQueue = queue
         thread_pool = spead2.ThreadPool()
         self.sourceStream = spead2.send.asyncio.InprocStream(
             thread_pool,
