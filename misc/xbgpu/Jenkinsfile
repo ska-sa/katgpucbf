@@ -85,6 +85,17 @@ pipeline {
         sh 'pip3 install -r requirements-dev.txt'
       }
     }
+   
+    /* This stage ensures that all the python style guidelines checks pass.
+     * This will catch if someone has commited to the repo without installing 
+     * the required pre-commit hooks.
+     */
+    stage('Check pre-commit hooks have been applied') {
+      steps {
+        sh 'pre-commit install'
+        sh 'pre-commit run --all-files'
+      }
+    }
 
     stage('Install katxgpu package') {
       steps {
