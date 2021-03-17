@@ -2,24 +2,21 @@
 
 import katxgpu.xsend
 import asyncio
+import numpy as np
+
 
 x = katxgpu.xsend.XEngineSPEADSend()
-
-x.send_heap(0x1, x._free_heaps_queue.get())
-x.send_heap(0x2, x._free_heaps_queue.get())
-x.send_heap(0x3, x._free_heaps_queue.get())
-x.send_heap(0x4, x._free_heaps_queue.get())
-x.send_heap(0x5, x._free_heaps_queue.get())
 
 
 async def send_process():
     """TODO: Write this docstring."""
-    print("Sending.")
     num_sent = 0
     while 1:
+        buffer_wrapper = await x.get_free_heap()
+        buffer_wrapper.buffer = np.full(buffer_wrapper.buffer.shape, num_sent, np.uint16)
         num_sent += 1
-        await x.get_free_heap()
-        print(num_sent)
+        x.send_heap(num_sent * 0x1000, buffer_wrapper)
+        print(num_sent, buffer_wrapper.buffer[0:10])
 
 
 if __name__ == "__main__":

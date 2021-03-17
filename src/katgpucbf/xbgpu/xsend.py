@@ -17,9 +17,9 @@ class XEngineSPEADSend:
     class XEngineHeapBufferWrapper:
         """TODO: Write this docstring."""
 
-        def __init__(self, buf: np.ndarray) -> None:
+        def __init__(self, buffer: np.ndarray) -> None:
             """TODO: Write this docstring."""
-            self.buf: np.ndarray = buf
+            self.buffer: np.ndarray = buffer
 
     # SPEAD static constants
     TIMESTAMP_ID: Final = 0x1600
@@ -52,20 +52,20 @@ class XEngineSPEADSend:
         self.channel_offset = 128
 
         # THere may be scope to use asynio queues here instead - need to figure it out
-        self._free_heaps_queue: queue.Queue[XEngineSPEADSend.XEngineHeapBufferWrapper] = queue.Queue(
-            maxsize=self.n_send_heaps_in_flight
-        )
-        self._in_flight_heaps_queue: queue.Queue[
+        self._heaps_queue: queue.Queue[
             typing.Tuple[asyncio.Future, XEngineSPEADSend.XEngineHeapBufferWrapper]
         ] = queue.Queue(maxsize=self.n_send_heaps_in_flight)
-        bufs = []
+        buffers = []
 
         for i in range(self.n_send_heaps_in_flight):
             # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
-            buf = accel.HostArray((self.heap_size_bytes,), np.uint8, context=self.context)
+            buffer = accel.HostArray((self.heap_size_bytes,), np.uint8, context=self.context)
             # 6.2 Create a chunk - the buffer object is given to this chunk. This is where sample data in a chunk is stored.
-            self._free_heaps_queue.put(XEngineSPEADSend.XEngineHeapBufferWrapper(buf))
-            bufs.append(buf)
+            dummyFuture: asyncio.Future = asyncio.Future()
+            dummyFuture.set_result("")
+
+            self._heaps_queue.put((dummyFuture, XEngineSPEADSend.XEngineHeapBufferWrapper(buffer)))
+            buffers.append(buffer)
 
         thread_pool = spead2.ThreadPool()
         self.sourceStream = spead2.send.asyncio.UdpIbvStream(
@@ -77,7 +77,7 @@ class XEngineSPEADSend:
                 rate=10e6,  # TODO Calculate a reasonable rate
             ),
             spead2.send.UdpIbvConfig(
-                endpoints=[self.endpoint], interface_address="10.100.44.1", ttl=4, comp_vector=2, memory_regions=bufs
+                endpoints=[self.endpoint], interface_address="10.100.44.1", ttl=4, comp_vector=2, memory_regions=buffers
             ),
         )
         del thread_pool  # This line is copied from the SPEAD2 examples.
@@ -109,52 +109,21 @@ class XEngineSPEADSend:
         # for the purposes of this test.
         self.item_group.get_heap()
 
-    def send_heap(self, timestamp: int, heap_buffer: XEngineHeapBufferWrapper) -> None:
+    def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
         """TODO: Write this docstring."""
         self.item_group["timestamp"].value = timestamp
         self.item_group["channel offset"].value = self.channel_offset
-        self.item_group["xeng_raw"].value = heap_buffer.buf
+        self.item_group["xeng_raw"].value = bufferWrapper.buffer
 
         heap_to_send = self.item_group.get_heap()
         # Say why this flag is needed
         heap_to_send.repeat_pointers = True
 
         future = self.sourceStream.async_send_heap(heap_to_send)
-        self._in_flight_heaps_queue.put((future, heap_buffer))
+        self._heaps_queue.put((future, bufferWrapper))
 
     async def get_free_heap(self) -> XEngineHeapBufferWrapper:
         """TODO: Write this docstring."""
-        future, bufWrap = self._in_flight_heaps_queue.get()
+        future, bufferWrapper = self._heaps_queue.get()
         await asyncio.wait([future])
-        return bufWrap
-
-
-# print(XEngineSPEADSend.max_packet_size)
-
-# x = XEngineSPEADSend()
-# print(x.endpoint)
-
-# x.send_heap(0x1, x._free_heaps_queue.get())
-# x.send_heap(0x2, x._free_heaps_queue.get())
-# x.send_heap(0x3, x._free_heaps_queue.get())
-# x.send_heap(0x4, x._free_heaps_queue.get())
-# x.send_heap(0x4, x._free_heaps_queue.get())
-
-# loop = asyncio.get_event_loop()
-# loop.run_until_complete(x.get_free_heap())
-# loop.close()
-
-
-# for i in range(n_send_chunks):
-#     ig["timestamp"].value = (i + 1) * 0x1000
-#     ig["channel offset"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
-#     ig["xeng_raw"].value = bufs[i]
-#     print("Sending", time.time())
-
-#     heap_to_send = ig.get_heap()
-#     # Say why needed
-#     heap_to_send.repeat_pointers = True
-#     futures = [sourceStream.async_send_heap(heap_to_send)]
-#     asyncio.get_event_loop().run_until_complete(asyncio.wait(futures))
-#     print("Sent   ", time.time())
-#     print()
+        return bufferWrapper

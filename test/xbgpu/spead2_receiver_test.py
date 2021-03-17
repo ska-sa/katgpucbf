@@ -9,6 +9,12 @@ It is more limited but easier to work with. One downside of the buffer transport
 from different antennas. This functionality has not yet been added to the buffer transport but it is available in the
 inproc transport.
 
+NOTE: A downside of this test is that it does not check that the packet formats are exactly correct. This test will
+ensure that the packets are transmitted in a way that they are able to be assembled into a heap by any SPEAD2 reciever
+or a full implementation of the SPEAD protocol. However, the exact packet size and the presence of repeat pointers
+within the a packet are not checked. Some sort of external test should be done to check this. See the
+display_fsim_multicast_packets.py script in the scratch folder of this repo as a starting point to check packet formats.
+
 TODO: Turn createTestObjects() into a pytest fixture.
 """
 
