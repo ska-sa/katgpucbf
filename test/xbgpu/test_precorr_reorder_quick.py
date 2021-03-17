@@ -190,7 +190,7 @@ if __name__ == "__main__":
     bufSamplesInt16Shape = template.inputDataShape
     bufSamplesInt8Shape = list(bufSamplesInt16Shape)
     bufSamplesInt8Shape[-1] *= 2  # By converting from int16 to int8, the length of the last dimension doubles.
-    bufSamplesInt8Shape = tuple(bufSamplesInt8Shape)
+    bufSamplesInt8Shape = tuple(bufSamplesInt8Shape)  # type: ignore
 
     bufSamples_host.dtype = np.int8
     bufSamples_host[:] = np.random.randint(
@@ -217,18 +217,8 @@ if __name__ == "__main__":
     bufReordered_host.dtype = np.int8
 
     # bufCorrectReordered_host = np.empty_like(bufReordered_host)
-    # print(bufReordered_host)
     print("\n------------------------------------\n")
     print(bufReordered_host.shape)
-
-    # for chan_index in range(0, args.chans):
-    #     for sample_per_tpb_index in range(0, args.samples_per_chan // 16):
-    #         for ant_index in range(0, args.ants):
-    #             for pol_index in range(0, 2):
-    #                 print(str(bufReordered_host[chan_index][sample_per_tpb_index][ant_index][pol_index][:]) + " ")
-    #             print("\n")
-    #         print("\n------------------------------------\n")
-    #     print("\n==========================================\n")
 
     result = verify_reorder(bufSamples_host, bufReordered_host, template)
     print(result)
