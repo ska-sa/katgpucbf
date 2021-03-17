@@ -27,16 +27,15 @@ TODO:
 import argparse
 import numpy as np
 from katxgpu.precorrelation_reorder_core import PreCorrelationReorderCoreTemplate
-
-# from katxgpu import test_parameters
 from katsdpsigproc import accel
+from typing import Tuple
 
 
 def verify_reorder(
     array_host: accel.Operation.buffer,
     arrayReordered_host: accel.Operation.buffer,
     template: PreCorrelationReorderCoreTemplate,
-) -> bool:
+) -> Tuple[bool, str]:
     """
     Operation verificiation function for Pre-correlation Reorder data output by the kernel.
 
@@ -62,51 +61,51 @@ def verify_reorder(
 
     # 2. Begin scrolling through the arrays and calculating relative indices on-the-fly
     # 2.1. Ultimately still calculating for each batch
-    # for batchCounter in range(0, template.n_batches):
+    for batchCounter in range(0, template.n_batches):
 
-    #     # Calculate the outer-most matrix stride, based on which batch we are verifying
-    #     matrix_stride = batchCounter * template.matrix_size # How convenient
+        # 2.2. Now for the particular matrix of this batch
+        for currIndex in range(0, template.matrix_size):
 
-    # 2.2. Now for the particular matrix of this batch
-    for currIndex in range(0, template.matrix_size):
+            # 2.2.1. Calculate the original, input indices
+            antIndex_orig = currIndex // antStride_orig
+            remIndex = currIndex % antStride_orig
 
-        # 2.2.1. Calculate the original, input indices
-        antIndex_orig = currIndex // antStride_orig
-        remIndex = currIndex % antStride_orig
+            chanIndex_orig = remIndex // chanStride_orig
+            remIndex = remIndex % chanStride_orig
 
-        chanIndex_orig = remIndex // chanStride_orig
-        remIndex = remIndex % chanStride_orig
+            timeIndex_orig = remIndex // timeStride_orig
+            remIndex = remIndex % timeStride_orig
+            # 0 = Even = Pol-0, 1 = Odd = Pol-1
+            polIndex_orig = remIndex
 
-        timeIndex_orig = remIndex // timeStride_orig
-        remIndex = remIndex % timeStride_orig
-        # 0 = Even = Pol-0, 1 = Odd = Pol-1
-        polIndex_orig = remIndex
+            # 2.2.2. Calculate the new, reordered indices
+            #   - Turns out we can use most of the originals (which is nice),
+            #     the only difference being with the Samples-per-channel/times-per-block strides
+            timeIndexOuter = timeIndex_orig // template.n_times_per_block
+            timeIndexInner = timeIndex_orig % template.n_times_per_block
 
-        # 2.2.2. Calculate the new, reordered indices
-        #   - Turns out we can use most of the originals (which is nice),
-        #     the only difference being with the Samples-per-channel/times-per-block strides
-        timeIndexOuter = timeIndex_orig // template.n_times_per_block
-        timeIndexInner = timeIndex_orig % template.n_times_per_block
+            # 2.2.3. Un/Fortunately, the input buffers have to be accessed using the specific dimensions
+            #        and not with a single indexing value.
+            currData_orig = array_host[batchCounter][antIndex_orig][chanIndex_orig][timeIndex_orig][polIndex_orig]
+            currData_new = arrayReordered_host[batchCounter][chanIndex_orig][timeIndexOuter][antIndex_orig][
+                polIndex_orig
+            ][timeIndexInner]
 
-        # 2.2.3. Un/Fortunately, the input buffers have to be accessed using the specific dimensions
-        #        and not with a single indexing value.
-        currData_orig = array_host[antIndex_orig][chanIndex_orig][timeIndex_orig][polIndex_orig]
-        currData_new = arrayReordered_host[chanIndex_orig][timeIndexOuter][antIndex_orig][polIndex_orig][timeIndexInner]
+            if currData_new != currData_orig:
+                # Problem
+                errmsg = (
+                    "Reordered: "
+                    + str(currData_new)
+                    + " at index "
+                    + str(currIndex)
+                    + " != Original: "
+                    + str(currData_orig)
+                    + "\n"
+                )
+                # raise ValueError(errmsg)
+                return False, errmsg
 
-        if currData_new != currData_orig:
-            # Problem
-            errmsg = (
-                "Reordered: "
-                + str(currData_new)
-                + " at index "
-                + str(currIndex)
-                + " != Original: "
-                + str(currData_orig)
-                + "\n"
-            )
-            raise ValueError(errmsg)
-
-    return True
+    return True, ""
 
 
 if __name__ == "__main__":
@@ -203,9 +202,14 @@ if __name__ == "__main__":
 
     # bufCorrectReordered_host = np.empty_like(bufReordered_host)
     print("\n------------------------------------\n")
-    print(bufSamples_host.shape)
-    print(bufReordered_host.shape)
+    print("Input data shape: " + str(bufSamples_host.shape))
+    print("\nOutput data shape: " + str(bufReordered_host.shape))
     print("\n------------------------------------\n")
+    print("Verifying...\n")
 
-    result = verify_reorder(bufSamples_host, bufReordered_host, template)
-    print(result)
+    result, returnMessage = verify_reorder(bufSamples_host, bufReordered_host, template)
+    if not result:
+        # Problem
+        raise ValueError(returnMessage)
+    # else: Great success!
+    print("Reorder was successful!\n")

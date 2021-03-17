@@ -61,9 +61,16 @@ class PreCorrelationReorderCoreTemplate:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
-        self.inputDataShape = (self.n_ants, self.n_channels, self.n_samples_per_channel, self.n_polarisations)
+        self.inputDataShape = (
+            self.n_batches,
+            self.n_ants,
+            self.n_channels,
+            self.n_samples_per_channel,
+            self.n_polarisations,
+        )
 
         self.outputDataShape = (
+            self.n_batches,
             self.n_channels,
             self.n_samples_per_channel // self.n_times_per_block,
             self.n_ants,
