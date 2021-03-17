@@ -133,19 +133,26 @@ class XEngineSPEADSend(ABC):
 class XEngineSPEADIbvSend(XEngineSPEADSend):
     """TODO: Write this docstring."""
 
-    def __init__(self) -> None:  # Pass endpoint here
+    def __init__(
+        self, endpoint: typing.Tuple[str, int], interface_address: str, thread_affinity: int
+    ) -> None:  # Pass endpoint here
         """TODO: Write this docstring."""
+        # 1. Initialise base class
         XEngineSPEADSend.__init__(self)
-        self.endpoint: typing.Tuple[str, int] = ("239.10.10.11", 7149)
+
+        # 2. Assign simple member variables
+        self.endpoint: Final[typing.Tuple[str, int]] = endpoint
+
+        # 3. Create SPEAD2 stream using ibverbs transport for sending data onto a network
         thread_pool = spead2.ThreadPool()
         self.sourceStream = spead2.send.asyncio.UdpIbvStream(
             thread_pool,
             self.streamConfig,
             spead2.send.UdpIbvConfig(
                 endpoints=[self.endpoint],
-                interface_address="10.100.44.1",
+                interface_address=interface_address,
                 ttl=4,
-                comp_vector=2,
+                comp_vector=thread_affinity,
                 memory_regions=self.buffers,
             ),
         )
@@ -155,7 +162,7 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
 class XEngineSPEADInprocSend(XEngineSPEADSend):
     """TODO: Write this docstring."""
 
-    def __init__(self) -> None:  # Pass endpoint here
+    def __init__(self) -> None:
         """TODO: Write this docstring."""
         XEngineSPEADSend.__init__(self)
         self.queue: spead2.InprocQueue = spead2.InprocQueue()

@@ -4,7 +4,9 @@ import asyncio
 import numpy as np
 
 
-x = katxgpu.xsend.XEngineSPEADIbvSend()
+x = katxgpu.xsend.XEngineSPEADIbvSend(
+    endpoint=("239.10.10.11", 7149), interface_address="10.100.44.1", thread_affinity=3
+)
 
 
 async def send_process():
