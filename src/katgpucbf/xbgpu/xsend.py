@@ -9,6 +9,7 @@ import asyncio
 from typing_extensions import Final  # type: ignore # This should change from "typing_extensions" to  "typing" in Python 3.8
 import typing
 import queue
+import math
 from abc import ABC
 
 
@@ -42,6 +43,7 @@ class XEngineSPEADSend(ABC):
         self.n_pols: int = 2
         self.n_baselines: int = (self.n_pols * self.n_ants + 1) * (self.n_ants * self.n_pols) // 2
         self.sample_bits: int = 32
+        self.dump_rate_s = 0.4
         self.heap_size_bytes: int = (
             self.n_channels_per_stream * self.n_baselines * XEngineSPEADSend.complexity * self.sample_bits // 8
         )
@@ -57,11 +59,17 @@ class XEngineSPEADSend(ABC):
         ] = queue.Queue(maxsize=self.n_send_heaps_in_flight)
         self.buffers = []  # say if this is the best way to do things
 
+        packets_per_heap = math.ceil(self.heap_size_bytes / XEngineSPEADSend.max_payload_size)
+        packet_header_overhead_bytes = packets_per_heap * XEngineSPEADSend.header_size
+        rate_Bps = (
+            (self.heap_size_bytes + packet_header_overhead_bytes) / self.dump_rate_s * 1.1
+        )  # 1.1 adds a 10 percent buffer
+        print(self.n_baselines, self.heap_size_bytes / 1024 / 1024 * 8, rate_Bps / 1024 / 1024 / 1.1 * 8)
         self.streamConfig = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
             max_heaps=self.n_send_heaps_in_flight,
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=10e6,  # TODO Calculate a reasonable rate
+            rate=rate_Bps,
         )
         self.sourceStream: spead2.send.asyncio.AbstractStream
 
