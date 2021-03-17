@@ -4,7 +4,7 @@ import asyncio
 import numpy as np
 
 
-x = katxgpu.xsend.XEngineSPEADSend()
+x = katxgpu.xsend.XEngineSPEADIbvSend()
 
 
 async def send_process():
@@ -15,7 +15,7 @@ async def send_process():
         buffer_wrapper.buffer = np.full(buffer_wrapper.buffer.shape, num_sent, np.uint16)
         num_sent += 1
         x.send_heap(num_sent * 0x1000, buffer_wrapper)
-        print(f"Sent heap {num_sent}. Values: [{buffer_wrapper.buffer[0]}...{buffer_wrapper.buffer[0]}]")
+        print(f"Sent heap {num_sent-1}. Values: [{buffer_wrapper.buffer[0]}...{buffer_wrapper.buffer[0]}]")
 
 
 async def run() -> None:
@@ -27,8 +27,6 @@ async def run() -> None:
 
 
 if __name__ == "__main__":
-    print("asdasd")
-
     # This ayncio stuff is for python3.6, will need to be upgraded for Python3.7 and above
     loop = asyncio.get_event_loop()
     loop.run_until_complete(run())

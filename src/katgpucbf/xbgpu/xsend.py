@@ -9,9 +9,10 @@ import asyncio
 from typing_extensions import Final  # type: ignore # This should change from "typing_extensions" to  "typing" in Python 3.8
 import typing
 import queue
+from abc import ABC
 
 
-class XEngineSPEADSend:
+class XEngineSPEADSend(ABC):
     """TODO: Write this docstring."""
 
     class XEngineHeapBufferWrapper:
@@ -48,14 +49,21 @@ class XEngineSPEADSend:
             device_filter=lambda x: x.is_cuda
         )
         self.n_send_heaps_in_flight: int = 5
-        self.endpoint: typing.Tuple[str, int] = ("239.10.10.11", 7149)
         self.channel_offset = 128
 
         # THere may be scope to use asynio queues here instead - need to figure it out
         self._heaps_queue: queue.Queue[
             typing.Tuple[asyncio.Future, XEngineSPEADSend.XEngineHeapBufferWrapper]
         ] = queue.Queue(maxsize=self.n_send_heaps_in_flight)
-        buffers = []
+        self.buffers = []  # say if this is the best way to do things
+
+        self.streamConfig = spead2.send.StreamConfig(
+            max_packet_size=self.max_packet_size,
+            max_heaps=self.n_send_heaps_in_flight,
+            rate_method=spead2.send.RateMethod.AUTO,
+            rate=10e6,  # TODO Calculate a reasonable rate
+        )
+        self.sourceStream: spead2.send.asyncio.AbstractStream
 
         for i in range(self.n_send_heaps_in_flight):
             # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
@@ -65,22 +73,7 @@ class XEngineSPEADSend:
             dummyFuture.set_result("")
 
             self._heaps_queue.put((dummyFuture, XEngineSPEADSend.XEngineHeapBufferWrapper(buffer)))
-            buffers.append(buffer)
-
-        thread_pool = spead2.ThreadPool()
-        self.sourceStream = spead2.send.asyncio.UdpIbvStream(
-            thread_pool,
-            spead2.send.StreamConfig(
-                max_packet_size=self.max_packet_size,
-                max_heaps=self.n_send_heaps_in_flight,
-                rate_method=spead2.send.RateMethod.AUTO,
-                rate=10e6,  # TODO Calculate a reasonable rate
-            ),
-            spead2.send.UdpIbvConfig(
-                endpoints=[self.endpoint], interface_address="10.100.44.1", ttl=4, comp_vector=2, memory_regions=buffers
-            ),
-        )
-        del thread_pool  # This line is copied from the SPEAD2 examples.
+            self.buffers.append(buffer)
 
         self.item_group = spead2.send.ItemGroup(flavour=spead2.Flavour(**XEngineSPEADSend.default_spead_flavour))
         self.item_group.add_item(
@@ -127,3 +120,41 @@ class XEngineSPEADSend:
         future, bufferWrapper = self._heaps_queue.get()
         await asyncio.wait([future])
         return bufferWrapper
+
+
+class XEngineSPEADIbvSend(XEngineSPEADSend):
+    """TODO: Write this docstring."""
+
+    def __init__(self) -> None:  # Pass endpoint here
+        """TODO: Write this docstring."""
+        XEngineSPEADSend.__init__(self)
+        self.endpoint: typing.Tuple[str, int] = ("239.10.10.11", 7149)
+        thread_pool = spead2.ThreadPool()
+        self.sourceStream = spead2.send.asyncio.UdpIbvStream(
+            thread_pool,
+            self.streamConfig,
+            spead2.send.UdpIbvConfig(
+                endpoints=[self.endpoint],
+                interface_address="10.100.44.1",
+                ttl=4,
+                comp_vector=2,
+                memory_regions=self.buffers,
+            ),
+        )
+        del thread_pool  # This line is copied from the SPEAD2 examples.
+
+
+class XEngineSPEADInprocSend(XEngineSPEADSend):
+    """TODO: Write this docstring."""
+
+    def __init__(self) -> None:  # Pass endpoint here
+        """TODO: Write this docstring."""
+        XEngineSPEADSend.__init__(self)
+        self.queue: spead2.InprocQueue = spead2.InprocQueue()
+        thread_pool = spead2.ThreadPool()
+        self.sourceStream = spead2.send.asyncio.InprocStream(
+            thread_pool,
+            [self.queue],
+            self.streamConfig,
+        )
+        del thread_pool  # This line is copied from the SPEAD2 examples.
