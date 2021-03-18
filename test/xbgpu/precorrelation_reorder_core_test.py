@@ -167,16 +167,4 @@ def test_precorr_reorder_quick():
     bufReordered_host = bufReordered_host.astype(np.int8)
     bufReordered_host.dtype = np.int8
 
-    # bufCorrectReordered_host = np.empty_like(bufReordered_host)
-    print("\n------------------------------------\n")
-    print("Input data shape: " + str(bufSamples_host.shape))
-    print("\nOutput data shape: " + str(bufReordered_host.shape))
-    print("\n------------------------------------\n")
-    print("Verifying...\n")
-
     verify_reorder(bufSamples_host, bufReordered_host, template)
-    # if not result:
-    #     # Problem
-    #     raise ValueError(returnMessage)
-    # # else: Great success!
-    # print("Reorder was successful!\n")

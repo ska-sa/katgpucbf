@@ -93,7 +93,7 @@ class PreCorrelationReorderCoreTemplate:
         # 5. Compile the kernel
         program = accel.build(
             context,
-            "kernels/precorrelation_reorder_kernel.cu",
+            "kernels/precorrelation_reorder_kernel.mako",
             {
                 "n_ants": self.n_ants,
                 "n_channels": self.n_channels,
