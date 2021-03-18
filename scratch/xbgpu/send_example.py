@@ -74,7 +74,9 @@ async def send_process():
         buffer_wrapper = await transmitStream.get_free_heap()
 
         # 5.2 Populate the buffer with dummy data.
-        buffer_wrapper.buffer = np.full(buffer_wrapper.buffer.shape, num_sent, np.uint16)
+        buffer_wrapper.buffer[:] = np.full(
+            buffer_wrapper.buffer.shape, num_sent, np.uint16
+        )  # [:] forces a copy, not an overwrite
         num_sent += 1
 
         # 5.3 Give the buffer back to the transmitStream to transmit out onto the network.

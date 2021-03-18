@@ -10,8 +10,8 @@ In this case the TODO is listed here.
 1. A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
 [display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp) and 
-[display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py) also have links that must be
-updated.
+[display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py), [xsend.py](katxgpu/xsend.py) 
+also have links that must be updated.
 2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
 3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
 no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 

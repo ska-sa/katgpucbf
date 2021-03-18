@@ -6,20 +6,21 @@ This module has been designed to work with asyncio.
 The data sent onto the network conforms to the SPEAD protocol. This module takes the baseline data, turns it into a
 SPEAD heap and then transmits that heap out onto the network using the SPEAD2 python module. The high-performance
 ibverbs implementation of SPEAD2 will be used even though the data rates out are very low due to the ibverbs
-implementation using far fewer system resources.
+implementation using far fewer system resources. The format of the packets transmitted by SPEAD2 can be found here:
+https://docs.google.com/drawings/d/1d3CMrMl8wTQfVlyX5NXztMGGHhak-37mt4IoK7Idc_I/edit
 
-This module defines three seperate classes - an abstract XEngineSPEADSend base class and, the XEngineSPEADIbvSend and
-XEngineSPEADInprocSend child classes. The main object that will be used is the XEngineSPEADIbvSend class as this
-actually creates the SPEAD2 ibverbs transport. However in order to implement unit tests without having a network, the
-SPEAD2 inproc transport must be used. This led to the creation of an XEngineSPEADInprocSend class that implements the
-inproc transport. Most of this module's logic is in the XEngineSPEADSend base class, the child classes only implement the
-the different transports.
+This module defines three seperate classes - an abstract XEngineSPEADAbstractSend base class and, the
+XEngineSPEADIbvSend and XEngineSPEADInprocSend child classes. The main object that will be used is the
+XEngineSPEADIbvSend class as this actually creates the SPEAD2 ibverbs transport. However in order to implement unit
+tests without having a network, the SPEAD2 inproc transport must be used. This led to the creation of an
+XEngineSPEADInprocSend class that implements the inproc transport. Most of this module's logic is in the
+XEngineSPEADAbstractSend base class, the child classes only implement the the different transports.
 
-The XEngineSPEADSend class creates its own buffers and data in those buffers will be encapsulated into SPEAD heaps and
-sent onto the network. The user can request the buffers from the object, populate them and then give them back to the
-class for transmission. The user must not give other buffers to the class as while this will work, it will be much
-slower. The memory regions of the XEngineSPEADSend generated buffers have been registered with ibverbs to enable zero
-copy transmission - other buffers will create an extra copy.
+The XEngineSPEADAbstractSend class creates its own buffers and data in those buffers will be encapsulated into SPEAD
+heaps and sent onto the network. The user can request the buffers from the object, populate them and then give them back
+to the class for transmission. The user must not give other buffers to the class as while this will work, it will be
+much slower. The memory regions of the XEngineSPEADAbstractSend generated buffers have been registered with ibverbs to
+enable zero copy transmission - using other buffers will force an extra copy.
 """
 
 import spead2
@@ -35,15 +36,55 @@ import math
 from abc import ABC
 
 
-class XEngineSPEADSend(ABC):
-    """Base class that m."""
+class XEngineSPEADAbstractSend(ABC):
+    """
+    Base class for turning baseline correlation products into SPEAD heaps and transmitting them.
+
+    This class creates a queue of buffers that can be sent out onto the network. To get one of these buffers call the
+    buffer_wrapper = thisObject.get_free_heap() object function - it will return a buffer wrapped in a
+    XEngineHeapBufferWrapper object. Once the necessary data has been copied to the buffer and it is ready to be sent
+    onto the network, pass it back to this object using the thisObject.send_heap(buffer_wrapper) command. This object
+    will create a limited number of buffers and keep recycling them - avoiding any memory allocation at runtime.
+
+    This has been designed to run in an asyncio loop, and the get_free_heap() function makes sure that the next buffer
+    in the queue is not in flight before returning.
+
+    This base class is missing the SPEAD2 transports for transmitting data. The child classes of this class are
+    responsible for implementing the specific transports.
+
+    While this base class is meant to be abstract, it has no abstract functions and so it can be constructed
+    without generating an error (the self.context: Final[katsdpsigproc.abc.AbstractContext] class member is the
+    abstract part). An error will only be thrown once an attempt is made to access the self.context object.
+    """
 
     class XEngineHeapBufferWrapper:
-        """TODO: Write this docstring."""
+        """
+        Holds a buffer object that has been configured so that it can be zero-copy transferred onto the network.
+
+        In order to preserve the zero-copy properties of th buffer, data can only be copied to the buffer within this
+        class, the buffer handle cannot be overwritten. For example: "buffer_wrapper.buffer = newArray" will fail as
+        it attempts to assign a new object to the buffer variable while "buffer_wrapper.buffer[:] = newArray" will
+        succeed as it overwrites the values in the buffer, not the buffer itself.
+
+        There may be a better way to hold these buffer objects and prevent them being overwritten other than
+        wrapping them in an XEngineHeapBufferWrapper class but I could not think of any at the time of writing.
+        """
 
         def __init__(self, buffer: np.ndarray) -> None:
-            """TODO: Write this docstring."""
-            self.buffer: np.ndarray = buffer
+            """
+            Initialise the XEngineHeapBufferWrapper object.
+
+            Parameters
+            ----------
+            buffer: np.ndarray
+                The buffer object configured for zero-copy transfers.
+            """
+            self._buffer: np.ndarray = buffer
+
+        @property
+        def buffer(self) -> np.ndarray:
+            """Return the buffer associated with this class."""
+            return self._buffer
 
     # SPEAD static constants
     TIMESTAMP_ID: Final[int] = 0x1600
@@ -71,10 +112,31 @@ class XEngineSPEADSend(ABC):
         dump_rate_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
-        n_send_heaps_in_flight: int = 5,  # I dont see any need for this to be configurable, the data rates are likely
-        # too low for it to be an issue. I have put it here more to be explicit than anything else.
+        n_send_heaps_in_flight: int = 5,
     ) -> None:
-        """TODO: Write this docstring."""
+        """
+        Construct an XEngineSPEADAbstractSend object.
+
+        Parameters
+        ----------
+        n_ants: int
+            The number of antennas that data will be received from.
+        n_channels_per_stream: int
+            The number of frequency channels contained in the stream.
+        n_pols: int
+            The number of pols per antenna. Expected to always be 2 at the moment.
+        dump_rate_s: float
+            A new heap is transmitted every dump_rate_s seconds.
+        channel_offset: int
+            Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
+            Must be a multiple of n_channels_per_stream.
+        context: katsdpsigproc.abc.AbstractContext
+            All buffers to be transmitted will be created from this context.
+        n_send_heaps_in_flight: int
+            Number of buffers that will be queued at any one time. I dont see any need for this to be configurable, the
+            data rates are likely too low for it to be an issue. I have put it here more to be explicit than anything
+            else. This argument is optional
+        """
         # 1. Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
@@ -83,10 +145,19 @@ class XEngineSPEADSend(ABC):
         self.dump_rate_s: Final[float] = dump_rate_s
         self._sample_bits: Final[int] = 32
 
+        if n_pols != 2:
+            raise ValueError("n_pols must equal 2 - no other modes supported at the moment.")
+
+        if dump_rate_s <= 0:
+            raise ValueError("Dump rate must be greater than 0 seconds.")
+
+        if channel_offset % n_channels_per_stream != 0:
+            raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+
         # 2. Multicast Stream Parameters
         self.channel_offset: Final[int] = channel_offset
         self.heap_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * XEngineSPEADSend.complexity * self._sample_bits // 8
+            self.n_channels_per_stream * self.n_baselines * XEngineSPEADAbstractSend.complexity * self._sample_bits // 8
         )
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
@@ -95,9 +166,9 @@ class XEngineSPEADSend(ABC):
 
         # 3.1 There may be scope to use asynio queues here instead - need to figure it out
         self._heaps_queue: queue.Queue[
-            typing.Tuple[asyncio.Future, XEngineSPEADSend.XEngineHeapBufferWrapper]
+            typing.Tuple[asyncio.Future, XEngineSPEADAbstractSend.XEngineHeapBufferWrapper]
         ] = queue.Queue(maxsize=self._n_send_heaps_in_flight)
-        self.buffers: typing.List[accel.HostArray] = []  # say if this is the best way to do things
+        self.buffers: typing.List[accel.HostArray] = []
 
         # 3.2 Create buffers once-off to be reused for sending data.
         for i in range(self._n_send_heaps_in_flight):
@@ -111,15 +182,15 @@ class XEngineSPEADSend(ABC):
 
             # 3.2.3. Wrap buffer in XEngineHeapBufferWrapper, join it together with its future as a tuple and put it
             # on the heaps queue
-            self._heaps_queue.put((dummyFuture, XEngineSPEADSend.XEngineHeapBufferWrapper(buffer)))
+            self._heaps_queue.put((dummyFuture, XEngineSPEADAbstractSend.XEngineHeapBufferWrapper(buffer)))
 
             # 3.2.4 Store buffer in array so that it can be assigned to ibverbs memory regions in the
             # XEngineSPEADIbvSend stream.
             self.buffers.append(buffer)
 
         # 4. Generate all required stream information that is not specific to transports defined in the child classes
-        packets_per_heap = math.ceil(self.heap_size_bytes / XEngineSPEADSend.max_payload_size)
-        packet_header_overhead_bytes = packets_per_heap * XEngineSPEADSend.header_size
+        packets_per_heap = math.ceil(self.heap_size_bytes / XEngineSPEADAbstractSend.max_payload_size)
+        packet_header_overhead_bytes = packets_per_heap * XEngineSPEADAbstractSend.header_size
         send_rate_Bps = (
             (self.heap_size_bytes + packet_header_overhead_bytes) / self.dump_rate_s * 1.1
         )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
@@ -130,26 +201,28 @@ class XEngineSPEADSend(ABC):
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_Bps,
         )
-        self.sourceStream: spead2.send.asyncio.AbstractStream
+        self.sourceStream: spead2.send.asyncio.AbstractStream  # Left unassigned to remain abstract.
 
         # 5. Create item group - This is the SPEAD2 object that stores all heap format information.
-        self.item_group = spead2.send.ItemGroup(flavour=spead2.Flavour(**XEngineSPEADSend.default_spead_flavour))
+        self.item_group = spead2.send.ItemGroup(
+            flavour=spead2.Flavour(**XEngineSPEADAbstractSend.default_spead_flavour)
+        )
         self.item_group.add_item(
-            XEngineSPEADSend.CHANNEL_OFFSET,
+            XEngineSPEADAbstractSend.CHANNEL_OFFSET,
             "channel offset",
             "Value of first channel in collections stored here",
             shape=[],
-            format=[("u", XEngineSPEADSend.default_spead_flavour["heap_address_bits"])],
+            format=[("u", XEngineSPEADAbstractSend.default_spead_flavour["heap_address_bits"])],
         )
         self.item_group.add_item(
-            XEngineSPEADSend.TIMESTAMP_ID,
+            XEngineSPEADAbstractSend.TIMESTAMP_ID,
             "timestamp",
             "timestamp description",
             shape=[],
-            format=[("u", XEngineSPEADSend.default_spead_flavour["heap_address_bits"])],
+            format=[("u", XEngineSPEADAbstractSend.default_spead_flavour["heap_address_bits"])],
         )
         self.item_group.add_item(
-            XEngineSPEADSend.DATA_ID,
+            XEngineSPEADAbstractSend.DATA_ID,
             "xeng_raw",
             "Integrated baseline correlation products",
             shape=(self.heap_size_bytes,),
@@ -180,8 +253,12 @@ class XEngineSPEADSend(ABC):
         return bufferWrapper
 
 
-class XEngineSPEADIbvSend(XEngineSPEADSend):
-    """TODO: Write this docstring."""
+class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
+    """
+    Child class of XEngineSPEADAbstractSend that implementing SPEAD2 ibverbs transport.
+
+    The ibverbs transport enables high-performance, low-overhead network transmission.
+    """
 
     def __init__(
         self,
@@ -194,10 +271,36 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
         endpoint: typing.Tuple[str, int],
         interface_address: str,
         thread_affinity: int,
-    ) -> None:  # Pass endpoint here
-        """TODO: Write this docstring."""
+    ) -> None:
+        """
+        Construct an XEngineSPEADIbvSend object.
+
+        This is a child class of XEngineSPEADAbstractSend configured to use the ibverbs SPEAD2 transport.
+
+        Parameters
+        ----------
+        n_ants: int
+            The number of antennas that data will be received from.
+        n_channels_per_stream: int
+            The number of frequency channels contained in the stream.
+        n_pols: int
+            The number of pols per antenna. Expected to always be 2 at the moment.
+        dump_rate_s: float
+            A new heap is transmitted every dump_rate_s seconds.
+        channel_offset: int
+            Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
+            Must be a multiple of n_channels_per_stream.
+        context: katsdpsigproc.abc.AbstractContext
+            All buffers to be transmitted will be created from this context.
+        endpoint: typing.Tuple[str, int]
+            Multicast address and port to transport data on. Expects "("x.x.x.x", port_num)" format
+        interface_address: str
+            IP address of the server interface that will transmit the multicast data.
+        thread_affinity: int
+            CPU core that will be used by the SPEAD2 ibverbs transport for all processing.
+        """
         # 1. Initialise base class
-        XEngineSPEADSend.__init__(
+        XEngineSPEADAbstractSend.__init__(
             self,
             n_ants=n_ants,
             n_channels_per_stream=n_channels_per_stream,
@@ -226,8 +329,12 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
         del thread_pool  # This line is copied from the SPEAD2 examples.
 
 
-class XEngineSPEADInprocSend(XEngineSPEADSend):
-    """TODO: Write this docstring."""
+class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
+    """
+    Child class of XEngineSPEADAbstractSend that implements the SPEAD2 inproc transport.
+
+    This allows for in process unit testing without needing to be connected to a network.
+    """
 
     def __init__(
         self,
@@ -239,8 +346,31 @@ class XEngineSPEADInprocSend(XEngineSPEADSend):
         context: katsdpsigproc.abc.AbstractContext,
         queue: spead2.InprocQueue,
     ) -> None:
-        """TODO: Write this docstring."""
-        XEngineSPEADSend.__init__(
+        """
+        Construct an XEngineSPEADInprocSend object.
+
+        This is a child class of XEngineSPEADAbstractSend configured to use the in process SPEAD2 transport for unit
+        testing without a network.
+
+        Parameters
+        ----------
+        n_ants: int
+            The number of antennas that data will be received from.
+        n_channels_per_stream: int
+            The number of frequency channels contained in the stream.
+        n_pols: int
+            The number of pols per antenna. Expected to always be 2 at the moment.
+        dump_rate_s: float
+            A new heap is transmitted every dump_rate_s seconds.
+        channel_offset: int
+            Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
+            Must be a multiple of n_channels_per_stream.
+        context: katsdpsigproc.abc.AbstractContext
+            All buffers to be transmitted will be created from this context.
+        queue: spead2.InprocQueue
+            SPEAD2 inproc queue to send heaps to.
+        """
+        XEngineSPEADAbstractSend.__init__(
             self,
             n_ants=n_ants,
             n_channels_per_stream=n_channels_per_stream,
