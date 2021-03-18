@@ -11,7 +11,7 @@ import katxgpu._katxgpu.recv as recv
 import katxgpu.monitor
 import katxgpu.ringbuffer
 
-# 1.1 External imports
+# 1.2 External imports
 import argparse
 import logging
 import asyncio
@@ -21,7 +21,6 @@ import katsdpsigproc.accel as accel
 logger = logging.getLogger(__name__)
 
 # 2. Relevant variables
-
 # 2.1 Parsing command line arguments
 
 parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxgpu receiver software.")

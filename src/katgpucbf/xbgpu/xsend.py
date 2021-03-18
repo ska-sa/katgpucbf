@@ -93,12 +93,12 @@ class XEngineSPEADSend(ABC):
             # XEngineSPEADIbvSend stream.
             self.buffers.append(buffer)
 
-        # 4. Generate all required stream information that is not specific to the child classes
+        # 4. Generate all required stream information that is not specific to transports defined in the child classes
         packets_per_heap = math.ceil(self.heap_size_bytes / XEngineSPEADSend.max_payload_size)
         packet_header_overhead_bytes = packets_per_heap * XEngineSPEADSend.header_size
         send_rate_Bps = (
             (self.heap_size_bytes + packet_header_overhead_bytes) / self.dump_rate_s * 1.1
-        )  # 1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+        )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
 
         self.streamConfig = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
