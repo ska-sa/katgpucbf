@@ -2,7 +2,10 @@
 import katxgpu.xsend
 import asyncio
 import numpy as np
+import katsdpsigproc.accel as accel
 
+
+context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
 x = katxgpu.xsend.XEngineSPEADIbvSend(
     n_ants=64,
@@ -10,6 +13,7 @@ x = katxgpu.xsend.XEngineSPEADIbvSend(
     n_pols=2,
     dump_rate_s=0.4,
     channel_offset=128 * 4,
+    context=context,
     endpoint=("239.10.10.11", 7149),
     interface_address="10.100.44.1",
     thread_affinity=3,

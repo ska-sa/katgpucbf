@@ -48,6 +48,7 @@ class XEngineSPEADSend(ABC):
         n_pols: int,
         dump_rate_s: float,
         channel_offset: int,
+        context: katsdpsigproc.abc.AbstractContext,
     ) -> None:
         """TODO: Write this docstring."""
         # 1. Array Configuration Parameters
@@ -63,21 +64,19 @@ class XEngineSPEADSend(ABC):
         self.heap_size_bytes: Final[int] = (
             self.n_channels_per_stream * self.n_baselines * XEngineSPEADSend.complexity * self._sample_bits // 8
         )
-        self.n_send_heaps_in_flight: Final[int] = 5
+        self._n_send_heaps_in_flight: Final[int] = 5  # Hardcoded for now - I dont think this needs to be configurable
 
         # 3. Allocate memory buffers
-        self.context: Final[katsdpsigproc.katsdpsigproc.abc.AbstractContext] = accel.create_some_context(
-            device_filter=lambda x: x.is_cuda
-        )
+        self.context: Final[katsdpsigproc.abc.AbstractContext] = context
 
         # 3.1 There may be scope to use asynio queues here instead - need to figure it out
         self._heaps_queue: queue.Queue[
             typing.Tuple[asyncio.Future, XEngineSPEADSend.XEngineHeapBufferWrapper]
-        ] = queue.Queue(maxsize=self.n_send_heaps_in_flight)
-        self.buffers = []  # say if this is the best way to do things
+        ] = queue.Queue(maxsize=self._n_send_heaps_in_flight)
+        self.buffers: typing.List[accel.HostArray] = []  # say if this is the best way to do things
 
         # 3.2 Create buffers once-off to be reused for sending data.
-        for i in range(self.n_send_heaps_in_flight):
+        for i in range(self._n_send_heaps_in_flight):
             # 3.2.1 Create a buffer from the accel context.
             buffer = accel.HostArray((self.heap_size_bytes,), np.uint8, context=self.context)
 
@@ -103,7 +102,7 @@ class XEngineSPEADSend(ABC):
 
         self.streamConfig = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
-            max_heaps=self.n_send_heaps_in_flight,
+            max_heaps=self._n_send_heaps_in_flight,
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_Bps,
         )
@@ -167,6 +166,7 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
         n_pols: int,
         dump_rate_s: float,
         channel_offset: int,
+        context: katsdpsigproc.abc.AbstractContext,
         endpoint: typing.Tuple[str, int],
         interface_address: str,
         thread_affinity: int,
@@ -180,6 +180,7 @@ class XEngineSPEADIbvSend(XEngineSPEADSend):
             n_pols=n_pols,
             dump_rate_s=dump_rate_s,
             channel_offset=channel_offset,
+            context=context,
         )
 
         # 2. Assign simple member variables
@@ -211,6 +212,7 @@ class XEngineSPEADInprocSend(XEngineSPEADSend):
         n_pols: int,
         dump_rate_s: float,
         channel_offset: int,
+        context: katsdpsigproc.abc.AbstractContext,
         queue: spead2.InprocQueue,
     ) -> None:
         """TODO: Write this docstring."""
@@ -221,6 +223,7 @@ class XEngineSPEADInprocSend(XEngineSPEADSend):
             n_pols=n_pols,
             dump_rate_s=dump_rate_s,
             channel_offset=channel_offset,
+            context=context,
         )
         self.queue: spead2.InprocQueue = queue
         thread_pool = spead2.ThreadPool()
