@@ -1,4 +1,26 @@
-"""TODO: Write this."""
+"""
+Module for sending baselines produced by the GPU X-Engine onto the network.
+
+This module has been designed to work with asyncio.
+
+The data sent onto the network conforms to the SPEAD protocol. This module takes the baseline data, turns it into a
+SPEAD heap and then transmits that heap out onto the network using the SPEAD2 python module. The high-performance
+ibverbs implementation of SPEAD2 will be used even though the data rates out are very low due to the ibverbs
+implementation using far fewer system resources.
+
+This module defines three seperate classes - an abstract XEngineSPEADSend base class and, the XEngineSPEADIbvSend and
+XEngineSPEADInprocSend child classes. The main object that will be used is the XEngineSPEADIbvSend class as this
+actually creates the SPEAD2 ibverbs transport. However in order to implement unit tests without having a network, the
+SPEAD2 inproc transport must be used. This led to the creation of an XEngineSPEADInprocSend class that implements the
+inproc transport. Most of this module's logic is in the XEngineSPEADSend base class, the child classes only implement the
+the different transports.
+
+The XEngineSPEADSend class creates its own buffers and data in those buffers will be encapsulated into SPEAD heaps and
+sent onto the network. The user can request the buffers from the object, populate them and then give them back to the
+class for transmission. The user must not give other buffers to the class as while this will work, it will be much
+slower. The memory regions of the XEngineSPEADSend generated buffers have been registered with ibverbs to enable zero
+copy transmission - other buffers will create an extra copy.
+"""
 
 import spead2
 import spead2.send.asyncio
@@ -14,7 +36,7 @@ from abc import ABC
 
 
 class XEngineSPEADSend(ABC):
-    """TODO: Write this docstring."""
+    """Base class that m."""
 
     class XEngineHeapBufferWrapper:
         """TODO: Write this docstring."""
@@ -49,6 +71,8 @@ class XEngineSPEADSend(ABC):
         dump_rate_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
+        n_send_heaps_in_flight: int = 5,  # I dont see any need for this to be configurable, the data rates are likely
+        # too low for it to be an issue. I have put it here more to be explicit than anything else.
     ) -> None:
         """TODO: Write this docstring."""
         # 1. Array Configuration Parameters
@@ -64,7 +88,7 @@ class XEngineSPEADSend(ABC):
         self.heap_size_bytes: Final[int] = (
             self.n_channels_per_stream * self.n_baselines * XEngineSPEADSend.complexity * self._sample_bits // 8
         )
-        self._n_send_heaps_in_flight: Final[int] = 5  # Hardcoded for now - I dont think this needs to be configurable
+        self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         # 3. Allocate memory buffers
         self.context: Final[katsdpsigproc.abc.AbstractContext] = context
