@@ -1,9 +1,22 @@
 """TODO: Write this."""
 import katxgpu.xsend
+
+import argparse
 import asyncio
 import numpy as np
 import katsdpsigproc.accel as accel
 
+
+parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxgpu receiver software.")
+parser.add_argument("--mcast_dest_ip", default="239.10.10.11", help="IP address of multicast stream to transmit on.")
+parser.add_argument("--mcast_dest_port", default="7149", type=int, help="Port of multicast stream to transmit on.")
+parser.add_argument("--interface", default="10.100.44.1", help="IP Address of interface that will receive the data.")
+args = parser.parse_args()
+dest_multicast_ip = args.mcast_dest_ip
+dest_multicast_port = args.mcast_dest_port
+interface_ip = args.interface
+
+print(f"Transmitting to {dest_multicast_ip}:{dest_multicast_port} on the {interface_ip} interface.")
 
 context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
@@ -14,8 +27,8 @@ x = katxgpu.xsend.XEngineSPEADIbvSend(
     dump_rate_s=0.4,
     channel_offset=128 * 4,
     context=context,
-    endpoint=("239.10.10.11", 7149),
-    interface_address="10.100.44.1",
+    endpoint=(dest_multicast_ip, dest_multicast_port),
+    interface_address=interface_ip,
     thread_affinity=3,
 )
 
