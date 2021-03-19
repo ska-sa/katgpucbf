@@ -244,6 +244,8 @@ within a buffer. The unit test can be found [here](../test/spead2_receiver_test.
 
 ## 3. Sender
 
+![Sender](./katxgpu_sender.png)
+
 TODO: Sender logic still needs to be implemented. This section will be updated once this has occured.
 
 ## 4. Peerdirect Support

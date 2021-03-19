@@ -165,12 +165,17 @@ imported using `import katxgpu._katxgpu`.
 The makeup of this module is quite complex. This [file](src/README.md) within this repo describes the entire module in
 great detail. A simple example of how to use the receiver network code is shown in
 [receiver_example.py](scratch/receiver_example.py) in the katxgpu/scratch directory. This example is probably the
-quickest way to figure out how the receiver works.
+quickest way to figure out how the receiver works. Likewise the [send_example.py](scratch/send_example.py) file in the 
+katxgpu/scratch folder demonstrates network transmit code works.
 
 The `katxgpu._katxgpu` module uses the SPEAD2 C++ bindings (not the python bindings) and as such requires the SPEAD2
 submodule to be included in this repository. This module is located in the katxgpu/3rdparty directory.
 
-TODO: Discuss how the output heaps are at a much lower data rate and as such normal SPEAD2 is used.
+The `katxgpu._katxgpu` module only provides functionality for receiving data. The normal SPEAD2 python module is used
+for sending X-Engine output data. This is because the X-Engine accumulates data and transmits it at a much lower data 
+rate than it is received meaning that high performance code is not necessary. The [xsend.py](katxgpu/xsend.py) module
+handles the transmission of correlated data. The high level description of this module can also be found
+in the same [file](src/README.md) that describes the data receiver module.
 
 ### F-Engine Packet Simulator
 
