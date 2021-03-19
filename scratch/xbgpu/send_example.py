@@ -73,7 +73,9 @@ async def send_process():
         # 5.1 Get a free buffer to store the next heap.
         buffer_wrapper = await transmitStream.get_free_heap()
 
-        # 5.2 Populate the buffer with dummy data.
+        # 5.2 Populate the buffer with dummy data - notice how we copy new values into the buffer, we dont overwrite
+        # the buffer. Attempts to overwrite the buffer will throw an error. This is intended behavour as the memory
+        # regions in the buffer have been configured for zero-copy sends.
         buffer_wrapper.buffer[:] = np.full(
             buffer_wrapper.buffer.shape, num_sent, np.uint16
         )  # [:] forces a copy, not an overwrite

@@ -234,7 +234,16 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group.get_heap()
 
     def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
-        """TODO: Write this docstring."""
+        """
+        Take in an XEngineHeapBufferWrapper object and send it onto the network as a SPEAD heap.
+
+        Parameters
+        ----------
+        timestamp: int
+            The timestamp that will be assigned to the buffer when it is encapsulated in a SPEAD heap.
+        bufferWrapper: XEngineHeapBufferWrapper
+            Wrapped buffer to sent as a SPEAD heap.
+        """
         self.item_group["timestamp"].value = timestamp
         self.item_group["channel offset"].value = self.channel_offset
         self.item_group["xeng_raw"].value = bufferWrapper.buffer
@@ -247,7 +256,27 @@ class XEngineSPEADAbstractSend(ABC):
         self._heaps_queue.put((future, bufferWrapper))
 
     async def get_free_heap(self) -> XEngineHeapBufferWrapper:
-        """TODO: Write this docstring."""
+        """
+        Return an XEngineHeapBufferWrapper object from the internal fifo queue when one is avaiable.
+
+        There are a limited number of XEngineHeapBufferWrapper in existence and they are all stored with a future
+        object. If the future is complete, the buffer is not being used for sending and it will return the buffer
+        immediatly. If the future is still busy, this function will wait asynchronously for the future to be done.
+
+        This function is compatible with asyncio.
+
+        Parameters
+        ----------
+        timestamp: int
+            The timestamp that will be assigned to the buffer when it is encapsulated in a SPEAD heap.
+        bufferWrapper: XEngineHeapBufferWrapper
+            Wrapped buffer to sent as a SPEAD heap.
+
+        Returns
+        -------
+        bufferWrapper: XEngineHeapBufferWrapper
+            Free buffer wrapped in an XEngineHeapBufferWrapper object.
+        """
         future, bufferWrapper = self._heaps_queue.get()
         await asyncio.wait([future])
         return bufferWrapper
