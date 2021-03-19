@@ -236,6 +236,9 @@ class XEngineSPEADAbstractSend(ABC):
         """
         Take in an XEngineHeapBufferWrapper object and send it onto the network as a SPEAD heap.
 
+        This funtion is non-blocking. There is no guarentee that a packet has been sent by the time the function
+        completes.
+
         Parameters
         ----------
         timestamp: int
@@ -285,8 +288,10 @@ class XEngineSPEADAbstractSend(ABC):
         Send the SPEAD descriptor over the SPEAD2 transport.
 
         This function transmits the descriptor heap created at the start of transmission. I am unsure if this is the
-        correct or best way to do this. Currently descriptors are largely ignored for testing, this function may need
-        to be revisited in production.
+        correct or best way to do this. Currently descriptors have not been considered during development
+
+        This function has no associated unit test - it will likely need to be revisited later as its need and function
+        become clear.
         """
         self.sourceStream.async_send_heap(self.descriptor_heap)
 
