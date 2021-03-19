@@ -43,7 +43,7 @@ context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
 # 4. Create object to transmit X-Engine output heaps. This constructor creates its own internal collection of buffers
 # that are registered in such a way as to allow zero copy sends.
-transmitStream = katxgpu.xsend.XEngineSPEADIbvSend(
+sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
     n_ants=n_ants,
     n_channels_per_stream=n_channels_per_stream,
     n_pols=n_pols,
@@ -61,28 +61,28 @@ async def send_process():
     """
     Continously sends X-Engine output heaps onto the network.
 
-    This function retrieves available buffers from the transmitStream, populates them and then tells the transmit stream
+    This function retrieves available buffers from the sendStream, populates them and then tells the transmit stream
     to send the filled buffer onto the network.
 
-    It is very important that only the buffers returned from the transmitStream.get_free_heap() function are transmitted
-    using the transmitStream.send_heap() function as these buffers have been registered as memory regions that ibverbs
+    It is very important that only the buffers returned from the sendStream.get_free_heap() function are transmitted
+    using the sendStream.send_heap() function as these buffers have been registered as memory regions that ibverbs
     will be able to use to zero copy send data onto the network.
     """
     num_sent = 0
     while 1:
         # 5.1 Get a free buffer to store the next heap.
-        buffer_wrapper = await transmitStream.get_free_heap()
+        buffer_wrapper = await sendStream.get_free_heap()
 
         # 5.2 Populate the buffer with dummy data - notice how we copy new values into the buffer, we dont overwrite
         # the buffer. Attempts to overwrite the buffer will throw an error. This is intended behavour as the memory
         # regions in the buffer have been configured for zero-copy sends.
         buffer_wrapper.buffer[:] = np.full(
-            buffer_wrapper.buffer.shape, num_sent, np.uint16
+            buffer_wrapper.buffer.shape, num_sent, np.uint8
         )  # [:] forces a copy, not an overwrite
         num_sent += 1
 
-        # 5.3 Give the buffer back to the transmitStream to transmit out onto the network.
-        transmitStream.send_heap(num_sent * 0x1000, buffer_wrapper)
+        # 5.3 Give the buffer back to the sendStream to transmit out onto the network.
+        sendStream.send_heap(num_sent * 0x1000, buffer_wrapper)
         print(f"Sent heap {num_sent-1}. Values: [{buffer_wrapper.buffer[0]}...{buffer_wrapper.buffer[0]}]")
 
 

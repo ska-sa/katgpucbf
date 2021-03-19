@@ -229,9 +229,8 @@ class XEngineSPEADAbstractSend(ABC):
             dtype=np.int8,
         )
 
-        # 5.1 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
-        # for the purposes of this test.
-        self.item_group.get_heap()
+        # 5.1 The first heap is the SPEAD descriptor - store it for transmission when required
+        self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
         """
@@ -248,7 +247,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group["channel offset"].value = self.channel_offset
         self.item_group["xeng_raw"].value = bufferWrapper.buffer
 
-        heap_to_send = self.item_group.get_heap()
+        heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
         # Say why this flag is needed
         heap_to_send.repeat_pointers = True
 
@@ -280,6 +279,16 @@ class XEngineSPEADAbstractSend(ABC):
         future, bufferWrapper = self._heaps_queue.get()
         await asyncio.wait([future])
         return bufferWrapper
+
+    def send_descriptor_heap(self):
+        """
+        Send the SPEAD descriptor over the SPEAD2 transport.
+
+        This function transmits the descriptor heap created at the start of transmission. I am unsure if this is the
+        correct or best way to do this. Currently descriptors are largely ignored for testing, this function may need
+        to be revisited in production.
+        """
+        self.sourceStream.async_send_heap(self.descriptor_heap)
 
 
 class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
@@ -390,7 +399,8 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
         dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds.
+            A new heap is transmitted every dump_rate_s seconds. For the inproc transport this rate is respected but is
+            not very useful.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.

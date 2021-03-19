@@ -147,9 +147,6 @@ def createTestObjects(
             shape=[],
             format=[("u", default_spead_flavour["heap_address_bits"])],
         )
-    # 3.2 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
-    # for the purposes of this test.
-    ig.get_heap()
 
     # 4. Configure receiver
 
@@ -260,7 +257,7 @@ def createHeaps(
         ig["padding 0"].value = 0
         ig["padding 1"].value = 0
         ig["padding 2"].value = 0
-        heap = ig.get_heap()
+        heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
 
         # This function makes sure that the immediate values in each heap are transmitted per packet in the heap. By
         # default these values are only transmitted once. These immediate values are required as this is how data is
@@ -508,6 +505,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     del sourceStream, ig, receiverStream, asyncRingbuffer
 
 
+# A manual run useful when debugging the unit tests.
 if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
     print("Running tests")
