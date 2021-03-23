@@ -147,7 +147,9 @@ def test_correlator_exhaustive(num_ants):
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
-def test_correlator_quick(num_ants):
+@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
+@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+def test_correlator_quick(num_ants, num_samples_per_channel, num_channels):
     """
     Lightweight unit test of the Tensor core correlation algorithm.
 
@@ -159,15 +161,19 @@ def test_correlator_quick(num_ants):
     """
     # 1. Array parameters
     n_ants = num_ants
-    n_channels = 64
-    n_samples_per_channel = 3072
+
+    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
+    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
+    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
+    n_channels_per_stream = num_channels // n_ants // 4
+    n_samples_per_channel = num_samples_per_channel
 
     # 2. Initialise GPU kernels and buffers.
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
     template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
+        ctx, n_ants=n_ants, n_channels=n_channels_per_stream, n_samples_per_channel=n_samples_per_channel
     )
     correlator = template.instantiate(queue)
     correlator.ensure_all_bound()
@@ -182,7 +188,7 @@ def test_correlator_quick(num_ants):
 
     # 3. Generate predictable input data. The time samples remain constant for every antenna-channel combination.
     bufSamples_host.dtype = np.int8
-    for channel_index in range(n_channels):
+    for channel_index in range(n_channels_per_stream):
         for ant_index in range(n_ants):
             sample_value = get_simple_test_ant_value(channel_index, ant_index)
             for time_outer_index in range(time_outer_range):
@@ -205,7 +211,7 @@ def test_correlator_quick(num_ants):
 
     # 5.2 Generate the visibilities on the CPU and check they match the expected value. The output values are simple to
     # calculate and do not require performing the matrix multiple as it is performed on the GPU.
-    for channel_index in range(0, n_channels):
+    for channel_index in range(0, n_channels_per_stream):
         for ant1_index in range(0, n_ants):
             for ant2_index in range(0, ant1_index + 1):
                 ant1_value = get_simple_test_ant_value(channel_index, ant1_index)
