@@ -35,7 +35,9 @@ Ultimately both kernels:
 
 """
 
+import os
 import pytest
+import ctypes
 import test_parameters
 import numpy as np
 from katxgpu.precorrelation_reorder_core import PreCorrelationReorderCoreTemplate
@@ -192,7 +194,45 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     bufReordered_host = bufReordered_host.astype(np.int8)
     bufReordered_host.dtype = np.int8
 
-    verify_reorder(bufSamples_host, bufReordered_host, template)
+    # verify_reorder(bufSamples_host, bufReordered_host, template)
+
+    # 5.1. Now using the external C-library for a more efficient verification
+    # functionlib_C = ctypes.CDLL("libfunc.so")
+    functionlib_C = np.ctypeslib.load_library(libname="libfunc.so", loader_path=os.path.abspath("./test/"))
+    verify_reorder_C = functionlib_C.verify_reorder
+    # 5.1.1. Need to clarify these argument types
+    #        - Ideally we want to pass Pointers to the array in here
+    #        - As well as the array dimensions to calculate the strides
+    #        - Fortunately we can flatten numpy.ndarrays, so it's shape is simply the matrix size
+    verify_reorder_C.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
+        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
+        ctypes.c_int,  # Batches
+        ctypes.c_int,  # Antennas
+        ctypes.c_int,  # Channels
+        ctypes.c_int,  # Samples-per-channel
+        ctypes.c_int,  # Polarisations
+        ctypes.c_int,  # Times-per-block
+    ]
+
+    verify_reorder_C.restype = ctypes.c_int  # Return 0/1: Fail/Success
+
+    result = verify_reorder_C(
+        bufSamples_host.flatten(order="C"),
+        bufReordered_host.flatten(order="C"),
+        template.n_batches,
+        template.n_ants,
+        template.n_channels,
+        template.n_samples_per_channel,
+        template.n_polarisations,
+        template.n_times_per_block,
+    )
+
+    if result:
+        # Great success!
+        print("Reorder was successful!")
+    else:
+        print("Reorder failed...")
 
 
 def test_precorr_reorder_batched():
@@ -212,7 +252,7 @@ def test_precorr_reorder_batched():
     n_ants = 84
     n_channels = 4096 // n_ants // 4
     n_samples_per_channel = 256
-    n_batches = 3
+    n_batches = 10
 
     # 2. Initialise GPU kernels and buffers.
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
@@ -228,6 +268,8 @@ def test_precorr_reorder_batched():
     preCorrelationReorderCore = template.instantiate(queue)
     preCorrelationReorderCore.ensure_all_bound()
 
+    # These buffers are of type katsdpsigproc.accel.HostArray
+    # - Which is further of type np.ndarray
     bufSamples_device = preCorrelationReorderCore.buffer("inSamples")
     bufSamples_host = bufSamples_device.empty_like()
 
@@ -266,4 +308,42 @@ def test_precorr_reorder_batched():
     bufReordered_host = bufReordered_host.astype(np.int8)
     bufReordered_host.dtype = np.int8
 
-    verify_reorder(bufSamples_host, bufReordered_host, template)
+    # verify_reorder(bufSamples_host, bufReordered_host, template)
+
+    # 5.1. Now using the external C-library for a more efficient verification
+    # functionlib_C = ctypes.CDLL("libfunc.so")
+    functionlib_C = np.ctypeslib.load_library(libname="libfunc.so", loader_path=os.path.abspath("./test/"))
+    verify_reorder_C = functionlib_C.verify_reorder
+    # 5.1.1. Need to clarify these argument types
+    #        - Ideally we want to pass Pointers to the array in here
+    #        - As well as the array dimensions to calculate the strides
+    #        - Fortunately we can flatten numpy.ndarrays, so it's shape is simply the matrix size
+    verify_reorder_C.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
+        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
+        ctypes.c_int,  # Batches
+        ctypes.c_int,  # Antennas
+        ctypes.c_int,  # Channels
+        ctypes.c_int,  # Samples-per-channel
+        ctypes.c_int,  # Polarisations
+        ctypes.c_int,  # Times-per-block
+    ]
+
+    verify_reorder_C.restype = ctypes.c_int  # Return 0/1: Fail/Success
+
+    result = verify_reorder_C(
+        bufSamples_host.flatten(order="C"),
+        bufReordered_host.flatten(order="C"),
+        template.n_batches,
+        template.n_ants,
+        template.n_channels,
+        template.n_samples_per_channel,
+        template.n_polarisations,
+        template.n_times_per_block,
+    )
+
+    if result:
+        # Great success!
+        print("Reorder was successful!")
+    else:
+        print("Reorder failed...")
