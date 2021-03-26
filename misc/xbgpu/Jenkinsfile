@@ -144,6 +144,12 @@ pipeline {
      */
     stage('Run pytest') {
       steps {
+        /* Still need to compile the C-based reorder verification function.
+         * Trying this for now, hopefully it works!
+         */
+        dir('test'){
+          sh 'make'
+        }
         sh 'pytest -v --junitxml=reports/result.xml'
       }
     }
