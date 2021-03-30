@@ -144,8 +144,8 @@ pipeline {
      */
     stage('Run pytest') {
       steps {
-        /* Still need to compile the C-based reorder verification function.
-         * Trying this for now, hopefully it works!
+        /* Compile the shared C library with the pre-correlation reorder verification
+         * function before invoking pytest.
          */
         dir('test'){
           sh 'make'

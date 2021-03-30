@@ -27,41 +27,25 @@
 #define NR_TIMES_PER_BLOCK ${n_times_per_block}
 #define NR_BATCHES ${n_batches}
 
-// Defines
-// - Altered for ease of visualisation
-/*
-#define NR_STATIONS 64
-#define NR_CHANNELS 128
-#define NR_SAMPLES_PER_CHANNEL 256
-#define NR_POLARISATIONS 2
-#define NR_TIMES_PER_BLOCK 16
-#define NR_BATCHES 10
-*/
-
-// Maximum number of threads per block, as per:
-// - https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications__technical-specifications-per-compute-capability
-#define THREADS_PER_BLOCK 1024
-
 /*  \brief Kernel that implements a naive reorder of F-Engine data.
-
-    The following CUDA kernel implements a naive (i.e. unrefined) reorder of data ingested by the GPU X-Engine from the F-Engine.
-    As mentioned at the top of this document, data is received as an array in the format of:
-    - uint16_t [n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
-    And is required to be reordered into an array of format:
-    - uint16_t [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarizations] [times_per_block]
-
-    Currently, all dimension-strides are calculated within the kernel itself.
-    - Granted, there are some redudancies/inefficiences in variable usage; however,
-    - The kernel itself is operating as required, and will be refined as necessary.
-    
-    \param[in]  pu16Array           Pointer to a pre-populated input data array. The input array is one-dimensional but stores
-                                    multidimensional data according to the following indices:
-                                    - [n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
-    \param[out] pu16ArrayReordered  Pointer to the memory allocated for the reordered output data. Once more, this 1D output array
-                                    represents multidimensional data in the following format:
-                                    - [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
-
-*/
+ *
+ *  The following CUDA kernel implements a naive (i.e. unrefined) reorder of data ingested by the GPU X-Engine from the F-Engine.
+ *  As mentioned at the top of this document, data is received as an array in the format of:
+ *   - uint16_t [n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
+ *   And is required to be reordered into an array of format:
+ *   - uint16_t [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarizations] [times_per_block]
+ *
+ *   Currently, all dimension-strides are calculated within the kernel itself.
+ *   - Granted, there are some redudancies/inefficiences in variable usage; however,
+ *   - The kernel itself is operating as required, and will be refined as necessary.
+ *   
+ *   \param[in]  pu16Array           Pointer to a pre-populated input data array. The input array is one-dimensional but stores
+ *                                   multidimensional data according to the following indices:
+ *                                   - [n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
+ *   \param[out] pu16ArrayReordered  Pointer to the memory allocated for the reordered output data. Once more, this 1D output array
+ *                                   represents multidimensional data in the following format:
+ *                                   - [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
+ */
 
 __global__
 void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)

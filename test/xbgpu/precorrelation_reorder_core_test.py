@@ -37,9 +37,9 @@ Ultimately both kernels:
 
 import os
 import pytest
-import ctypes
 import test_parameters
 import numpy as np
+from ctypes import c_int  # Only need this from the library
 from katxgpu.precorrelation_reorder_core import PreCorrelationReorderCoreTemplate
 from katsdpsigproc import accel
 
@@ -186,7 +186,6 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
 
     # 5. Verify the processed/returned result
     #    - Both the input and output data are ultimately of type np.int8
-    # bufSamples_host.dtype = np.int16 # Shouldn't need this line..
     bufSamples_host = bufSamples_host.astype(np.int8)
     bufSamples_host.dtype = np.int8
 
@@ -194,31 +193,39 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     bufReordered_host = bufReordered_host.astype(np.int8)
     bufReordered_host.dtype = np.int8
 
-    # verify_reorder(bufSamples_host, bufReordered_host, template)
-
     # 5.1. Now using the external C-library for a more efficient verification
-    # functionlib_C = ctypes.CDLL("libfunc.so")
+    #   - TODO: Need to figure out a better way of indicating the loader_path
+    #   - Using './test/' as this function is called from the parent (root) katxgpu directory
     functionlib_C = np.ctypeslib.load_library(libname="libfunc.so", loader_path=os.path.abspath("./test/"))
     verify_reorder_C = functionlib_C.verify_reorder
+
     # 5.1.1. Need to clarify these argument types
-    #        - Ideally we want to pass Pointers to the array in here
-    #        - As well as the array dimensions to calculate the strides
-    #        - Fortunately we can flatten numpy.ndarrays, so it's shape is simply the matrix size
+    #   - Ideally we want to pass Pointers to the array in here
+    #   - As well as the array dimensions to calculate the strides
+    #   - Fortunately, we can flatten numpy.ndarrays, so its shape is simply the total matrix size
     verify_reorder_C.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
-        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
-        ctypes.c_int,  # Batches
-        ctypes.c_int,  # Antennas
-        ctypes.c_int,  # Channels
-        ctypes.c_int,  # Samples-per-channel
-        ctypes.c_int,  # Polarisations
-        ctypes.c_int,  # Times-per-block
+        np.ctypeslib.ndpointer(
+            dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"  # Input data array
+        ),
+        np.ctypeslib.ndpointer(
+            dtype=np.int8,  # Reordered, output data array
+            shape=(template.matrix_size * template.n_batches,),
+            flags="C_CONTIGUOUS",
+        ),
+        c_int,  # Batches
+        c_int,  # Antennas
+        c_int,  # Channels
+        c_int,  # Samples-per-channel
+        c_int,  # Polarisations
+        c_int,  # Times-per-block
     ]
 
-    verify_reorder_C.restype = ctypes.c_int  # Return 0/1: Fail/Success
+    #   - Function return type - 0/1: Fail/Success
+    verify_reorder_C.restype = c_int
 
+    # 5.1.2. Call the function with the required variables
     result = verify_reorder_C(
-        bufSamples_host.flatten(order="C"),
+        bufSamples_host.flatten(order="C"),  # Flatten in row-major (C-style) order
         bufReordered_host.flatten(order="C"),
         template.n_batches,
         template.n_ants,
@@ -299,8 +306,7 @@ def test_precorr_reorder_batched():
     bufReordered_device.get(queue, bufReordered_host)
 
     # 5. Verify the processed/returned result
-    #    - Both the input and output data are ultimately of type np.int8
-    # bufSamples_host.dtype = np.int16 # Shouldn't need this line..
+    #   - Both the input and output data are ultimately of type np.int8
     bufSamples_host = bufSamples_host.astype(np.int8)
     bufSamples_host.dtype = np.int8
 
@@ -308,31 +314,39 @@ def test_precorr_reorder_batched():
     bufReordered_host = bufReordered_host.astype(np.int8)
     bufReordered_host.dtype = np.int8
 
-    # verify_reorder(bufSamples_host, bufReordered_host, template)
-
     # 5.1. Now using the external C-library for a more efficient verification
-    # functionlib_C = ctypes.CDLL("libfunc.so")
+    #   - TODO: Need to figure out a better way of indicating the loader_path
+    #   - Using './test/' as this function is called from the parent (root) katxgpu directory
     functionlib_C = np.ctypeslib.load_library(libname="libfunc.so", loader_path=os.path.abspath("./test/"))
     verify_reorder_C = functionlib_C.verify_reorder
+
     # 5.1.1. Need to clarify these argument types
-    #        - Ideally we want to pass Pointers to the array in here
-    #        - As well as the array dimensions to calculate the strides
-    #        - Fortunately we can flatten numpy.ndarrays, so it's shape is simply the matrix size
+    #   - Ideally we want to pass Pointers to the array in here
+    #   - As well as the array dimensions to calculate the strides
+    #   - Fortunately, we can flatten numpy.ndarrays, so its shape is simply the total matrix size
     verify_reorder_C.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
-        np.ctypeslib.ndpointer(dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"),
-        ctypes.c_int,  # Batches
-        ctypes.c_int,  # Antennas
-        ctypes.c_int,  # Channels
-        ctypes.c_int,  # Samples-per-channel
-        ctypes.c_int,  # Polarisations
-        ctypes.c_int,  # Times-per-block
+        np.ctypeslib.ndpointer(
+            dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"  # Input data array
+        ),
+        np.ctypeslib.ndpointer(
+            dtype=np.int8,  # Reordered, output data array
+            shape=(template.matrix_size * template.n_batches,),
+            flags="C_CONTIGUOUS",
+        ),
+        c_int,  # Batches
+        c_int,  # Antennas
+        c_int,  # Channels
+        c_int,  # Samples-per-channel
+        c_int,  # Polarisations
+        c_int,  # Times-per-block
     ]
 
-    verify_reorder_C.restype = ctypes.c_int  # Return 0/1: Fail/Success
+    #   - Function return type - 0/1: Fail/Success
+    verify_reorder_C.restype = c_int
 
+    # 5.1.2. Call the function with the required variables
     result = verify_reorder_C(
-        bufSamples_host.flatten(order="C"),
+        bufSamples_host.flatten(order="C"),  # Flatten in row-major (C-style) order
         bufReordered_host.flatten(order="C"),
         template.n_batches,
         template.n_ants,
