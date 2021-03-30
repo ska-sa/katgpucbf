@@ -287,7 +287,7 @@ struct heap_data
  * SPEAD2 has the concept of substreams. Different heaps can be queued on different substreams and then the packets on
  * each heap will be interleaved. This emulates sending data from multiple sources to a single receiver with the caveat
  * that the interleaving is much more predictable than what can be expected from multiple F-Engines. One substream is
- * assigned per F-Engine. (TODO: Force interleaving by using async_send_heaps instead of async_send_heap).
+ * assigned per F-Engine.
  *
  * This class generates heaps for n_ants F-Engines. A heap is generated once and the transmitted multiple times so that
  * no processing time is spent creating new data.

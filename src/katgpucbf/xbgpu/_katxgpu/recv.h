@@ -17,10 +17,10 @@
  *
  * The functioning of this class is explained in more detail in katxgpu/src/README.md
  *
- * TODO: Move 'pybind11::buffer_info view' and associated functions to py_recv.h
+ * TODO: Move 'pybind11::buffer_info m_BufferView' and associated functions to py_recv.h
  * TODO: Implement logging slightly differently - at the moment, the SPEAD2 logger is used. It may be worthwhile to have
  * a seperate katxgpu logger to seperate a SPEAD2 log from a katxgpu log.
- * TODO: Class member variables should start with an m_ for clarity. 
+ * TODO: Class member variables should start with an m_ for clarity.
  */
 
 #ifndef KATXGPU_RECV_H
@@ -62,9 +62,9 @@ namespace katxgpu::recv
  */
 struct chunk
 {
-    std::int64_t timestamp;              ///< Timestamp of first collection of heaps
-    std::vector<bool> present;           ///< Bitmask of packets that are present
-    boost::asio::mutable_buffer storage; ///< Storage for samples
+    std::int64_t m_i64timestamp;           ///< Timestamp of first collection of heaps
+    std::vector<bool> m_vbPacketPresent;   ///< Bitmask of packets that are present
+    boost::asio::mutable_buffer m_storage; ///< Storage for samples
 
     virtual ~chunk() = default; // makes it polymorphic
 };
@@ -87,12 +87,12 @@ class stream;
 class allocator : public spead2::memory_allocator
 {
   private:
-    stream &recv;
+    stream &m_receiverStream;
 
   public:
-    explicit allocator(stream &recv);
+    explicit allocator(stream &receiverStream);
 
-    virtual pointer allocate(std::size_t size, void *hint) override;
+    virtual pointer allocate(std::size_t ulHeapSize_bytes, void *receivedPacket) override;
     virtual void free(std::uint8_t *ptr, void *user) override;
 };
 
@@ -134,49 +134,52 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     {
     }
 
-    const int sample_bits;                 ///< Number of bits per sample
-    const int n_ants;                      ///< Number of antennas in the array
-    const int n_channels;                  ///< Number of channels in each packet
-    const int n_samples_per_channel;       ///< Number of samples stored in a single channel
-    const int n_pols;                      ///< Number of polarisations in each sample
-    const int complexity = 2;              ///< Indicates two values per sample - one real and one imaginary.
-    const int heaps_per_fengine_per_chunk; ///< A chunk has this many heaps per F-Engine.
-    const int timestamp_step;              ///< Increase in timestamp between successive heaps from the same F-Engine.
-    const std::size_t packet_bytes;        ///< Number of payload bytes in each packet
-    const std::size_t chunk_bytes;         ///< Number of payload bytes in each chunk
+    // Array configuration parameters
+    const int m_iSampleBits;           ///< Number of bits per sample
+    const int m_iNumAnts;              ///< Number of antennas in the array
+    const int m_iNumChannels;          ///< Number of channels in each packet
+    const int m_iNumSamplesPerChannel; ///< Number of samples stored in a single channel
+    const int m_iNumPols;              ///< Number of polarisations in each sample
+    const int m_iComplexity = 2;       ///< Indicates two values per sample - one real and one imaginary.
 
-    std::int64_t first_timestamp = -1; ///< Very first timestamp observed. Populated when first packet is received.
+    // Internal parameters
+    const int m_iHeapsPerFenginePerChunk;   ///< A chunk has this many heaps per F-Engine.
+    const int m_iTimestampStep;             ///< Increase in timestamp between successive heaps from the same F-Engine.
+    const std::size_t m_ulPacketSize_bytes; ///< Number of payload bytes in each packet
+    const std::size_t m_ulChunkSize_bytes;  ///< Number of payload bytes in each chunk
 
-    mutable std::mutex free_chunks_lock; ///< Protects access to @ref free_chunks
-    spead2::semaphore free_chunks_sem;   ///< Semaphore that is put whenever chunks are added
+    std::int64_t m_i64FirstTimestamp = -1; ///< Very first timestamp observed. Populated when first packet is received.
 
-    /* When the user gives a new chunk (or a recycled old chunk) to the receiver, it is added to the free_chunks stack.
-     * The chunks on this stack are not in use, but when they are required, they will be moved from this stack to the
-     * active chunks queue.
+    mutable std::mutex m_freeChunksLock;     ///< Protects access to @ref m_freeChunksStack
+    spead2::semaphore m_freeChunksSemaphore; ///< Semaphore that is put whenever chunks are added
+
+    /* When the user gives a new chunk (or a recycled old chunk) to the receiver, it is added to the
+     * m_freeChunksStack. The chunks on this stack are not in use, but when they are required, they will be moved from
+     * this stack to the active chunks queue.
      */
-    std::stack<std::unique_ptr<chunk>> free_chunks;
+    std::stack<std::unique_ptr<chunk>> m_freeChunksStack;
 
     /* Chunks that are actively being assembled from multiple heaps are stored in this queue. The receiver can be
      * assembling multiple chunks at any one time. Once a chunk is fully assembled, the receiver will move it to the
-     * ringbuffer object.
+     * m_completedChunksRingbuffer object.
      */
-    std::deque<std::unique_ptr<chunk>> active_chunks; ///< Chunks currently being filled
+    std::deque<std::unique_ptr<chunk>> m_activeChunksQueue; ///< Chunks currently being filled
 
     /* All chunks that have been assembled by the receiver and are ready to be passed to the user will be pushed onto
      * this ringbuffer.
      */
-    ringbuffer_t &ringbuffer;
+    ringbuffer_t &m_completedChunksRingbuffer;
 
-    /* TODO: This view is only used during unit testing. It stores the python view of the buffer containing simulated
-     * packets. More detail in "add_buffer_reader()" function. I do not think that this file is the best place for this
-     * object. Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would need to be
-     * modified too to accomodate this change. I would need to move a bunch of other functions around to make that
-     * happen, so I will wait until I have a spare moment.
+    /* TODO: This m_BufferView is only used during unit testing. It stores the python view of the buffer containing
+     * simulated packets. More detail in "add_buffer_reader()" function. I do not think that this file is the best place
+     * for this object. Its a pybind11 object, so it should go under py_recv.h. The add_buffer_reader() function would
+     * need to be modified too to accomodate this change. I would need to move a bunch of other functions around to make
+     * that happen, so I will wait until I have a spare moment.
      */
-    pybind11::buffer_info view;
+    pybind11::buffer_info m_BufferView;
 
     /// Obtain a fresh chunk from the free pool (blocking if necessary)
-    void grab_chunk(std::int64_t timestamp);
+    void grab_chunk(std::int64_t i64Timestamp);
 
     /**
      * Send the first active chunk in the queue to the ringbuffer.
@@ -198,25 +201,22 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      * 2. chunk* - A pointer to the specific chunk that contains the buffer the heaps data is being allocated to.
      * 3. std::size_t - An index indicating which heap within the chunk that the heap belongs to.
      *
-     * TODO: Clarify what the packet index means, mention what its called in katfgpu and say why the overloading is
-     * used. Determine data pointer, chunk and packet index from packet timestamp and F-Engine ID.
-     *
      * If the timestamp is beyond the last active chunk, old chunks may be flushed and new chunks appended.
      *
      * NOTE: This function was copied, renamed and reworked from the decode_timestamp() function in katfgpu but performs
      * essentially the same function.
      */
-    std::tuple<void *, chunk *, std::size_t> calculate_packet_destination(std::int64_t timestamp,
-                                                                          std::int64_t fengine_id);
+    std::tuple<void *, chunk *, std::size_t> calculate_packet_destination(std::int64_t i64Timestamp,
+                                                                          std::int64_t i64FengineID);
 
     /* This overload operates on a specific chunk, not the whole set of active chunks. Returning the same chunk is
      * redundant, but allows this function to be tail-called from the main overload.
      *
-     * This function can be seen as a helper function to calculate_packet_destination(std::int64_t timestamp,
+     * This function can be seen as a helper function to calculate_packet_destination(std::int64_t i64Timestamp,
      * std::int64_t fengine_id) as it is only called by that function.
      */
-    std::tuple<void *, chunk *, std::size_t> calculate_packet_destination(std::int64_t timestamp,
-                                                                          std::int64_t fengine_id, chunk &c);
+    std::tuple<void *, chunk *, std::size_t> calculate_packet_destination(std::int64_t i64Timestamp,
+                                                                          std::int64_t i64FengineID, chunk &chunk);
 
     /* Function called by allocator::allocator function to determine which location in memory and chunk to assign a
      * heap to. This function will call the calculate_packet_destination(...) function to determine the actual location
@@ -224,21 +224,21 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      *
      * See the allocator class and calculate_packet_destination() comments above for more information.
      */
-    void *allocate(std::size_t size, spead2::recv::packet_header &packet);
+    void *allocate(std::size_t ulHeapSize, spead2::recv::packet_header &receivedPacket);
 
   public:
     /* See pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver") documentation in py_recv.cpp for a
      * descritpion of this constructor.
      */
-    stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
-           size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity = -1,
-           bool use_gdrcopy = false);
+    stream(int iNumAnts, int iNumChannels, int iNumSamplesPerChannel, int iNumPols, int iSampleBits, int iTimestampStep,
+           size_t iHeapsPerFenginePerChunk, ringbuffer_t &m_completedChunksRingbuffer, int iThreadAffinity = -1,
+           bool bUseGDRCopy = false);
     ~stream();
 
     /* See pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver") documentation in py_recv.cpp for a
      * descritpion of this function.
      */
-    void add_udp_pcap_file_reader(const std::string &filename);
+    void add_udp_pcap_file_reader(const std::string &strFilename);
 
     /* See pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver") documentation in py_recv.cpp for a
      * descritpion of this function.
@@ -248,9 +248,9 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     /* See pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver") documentation in py_recv.cpp for a
      * descritpion of this function.
      */
-    void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
-                            const std::string &interface_address, std::size_t buffer_size, int comp_vector = 0,
-                            int max_poll = spead2::recv::udp_ibv_config::default_max_poll);
+    void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &vEndpoints,
+                            const std::string &strInterfaceAddress, std::size_t ulBufferSize_bytes, int iCompVector = 0,
+                            int iMaxPoll = spead2::recv::udp_ibv_config::default_max_poll);
 
     /// Get the referenced ringbuffer
     ringbuffer_t &get_ringbuffer();
@@ -260,7 +260,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     std::size_t get_chunk_bytes() const;
 
     /// Add a chunk to the free pool.
-    void add_chunk(std::unique_ptr<chunk> &&c);
+    void add_chunk(std::unique_ptr<chunk> &&pChunk);
 
     /// Stop stream and block until all readers have wound up.
     virtual void stop() override;
