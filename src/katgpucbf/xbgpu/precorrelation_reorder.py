@@ -58,7 +58,7 @@ class PreCorrelationReorderTemplate:
         self.n_batches = n_batches
 
         # Hardcoded to 8 for now, but must be updated to 4- and 16-bit
-        # as and when the TensorCoreXEngine requies it.
+        # as and when the TensorCoreXEngine requires it.
         self._sample_bitwidth = 8
 
         # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
