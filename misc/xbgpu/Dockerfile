@@ -47,7 +47,7 @@ RUN pip3 install numpy==1.19.5 pycparser jinja2 pybind11
 
 # 3. Install katxgpu including all python packages specified in the requirements
 # files.
-WORKDIR katxgpu
+WORKDIR /katxgpu
 
 # Copy entire docker build context into katxgpu folder with the container.
 COPY . . 
@@ -64,3 +64,16 @@ RUN pip3 install -r requirements-dev.txt
 RUN rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python 
 
 RUN pip3 install .
+
+# Build the Fsim in case someone wants to use it.
+WORKDIR /katxgpu/3rdparty/spead2
+RUN ./bootstrap.sh
+RUN ./configure
+RUN make
+RUN make install
+
+WORKDIR /katxgpu/scratch
+RUN make
+
+# Change the workdir back
+WORKDIR /katxgpu
