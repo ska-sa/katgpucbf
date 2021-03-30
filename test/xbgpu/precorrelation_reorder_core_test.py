@@ -53,6 +53,7 @@ def verify_reorder(
     Verificiation function for Pre-correlation Reorder data output by the kernel.
 
     This is done using a single for-loop, calculating the respective strides and indices on-the-fly.
+    NOTE: This has been superceded by the C-based function in the shared library, functionlib.c.
 
     Parameters
     ----------
