@@ -1,17 +1,18 @@
 /*
-    This kernel aims to carry out the reorder functionality required by katxgpu.
-    This GPU-side reorder transforms a 1D block of data in the following matrix format:
-    - uint16_t [n_antennas] [n_channels] [n_samples_per_channel] [polarizations]
-      transposed to
-      uint16_t [n_channels] [n_samples_per_channel//times_per_block]
-               [n_antennas] [polarizations] [times_per_block]
-    - Typical values for the dimensions
-        - n_antennas (a) = 64
-        - n_channels (c) = 128
-        - n_samples_per_channel (t) = 256
-        - polarisations (p) = 2, always
-        - times_per_block = 16, always
-*/
+ *  This kernel aims to carry out the reorder functionality required by katxgpu.
+ *  This GPU-side reorder makes provision for batched operations (i.e. reordering batches of matrices),
+ *  and transforms a 1D block of data in the following matrix format:
+ *  - uint16_t [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarizations]
+ *    transposed to
+ *    uint16_t [n_batches][n_channels] [n_samples_per_channel//times_per_block]
+ *             [n_antennas] [polarizations] [times_per_block]
+ *  - Typical values for the dimensions
+ *      - n_antennas (a) = 64
+ *      - n_channels (c) = 128
+ *      - n_samples_per_channel (t) = 256
+ *      - polarisations (p) = 2, always
+ *      - times_per_block = 16
+ */
 
 // Includes
 #include <stdint.h>
@@ -25,15 +26,14 @@
 #define NR_SAMPLES_PER_CHANNEL ${n_samples_per_channel}
 #define NR_POLARISATIONS ${n_polarisations}
 #define NR_TIMES_PER_BLOCK ${n_times_per_block}
-#define NR_BATCHES ${n_batches}
 
 /*  \brief Kernel that implements a naive reorder of F-Engine data.
  *
  *  The following CUDA kernel implements a naive (i.e. unrefined) reorder of data ingested by the GPU X-Engine from the F-Engine.
  *  As mentioned at the top of this document, data is received as an array in the format of:
- *   - uint16_t [n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
+ *   - uint16_t [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
  *   And is required to be reordered into an array of format:
- *   - uint16_t [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarizations] [times_per_block]
+ *   - uint16_t [n_batches][n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarizations] [times_per_block]
  *
  *   Currently, all dimension-strides are calculated within the kernel itself.
  *   - Granted, there are some redudancies/inefficiences in variable usage; however,
@@ -41,10 +41,10 @@
  *   
  *   \param[in]  pu16Array           Pointer to a pre-populated input data array. The input array is one-dimensional but stores
  *                                   multidimensional data according to the following indices:
- *                                   - [n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
+ *                                   - [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
  *   \param[out] pu16ArrayReordered  Pointer to the memory allocated for the reordered output data. Once more, this 1D output array
  *                                   represents multidimensional data in the following format:
- *                                   - [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
+ *                                   - [n_batches][n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
  */
 
 __global__

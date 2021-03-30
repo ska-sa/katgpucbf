@@ -1,15 +1,16 @@
 """
 Module wrapping the Pre-correlation Reorder Kernel in the MeerKAT katsdpsigproc framework.
 
+The size of this kernel simply depends on the individual matrix size and the number of batches required to be reordered.
+
 This module has two classes:
-    1. PreCorrelationReorderCoreTemplate
+    1. PreCorrelationReorderTemplate
         - This class allows for multiple different compilations of the same kernel with parameters to take place.
-    2. PreCorrelationReorderCore
+    2. PreCorrelationReorder
         - This class provides the interface to call the kernel created in a PreCorrelationReorderTemplate object.
 
 TODO:
-    1. Actually test this.
-    2. Update naming conventions as necessary.
+    1. Update naming conventions as necessary.
 
 """
 
@@ -19,24 +20,27 @@ from katsdpsigproc import accel
 from katsdpsigproc import cuda
 
 
-class PreCorrelationReorderCoreTemplate:
+class PreCorrelationReorderTemplate:
     """
     Template class for compiling different variations of the pre-correlation reorder kernel.
 
-    This object will be used to create a PreCorrelationReorderCore object that will be able to run the created kernel.
+    This object will be used to create a PreCorrelationReorder object that will be able to run the created kernel.
     """
 
     def __init__(
         self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int, n_batches: int
     ) -> None:
         """
-        Initialise the PreCorrelationReorderCoreTemplate class and compile the pre-correlation reorder kernel.
+        Initialise the PreCorrelationReorderTemplate class and compile the pre-correlation reorder kernel.
 
         The parameters given to this function are used by this class to compile the kernel and by the
-        PreCorrelationReorderCore to specify the shape of the memory buffers connected to this kernel.
+        PreCorrelationReorder to specify the shape of the memory buffers connected to this kernel.
 
         Parameters
         ----------
+        context: cuda.Context
+            The GPU device's context provided by katsdpsigproc's abstraction of PyCUA.
+            A context is associated with a single device and 'owns' all memory allocations.
         n_ants: int
             The number of antennas that will be correlated. Each antennas is expected to produce two polarisations.
         n_channels: int
@@ -52,7 +56,10 @@ class PreCorrelationReorderCoreTemplate:
         self.n_samples_per_channel = n_samples_per_channel
         self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_batches = n_batches
-        self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
+
+        # Hardcoded to 8 for now, but must be updated to 4- and 16-bit
+        # as and when the TensorCoreXEngine requies it.
+        self._sample_bitwidth = 8
 
         # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
@@ -84,11 +91,9 @@ class PreCorrelationReorderCoreTemplate:
         THREADS_PER_BLOCK = 1024
 
         # 4. Calculate the number of thread blocks to launch per kernel call
-        # - This remains constant for the lifetime of the object.
-        # - Unlike the Tensor Core Correlation kernel, the size of this kernel does not depend on the number of ants_per_block
-        #   Rather, it simply depends on the individual matrix size and the number of batches.
-        # - But also, how should I error-check this value? (As in, bounds/values, not method)
-        self.n_blocks = (self.matrix_size + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
+        # - This is in the x-dimension and remains constant for the lifetime of the object.
+        # - TODO: Error-check these values (As in, bounds/values, not method).
+        self.n_blocks_x = (self.matrix_size + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
 
         # 5. Compile the kernel
         program = accel.build(
@@ -100,41 +105,40 @@ class PreCorrelationReorderCoreTemplate:
                 "n_samples_per_channel": self.n_samples_per_channel,
                 "n_polarisations": self.n_polarisations,
                 "n_times_per_block": self.n_times_per_block,
-                "n_batches": self.n_batches,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("reorder_naive")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "PreCorrelationReorderCore":
-        """Create a PreCorrelationReorderCore object using this template to build the kernel."""
-        return PreCorrelationReorderCore(self, command_queue)
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "PreCorrelationReorder":
+        """Create a PreCorrelationReorder object using this template to build the kernel."""
+        return PreCorrelationReorder(self, command_queue)
 
 
-class PreCorrelationReorderCore(accel.Operation):
+class PreCorrelationReorder(accel.Operation):
     """
-    Class containing a pre-correlation reorder kernel compiled from a PreCorrelationReorderCoreTemplate.
+    Class containing a pre-correlation reorder kernel compiled from a PreCorrelationReorderTemplate.
 
     This class specifies the shape of the input sample and output reordered buffers required by the kernel. The
-    parameters specified in the PreCorrelationReorderCoreTemplate object are used to determine the shape of the buffers.
+    parameters specified in the PreCorrelationReorderTemplate object are used to determine the shape of the buffers.
 
     The input sample buffer must have the shape:
-    [antennas][channels][samples_per_channel][polarisations]
+    [batch][antennas][channels][samples_per_channel][polarisations]
 
     The output sample buffer must have the shape:
-    [channels][samples_per_channel//times_per_block][n_ants][polarisations][times_per_block]
+    [batch][channels][samples_per_channel//times_per_block][n_ants][polarisations][times_per_block]
 
     A complexity that is introduced by the pre-correlation reorder kernel is that the samples_per_channel index is split over two
     different indices. The first index ranges from 0 to samples_per_channel//times_per_block and the second index
-    ranges from 0 to times_per_block. Times per block is calculated by the PreCorrelationReorderCoreTemplate object.
+    ranges from 0 to times_per_block. Times per block is calculated by the PreCorrelationReorderTemplate object.
     In 8-bit input mode times_per_block is equal to 16.
 
     Each input element is n complex 8-bit integer sample. Numpy does not support 8-bit complex numbers,
     so the input sample array has dtype of np.int16 as a placeholder.
     """
 
-    def __init__(self, template: PreCorrelationReorderCoreTemplate, command_queue: accel.AbstractCommandQueue) -> None:
-        """Initialise the PreCorrelationReorderCore object and specify the size of the memory buffers."""
+    def __init__(self, template: PreCorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+        """Initialise the PreCorrelationReorder object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
         self.slots["inSamples"] = accel.IOSlot(
@@ -151,6 +155,7 @@ class PreCorrelationReorderCore(accel.Operation):
             [inSamples_buffer.buffer, outReordered_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
             # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
-            global_size=(1024 * self.template.n_blocks, self.template.n_batches),
+            # - Global size is across the x- and y-dimensions (for this application).
+            global_size=(1024 * self.template.n_blocks_x, self.template.n_batches),
             local_size=(1024, 1),
         )

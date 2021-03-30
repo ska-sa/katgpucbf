@@ -1,8 +1,10 @@
-/*
- * C library containing methods for post-kernel execution during the running of pytest:
+/* C library containing methods for kernel data verification.
+ * 
+ * This was created as it speeds up the verification process massively, when compared to its python-equivalent.
  *
+ * The following verificaiton functions have been migrated to C to take advantage of this preformance increase.
  * 1. verify_reorder:
- *  - For verification of the data output by the precorrelation_reorder_kernel
+ *  - For verification of the data output by the precorrelation_reorder_kernel.
  */
 
 #include <stdint.h>
@@ -16,7 +18,13 @@
  *   And is reordered into an array of format:
  *   - uint16_t [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarizations] [times_per_block]
  *
- *   In its first iteration, this function accept the input and output data as well as all matrix dimensions as individual parameters.
+ *   This function accept the input and output data as well as all matrix dimensions as individual parameters.
+ *   Typical values for matrix dimensions are as follows:
+ *   - Antennas = 64,
+ *   - Channels = 128,
+ *   - Samples-per-channel = 256,
+ *   - Polarisations = 2 (hardcoded),
+ *   - Times-per-block = 16.
  *   
  *   \param[in] pi8Array            Pointer to a pre-populated input data array. The input array is one-dimensional but stores
  *                                   multidimensional data according to the following indices:
@@ -25,14 +33,22 @@
  *                                   represents multidimensional data in the following format:
  *                                   - [n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
  *   \parma[in] iNumBatches         Number of batches of data that has been reordered.
- *   \parma[in] iNumAnts            Number of antennas that .
- *   \parma[in] iNumChans           This is some text.
- *   \parma[in] iNumSamplesPerChan  This is some text.
- *   \parma[in] iNumPols            This is some text.
- *   \param[in] iNumTimesPerBlock   This is some text.
+ *   \parma[in] iNumAnts            Number of antennas.
+ *   \parma[in] iNumChans           Number of channels, per antenna.
+ *   \parma[in] iNumSamplesPerChan  Number of samples per channel.
+ *   \parma[in] iNumPols            Number of polarisations per sample.
+ *   \param[in] iNumTimesPerBlock   Number of times per block.
  */
 
-int verify_reorder(int8_t *pi8Array, int8_t *pi8ArrayReordered, int iNumBatches, int iNumAnts, int iNumChans, int iNumSamplesPerChan, int iNumPols, int iNumTimesPerBlock)
+int verify_precorrelation_reorder(
+    int8_t *pi8Array,
+    int8_t *pi8ArrayReordered,
+    int iNumBatches,
+    int iNumAnts,
+    int iNumChans,
+    int iNumSamplesPerChan,
+    int iNumPols,
+    int iNumTimesPerBlock)
 {
     // 1. Input matrix
     // 1.1. Declare variables for input matrix strides and indices
@@ -89,12 +105,12 @@ int verify_reorder(int8_t *pi8Array, int8_t *pi8ArrayReordered, int iNumBatches,
 
             iNewIndex = iNewChanOffset + iTimeOuterOffset + iNewAntOffset + \
                         iNewPolOffset + iTimeIndexInner + iMatrixStride;
-
+            
             // 4. Compare the input data to the output, reordered data
             if (pi8ArrayReordered[iNewIndex] != pi8Array[iCurrIndex + iMatrixStride])
             {
                 // Problem
-                printf("\nReordered: %d at index %d\n != Original: %d at index %d",\
+                printf("\nReordered: %d at index %d\n != Original: %d at index %d\n",\
                         pi8ArrayReordered[iNewIndex], iNewIndex,\
                         pi8Array[iCurrIndex + iMatrixStride], (iCurrIndex + iMatrixStride));
                 

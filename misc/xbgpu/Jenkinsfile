@@ -144,9 +144,7 @@ pipeline {
      */
     stage('Run pytest') {
       steps {
-        /* Compile the shared C library with the pre-correlation reorder verification
-         * function before invoking pytest.
-         */
+        // Compile the shared C library with verification functions.
         dir('test'){
           sh 'make'
         }

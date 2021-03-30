@@ -1,9 +1,6 @@
 """
 Module for performing unit tests on the Pre-correlation Reorder.
 
-NOTE: These tests will take some time to complete altogether, we would recommend running them separately via:
-    - pytest -v test/precorrelation_reorder_core_test.py::test_precorr_reorder_{parametrised, batched}
-
 The pre-correlation reorder operates on a block of data with the following dimensions:
     - uint16_t [n_antennas] [n_channels] [n_samples_per_channel] [polarizations]
       transposed to
@@ -23,9 +20,9 @@ Contains two tests, one parametrised and one batched:
     2. The second test uses a static set of value combinations for the largest possible array size,
         but now testing for multiple batches.
         - Antennas = 84
-        - Channels (from the F-Engine) = 4096
+        - Channels (from the F-Engine) = 32768
         - Samples per Channel = 256
-        - Batches = 3
+        - Batches = 10
 
 Ultimately both kernels:
     1. Populate a host-side array with random, numpy.int8 data ranging from -127 to 128.
@@ -40,14 +37,14 @@ import pytest
 import test_parameters
 import numpy as np
 from ctypes import c_int  # Only need this from the library
-from katxgpu.precorrelation_reorder_core import PreCorrelationReorderCoreTemplate
+from katxgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 from katsdpsigproc import accel
 
 
 def verify_reorder(
     array_host: accel.Operation.buffer,
     arrayReordered_host: accel.Operation.buffer,
-    template: PreCorrelationReorderCoreTemplate,
+    template: PreCorrelationReorderTemplate,
 ) -> None:
     """
     Verificiation function for Pre-correlation Reorder data output by the kernel.
@@ -61,7 +58,7 @@ def verify_reorder(
         The original, host-side buffer populated with data to be reordered by the kernel.
     arrayReordered_host: accel.Operation.buffer
         The reordered data output by the precorrelation_reorder_kernel, copied back to the host.
-    template: PreCorrelationReorderCoreTemplate
+    template: PreCorrelationReorderTemplate
         The template has all the attributes of the dimensions of data being processed
         - Antennas, Channels, Samples-per-channel, Polarisations and Times-per-block
     """
@@ -131,7 +128,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     num_samples_per_channel: int
         The number of time samples per frequency channel.
     """
-    # Now to create the actual PrecorrelationReorderCoreTemplate
+    # Now to create the actual PrecorrelationReorderTemplate
     # 1. Array parameters
     # - Will be {ants, chans, samples_per_chan, batches}
     n_ants = num_ants
@@ -147,20 +144,20 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = PreCorrelationReorderCoreTemplate(
+    template = PreCorrelationReorderTemplate(
         ctx,
         n_ants=n_ants,
         n_channels=n_channels_per_stream,
         n_samples_per_channel=n_samples_per_channel,
         n_batches=n_batches,
     )
-    preCorrelationReorderCore = template.instantiate(queue)
-    preCorrelationReorderCore.ensure_all_bound()
+    preCorrelationReorder = template.instantiate(queue)
+    preCorrelationReorder.ensure_all_bound()
 
-    bufSamples_device = preCorrelationReorderCore.buffer("inSamples")
+    bufSamples_device = preCorrelationReorder.buffer("inSamples")
     bufSamples_host = bufSamples_device.empty_like()
 
-    bufReordered_device = preCorrelationReorderCore.buffer("outReordered")
+    bufReordered_device = preCorrelationReorder.buffer("outReordered")
     bufReordered_host = bufReordered_device.empty_like()
 
     # 3. Generate random input data - need to modify the dtype and  shape of the array as numpy does not have a packet
@@ -182,7 +179,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output Reordered array to the CPU.
     bufSamples_device.set(queue, bufSamples_host)
-    preCorrelationReorderCore()
+    preCorrelationReorder()
     bufReordered_device.get(queue, bufReordered_host)
 
     # 5. Verify the processed/returned result
@@ -197,16 +194,20 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     # 5.1. Now using the external C-library for a more efficient verification
     #   - TODO: Need to figure out a better way of indicating the loader_path
     #   - Using './test/' as this function is called from the parent (root) katxgpu directory
-    functionlib_C = np.ctypeslib.load_library(libname="libfunc.so", loader_path=os.path.abspath("./test/"))
-    verify_reorder_C = functionlib_C.verify_reorder
+    verificationFunctionsLib_C = np.ctypeslib.load_library(
+        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/")
+    )
+    verify_precorr_reorder_C = verificationFunctionsLib_C.verify_precorrelation_reorder
 
     # 5.1.1. Need to clarify these argument types
     #   - Ideally we want to pass Pointers to the array in here
     #   - As well as the array dimensions to calculate the strides
     #   - Fortunately, we can flatten numpy.ndarrays, so its shape is simply the total matrix size
-    verify_reorder_C.argtypes = [
+    verify_precorr_reorder_C.argtypes = [
         np.ctypeslib.ndpointer(
-            dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"  # Input data array
+            dtype=np.int8,  # Input data array
+            shape=(template.matrix_size * template.n_batches,),
+            flags="C_CONTIGUOUS",
         ),
         np.ctypeslib.ndpointer(
             dtype=np.int8,  # Reordered, output data array
@@ -222,10 +223,10 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     ]
 
     #   - Function return type - 0/1: Fail/Success
-    verify_reorder_C.restype = c_int
+    verify_precorr_reorder_C.restype = c_int
 
     # 5.1.2. Call the function with the required variables
-    result = verify_reorder_C(
+    result = verify_precorr_reorder_C(
         bufSamples_host.flatten(order="C"),  # Flatten in row-major (C-style) order
         bufReordered_host.flatten(order="C"),
         template.n_batches,
@@ -236,11 +237,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
         template.n_times_per_block,
     )
 
-    if result:
-        # Great success!
-        print("Reorder was successful!")
-    else:
-        print("Reorder failed...")
+    assert result, "Reorder failed..."
 
 
 def test_precorr_reorder_batched():
@@ -250,15 +247,15 @@ def test_precorr_reorder_batched():
     Also invokes verification of reordered data. Note that the CPU-side verification will take around five minutes for a batch size of ten (10) :(.
     Using default values for the following:
     - Antennas = 84
-    - F-Engine Channels = 4096
+    - F-Engine Channels = 32768
     - Samples per Channel = 256
-    - Batches = 3
+    - Batches = 10
     """
-    # Now to create the actual PrecorrelationReorderCoreTemplate
+    # Now to create the actual PrecorrelationReorderTemplate
     # 1. Array parameters
     # - Will be {ants, chans, samples_per_chan, batches}
     n_ants = 84
-    n_channels = 4096 // n_ants // 4
+    n_channels = 32768 // n_ants // 4
     n_samples_per_channel = 256
     n_batches = 10
 
@@ -266,22 +263,22 @@ def test_precorr_reorder_batched():
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = PreCorrelationReorderCoreTemplate(
+    template = PreCorrelationReorderTemplate(
         ctx,
         n_ants=n_ants,
         n_channels=n_channels,
         n_samples_per_channel=n_samples_per_channel,
         n_batches=n_batches,
     )
-    preCorrelationReorderCore = template.instantiate(queue)
-    preCorrelationReorderCore.ensure_all_bound()
+    preCorrelationReorder = template.instantiate(queue)
+    preCorrelationReorder.ensure_all_bound()
 
     # These buffers are of type katsdpsigproc.accel.HostArray
     # - Which is further of type np.ndarray
-    bufSamples_device = preCorrelationReorderCore.buffer("inSamples")
+    bufSamples_device = preCorrelationReorder.buffer("inSamples")
     bufSamples_host = bufSamples_device.empty_like()
 
-    bufReordered_device = preCorrelationReorderCore.buffer("outReordered")
+    bufReordered_device = preCorrelationReorder.buffer("outReordered")
     bufReordered_host = bufReordered_device.empty_like()
 
     # 3. Generate random input data - need to modify the dtype and  shape of the array as numpy does not have a packet
@@ -303,7 +300,7 @@ def test_precorr_reorder_batched():
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output Reordered array to the CPU.
     bufSamples_device.set(queue, bufSamples_host)
-    preCorrelationReorderCore()
+    preCorrelationReorder()
     bufReordered_device.get(queue, bufReordered_host)
 
     # 5. Verify the processed/returned result
@@ -318,16 +315,20 @@ def test_precorr_reorder_batched():
     # 5.1. Now using the external C-library for a more efficient verification
     #   - TODO: Need to figure out a better way of indicating the loader_path
     #   - Using './test/' as this function is called from the parent (root) katxgpu directory
-    functionlib_C = np.ctypeslib.load_library(libname="libfunc.so", loader_path=os.path.abspath("./test/"))
-    verify_reorder_C = functionlib_C.verify_reorder
+    verificationFunctionsLib_C = np.ctypeslib.load_library(
+        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/")
+    )
+    verify_precorr_reorder_C = verificationFunctionsLib_C.verify_precorrelation_reorder
 
     # 5.1.1. Need to clarify these argument types
     #   - Ideally we want to pass Pointers to the array in here
     #   - As well as the array dimensions to calculate the strides
     #   - Fortunately, we can flatten numpy.ndarrays, so its shape is simply the total matrix size
-    verify_reorder_C.argtypes = [
+    verify_precorr_reorder_C.argtypes = [
         np.ctypeslib.ndpointer(
-            dtype=np.int8, shape=(template.matrix_size * template.n_batches,), flags="C_CONTIGUOUS"  # Input data array
+            dtype=np.int8,  # Input data array
+            shape=(template.matrix_size * template.n_batches,),
+            flags="C_CONTIGUOUS",
         ),
         np.ctypeslib.ndpointer(
             dtype=np.int8,  # Reordered, output data array
@@ -343,10 +344,10 @@ def test_precorr_reorder_batched():
     ]
 
     #   - Function return type - 0/1: Fail/Success
-    verify_reorder_C.restype = c_int
+    verify_precorr_reorder_C.restype = c_int
 
     # 5.1.2. Call the function with the required variables
-    result = verify_reorder_C(
+    result = verify_precorr_reorder_C(
         bufSamples_host.flatten(order="C"),  # Flatten in row-major (C-style) order
         bufReordered_host.flatten(order="C"),
         template.n_batches,
@@ -357,8 +358,4 @@ def test_precorr_reorder_batched():
         template.n_times_per_block,
     )
 
-    if result:
-        # Great success!
-        print("Reorder was successful!")
-    else:
-        print("Reorder failed...")
+    assert result, "Reorder failed..."
