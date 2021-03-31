@@ -242,7 +242,7 @@ class XEngineSPEADAbstractSend(ABC):
         )
 
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
-        self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
+        self.descriptor_heap = self.item_group.get_heap(descriptors="stale", data="none")
 
     def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
         """
@@ -262,7 +262,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group["channel offset"].value = self.channel_offset
         self.item_group["xeng_raw"].value = bufferWrapper.buffer
 
-        heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
+        heap_to_send = self.item_group.get_heap(descriptors="none", data="stale")
         # This flag forces the heap to include all item_group pointers in every packet belonging to a single heap
         # instead of just in the first packet. This is done to duplicate the format of the packets out of the MeerKAT
         # SKARABs.
