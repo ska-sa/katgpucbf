@@ -11,7 +11,17 @@ ensure that the packets are transmitted in a way that they are able to be assemb
 or a full implementation of the SPEAD protocol. However, the exact packet size and the presence of repeat pointers
 within the a packet are not checked. Some sort of external test should be done to check this. See the
 display_xengine_multicast_packets.py script in the scratch folder of this repo as a starting point to check packet
-formats.
+formats. UPDATE: If we wanted to actually process real network packets, we could use the SPEAD2 PCAP transport. This
+allows SPEAD2 to read a PCAP file. We could generate network data in a manner that duplicates real traffic and then
+store that in a PCAP file to be used in unit tests. This data could be interleaved and out of order if necessary for a
+more robust test. The downside to a PCAP test is that the PCAP file could get quite large quite quickly. This could
+lead to the repo getting very large which is to be avoided. I think the best use a single PCAP file of a single array
+configuration and run a single unit test and then use the inproc readers as done below for the remaining configurations.
+This will ensure that we run a test on "real" data while still testing all configurations without the repo growing too
+large.
+
+TODO: Implement a pcap test as described in the above note.
+TODO: Review the xsend.py class to see if some functionality has not been covered in all of these tests.
 """
 
 # 1. Import local modules

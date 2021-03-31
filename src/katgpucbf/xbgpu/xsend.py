@@ -91,7 +91,7 @@ class XEngineSPEADAbstractSend(ABC):
         @buffer.setter
         def buffer(self, buffer):
             """
-            Overwrite the buffers handle - this functionality has been disabled.
+            Overwrite the buffer's handle - this functionality has been disabled.
 
             Instead of overwriting the handle, copy to the buffer using array indexing [:] instead.
             """

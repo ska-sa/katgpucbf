@@ -12,7 +12,9 @@ files must be converted to PDF and the links updated accordingly when this progr
 [display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp) and 
 [display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py), [xsend.py](katxgpu/xsend.py) 
 also have links that must be updated.
-2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
+2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8. Once this port has been done. Change the
+[send_example.py](scratch/send_example.py) example to use the updated `asyncio.gather()` syntax instead of the the 
+`loop.run_until_complete(run())` syntax.
 3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
 no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 
 own folder and then another folder called scripts should be added where things like receiver_example.py will go. 
@@ -26,6 +28,8 @@ license classifier in the `setuptools.setup()` function in [setup.py](setup.py) 
 something like [sphinx](http://www.sphinx-doc.org) that can generate a proper readthedocs page for this repo.
 7. The [unit tests](test/tensorcore_xengine_core_test.py) for the TensorCoreXEngineCore are executed in python and take
 a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
+8. The [spead2_send_test.py](test/spead2_send_test.py) file has some TODOs that can improve the test coverage. These
+should be implemented.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.

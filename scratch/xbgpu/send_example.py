@@ -5,6 +5,9 @@ Correlation Products Hardware Heaps" stream (or more simply an X-Engine output s
 channelised voltage stream
 
 It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxgpu receiver.
+
+TODO: When the katxgpu repo has been ported to python version 3.7 and above, update the asyncio functionality to use the
+asyncio.gather() syntax.
 """
 # 1. Imports
 # 1.1 Local imports
@@ -90,7 +93,7 @@ async def send_process():
 # 6. This is a function that wraps the send_process() function. See desription in function docstring.
 async def run() -> None:
     """
-    Kicks off the send process by calling the send_process() function asynchronously.
+    Kick off the send process by calling the send_process() function asynchronously.
 
     This function is called asynchronously and in turn calls the send_process() function asynchronously.
 
@@ -102,7 +105,8 @@ async def run() -> None:
     run in parallel was a bit challenging.
 
     The method of creating tasks in this function is the only way to do it in Python 3.6. From Python 3.7 onwards, the
-    loop object is not longer necessary as the mechanism to launch tasks has been simplified.
+    loop object is not longer necessary as the mechanism to launch tasks has been simplified to use the
+    asyncio.gather() funtion.
     """
     loop = asyncio.get_event_loop()
     task1 = loop.create_task(send_process())
