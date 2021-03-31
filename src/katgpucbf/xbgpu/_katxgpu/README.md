@@ -252,11 +252,11 @@ seconds, not milliseconds, and as such no chunking is required to manage these r
 The [xsend.py](./katxgpu/xsend.py) module defines a number of classes to deal with transmission. The main parent class
 for these classes is called the `XEngineSPEADAbstractSend` class. 
 
-The image below gives conceptual overview of how the katxgpu receive code is implemented:
+The image below gives conceptual overview of how the katxgpu sender code is implemented:
 
 ![Sender](./katxgpu_sender.png)
 
-The above diagram shows how the receiver module is broken up into three main layers:
+The above diagram shows how the sender module is broken up into three main layers:
 1. XEngineSPEADAbstractSend class - This is the interface to the sender module. Once the program is running,
 the main processing loop will request free buffers (`get_free_heap()`) from the xsend module, populate the buffers and
 then tell the module to send these buffers(`send_free_heap()`). The sending happens asynchronously but the xsend class

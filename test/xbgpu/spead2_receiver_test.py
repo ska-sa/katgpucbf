@@ -119,7 +119,7 @@ def createTestObjects(
     ig.add_item(
         TIMESTAMP_ID,
         "timestamp",
-        "timestamp description",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
         shape=[],
         format=[("u", default_spead_flavour["heap_address_bits"])],
     )

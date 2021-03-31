@@ -24,6 +24,8 @@ folder, this will need to be updated to reflect the new links to prevent stale d
 license classifier in the `setuptools.setup()` function in [setup.py](setup.py) that will need to be updated.
 6. Most of the repos documentation is just in the form of readmes and inline commenting. It is worth investigating 
 something like [sphinx](http://www.sphinx-doc.org) that can generate a proper readthedocs page for this repo.
+7. The [unit tests](test/tensorcore_xengine_core_test.py) for the TensorCoreXEngineCore are executed in python and take
+a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
@@ -173,7 +175,7 @@ submodule to be included in this repository. This module is located in the katxg
 
 The `katxgpu._katxgpu` module only provides functionality for receiving data. The normal SPEAD2 python module is used
 for sending X-Engine output data. This is because the X-Engine accumulates data and transmits it at a much lower data 
-rate than it is received meaning that high performance code is not necessary. The [xsend.py](katxgpu/xsend.py) module
+rate than it is received meaning that the chunking approach is not necessary. The [xsend.py](katxgpu/xsend.py) module
 handles the transmission of correlated data. The high level description of this module can also be found
 in the same [file](src/README.md) that describes the data receiver module.
 

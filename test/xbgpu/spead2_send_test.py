@@ -48,7 +48,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         The event loop that the async events will be placed on. When running a unit test, this is a fixture provided
         by the pytest-asyncio module.
     num_ants: int
-        The number of antennas that are correlated
+        The number of antennas that have been correlated.
     num_channels: int
         The number of frequency channels out of the FFT. NB: This is not the number of FFT channels per stream. The
         number of channels per stream is calculated from this value.
@@ -69,6 +69,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
     # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
     # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
+    # The // 4 is here because in the MeerKAT case, there are 4*num_ants multicast streams.
     n_channels_per_stream = num_channels // num_ants // 4
     n_baselines = (n_pols * num_ants + 1) * (num_ants * n_pols) // 2
 
@@ -95,7 +96,6 @@ def test_send_simple(event_loop, num_ants, num_channels):
     thread_pool = spead2.ThreadPool()
     recvStream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
     recvStream.add_inproc_reader(queue)
-    del thread_pool
 
     # 4. Define an async function to manage sending of X-Engine heaps. This function generates the heaps to be tested.
     async def send_process():
@@ -118,11 +118,13 @@ def test_send_simple(event_loop, num_ants, num_channels):
             # 4.2.2 Populate the buffer with dummy data - notice how we copy new values into the buffer, we dont
             # overwrite the buffer. Attempts to overwrite the buffer will throw an error. This is intended behavour as
             # the memory regions in the buffer have been configured for zero-copy sends.
-            buffer_wrapper.buffer[:] = np.full(
-                buffer_wrapper.buffer.shape, num_sent, np.uint8
-            )  # [:] forces a copy, not an overwrite
+            # The [:] syntax forces the data to be copied to the buffer. Without this, the buffer_wrapper variable
+            # would point to the new created numpy array which is located in new location in memory and the old buffer
+            # would be garbage collected.
+            buffer_wrapper.buffer[:] = np.full(buffer_wrapper.buffer.shape, num_sent, np.uint8)
 
-            # 4.2.3 Give the buffer back to the sendStream to transmit out onto the network.
+            # 4.2.3 Give the buffer back to the sendStream to transmit out onto the network. The timestamp is
+            # multiplied by 0x1000000 so that its value is different from the values in the buffer_wrapper array.
             sendStream.send_heap(num_sent * 0x1000000, buffer_wrapper)
             num_sent += 1
 
@@ -145,7 +147,8 @@ def test_send_simple(event_loop, num_ants, num_channels):
 
         # 5.2 Wait for the rest of the heaps to arrive and then end the function.
         while num_received < heaps_to_send:
-            # 5.2.1 The next heap may not be available immediatly. This function yields until a heap arrives.
+            # 5.2.1 The next heap may not be available immediatly. This function waits asynchronously until a
+            # heap arrives.
             heap = await recvStream.get()
 
             items = ig.update(heap)

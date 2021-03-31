@@ -23,17 +23,11 @@ parser.add_argument("--mcast_src_port", default="7149", type=int, help="Port of 
 args = parser.parse_args()
 mcast_group = args.mcast_src_ip
 mcast_port = args.mcast_src_port
-is_all_group = True
 
 # 3. Opens socket listening for multicast data on mcast_group:PORT
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-if is_all_group:
-    # on this port, receives ALL multicast groups
-    sock.bind(("", mcast_port))
-else:
-    # on this port, listen ONLY to mcast_group
-    sock.bind((mcast_group, mcast_port))
+sock.bind((mcast_group, mcast_port))
 mreq = struct.pack("4sl", socket.inet_aton(mcast_group), socket.INADDR_ANY)
 
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)

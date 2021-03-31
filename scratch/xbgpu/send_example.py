@@ -30,7 +30,8 @@ interface_ip = args.interface
 print(f"Transmitting to {dest_multicast_ip}:{dest_multicast_port} on the {interface_ip} interface.")
 
 # 2.2 Adjustable parameters - The description of these parameters can be found in the documentation for the
-# katxgpu.xsend.XEngineSPEADIbvSend object.
+# katxgpu.xsend.XEngineSPEADIbvSend object. These default values have been chosen to represent a typical correlator
+# configuration.
 thread_affinity = 3
 n_ants = 64
 n_channels_total = 32768
@@ -59,7 +60,7 @@ sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
 # 5. This is the main processing function. It repeatedly sends new heaps out onto the network.
 async def send_process():
     """
-    Continously sends X-Engine output heaps onto the network.
+    Continously send X-Engine output heaps onto the network.
 
     This function retrieves available buffers from the sendStream, populates them and then tells the transmit stream
     to send the filled buffer onto the network.
@@ -69,7 +70,7 @@ async def send_process():
     will be able to use to zero copy send data onto the network.
     """
     num_sent = 0
-    while 1:
+    while True:
         # 5.1 Get a free buffer to store the next heap.
         buffer_wrapper = await sendStream.get_free_heap()
 
@@ -91,7 +92,7 @@ async def run() -> None:
     """
     Kicks off the send process by calling the send_process() function asynchronously.
 
-    This function needs to be called asynchronously and in turn calls the send_process() function asynchronously.
+    This function is called asynchronously and in turn calls the send_process() function asynchronously.
 
     This function is not necessary in this example as the send_process function can be launched directly in the __main__
     section but by copying the task1 = loop.create_task(send_process()) and await task1 pattern, this function can
