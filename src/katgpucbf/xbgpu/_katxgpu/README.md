@@ -244,7 +244,35 @@ within a buffer. The unit test can be found [here](../test/spead2_receiver_test.
 
 ## 3. Sender
 
-TODO: Sender logic still needs to be implemented. This section will be updated once this has occured.
+The X-Engine transmit code can be found in the [xsend.py](./katxgpu/xsend.py) file in the katxgpu/katxgpu subfolder.
+Unlike the receiver logic, the sender logic just makes use of the normal SPEAD2 python code - no custom C++ bindings are
+required. The X-Engine implements accumulation and drastically reduces data rates. A heap is sent out on the order of 
+seconds, not milliseconds, and as such no chunking is required to manage these rates.
+
+The [xsend.py](./katxgpu/xsend.py) module defines a number of classes to deal with transmission. The main parent class
+for these classes is called the `XEngineSPEADAbstractSend` class. 
+
+The image below gives conceptual overview of how the katxgpu sender code is implemented:
+
+![Sender](./katxgpu_sender.png)
+
+The above diagram shows how the sender module is broken up into three main layers:
+1. XEngineSPEADAbstractSend class - This is the interface to the sender module. Once the program is running,
+the main processing loop will request free buffers (`get_free_heap()`) from the xsend module, populate the buffers and
+then tell the module to send these buffers(`send_free_heap()`). The sending happens asynchronously but the xsend class
+ensures that buffers are not recycled until they are sent.
+2. XEngineSPEADAbstractSend internal workings - This class manages a queue of buffers being sent on the network in an
+asynchronous manner. Each buffer has an associated future. This class monitors the futures when more buffer resources
+are requested by the main processing loop and will only return a free buffer when the corresponding resource is marked
+as done.
+3. SPEAD2 sourceStream - The XEngineSPEADAbstractSend creates a SPEAD2 send stream object. Every buffer passed to the
+XEngineSPEADAbstractSend object is given to this sourceStream. The sourceStream object encapsulates the buffer 
+object into a SPEAD heap and sends it out onto the network (in the normal case). It returns a future that will be
+marked as done once the transmission is complete.
+
+## 3.1 Unit Tests
+
+The unit test for the send object can [here](../test/spead2_sender_test.py)
 
 ## 4. Peerdirect Support
 

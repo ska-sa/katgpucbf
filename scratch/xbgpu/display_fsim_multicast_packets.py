@@ -1,10 +1,8 @@
 """
 Script that receives SPEAD packets from the fsim. It will print all the important SPEAD heap information in each packet.
 
-This script does not use any optomised networking code. If the F-Engine transmits at a data rate that is too high, then
+This script does not use any optomised networking code. If the fsim transmits at a data rate that is too high, then
 overflows will happen. Its up to the user to reduce the fsim data rates.
-
-This script is hardcoded to expect multicast data on address 239.10.10.10 and port 7149.
 
 See https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg for a description of F-Engine
 output/X-Engine input packet format.
@@ -25,17 +23,11 @@ parser.add_argument("--mcast_src_port", default="7149", type=int, help="Port of 
 args = parser.parse_args()
 mcast_group = args.mcast_src_ip
 mcast_port = args.mcast_src_port
-is_all_group = True
 
 # 3. Opens socket listening for multicast data on mcast_group:PORT
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-if is_all_group:
-    # on this port, receives ALL multicast groups
-    sock.bind(("", mcast_port))
-else:
-    # on this port, listen ONLY to mcast_group
-    sock.bind((mcast_group, mcast_port))
+sock.bind((mcast_group, mcast_port))
 mreq = struct.pack("4sl", socket.inet_aton(mcast_group), socket.INADDR_ANY)
 
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)

@@ -5,6 +5,7 @@
 llvmlite==0.31.0
 numpy==1.19.5
 pycuda==2019.1.2
+typing
 pybind11
 spead2
 katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc

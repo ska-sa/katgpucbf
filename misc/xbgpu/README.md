@@ -9,9 +9,12 @@ to development. Many of these TODOs are listed in the relevant files, but someti
 In this case the TODO is listed here.
 1. A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
-[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) and [fsim.cpp](scratch/fsim.cpp)  also
-have links that must be updated.
-2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8
+[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp) and 
+[display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py), [xsend.py](katxgpu/xsend.py) 
+also have links that must be updated.
+2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8. Once this port has been done. Change the
+[send_example.py](scratch/send_example.py) example to use the updated `asyncio.gather()` syntax instead of the the 
+`loop.run_until_complete(run())` syntax.
 3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
 no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 
 own folder and then another folder called scripts should be added where things like receiver_example.py will go. 
@@ -23,6 +26,20 @@ folder, this will need to be updated to reflect the new links to prevent stale d
 license classifier in the `setuptools.setup()` function in [setup.py](setup.py) that will need to be updated.
 6. Most of the repos documentation is just in the form of readmes and inline commenting. It is worth investigating 
 something like [sphinx](http://www.sphinx-doc.org) that can generate a proper readthedocs page for this repo.
+7. The [unit tests](test/tensorcore_xengine_core_test.py) for the TensorCoreXEngineCore are executed in python and take
+a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
+8. The [spead2_send_test.py](test/spead2_send_test.py) file has some TODOs that can improve the test coverage. These
+should be implemented.
+9. The `default_spead_flavour` variable is duplicated in two places ([xsend.py](katxgpu/xsend.py) and
+[test/spead2_receiver_test.py](test/spead2_receiver_test.py)) with the potential to be duplicated in more places
+if a bsend.py file is created. It may be worth looking at putting all this information in the same place.
+10. When the Jenkins CI server runs its unit tests, sometimes a test/spead2_receiver_test.py::test_recv_simple test
+will just hang (not error out) forever. This causes the test to never end and the Jenkins server is then unable to
+launch more tests due to this stall. This can be fixed by manually restarting the tests but this is far from ideal.
+This only occurs about once every ten runs, but when multiple branches are being PR'd and merged, this tends to
+kick off many tests. This problem needs to be investigate. I think this is due to the async function here:
+https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
+but I dont know for sure.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
@@ -164,12 +181,17 @@ imported using `import katxgpu._katxgpu`.
 The makeup of this module is quite complex. This [file](src/README.md) within this repo describes the entire module in
 great detail. A simple example of how to use the receiver network code is shown in
 [receiver_example.py](scratch/receiver_example.py) in the katxgpu/scratch directory. This example is probably the
-quickest way to figure out how the receiver works.
+quickest way to figure out how the receiver works. Likewise the [send_example.py](scratch/send_example.py) file in the 
+katxgpu/scratch folder demonstrates network transmit code works.
 
 The `katxgpu._katxgpu` module uses the SPEAD2 C++ bindings (not the python bindings) and as such requires the SPEAD2
 submodule to be included in this repository. This module is located in the katxgpu/3rdparty directory.
 
-__NOTE:__ The F-Engine 
+The `katxgpu._katxgpu` module only provides functionality for receiving data. The normal SPEAD2 python module is used
+for sending X-Engine output data. This is because the X-Engine accumulates data and transmits it at a much lower data 
+rate than it is received meaning that the chunking approach is not necessary. The [xsend.py](katxgpu/xsend.py) module
+handles the transmission of correlated data. The high level description of this module can also be found
+in the same [file](src/README.md) that describes the data receiver module.
 
 ### F-Engine Packet Simulator
 

@@ -9,6 +9,12 @@ It is more limited but easier to work with. One downside of the buffer transport
 from different antennas. This functionality has not yet been added to the buffer transport but it is available in the
 inproc transport.
 
+NOTE: A downside of this test is that it does not check that the packet formats are exactly correct. This test will
+ensure that the packets are transmitted in a way that they are able to be assembled into a heap by any SPEAD2 receiver
+or a full implementation of the SPEAD protocol. However, the exact packet size and the presence of repeat pointers
+within the a packet are not checked. Some sort of external test should be done to check this. See the
+display_fsim_multicast_packets.py script in the scratch folder of this repo as a starting point to check packet formats.
+
 TODO: Turn createTestObjects() into a pytest fixture.
 """
 
@@ -113,7 +119,7 @@ def createTestObjects(
     ig.add_item(
         TIMESTAMP_ID,
         "timestamp",
-        "timestamp description",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
         shape=[],
         format=[("u", default_spead_flavour["heap_address_bits"])],
     )
@@ -141,9 +147,6 @@ def createTestObjects(
             shape=[],
             format=[("u", default_spead_flavour["heap_address_bits"])],
         )
-    # 3.2 Throw away first heap - need to get this as it contains a bunch of descriptor information that we dont want
-    # for the purposes of this test.
-    ig.get_heap()
 
     # 4. Configure receiver
 
@@ -254,7 +257,7 @@ def createHeaps(
         ig["padding 0"].value = 0
         ig["padding 1"].value = 0
         ig["padding 2"].value = 0
-        heap = ig.get_heap()
+        heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
 
         # This function makes sure that the immediate values in each heap are transmitted per packet in the heap. By
         # default these values are only transmitted once. These immediate values are required as this is how data is
@@ -502,6 +505,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     del sourceStream, ig, receiverStream, asyncRingbuffer
 
 
+# A manual run useful when debugging the unit tests.
 if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
     print("Running tests")
