@@ -37,18 +37,16 @@
  *
  *   Currently, all dimension-strides are calculated within the kernel itself.
  *   - Granted, there are some redudancies/inefficiences in variable usage; however,
- *   - The kernel itself is operating as required, and will be refined as necessary.
+ *   - The kernel itself is operating as required.
  *   
  *   \param[in]  pu16Array           Pointer to a pre-populated input data array. The input array is one-dimensional but stores
- *                                   multidimensional data according to the following indices:
- *                                   - [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
+ *                                   multidimensional data according to the format described above.
  *   \param[out] pu16ArrayReordered  Pointer to the memory allocated for the reordered output data. Once more, this 1D output array
- *                                   represents multidimensional data in the following format:
- *                                   - [n_batches][n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
+ *                                   represents multidimensional data in the format described above.
  */
 
 __global__
-void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
+void precorrelation_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
 {
     // 1. Declare indices used for reorder
     int iThreadIndex_x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -56,8 +54,7 @@ void reorder_naive(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
     iBatchCounter = blockIdx.y;
 
     int iAntIndex, iChanIndex, iTimeIndex, iPolIndex;
-    // iPolStride = 1;
-
+    
     // - Declaring in their order of dimensionality for the new matrix
     int iNewIndex, iNewChanOffset, iTimeOuterOffset, iNewAntOffset, iNewPolOffset;
     int iTimeOuterIndex, iTimeInnerIndex, iMatrixStride_y;
