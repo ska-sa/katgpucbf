@@ -155,6 +155,10 @@ pipeline {
      */
     stage('Run pytest') {
       steps {
+        // Compile the shared C library with verification functions.
+        dir('test'){
+          sh 'make'
+        }
         sh 'pytest -v --junitxml=reports/result.xml'
       }
     }
