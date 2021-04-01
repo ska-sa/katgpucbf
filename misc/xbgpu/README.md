@@ -30,6 +30,16 @@ something like [sphinx](http://www.sphinx-doc.org) that can generate a proper re
 a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
 8. The [spead2_send_test.py](test/spead2_send_test.py) file has some TODOs that can improve the test coverage. These
 should be implemented.
+9. The `default_spead_flavour` variable is duplicated in two places ([xsend.py](katxgpu/xsend.py) and
+[test/spead2_receiver_test.py](test/spead2_receiver_test.py)) with the potential to be duplicated in more places
+if a bsend.py file is created. It may be worth looking at putting all this information in the same place.
+10. When the Jenkins CI server runs its unit tests, sometimes a test/spead2_receiver_test.py::test_recv_simple test
+will just hang (not error out) forever. This causes the test to never end and the Jenkins server is then unable to
+launch more tests due to this stall. This can be fixed by manually restarting the tests but this is far from ideal.
+This only occurs about once every ten runs, but when multiple branches are being PR'd and merged, this tends to
+kick off many tests. This problem needs to be investigate. I think this is due to the async function here:
+https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
+but I dont know for sure.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
