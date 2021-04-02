@@ -1,12 +1,17 @@
 """TODO: Write this."""
 
 import asyncio
+import katxgpu.xbengine_proc_loop
 
 
 async def async_main() -> None:
     """TODO: Write this."""
     print("Async Main running")
     await asyncio.sleep(1)
+
+    xbengine_proc_loop = katxgpu.xbengine_proc_loop.XBEngineProcessingLoop()
+    await xbengine_proc_loop.run()
+
     print("Async Main Complete")
 
 
