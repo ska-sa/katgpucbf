@@ -3,6 +3,8 @@
 import asyncio
 from typing import List
 
+import katxgpu.monitor
+
 import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
@@ -18,11 +20,12 @@ class XBEngineProcessingLoop:
 
         Facilitates processing between different loops
         Describe that this could become seperate items like katxgpu
+        Could be its on class
         """
 
         timestamp: int
         events: List[katsdpsigproc.abc.AbstractEvent]
-        spectra: katsdpsigproc.accel.DeviceArray
+        buffer: katsdpsigproc.accel.DeviceArray
 
         def __init__(self, timestamp: int = 0) -> None:
             """TODO: Write this."""
@@ -32,6 +35,7 @@ class XBEngineProcessingLoop:
             """TODO: Write this."""
             self.timestamp = timestamp
             self.events = []
+            self.buffer = []
 
         def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
             """TODO: Write this."""
@@ -60,30 +64,71 @@ class XBEngineProcessingLoop:
 
         self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
+        n_rx_items = 3
+        n_tx_items = 1
+
+        use_file_monitor = False
+        if use_file_monitor:
+            monitor: katxgpu.monitor.Monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+        else:
+            monitor = katxgpu.monitor.NullMonitor()
+        self.monitor = monitor
+
         # These queues are CUDA streams
         self._upload_command_queue = self.context.create_command_queue()
         self._proc_command_queue = self.context.create_command_queue()
         self._download_command_queue = self.context.create_command_queue()
 
-        # Inter asyncio communication process - monitor make queue is a
+        # Inter asyncio communication process - monitor make queue is a wrapper of asyncio queue
+        self._rx_item_queue = monitor.make_queue(
+            "rx_item_queue", n_rx_items
+        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
+        self._rx_free_item_queue = monitor.make_queue(
+            "rx_free_item_queue", n_rx_items
+        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
+        self._tx_item_queue = monitor.make_queue(
+            "tx_item_queue", n_tx_items
+        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
+        self._tx_free_item_queue = monitor.make_queue(
+            "tx_free_item_queue", n_tx_items
+        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
+
+        for i in range(n_rx_items):
+            self._rx_free_item_queue.put_nowait(XBEngineProcessingLoop.CommunicationItem())
+        for i in range(n_tx_items):
+            self._tx_free_item_queue.put_nowait(XBEngineProcessingLoop.CommunicationItem())
 
     async def _receiver_loop(self):
         """TODO: Write this."""
         print("Receiver Loop Start")
-        await asyncio.sleep(1)
-        print("Receiver Loop End")
+        while True:
+            await asyncio.sleep(1)
+            item = await self._rx_free_item_queue.get()
+            item.timestamp += 1
+            print(f"1. Timestamp: {item.timestamp}")
+            await self._rx_item_queue.put(item)  # Dont think it needs to be async
 
     async def _gpu_proc_loop(self):
         """TODO: Write this."""
         print("GPU Proc Loop Start")
-        await asyncio.sleep(1)
-        print("GPU Proc Loop End")
+        while True:
+            itemRx = await self._rx_item_queue.get()
+            itemTx = await self._tx_free_item_queue.get()
+            itemTx.timestamp = itemTx.timestamp + itemRx.timestamp + 1
+            print(f"2. Timestamp: {itemTx.timestamp}")
+            await self._tx_item_queue.put(itemTx)
+            itemRx.reset()
+            await self._rx_free_item_queue.put(itemRx)
 
     async def _sender_loop(self):
         """TODO: Write this."""
         print("Sender Loop Start")
-        await asyncio.sleep(1)
-        print("Sender Loop End")
+        while True:
+            item = await self._tx_item_queue.get()
+            print(f"3. Timestamp: {item.timestamp + 1}")
+            print()
+            item.reset()
+            await self._tx_free_item_queue.put(item)
 
     async def run(self):
         """TODO: Write this."""
