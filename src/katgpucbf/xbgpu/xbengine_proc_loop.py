@@ -29,7 +29,7 @@ class XBEngineProcessingLoop:
 
         timestamp: int
         events: List[katsdpsigproc.abc.AbstractEvent]
-        buffer: katsdpsigproc.accel.DeviceArray
+        buffer_device: katsdpsigproc.accel.DeviceArray
 
         def __init__(self, timestamp: int = 0) -> None:
             """TODO: Write this."""
@@ -65,7 +65,7 @@ class XBEngineProcessingLoop:
         self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
         n_rx_items = 3  # To high means to much GPU memory gets allocated
-        n_tx_items = 1
+        n_tx_items = 2
 
         self.rx_running = True
 
@@ -128,6 +128,11 @@ class XBEngineProcessingLoop:
         )
         self.preCorrelationReorderOperation = template.instantiate(self._proc_command_queue)
 
+        self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
+            self.context, self.preCorrelationReorderOperation.template.outputDataShape, np.int16
+        )
+        self.preCorrelationReorderOperation.bind(outReordered=self.reordered_buffer_device)
+
         # Inter asyncio communication process - monitor make queue is a wrapper of asyncio queue
         self._rx_item_queue = monitor.make_queue(
             "rx_item_queue", n_rx_items
@@ -144,21 +149,21 @@ class XBEngineProcessingLoop:
 
         for i in range(n_rx_items):
             rx_item = XBEngineProcessingLoop.CommunicationItem()
-            rx_item.buffer = katsdpsigproc.accel.DeviceArray(
+            rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context, self.preCorrelationReorderOperation.template.inputDataShape, np.int16
             )
             self._rx_free_item_queue.put_nowait(rx_item)
         for i in range(n_tx_items):
             tx_item = XBEngineProcessingLoop.CommunicationItem()
-            tx_item.buffer = katsdpsigproc.accel.DeviceArray(
-                self.context, self.preCorrelationReorderOperation.template.outputDataShape, np.int16
+            tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+                self.context, self.tensorCoreXEngineCoreOperation.template.outputDataShape, np.int64
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
     async def _receiver_loop(self):
         """TODO: Write this."""
         print("Receiver Loop Start")
-        for i in range(10):
+        for i in range(3):
             await asyncio.sleep(1)
             item = await self._rx_free_item_queue.get()
             item.timestamp += i * 10
@@ -169,17 +174,21 @@ class XBEngineProcessingLoop:
                 self.preCorrelationReorderOperation.template.inputDataShape,
                 context=self.context,
             )  # not necessary
-            initial_val = self.heaps_per_fengine_per_chunk * i
+            initial_val = self.heaps_per_fengine_per_chunk * i + 1
             for j in range(self.heaps_per_fengine_per_chunk):
                 host_buffer[j] = initial_val + j
             print(np.sum(host_buffer), host_buffer[0][0][0][0][0], "...", host_buffer[-1][-1][-1][-1][-1])
-            item.buffer.set_async(self._upload_command_queue, host_buffer)
+            item.buffer_device.set_async(self._upload_command_queue, host_buffer)
             item.add_event(self._upload_command_queue.enqueue_marker())
             await self._rx_item_queue.put(item)  # Dont think it needs to be async
         self.rx_running = False
 
     async def _gpu_proc_loop(self):
-        """TODO: Write this."""
+        """
+        TODO: Write this.
+
+        Make this work correctly - currently it does not sync on timestamps and specific numbers of accumulations.
+        """
         print("GPU Proc Loop Start")
         while self.rx_running is True:
             # 1. Get all items
@@ -188,11 +197,23 @@ class XBEngineProcessingLoop:
             await rx_item.async_wait_for_events()
 
             # 2. Process data in items
-            self.preCorrelationReorderOperation.bind(**{"inSamples": rx_item.buffer})
-            self.preCorrelationReorderOperation.bind(**{"outReordered": tx_item.buffer})
+            self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
+            self.preCorrelationReorderOperation.bind(inSamples=rx_item.buffer_device)
             self.preCorrelationReorderOperation()
 
-            # 3 Pass all items on
+            # TODO: Make this less clunky
+            self.tensorCoreXEngineCoreOperation.zero_visibilities()
+            for i in range(self.heaps_per_fengine_per_chunk):
+                buffer_slice = katsdpsigproc.accel.DeviceArray(
+                    self.context,
+                    self.tensorCoreXEngineCoreOperation.template.inputDataShape,
+                    np.int16,
+                    raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap * i,
+                )
+                self.tensorCoreXEngineCoreOperation.bind(inSamples=buffer_slice)
+                self.tensorCoreXEngineCoreOperation()
+
+            # 3 Pass all items on to sender
             tx_item.add_event(self._proc_command_queue.enqueue_marker())
             tx_item.timestamp = tx_item.timestamp + rx_item.timestamp + 1
             print(f"2. Timestamp: {tx_item.timestamp}")
@@ -205,16 +226,16 @@ class XBEngineProcessingLoop:
         print("Sender Loop Start")
         while self.rx_running is True:
             host_buffer = katsdpsigproc.accel.HostArray(
-                self.preCorrelationReorderOperation.template.outputDataShape,
-                np.int16,
-                self.preCorrelationReorderOperation.template.outputDataShape,
+                self.tensorCoreXEngineCoreOperation.template.outputDataShape,
+                np.int64,
+                self.tensorCoreXEngineCoreOperation.template.outputDataShape,
                 context=self.context,
             )  # not necessary
             item = await self._tx_item_queue.get()
             await item.async_wait_for_events()
-            item.buffer.get_async(self._download_command_queue, host_buffer)
+            item.buffer_device.get(self._download_command_queue, host_buffer)
             print(f"3. Timestamp: {item.timestamp + 1}")
-            print(np.sum(host_buffer), host_buffer[0][0][0][0][0], "...", host_buffer[-1][-1][-1][-1][-1])
+            print(np.sum(host_buffer), host_buffer[0][0][0][0], "...", host_buffer[-1][-1][-1][-1])
             print()
             item.reset()
             await self._tx_free_item_queue.put(item)
