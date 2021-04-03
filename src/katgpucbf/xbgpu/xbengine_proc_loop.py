@@ -10,6 +10,8 @@ import katsdpsigproc.accel
 import katsdpsigproc.resource
 
 import katxgpu.monitor
+import katxgpu.tensorcore_xengine_core
+import katxgpu.precorrelation_reorder
 import katxgpu._katxgpu.recv as recv
 
 
@@ -50,12 +52,13 @@ class XBEngineProcessingLoop:
         """TODO: Write this."""
         print("Created Processing Loop Object")
 
-        n_ants = 64
-        n_channels_total = 32768
-        n_channels_per_stream = 128
-        n_samples_per_channel = 256
-        n_pols = 2
-        sample_bits = 8
+        self.n_ants = 64
+        self.n_channels_total = 32768
+        self.n_channels_per_stream = 128
+        self.n_samples_per_channel = 256
+        self.n_pols = 2
+        self.sample_bits = 8
+        complexity = 2
 
         ############################
 
@@ -79,17 +82,17 @@ class XBEngineProcessingLoop:
         # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
         # argument to the reciever for cases where the n_channels_per_stream changes across streams (likely for non-power-of-
         # two array sizes).
-        self.rx_heap_timestamp_step = n_channels_total * 2 * n_samples_per_channel
+        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_samples_per_channel
         self.heaps_per_fengine_per_chunk = 10
         rx_thread_affinity = 2
         ringbuffer_capacity = 8
         self.ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
         self.receiverStream = recv.Stream(
-            n_ants=n_ants,
-            n_channels=n_channels_per_stream,
-            n_samples_per_channel=n_samples_per_channel,
-            n_pols=n_pols,
-            sample_bits=sample_bits,
+            n_ants=self.n_ants,
+            n_channels=self.n_channels_per_stream,
+            n_samples_per_channel=self.n_samples_per_channel,
+            n_pols=self.n_pols,
+            sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
             ringbuffer=self.ringbuffer,
@@ -97,15 +100,33 @@ class XBEngineProcessingLoop:
             use_gdrcopy=False,
             monitor=monitor,
         )
-        self.rx_samples_per_heap = (
-            n_ants * n_channels_per_stream * n_samples_per_channel * n_pols * 2
-        )  # 2 for complexity
-        print(self.rx_samples_per_heap)
+        self.rx_bytes_per_heap = (
+            self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
+        )
+        print(self.rx_bytes_per_heap)
 
         # These queues are CUDA streams
         self._upload_command_queue = self.context.create_command_queue()
         self._proc_command_queue = self.context.create_command_queue()
         self._download_command_queue = self.context.create_command_queue()
+
+        # Set up GPU Kernels
+        template = katxgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
+            self.context,
+            n_ants=self.n_ants,
+            n_channels=self.n_channels_per_stream,
+            n_samples_per_channel=self.n_samples_per_channel,
+        )
+        self.tensorCoreXEngineCoreOperation = template.instantiate(self._proc_command_queue)
+
+        template = katxgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
+            self.context,
+            n_ants=self.n_ants,
+            n_channels=self.n_channels_per_stream,
+            n_samples_per_channel=self.n_samples_per_channel,
+            n_batches=self.heaps_per_fengine_per_chunk,
+        )
+        self.preCorrelationReorderOperation = template.instantiate(self._proc_command_queue)
 
         # Inter asyncio communication process - monitor make queue is a wrapper of asyncio queue
         self._rx_item_queue = monitor.make_queue(
@@ -123,11 +144,15 @@ class XBEngineProcessingLoop:
 
         for i in range(n_rx_items):
             rx_item = XBEngineProcessingLoop.CommunicationItem()
-            rx_item.buffer = katsdpsigproc.accel.DeviceArray(self.context, (self.receiverStream.chunk_bytes,), np.uint8)
+            rx_item.buffer = katsdpsigproc.accel.DeviceArray(
+                self.context, self.preCorrelationReorderOperation.template.inputDataShape, np.int16
+            )
             self._rx_free_item_queue.put_nowait(rx_item)
         for i in range(n_tx_items):
             tx_item = XBEngineProcessingLoop.CommunicationItem()
-            tx_item.buffer = katsdpsigproc.accel.DeviceArray(self.context, (self.receiverStream.chunk_bytes,), np.uint8)
+            tx_item.buffer = katsdpsigproc.accel.DeviceArray(
+                self.context, self.preCorrelationReorderOperation.template.outputDataShape, np.int16
+            )
             self._tx_free_item_queue.put_nowait(tx_item)
 
     async def _receiver_loop(self):
@@ -139,14 +164,15 @@ class XBEngineProcessingLoop:
             item.timestamp += i * 10
             print(f"1. Timestamp: {item.timestamp}")
             host_buffer = katsdpsigproc.accel.HostArray(
-                (self.receiverStream.chunk_bytes,), np.uint8, (self.receiverStream.chunk_bytes,), context=self.context
+                self.preCorrelationReorderOperation.template.inputDataShape,
+                np.int16,
+                self.preCorrelationReorderOperation.template.inputDataShape,
+                context=self.context,
             )  # not necessary
             initial_val = self.heaps_per_fengine_per_chunk * i
             for j in range(self.heaps_per_fengine_per_chunk):
-                init_offset = self.rx_samples_per_heap * j
-                final_offset = init_offset + self.rx_samples_per_heap
-                host_buffer[init_offset:final_offset] = initial_val + j
-            print(np.sum(host_buffer), host_buffer)
+                host_buffer[j] = initial_val + j
+            print(np.sum(host_buffer), host_buffer[0][0][0][0][0], "...", host_buffer[-1][-1][-1][-1][-1])
             item.buffer.set_async(self._upload_command_queue, host_buffer)
             item.add_event(self._upload_command_queue.enqueue_marker())
             await self._rx_item_queue.put(item)  # Dont think it needs to be async
@@ -157,38 +183,38 @@ class XBEngineProcessingLoop:
         print("GPU Proc Loop Start")
         while self.rx_running is True:
             # 1. Get all items
-            itemRx = await self._rx_item_queue.get()
-            itemTx = await self._tx_free_item_queue.get()
-            await itemRx.async_wait_for_events()
+            rx_item = await self._rx_item_queue.get()
+            tx_item = await self._tx_free_item_queue.get()
+            await rx_item.async_wait_for_events()
 
             # 2. Process data in items
-            itemRx.buffer.copy_region(
-                self._proc_command_queue,
-                itemTx.buffer,
-                np.s_[0 : self.receiverStream.chunk_bytes],
-                np.s_[0 : self.receiverStream.chunk_bytes],
-            )
+            self.preCorrelationReorderOperation.bind(**{"inSamples": rx_item.buffer})
+            self.preCorrelationReorderOperation.bind(**{"outReordered": tx_item.buffer})
+            self.preCorrelationReorderOperation()
 
             # 3 Pass all items on
-            itemTx.add_event(self._proc_command_queue.enqueue_marker())
-            itemTx.timestamp = itemTx.timestamp + itemRx.timestamp + 1
-            print(f"2. Timestamp: {itemTx.timestamp}")
-            await self._tx_item_queue.put(itemTx)
-            itemRx.reset()
-            await self._rx_free_item_queue.put(itemRx)
+            tx_item.add_event(self._proc_command_queue.enqueue_marker())
+            tx_item.timestamp = tx_item.timestamp + rx_item.timestamp + 1
+            print(f"2. Timestamp: {tx_item.timestamp}")
+            await self._tx_item_queue.put(tx_item)
+            rx_item.reset()
+            await self._rx_free_item_queue.put(rx_item)
 
     async def _sender_loop(self):
         """TODO: Write this."""
         print("Sender Loop Start")
         while self.rx_running is True:
             host_buffer = katsdpsigproc.accel.HostArray(
-                (self.receiverStream.chunk_bytes,), np.uint8, (self.receiverStream.chunk_bytes,), context=self.context
+                self.preCorrelationReorderOperation.template.outputDataShape,
+                np.int16,
+                self.preCorrelationReorderOperation.template.outputDataShape,
+                context=self.context,
             )  # not necessary
             item = await self._tx_item_queue.get()
             await item.async_wait_for_events()
             item.buffer.get_async(self._download_command_queue, host_buffer)
             print(f"3. Timestamp: {item.timestamp + 1}")
-            print(np.sum(host_buffer), host_buffer)
+            print(np.sum(host_buffer), host_buffer[0][0][0][0][0], "...", host_buffer[-1][-1][-1][-1][-1])
             print()
             item.reset()
             await self._tx_free_item_queue.put(item)
