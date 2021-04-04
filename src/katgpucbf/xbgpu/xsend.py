@@ -162,15 +162,22 @@ class XEngineSPEADAbstractSend(ABC):
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
         self.n_pols: Final[int] = n_pols
-        self.n_baselines: Final[int] = (self.n_pols * self.n_ants + 1) * (self.n_ants * self.n_pols) // 2
+        self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) // 2
         self.dump_rate_s: Final[float] = dump_rate_s
         self._sample_bits: Final[int] = 32
 
         # 3. Multicast Stream Parameters
         self.channel_offset: Final[int] = channel_offset
         self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * XEngineSPEADAbstractSend.complexity * self._sample_bits // 8
+            self.n_channels_per_stream
+            * self.n_baselines
+            * self.n_pols
+            * self.n_pols
+            * XEngineSPEADAbstractSend.complexity
+            * self._sample_bits
+            // 8
         )
+        self.heap_shape: Final[typing.Tuple] = (self.n_channels_per_stream, self.n_baselines, self.n_pols, self.n_pols)
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         # 4. Allocate memory buffers
@@ -185,7 +192,7 @@ class XEngineSPEADAbstractSend(ABC):
         # 4.2 Create buffers once-off to be reused for sending data.
         for i in range(self._n_send_heaps_in_flight):
             # 4.2.1 Create a buffer from the accel context.
-            buffer = accel.HostArray((self.heap_payload_size_bytes,), np.uint8, context=self.context)
+            buffer = accel.HostArray(self.heap_shape, np.int64, context=self.context)
 
             # 4.2.2 Create a dummy future object that is already marked as "done" Each buffer is paired with a future
             # so these dummy onces are necessary for initial start up.
@@ -237,8 +244,8 @@ class XEngineSPEADAbstractSend(ABC):
             XEngineSPEADAbstractSend.DATA_ID,
             "xeng_raw",
             "Integrated baseline correlation products",
-            shape=(self.heap_payload_size_bytes,),
-            dtype=np.int8,
+            shape=self.heap_shape,
+            dtype=np.int64,
         )
 
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required

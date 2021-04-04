@@ -13,6 +13,7 @@ import katxgpu.monitor
 import katxgpu.tensorcore_xengine_core
 import katxgpu.precorrelation_reorder
 import katxgpu._katxgpu.recv as recv
+import katxgpu.xsend
 
 
 class XBEngineProcessingLoop:
@@ -103,7 +104,21 @@ class XBEngineProcessingLoop:
         self.rx_bytes_per_heap = (
             self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
         )
-        print(self.rx_bytes_per_heap)
+
+        # Sender stuff
+        tx_thread_affinity = 3
+        self.dump_rate_s = 0.5
+        self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
+            n_ants=self.n_ants,
+            n_channels_per_stream=self.n_channels_per_stream,
+            n_pols=self.n_pols,
+            dump_rate_s=self.dump_rate_s,
+            channel_offset=self.n_channels_per_stream * 4,  # Arbitrary for now - depends on F-Engine stream
+            context=self.context,
+            endpoint=("239.10.10.11", 7149),
+            interface_address="10.100.44.1",
+            thread_affinity=tx_thread_affinity,
+        )
 
         # These queues are CUDA streams
         self._upload_command_queue = self.context.create_command_queue()
@@ -225,18 +240,30 @@ class XBEngineProcessingLoop:
         """TODO: Write this."""
         print("Sender Loop Start")
         while self.rx_running is True:
-            host_buffer = katsdpsigproc.accel.HostArray(
-                self.tensorCoreXEngineCoreOperation.template.outputDataShape,
-                np.int64,
-                self.tensorCoreXEngineCoreOperation.template.outputDataShape,
-                context=self.context,
-            )  # not necessary
+            # 1. Get the item to transfer
             item = await self._tx_item_queue.get()
             await item.async_wait_for_events()
-            item.buffer_device.get(self._download_command_queue, host_buffer)
+
+            # 2. Get a free heap buffer to copy the GPU data to
+            buffer_wrapper = await self.sendStream.get_free_heap()
+
+            # 3. Transfer GPU buffer in item to free buffer.
+            item.buffer_device.get(self._download_command_queue, buffer_wrapper.buffer)
+            event = self._download_command_queue.enqueue_marker()
+            await katsdpsigproc.resource.async_wait_for_events([event])
+
+            # 4. Tell sender to transmit heap buffer on network.
+            self.sendStream.send_heap(item.timestamp, buffer_wrapper)
+
             print(f"3. Timestamp: {item.timestamp + 1}")
-            print(np.sum(host_buffer), host_buffer[0][0][0][0], "...", host_buffer[-1][-1][-1][-1])
+            print(
+                np.sum(buffer_wrapper.buffer),
+                hex(buffer_wrapper.buffer[0][0][0][0]),
+                buffer_wrapper.buffer[-1][-1][-1][-1],
+            )
             print()
+
+            # 5. Reset item and put it back on the the _tx_free_item_queue
             item.reset()
             await self._tx_free_item_queue.put(item)
 

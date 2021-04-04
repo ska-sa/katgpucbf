@@ -52,7 +52,7 @@ sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
     n_channels_per_stream=n_channels_per_stream,
     n_pols=n_pols,
     dump_rate_s=dump_rate_s,
-    channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
+    channel_offset=n_channels_per_stream * 4,  # Arbitrary for now - depends on F-Engine stream
     context=context,
     endpoint=(dest_multicast_ip, dest_multicast_port),
     interface_address=interface_ip,
@@ -87,7 +87,9 @@ async def send_process():
 
         # 5.3 Give the buffer back to the sendStream to transmit out onto the network.
         sendStream.send_heap(num_sent * 0x1000, buffer_wrapper)
-        print(f"Sent heap {num_sent-1}. Values: [{buffer_wrapper.buffer[0]}...{buffer_wrapper.buffer[0]}]")
+        print(
+            f"Sent heap {num_sent-1}. Values: [{buffer_wrapper.buffer[0][0][0][0]}...{buffer_wrapper.buffer[-1][-1][-1][-1]}]"
+        )
 
 
 # 6. This is a function that wraps the send_process() function. See desription in function docstring.
