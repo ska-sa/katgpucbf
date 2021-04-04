@@ -248,7 +248,7 @@ class XBEngineProcessingLoop:
             buffer_wrapper = await self.sendStream.get_free_heap()
 
             # 3. Transfer GPU buffer in item to free buffer.
-            item.buffer_device.get(self._download_command_queue, buffer_wrapper.buffer)
+            item.buffer_device.get_async(self._download_command_queue, buffer_wrapper.buffer)
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
