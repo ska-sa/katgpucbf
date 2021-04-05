@@ -1,4 +1,13 @@
-"""TODO: Write this."""
+"""
+TODO: Write this.
+
+TODO:
+1. Autoresync logic
+2. Sender to inproc transport/ibverbs
+3. Receiver to buffer/ibverbs/pcap transport
+4. Figure out what to do with the comp vector
+5. Make Two communication items
+"""
 
 import asyncio
 import numpy as np
@@ -14,6 +23,7 @@ import katxgpu.tensorcore_xengine_core
 import katxgpu.precorrelation_reorder
 import katxgpu._katxgpu.recv as recv
 import katxgpu.xsend
+import katxgpu.ringbuffer
 
 
 class XBEngineProcessingLoop:
@@ -31,6 +41,7 @@ class XBEngineProcessingLoop:
         timestamp: int
         events: List[katsdpsigproc.abc.AbstractEvent]
         buffer_device: katsdpsigproc.accel.DeviceArray
+        chunk: katxgpu._katxgpu.recv.Chunk
 
         def __init__(self, timestamp: int = 0) -> None:
             """TODO: Write this."""
@@ -40,6 +51,7 @@ class XBEngineProcessingLoop:
             """TODO: Write this."""
             self.timestamp = timestamp
             self.events = []
+            # Need to reset chunk
 
         def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
             """TODO: Write this."""
@@ -106,7 +118,7 @@ class XBEngineProcessingLoop:
         )
 
         # Sender stuff
-        tx_thread_affinity = 3
+        self.tx_thread_affinity = 3
         self.dump_rate_s = 0.5
         self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
@@ -117,7 +129,7 @@ class XBEngineProcessingLoop:
             context=self.context,
             endpoint=("239.10.10.11", 7149),
             interface_address="10.100.44.1",
-            thread_affinity=tx_thread_affinity,
+            thread_affinity=self.tx_thread_affinity,
         )
 
         # These queues are CUDA streams
@@ -175,28 +187,76 @@ class XBEngineProcessingLoop:
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
+        for i in range(8):
+            # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
+            buf = katsdpsigproc.accel.HostArray(
+                self.preCorrelationReorderOperation.template.inputDataShape, np.int16, context=self.context
+            )
+            # 6.2 Create a chunk - the buffer object is given to this chunk. This is where sample data in a chunk is stored.
+            chunk = recv.Chunk(buf)
+            # 6.3 Give the chunk to the receiver - once this is done we no longer need to track the chunk object.
+            self.receiverStream.add_chunk(chunk)
+
+    def add_udp_ibv_transport(self):
+        """TODO: Write this."""
+        self.receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 0)
+        print("Added reader")
+
     async def _receiver_loop(self):
         """TODO: Write this."""
         print("Receiver Loop Start")
-        for i in range(3):
-            await asyncio.sleep(1)
+        asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
+            self.receiverStream.ringbuffer, self.monitor, "recv_ringbuffer", "get_chunks"
+        )
+        recieved_chunks = 0
+        i = 0
+        received = 0
+        dropped = 0
+        async for chunk in asyncRingbuffer:
+            received += len(chunk.present)
+            dropped += len(chunk.present) - sum(chunk.present)
+            print(
+                f"Chunk: {i:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. {len(chunk.base)}"
+            )
+            i += 1
+            # 8.3 Once we are done with the chunk, give it back to the receiver so that the receiver has access to more
+            # chunks without having to allocate more memory.
+
             item = await self._rx_free_item_queue.get()
-            item.timestamp += i * 10
-            print(f"1. Timestamp: {item.timestamp}")
-            host_buffer = katsdpsigproc.accel.HostArray(
-                self.preCorrelationReorderOperation.template.inputDataShape,
-                np.int16,
-                self.preCorrelationReorderOperation.template.inputDataShape,
-                context=self.context,
-            )  # not necessary
-            initial_val = self.heaps_per_fengine_per_chunk * i + 1
-            for j in range(self.heaps_per_fengine_per_chunk):
-                host_buffer[j] = initial_val + j
-            print(np.sum(host_buffer), host_buffer[0][0][0][0][0], "...", host_buffer[-1][-1][-1][-1][-1])
-            item.buffer_device.set_async(self._upload_command_queue, host_buffer)
+            item.timestamp += chunk.timestamp
+            item.chunk = chunk
+
+            item.buffer_device.set_async(self._upload_command_queue, chunk.base)
             item.add_event(self._upload_command_queue.enqueue_marker())
             await self._rx_item_queue.put(item)  # Dont think it needs to be async
-        self.rx_running = False
+
+            recieved_chunks += 1
+            if recieved_chunks == 30:
+                self.rx_running = False
+                self.receiverStream.stop()
+
+        # async for chunk in asyncRingbuffer:
+        #     recieved_chunks+=1
+        #     print(f"1. Timestamp: {item.timestamp}")
+        #     # host_buffer = katsdpsigproc.accel.HostArray(
+        #     #     self.preCorrelationReorderOperation.template.inputDataShape,
+        #     #     np.int16,
+        #     #     self.preCorrelationReorderOperation.template.inputDataShape,
+        #     #     context=self.context,
+        #     # )  # not necessary
+        #     # initial_val = self.heaps_per_fengine_per_chunk * i + 1
+        #     # for j in range(self.heaps_per_fengine_per_chunk):
+        #     #     host_buffer[j] = initial_val + j
+        #     import time
+        #     #print(time.time(), chunk.base[0][0][0][0][0], "...", chunk.base[-1][-1][-1][-1][-1], chunk.base.dtype, self.receiverStream.chunk_bytes, chunk.base.shape)
+        #     #print(chunk.base[0][0][0][0][0], chunk.base[0][0][0][0][1], chunk.base[0][0][1][0][1], chunk.base[5][-1][-1][-1][0])
+        #     item.buffer_device.set_async(self._upload_command_queue, chunk.base)
+        #     item.add_event(self._upload_command_queue.enqueue_marker())
+        #     await self._rx_item_queue.put(item)  # Dont think it needs to be async
+
+        # if(recieved_chunks == 4):
+        #     self.rx_running = False
+        #     break
 
     async def _gpu_proc_loop(self):
         """
@@ -210,6 +270,7 @@ class XBEngineProcessingLoop:
             rx_item = await self._rx_item_queue.get()
             tx_item = await self._tx_free_item_queue.get()
             await rx_item.async_wait_for_events()
+            self.receiverStream.add_chunk(rx_item.chunk)
 
             # 2. Process data in items
             self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
@@ -217,6 +278,7 @@ class XBEngineProcessingLoop:
             self.preCorrelationReorderOperation()
 
             # TODO: Make this less clunky
+            # TODO: Add auto resync logic
             self.tensorCoreXEngineCoreOperation.zero_visibilities()
             for i in range(self.heaps_per_fengine_per_chunk):
                 buffer_slice = katsdpsigproc.accel.DeviceArray(
@@ -235,6 +297,7 @@ class XBEngineProcessingLoop:
             await self._tx_item_queue.put(tx_item)
             rx_item.reset()
             await self._rx_free_item_queue.put(rx_item)
+        print("Done running GPU Proc")
 
     async def _sender_loop(self):
         """TODO: Write this."""
@@ -256,16 +319,17 @@ class XBEngineProcessingLoop:
             self.sendStream.send_heap(item.timestamp, buffer_wrapper)
 
             print(f"3. Timestamp: {item.timestamp + 1}")
-            print(
-                np.sum(buffer_wrapper.buffer),
-                hex(buffer_wrapper.buffer[0][0][0][0]),
-                buffer_wrapper.buffer[-1][-1][-1][-1],
-            )
-            print()
+            # print(
+            #     np.sum(buffer_wrapper.buffer),
+            #     hex(buffer_wrapper.buffer[0][0][0][0]),
+            #     buffer_wrapper.buffer[-1][-1][-1][-1],
+            # )
+            # print()
 
             # 5. Reset item and put it back on the the _tx_free_item_queue
             item.reset()
             await self._tx_free_item_queue.put(item)
+        print("Done running sender")
 
     async def run(self):
         """TODO: Write this."""

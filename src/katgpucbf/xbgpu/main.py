@@ -10,6 +10,7 @@ async def async_main() -> None:
     await asyncio.sleep(1)
 
     xbengine_proc_loop = katxgpu.xbengine_proc_loop.XBEngineProcessingLoop()
+    xbengine_proc_loop.add_udp_ibv_transport()
     await xbengine_proc_loop.run()
 
     print("Async Main Complete")
