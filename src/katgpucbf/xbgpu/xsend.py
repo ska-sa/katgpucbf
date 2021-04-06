@@ -269,7 +269,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group["channel offset"].value = self.channel_offset
         self.item_group["xeng_raw"].value = bufferWrapper.buffer
 
-        heap_to_send = self.item_group.get_heap(descriptors="none", data="stale")
+        heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
         # This flag forces the heap to include all item_group pointers in every packet belonging to a single heap
         # instead of just in the first packet. This is done to duplicate the format of the packets out of the MeerKAT
         # SKARABs.
