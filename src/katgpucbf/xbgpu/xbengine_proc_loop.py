@@ -82,6 +82,7 @@ class XBEngineProcessingLoop:
         n_rx_items = 5  # To high means to much GPU memory gets allocated
         n_tx_items = 3
 
+        self.rx_transport_added = False
         self.rx_running = True
 
         use_file_monitor = False
@@ -204,9 +205,25 @@ class XBEngineProcessingLoop:
             self.receiverStream.add_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self):
-        """TODO: Write this."""
+        """TODO: Write this - add command line arguments."""
+        if self.rx_transport_added is True:
+            raise AttributeError("Transport for receiving data has already been set.")
+        self.rx_transport_added = True
         self.receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 2)
-        print("Added reader")
+
+    def add_buffer_receiver_transport(self, buffer: bytes):
+        """TODO: Write this."""
+        if self.rx_transport_added is True:
+            raise AttributeError("Transport for receiving data has already been set.")
+        self.rx_transport_added = True
+        self.receiverStream.add_buffer_reader(buffer)
+
+    def add_pcap_receiver_transport(self, pcap_file_name: str):
+        """TODO: Write this."""
+        if self.rx_transport_added is True:
+            raise AttributeError("Transport for receiving data has already been set.")
+        self.rx_transport_added = True
+        self.receiverStream.add_udp_pcap_file_reader(pcap_file_name)
 
     async def _receiver_loop(self):
         """TODO: Write this."""
@@ -340,7 +357,7 @@ class XBEngineProcessingLoop:
             await self._tx_free_item_queue.put(item)
         print("Done running sender")
 
-    async def _send_descriptors(self):
+    async def _send_descriptors_loop(self):
         """TODO: Write this."""
         while self.rx_running is True:
             self.sendStream.send_descriptor_heap()
@@ -348,6 +365,9 @@ class XBEngineProcessingLoop:
 
     async def run(self):
         """TODO: Write this."""
+        if self.rx_transport_added is not False:
+            raise AttributeError("Transport for receiving data has not yet been set.")
+
         # NOTE: Put in todo about upgrading this to python 3.8
         loop = asyncio.get_event_loop()
 
@@ -356,7 +376,7 @@ class XBEngineProcessingLoop:
         receiver_task = loop.create_task(self._receiver_loop())
         gpu_proc_task = loop.create_task(self._gpu_proc_loop())
         sender_task = loop.create_task(self._sender_loop())
-        descriptor_task = loop.create_task(self._send_descriptors())
+        descriptor_task = loop.create_task(self._send_descriptors_loop())
         await receiver_task
         await gpu_proc_task
         await sender_task
