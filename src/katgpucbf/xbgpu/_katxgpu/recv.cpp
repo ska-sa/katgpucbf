@@ -254,7 +254,7 @@ void *stream::allocate(std::size_t ulHeapSize_bytes, spead2::recv::packet_header
     // 1. Perform some basic checks on the received packet of the new heap to confirm that it is what we expect.
     if (ulHeapSize_bytes != m_ulPacketSize_bytes * m_iNumChannels)
     {
-        spead2::log_info("Allocating incorrect size");
+        spead2::log_info("Received heap is the wrong size - is this a descriptor? (This message can be removed in production)");
         return nullptr;
     }
     std::int64_t i64Timestamp = -1;

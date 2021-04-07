@@ -248,4 +248,6 @@ Additionally different sockets have different PCIe root complexes. It is advisab
 same NUMA region and use some utility like `numactl` to ensure that the corresponding CPU and memory region are used
 with the GPU and NIC. If this is not done, there is a chance that the data will move between CPU sockets, leading to
 bottlenecks at the bus between the two sockets.
+4. IRQ Coalescing - TODO
+5. Larger Packet Sizes - TODO
 

@@ -112,7 +112,6 @@ def createTestObjects(
         thread_pool,
         spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
     )
-    del thread_pool  # This line is copied from the SPEAD2 examples.
 
     # 3. Create ItemGroup and add all the required fields.
     ig = spead2.send.ItemGroup(flavour=spead2.Flavour(**default_spead_flavour))

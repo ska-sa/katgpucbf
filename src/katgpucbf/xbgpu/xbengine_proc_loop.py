@@ -65,9 +65,11 @@ class XBEngineProcessingLoop:
         """TODO: Write this."""
         print("Created Processing Loop Object")
 
+        self.adc_sample_rate = 1712e6
+        self.heap_accumulation_threshold = 52  # 256
         self.n_ants = 64
         self.n_channels_total = 32768
-        self.n_channels_per_stream = 128
+        self.n_channels_per_stream = self.n_channels_total // 256
         self.n_samples_per_channel = 256
         self.n_pols = 2
         self.sample_bits = 8
@@ -121,7 +123,9 @@ class XBEngineProcessingLoop:
         self.tx_thread_affinity = 2
 
         # Care needs to be taken when setting this value - document why
-        self.dump_rate_s = 0.05
+        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
+        self.dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate
+
         self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
@@ -199,7 +203,7 @@ class XBEngineProcessingLoop:
             # 6.3 Give the chunk to the receiver - once this is done we no longer need to track the chunk object.
             self.receiverStream.add_chunk(chunk)
 
-    def add_udp_ibv_transport(self):
+    def add_udp_ibv_receiver_transport(self):
         """TODO: Write this."""
         self.receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 2)
         print("Added reader")
@@ -219,9 +223,9 @@ class XBEngineProcessingLoop:
             received += len(chunk.present)
             dropped += len(chunk.present) - sum(chunk.present)
             # Rework this
-            print(
-                f"f{hex(chunk.timestamp)} Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}."
-            )
+            # print(
+            #   f"f{hex(chunk.timestamp)} Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}."
+            # )
             chunk_index += 1
             # 8.3 Once we are done with the chunk, give it back to the receiver so that the receiver has access to more
             # chunks without having to allocate more memory.
@@ -246,21 +250,32 @@ class XBEngineProcessingLoop:
         Make this work correctly - currently it does not sync on timestamps and specific numbers of accumulations.
         """
         print("GPU Proc Loop Start")
+
+        # import time
+
+        # old_time = time.time()
+        # old_ts = 0
+
+        tx_item = await self._tx_free_item_queue.get()
+        # The very first heap sent out the X-Engine will have a timestamp of zero, every other heap will have the
+        # correct timestamp
+        tx_item.timestamp = 0
+        self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
+        self.tensorCoreXEngineCoreOperation.zero_visibilities()
+
         while self.rx_running is True:
             # 1. Get all items
             rx_item = await self._rx_item_queue.get()
-            tx_item = await self._tx_free_item_queue.get()
             await rx_item.async_wait_for_events()
+            current_timestamp = rx_item.timestamp
             self.receiverStream.add_chunk(rx_item.chunk)
 
             # 2. Process data in items
-            self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
             self.preCorrelationReorderOperation.bind(inSamples=rx_item.buffer_device)
             self.preCorrelationReorderOperation()
 
             # TODO: Make this less clunky
-            # TODO: Add auto resync logic
-            self.tensorCoreXEngineCoreOperation.zero_visibilities()
+
             for i in range(self.heaps_per_fengine_per_chunk):
                 buffer_slice = katsdpsigproc.accel.DeviceArray(
                     self.context,
@@ -271,14 +286,35 @@ class XBEngineProcessingLoop:
                 self.tensorCoreXEngineCoreOperation.bind(inSamples=buffer_slice)
                 self.tensorCoreXEngineCoreOperation()
 
-            # 3 Pass all items on to sender
-            tx_item.add_event(self._proc_command_queue.enqueue_marker())
-            tx_item.timestamp = tx_item.timestamp + rx_item.timestamp + 1
+                next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
+                if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
 
-            await self._tx_item_queue.put(tx_item)
+                    # new_time = time.time()
+                    # print(
+                    #     round(new_time - old_time, 2),
+                    #     hex(tx_item.timestamp),
+                    #     hex(tx_item.timestamp - old_ts),
+                    #     self.dump_rate_s,
+                    #     self.rx_running,
+                    # )
+                    # old_time = new_time
+                    # old_ts = tx_item.timestamp
+
+                    tx_item.add_event(self._proc_command_queue.enqueue_marker())
+                    await self._tx_item_queue.put(tx_item)
+
+                    tx_item = await self._tx_free_item_queue.get()
+                    tx_item.timestamp = next_heap_timestamp
+                    self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
+                    self.tensorCoreXEngineCoreOperation.zero_visibilities()
+
+                current_timestamp += self.rx_heap_timestamp_step
+
             rx_item.reset()
             await self._rx_free_item_queue.put(rx_item)
-        print("Done running GPU Proc")
+
+        # Used for clossing off the queue
+        await self._tx_item_queue.put(tx_item)
 
     async def _sender_loop(self):
         """TODO: Write this."""
@@ -304,13 +340,24 @@ class XBEngineProcessingLoop:
             await self._tx_free_item_queue.put(item)
         print("Done running sender")
 
+    async def _send_descriptors(self):
+        """TODO: Write this."""
+        while self.rx_running is True:
+            self.sendStream.send_descriptor_heap()
+            await asyncio.sleep(5)
+
     async def run(self):
         """TODO: Write this."""
         # NOTE: Put in todo about upgrading this to python 3.8
         loop = asyncio.get_event_loop()
+
+        # Check here that everythin is inited properly
+
         receiver_task = loop.create_task(self._receiver_loop())
         gpu_proc_task = loop.create_task(self._gpu_proc_loop())
         sender_task = loop.create_task(self._sender_loop())
+        descriptor_task = loop.create_task(self._send_descriptors())
         await receiver_task
         await gpu_proc_task
         await sender_task
+        await descriptor_task
