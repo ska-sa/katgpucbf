@@ -2,22 +2,26 @@
 TODO: Write this.
 
 TODO:
-1. Autoresync logic - proper accumulation time and dump rate
 2. Sender to inproc transport/ibverbs
-3. Receiver to buffer/ibverbs/pcap transport
 4. Figure out what to do with the comp vector
-5. Make Two communication items
+
+TODO:
+Close _receiver_loop properly
 """
 
+# General Imports
 import asyncio
 import numpy as np
 from typing import List
 
+# SARAO Developed Package Imports
+import spead2
 import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
 
+# Internal katxgpu Package Imports
 import katxgpu.monitor
 import katxgpu.tensorcore_xengine_core
 import katxgpu.precorrelation_reorder
@@ -26,46 +30,119 @@ import katxgpu.xsend
 import katxgpu.ringbuffer
 
 
+class QueueItem:
+    """
+    TODO: Write this.
+
+    Facilitates processing between different loops
+    Describe that this could become seperate items like katxgpu
+    Could be its on class
+    """
+
+    timestamp: int
+    events: List[katsdpsigproc.abc.AbstractEvent]
+    buffer_device: katsdpsigproc.accel.DeviceArray
+    chunk: katxgpu._katxgpu.recv.Chunk
+
+    def __init__(self, timestamp: int = 0) -> None:
+        """TODO: Write this."""
+        self.reset(timestamp)
+
+    def reset(self, timestamp: int = 0) -> None:
+        """TODO: Write this."""
+        self.timestamp = timestamp
+        self.events = []
+        # Need to reset chunk
+
+    def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
+        """TODO: Write this."""
+        self.events.append(event)
+
+    async def async_wait_for_events(self):
+        """TODO: Write this."""
+        await katsdpsigproc.resource.async_wait_for_events(self.events)
+
+
+class RxQueueItem(QueueItem):
+    """
+    TODO: Write this.
+
+    Extended to store a chunk
+    """
+
+    chunk: katxgpu._katxgpu.recv.Chunk
+
+    def reset(self, timestamp: int = 0) -> None:
+        """TODO: Write this."""
+        super().reset(timestamp=timestamp)
+        self.chunk = None
+
+
 class XBEngineProcessingLoop:
     """TODO: Write this."""
 
-    class CommunicationItem:
-        """
-        TODO: Write this.
+    # 1. Array Configuration Parameters - Parameters used to configure the entire array
+    adc_sample_rate_Hz: int
+    heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation epoch.
+    n_ants: int
+    n_channels_total: int
+    n_channels_per_stream: int
+    n_samples_per_channel: int
+    n_pols: int
+    sample_bits: int
 
-        Facilitates processing between different loops
-        Describe that this could become seperate items like katxgpu
-        Could be its on class
-        """
+    # 2. Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
+    rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
+    timestamp_increment_per_accumulation: int
+    rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
+    dump_rate_s: float  # The time between succesive accumulation epochs
 
-        timestamp: int
-        events: List[katsdpsigproc.abc.AbstractEvent]
-        buffer_device: katsdpsigproc.accel.DeviceArray
-        chunk: katxgpu._katxgpu.recv.Chunk
+    # 3. Engine Parameters - Parameters not used in the array but needed for this engine
+    heaps_per_fengine_per_chunk: int  # Sets the number of batches of heaps to store per chunk
+    channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
 
-        def __init__(self, timestamp: int = 0) -> None:
-            """TODO: Write this."""
-            self.reset(timestamp)
+    # 3. Flags used at some point in the program
+    rx_transport_added: bool  # False if no rx transport has been added, true otherwise
+    tx_transport_added: bool  # False if no tx transport has been added, true otherwise
+    rx_running: bool  # Remains true until the process must close - then set to false and all the loops will stop
 
-        def reset(self, timestamp: int = 0) -> None:
-            """TODO: Write this."""
-            self.timestamp = timestamp
-            self.events = []
-            # Need to reset chunk
+    # 4. Monitor for tracking the number of chunks queued in the receiver and items in the queues
+    monitor: katxgpu.monitor.Monitor
 
-        def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
-            """TODO: Write this."""
-            self.events.append(event)
+    # 5. Queues for passing items between different asyncio functions. The _rx_item_queue passes items from the
+    # _receiver_loop function to the _gpu_proc_loop function and the _tx_item_queue passes items from the
+    # _gpu_proc_loop to the _sender_loop function. Once an item has been used, it will be passed back on the
+    # corresponding _free_item_queue to ensure that all allocated buffers go back into circulation.
+    _rx_item_queue: "asyncio.Queue[RxQueueItem]"
+    _rx_free_item_queue: "asyncio.Queue[RxQueueItem]"
+    _tx_item_queue: "asyncio.Queue[QueueItem]"
+    _tx_free_item_queue: "asyncio.Queue[QueueItem]"
 
-        async def async_wait_for_events(self):
-            """TODO: Write this."""
-            await katsdpsigproc.resource.async_wait_for_events(self.events)
+    # 6. Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
+    # stream. An abstract command queue can either be implemented as an OpenCL command queue or a Cuda stream depending
+    # on the context.
+    _upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+    _proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+    _download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+
+    # 7. Objects for sending and receiving data
+    ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
+    receiverStream: recv.Stream
+    sendStream: katxgpu.xsend.XEngineSPEADAbstractSend
+
+    # 8. GPU Kernels and GPU Context
+    context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
+    tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
+    preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorderTemplate
 
     def __init__(self):
         """TODO: Write this."""
         print("Created Processing Loop Object")
 
-        self.adc_sample_rate = 1712e6
+        # Remember to set rx  thread affinities
+        # Remeber to set interface ip
+
+        self.adc_sample_rate_Hz = 1712e6
         self.heap_accumulation_threshold = 52  # 256
         self.n_ants = 64
         self.n_channels_total = 32768
@@ -75,19 +152,19 @@ class XBEngineProcessingLoop:
         self.sample_bits = 8
         complexity = 2
 
+        self.channel_offset_value = self.n_channels_per_stream * 4
+
         ############################
 
         self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
-        n_rx_items = 5  # To high means to much GPU memory gets allocated
-        n_tx_items = 3
-
+        self.tx_transport_added = False
         self.rx_transport_added = False
         self.rx_running = True
 
         use_file_monitor = False
         if use_file_monitor:
-            monitor: katxgpu.monitor.Monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+            monitor = katxgpu.monitor.FileMonitor("temp_file.log")
         else:
             monitor = katxgpu.monitor.NullMonitor()
         self.monitor = monitor
@@ -101,7 +178,7 @@ class XBEngineProcessingLoop:
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_samples_per_channel
         self.heaps_per_fengine_per_chunk = 10
         rx_thread_affinity = 2
-        ringbuffer_capacity = 8
+        ringbuffer_capacity = 15
         self.ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
         self.receiverStream = recv.Stream(
             n_ants=self.n_ants,
@@ -116,28 +193,13 @@ class XBEngineProcessingLoop:
             use_gdrcopy=False,
             monitor=monitor,
         )
-        self.rx_bytes_per_heap = (
+        self.rx_bytes_per_heap_batch = (
             self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
         )
 
-        # Sender stuff
-        self.tx_thread_affinity = 2
-
         # Care needs to be taken when setting this value - document why
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
-        self.dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate
-
-        self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
-            n_ants=self.n_ants,
-            n_channels_per_stream=self.n_channels_per_stream,
-            n_pols=self.n_pols,
-            dump_rate_s=self.dump_rate_s,
-            channel_offset=self.n_channels_per_stream * 4,  # Arbitrary for now - depends on F-Engine stream
-            context=self.context,
-            endpoint=("239.10.10.11", 7149),
-            interface_address="10.100.44.1",
-            thread_affinity=self.tx_thread_affinity,
-        )
+        self.dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
 
         # These queues are CUDA streams
         self._upload_command_queue = self.context.create_command_queue()
@@ -167,34 +229,31 @@ class XBEngineProcessingLoop:
         )
         self.preCorrelationReorderOperation.bind(outReordered=self.reordered_buffer_device)
 
+        n_rx_items = 5  # To high means to much GPU memory gets allocated
+        n_tx_items = 3
+        n_free_chunks = 20
+
         # Inter asyncio communication process - monitor make queue is a wrapper of asyncio queue
-        self._rx_item_queue = monitor.make_queue(
-            "rx_item_queue", n_rx_items
-        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
-        self._rx_free_item_queue = monitor.make_queue(
-            "rx_free_item_queue", n_rx_items
-        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
-        self._tx_item_queue = monitor.make_queue(
-            "tx_item_queue", n_tx_items
-        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
-        self._tx_free_item_queue = monitor.make_queue(
-            "tx_free_item_queue", n_tx_items
-        )  # type: asyncio.Queue[XBEngineProcessingLoop.CommunicationItem]
+        self._rx_item_queue = monitor.make_queue("rx_item_queue", n_rx_items)  # type: asyncio.Queue[RxQueueItem]
+        self._rx_free_item_queue = monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._tx_item_queue = monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue = monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for i in range(n_rx_items):
-            rx_item = XBEngineProcessingLoop.CommunicationItem()
+            rx_item = RxQueueItem()
             rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context, self.preCorrelationReorderOperation.template.inputDataShape, np.int16
             )
             self._rx_free_item_queue.put_nowait(rx_item)
+
         for i in range(n_tx_items):
-            tx_item = XBEngineProcessingLoop.CommunicationItem()
+            tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context, self.tensorCoreXEngineCoreOperation.template.outputDataShape, np.int64
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        for i in range(20):
+        for i in range(n_free_chunks):
             # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
             buf = katsdpsigproc.accel.HostArray(
                 self.preCorrelationReorderOperation.template.inputDataShape, np.int16, context=self.context
@@ -204,12 +263,12 @@ class XBEngineProcessingLoop:
             # 6.3 Give the chunk to the receiver - once this is done we no longer need to track the chunk object.
             self.receiverStream.add_chunk(chunk)
 
-    def add_udp_ibv_receiver_transport(self):
+    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, thread_affinity: int):
         """TODO: Write this - add command line arguments."""
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
-        self.receiverStream.add_udp_ibv_reader([("239.10.10.10", 7149)], "10.100.44.1", 10000000, 2)
+        self.receiverStream.add_udp_ibv_reader([(src_ip, src_port)], interface_ip, 10000000, thread_affinity)
 
     def add_buffer_receiver_transport(self, buffer: bytes):
         """TODO: Write this."""
@@ -225,6 +284,39 @@ class XBEngineProcessingLoop:
         self.rx_transport_added = True
         self.receiverStream.add_udp_pcap_file_reader(pcap_file_name)
 
+    def add_udp_ibv_sender_transport(self, dest_ip: str, dest_port: int, interface_ip: str, thread_affinity: int):
+        """TODO: Write this - add command line arguments."""
+        if self.tx_transport_added is True:
+            raise AttributeError("Transport for sending data has already been set.")
+        self.tx_transport_added = True
+        self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
+            n_ants=self.n_ants,
+            n_channels_per_stream=self.n_channels_per_stream,
+            n_pols=self.n_pols,
+            dump_rate_s=self.dump_rate_s,
+            channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
+            context=self.context,
+            endpoint=(dest_ip, dest_port),
+            interface_address=interface_ip,
+            thread_affinity=thread_affinity,
+        )
+
+    def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
+        """TODO: Write this - add command line arguments."""
+        if self.tx_transport_added is True:
+            raise AttributeError("Transport for sending data has already been set.")
+        self.tx_transport_added = True
+
+        self.sendStream = katxgpu.xsend.XEngineSPEADInprocSend(
+            n_ants=self.n_ants,
+            n_channels_per_stream=self.n_channels_per_stream,
+            n_pols=self.n_pols,
+            dump_rate_s=self.dump_rate_s,
+            channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
+            context=self.context,
+            queue=queue,
+        )
+
     async def _receiver_loop(self):
         """TODO: Write this."""
         print("Receiver Loop Start")
@@ -233,16 +325,21 @@ class XBEngineProcessingLoop:
         )
         recieved_chunks = 0
         chunk_index = 0
-        received = 0
-        dropped = 0
+        received_total = 0
+        dropped_total = 0
 
         async for chunk in asyncRingbuffer:
-            received += len(chunk.present)
-            dropped += len(chunk.present) - sum(chunk.present)
-            # Rework this
-            # print(
-            #   f"f{hex(chunk.timestamp)} Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}."
-            # )
+            received_heaps = len(chunk.present)
+            dropped_heaps = len(chunk.present) - sum(chunk.present)
+            received_total += received_heaps
+            dropped_total += dropped_heaps
+
+            # TODO: THis must become a proper logging message
+            if dropped_heaps != 0:
+                print(
+                    f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. All time dropped/received heaps: {dropped_total}/{received_total}."
+                )
+
             chunk_index += 1
             # 8.3 Once we are done with the chunk, give it back to the receiver so that the receiver has access to more
             # chunks without having to allocate more memory.
@@ -298,7 +395,7 @@ class XBEngineProcessingLoop:
                     self.context,
                     self.tensorCoreXEngineCoreOperation.template.inputDataShape,
                     np.int16,
-                    raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap * i,
+                    raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
                 )
                 self.tensorCoreXEngineCoreOperation.bind(inSamples=buffer_slice)
                 self.tensorCoreXEngineCoreOperation()
@@ -365,14 +462,13 @@ class XBEngineProcessingLoop:
 
     async def run(self):
         """TODO: Write this."""
-        if self.rx_transport_added is not False:
+        if self.rx_transport_added is not True:
             raise AttributeError("Transport for receiving data has not yet been set.")
+        if self.tx_transport_added is not True:
+            raise AttributeError("Transport for sending data has not yet been set.")
 
         # NOTE: Put in todo about upgrading this to python 3.8
         loop = asyncio.get_event_loop()
-
-        # Check here that everythin is inited properly
-
         receiver_task = loop.create_task(self._receiver_loop())
         gpu_proc_task = loop.create_task(self._gpu_proc_loop())
         sender_task = loop.create_task(self._sender_loop())

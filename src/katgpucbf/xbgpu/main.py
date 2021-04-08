@@ -10,7 +10,12 @@ async def async_main() -> None:
     await asyncio.sleep(1)
 
     xbengine_proc_loop = katxgpu.xbengine_proc_loop.XBEngineProcessingLoop()
-    xbengine_proc_loop.add_udp_ibv_receiver_transport()
+    xbengine_proc_loop.add_udp_ibv_receiver_transport(
+        src_ip="239.10.10.10", src_port=7149, interface_ip="10.100.44.1", thread_affinity=2
+    )
+    xbengine_proc_loop.add_udp_ibv_sender_transport(
+        dest_ip="239.10.10.11", dest_port=7149, interface_ip="10.100.44.1", thread_affinity=2
+    )
     await xbengine_proc_loop.run()
 
     print("Async Main Complete")
