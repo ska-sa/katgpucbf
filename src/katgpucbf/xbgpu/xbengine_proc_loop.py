@@ -2,7 +2,6 @@
 TODO: Write this.
 
 TODO:
-2. Sender to inproc transport/ibverbs
 4. Figure out what to do with the comp vector
 
 TODO:
@@ -133,26 +132,45 @@ class XBEngineProcessingLoop:
     # 8. GPU Kernels and GPU Context
     context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
     tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
-    preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorderTemplate
+    preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorder
 
-    def __init__(self):
+    def __init__(
+        self,
+        adc_sample_rate_Hz: int,
+        n_ants: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_per_channel: int,
+        n_pols: int,
+        sample_bits: int,
+        heap_accumulation_threshold: int,
+        channel_offset_value: int,
+    ):
         """TODO: Write this."""
         print("Created Processing Loop Object")
 
-        # Remember to set rx  thread affinities
-        # Remeber to set interface ip
+        if n_pols != 2:
+            raise ValueError("n_pols must equal 2 - no other values supported at the moment.")
 
-        self.adc_sample_rate_Hz = 1712e6
-        self.heap_accumulation_threshold = 52  # 256
-        self.n_ants = 64
-        self.n_channels_total = 32768
-        self.n_channels_per_stream = self.n_channels_total // 256
-        self.n_samples_per_channel = 256
-        self.n_pols = 2
-        self.sample_bits = 8
+        if sample_bits != 8:
+            raise ValueError("sample_bits must equal 2 - no other values supported at the moment.")
+
+        if channel_offset_value % n_channels_per_stream != 0:
+            raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+
+        # Remember to set rx  thread affinities
+
+        self.adc_sample_rate_Hz = adc_sample_rate_Hz
+        self.heap_accumulation_threshold = heap_accumulation_threshold
+        self.n_ants = n_ants
+        self.n_channels_total = n_channels_total
+        self.n_channels_per_stream = n_channels_per_stream
+        self.n_samples_per_channel = n_samples_per_channel
+        self.n_pols = n_pols
+        self.sample_bits = sample_bits
         complexity = 2
 
-        self.channel_offset_value = self.n_channels_per_stream * 4
+        self.channel_offset_value = channel_offset_value
 
         ############################
 
@@ -164,10 +182,9 @@ class XBEngineProcessingLoop:
 
         use_file_monitor = False
         if use_file_monitor:
-            monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+            self.monitor = katxgpu.monitor.FileMonitor("temp_file.log")
         else:
-            monitor = katxgpu.monitor.NullMonitor()
-        self.monitor = monitor
+            self.monitor = katxgpu.monitor.NullMonitor()
 
         # ########################
         # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
@@ -191,7 +208,7 @@ class XBEngineProcessingLoop:
             ringbuffer=self.ringbuffer,
             thread_affinity=rx_thread_affinity,
             use_gdrcopy=False,
-            monitor=monitor,
+            monitor=self.monitor,
         )
         self.rx_bytes_per_heap_batch = (
             self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
@@ -207,22 +224,22 @@ class XBEngineProcessingLoop:
         self._download_command_queue = self.context.create_command_queue()
 
         # Set up GPU Kernels
-        template = katxgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
+        tensorCoreTemplate = katxgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
         )
-        self.tensorCoreXEngineCoreOperation = template.instantiate(self._proc_command_queue)
+        self.tensorCoreXEngineCoreOperation = tensorCoreTemplate.instantiate(self._proc_command_queue)
 
-        template = katxgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
+        reorderTemplate = katxgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
             n_batches=self.heaps_per_fengine_per_chunk,
         )
-        self.preCorrelationReorderOperation = template.instantiate(self._proc_command_queue)
+        self.preCorrelationReorderOperation = reorderTemplate.instantiate(self._proc_command_queue)
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
             self.context, self.preCorrelationReorderOperation.template.outputDataShape, np.int16
@@ -234,10 +251,10 @@ class XBEngineProcessingLoop:
         n_free_chunks = 20
 
         # Inter asyncio communication process - monitor make queue is a wrapper of asyncio queue
-        self._rx_item_queue = monitor.make_queue("rx_item_queue", n_rx_items)  # type: asyncio.Queue[RxQueueItem]
-        self._rx_free_item_queue = monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue = monitor.make_queue("tx_item_queue", n_tx_items)
-        self._tx_free_item_queue = monitor.make_queue("tx_free_item_queue", n_tx_items)
+        self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)  # type: asyncio.Queue[RxQueueItem]
+        self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for i in range(n_rx_items):
             rx_item = RxQueueItem()
@@ -263,12 +280,14 @@ class XBEngineProcessingLoop:
             # 6.3 Give the chunk to the receiver - once this is done we no longer need to track the chunk object.
             self.receiverStream.add_chunk(chunk)
 
-    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, thread_affinity: int):
+    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector_affinity: int):
         """TODO: Write this - add command line arguments."""
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
-        self.receiverStream.add_udp_ibv_reader([(src_ip, src_port)], interface_ip, 10000000, thread_affinity)
+        self.receiverStream.add_udp_ibv_reader(
+            [(src_ip, src_port)], interface_ip, buffer_size=10000000, comp_vector=comp_vector_affinity
+        )
 
     def add_buffer_receiver_transport(self, buffer: bytes):
         """TODO: Write this."""
@@ -365,10 +384,10 @@ class XBEngineProcessingLoop:
         """
         print("GPU Proc Loop Start")
 
-        # import time
+        import time
 
-        # old_time = time.time()
-        # old_ts = 0
+        old_time = time.time()
+        old_ts = 0
 
         tx_item = await self._tx_free_item_queue.get()
         # The very first heap sent out the X-Engine will have a timestamp of zero, every other heap will have the
@@ -403,16 +422,16 @@ class XBEngineProcessingLoop:
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
 
-                    # new_time = time.time()
-                    # print(
-                    #     round(new_time - old_time, 2),
-                    #     hex(tx_item.timestamp),
-                    #     hex(tx_item.timestamp - old_ts),
-                    #     self.dump_rate_s,
-                    #     self.rx_running,
-                    # )
-                    # old_time = new_time
-                    # old_ts = tx_item.timestamp
+                    new_time = time.time()
+                    print(
+                        round(new_time - old_time, 2),
+                        hex(tx_item.timestamp),
+                        hex(tx_item.timestamp - old_ts),
+                        self.dump_rate_s,
+                        self.rx_running,
+                    )
+                    old_time = new_time
+                    old_ts = tx_item.timestamp
 
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
