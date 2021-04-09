@@ -23,6 +23,8 @@ async def async_main() -> None:
         n_pols=2,
         sample_bits=8,
         channel_offset_value=32768 // 256 * 4,
+        rx_thread_affinity=2,
+        batches_per_chunk=5,
     )
 
     xbengine_proc_loop.add_udp_ibv_receiver_transport(

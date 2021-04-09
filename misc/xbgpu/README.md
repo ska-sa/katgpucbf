@@ -1,5 +1,6 @@
 # katxgpu
 A tensor-core accelerated GPU-based X-engine.
+TODO: Expand on this
 
 ## TODOs
 
@@ -96,6 +97,10 @@ will be rejected with extreme prejudice.
 1. Enter your python 3.6 virtual environment
 2. Run `pip install -r requirements-dev.txt`
 3. Run `pre-commit install`
+
+## Theory of Operation
+
+## Resource Utilisation
 
 ## Test Framework
 
