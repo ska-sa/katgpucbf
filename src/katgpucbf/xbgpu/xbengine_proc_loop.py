@@ -1,12 +1,25 @@
 """
-TODO: Write this.
+This module defines an XBEngineProcessingLoop processing loop object that implements an entire GPU XB-Engine pipeline.
+
+Additionally this module defines the QueueItem and RxQueueItem objects that are used in the XBEngineProcessingLoop for
+passing information between different async processing loops within the object.
 
 TODO:
-Close _receiver_loop properly - set running equal to false, if data is not being received, receiver loop will not stop
-Talk about accumulation epochs
-Define a batch
-Decide what to do with file monitor
-B-Engine
+    1. Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
+    docstring for more information. At the moment, there is not clean way to close the pipeline.
+    2. Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
+    worth parameterising this function to give it a custom file name and set it to write changes to a file.
+    3. There is no B-Engine
+    4. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
+    instead of these print statements.
+    5. The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
+    logic will need to go in the _gpu_proc_loop for the B-Engine processing and then a seperate sender loop would need
+    to be created for sending B-Engine data.
+    6. Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
+    pipeline.
+    7. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
+    crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
+    could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
 """
 
 # General Imports
@@ -91,10 +104,17 @@ class XBEngineProcessingLoop:
 
     The X-Engine processing is performed across three different async_methods. Data is passed between these items
     using asyncio.Queues. The three processing loops are as follows:
-    1. _receiver_loop
-    2. _gpu_proc_loop
-    3. _sender_loop
+    1. _receiver_loop - Receive chunks from network and initiate transfer to GPU.
+    2. _gpu_proc_loop - Reorder chunk in GPU memory and perform the correlation operation on this reordered data.
+    3. _sender_loop - Transfer correlated data to system RAM and then send it out on the network.
     There is also a seperate loop for sending descriptors onto the network.
+
+    Items passed between queues may still have GPU operations in progress. Each item stores a list of events that can
+    used to determine if GPU operation is complete.
+
+    In order to reduce the load on the python controlling thread, received data is collected into chunks. A chunk
+    consists of multiple batches of F-Engine heaps where a batch is a collection of heaps from all F-Engine with the
+    same timestamp.
 
     This class allows for different types of transports to be used for the sender and receiver code. These transports
     allow for in process unit tests to be created that do not require access to the network.
@@ -171,7 +191,8 @@ class XBEngineProcessingLoop:
         """
         Construct an XBEngineProcessingLoop object.
 
-        This constructor allocates all memory buffers to be used in the lifetime of the project.
+        This constructor allocates all memory buffers to be used in the lifetime of the project. These buffers are then
+        continously resued to ensure memory use remains constrained.
 
         It does not specify the transports to be used. These need to be specified by the add_*_receiver_transport() and
         the add_*_sender_transport() functions provided in this class.
