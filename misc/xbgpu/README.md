@@ -42,6 +42,12 @@ This only occurs about once every ten runs, but when multiple branches are being
 kick off many tests. This problem needs to be investigate. I think this is due to the async function here:
 https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
 but I dont know for sure.
+11. There are a list of TODOs in the [xbengine](katxgpu/xbengine_proc_loop.py). These should be implemented. The most
+pressing of these is the implementation of a clean exit and the addition of control and monitoring.
+12. The receiver class requires a few different classes to set up correctly. The recv.Stream, recv.Ringbuffer and 
+katxgpu.ringbuffer.AsyncRingbuffer objects. See [receiver_example.py](scratch/receiver_example.py) for an example. It
+may be worth creating some top level class that encapsulates all of these classes as there is no real value added by
+having the seperate. It would make implementing the receiver much simpler.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
