@@ -6,6 +6,7 @@ Close _receiver_loop properly - set running equal to false, if data is not being
 Talk about accumulation epochs
 Define a batch
 Decide what to do with file monitor
+B-Engine
 """
 
 # General Imports
@@ -78,7 +79,24 @@ class RxQueueItem(QueueItem):
 
 
 class XBEngineProcessingLoop:
-    """TODO: Write this."""
+    """
+    Class that creates an entire GPU XB-Engine pipeline.
+
+    Currently the B-Engine functionality has not been added. This class currently only creates an X-Engine pipeline.
+
+    This pipeline encompasses receiving SPEAD heaps from F-Engine. Sending them to the GPU for processing and then
+    sending them back out on the network.
+
+    The X-Engine processing is performed across three different async_methods. Data is passed between these items
+    using asyncio.Queues. The three processing loops are as follows:
+    1. _receiver_loop
+    2. _gpu_proc_loop
+    3. _sender_loop
+    There is also a seperate loop for sending descriptors onto the network.
+
+    This class allows for different types of transports to be used for the sender and receiver code. These transports
+    allow for in process unit tests to be created that do not require access to the network.
+    """
 
     # 1. Array Configuration Parameters - Parameters used to configure the entire array
     adc_sample_rate_Hz: int
@@ -148,9 +166,45 @@ class XBEngineProcessingLoop:
         rx_thread_affinity: int,
         batches_per_chunk: int,  # Used for GPU memory tuning
     ):
-        """TODO: Write this."""
-        print("Created Processing Loop Object")
+        """
+        Construct an XBEngineProcessingLoop object.
 
+        This constructor allocates all memory buffers to be used in the lifetime of the project.
+
+        It does not specify the transports to be used. These need to be specified by the add_*_receiver_transport() and
+        the add_*_sender_transport() functions provided in this class.
+
+        Parameters
+        ----------
+        adc_sample_rate_Hz: int
+            Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
+            of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
+            stall as heaps queue at the sender faster than they are sent.
+        n_ants: int
+            The number of antennas to be correlated.
+        n_channels_total: int
+            The total number of frequency channels out of the F-Engine.
+        n_channels_per_stream: int
+            The number of frequency channels contained per stream.
+        n_pols: int
+            The number of pols per antenna. Expected to always be 2.
+        n_samples_per_channel: int
+            The number of time samples received per frequency channel.
+        sample_bits: int
+            The number of bits per sample. Only 8 bits is supported at the moment.
+        heap_accumulation_threshold: int
+            The number of consecutive heaps to accumulate. Used to determine the sync epoch.
+        channel_offset_value: int
+            Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
+            Must be a multiple of n_channels_per_stream.
+        rx_thread_affinity: int
+            Specifc CPU core to assign the RX stream processing thread to.
+        batches_per_chunk: int
+            A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
+            the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
+            system RAM is allocated, the lower this value is, the more work the python processing thread is requried to
+            do.
+        """
         # 1. Assign configuration variables.
         # 1.1 Ensure that constructor arguments conform to
         if n_pols != 2:
@@ -301,7 +355,26 @@ class XBEngineProcessingLoop:
             self.receiverStream.add_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector_affinity: int):
-        """TODO: Write this - add command line arguments."""
+        """
+        Add the ibv_udp transport to the receiver.
+
+        The receiver will read udp packets off of the specified interface using the ibverbs library to offload
+        processing from the CPU.
+
+        This transport is intended to be the transport used in production.
+
+        Parameters
+        ----------
+        src_ip: str
+            IP address of source data.
+        src_port: int
+            Port of source data
+        interface_ip: str
+            IP address of interface to listen for data on.
+        comp_vector_affinity: int
+            Received packets will generate interrupts from the NIC. These interrupts can be assigned to a specific CPU
+            core. This parameters determines which core to assign these interrupts to.
+        """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
@@ -310,14 +383,34 @@ class XBEngineProcessingLoop:
         )
 
     def add_buffer_receiver_transport(self, buffer: bytes):
-        """TODO: Write this."""
+        """
+        Add the buffer transport to the receiver.
+
+        The receiver will read packet data python ByteArray generated by a spead2.send.BytesStream object.
+
+        This transport is intended to be used for testing purposes.
+
+        Parameters
+        ----------
+        buffer: bytes
+            Buffer containing simulated packet data.
+        """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
         self.receiverStream.add_buffer_reader(buffer)
 
     def add_pcap_receiver_transport(self, pcap_file_name: str):
-        """TODO: Write this."""
+        """
+        Add the pcap transport to the receiver. The receiver will read packet data from a pcap file.
+
+        This transport is intended to be used for testing purposes.
+
+        Parameters
+        ----------
+        filename: string
+            Name of PCAP file to open.
+        """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
@@ -329,6 +422,9 @@ class XBEngineProcessingLoop:
             raise AttributeError("Transport for sending data has already been set.")
         self.tx_transport_added = True
 
+        # This value staggers the send so that packets within a heap are transmitted onto the network across the entire
+        # time between dumps. intervaleCare needs to be taken to ensure that this rate is not set too high. If it is
+        # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
 
         self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
@@ -348,8 +444,9 @@ class XBEngineProcessingLoop:
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
         self.tx_transport_added = True
-
-        dump_rate_s = 0.05  # Just set very low
+        # For the inproc transport this value is set very low as the dump rate does affect performanc for an inproc
+        # queue and a high dump rate just makes the unit tests take very long to run.
+        dump_rate_s = 0.05
 
         self.sendStream = katxgpu.xsend.XEngineSPEADInprocSend(
             n_ants=self.n_ants,
