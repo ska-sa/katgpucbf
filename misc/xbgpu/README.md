@@ -100,6 +100,8 @@ will be rejected with extreme prejudice.
 
 ## Theory of Operation
 
+### Accumulation Epochs and Auto resync
+
 ## Resource Utilisation
 
 ## Test Framework

@@ -3,7 +3,9 @@ TODO: Write this.
 
 TODO:
 Close _receiver_loop properly - set running equal to false, if data is not being received, receiver loop will not stop
-
+Talk about accumulation epochs
+Define a batch
+Decide what to do with file monitor
 """
 
 # General Imports
@@ -97,15 +99,15 @@ class XBEngineProcessingLoop:
     batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
     channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
 
-    # 3. Flags used at some point in the program
+    # 4. Flags used at some point in the program
     rx_transport_added: bool  # False if no rx transport has been added, true otherwise
     tx_transport_added: bool  # False if no tx transport has been added, true otherwise
     running: bool  # Remains true until the process must close - then set to false and all the loops will stop
 
-    # 4. Monitor for tracking the number of chunks queued in the receiver and items in the queues
+    # 5. Monitor for tracking the number of chunks queued in the receiver and items in the queues
     monitor: katxgpu.monitor.Monitor
 
-    # 5. Queues for passing items between different asyncio functions. The _rx_item_queue passes items from the
+    # 6. Queues for passing items between different asyncio functions. The _rx_item_queue passes items from the
     # _receiver_loop function to the _gpu_proc_loop function and the _tx_item_queue passes items from the
     # _gpu_proc_loop to the _sender_loop function. Once an item has been used, it will be passed back on the
     # corresponding _free_item_queue to ensure that all allocated buffers go back into circulation.
@@ -113,13 +115,6 @@ class XBEngineProcessingLoop:
     _rx_free_item_queue: "asyncio.Queue[RxQueueItem]"
     _tx_item_queue: "asyncio.Queue[QueueItem]"
     _tx_free_item_queue: "asyncio.Queue[QueueItem]"
-
-    # 6. Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
-    # stream. An abstract command queue can either be implemented as an OpenCL command queue or a Cuda stream depending
-    # on the context.
-    _upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-    _proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-    _download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
 
     # 7. Objects for sending and receiving data
     ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
@@ -130,6 +125,14 @@ class XBEngineProcessingLoop:
     context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
     tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
     preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorder
+    reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
+
+    # 9. Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
+    # stream. An abstract command queue can either be implemented as an OpenCL command queue or a Cuda stream depending
+    # on the context.
+    _upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+    _proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+    _download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
 
     def __init__(
         self,
@@ -148,8 +151,8 @@ class XBEngineProcessingLoop:
         """TODO: Write this."""
         print("Created Processing Loop Object")
 
-        # 1.
-
+        # 1. Assign configuration variables.
+        # 1.1 Ensure that constructor arguments conform to
         if n_pols != 2:
             raise ValueError("n_pols must equal 2 - no other values supported at the moment.")
 
@@ -159,8 +162,7 @@ class XBEngineProcessingLoop:
         if channel_offset_value % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
-        # Remember to set rx  thread affinities
-
+        # 1.2 Assign array configuration variables
         self.adc_sample_rate_Hz = adc_sample_rate_Hz
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.n_ants = n_ants
@@ -171,30 +173,41 @@ class XBEngineProcessingLoop:
         self.sample_bits = sample_bits
         complexity = 2
 
-        self.channel_offset_value = channel_offset_value
-
-        ############################
-
-        self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
-
-        self.tx_transport_added = False
-        self.rx_transport_added = False
-        self.running = True
-
-        use_file_monitor = False
-        if use_file_monitor:
-            self.monitor = katxgpu.monitor.FileMonitor("temp_file.log")
-        else:
-            self.monitor = katxgpu.monitor.NullMonitor()
-
-        # ########################
+        # 1.3 Calculate derived parameters.
         # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
         # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
         # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
         # argument to the reciever for cases where the n_channels_per_stream changes across streams (likely for non-power-of-
         # two array sizes).
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_samples_per_channel
+        # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
+        self.rx_bytes_per_heap_batch = (
+            self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
+        )
+        # This is how much the timestamp increments by between succesive accumulation epochs
+        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
+
+        # 1.4 Assign engine configuration parameters
         self.batches_per_chunk = batches_per_chunk
+        self.channel_offset_value = channel_offset_value
+
+        # 1.5 Set runtime flags to their initial states
+        self.tx_transport_added = False
+        self.rx_transport_added = False
+        self.running = True
+
+        # 2. Set up file monitor for tracking the state of the reciever chunks and the queues. This monitor is hardcoded
+        # to not write data to a file. If debugging of the queues is needed, setting the use_file_monitor to true should
+        # aid in this debugging.
+        # TODO: Decide how to configure and manage the monitor.
+        use_file_monitor = False
+        if use_file_monitor:
+            self.monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+        else:
+            self.monitor = katxgpu.monitor.NullMonitor()
+
+        # 3. Create the receiverStream object. This object has no attached transport yet and will not function until
+        # one of the add_*_receiver_transport() functions has been called.
         ringbuffer_capacity = 15
         self.ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
         self.receiverStream = recv.Stream(
@@ -210,19 +223,17 @@ class XBEngineProcessingLoop:
             use_gdrcopy=False,
             monitor=self.monitor,
         )
-        self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
-        )
 
-        # Care needs to be taken when setting this value - document why
-        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
+        # 4. Create GPU specific objects.
+        # 4.1 Create a GPU context, the x.is_cuda flag forces CUDA to be used instead of OpenCL.
+        self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
-        # These queues are CUDA streams
+        # 4.2 Create various command queues (or CUDA streams) to queue GPU functions on.
         self._upload_command_queue = self.context.create_command_queue()
         self._proc_command_queue = self.context.create_command_queue()
         self._download_command_queue = self.context.create_command_queue()
 
-        # Set up GPU Kernels
+        # 4.3 Create reorder and correlation operations and create buffer linking the two operations.
         tensorCoreTemplate = katxgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
             self.context,
             n_ants=self.n_ants,
@@ -245,16 +256,27 @@ class XBEngineProcessingLoop:
         )
         self.preCorrelationReorderOperation.bind(outReordered=self.reordered_buffer_device)
 
+        # 5. Create various buffers and assign them to the correct queues or objects.
+        # 5.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
+        # setting these values too high results in too much GPU memory being consumed. There just need to be enough
+        # of them that the different processing loops do not get starved waiting for items. The low single digits is
+        # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
+        # RAM than GPU RAM.
+        # These values are not configurable as they have been acceptable for most tests cases up until now. If the
+        # pipeline starts bottlenecking, then maybe look at increasing these values.
         n_rx_items = 3  # To high means to much GPU memory gets allocated
         n_tx_items = 2
         n_free_chunks = 20
 
-        # Inter asyncio communication process - monitor make queue is a wrapper of asyncio queue
+        # 5.2 Create various queues for communication between async funtions. These queues are extended in the monitor
+        # class, allowing for the monitor to track the number of items on each queue.
         self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)  # type: asyncio.Queue[RxQueueItem]
         self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
         self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
+        # 5.3 Create buffers and assign them correctly.
+        # 5.3.1 Create items that will store received chunks that have been transferred to the GPU.
         for i in range(n_rx_items):
             rx_item = RxQueueItem()
             rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
@@ -262,6 +284,7 @@ class XBEngineProcessingLoop:
             )
             self._rx_free_item_queue.put_nowait(rx_item)
 
+        # 5.3.2 Create items that will store correlated data in GPU memory, ready for transferring back to system RAM.
         for i in range(n_tx_items):
             tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
@@ -269,14 +292,12 @@ class XBEngineProcessingLoop:
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
+        # 5.3.1 Create empty chunks and give them to the receiver to use to assemble heaps.
         for i in range(n_free_chunks):
-            # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
             buf = katsdpsigproc.accel.HostArray(
                 self.preCorrelationReorderOperation.template.inputDataShape, np.int16, context=self.context
             )
-            # 6.2 Create a chunk - the buffer object is given to this chunk. This is where sample data in a chunk is stored.
             chunk = recv.Chunk(buf)
-            # 6.3 Give the chunk to the receiver - once this is done we no longer need to track the chunk object.
             self.receiverStream.add_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector_affinity: int):
