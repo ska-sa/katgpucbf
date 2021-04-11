@@ -112,18 +112,36 @@ will be rejected with extreme prejudice.
 2. Run `pip install -r requirements-dev.txt`
 3. Run `pre-commit install`
 
-## Running the pipeline
+## Launching the XB-Engine.
 
-The [main.py](katxgpu/main.py) file launches the entire XB-Engine pipeline. When installing the katxgpu package
+The [main.py](katxgpu/main.py) file launches the entire XB-Engine pipeline. When installing the katxgpu package, the
+main.py file is wrapped in a script called `xgpu` that can be called from the command line. The pipeline can be
+launched using the following command: 
 
 ```
 xgpu \
---receiver-thread-affinity 0 \
---receiver-comp-vector-affinity 0 \
---src-interface-address 10.100.44.1 --sender-thread-affinity 0 --dest-interface-address 10.100.44.1 239.10.10.10 7149 239.10.10.11 7149
+    --receiver-thread-affinity <CPU core index> \
+    --receiver-comp-vector-affinity <CPU core index> \
+    --src-interface-address <interface IP> \
+    --sender-thread-affinity <CPU core index> \
+    --dest-interface-address <interface IP> \
+    <src mcast address> <src port> \
+    <dest mcast address> <dest port>
+```
 
-Threads can all have the same ID
-Default config
+An example with the fields populated is: 
+`xgpu --receiver-thread-affinity 0 --receiver-comp-vector-affinity 0 --src-interface-address 10.100.44.1 --sender-thread-affinity 0 --dest-interface-address 10.100.44.1 239.10.10.10 7149 239.10.10.11 7149`
+
+The command above launches the XB-Engine with the minimum number of arguments required to run. The interface with
+address 10.100.44.1 is used to send and receive data. Data is received from the 239.10.10.10:7149 address and sent out
+on the 239.10.10.11:7149 address. All the different affinities are set to use core 0. This XB-Engine uses the default 
+configuration of a 64 antenna, 32 768 channels, L-Band array. Running `xgpu --help` will list all other arguments that
+can be used to configure the array.
+
+This pipeline requires three core indexes to be specified 
+(`--receiver-thread-affinity, --receiver-comp-vector-affinity, --sender-thread-affinity`). It is recommended that these
+all be assigned to the same core. The reason for keeping them seperate is to be explicit and in case performance issues
+occur.
 
 ## Theory of Operation
 
@@ -185,6 +203,7 @@ docker run \
 ```
 
 To launch the entire XB-Engine in a container run the following command:
+
 ```
 docker run \
     --gpus all \
