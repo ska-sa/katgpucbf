@@ -99,4 +99,6 @@ setuptools.setup(
     ext_package="katxgpu",
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExt},
+    # This creates a command line tool called xgpu that when run launches a XB-Engine pipeline.
+    entry_points={"console_scripts": ["xgpu = katxgpu.main:main"]},
 )

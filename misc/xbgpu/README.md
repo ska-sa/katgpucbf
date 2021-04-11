@@ -44,10 +44,18 @@ https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/
 but I dont know for sure.
 11. There are a list of TODOs in the [xbengine](katxgpu/xbengine_proc_loop.py). These should be implemented. The most
 pressing of these is the implementation of a clean exit and the addition of control and monitoring.
-12. The receiver class requires a few different classes to set up correctly. The recv.Stream, recv.Ringbuffer and 
+12. The receiver requires a few different classes to set up correctly. The recv.Stream, recv.Ringbuffer and 
 katxgpu.ringbuffer.AsyncRingbuffer objects. See [receiver_example.py](scratch/receiver_example.py) for an example. It
 may be worth creating some top level class that encapsulates all of these classes as there is no real value added by
-having the seperate. It would make implementing the receiver much simpler.
+having them seperate and it is a bit confusing to have to work with so many classes to do essentially one function.
+13. The command line parameters in [main.py](katxgpu/main.py) could be made more intuitive, for example instead of
+having mcast addresses and port numbers as seperate arguments, accept something formatted as
+`<ip address>:<port number>` and parse the argument to seperate out the parameters. Additionally checks need to be put
+in place to ensure the command line parameters are correct - is the port number valid, is the IP address a multicast
+address, is the array size >0, etc. As a first step for this, I would look at the
+[main.py](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/main.py) file in katfgpu as this uses some useful
+parsing functions that could be of use here.
+
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
