@@ -1,8 +1,16 @@
 """
-TODO: Write this.
+Module to launch the XB-Engine.
 
-TODO: Add command line parameters
-TODO: Fix command line parameters
+This module parses all command line arguments required to configure the XB-Engine and creates an XBEngineProcessingLoop
+object. The XBEngineProcessingLoop object then manages everything required to run the XB-Engine.
+
+TODO:
+The command line parameters could be made more intuitive, for example instead of having mcast addresses and port
+numbers as seperate arguments, accept something formatted as "<ip address>:<port number>" and parse the argument to
+seperate out the parameters. Additionally checks need to be put in place to ensure the command line parameters are
+correct - is the port number valid, is the IP address a multicast address, is the array size >0, etc. As a first step
+for this, I would look at the [main.py](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/main.py) file in katfgpu
+as this uses some useful parsing functions that could be of use here.
 """
 
 import argparse
@@ -11,8 +19,11 @@ import katxgpu.xbengine_proc_loop
 
 
 def parse_args() -> argparse.Namespace:
-    """TODO: Add this."""
+    """Parse all command line parameters for the XB-Engine and ensure that they are valid."""
+    # 1. Create command line parsing argument and set help menu description
     parser = argparse.ArgumentParser(description="Launch an XB-Engine for a single multicast stream.")
+
+    # 2. Configure flagged arguments
     parser.add_argument(
         "--adc-sample-rate",
         type=int,
@@ -91,23 +102,34 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="IP address of the interface that this engine will transmit data on.",
     )
+
+    # 3. Set positional arguments
     parser.add_argument("src_multicast_address", type=str, help="Multicast address data is received from.")
     parser.add_argument("src_port", type=int, help="Port data is received from.")
     parser.add_argument("dest_multicast_address", type=str, help="Multicast address data is sent on.")
     parser.add_argument("dest_port", type=int, help="Port data is sent on.")
+
+    # 4. Read in command line arguments into ArgumentParser object
     args = parser.parse_args()
 
+    # 5. Verify that the command line arguments are valid.
     if args.pols != 2:
         parser.error("Only 2 polarisations per antenna currently supported.")
 
     if args.sample_bits != 8:
         parser.error("Only 8 bit values are currently supported.")
 
+    # 6. Return
     return args
 
 
 async def async_main() -> None:
-    """TODO: Write this."""
+    """
+    Create and launch the XB-Engine.
+
+    This function creates the XBEngineProcessingLoop object. It attaches the ibverbs sender and receiver transports to
+    the XBEngineProcessingLoop object and then tells the object to launch all its internal asyncio functions.
+    """
     args = parse_args()
 
     print("Print Initialising XB-Engine")
@@ -145,7 +167,11 @@ async def async_main() -> None:
 
 
 def main() -> None:
-    """TODO: Write this."""
+    """
+    Launch the XB-Engine pipeline.
+
+    This method only sets up the asyncio loop and calls the async_main() method which is where the real work is done.
+    """
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(async_main())
