@@ -20,6 +20,8 @@ TODO:
     7. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
     crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
     could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
+    8. The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
+    this to use the new asyncio syntax.
 """
 
 # General Imports
@@ -225,7 +227,7 @@ class XBEngineProcessingLoop:
         batches_per_chunk: int
             A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
             the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
-            system RAM is allocated, the lower this value is, the more work the python processing thread is requried to
+            system RAM is allocated, the lower this value is, the more work the python processing thread is required to
             do.
         """
         # 1. Assign configuration variables.
@@ -641,7 +643,7 @@ class XBEngineProcessingLoop:
                     # is expected to be constant
                     # This print message must become a debug.INFO message
                     print(
-                        f"LOG INFO: Current dump timestamp: {hex(tx_item.timestamp)}, difference between dump timestamps: {hex(tx_item.timestamp - old_ts)}, wall time between dumps {round(new_time - old_time, 2)}, "
+                        f"LOG INFO: Current dump timestamp: {hex(tx_item.timestamp)}, difference between dump timestamps: {hex(tx_item.timestamp - old_ts)}, wall time between dumps {round(new_time - old_time, 2)} s, "
                     )
                     # Not sure under which conditions that this would occur. Something funny would have to happen at the receiver.
                     # This check is here preemptivly - this issue has not been detected yet.
