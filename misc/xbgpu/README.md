@@ -1,6 +1,14 @@
 # katxgpu
-A tensor-core accelerated GPU-based X-engine.
-TODO: Expand on this
+
+This repository implements a GPU-based XB-Engine for the MeerKAT Extension Project. 
+
+This repo makes use of the [SPEAD2](https://spead2.readthedocs.io/en/latest/index.html) library for high performance
+networking. SPEAD2 is designed to send and recieve multicast UDP data that conforms to the SPEAD protocol. More
+information can be found [here](src/README.md).
+
+Nvidia Tensor cores have been used to greatly accelerate the correlation algorithm.
+
+NOTE: Currently the B-Engine part of this engine has not been implemented.
 
 ## TODOs
 
@@ -12,7 +20,7 @@ In this case the TODO is listed here.
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
 [display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp) and 
 [display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py), [xsend.py](katxgpu/xsend.py) 
-also have links that must be updated.
+also have links that must be updated. This README.md also has these links. 
 2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8. Once this port has been done. Change the
 [send_example.py](scratch/send_example.py) example to use the updated `asyncio.gather()` syntax instead of the the 
 `loop.run_until_complete(run())` syntax. This syntax also needs to be changed in the 
@@ -55,6 +63,7 @@ in place to ensure the command line parameters are correct - is the port number 
 address, is the array size >0, etc. As a first step for this, I would look at the
 [main.py](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/main.py) file in katfgpu as this uses some useful
 parsing functions that could be of use here.
+14. There is no B-Engine. It should eventually be implemented.
 
 
 ## License
@@ -145,9 +154,28 @@ occur.
 
 ## Theory of Operation
 
+![Sender](./katxgpu_concept.png)
+
+![Sender](./katxgpu_hardware_path.png)
+
+![Sender](./katxgpu_async_loops.png)
+
+![Sender](./katxgpu_gpu_command_queues.png)
+
+Input format
+
+Output format
+
+Where are chunks explained
+
+Link to 4 different classes
+
+Link to [file](src/README.md)
+
+
 ### Accumulation Epochs and Auto resync
 
-## Resource Utilisation
+Not a one to one ratio of input to output
 
 ## Test Framework
 
