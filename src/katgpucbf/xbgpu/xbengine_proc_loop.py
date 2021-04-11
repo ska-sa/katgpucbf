@@ -134,8 +134,9 @@ class XBEngineProcessingLoop:
 
     # 2. Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
     rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
-    timestamp_increment_per_accumulation: int
+    timestamp_increment_per_accumulation: int  # Time difference two different accumulation epochs.
     rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
+    dump_rate_s: float  # Number of seconds between output heaps.
 
     # 3. Engine Parameters - Parameters not used in the array but needed for this engine
     batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
@@ -470,13 +471,13 @@ class XBEngineProcessingLoop:
         # This value staggers the send so that packets within a heap are transmitted onto the network across the entire
         # time between dumps. intervaleCare needs to be taken to ensure that this rate is not set too high. If it is
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
-        dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
+        self.dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
 
         self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
-            dump_rate_s=dump_rate_s,
+            dump_rate_s=self.dump_rate_s,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             endpoint=(dest_ip, dest_port),
@@ -500,13 +501,13 @@ class XBEngineProcessingLoop:
         self.tx_transport_added = True
         # For the inproc transport this value is set very low as the dump rate does affect performanc for an inproc
         # queue and a high dump rate just makes the unit tests take very long to run.
-        dump_rate_s = 0.05
+        self.dump_rate_s = 0.05
 
         self.sendStream = katxgpu.xsend.XEngineSPEADInprocSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
-            dump_rate_s=dump_rate_s,
+            dump_rate_s=self.dump_rate_s,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             queue=queue,
@@ -587,8 +588,6 @@ class XBEngineProcessingLoop:
         TODO: Add B-Engine processing in this loop.
         """
         # 1. Set up initial conditions
-        old_time = time.time()
-        old_ts = 0
         tx_item = await self._tx_free_item_queue.get()
         # The very first heap sent out the X-Engine will have a timestamp of zero which is meaningless, every other
         # heap will have the correct timestamp.
@@ -635,30 +634,11 @@ class XBEngineProcessingLoop:
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
 
-                    # 3.2.3 Perform some basic logging - these prints will need to be turned into proper python logging
-                    # statements
-                    new_time = time.time()
-                    # We do not expect the time between dumps to be the same each time as the time.time() function
-                    # checks the wall time now, not the time between timestamps. The difference between dump timestamps
-                    # is expected to be constant
-                    # This print message must become a debug.INFO message
-                    print(
-                        f"LOG INFO: Current dump timestamp: {hex(tx_item.timestamp)}, difference between dump timestamps: {hex(tx_item.timestamp - old_ts)}, wall time between dumps {round(new_time - old_time, 2)} s, "
-                    )
-                    # Not sure under which conditions that this would occur. Something funny would have to happen at the receiver.
-                    # This check is here preemptivly - this issue has not been detected yet.
-                    if tx_item.timestamp - old_ts != self.timestamp_increment_per_accumulation:
-                        print(
-                            f"LOG WARNING: Timestamp between heaps equal to {hex(tx_item.timestamp - old_ts)}, expected {self.timestamp_increment_per_accumulation}"
-                        )
-                    old_time = new_time
-                    old_ts = tx_item.timestamp
-
-                    # 3.2.4 Transfer the TX item to the sender loop
+                    # 3.2.3 Transfer the TX item to the sender loop
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
 
-                    # 3.2.5 Get a new tx item, assign its buffer correctly and reset the buffer to zero.
+                    # 3.2.4 Get a new tx item, assign its buffer correctly and reset the buffer to zero.
                     tx_item = await self._tx_free_item_queue.get()
                     tx_item.timestamp = next_heap_timestamp
                     self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
@@ -694,6 +674,9 @@ class XBEngineProcessingLoop:
         better, but this is not really required in this loop as this whole process occurs at a much slower pace than
         the rest of the pipeline.
         """
+        old_time_s = time.time()
+        old_timestamp = 0
+
         while self.running is True:
             # 1. Get the item to transfer and wait for all GPU events to finish before continuing
             item = await self._tx_item_queue.get()
@@ -702,15 +685,53 @@ class XBEngineProcessingLoop:
             # 2. Get a free heap buffer to copy the GPU data to
             buffer_wrapper = await self.sendStream.get_free_heap()
 
-            # 3. Transfer GPU buffer in item to free buffer.
+            # 3 Perform some basic logging - these prints will need to be turned into proper python logging
+            # statements. We do not expect the time between dumps to be the same each time as the time.time() function
+            # checks the wall time now, not the actual time between timestamps. The difference between dump timestamps
+            # is expected to be constant
+            new_time_s = time.time()
+            time_difference_between_heaps_s = new_time_s - old_time_s
+
+            # 3.1 Print that a heap is about to be sent. This print message must become a debug.INFO message
+            # print(
+            #     f"LOG INFO: Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
+            #     f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
+            #     f"{round(time_difference_between_heaps_s, 2)} s"
+            # )
+
+            # 3.2. Ensure that the timestamp between output heaps is the value that is expected,
+            # Not sure under which conditions that this would occur. Something funny would have to happen at the receiver.
+            # This check is here pre-emptivly - this issue has not been detected yet.
+            if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
+                print(
+                    f"LOG WARNING: Timestamp between heaps equal to {hex(item.timestamp - old_timestamp)}, expected "
+                    f"{hex(self.timestamp_increment_per_accumulation)}"
+                )
+
+            # 3.3. Check that items are not being received faster than they are expected to be send.
+            # As the output packets are rate limited in such a way to match the dump rate, receiving data too quickly
+            # will result in data bottlenecking at the sender, the pipeline eventually stalling and the input buffer
+            # overflowing.
+            if time_difference_between_heaps_s * 1.05 < self.dump_rate_s:
+                print(
+                    f"LOG WARNING: Time between output heaps: {round(time_difference_between_heaps_s,2)} which is less "
+                    f"the expected {round(self.dump_rate_s,2)}. If this warning occurs too often, the pipeline will "
+                    f"stall because the rate limited sender will not keep up with the input rate."
+                )
+
+            # 3.4 Update variables used for warning checks.
+            old_time_s = new_time_s
+            old_timestamp = item.timestamp
+
+            # 4. Transfer GPU buffer in item to free buffer.
             item.buffer_device.get_async(self._download_command_queue, buffer_wrapper.buffer)
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            # 4. Tell sender to transmit heap buffer on network.
+            # 5. Tell sender to transmit heap buffer on network.
             self.sendStream.send_heap(item.timestamp, buffer_wrapper)
 
-            # 5. Reset item and put it back on the the _tx_free_item_queue for resue
+            # 6. Reset item and put it back on the the _tx_free_item_queue for resue
             item.reset()
             await self._tx_free_item_queue.put(item)
 

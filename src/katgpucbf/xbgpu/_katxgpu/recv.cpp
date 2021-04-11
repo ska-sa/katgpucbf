@@ -254,7 +254,8 @@ void *stream::allocate(std::size_t ulHeapSize_bytes, spead2::recv::packet_header
     // 1. Perform some basic checks on the received packet of the new heap to confirm that it is what we expect.
     if (ulHeapSize_bytes != m_ulPacketSize_bytes * m_iNumChannels)
     {
-        spead2::log_info("Received heap is the wrong size - is this a descriptor? (This message can be removed in production)");
+        spead2::log_info(
+            "Received heap is the wrong size - is this a descriptor? (This message can be removed in production)");
         return nullptr;
     }
     std::int64_t i64Timestamp = -1;
@@ -331,8 +332,9 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     }
     if (ulHeapSize_bytes != m_ulPacketSize_bytes * m_iNumChannels)
     {
-        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes", ulHeapSize_bytes,
-                         m_ulPacketSize_bytes * m_iNumChannels);
+        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes. is this a descriptor? (This "
+                         "message can be removed in production)",
+                         ulHeapSize_bytes, m_ulPacketSize_bytes * m_iNumChannels);
         return;
     }
 
