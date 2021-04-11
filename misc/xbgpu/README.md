@@ -4,13 +4,34 @@ This repository implements a GPU-based XB-Engine for the MeerKAT Extension Proje
 
 This repo makes use of the [SPEAD2](https://spead2.readthedocs.io/en/latest/index.html) library for high performance
 networking. SPEAD2 is designed to send and recieve multicast UDP data that conforms to the SPEAD protocol. More
-information can be found [here](src/README.md).
+information can be found [here](src/README.md). With the correct configuration, this engine is able to receive packets
+at high data rates without dropping any.
 
-Nvidia Tensor cores have been used to greatly accelerate the correlation algorithm.
+Nvidia Tensor cores have been used to greatly accelerate the correlation algorithm. 
+
+The SARAO [katsdpsigproc](https://katsdpsigproc.readthedocs.io/) package has been used to implement the GPU side processing.
+This wraps both OpenCL and CUDA allowing for generic operations to be defined that can operate in both CUDA and OpenCL.
+Currently all kernels have been written in CUDA. Additionally in order to make use of Tensor cores, CUDA needs to be
+used. Due to these reasons, the framework only compiles things down to CUDA, not OpenCL.
+
+Both katsdpsigproc and SPEAD2 are compatible with [asyncio](https://docs.python.org/3/library/asyncio.html). This
+XB-Engine has been written to run across multiple functions using asyncio to coordinate all the moving parts.
+
+The majority of this code is written in python. The Python portion of this code is only used for controlling and
+coordinating the engine. All heavy processing is handled on seperate C++ threads (in the SPEAD2 case) and on the GPU.
+This allows the pipeline to process at very high data rates. (With the correct configuration, by running 10 instances
+of this pipeline, a single Nvidia RTX 3080 GPU and Mellanox 100 GbE NIC should be able to process 70 Gbps quite easily
+without dropping any packets.)  
+
+TODO: The specific tools used for control and monitoring, metrics and logging need to be mentioned here when they
+have been decided upon.
 
 NOTE: Currently the B-Engine part of this engine has not been implemented.
 
 ## TODOs
+The X-Engine in its current form works as expected. The B-Engine and control and monitoring still needs to be
+implemented and there are some quality of life improvements that can be made. The recommeded improvements are as
+follows:
 
 katxgpu is still in early development with more modules being added every few weeks. Attempts are made for each of these
 modules to be complete, but when there are lingering issues that eventually need to be resolved but are not critical
@@ -52,18 +73,22 @@ https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/
 but I dont know for sure.
 11. There are a list of TODOs in the [xbengine](katxgpu/xbengine_proc_loop.py). These should be implemented. The most
 pressing of these is the implementation of a clean exit and the addition of control and monitoring.
-12. The receiver requires a few different classes to set up correctly. The recv.Stream, recv.Ringbuffer and 
+12. In the [xbengine](katxgpu/xbengine_proc_loop.py) a number of print statements are in place of proper logging
+messages. These should be replaced with log messages. In addition, it must be decided what logging and metric measuring
+tools must be used. (There was talk on using something like logstash for centralised logging and Prometheus for
+managing metrics.)
+13. The receiver requires a few different classes to set up correctly. The recv.Stream, recv.Ringbuffer and 
 katxgpu.ringbuffer.AsyncRingbuffer objects. See [receiver_example.py](scratch/receiver_example.py) for an example. It
 may be worth creating some top level class that encapsulates all of these classes as there is no real value added by
 having them seperate and it is a bit confusing to have to work with so many classes to do essentially one function.
-13. The command line parameters in [main.py](katxgpu/main.py) could be made more intuitive, for example instead of
+14. The command line parameters in [main.py](katxgpu/main.py) could be made more intuitive, for example instead of
 having mcast addresses and port numbers as seperate arguments, accept something formatted as
 `<ip address>:<port number>` and parse the argument to seperate out the parameters. Additionally checks need to be put
 in place to ensure the command line parameters are correct - is the port number valid, is the IP address a multicast
 address, is the array size >0, etc. As a first step for this, I would look at the
 [main.py](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/main.py) file in katfgpu as this uses some useful
 parsing functions that could be of use here.
-14. There is no B-Engine. It should eventually be implemented.
+15. There is no B-Engine. It should eventually be implemented.
 
 
 ## License
@@ -154,28 +179,101 @@ occur.
 
 ## Theory of Operation
 
-![Sender](./katxgpu_concept.png)
+### Signal Flow
 
-![Sender](./katxgpu_hardware_path.png)
+The general flow of data through the system is shown in the the image below:
 
-![Sender](./katxgpu_async_loops.png)
+![signal_path](./katxgpu_concept.png)
 
-![Sender](./katxgpu_gpu_command_queues.png)
+The X-Engine processing pipeline can be broken into four different stages:
+1. Receive data from the network and assemble it into a chunk. This chunk is then transferred to the GPU. This receiver
+has been implemented using SPEAD2 in C++ and bound into python. See the "SPEAD2 Network Side Software" section below
+for more information. 
+2. Reorder the chunk so that it is in a format that is ready for correlation. This reorder is implemented in the
+[precorrelation_reorder.py](katxgpu/precorrelation_reorder.py) module.
+3. The data is then correlated using the ASTRON Tensor Core Kernel. This is done by the 
+[tensorcore_xengine_core.py](katxgpu/tensorcore_xengine_core.py) class. This correlated data is then transferred back to
+system RAM.
+4. Send the correlated data (known as baseline correlation products) back into the network. This is implemented by
+the [xsend.py](katxgpu/xsend.py) module.
 
-Input format
+The image below shows where the data is located at the various stages mentioned above:
 
-Output format
+![hardware_data_path](./katxgpu_hardware_path.png)
 
-Where are chunks explained
+The numbers in the above image correspond to the following actions:
 
-Link to 4 different classes
+0\. Heaps received from F-Engines.
 
-Link to [file](src/README.md)
+1\. Heaps assembled into a chunk in system RAM.
 
+2\. Chunk transferred to GPU memory.
+
+3\. & 4. GPU kernel reorders chunk to be read for correlation and transfers reordered data to GPU memory.
+
+5\. & 6. Correlate reordered data and transfer baselines to GPU memory.
+
+7\. Transfer baselines from GPU memory to host memory.
+
+8\. Transfer baselines from host memory to the NIC and onto the network.
+
+TODO: Fix up the formatting in the above list.
+
+### Synchronization and Coordination
+
+The [xbengine_proc_loop.py](katxgpu/xbengine_proc_loop.py) module does the work of assembling all the different modules
+into a pipeline. This modules has three different async processing pipelines know as the _receiver_loop, _gpu_proc_loop
+and the _sender_loop. Data is passed between these three processing loops using asyncio.Queues. Buffers in queues are
+reused to prevent unecessary memory allocations. Additionally, buffers are passed between the python
+program to the network threads and back in order to reuse these buffers too.
+
+The image below demonstrates how data moves through the pipeline and how it is reused:
+
+![async_loops](./katxgpu_async_loops.png)
+
+The asyncio.Queues help to coordinate the flow of data through the different asyncio functions. However the GPU
+requires a seperate type of coordination. The GPU has three different command queues (A command queue is an OpenCL
+concept, with katsdpsigproc, this is still called a command queue even though it is implemented as a CUDA stream) that
+manage the coordination. One command queue is for processing and the other two are for transferring data from host
+memory to the GPU and back. Events are put onto the command queue and the async processing loops can `await` for these
+events to be complete. Often one async function will enqueue some commands followed by an event onto the GPU command
+queue and the next async function will `await` for this event to complete as it is the function that needs to work with
+this data. Tracking the different events across functions requires a bit of care to prevent race conditions and
+deadlock.
+
+The image below shows the interaction between the processing loops and the command queues:
+
+![command_queues](./katxgpu_gpu_command_queues.png)
+
+The numbers in the image above correspond to the following actions:
+1. Copy chunk to GPU memory from host 
+2. Reorder Chunk
+3. Correlate chunk
+4. Transfer heap to host memory from GPU
 
 ### Accumulation Epochs and Auto resync
 
-Not a one to one ratio of input to output
+The input data is accumulated before being output. For every output heap, multiple input heaps are received.
+
+A heap from a single F-Engine consists of a set number of samples specified by the `--samples-per-channel` flag. Each
+of these time samples is part of a different FFT spectrum. Meaning that the timestamp difference per sample is
+equal to the `--channels-total` multiplied by 2 (multiple for two to account for the fact that we throw half the
+spectrum away due to the symmetric properties of the Fourier transform). The timestamp difference between consecutive
+two heaps from the same F-Engine is equal to: `--samples-per-channel * --channels-total * 2`.
+
+A batch of heaps is a collection of heaps from different F-Engines with the same timestamp. Correlation occurs on a
+batch of heaps at a time. The correlated data is then accumulated. An accumulation period is called an epoch. The
+number of batches to accumulate in an epoch is equal to the `--heap-accumulation-threshold` flag. The timestamp
+difference between succesive epochs is equal to: 
+`timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`
+
+The timestamp is aligned to an integer multiple of `timestamp_difference` 
+(equivalent to the current SKARAB "auto-resync" logic). The total epoch time is equal to:
+`accumulation_time_s = timestamp_difference * --adc-sample-rate(Hz)` seconds.
+
+The output heap contains multiple packets and these packets are distributed over the entire `accumulation_time_s`
+interval to reduce network burstiness. The default configuration in [main.py](katxgpu/main.py) is for 0.5 second
+epochs when using the MeerKAT 1712 MHz sample rate L-band digitisers.
 
 ## Test Framework
 
@@ -335,6 +433,12 @@ Additionally different sockets have different PCIe root complexes. It is advisab
 same NUMA region and use some utility like `numactl` to ensure that the corresponding CPU and memory region are used
 with the GPU and NIC. If this is not done, there is a chance that the data will move between CPU sockets, leading to
 bottlenecks at the bus between the two sockets.
-4. IRQ Coalescing - TODO
-5. Larger Packet Sizes - TODO
-
+4. Larger Packet Sizes - The current MeerKAT F-Engine output packets are 1 KiB in size. A number of packets make up a
+heap with each packet in the heap representing a single channel. The packet size is thus equal to the value set by
+the `--samples-per-channel` flag multiplied by 4 (as each sample is a dual pol, complex 8-bit sample, so 4 bytes per
+sample). For the 1 KiB packets, `--samples-per-channel` is equal to 256. 1 KiB packets require quite a bit of 
+computation to assemble into heaps. By switcing to 2 KiB packets, the total CPU processing requirements can be reduced
+to 2/3 of the 1 KiB packets. Packet sizes of 4 and 8 KiB also improve on the 2 KiB packet size but the improvement is
+not as dramatic. By increasing the packet sizes, the less chance there is of your CPU being overloaded and dropping
+packets. The [fsim.cpp](scratch/fsim.cpp) and [main.py](katxgpu/main.py) both have a `--samples-per-channel` flag.
+Using these two files the thread performance at different packet sizes can be analysed.
