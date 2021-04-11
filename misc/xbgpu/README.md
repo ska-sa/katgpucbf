@@ -112,6 +112,19 @@ will be rejected with extreme prejudice.
 2. Run `pip install -r requirements-dev.txt`
 3. Run `pre-commit install`
 
+## Running the pipeline
+
+The [main.py](katxgpu/main.py) file launches the entire XB-Engine pipeline. When installing the katxgpu package
+
+```
+xgpu \
+--receiver-thread-affinity 0 \
+--receiver-comp-vector-affinity 0 \
+--src-interface-address 10.100.44.1 --sender-thread-affinity 0 --dest-interface-address 10.100.44.1 239.10.10.10 7149 239.10.10.11 7149
+
+Threads can all have the same ID
+Default config
+
 ## Theory of Operation
 
 ### Accumulation Epochs and Auto resync
@@ -171,8 +184,7 @@ docker run \
     katxgpu
 ```
 
-
-To launch the [receiver_example.py](scratch/receiver_example.py) in a container run the following command:
+To launch the entire XB-Engine in a container run the following command:
 ```
 docker run \
     --gpus all \
@@ -184,10 +196,17 @@ docker run \
     -d \
     --name=katxgpu_container \
     katxgpu \
-    python scratch/receiver_example.py
+    xgpu \
+    --receiver-thread-affinity <CPU core index> \
+    --receiver-comp-vector-affinity <CPU core index> \
+    --src-interface-address <interface IP> \
+    --sender-thread-affinity <CPU core index> \
+    --dest-interface-address <interface IP> \
+    <src mcast address> <src port> \
+    <dest mcast address> <dest port>
 ```
 
-To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_containe`
+To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_container`
 
 __NOTE__: There is quite a bit of overlap between the commands in the [Dockerfile](./Dockerfile) and the
 [Jenkinsfile](./Jenkinsfile) and the requirements for running a docker container are the same requirements as mentioned
