@@ -137,7 +137,7 @@ class XEngineSPEADAbstractSend(ABC):
         n_pols: int
             The number of pols per antenna. Expected to always be 2.
         dump_interval_s: float
-            A new heap is transmitted every dump_interval_s seconds.
+            A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -152,8 +152,8 @@ class XEngineSPEADAbstractSend(ABC):
         if n_pols != 2:
             raise ValueError("n_pols must equal 2 - no other modes supported at the moment.")
 
-        if dump_interval_s <= 0:
-            raise ValueError("Dump interval must be greater than 0 seconds.")
+        if dump_interval_s < 0:
+            raise ValueError("Dump interval must be 0 or greater.")
 
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
@@ -210,9 +210,14 @@ class XEngineSPEADAbstractSend(ABC):
         # 5. Generate all required stream information that is not specific to transports defined in the child classes
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / XEngineSPEADAbstractSend.max_payload_size)
         packet_header_overhead_bytes = packets_per_heap * XEngineSPEADAbstractSend.header_size
-        send_rate_Bps = (
-            (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_interval_s * 1.1
-        )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+
+        # 5.1 If the dump_interval is set to zero, pass zero to streamConfig to send as fast as possible.
+        if self.dump_interval_s != 0:
+            send_rate_Bps = (
+                (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_interval_s * 1.1
+            )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+        else:
+            send_rate_Bps = 0
 
         self.streamConfig = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
@@ -350,7 +355,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
         dump_interval_s: float
-            A new heap is transmitted every dump_interval_s seconds.
+            A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -424,7 +429,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             The number of pols per antenna. Expected to always be 2 at the moment.
         dump_interval_s: float
             A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected
-            but is not very useful.
+            but is not very useful. Set to zero to send as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.

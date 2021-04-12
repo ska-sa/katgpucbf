@@ -310,7 +310,8 @@ in more detail how Jenkins is configured on SARAO's servers. This document is a 
 
 ## Running within a Docker container
 
-This repository contains a Dockerfile for building a docker image that can launch katxgpu.
+This repository contains a Dockerfile for building a docker image that can launch katxgpu. As with the Jenkins CI
+server, the nvidia-container-runtime needs to be installed when running the image.
 
 In order to build the container, the following command needs to be run from the top level katxgpu directory: 
 `docker image build -t katxgpu .`
@@ -352,6 +353,11 @@ docker run \
 ```
 
 To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_container`
+
+The `--network host`, `--ulimit=memlock=-1`, `--device=/dev/infiniband/rdma_cm`, `--device=/dev/infiniband/uverbs0`
+flags are required to pass the ibverbs devices to the container for high performance networking.
+
+The `--gpus all` flag passes the GPUs from the host machine into the docker container
 
 __NOTE__: There is quite a bit of overlap between the commands in the [Dockerfile](./Dockerfile) and the
 [Jenkinsfile](./Jenkinsfile) and the requirements for running a docker container are the same requirements as mentioned

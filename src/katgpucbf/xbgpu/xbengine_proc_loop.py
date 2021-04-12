@@ -501,7 +501,7 @@ class XBEngineProcessingLoop:
         self.tx_transport_added = True
         # For the inproc transport this value is set very low as the dump rate does affect performanc for an inproc
         # queue and a high dump rate just makes the unit tests take very long to run.
-        self.dump_interval_s = 0.05
+        self.dump_interval_s = 0
 
         self.sendStream = katxgpu.xsend.XEngineSPEADInprocSend(
             n_ants=self.n_ants,
@@ -535,7 +535,6 @@ class XBEngineProcessingLoop:
         chunk_index = 0
         received_total = 0
         dropped_total = 0
-
         # 2. Get complete chunks from the ringbuffer.
         async for chunk in asyncRingbuffer:
             # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
@@ -693,11 +692,11 @@ class XBEngineProcessingLoop:
             time_difference_between_heaps_s = new_time_s - old_time_s
 
             # 3.1 Print that a heap is about to be sent. This print message must become a debug.INFO message
-            # print(
-            #     f"LOG INFO: Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
-            #     f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
-            #     f"{round(time_difference_between_heaps_s, 2)} s"
-            # )
+            print(
+                f"LOG INFO: Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
+                f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
+                f"{round(time_difference_between_heaps_s, 2)} s"
+            )
 
             # 3.2. Ensure that the timestamp between output heaps is the value that is expected,
             # Not sure under which conditions that this would occur. Something funny would have to happen at the receiver.

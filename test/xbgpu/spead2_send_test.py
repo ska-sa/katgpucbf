@@ -68,7 +68,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     heaps_to_send = (
         20  # Number of heaps to transmit in the this test. I do not see a need for this number to be larger.
     )
-    dump_interval_s = 0.05  # Normally 0.4 but we set it very low so that the test runs quickly
+    dump_interval_s = 0  # Normally 0.4 but we set it to as fast as possible so things run quickly.
 
     n_pols = 2
     complexity = 2
