@@ -423,8 +423,8 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
         dump_interval_s: float
-            A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected but is
-            not very useful.
+            A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected
+            but is not very useful.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.

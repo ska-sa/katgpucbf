@@ -40,7 +40,7 @@ n_ants = 64
 n_channels_total = 32768
 n_channels_per_stream = n_channels_total // n_ants // 4
 n_pols = 2
-dump_rate_s = 0.4
+dump_interval_s = 0.4
 
 # 3. Create cuda context - all buffers created in the XEngineSPEADIbvSend object are created from this context.
 context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
@@ -51,7 +51,7 @@ sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
     n_ants=n_ants,
     n_channels_per_stream=n_channels_per_stream,
     n_pols=n_pols,
-    dump_rate_s=dump_rate_s,
+    dump_interval_s=dump_interval_s,
     channel_offset=n_channels_per_stream * 4,  # Arbitrary for now - depends on F-Engine stream
     context=context,
     endpoint=(dest_multicast_ip, dest_multicast_port),
