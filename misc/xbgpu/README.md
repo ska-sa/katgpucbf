@@ -267,7 +267,7 @@ number of batches to accumulate in an epoch is equal to the `--heap-accumulation
 difference between succesive epochs is equal to: 
 `timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`
 
-The timestamp is aligned to an integer multiple of `timestamp_difference` 
+The output heap timestamp is aligned to an integer multiple of `timestamp_difference` 
 (equivalent to the current SKARAB "auto-resync" logic). The total epoch time is equal to:
 `accumulation_time_s = timestamp_difference * --adc-sample-rate(Hz)` seconds.
 

@@ -120,7 +120,7 @@ class XEngineSPEADAbstractSend(ABC):
         n_ants: int,
         n_channels_per_stream: int,
         n_pols: int,
-        dump_rate_s: float,
+        dump_interval_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         n_send_heaps_in_flight: int = 5,
@@ -136,8 +136,8 @@ class XEngineSPEADAbstractSend(ABC):
             The number of frequency channels contained per stream.
         n_pols: int
             The number of pols per antenna. Expected to always be 2.
-        dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds.
+        dump_interval_s: float
+            A new heap is transmitted every dump_interval_s seconds.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -152,8 +152,8 @@ class XEngineSPEADAbstractSend(ABC):
         if n_pols != 2:
             raise ValueError("n_pols must equal 2 - no other modes supported at the moment.")
 
-        if dump_rate_s <= 0:
-            raise ValueError("Dump rate must be greater than 0 seconds.")
+        if dump_interval_s <= 0:
+            raise ValueError("Dump interval must be greater than 0 seconds.")
 
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
@@ -163,7 +163,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
         self.n_pols: Final[int] = n_pols
         self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) // 2
-        self.dump_rate_s: Final[float] = dump_rate_s
+        self.dump_interval_s: Final[float] = dump_interval_s
         self._sample_bits: Final[int] = 32
 
         # 3. Multicast Stream Parameters
@@ -211,7 +211,7 @@ class XEngineSPEADAbstractSend(ABC):
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / XEngineSPEADAbstractSend.max_payload_size)
         packet_header_overhead_bytes = packets_per_heap * XEngineSPEADAbstractSend.header_size
         send_rate_Bps = (
-            (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_rate_s * 1.1
+            (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_interval_s * 1.1
         )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
 
         self.streamConfig = spead2.send.StreamConfig(
@@ -329,7 +329,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
         n_ants: int,
         n_channels_per_stream: int,
         n_pols: int,
-        dump_rate_s: float,
+        dump_interval_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         endpoint: typing.Tuple[str, int],
@@ -349,8 +349,8 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
             The number of frequency channels contained in the stream.
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
-        dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds.
+        dump_interval_s: float
+            A new heap is transmitted every dump_interval_s seconds.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -368,7 +368,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
             n_ants=n_ants,
             n_channels_per_stream=n_channels_per_stream,
             n_pols=n_pols,
-            dump_rate_s=dump_rate_s,
+            dump_interval_s=dump_interval_s,
             channel_offset=channel_offset,
             context=context,
         )
@@ -403,7 +403,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         n_ants: int,
         n_channels_per_stream: int,
         n_pols: int,
-        dump_rate_s: float,
+        dump_interval_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         queue: spead2.InprocQueue,
@@ -422,8 +422,8 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             The number of frequency channels contained in the stream.
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
-        dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds. For the inproc transport this rate is respected but is
+        dump_interval_s: float
+            A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected but is
             not very useful.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
@@ -437,7 +437,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             n_ants=n_ants,
             n_channels_per_stream=n_channels_per_stream,
             n_pols=n_pols,
-            dump_rate_s=dump_rate_s,
+            dump_interval_s=dump_interval_s,
             channel_offset=channel_offset,
             context=context,
         )

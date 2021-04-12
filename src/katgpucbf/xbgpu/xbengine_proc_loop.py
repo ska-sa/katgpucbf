@@ -136,7 +136,7 @@ class XBEngineProcessingLoop:
     rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
     timestamp_increment_per_accumulation: int  # Time difference two different accumulation epochs.
     rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
-    dump_rate_s: float  # Number of seconds between output heaps.
+    dump_interval_s: float  # Number of seconds between output heaps.
 
     # 3. Engine Parameters - Parameters not used in the array but needed for this engine
     batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
@@ -471,13 +471,13 @@ class XBEngineProcessingLoop:
         # This value staggers the send so that packets within a heap are transmitted onto the network across the entire
         # time between dumps. intervaleCare needs to be taken to ensure that this rate is not set too high. If it is
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
-        self.dump_rate_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
+        self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
 
         self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
-            dump_rate_s=self.dump_rate_s,
+            dump_interval_s=self.dump_interval_s,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             endpoint=(dest_ip, dest_port),
@@ -501,13 +501,13 @@ class XBEngineProcessingLoop:
         self.tx_transport_added = True
         # For the inproc transport this value is set very low as the dump rate does affect performanc for an inproc
         # queue and a high dump rate just makes the unit tests take very long to run.
-        self.dump_rate_s = 0.05
+        self.dump_interval_s = 0.05
 
         self.sendStream = katxgpu.xsend.XEngineSPEADInprocSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
-            dump_rate_s=self.dump_rate_s,
+            dump_interval_s=self.dump_interval_s,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             queue=queue,
@@ -712,10 +712,10 @@ class XBEngineProcessingLoop:
             # As the output packets are rate limited in such a way to match the dump rate, receiving data too quickly
             # will result in data bottlenecking at the sender, the pipeline eventually stalling and the input buffer
             # overflowing.
-            if time_difference_between_heaps_s * 1.05 < self.dump_rate_s:
+            if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
                 print(
                     f"LOG WARNING: Time between output heaps: {round(time_difference_between_heaps_s,2)} which is less "
-                    f"the expected {round(self.dump_rate_s,2)}. If this warning occurs too often, the pipeline will "
+                    f"the expected {round(self.dump_interval_s,2)}. If this warning occurs too often, the pipeline will "
                     f"stall because the rate limited sender will not keep up with the input rate."
                 )
 
