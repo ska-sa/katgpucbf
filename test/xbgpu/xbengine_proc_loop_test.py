@@ -2,7 +2,6 @@
 
 # 1. Import local modules
 import test_parameters
-import spead2_receiver_test
 import katxgpu.ringbuffer
 import katxgpu.xbengine_proc_loop
 
@@ -28,6 +27,116 @@ DATA_ID = 0x4300
 
 default_spead_flavour = {"version": 4, "item_pointer_bits": 64, "heap_address_bits": 48, "bug_compat": 0}
 complexity = 2
+
+
+def createHeaps(
+    timestamp: int,
+    batch_index: int,
+    n_ants: int,
+    n_channels_per_stream: int,
+    n_samples_per_channel: int,
+    n_pols: int,
+    ig: spead2.send.ItemGroup,
+):
+    """
+    TODO: Update This.
+
+    Generate a list of heaps to send via the sourceStream.
+
+    One heap is generated per antenna in the array. All heaps will have the same timestamp. The 8-bit complex samples
+    are treated as a single 16-bit value. Per heap, all sample values are the same. This makes for faster verification
+    (The downside is that if the packets in a heap get mixed up, this will not be detected - however this is something
+    that is expected to be picked up in the SPEAD2 unit tests). The coded sample is a combination of the antenna index
+    and a unique 8-bit ID that can is passed to this function. The sample value is equal to the following:
+
+    coded_sample_value = (np.uint8(id) << 8) + np.uint8(ant_index)
+
+    Parameters
+    ----------
+    timestamp: int
+        The timestamp that will be assigned to all heaps.
+    id: int
+        8-bit value that will be encoded into all samples in this set of generated heaps.
+    n_ants: int
+        The number of antennas that data will be received from. A seperate heap will be generated per antenna.
+    n_channels_per_stream: int
+        The number of frequency channels contained in a heap.
+    n_samples_per_channel: int
+        The number of time samples per frequency channel.
+    n_pols: int
+        The number of pols per antenna. Expected to always be 2 at the moment.
+    ig: spead2.send.ItemGroup
+        The ig is used to generate heaps that will be passed to the source stream. This ig is expected to have been
+        configured correctly using the createTestObjects function.
+
+    Returns
+    -------
+    heaps: [spead2.send.HeapReference]
+        The required heaps are stored in an array. EAch heap is wrapped in a HeapReference object is this is what is
+        required by tge SPEAD2 send_heaps() function.
+    """
+    heap_shape = (
+        n_channels_per_stream,
+        n_samples_per_channel,
+        n_pols,
+        complexity,
+    )
+    # The heaps shape has been modified with the complexity dimension equal to 1 instead of 2. This is because we treat
+    # the two 8-bit complex samples
+    modified_heap_shape = (
+        n_channels_per_stream,
+        n_samples_per_channel,
+        n_pols // 2,
+        complexity // 2,
+    )
+    heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
+    for ant_index in range(n_ants):
+        sample_array = np.zeros(modified_heap_shape, np.uint32)
+
+        for chan_index in range(n_channels_per_stream):
+            # coded_sample_value = (0 << 24) + (ant_index << 16) + (0 << 8) + np.uint8(ant_index)
+            pol0Real = np.int8(ant_index)
+            pol0Imag = np.int8(ant_index + 1)
+            pol1Real = np.int8(ant_index)
+            pol1Imag = np.int8(ant_index + 2)
+            if pol0Real == -128:
+                pol0Real = -127
+            if pol0Imag == -128:
+                pol0Imag = -127
+            if pol1Real == -128:
+                pol1Real = -127
+            if pol1Imag == -128:
+                pol1Imag = -127
+            coded_sample_value = (pol1Imag << 24) + (pol1Real << 16) + (pol0Imag << 8) + (pol0Real << 0)
+            sample_array[chan_index][:] = np.full((n_samples_per_channel, 1, 1), coded_sample_value, np.uint32)
+
+        # Here we change the dtype of the array from uint16 back to int8. This does not modify the actual data in the
+        # array. It just changes the shape back to what we expect. (The complexity dimension is now back to 2 from 1).
+        sample_array.dtype = np.int8
+        sample_array = np.reshape(sample_array, heap_shape)
+
+        ig["timestamp"].value = timestamp
+        ig["fengine id"].value = ant_index
+        ig["channel offset"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
+        ig["feng_raw"].value = sample_array
+        ig["padding 0"].value = 0
+        ig["padding 1"].value = 0
+        ig["padding 2"].value = 0
+        heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
+
+        # This function makes sure that the immediate values in each heap are transmitted per packet in the heap. By
+        # default these values are only transmitted once. These immediate values are required as this is how data is
+        # received from the MeerKAT SKARAB F-Engines.
+        heap.repeat_pointers = True
+
+        # NOTE: The substream_index is set to zero as the SPEAD BytesStream transport has not had the concept of
+        # substreams introduced. It has not been updated along with the rest of the transports. As such the unit test
+        # cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be
+        # added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to
+        # look at using the inproc transport. The inproc transport would be much better, but requires porting a bunch
+        # of things from SPEAD2 python to katxgpu python. This will require much more work.
+        heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
+    return heaps
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
@@ -120,26 +229,23 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         batches_per_chunk=heaps_per_fengine_per_chunk,
     )
 
-    # 5. Generate Data
+    # 6. Generate Data
     for i in range(heap_accumulation_threshold * n_accumulations + 1):
         timestamp = (i + (heap_accumulation_threshold - 1)) * timestamp_step  # Say what this -1 is for
-        print(i, hex(timestamp))
-        heaps = spead2_receiver_test.createHeaps(
-            timestamp, i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send
-        )
+        # print(i, hex(timestamp))
+        heaps = createHeaps(timestamp, i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send)
         sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
-    # 6. Define C function for verification of data.
+    # 5. Define C function for verification of data.
     verificationFunctionsLib_C = np.ctypeslib.load_library(
-        libname="lib_verification_functions.so", loader_path=os.path.abspath("./")
+        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/")
     )
     verify_xbengine_proc_loop_C = verificationFunctionsLib_C.verify_xbengine_proc_loop
 
     baselines_products = n_ants * (n_ants + 1) // 2 * n_pols * n_pols * n_channels_per_stream
-    print("++++++++++++++++++", baselines_products, n_channels_per_stream, n_ants)
     verify_xbengine_proc_loop_C.argtypes = [
         np.ctypeslib.ndpointer(
-            dtype=np.int64,  # Output data array
+            dtype=np.uint64,  # Output data array
             shape=(baselines_products,),
             flags="C_CONTIGUOUS",
         ),
@@ -177,12 +283,10 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
                 ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
             ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
 
-            print(
-                f"Received Timestamp: {hex(ig_recv['timestamp'].value)}, Value: {ig_recv['xeng_raw'].value[0][0][0][0]}"
-            )
+            # print(
+            #     f"Received Timestamp: {hex(ig_recv['timestamp'].value)}, Value: {ig_recv['xeng_raw'].value[0][0][0][0]}"
+            # )
 
-            print(ig_recv["xeng_raw"].value.flatten(order="C"))
-            print(len(ig_recv["xeng_raw"].value.flatten(order="C")))
             if i == 0:
                 num_batches_in_current_accumulation = 1
                 base_batch_index = heap_accumulation_threshold - 1
@@ -198,7 +302,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
                 n_samples_per_channel,
                 n_pols,
             )
-            print(f"========================== {result} ============================")
+            assert result, "Gosh darnit"
+            # print(katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(4,3))
 
     # 8. Function that will launch the send_process() and xbengin loop
     @pytest.mark.asyncio
@@ -219,7 +324,7 @@ if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
     print("Running tests")
     loop = asyncio.get_event_loop()
-    test_xbengine(loop, 64, 1024, 32768)
+    test_xbengine(loop, 64, 256, 32768)
     # test_xbengine(loop, 8, 1024, 32768)
     # test_xbengine(loop, 16, 1024, 32768)
     # test_xbengine(loop, 32, 1024, 32768)

@@ -250,7 +250,7 @@ class XEngineSPEADAbstractSend(ABC):
             "xeng_raw",
             "Integrated baseline correlation products",
             shape=self.heap_shape,
-            dtype=np.int64,
+            dtype=np.uint64,
         )
 
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
