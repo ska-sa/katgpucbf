@@ -164,6 +164,7 @@ async def async_main() -> None:
     print("Starting main processing loop")
 
     await xbengine_proc_loop.run()
+    await xbengine_proc_loop.run_descriptors_loop(5)
 
 
 def main() -> None:

@@ -734,11 +734,15 @@ class XBEngineProcessingLoop:
             item.reset()
             await self._tx_free_item_queue.put(item)
 
-    async def _send_descriptors_loop(self):
-        """Send the Baseline Correlation Products Hardware heaps out to the network every 5 seconds."""
+    async def run_descriptors_loop(self, interval_s):
+        """
+        Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
+
+        This loop is not part of the main run loop as we do not want it running during the unit tests.
+        """
         while self.running is True:
             self.sendStream.send_descriptor_heap()
-            await asyncio.sleep(5)
+            await asyncio.sleep(interval_s)
 
     async def run(self):
         """
@@ -753,11 +757,25 @@ class XBEngineProcessingLoop:
 
         # NOTE: Put in todo about upgrading this to python 3.8
         loop = asyncio.get_event_loop()
-        receiver_task = loop.create_task(self._receiver_loop())
-        gpu_proc_task = loop.create_task(self._gpu_proc_loop())
-        sender_task = loop.create_task(self._sender_loop())
-        descriptor_task = loop.create_task(self._send_descriptors_loop())
-        await receiver_task
-        await gpu_proc_task
-        await sender_task
-        await descriptor_task
+        self.receiver_task = loop.create_task(self._receiver_loop())
+        self.gpu_proc_task = loop.create_task(self._gpu_proc_loop())
+        self.sender_task = loop.create_task(self._sender_loop())
+        await self.receiver_task
+        await self.gpu_proc_task
+        await self.sender_task
+
+    def stop(self):
+        """
+        Stop all the different processing loops launched in the run() function and wind up the receiver stream.
+
+        NOTE 1: This function may not be working correctly. If you have trouble closing the tasks, it may be worth
+        re-evaluating this function.
+        NOTE 2: The descriptors loop is not launched by the run() function. It is the users responsibility to stop that
+        loop.
+        """
+        self.receiverStream.stop()
+        self.running = False
+        self.receiver_task.cancel()
+        self.gpu_proc_task.cancel()
+        self.sender_task.cancel()
+        del self.context

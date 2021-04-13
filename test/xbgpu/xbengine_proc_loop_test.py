@@ -44,8 +44,9 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     n_samples_per_channel = num_samples_per_channel
     n_pols = 2
     sample_bits = 8
-    heaps_per_fengine_per_chunk = 3
-    heap_accumulation_threshold = 6
+    heaps_per_fengine_per_chunk = 2
+    heap_accumulation_threshold = 4
+    n_accumulations = 3
 
     max_packet_size = (
         n_samples_per_channel * n_pols * complexity * sample_bits // 8 + 96
@@ -118,8 +119,9 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     )
 
     # 5. Generate Data
-    for i in range(heap_accumulation_threshold * 2):
-        timestamp = i * timestamp_step
+    for i in range(heap_accumulation_threshold * n_accumulations + 1):
+        timestamp = (i + (heap_accumulation_threshold - 1)) * timestamp_step  # Say what this -1 is for
+        print(i, hex(timestamp))
         heaps = spead2_receiver_test.createHeaps(
             timestamp, i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send
         )
@@ -140,23 +142,28 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         items = ig_recv.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-        heap = await recvStream.get()
-        items = ig_recv.update(heap)
-        heap = await recvStream.get()
-        items = ig_recv.update(heap)
+        for i in range(n_accumulations + 1):
+            heap = await recvStream.get()
+            items = ig_recv.update(heap)
+            # assert len(list(items.values())) != 0, "This heap contains item values not just the expected descriptors."
+            print(
+                f"Received Timestamp: {hex(ig_recv['timestamp'].value)}, Value: {ig_recv['xeng_raw'].value[0][0][0][0]}"
+            )
         # print("*************Done up to here*************")
 
-    # 6. Function that will launch the send_process() and xbengin loop
+    # 8. Function that will launch the send_process() and xbengin loop
     async def run():
         """TODO: Write this."""
-        event_loop.create_task(xbengine_proc_loop.run())
+        task1 = event_loop.create_task(xbengine_proc_loop.run())
         task2 = event_loop.create_task(recv_process())
-        # await task1
         await task2
+        task1.cancel()
 
+    # 9. Launch asyn functions and wait until completion
     try:
         event_loop.run_until_complete(run())
     finally:
+        xbengine_proc_loop.stop()
         event_loop.run_until_complete(event_loop.shutdown_asyncgens())
 
 
@@ -166,8 +173,8 @@ if __name__ == "__main__":
     print("Running tests")
     loop = asyncio.get_event_loop()
     test_xbengine(loop, 4, 1024, 32768)
-    test_xbengine(loop, 8, 1024, 32768)
-    test_xbengine(loop, 16, 1024, 32768)
-    test_xbengine(loop, 32, 1024, 32768)
-    test_xbengine(loop, 64, 1024, 32768)
+    # test_xbengine(loop, 8, 1024, 32768)
+    # test_xbengine(loop, 16, 1024, 32768)
+    # test_xbengine(loop, 32, 1024, 32768)
+    # test_xbengine(loop, 64, 1024, 32768)
     print("Tests complete")

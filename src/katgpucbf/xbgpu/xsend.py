@@ -254,7 +254,7 @@ class XEngineSPEADAbstractSend(ABC):
         )
 
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
-        self.descriptor_heap = self.item_group.get_heap(descriptors="stale", data="none")
+        self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
         """
