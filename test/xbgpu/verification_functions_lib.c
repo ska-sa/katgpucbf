@@ -122,3 +122,17 @@ int verify_precorrelation_reorder(
     // If we get here, all is well
     return 1;
 }
+
+
+int verify_xbengine_proc_loop(
+    int64_t *pi64Baselines,
+    int iBatchStartIndex,
+    int iNumBatches,
+    int iNumAnts,
+    int iNumChans,
+    int iNumSamplesPerChan,
+    int iNumPols)
+{
+    printf("********************* %d **** %d **********************\n",iBatchStartIndex,iNumBatches);
+    return 1;
+}

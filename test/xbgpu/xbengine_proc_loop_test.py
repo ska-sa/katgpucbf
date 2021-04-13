@@ -7,6 +7,8 @@ import katxgpu.ringbuffer
 import katxgpu.xbengine_proc_loop
 
 # 2. Import external modules
+import os
+import ctypes
 import pytest
 import logging
 import asyncio
@@ -127,14 +129,39 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         )
         sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
-    # 6. Add transports
+    # 6. Define C function for verification of data.
+    verificationFunctionsLib_C = np.ctypeslib.load_library(
+        libname="lib_verification_functions.so", loader_path=os.path.abspath("./")
+    )
+    verify_xbengine_proc_loop_C = verificationFunctionsLib_C.verify_xbengine_proc_loop
+
+    baselines_products = n_ants * (n_ants + 1) // 2 * n_pols * n_pols * n_channels_per_stream
+    print("++++++++++++++++++", baselines_products, n_channels_per_stream, n_ants)
+    verify_xbengine_proc_loop_C.argtypes = [
+        np.ctypeslib.ndpointer(
+            dtype=np.int64,  # Output data array
+            shape=(baselines_products,),
+            flags="C_CONTIGUOUS",
+        ),
+        ctypes.c_int,  # Batch Start Index
+        ctypes.c_int,  # Batches to accumulat
+        ctypes.c_int,  # Antennas
+        ctypes.c_int,  # Channels
+        ctypes.c_int,  # Samples-per-channel
+        ctypes.c_int,  # Polarisations
+    ]
+
+    verify_xbengine_proc_loop_C.restype = ctypes.c_int
+
+    # 7. Add transports
     xbengine_proc_loop.add_inproc_sender_transport(queue)
     xbengine_proc_loop.sendStream.send_descriptor_heap()
 
     buffer = sourceStream.getvalue()
     xbengine_proc_loop.add_buffer_receiver_transport(buffer)
 
-    # 7. Function to get data from xb_engine
+    # 8. Function to get data from xb_engine
+    @pytest.mark.asyncio
     async def recv_process():
         """TODO: Write this."""
         ig_recv = spead2.ItemGroup()
@@ -146,12 +173,35 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
             heap = await recvStream.get()
             items = ig_recv.update(heap)
             # assert len(list(items.values())) != 0, "This heap contains item values not just the expected descriptors."
+            assert (
+                ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
+            ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+
             print(
                 f"Received Timestamp: {hex(ig_recv['timestamp'].value)}, Value: {ig_recv['xeng_raw'].value[0][0][0][0]}"
             )
-        # print("*************Done up to here*************")
+
+            print(ig_recv["xeng_raw"].value.flatten(order="C"))
+            print(len(ig_recv["xeng_raw"].value.flatten(order="C")))
+            if i == 0:
+                num_batches_in_current_accumulation = 1
+                base_batch_index = heap_accumulation_threshold - 1
+            else:
+                num_batches_in_current_accumulation = heap_accumulation_threshold
+                base_batch_index = i * heap_accumulation_threshold
+            result = verify_xbengine_proc_loop_C(
+                ig_recv["xeng_raw"].value.flatten(order="C"),
+                base_batch_index,
+                num_batches_in_current_accumulation,
+                n_ants,
+                n_channels_per_stream,
+                n_samples_per_channel,
+                n_pols,
+            )
+            print(f"========================== {result} ============================")
 
     # 8. Function that will launch the send_process() and xbengin loop
+    @pytest.mark.asyncio
     async def run():
         """TODO: Write this."""
         task1 = event_loop.create_task(xbengine_proc_loop.run())
@@ -160,11 +210,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         task1.cancel()
 
     # 9. Launch asyn functions and wait until completion
-    try:
-        event_loop.run_until_complete(run())
-    finally:
-        xbengine_proc_loop.stop()
-        event_loop.run_until_complete(event_loop.shutdown_asyncgens())
+    event_loop.run_until_complete(run())
+    xbengine_proc_loop.stop()
 
 
 # A manual run useful when debugging the unit tests.
@@ -172,7 +219,7 @@ if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
     print("Running tests")
     loop = asyncio.get_event_loop()
-    test_xbengine(loop, 4, 1024, 32768)
+    test_xbengine(loop, 64, 1024, 32768)
     # test_xbengine(loop, 8, 1024, 32768)
     # test_xbengine(loop, 16, 1024, 32768)
     # test_xbengine(loop, 32, 1024, 32768)

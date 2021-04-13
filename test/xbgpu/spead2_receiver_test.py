@@ -495,10 +495,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         assert chunk_index == total_chunks, f"Expected to receive {total_chunks} chunks. Only received {chunk_index}"
 
     # 6. Run get_chunks() function
-    try:
-        event_loop.run_until_complete(get_chunks(asyncRingbuffer, receiverStream, total_chunks))
-    finally:
-        event_loop.run_until_complete(event_loop.shutdown_asyncgens())
+    event_loop.run_until_complete(get_chunks(asyncRingbuffer, receiverStream, total_chunks))
 
     # 7. Final cleanup
     # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that
