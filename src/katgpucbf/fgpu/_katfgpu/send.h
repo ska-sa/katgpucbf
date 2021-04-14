@@ -1,3 +1,6 @@
+/* This file implements a chunking C++ SPEAD2 sender for the F-engine.
+ */
+
 #ifndef KATFGPU_SEND_H
 #define KATFGPU_SEND_H
 
@@ -30,7 +33,7 @@ struct chunk
     int channels;
     int acc_len;
     int pols;
-    int frames;
+    int frames;                          ///< Not ethernet frames, but n_spectra / acc_len, i.e. num of sets of heaps
     boost::asio::const_buffer storage;   ///< Storage for data
     boost::system::error_code error;     ///< First error from sending the data
 
@@ -39,6 +42,9 @@ struct chunk
 
 using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<chunk>, spead2::semaphore_fd>;
 
+/* Wrap a spead2::send::stream object, which does the low-level sending of
+ * data over the network, with some other stuff it needs to do its thing.
+ */
 class sender
 {
 private:

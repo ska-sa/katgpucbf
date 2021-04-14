@@ -4,6 +4,18 @@ This is proof-of-concept code, not a fully working F-engine. For a more
 detailed report on the design and lessons learned, refer to
 [doc/design.rst](doc/design.rst).
 
+## Developing
+
+The repo has been kitted out with a pre-commit workflow which encourages SARAO DSP-team agreed-upon best practices.
+To make sure this is enabled, on cloning this repo:
+```
+pip install -r requirements-dev.txt
+pre-commit install
+```
+
+When you run `git commit`, checks will be run on all Python code to ensure a minimum standard of readability.
+
+
 ## Features
 
 The following features have been implemented, although they are not all fully tested:

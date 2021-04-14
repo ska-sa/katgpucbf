@@ -1,2 +1,21 @@
 [build-system]
 requires = ["setuptools", "wheel", "jinja2==2.10.1", "pycparser==2.19", "pybind11==2.5.0"]
+
+[tool.black]
+line-length = 120
+include = '\.pyi?$'
+exclude ='''
+/(
+		  \.eggs	# exclude a few common directories
+		| \.git		# in the root of the project
+		| \.hg
+		| \.mypy_cache
+		| \.nox
+		| \.tox
+		| \.venv
+		| _build
+		| buck-out
+		| build
+		| dist
+)/
+'''

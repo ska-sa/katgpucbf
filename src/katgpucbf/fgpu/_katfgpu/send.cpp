@@ -12,15 +12,19 @@ static constexpr int FENG_ID_ID = 0x4101;
 static constexpr int FREQUENCY_ID = 0x4103;
 static constexpr int FENG_RAW_ID = 0x4300;
 
+/* context struct holds sender, chunk, a vector of heaps, and a count of how much
+ * remaining stuff to transmit there is.
+ * Constructor reserves space in memory for the heaps,
+ * destructor returns the chunk to the free ring.
+ */
 struct context
 {
     send::sender &sender;
     std::unique_ptr<chunk> c;
     std::vector<spead2::send::heap> heaps;
-    std::size_t remaining;
 
     context(send::sender &sender, std::unique_ptr<chunk> &&c, std::size_t n_heaps)
-        : sender(sender), c(std::move(c)), remaining(n_heaps)
+        : sender(sender), c(std::move(c))
     {
         heaps.reserve(n_heaps);
     }
@@ -40,12 +44,18 @@ sender::sender(std::size_t free_ring_capacity,
     : thread_pool(1, thread_affinity >= 0 ? std::vector<int>{thread_affinity} : std::vector<int>{}),
     free_ring(free_ring_capacity)
 {
+    // Convert list of string & int endpoints to more useful boost::asio types.
     if (endpoints.empty())
         throw std::invalid_argument("must have at least one endpoint");
     std::vector<boost::asio::ip::udp::endpoint> ep;
     for (const auto &e : endpoints)
         ep.emplace_back(boost::asio::ip::address::from_string(e.first), e.second);
+
+    // Ihis is the IP address of the interface we will be using for sending. ibverbs
+    // needs this information.
     boost::asio::ip::address interface = boost::asio::ip::address::from_string(interface_address);
+
+    // Configure and create the spead2 stream.
     spead2::send::stream_config config;
     config.set_max_packet_size(max_packet_size);
     config.set_rate(rate);
@@ -90,6 +100,8 @@ void sender::stop()
 
 void sender::send_chunk(std::unique_ptr<chunk> &&c)
 {
+    // TODO: It makes more sense to do this check in the constructor, but it doesn't
+    // currently have access to the number of channels.
     std::size_t n_substreams = stream->get_num_substreams();
     if (c->channels % n_substreams != 0)
         throw std::invalid_argument("channels must be divisible by the number of substreams");
@@ -97,9 +109,10 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     const spead2::flavour flavour(spead2::maximum_version, 64, 48);
     const std::size_t n_heaps = n_substreams * c->frames;
     const int channels_per_substream = c->channels / n_substreams;
-    const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->acc_len * c->pols * 2;
+    const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->acc_len * c->pols * 2; // TODO either a constexpr or #define to make 2 explicitly "complexity"
     const std::size_t heap_bytes = frame_bytes / n_substreams;
     const std::int64_t timestamp_step = c->acc_len * c->channels * 2;
+
     if (boost::asio::buffer_size(c->storage) < c->frames * frame_bytes)
         throw std::invalid_argument("send_chunk storage is too small");
 
@@ -112,6 +125,9 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     }
 
     auto ctx = std::make_shared<context>(*this, std::move(c), n_heaps);
+
+    // Lambda as a callback to handle potential errors in transmission.
+    // Records the error code in the chunk being transmitted, and emits a debug message.
     auto callback = [ctx] (const boost::system::error_code &ec, spead2::item_pointer_t bytes_transferred)
     {
         if (ec)
@@ -125,8 +141,12 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     for (int i = 0; i < frames; i++)
         for (std::size_t j = 0; j < n_substreams; j++)
         {
+            // Buffer "pointing" to the sub-region in the chunk which has the
+            // data to be sent next
             auto heap_data = boost::asio::buffer(ctx->c->storage + i * frame_bytes + j * heap_bytes,
                                                  heap_bytes);
+
+            // Add a new heap to the queue with the appropriate fields.
             ctx->heaps.emplace_back(flavour);
             spead2::send::heap &heap = ctx->heaps.back();
             // TODO: Consider pre-creating the heaps and recycling
@@ -138,8 +158,11 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
                           boost::asio::buffer_cast<const void *>(heap_data),
                           boost::asio::buffer_size(heap_data),
                           false);
+            // Padding for compatibility with MeerKAT's F-engine.
             for (int pad = 0; pad < 3; pad++)
                 heap.add_item(0, 0);
+
+            // Mark the heap for asynchronous sending.
             stream->async_send_heap(heap, callback, -1, j);
         }
 }

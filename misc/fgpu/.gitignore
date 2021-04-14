@@ -5,3 +5,4 @@ __pycache__
 /demo
 /build
 /katfgpu/*.so
+.vscode/

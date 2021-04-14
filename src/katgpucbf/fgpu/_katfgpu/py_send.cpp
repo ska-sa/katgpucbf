@@ -43,7 +43,12 @@ public:
     }
 };
 
-// Keeps buffers alive
+/* For enrichment and education:
+ * The C++ destructor for py::buffer_info calls PyBuffer_Release, which tells
+ * Python that C/C++ is no longer using the buffer (and which has other
+ * implications beyond just garbage collection). So this is to manage the
+ * lifetime of the py::buffer_info rather than the buffer object itself.
+ */
 class memory_regions_holder
 {
 private:
@@ -134,9 +139,45 @@ py::module register_module(py::module &parent)
         .def_readwrite("device", &py_chunk::device)
     ;
 
-    register_ringbuffer<ringbuffer_t, py_chunk>(m, "Ringbuffer", "Ringbuffer of chunks");
+    register_ringbuffer<ringbuffer_t, py_chunk>(m, "Ringbuffer", R"pydocstring(
+        Ringbuffer of chunks for channelised output samples.
 
-    py::class_<py_sender>(m, "Sender", "Converts Chunks to heaps and transmit them")
+        Parameters
+        ----------
+        cap
+            Capacity of the ringbuffer.
+    )pydocstring");
+
+    py::class_<py_sender>(m, "Sender", R"pydocstring(
+        Converts Chunks to heaps and transmits them.
+
+        Parameters
+        ----------
+        free_ring_capacity
+            Capacity of the ringbuffer of free chunks.
+        memory_regions: List[Chunk]
+            A list of the chunks' bases that will be worked on.
+        thread_affinity
+            CPU core for output-handling thread.
+        comp_vector
+            Completion vector for transmission, or -1 for polling.
+        endpoints
+            IP addresses and ports of multicast stream to listen for traffic on.
+        ttl
+            TTL for outgoing packets.
+        interface_address: str
+            IP address of the network device to use for output.
+        ibv
+            Use ibverbs for output.
+        max_packet_size
+            Size for output packets.
+        rate: float
+            Target network transmission rate.
+        max_heaps
+            Maximum number of in-flight heaps for the sender Stream.
+        monitor: Optional[Monitor]
+            Monitor to use for collecting metrics.
+        )pydocstring")
         .def(py::init<
                  std::size_t,
                  std::vector<py::buffer> &,
@@ -161,13 +202,29 @@ py::module register_module(py::module &parent)
         {
             auto c = std::make_unique<py_chunk>(std::move(chunk));
             self.send_chunk(std::move(c));
-        }, "chunk"_a)
+        }, "chunk"_a,
+        py::doc(R"pydocstring(
+            Schedule transmission of the chunk.
+
+            Loops through the "frames" within the chunk, and through the
+            substreams (a few channels need to go to each substream), creating
+            an appropriate number of heaps and scheduling them for sending by
+            the Stream. The chunk is returned to the free ring once done.
+        )pydocstring" ))
         .def("push_free_ring", [](py_sender &self, py_chunk &chunk)
         {
             auto c = std::make_unique<py_chunk>(std::move(chunk));
             self.push_free_ring(std::move(c));
-        }, "chunk"_a)
-        .def("stop", &py_sender::stop)
+        }, "chunk"_a,
+        py::doc("Add a chunk to the ringbuffer, blocking if necessary.\n"))
+        .def("stop", &py_sender::stop,
+        py::doc(R"pydocstring(
+            Cleanly shut down transmission.
+
+            Stop the ringbuffer from accepting new chunks, block until all
+            enqueued heaps have been sent, and shut down the sender's thread
+            pool.
+            )pydocstring"))
         .def_property_readonly("free_ring", [](py_sender &self) -> ringbuffer_t &
         {
             return self.get_free_ring();

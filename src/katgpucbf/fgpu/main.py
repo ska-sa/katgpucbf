@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""katfgpu main script.
+
+This is what kicks everything off. Command-line arguments are parsed, and used
+to create an :class:`~katfgpu.engine.Engine` object, which then takes over the
+actual running of the processing.
+"""
 
 import argparse
 import asyncio
@@ -14,11 +20,12 @@ from .engine import Engine
 from .monitor import Monitor, FileMonitor, NullMonitor
 
 
-_T = TypeVar('_T')
-N_POL = 2
+_T = TypeVar("_T")
+N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
 
 
 def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
+    """Parse a string into a list of IP endpoints."""
     try:
         endpoints = endpoint_list_parser(7148)(value)
         for endpoint in endpoints:
@@ -28,103 +35,134 @@ def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
         return value
 
 
-def comma_split(base_type: Callable[[str], _T],
-                count: Optional[int] = None) -> Callable[[str], List[_T]]:
-    def func(value: str) -> List[_T]:
-        parts = value.split(',')
+def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> Callable[[str], List[_T]]:
+    """Return a function to split a comma-delimited str into a list of type _T.
+
+    This function is used to parse lists of CPU core numbers, which come from
+    the command-line as comma-separated strings, but are obviously more useful
+    as a list of ints. It's generic enough that it could process lists of other
+    types as well though if necessary.
+
+    Parameters
+    ----------
+    base_type
+        The base type of thing you expect in the list, e.g. `int`, `float`.
+    count
+        How many of them you expect to be in the list. `None` means the list
+        could be any length.
+    """
+
+    def func(value: str) -> List[_T]:  # noqa: D102
+        parts = value.split(",")
         n = len(parts)
         if count is not None and n != count:
-            raise ValueError(f'Expected {count} comma-separated fields, received {n}')
+            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
         return [base_type(part) for part in parts]
+
     return func
 
 
 def parse_args() -> argparse.Namespace:
+    """Declare and parse command-line arguments."""
     parser = argparse.ArgumentParser()
+    parser.add_argument("--src-interface", type=get_interface_address, help="Name of input network device")
+    parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
-        '--src-interface', type=get_interface_address,
-        help='Name of input network device')
-    parser.add_argument(
-        '--src-ibv', action='store_true',
-        help='Use ibverbs for input [no]')
-    parser.add_argument(
-        '--src-affinity', type=comma_split(int, N_POL), metavar='CORE,CORE',
+        "--src-affinity",
+        type=comma_split(int, N_POL),
+        metavar="CORE,CORE",
         default=[-1] * N_POL,
-        help='Cores for input-handling threads (comma-separated) [not bound]')
+        help="Cores for input-handling threads (comma-separated) [not bound]",
+    )
     parser.add_argument(
-        '--src-comp-vector', type=comma_split(int, N_POL), metavar='VECTOR,VECTOR',
+        "--src-comp-vector",
+        type=comma_split(int, N_POL),
+        metavar="VECTOR,VECTOR",
         default=[0] * N_POL,
-        help='Completion vectors for source streams, or -1 for polling [0]')
+        help="Completion vectors for source streams, or -1 for polling [0]",
+    )
     parser.add_argument(
-        '--src-packet-samples', type=int, default=4096,
-        help='Number of samples per digitiser packet [%(default)s]')
+        "--src-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
+    )
     parser.add_argument(
-        '--src-buffer', type=int, default=32 * 1024 * 1024, metavar='BYTES',
-        help='Size of network receive buffer (per pol) [32MiB]')
+        "--src-buffer",
+        type=int,
+        default=32 * 1024 * 1024,
+        metavar="BYTES",
+        help="Size of network receive buffer (per pol) [32MiB]",
+    )
     parser.add_argument(
-        '--dst-interface', type=get_interface_address, required=True,
-        help='Name of output network device')
+        "--dst-interface", type=get_interface_address, required=True, help="Name of output network device"
+    )
+    parser.add_argument("--dst-ttl", type=int, default=4, help="TTL for outgoing packets [%(default)s]")
+    parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no]")
     parser.add_argument(
-        '--dst-ttl', type=int, default=4,
-        help='TTL for outgoing packets [%(default)s]')
+        "--dst-packet-payload",
+        type=int,
+        default=1024,
+        metavar="BYTES",
+        help="Size for output packets (voltage payload only) [%(default)s]",
+    )
     parser.add_argument(
-        '--dst-ibv', action='store_true',
-        help='Use ibverbs for output [no]')
+        "--dst-affinity", type=int, default=-1, metavar="CORE,...", help="Cores for output-handling threads [not bound]"
+    )
     parser.add_argument(
-        '--dst-packet-payload', type=int, default=1024, metavar='BYTES',
-        help='Size for output packets (voltage payload only) [%(default)s]')
+        "--dst-comp-vector",
+        type=int,
+        default=0,
+        metavar="VECTOR,...",
+        help="Completion vector for transmission, or -1 for polling [0]",
+    )
     parser.add_argument(
-        '--dst-affinity', type=int, default=-1, metavar='CORE,...',
-        help='Cores for output-handling threads [not bound]')
+        "--adc-rate",
+        type=float,
+        default=0.0,
+        metavar="HZ",
+        help="Digitiser sampling rate, used to determine transmission rate [fast as possible]",
+    )
+    parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")
     parser.add_argument(
-        '--dst-comp-vector', type=int, default=0, metavar='VECTOR,...',
-        help='Completion vector for transmission, or -1 for polling [0]')
+        "--acc-len", type=int, default=256, metavar="SPECTRA", help="Spectra in each output heap [%(default)s]"
+    )
     parser.add_argument(
-        '--adc-rate', type=float, default=0.0, metavar='HZ',
-        help='Digitiser sampling rate, used to determine transmission rate [fast as possible]')
+        "--chunk-samples",
+        type=int,
+        default=2 ** 26,
+        metavar="SAMPLES",
+        help="Number of digitiser samples to process at a time (per pol). If not a multiple of 2*channels*acc-len,"
+        "it will be rounded up to the next multiple. [%(default)s]",
+    )
+    parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
     parser.add_argument(
-        '--channels', type=int, required=True,
-        help='Number of output channels to produce')
+        "--quant-scale", type=float, default=0.001, help="Rescaling factor before 8-bit requantisation [%(default)s]"
+    )
     parser.add_argument(
-        '--acc-len', type=int, default=256, metavar='SPECTRA',
-        help='Spectra in each output heap [%(default)s]')
+        "--mask-timestamp",
+        action="store_true",
+        help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
+    )
     parser.add_argument(
-        '--chunk-samples', type=int, default=2**26, metavar='SAMPLES',
-        help='Number of digitiser samples to process at a time (per pol) [%(default)s]')
+        "--use-gdrcopy", action="store_true", help="Assemble chunks directly in GPU memory (requires supported GPU)"
+    )
     parser.add_argument(
-        '--taps', type=int, default=16,
-        help='Number of taps in polyphase filter bank [%(default)s]')
-    parser.add_argument(
-        '--quant-scale', type=float, default=0.001,
-        help='Rescaling before 8-bit quantisation [%(default)s]')
-    parser.add_argument(
-        '--mask-timestamp', action='store_true',
-        help='Mask off bottom bits of timestamp (workaround for broken digitiser)')
-    parser.add_argument(
-        '--use-gdrcopy', action='store_true',
-        help='Assemble chunks directly in GPU memory (requires supported GPU)')
-    parser.add_argument(
-        '--use-peerdirect', action='store_true',
-        help='Send chunks directly from GPU memory (requires supported GPU)')
-    parser.add_argument(
-        '--monitor-log',
-        help='File to write performance-monitoring data to')
+        "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
+    )
+    parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
 
-    parser.add_argument('src', type=parse_source, nargs=N_POL,
-                        help='Source endpoints (or pcap file)')
-    parser.add_argument('dst', type=endpoint_list_parser(7148),
-                        help='Destination endpoints')
+    parser.add_argument("src", type=parse_source, nargs=N_POL, help="Source endpoints (or pcap file)")
+    parser.add_argument("dst", type=endpoint_list_parser(7148), help="Destination endpoints")
     args = parser.parse_args()
 
     if args.use_peerdirect and not args.dst_ibv:
-        parser.error('--use-peerdirect requires --dst-ibv')
+        parser.error("--use-peerdirect requires --dst-ibv")
     for src in args.src:
         if not isinstance(src, str) and args.src_interface is None:
-            parser.error('Live source requires --src-interface')
+            parser.error("Live source requires --src-interface")
     return args
 
 
 async def async_main() -> None:
+    """Start the F-Engine asynchronously."""
     args = parse_args()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
@@ -161,11 +199,13 @@ async def async_main() -> None:
             mask_timestamp=args.mask_timestamp,
             use_gdrcopy=args.use_gdrcopy,
             use_peerdirect=args.use_peerdirect,
-            monitor=monitor)
+            monitor=monitor,
+        )
         await engine.run()
 
 
 def main() -> None:
+    """Start the F-engine."""
     katsdpservices.setup_logging()
     loop = asyncio.get_event_loop()
     try:
@@ -175,5 +215,5 @@ def main() -> None:
         loop.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
