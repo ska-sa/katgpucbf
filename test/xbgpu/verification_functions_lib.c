@@ -124,10 +124,12 @@ struct si32Complex
 
 struct si32Complex createBoundedComplex(int8_t i8Real, int8_t i8Imag)
 {
+    //printf("%d %d\n",i8Real,i8Imag);
     if (i8Real == -128)
         i8Real = -127;
     if (i8Imag == -128)
         i8Imag = -127;
+    //printf("%d %d\n",i8Real,i8Imag);
     struct si32Complex ret = {i8Real, i8Imag};
     return ret;
 }
@@ -167,24 +169,33 @@ int verify_antpair_visibilities(int iBatchStartIndex, int iNumBatches, int iNumS
     struct si32Complex sGeneratedPol10 = {0, 0};
     struct si32Complex sGeneratedPol11 = {0, 0};
 
+    //printf("Starting %d\n",iNumBatches);
     for (size_t ulBatchIndex = 0; ulBatchIndex < iNumBatches; ulBatchIndex++)
     {
-        struct si32Complex ant1Pol0 = {(int8_t)iAnt1Index, (int8_t)iAnt1Index + 1};
-        struct si32Complex ant1Pol1 = {(int8_t)iAnt1Index, (int8_t)iAnt1Index + 2};
-        struct si32Complex ant2Pol0 = {(int8_t)iAnt2Index, (int8_t)iAnt2Index + 1};
-        struct si32Complex ant2Pol1 = {(int8_t)iAnt2Index, (int8_t)iAnt2Index + 2};
+        struct si32Complex ant1Pol0 = createBoundedComplex((int8_t)iAnt1Index, (int8_t)(iAnt1Index + 1));
+        //printf("Heerere a\n");
+        struct si32Complex ant1Pol1 = createBoundedComplex((int8_t)iAnt1Index, (int8_t)(iAnt1Index + 2));
+        //printf("TYHerere b\n");
+        struct si32Complex ant2Pol0 = createBoundedComplex((int8_t)iAnt2Index, (int8_t)(iAnt2Index + 1));
+        //printf("TYHerere c\n");
+        struct si32Complex ant2Pol1 = createBoundedComplex((int8_t)iAnt2Index, (int8_t)(iAnt2Index + 2));
+
+        //printf("%d %d %d %d %d %d\n", iAnt1Index, iAnt2Index ,ant1Pol1.real , ant1Pol1.imag , ant2Pol0.real, ant2Pol0.imag);
 
         complex_multiply_scale_accumulate(&sGeneratedPol00, ant1Pol0, ant2Pol0, iNumSamplesPerChan);
         complex_multiply_scale_accumulate(&sGeneratedPol01, ant1Pol0, ant2Pol1, iNumSamplesPerChan);
+        //printf("=========\n");
         complex_multiply_scale_accumulate(&sGeneratedPol10, ant1Pol1, ant2Pol0, iNumSamplesPerChan);
+        //printf("========= %d %d\n",sGeneratedPol10.real,sGeneratedPol10.imag);
         complex_multiply_scale_accumulate(&sGeneratedPol11, ant1Pol1, ant2Pol1, iNumSamplesPerChan);
     }
+    //printf("Ending\n");
 
     //printf("%d %d %d %d\n", iAnt1Index, iAnt2Index, sGeneratedPol00.real, sGeneratedPol00.imag);
 
     if (assert_complex_samples(sGeneratedPol00, u64Pol00) == 0)
     {
-        printf("a\n");
+        printf("%d %d %d %d\n", iAnt1Index, iAnt2Index, sGeneratedPol00.real, sGeneratedPol00.imag);
         return 0;
     }
     if (assert_complex_samples(sGeneratedPol01, u64Pol01) == 0)
@@ -194,6 +205,9 @@ int verify_antpair_visibilities(int iBatchStartIndex, int iNumBatches, int iNumS
     }
     if (assert_complex_samples(sGeneratedPol10, u64Pol10) == 0)
     {
+        printf("%d %d %d %d\n", iAnt1Index, iAnt2Index, sGeneratedPol10.real, sGeneratedPol10.imag);
+        printf("%d %d %d %d\n", (int8_t)iAnt1Index, (int8_t)(iAnt1Index+2), (int8_t)iAnt2Index, (int8_t)(iAnt2Index+1));
+        printf("%d %d\n", (int32_t)u64Pol10, (int32_t)(u64Pol10>>32));
         printf("c\n");
         return 0;
     }

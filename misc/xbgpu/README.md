@@ -89,6 +89,21 @@ address, is the array size >0, etc. As a first step for this, I would look at th
 [main.py](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/main.py) file in katfgpu as this uses some useful
 parsing functions that could be of use here.
 15. There is no B-Engine. It should eventually be implemented.
+16. The current Tensor core kernel is designed to work on the Nvidia RTX 20xx series of GPUs. The newer ranges of
+cards (RTX 30xx and above) may not be compatible with this kernel. This needs to be tested as soon as possible on 
+a newer card to see if it works. If this does not work, there are a few options. Either the
+[tensorcore_xengine_core.py](katxgpu/tensorcore_xengine_core.py) might require some tweaking in which case the changes
+are quite well contained. A complication may be that the tensor core kernel needs to be changes so much that the input
+and output data formats change. In this case, the [precorrelation_reorder.py](katxgpu/precorrelation_reorder.py) may
+need to be changed too. The entirety of the `async def _gpu_proc_loop(self)` function in
+[xbengine_proc_loop.py](katxgpu/xbengine_proc_loop.py) would then need to be modified. If you begin modifying other
+functions in xbengine_proc_loop.py to get the new tensor cores working then I suspect you have done something wrong as
+only the `_gpu_proc_loop` function launches GPU kernels. Nvidia has some cuBLAS functions that could potentially
+perform the operation we want after a bit of reordering 
+(see [here](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-syrk) - but you may need to dig deeper into
+the cuBLAS options available) - I am just not certain that this uses Tensor cores under the hood. You will need to
+investigate and profile this further.
+
 
 
 ## License
@@ -203,21 +218,13 @@ The image below shows where the data is located at the various stages mentioned 
 
 The numbers in the above image correspond to the following actions:
 
-0\. Heaps received from F-Engines.
-
-1\. Heaps assembled into a chunk in system RAM.
-
-2\. Chunk transferred to GPU memory.
-
-3\. & 4. GPU kernel reorders chunk to be read for correlation and transfers reordered data to GPU memory.
-
-5\. & 6. Correlate reordered data and transfer baselines to GPU memory.
-
-7\. Transfer baselines from GPU memory to host memory.
-
-8\. Transfer baselines from host memory to the NIC and onto the network.
-
-TODO: Fix up the formatting in the above list.
+0\. Heaps received from F-Engines.</br>
+1\. Heaps assembled into a chunk in system RAM.</br>
+2\. Chunk transferred to GPU memory.</br>
+3\. & 4. GPU kernel reorders chunk to be read for correlation and transfers reordered data to GPU memory.</br>
+5\. & 6. Correlate reordered data and transfer baselines to GPU memory.</br>
+7\. Transfer baselines from GPU memory to host memory.</br>
+8\. Transfer baselines from host memory to the NIC and onto the network.</br>
 
 ### Synchronization and Coordination
 
