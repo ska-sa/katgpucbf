@@ -96,14 +96,10 @@ def createHeaps(
 
         for chan_index in range(n_channels_per_stream):
             # coded_sample_value = (0 << 24) + (ant_index << 16) + (0 << 8) + np.uint8(ant_index)
-            pol0Real = np.int8(ant_index)
-            pol0Imag = np.int8(ant_index + 1)
+            pol0Real = np.int8(batch_index)
+            pol0Imag = np.int8(chan_index)
             pol1Real = np.int8(ant_index)
-            pol1Imag = np.int8(ant_index + 2)
-            # pol0Real = np.int8(batch_index)
-            # pol0Imag = np.int8(chan_index)
-            # pol1Real = np.int8(ant_index)
-            # pol1Imag = np.int8(chan_index)
+            pol1Imag = np.int8(chan_index)
             if pol0Real == -128:
                 pol0Real = -127
             if pol0Imag == -128:
@@ -118,9 +114,9 @@ def createHeaps(
                 + (np.uint8(pol0Imag) << 8)
                 + (np.uint8(pol0Real) << 0)
             )
-            if ant_index == 127 or ant_index == 0:
-                print(ant_index, "Input numbers: ", pol0Real, pol0Imag, pol1Real, pol1Imag)
-                print(hex(coded_sample_value))
+            # if ant_index == 127 or ant_index == 0:
+            #     print(ant_index, "Input numbers: ", pol0Real, pol0Imag, pol1Real, pol1Imag)
+            #     print(hex(coded_sample_value))
             sample_array[chan_index][:] = np.full((n_samples_per_channel, 1, 1), coded_sample_value, np.uint32)
 
         # Here we change the dtype of the array from uint16 back to int8. This does not modify the actual data in the
@@ -244,9 +240,12 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     # 6. Generate Data
     for i in range(heap_accumulation_threshold * n_accumulations + 1):
-        timestamp = (i + (heap_accumulation_threshold - 1)) * timestamp_step  # Say what this -1 is for
+        batch_index = i + (heap_accumulation_threshold - 1)
+        timestamp = batch_index * timestamp_step  # Say what this -1 is for
         # print(i, hex(timestamp))
-        heaps = createHeaps(timestamp, i, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send)
+        heaps = createHeaps(
+            timestamp, batch_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send
+        )
         sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # 5. Define C function for verification of data.
@@ -338,7 +337,7 @@ if __name__ == "__main__":
     np.set_printoptions(formatter={"int": hex})
     print("Running tests")
     loop = asyncio.get_event_loop()
-    test_xbengine(loop, 130, 256, 1024)
+    test_xbengine(loop, 130, 256, 4096)
     # test_xbengine(loop, 8, 1024, 32768)
     # test_xbengine(loop, 16, 1024, 32768)
     # test_xbengine(loop, 32, 1024, 32768)
