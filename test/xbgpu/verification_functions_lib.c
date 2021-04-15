@@ -172,14 +172,15 @@ int verify_antpair_visibilities(int iBatchStartIndex, int iNumBatches, int iChan
     // printf("Starting %d\n",iNumBatches);
     for (size_t ulBatchIndex = iBatchStartIndex; ulBatchIndex < iBatchStartIndex + iNumBatches; ulBatchIndex++)
     {
-        //printf("Batch index %ld %d\n",ulBatchIndex, (int8_t)(ulBatchIndex));
-        struct si32Complex ant1Pol0 = createBoundedComplex((int8_t)(ulBatchIndex), (int8_t)(iChannelIndex));
+        int sign = ulBatchIndex % 2 == 0 ? 1 : -1;
+        // printf("Batch index %ld %d\n",ulBatchIndex, (int8_t)(ulBatchIndex));
+        struct si32Complex ant1Pol0 = createBoundedComplex((int8_t)(sign * ulBatchIndex), (int8_t)(sign * iChannelIndex));
         // printf("Heerere a\n");
-        struct si32Complex ant1Pol1 = createBoundedComplex((int8_t)iAnt1Index, (int8_t)(iChannelIndex));
+        struct si32Complex ant1Pol1 = createBoundedComplex((int8_t)(-sign*iAnt1Index), (int8_t)(-sign*iChannelIndex));
         // printf("TYHerere b\n");
-        struct si32Complex ant2Pol0 = createBoundedComplex((int8_t)(ulBatchIndex), (int8_t)(iChannelIndex));
+        struct si32Complex ant2Pol0 = createBoundedComplex((int8_t)(sign * ulBatchIndex), (int8_t)(sign * iChannelIndex));
         // printf("TYHerere c\n");
-        struct si32Complex ant2Pol1 = createBoundedComplex((int8_t)iAnt2Index, (int8_t)(iChannelIndex));
+        struct si32Complex ant2Pol1 = createBoundedComplex((int8_t)(-sign*iAnt2Index), (int8_t)(-sign*iChannelIndex));
 
         // printf("%d %d %d %d %d %d\n", iAnt1Index, iAnt2Index ,ant1Pol1.real , ant1Pol1.imag , ant2Pol0.real,
         // ant2Pol0.imag);
@@ -236,7 +237,7 @@ int verify_xbengine_proc_loop(uint64_t *pu64Baselines, int iBatchStartIndex, int
 
     for (size_t iChannelIndex = 0; iChannelIndex < iNumChans; iChannelIndex++)
     {
-        //printf("asd %d\n", iNumChans);
+        // printf("asd %d\n", iNumChans);
         for (size_t iAnt1Index = 0; iAnt1Index < iNumAnts; iAnt1Index++)
         {
             for (size_t iAnt2Index = 0; iAnt2Index < iAnt1Index + 1; iAnt2Index++)

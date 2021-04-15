@@ -103,8 +103,14 @@ perform the operation we want after a bit of reordering
 (see [here](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-syrk) - but you may need to dig deeper into
 the cuBLAS options available) - I am just not certain that this uses Tensor cores under the hood. You will need to
 investigate and profile this further.
-
-
+17. The katxgpu._katxgpu module only exists in the C++ real. IDEs (and I suspect documentation generators) do not pickup
+up these C++ python modules very well. It would be nice if these modules were detected by IDEs. In katfgpu, there is a
+solution to this that involves using .pyi files (stub files). The folder with these stub files is
+[here](https://github.com/ska-sa/katfgpu/tree/master/katfgpu/_katfgpu). The 
+[recv.pyi](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/_katfgpu/recv.pyi) file in this folder defines stubs
+of the functions in [py_recv.cpp](https://github.com/ska-sa/katfgpu/blob/master/src/py_recv.cpp). We should do something
+similar to this in katxgpu. Addtitionally we should move the comments that were placed in py_recv.cpp to a py_recv.pyi
+file in katxgpu/_katxgpu/recv.pyi so that it can get checked by mypy and used in your IDE of choice.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.

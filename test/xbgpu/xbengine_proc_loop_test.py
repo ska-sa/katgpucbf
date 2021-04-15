@@ -96,10 +96,11 @@ def createHeaps(
 
         for chan_index in range(n_channels_per_stream):
             # coded_sample_value = (0 << 24) + (ant_index << 16) + (0 << 8) + np.uint8(ant_index)
-            pol0Real = np.int8(batch_index)
-            pol0Imag = np.int8(chan_index)
-            pol1Real = np.int8(ant_index)
-            pol1Imag = np.int8(chan_index)
+            sign = 1 if batch_index % 2 == 0 else -1
+            pol0Real = np.int8(sign * batch_index)
+            pol0Imag = np.int8(sign * chan_index)
+            pol1Real = np.int8(-sign * ant_index)
+            pol1Imag = np.int8(-sign * chan_index)
             if pol0Real == -128:
                 pol0Real = -127
             if pol0Imag == -128:
