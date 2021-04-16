@@ -1,7 +1,7 @@
 """
-This module defines an XBEngineProcessingLoop processing loop object that implements an entire GPU XB-Engine pipeline.
+This module defines an XBEngine object that implements an entire GPU XB-Engine pipeline.
 
-Additionally this module defines the QueueItem and RxQueueItem objects that are used in the XBEngineProcessingLoop for
+Additionally this module defines the QueueItem and RxQueueItem objects that are used in the XBEngine for
 passing information between different async processing loops within the object.
 
 TODO:
@@ -48,7 +48,7 @@ import katxgpu.ringbuffer
 
 class QueueItem:
     """
-    A storage container to facilitates communication between different functions in the XBEngineProcessingLoop object.
+    A storage container to facilitates communication between different functions in the XBEngine object.
 
     This queue item contains a buffer of preallocated GPU memory. This memory is reused many times in the processing
     loops to prevent unecessary allocations. The item also contains a list of events. Before accessing the data in the
@@ -192,7 +192,7 @@ class XBEngine:
         batches_per_chunk: int,  # Used for GPU memory tuning
     ):
         """
-        Construct an XBEngineProcessingLoop object.
+        Construct an XBEngine object.
 
         This constructor allocates all memory buffers to be used in the lifetime of the project. These buffers are then
         continously resued to ensure memory use remains constrained.

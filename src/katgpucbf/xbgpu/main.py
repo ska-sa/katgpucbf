@@ -1,8 +1,8 @@
 """
 Module to launch the XB-Engine.
 
-This module parses all command line arguments required to configure the XB-Engine and creates an XBEngineProcessingLoop
-object. The XBEngineProcessingLoop object then manages everything required to run the XB-Engine.
+This module parses all command line arguments required to configure the XB-Engine and creates an XBEngine
+object. The XBEngine object then manages everything required to run the XB-Engine.
 
 TODO:
 The command line parameters could be made more intuitive, for example instead of having mcast addresses and port
@@ -15,7 +15,7 @@ as this uses some useful parsing functions that could be of use here.
 
 import argparse
 import asyncio
-import katxgpu.xbengine_proc_loop
+import katxgpu.xbengine
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,13 +127,13 @@ async def async_main() -> None:
     """
     Create and launch the XB-Engine.
 
-    This function creates the XBEngineProcessingLoop object. It attaches the ibverbs sender and receiver transports to
-    the XBEngineProcessingLoop object and then tells the object to launch all its internal asyncio functions.
+    This function creates the XBEngine object. It attaches the ibverbs sender and receiver transports to
+    the XBEngine object and then tells the object to launch all its internal asyncio functions.
     """
     args = parse_args()
 
     print("Print Initialising XB-Engine")
-    xbengine_proc_loop = katxgpu.xbengine_proc_loop.XBEngineProcessingLoop(
+    xbengine = katxgpu.xbengine.XBEngine(
         adc_sample_rate_Hz=args.adc_sample_rate,
         n_ants=args.array_size,
         n_channels_total=args.channels_total,
@@ -147,14 +147,14 @@ async def async_main() -> None:
         batches_per_chunk=args.batches_per_chunk,
     )
 
-    xbengine_proc_loop.add_udp_ibv_receiver_transport(
+    xbengine.add_udp_ibv_receiver_transport(
         src_ip=args.src_multicast_address,
         src_port=args.src_port,
         interface_ip=args.src_interface_address,
         comp_vector_affinity=args.receiver_comp_vector_affinity,
     )
 
-    xbengine_proc_loop.add_udp_ibv_sender_transport(
+    xbengine.add_udp_ibv_sender_transport(
         dest_ip=args.dest_multicast_address,
         dest_port=args.dest_port,
         interface_ip=args.dest_interface_address,
@@ -163,8 +163,8 @@ async def async_main() -> None:
 
     print("Starting main processing loop")
 
-    await xbengine_proc_loop.run()
-    await xbengine_proc_loop.run_descriptors_loop(5)
+    await xbengine.run()
+    await xbengine.run_descriptors_loop(5)
 
 
 def main() -> None:

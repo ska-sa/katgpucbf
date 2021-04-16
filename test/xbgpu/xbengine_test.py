@@ -1,7 +1,6 @@
 """TODO: Write this."""
 
 # 1. Import local modules
-# from katxgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 import test_parameters
 import katxgpu.ringbuffer
 import katxgpu.xbengine
