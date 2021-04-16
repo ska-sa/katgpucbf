@@ -118,18 +118,16 @@ int verify_precorrelation_reorder(int8_t *pi8Array, int8_t *pi8ArrayReordered, i
 
 struct si32Complex
 {
-    int32_t real;
-    int32_t imag;
+    int32_t i32Real;
+    int32_t i32Imag;
 };
 
 struct si32Complex createBoundedComplex(int8_t i8Real, int8_t i8Imag)
 {
-    // printf("%d %d\n",i8Real,i8Imag);
     if (i8Real == -128)
         i8Real = -127;
     if (i8Imag == -128)
         i8Imag = -127;
-    // printf("%d %d\n",i8Real,i8Imag);
     struct si32Complex ret = {i8Real, i8Imag};
     return ret;
 }
@@ -144,117 +142,106 @@ int get_baseline_index(int iAnt1, int iAnt2)
 // c = a * b * alpha
 void complex_multiply_scale_accumulate(struct si32Complex *c, struct si32Complex a, struct si32Complex b, int alpha)
 {
-    c->real += (a.real * b.real + a.imag * b.imag) * alpha;
-    c->imag += (a.imag * b.real - a.real * b.imag) * alpha;
+    c->i32Real += (a.i32Real * b.i32Real + a.i32Imag * b.i32Imag) * alpha;
+    c->i32Imag += (a.i32Imag * b.i32Real - a.i32Real * b.i32Imag) * alpha;
 }
 
-int assert_complex_samples(struct si32Complex calculatedSample, uint64_t u64ActualSample)
+int assert_complex_samples(struct si32Complex sCalculatedSample, struct si32Complex sActualSample)
 {
-    int32_t i32ActualSampleReal = (int32_t)u64ActualSample;
-    int32_t i32ActualSampleImag = (int32_t)(u64ActualSample >> 32);
-
-    if (calculatedSample.real != i32ActualSampleReal)
+    if (sCalculatedSample.i32Real != sActualSample.i32Real)
         return 0;
-    if (calculatedSample.imag != i32ActualSampleImag)
+    if (sCalculatedSample.i32Imag != sActualSample.i32Imag)
         return 0;
     return 1;
 }
 
-int verify_antpair_visibilities(int iBatchStartIndex, int iNumBatches, int iChannelIndex, int iNumSamplesPerChan,
-                                int iAnt1Index, int iAnt2Index, uint64_t u64Pol00, uint64_t u64Pol01, uint64_t u64Pol10,
-                                uint64_t u64Pol11)
+int verify_antpair_visibilities(uint uBatchStartIndex, uint ulNumBatches, uint ulChannelIndex, uint ulNumSamplesPerChan,
+                                uint uAnt1Index, uint uAnt2Index, uint64_t u64Pol00, uint64_t u64Pol01,
+                                uint64_t u64Pol10, uint64_t u64Pol11)
 {
+    struct si32Complex sActualPol00 = {(int32_t)u64Pol00, (int32_t)(u64Pol00 >> 32)};
+    struct si32Complex sActualPol01 = {(int32_t)u64Pol01, (int32_t)(u64Pol01 >> 32)};
+    struct si32Complex sActualPol10 = {(int32_t)u64Pol10, (int32_t)(u64Pol10 >> 32)};
+    struct si32Complex sActualPol11 = {(int32_t)u64Pol11, (int32_t)(u64Pol11 >> 32)};
+
     struct si32Complex sGeneratedPol00 = {0, 0};
     struct si32Complex sGeneratedPol01 = {0, 0};
     struct si32Complex sGeneratedPol10 = {0, 0};
     struct si32Complex sGeneratedPol11 = {0, 0};
 
-    // printf("Starting %d\n",iNumBatches);
-    for (size_t ulBatchIndex = iBatchStartIndex; ulBatchIndex < iBatchStartIndex + iNumBatches; ulBatchIndex++)
+    for (size_t ulBatchIndex = uBatchStartIndex; ulBatchIndex < uBatchStartIndex + ulNumBatches; ulBatchIndex++)
     {
-        int sign = ulBatchIndex % 2 == 0 ? 1 : -1;
-        // printf("Batch index %ld %d\n",ulBatchIndex, (int8_t)(ulBatchIndex));
-        struct si32Complex ant1Pol0 = createBoundedComplex((int8_t)(sign * ulBatchIndex), (int8_t)(sign * iChannelIndex));
-        // printf("Heerere a\n");
-        struct si32Complex ant1Pol1 = createBoundedComplex((int8_t)(-sign*iAnt1Index), (int8_t)(-sign*iChannelIndex));
-        // printf("TYHerere b\n");
-        struct si32Complex ant2Pol0 = createBoundedComplex((int8_t)(sign * ulBatchIndex), (int8_t)(sign * iChannelIndex));
-        // printf("TYHerere c\n");
-        struct si32Complex ant2Pol1 = createBoundedComplex((int8_t)(-sign*iAnt2Index), (int8_t)(-sign*iChannelIndex));
+        int iSign = ulBatchIndex % 2 == 0 ? 1 : -1;
 
-        // printf("%d %d %d %d %d %d\n", iAnt1Index, iAnt2Index ,ant1Pol1.real , ant1Pol1.imag , ant2Pol0.real,
-        // ant2Pol0.imag);
+        struct si32Complex sAnt1Pol0 =
+            createBoundedComplex((int8_t)(iSign * ulBatchIndex), (int8_t)(iSign * ulChannelIndex));
+        struct si32Complex sAnt1Pol1 =
+            createBoundedComplex((int8_t)(-iSign * uAnt1Index), (int8_t)(-iSign * ulChannelIndex));
+        struct si32Complex sAnt2Pol0 =
+            createBoundedComplex((int8_t)(iSign * ulBatchIndex), (int8_t)(iSign * ulChannelIndex));
+        struct si32Complex sAnt2Pol1 =
+            createBoundedComplex((int8_t)(-iSign * uAnt2Index), (int8_t)(-iSign * ulChannelIndex));
 
-        complex_multiply_scale_accumulate(&sGeneratedPol00, ant1Pol0, ant2Pol0, iNumSamplesPerChan);
-        complex_multiply_scale_accumulate(&sGeneratedPol01, ant1Pol0, ant2Pol1, iNumSamplesPerChan);
-        // printf("=========\n");
-        complex_multiply_scale_accumulate(&sGeneratedPol10, ant1Pol1, ant2Pol0, iNumSamplesPerChan);
-        // printf("========= %d %d\n",sGeneratedPol10.real,sGeneratedPol10.imag);
-        complex_multiply_scale_accumulate(&sGeneratedPol11, ant1Pol1, ant2Pol1, iNumSamplesPerChan);
+        complex_multiply_scale_accumulate(&sGeneratedPol00, sAnt1Pol0, sAnt2Pol0, ulNumSamplesPerChan);
+        complex_multiply_scale_accumulate(&sGeneratedPol01, sAnt1Pol0, sAnt2Pol1, ulNumSamplesPerChan);
+        complex_multiply_scale_accumulate(&sGeneratedPol10, sAnt1Pol1, sAnt2Pol0, ulNumSamplesPerChan);
+        complex_multiply_scale_accumulate(&sGeneratedPol11, sAnt1Pol1, sAnt2Pol1, ulNumSamplesPerChan);
     }
-    // printf("Ending\n");
 
-    // printf("%d %d %d %d\n", iAnt1Index, iAnt2Index, sGeneratedPol00.real, sGeneratedPol00.imag);
-
-    if (assert_complex_samples(sGeneratedPol00, u64Pol00) == 0)
+    if (assert_complex_samples(sGeneratedPol00, sActualPol00) == 0)
     {
-        printf("%d %d %d %d\n", iAnt1Index, iAnt2Index, sGeneratedPol00.real, sGeneratedPol00.imag);
+        printf("Ant 1 %d, Ant 2 %d, Polarisation product 00 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               uAnt1Index, uAnt2Index, sGeneratedPol00.i32Real, sGeneratedPol00.i32Imag, sActualPol00.i32Real,
+               sActualPol00.i32Imag);
         return 0;
     }
-    if (assert_complex_samples(sGeneratedPol01, u64Pol01) == 0)
+    if (assert_complex_samples(sGeneratedPol01, sActualPol01) == 0)
     {
-        printf("b\n");
+        printf("Ant 1 %d, Ant 2 %d, Polarisation product 01 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               uAnt1Index, uAnt2Index, sGeneratedPol01.i32Real, sGeneratedPol01.i32Imag, sActualPol01.i32Real,
+               sActualPol01.i32Imag);
         return 0;
     }
-    if (assert_complex_samples(sGeneratedPol10, u64Pol10) == 0)
+    if (assert_complex_samples(sGeneratedPol10, sActualPol10) == 0)
     {
-        printf("%d %d %d %d\n", iAnt1Index, iAnt2Index, sGeneratedPol10.real, sGeneratedPol10.imag);
-        printf("%d %d %d %d\n", (int8_t)iAnt1Index, (int8_t)(iAnt1Index + 2), (int8_t)iAnt2Index,
-               (int8_t)(iAnt2Index + 1));
-        printf("%d %d\n", (int32_t)u64Pol10, (int32_t)(u64Pol10 >> 32));
-        printf("c\n");
+        printf("Ant 1 %d, Ant 2 %d, Polarisation product 10 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               uAnt1Index, uAnt2Index, sGeneratedPol10.i32Real, sGeneratedPol10.i32Imag, sActualPol10.i32Real,
+               sActualPol10.i32Imag);
         return 0;
     }
-    if (assert_complex_samples(sGeneratedPol11, u64Pol11) == 0)
+    if (assert_complex_samples(sGeneratedPol11, sActualPol11) == 0)
     {
-        printf("d\n");
+        printf("Ant 1 %d, Ant 2 %d, Polarisation product 11 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               uAnt1Index, uAnt2Index, sGeneratedPol11.i32Real, sGeneratedPol11.i32Imag, sActualPol11.i32Real,
+               sActualPol11.i32Imag);
         return 0;
     }
-    // int complex z2 = 1 + 2 * I;
 
     return 1;
 }
 
-// Print somewhere a failure message
-int verify_xbengine(uint64_t *pu64Baselines, int iBatchStartIndex, int iNumBatches, int iNumAnts,
-                              int iNumChans, int iNumSamplesPerChan, int iNumPols)
+int verify_xbengine(uint64_t *pu64Baselines, uint uBatchStartIndex, size_t ulNumBatches, size_t ulNumAnts,
+                    size_t ulNumChans, size_t ulNumSamplesPerChan, size_t uNumPols)
 {
-    // printf("********************* %d **** %d **********************\n", iBatchStartIndex, iNumBatches);
+    const size_t ulNumBaselines = ulNumAnts * (ulNumAnts + 1) / 2;
+    const size_t ulBaselineStride = uNumPols * uNumPols;
+    const size_t ulChannelStride = ulNumBaselines * ulBaselineStride;
 
-    const int iNumBaselines = iNumAnts * (iNumAnts + 1) / 2; // Change to Ul
-    const int iBaselineStride = iNumPols * iNumPols;
-    const int iChannelStride = iNumBaselines * iBaselineStride;
-
-    for (size_t iChannelIndex = 0; iChannelIndex < iNumChans; iChannelIndex++)
+    for (size_t ulChannelIndex = 0; ulChannelIndex < ulNumChans; ulChannelIndex++)
     {
-        // printf("asd %d\n", iNumChans);
-        for (size_t iAnt1Index = 0; iAnt1Index < iNumAnts; iAnt1Index++)
+        for (size_t ulAnt1Index = 0; ulAnt1Index < ulNumAnts; ulAnt1Index++)
         {
-            for (size_t iAnt2Index = 0; iAnt2Index < iAnt1Index + 1; iAnt2Index++)
+            for (size_t ulAnt2Index = 0; ulAnt2Index < ulAnt1Index + 1; ulAnt2Index++)
             {
-                int iBaselineIndex = get_baseline_index(iAnt1Index, iAnt2Index);
-                int iSampleIndex = iChannelIndex * iChannelStride + iBaselineStride * iBaselineIndex;
-                int iSampleReal = (int32_t)pu64Baselines[iSampleIndex];
-                int iSampleImag = (int32_t)(pu64Baselines[iSampleIndex] >> 32);
-                // printf("%d %d %ld %ld %d %d\n", iBaselineIndex, iSampleIndex, iAnt1Index, iAnt2Index, iSampleReal,
-                //        iSampleImag);
-                int success = verify_antpair_visibilities(
-                    iBatchStartIndex, iNumBatches, iChannelIndex, iNumSamplesPerChan, iAnt1Index, iAnt2Index,
-                    pu64Baselines[iSampleIndex], pu64Baselines[iSampleIndex + 1], pu64Baselines[iSampleIndex + 2],
-                    pu64Baselines[iSampleIndex + 3]);
-                if (success == 0)
+                uint uBaselineIndex = get_baseline_index(ulAnt1Index, ulAnt2Index);
+                uint uSampleIndex = ulChannelIndex * ulChannelStride + ulBaselineStride * uBaselineIndex;
+
+                int iSuccess = verify_antpair_visibilities(
+                    uBatchStartIndex, ulNumBatches, ulChannelIndex, ulNumSamplesPerChan, ulAnt1Index, ulAnt2Index,
+                    pu64Baselines[uSampleIndex], pu64Baselines[uSampleIndex + 1], pu64Baselines[uSampleIndex + 2],
+                    pu64Baselines[uSampleIndex + 3]);
+                if (iSuccess == 0)
                 {
-                    printf("We failed\n");
                     return 0;
                 }
             }
