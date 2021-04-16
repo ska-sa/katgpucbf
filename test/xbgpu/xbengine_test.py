@@ -4,7 +4,7 @@
 # from katxgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 import test_parameters
 import katxgpu.ringbuffer
-import katxgpu.xbengine_proc_loop
+import katxgpu.xbengine
 
 # 2. Import external modules
 import os
@@ -225,7 +225,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     recvStream.add_inproc_reader(queue)
 
     # 4. Create xbengine
-    xbengine_proc_loop = katxgpu.xbengine_proc_loop.XBEngineProcessingLoop(
+    xbengine = katxgpu.xbengine.XBEngine(
         adc_sample_rate_Hz=1712000000,  # L-Band, not important
         n_ants=n_ants,
         n_channels_total=n_channels_total,
@@ -253,10 +253,10 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     verificationFunctionsLib_C = np.ctypeslib.load_library(
         libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/")
     )
-    verify_xbengine_proc_loop_C = verificationFunctionsLib_C.verify_xbengine_proc_loop
+    verify_xbengine_C = verificationFunctionsLib_C.verify_xbengine
 
     baselines_products = n_ants * (n_ants + 1) // 2 * n_pols * n_pols * n_channels_per_stream
-    verify_xbengine_proc_loop_C.argtypes = [
+    verify_xbengine_C.argtypes = [
         np.ctypeslib.ndpointer(
             dtype=np.uint64,  # Output data array
             shape=(baselines_products,),
@@ -270,14 +270,14 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         ctypes.c_int,  # Polarisations
     ]
 
-    verify_xbengine_proc_loop_C.restype = ctypes.c_int
+    verify_xbengine_C.restype = ctypes.c_int
 
     # 7. Add transports
-    xbengine_proc_loop.add_inproc_sender_transport(queue)
-    xbengine_proc_loop.sendStream.send_descriptor_heap()
+    xbengine.add_inproc_sender_transport(queue)
+    xbengine.sendStream.send_descriptor_heap()
 
     buffer = sourceStream.getvalue()
-    xbengine_proc_loop.add_buffer_receiver_transport(buffer)
+    xbengine.add_buffer_receiver_transport(buffer)
 
     # 8. Function to get data from xb_engine
     @pytest.mark.asyncio
@@ -306,7 +306,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
             else:
                 num_batches_in_current_accumulation = heap_accumulation_threshold
                 base_batch_index = i * heap_accumulation_threshold
-            result = verify_xbengine_proc_loop_C(
+            result = verify_xbengine_C(
                 ig_recv["xeng_raw"].value.flatten(order="C"),
                 base_batch_index,
                 num_batches_in_current_accumulation,
@@ -323,14 +323,14 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     @pytest.mark.asyncio
     async def run():
         """TODO: Write this."""
-        task1 = event_loop.create_task(xbengine_proc_loop.run())
+        task1 = event_loop.create_task(xbengine.run())
         task2 = event_loop.create_task(recv_process())
         await task2
         task1.cancel()
 
     # 9. Launch asyn functions and wait until completion
     event_loop.run_until_complete(run())
-    xbengine_proc_loop.stop()
+    xbengine.stop()
 
 
 # A manual run useful when debugging the unit tests.

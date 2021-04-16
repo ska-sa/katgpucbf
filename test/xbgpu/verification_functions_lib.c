@@ -226,7 +226,7 @@ int verify_antpair_visibilities(int iBatchStartIndex, int iNumBatches, int iChan
 }
 
 // Print somewhere a failure message
-int verify_xbengine_proc_loop(uint64_t *pu64Baselines, int iBatchStartIndex, int iNumBatches, int iNumAnts,
+int verify_xbengine(uint64_t *pu64Baselines, int iBatchStartIndex, int iNumBatches, int iNumAnts,
                               int iNumChans, int iNumSamplesPerChan, int iNumPols)
 {
     // printf("********************* %d **** %d **********************\n", iBatchStartIndex, iNumBatches);

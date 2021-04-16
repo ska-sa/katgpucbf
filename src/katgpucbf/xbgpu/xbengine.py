@@ -95,7 +95,7 @@ class RxQueueItem(QueueItem):
         self.chunk = None
 
 
-class XBEngineProcessingLoop:
+class XBEngine:
     """
     Class that creates an entire GPU XB-Engine pipeline.
 
