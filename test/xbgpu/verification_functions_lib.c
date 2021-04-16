@@ -128,8 +128,8 @@ struct si32Complex createBoundedComplex(int8_t i8Real, int8_t i8Imag)
         i8Real = -127;
     if (i8Imag == -128)
         i8Imag = -127;
-    struct si32Complex ret = {i8Real, i8Imag};
-    return ret;
+    struct si32Complex sReturn = {i8Real, i8Imag};
+    return sReturn;
 }
 
 int get_baseline_index(int iAnt1, int iAnt2)

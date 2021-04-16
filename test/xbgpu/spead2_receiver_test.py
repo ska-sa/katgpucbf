@@ -231,7 +231,7 @@ def createHeaps(
     -------
     heaps: [spead2.send.HeapReference]
         The required heaps are stored in an array. EAch heap is wrapped in a HeapReference object is this is what is
-        required by tge SPEAD2 send_heaps() function.
+        required by the SPEAD2 send_heaps() function.
     """
     # The heaps shape has been modified with the complexity dimension equal to 1 instead of 2. This is because we treat
     # the two 8-bit complex samples
