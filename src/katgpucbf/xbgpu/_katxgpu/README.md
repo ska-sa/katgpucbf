@@ -272,7 +272,7 @@ marked as done once the transmission is complete.
 
 ## 3.1 Unit Tests
 
-The unit test for the send object can [here](../test/spead2_sender_test.py)
+The unit test for the send object can be found [here](../test/spead2_sender_test.py)
 
 ## 4. Peerdirect Support
 
