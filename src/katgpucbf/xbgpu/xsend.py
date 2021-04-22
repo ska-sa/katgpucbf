@@ -168,6 +168,8 @@ class XEngineSPEADAbstractSend(ABC):
 
         # 3. Multicast Stream Parameters
         self.channel_offset: Final[int] = channel_offset
+
+        # n_pols is meant to be here twice to represent the hh, vv, hv, vh pols.
         self.heap_payload_size_bytes: Final[int] = (
             self.n_channels_per_stream
             * self.n_baselines

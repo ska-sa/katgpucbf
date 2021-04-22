@@ -2,16 +2,16 @@
 
 This repository implements a GPU-based XB-Engine for the MeerKAT Extension Project. 
 
-This repo makes use of the [SPEAD2](https://spead2.readthedocs.io/en/latest/index.html) library for high performance
+This repo makes use of the [SPEAD2](https://spead2.readthedocs.io/en/latest/index.html) library for high-performance
 networking. SPEAD2 is designed to send and recieve multicast UDP data that conforms to the SPEAD protocol. More
 information can be found [here](src/README.md). With the correct configuration, this engine is able to receive packets
 at high data rates without dropping any.
 
-Nvidia Tensor cores have been used to greatly accelerate the correlation algorithm. 
+Nvidia Tensor Cores have been used to greatly accelerate the correlation algorithm. 
 
-The SARAO [katsdpsigproc](https://katsdpsigproc.readthedocs.io/) package has been used to implement the GPU side processing.
+The SARAO [katsdpsigproc](https://katsdpsigproc.readthedocs.io/) package has been used to implement the GPU-side processing.
 This wraps both OpenCL and CUDA allowing for generic operations to be defined that can operate in both CUDA and OpenCL.
-Currently all kernels have been written in CUDA. Additionally in order to make use of Tensor cores, CUDA needs to be
+Currently all kernels have been written in CUDA. Additionally in order to make use of Tensor Cores, CUDA needs to be
 used. Due to these reasons, the framework only compiles things down to CUDA, not OpenCL.
 
 Both katsdpsigproc and SPEAD2 are compatible with [asyncio](https://docs.python.org/3/library/asyncio.html). This
@@ -30,7 +30,7 @@ NOTE: Currently the B-Engine part of this engine has not been implemented.
 
 ## TODOs
 The X-Engine in its current form works as expected. The B-Engine and control and monitoring still needs to be
-implemented and there are some quality of life improvements that can be made. The recommeded improvements are as
+implemented and there are some quality-of-life improvements that can be made. The recommeded improvements are as
 follows:
 
 katxgpu is still in early development with more modules being added every few weeks. Attempts are made for each of these
@@ -81,27 +81,27 @@ managing metrics.)
 katxgpu.ringbuffer.AsyncRingbuffer objects. See [receiver_example.py](scratch/receiver_example.py) for an example. It
 may be worth creating some top level class that encapsulates all of these classes as there is no real value added by
 having them seperate and it is a bit confusing to have to work with so many classes to do essentially one function.
-14. The command line parameters in [main.py](katxgpu/main.py) could be made more intuitive, for example instead of
+14. The command-line parameters in [main.py](katxgpu/main.py) could be made more intuitive, for example instead of
 having mcast addresses and port numbers as seperate arguments, accept something formatted as
 `<ip address>:<port number>` and parse the argument to seperate out the parameters. Additionally checks need to be put
-in place to ensure the command line parameters are correct - is the port number valid, is the IP address a multicast
+in place to ensure the command-line parameters are correct - is the port number valid, is the IP address a multicast
 address, is the array size >0, etc. As a first step for this, I would look at the
 [main.py](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/main.py) file in katfgpu as this uses some useful
 parsing functions that could be of use here.
 15. There is no B-Engine. It should eventually be implemented.
-16. The current Tensor core kernel is designed to work on the Nvidia RTX 20xx series of GPUs. The newer ranges of
+16. The current Tensor Core kernel is designed to work on the Nvidia RTX 20xx series of GPUs. The newer ranges of
 cards (RTX 30xx and above) may not be compatible with this kernel. This needs to be tested as soon as possible on 
 a newer card to see if it works. If this does not work, there are a few options. Either the
 [tensorcore_xengine_core.py](katxgpu/tensorcore_xengine_core.py) might require some tweaking in which case the changes
-are quite well contained. A complication may be that the tensor core kernel needs to be changes so much that the input
+are quite well contained. A complication may be that the Tensor Core kernel needs to be changed so much that the input
 and output data formats change. In this case, the [precorrelation_reorder.py](katxgpu/precorrelation_reorder.py) may
 need to be changed too. The entirety of the `async def _gpu_proc_loop(self)` function in
 [xbengine.py](katxgpu/xbengine.py) would then need to be modified. If you begin modifying other
-functions in xbengine.py to get the new tensor cores working then I suspect you have done something wrong as
+functions in xbengine.py to get the new Tensor Cores working then I suspect you have done something wrong as
 only the `_gpu_proc_loop` function launches GPU kernels. Nvidia has some cuBLAS functions that could potentially
 perform the operation we want after a bit of reordering 
 (see [here](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-syrk) - but you may need to dig deeper into
-the cuBLAS options available) - I am just not certain that this uses Tensor cores under the hood. You will need to
+the cuBLAS options available) - I am just not certain that this uses Tensor Cores under the hood. You will need to
 investigate and profile this further.
 17. The katxgpu._katxgpu module only exists in the C++ realm. IDEs (and I suspect documentation generators) do not pickup
 up these C++ python modules very well. It would be nice if these modules were detected by IDEs. In katfgpu, there is a
@@ -111,11 +111,16 @@ solution to this that involves using .pyi files (stub files). The folder with th
 of the functions in [py_recv.cpp](https://github.com/ska-sa/katfgpu/blob/master/src/py_recv.cpp). We should do something
 similar to this in katxgpu. Addtitionally we should move the comments that were placed in py_recv.cpp to a py_recv.pyi
 file in katxgpu/_katxgpu/recv.pyi so that it can get checked by mypy and used in your IDE of choice.
+18. Currently to run katxgpu, three arguments are given: `--receiver-thread-affinity, --receiver-comp-vector-affinity`, 
+and `--sender-thread-affinity`. It is likely that all of these wil be set to use the same core. It may be worth
+creating a new argument in [main.py](katxgpu/main.py) to assign all these values to a specific core. We must then
+decide if we want to give the user access to the above three arguments. If this is done, the "Launching the XB-Engine"
+section below will need to be updated to reflect this new command.
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
 When it eventually goes public, this will need to be specified. We need to check with John Romein (the author of the 
-Tensor core X-Engine core kernel that is central to this repo) what license he is using. This will inform the choice of.
+Tensor Core X-Engine core kernel that is central to this repo) what license he is using. This will inform the choice of.
 license here.
 
 __DO NOT__ make this repo public before specifying the license.
@@ -224,10 +229,10 @@ The image below shows where the data is located at the various stages mentioned 
 
 The numbers in the above image correspond to the following actions:
 
-0\. Heaps received from F-Engines.</br>
-1\. Heaps assembled into a chunk in system RAM.</br>
-2\. Chunk transferred to GPU memory.</br>
-3\. & 4. GPU kernel reorders chunk to be read for correlation and transfers reordered data to GPU memory.</br>
+0\. Receive heaps from F-Engines.</br>
+1\. Assemble heaps into a chunk in system RAM.</br>
+2\. Transfer chunk to GPU memory.</br>
+3\. & 4. Launch a GPU kernel to reorder a chunk and transfer reordered data back to GPU memory.
 5\. & 6. Correlate reordered data and transfer baselines to GPU memory.</br>
 7\. Transfer baselines from GPU memory to host memory.</br>
 8\. Transfer baselines from host memory to the NIC and onto the network.</br>
@@ -246,7 +251,7 @@ The image below demonstrates how data moves through the pipeline and how it is r
 
 The `asyncio.Queues` help to coordinate the flow of data through the different asyncio functions. However the GPU
 requires a seperate type of coordination. The GPU has three different command queues that manage the coordination. 
-A command queue is an OpenCL concept - within katsdpsigproc, this is still called a command queue even though it can be
+A command queue is an OpenCL term - within katsdpsigproc, this is still called a command queue even though it can be
 implemented as a CUDA stream. One command queue is for processing and the other two are for transferring data from host
 memory to the GPU and back. Events are put onto the command queue and the async processing loops can `await` for these
 events to be complete. Often one async function will enqueue some commands followed by an event onto the GPU command
@@ -269,9 +274,9 @@ The numbers in the image above correspond to the following actions:
 The input data is accumulated before being output. For every output heap, multiple input heaps are received.
 
 A heap from a single F-Engine consists of a set number of samples specified by the `--samples-per-channel` flag. Each
-of these time samples is part of a different FFT spectrum. Meaning that the timestamp difference per sample is
+of these time samples is part of a different spectrum. Meaning that the timestamp difference per sample is
 equal to the `--channels-total` multiplied by 2 (multiple for two to account for the fact that we throw half the
-spectrum away due to the symmetric properties of the Fourier transform). The timestamp difference between consecutive
+spectrum away due to the symmetric properties of the Fourier Transform). The timestamp difference between consecutive
 two heaps from the same F-Engine is equal to: `--samples-per-channel * --channels-total * 2`.
 
 A batch of heaps is a collection of heaps from different F-Engines with the same timestamp. Correlation occurs on a
@@ -295,6 +300,11 @@ To run the framework, run the command `pytest` from the katxgpu parent directory
 
 This assumes the package installation and pre-commit configuration has already been done.
 
+__NB:__ Some of the tests in pytest verify their output using a function written in the 
+[verification_functions_lib.c](test/verification_functions_lib.c) C file in order to reduce the test runtime.
+This file needs to be compiled or else the test will throw an error. Navigate to the [test](./test) directory and run
+`make` to compile it.
+
 ## Jenkins CI
 
 Jenkins has been integrated into this repo. On every PR and at least once a day, Jenkins will scan the repo for changes
@@ -305,7 +315,7 @@ changes (as long as the branch has a Jenkinsfile). The test configuration is spe
 In theory, any Jenkins server should be able run the pipeline from the Jenkinsfile, however for this repo, there are a 
 few additional requirements:
 1. The node the docker server run on requires a Nvidia GPU of compute capability 7.5 or above. Basically the GPU is
-required to have Tensor cores.
+required to have Tensor Cores.
 2. The docker engine that Jenkins points to will need to be able to access the host GPU. Nvidia provides a tool
 do this, called the [nvidia-container-runtime](https://github.com/NVIDIA/nvidia-container-runtime). This need to be
 installed and then the `--gpus all` flag needs to be added when calling docker run (`docker run --gpus all ...`). The 
@@ -368,7 +378,7 @@ docker run \
 To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_container`
 
 The `--network host`, `--ulimit=memlock=-1`, `--device=/dev/infiniband/rdma_cm`, `--device=/dev/infiniband/uverbs0`
-flags are required to pass the ibverbs devices to the container for high performance networking.
+flags are required to pass the ibverbs devices to the container for high-performance networking.
 
 The `--gpus all` flag passes the GPUs from the host machine into the docker container
 
@@ -379,7 +389,7 @@ be found in the Jenkinsfile.
 
 ## SPEAD2 Network Side Software
 
-This software uses the high performance SPEAD2 networking library for all high speed data transmission and reception.
+This software uses the high-performance SPEAD2 networking library for all high speed data transmission and reception.
 The SPEAD2 library has been extended in C++ and this has been turned into a project submodule. This module can be
 imported using `import katxgpu._katxgpu`.
 

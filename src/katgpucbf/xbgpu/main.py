@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
         "--channels-total",
         type=int,
         default=32768,
-        help="Total number of channels out of the F-Engine FFT. [%(default)s]",
+        help="Total number of channels out of the F-Engine PFB. [%(default)s]",
     )
     parser.add_argument(
         "--channels-in-stream",
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
         "--channel-offset-value",
         type=int,
         default=0,
-        help="First channel in the range of channels that this engine must process. [%(default)s]",
+        help="First channel in the band of channels that this engine must process. [%(default)s]",
     )
     parser.add_argument(
         "--samples-per-channel",
@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
         "--batches-per-chunk",
         type=int,
         default=5,
-        help="A batch is a collection of heaps from different antennas with the same timestamp. This parameter "
+        help="A batch is a collection of heaps from different F-Engines with the same timestamp. This parameter "
         "specifies the number of consecutive batches to store in the same chunk. The higher this value is, the "
         "more GPU and system RAM is allocated, the lower this value is, the more work the python processing thread "
         "is required to do. [%(default)s]",
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         parser.error("Only 2 polarisations per antenna currently supported.")
 
     if args.sample_bits != 8:
-        parser.error("Only 8 bit values are currently supported.")
+        parser.error("Only 8-bit values are currently supported.")
 
     # 6. Return
     return args
@@ -165,8 +165,11 @@ async def async_main() -> None:
 
     print("Starting main processing loop")
 
-    await xbengine.run()
-    await xbengine.run_descriptors_loop(5)
+    loop = asyncio.get_event_loop()
+    main_task = loop.create_task(xbengine.run())
+    descriptor_task = loop.create_task(xbengine.run_descriptors_loop(5))
+    await main_task
+    await descriptor_task
 
 
 def main() -> None:
