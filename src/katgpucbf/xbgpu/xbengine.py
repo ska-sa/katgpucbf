@@ -6,7 +6,8 @@ passing information between different async processing loops within the object.
 
 TODO:
     1. Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
-    docstring for more information. At the moment, there is no clean way to close the pipeline.
+    docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
+    attempts this but needs some work.
     2. Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
     worth parameterising this function to give it a custom file name and set it to write changes to a file.
     3. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
@@ -471,7 +472,7 @@ class XBEngine:
         self.tx_transport_added = True
 
         # This value staggers the send so that packets within a heap are transmitted onto the network across the entire
-        # time between dumps. intervaleCare needs to be taken to ensure that this rate is not set too high. If it is
+        # time between dumps. Care needs to be taken to ensure that this rate is not set too high. If it is
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
 
@@ -563,7 +564,7 @@ class XBEngine:
             item.add_event(self._upload_command_queue.enqueue_marker())
 
             # 2.4. Give the rx item to the _gpu_proc_loop.
-            await self._rx_item_queue.put(item)  # Dont think it needs to be async
+            await self._rx_item_queue.put(item)
 
             # 3. If the loop must close, stop the stream.
             if self.running is not True:
@@ -596,7 +597,7 @@ class XBEngine:
         self.tensorCoreXEngineCoreOperation.bind(outVisibilities=tx_item.buffer_device)
         self.tensorCoreXEngineCoreOperation.zero_visibilities()
 
-        while self.running is True:
+        while self.running:
             # 2. Get item from receiver loop - wait for the HtoD transfers to complete and then give the chunk back to
             # the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
@@ -652,7 +653,7 @@ class XBEngine:
             rx_item.reset()
             await self._rx_free_item_queue.put(rx_item)
 
-        # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit. This funtion
+        # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit. This function
         # puts the current tx_item on the queue. The sender_loop can then stop waiting upon receiving this and exit.
         await self._tx_item_queue.put(tx_item)
 
@@ -663,7 +664,7 @@ class XBEngine:
         This function does the following:
         1. Get an item from the _tx_item_queue.
         2. Wait for all the events on this item to complete.
-        3. Wait for an available heap buffer to become available.
+        3. Wait for an available heap buffer from the sendStream.
         4. Transfer the GPU buffer in the item to the heap buffer in system RAM.
         5. Wait for the transfer to complete.
         6. Transmit data in heap buffer out into the network.
@@ -678,7 +679,7 @@ class XBEngine:
         old_time_s = time.time()
         old_timestamp = 0
 
-        while self.running is True:
+        while self.running:
             # 1. Get the item to transfer and wait for all GPU events to finish before continuing
             item = await self._tx_item_queue.get()
             await item.async_wait_for_events()
@@ -742,7 +743,7 @@ class XBEngine:
 
         This loop is not part of the main run loop as we do not want it running during the unit tests.
         """
-        while self.running is True:
+        while self.running:
             self.sendStream.send_descriptor_heap()
             await asyncio.sleep(interval_s)
 
@@ -780,4 +781,3 @@ class XBEngine:
         self.receiver_task.cancel()
         self.gpu_proc_task.cancel()
         self.sender_task.cancel()
-        del self.context

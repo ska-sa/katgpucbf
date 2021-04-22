@@ -41,7 +41,7 @@ def createHeaps(
     Generate a list of heaps to send to the xbengine.
 
     One heap is generated per antenna in the array. All heaps will have the same timestamp. The 8-bit complex samples
-    for both pols are groued together and encoded as a single 32-bit unsigned integer value. A heap is composed of
+    for both pols are grouped together and encoded as a single 32-bit unsigned integer value. A heap is composed of
     multiple channels. Per channel all 32-bit values are kept constant. This makes for faster verification with the
     downside being that if samples within the channel range get mixed up, this will not be detected.
 
@@ -51,7 +51,7 @@ def createHeaps(
     coded_sample_value =  (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
                           (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
 
-    The sign value is 1 for even batch indexes and -1 for odd ones for an even spread of positive and negative
+    The sign value is 1 for even batch indices and -1 for odd ones for an even spread of positive and negative
     numbers. An added nuance is that if any of these 8-bit values are equal to -128 they are set to -127 as -128 is not
     supported by the tensor cores.
 
@@ -82,7 +82,7 @@ def createHeaps(
     Returns
     -------
     heaps: [spead2.send.HeapReference]
-        The required heaps are stored in an array. Each heap is wrapped in a HeapReference object is this is what is
+        The required heaps are stored in an array. Each heap is wrapped in a HeapReference object as this is what is
         required by the SPEAD2 send_heaps() function.
     """
     # 1. Define heap shapes that will be needed to generate simulated data.
@@ -170,7 +170,7 @@ def createHeaps(
         # substreams introduced. It has not been updated along with the rest of the transports. As such the unit test
         # cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be
         # added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to
-        # look at using the inproc transport. The inproc transport would be much better, but requires porting a bunch
+        # look at using the inproc transport. The inproc transport supports substreams, but requires porting a bunch
         # of things from SPEAD2 python to katxgpu python. This will require much more work.
         heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
     return heaps
@@ -313,7 +313,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         # 6.1. Generate the batch index. By setting the first batch timestamp value to
         # timestamp_step * (heap_accumulation_threshold - 1) we generate only a single batch for the first epoch. As
         # the epochs are aligned to integer multiples of heap_accumulation_threshold * timestamp_step
-        batch_index = i + (heap_accumulation_threshold - 1)  # Say what this -1 is for
+        batch_index = i + (heap_accumulation_threshold - 1)
         timestamp = batch_index * timestamp_step
         heaps = createHeaps(
             timestamp, batch_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send
