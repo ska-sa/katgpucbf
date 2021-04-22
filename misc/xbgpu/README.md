@@ -45,7 +45,7 @@ also have links that must be updated. This README.md also has these links.
 2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8. Once this port has been done. Change the
 [send_example.py](scratch/send_example.py) example to use the updated `asyncio.gather()` syntax instead of the the 
 `loop.run_until_complete(run())` syntax. This syntax also needs to be changed in the 
-[xbengine_proc_loop.py](katxgpu/xbengine_proc_loop.py)
+[xbengine.py](katxgpu/xbengine.py)
 3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
 no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 
 own folder and then another folder called scripts should be added where things like receiver_example.py will go. 
@@ -71,9 +71,9 @@ This only occurs about once every ten runs, but when multiple branches are being
 kick off many tests. This problem needs to be investigate. I think this is due to the async function here:
 https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
 but I dont know for sure.
-11. There are a list of TODOs in the [xbengine](katxgpu/xbengine_proc_loop.py). These should be implemented. The most
+11. There are a list of TODOs in the [xbengine](katxgpu/xbengine.py). These should be implemented. The most
 pressing of these is the implementation of a clean exit and the addition of control and monitoring.
-12. In the [xbengine](katxgpu/xbengine_proc_loop.py) a number of print statements are in place of proper logging
+12. In the [xbengine](katxgpu/xbengine.py) a number of print statements are in place of proper logging
 messages. These should be replaced with log messages. In addition, it must be decided what logging and metric measuring
 tools must be used. (There was talk on using something like logstash for centralised logging and Prometheus for
 managing metrics.)
@@ -96,14 +96,14 @@ a newer card to see if it works. If this does not work, there are a few options.
 are quite well contained. A complication may be that the tensor core kernel needs to be changes so much that the input
 and output data formats change. In this case, the [precorrelation_reorder.py](katxgpu/precorrelation_reorder.py) may
 need to be changed too. The entirety of the `async def _gpu_proc_loop(self)` function in
-[xbengine_proc_loop.py](katxgpu/xbengine_proc_loop.py) would then need to be modified. If you begin modifying other
-functions in xbengine_proc_loop.py to get the new tensor cores working then I suspect you have done something wrong as
+[xbengine.py](katxgpu/xbengine.py) would then need to be modified. If you begin modifying other
+functions in xbengine.py to get the new tensor cores working then I suspect you have done something wrong as
 only the `_gpu_proc_loop` function launches GPU kernels. Nvidia has some cuBLAS functions that could potentially
 perform the operation we want after a bit of reordering 
 (see [here](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-syrk) - but you may need to dig deeper into
 the cuBLAS options available) - I am just not certain that this uses Tensor cores under the hood. You will need to
 investigate and profile this further.
-17. The katxgpu._katxgpu module only exists in the C++ real. IDEs (and I suspect documentation generators) do not pickup
+17. The katxgpu._katxgpu module only exists in the C++ realm. IDEs (and I suspect documentation generators) do not pickup
 up these C++ python modules very well. It would be nice if these modules were detected by IDEs. In katfgpu, there is a
 solution to this that involves using .pyi files (stub files). The folder with these stub files is
 [here](https://github.com/ska-sa/katfgpu/tree/master/katfgpu/_katfgpu). The 
@@ -193,7 +193,7 @@ on the 239.10.10.11:7149 address. All the different affinities are set to use co
 configuration of a 64 antenna, 32 768 channels, L-Band array. Running `xgpu --help` will list all other arguments that
 can be used to configure the array.
 
-This pipeline requires three core indexes to be specified 
+This pipeline requires three core indices to be specified 
 (`--receiver-thread-affinity, --receiver-comp-vector-affinity, --sender-thread-affinity`). It is recommended that these
 all be assigned to the same core. The reason for keeping them seperate is to be explicit and in case performance issues
 occur.
@@ -234,20 +234,20 @@ The numbers in the above image correspond to the following actions:
 
 ### Synchronization and Coordination
 
-The [xbengine_proc_loop.py](katxgpu/xbengine_proc_loop.py) module does the work of assembling all the different modules
-into a pipeline. This modules has three different async processing pipelines know as the _receiver_loop, _gpu_proc_loop
-and the _sender_loop. Data is passed between these three processing loops using asyncio.Queues. Buffers in queues are
-reused to prevent unecessary memory allocations. Additionally, buffers are passed between the python
-program to the network threads and back in order to reuse these buffers too.
+The [xbengine.py](katxgpu/xbengine.py) module does the work of assembling all the different modules
+into a pipeline. This module has three different async processing pipelines know as the `_receiver_loop`,
+`_gpu_proc_loop` and the `_sender_loop`. Data is passed between these three processing loops using `asyncio.Queues`.
+Buffers in queues are reused to prevent unecessary memory allocations. Additionally, buffers are passed between the
+python program to the network threads and back in order to reuse these buffers too.
 
 The image below demonstrates how data moves through the pipeline and how it is reused:
 
 ![async_loops](./katxgpu_async_loops.png)
 
-The asyncio.Queues help to coordinate the flow of data through the different asyncio functions. However the GPU
-requires a seperate type of coordination. The GPU has three different command queues (A command queue is an OpenCL
-concept, with katsdpsigproc, this is still called a command queue even though it is implemented as a CUDA stream) that
-manage the coordination. One command queue is for processing and the other two are for transferring data from host
+The `asyncio.Queues` help to coordinate the flow of data through the different asyncio functions. However the GPU
+requires a seperate type of coordination. The GPU has three different command queues that manage the coordination. 
+A command queue is an OpenCL concept - within katsdpsigproc, this is still called a command queue even though it can be
+implemented as a CUDA stream. One command queue is for processing and the other two are for transferring data from host
 memory to the GPU and back. Events are put onto the command queue and the async processing loops can `await` for these
 events to be complete. Often one async function will enqueue some commands followed by an event onto the GPU command
 queue and the next async function will `await` for this event to complete as it is the function that needs to work with
@@ -456,8 +456,8 @@ bottlenecks at the bus between the two sockets.
 heap with each packet in the heap representing a single channel. The packet size is thus equal to the value set by
 the `--samples-per-channel` flag multiplied by 4 (as each sample is a dual pol, complex 8-bit sample, so 4 bytes per
 sample). For the 1 KiB packets, `--samples-per-channel` is equal to 256. 1 KiB packets require quite a bit of 
-computation to assemble into heaps. By switcing to 2 KiB packets, the total CPU processing requirements can be reduced
+computation to assemble into heaps. By switching to 2 KiB packets, the total CPU processing requirements can be reduced
 to 2/3 of the 1 KiB packets. Packet sizes of 4 and 8 KiB also improve on the 2 KiB packet size but the improvement is
-not as dramatic. By increasing the packet sizes, the less chance there is of your CPU being overloaded and dropping
+not as drastic. By increasing the packet sizes, the less chance there is of your CPU being overloaded and dropping
 packets. The [fsim.cpp](scratch/fsim.cpp) and [main.py](katxgpu/main.py) both have a `--samples-per-channel` flag.
 Using these two files the thread performance at different packet sizes can be analysed.
