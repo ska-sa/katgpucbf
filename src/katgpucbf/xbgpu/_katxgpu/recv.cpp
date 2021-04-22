@@ -332,7 +332,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     }
     if (ulHeapSize_bytes != m_ulPacketSize_bytes * m_iNumChannels)
     {
-        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes. is this a descriptor? (This "
+        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes. Is this a descriptor? (This "
                          "message can be removed in production)",
                          ulHeapSize_bytes, m_ulPacketSize_bytes * m_iNumChannels);
         return;

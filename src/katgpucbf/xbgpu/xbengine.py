@@ -6,21 +6,20 @@ passing information between different async processing loops within the object.
 
 TODO:
     1. Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
-    docstring for more information. At the moment, there is not clean way to close the pipeline.
+    docstring for more information. At the moment, there is no clean way to close the pipeline.
     2. Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
     worth parameterising this function to give it a custom file name and set it to write changes to a file.
-    3. There is no B-Engine
-    4. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
+    3. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
     instead of these print statements.
-    5. The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
+    4. The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
     logic will need to go in the _gpu_proc_loop for the B-Engine processing and then a seperate sender loop would need
     to be created for sending B-Engine data.
-    6. Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
+    5. Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
     pipeline.
-    7. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
+    6. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
     crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
     could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
-    8. The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
+    7. The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
     this to use the new asyncio syntax.
 """
 
@@ -48,7 +47,7 @@ import katxgpu.ringbuffer
 
 class QueueItem:
     """
-    A storage container to facilitates communication between different functions in the XBEngine object.
+    Object to enable communication and synchronisation between different functions in the XBEngine object.
 
     This queue item contains a buffer of preallocated GPU memory. This memory is reused many times in the processing
     loops to prevent unecessary allocations. The item also contains a list of events. Before accessing the data in the
@@ -111,15 +110,14 @@ class XBEngine:
     3. _sender_loop - Transfer correlated data to system RAM and then send it out on the network.
     There is also a seperate loop for sending descriptors onto the network.
 
-    Items passed between queues may still have GPU operations in progress. Each item stores a list of events that can
-    used to determine if GPU operation is complete.
+    Items passed between queues may still have GPU operations in progress. Each item stores a list of events that can be
+    used to determine if a GPU operation is complete.
 
-    In order to reduce the load on the python controlling thread, received data is collected into chunks. A chunk
-    consists of multiple batches of F-Engine heaps where a batch is a collection of heaps from all F-Engine with the
-    same timestamp.
+    In order to reduce the load on the maim thread, received data is collected into chunks. A chunk consists of
+    multiple batches of F-Engine heaps where a batch is a collection of heaps from all F-Engine with the same timestamp.
 
     This class allows for different types of transports to be used for the sender and receiver code. These transports
-    allow for in process unit tests to be created that do not require access to the network.
+    allow for in-process unit tests to be created that do not require access to the network.
     """
 
     # 1. Array Configuration Parameters - Parameters used to configure the entire array
@@ -134,7 +132,7 @@ class XBEngine:
 
     # 2. Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
     rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
-    timestamp_increment_per_accumulation: int  # Time difference two different accumulation epochs.
+    timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulation epochs.
     rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
     dump_interval_s: float  # Number of seconds between output heaps.
 
@@ -142,18 +140,19 @@ class XBEngine:
     batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
     channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
 
-    # 4. Flags used at some point in the program
+    # 4. Flags used at some point in this class.
     rx_transport_added: bool  # False if no rx transport has been added, true otherwise
     tx_transport_added: bool  # False if no tx transport has been added, true otherwise
-    running: bool  # Remains true until the process must close - then set to false and all the loops will stop
+    running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio loops.
 
     # 5. Monitor for tracking the number of chunks queued in the receiver and items in the queues
     monitor: katxgpu.monitor.Monitor
 
-    # 6. Queues for passing items between different asyncio functions. The _rx_item_queue passes items from the
-    # _receiver_loop function to the _gpu_proc_loop function and the _tx_item_queue passes items from the
-    # _gpu_proc_loop to the _sender_loop function. Once an item has been used, it will be passed back on the
-    # corresponding _free_item_queue to ensure that all allocated buffers go back into circulation.
+    # 6. Queues for passing items between different asyncio functions.
+    # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.
+    # * The _tx_item_queue passes items from the _gpu_proc_loop to the _sender_loop function.
+    # Once the destination function is finished with an item, it will be pass it back to the corresponding
+    # _(rx/tx)_free_item_queue to ensure that all allocated buffers are in continuous circulation.
     _rx_item_queue: "asyncio.Queue[RxQueueItem]"
     _rx_free_item_queue: "asyncio.Queue[RxQueueItem]"
     _tx_item_queue: "asyncio.Queue[QueueItem]"
@@ -171,7 +170,7 @@ class XBEngine:
     reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
 
     # 9. Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
-    # stream. An abstract command queue can either be implemented as an OpenCL command queue or a Cuda stream depending
+    # stream. An abstract command queue can either be implemented as an OpenCL command queue or a CUDA stream depending
     # on the context.
     _upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
     _proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
@@ -194,8 +193,8 @@ class XBEngine:
         """
         Construct an XBEngine object.
 
-        This constructor allocates all memory buffers to be used in the lifetime of the project. These buffers are then
-        continously resued to ensure memory use remains constrained.
+        This constructor allocates all memory buffers to be used during the lifetime of the XBEngine object. These
+        buffers are continuously reused to ensure memory use remains constrained.
 
         It does not specify the transports to be used. These need to be specified by the add_*_receiver_transport() and
         the add_*_sender_transport() functions provided in this class.
@@ -232,7 +231,7 @@ class XBEngine:
             do.
         """
         # 1. Assign configuration variables.
-        # 1.1 Ensure that constructor arguments conform to
+        # 1.1 Ensure that constructor arguments are within the expected range.
         if n_pols != 2:
             raise ValueError("n_pols must equal 2 - no other values supported at the moment.")
 
@@ -251,11 +250,11 @@ class XBEngine:
         self.n_samples_per_channel = n_samples_per_channel
         self.n_pols = n_pols
         self.sample_bits = sample_bits
-        complexity = 2
+        complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
 
         # 1.3 Calculate derived parameters.
         # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
-        # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier transform.
+        # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the Fourier Transform.
         # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
         # argument to the reciever for cases where the n_channels_per_stream changes across streams (likely for non-power-of-
         # two array sizes).
@@ -288,6 +287,9 @@ class XBEngine:
 
         # 3. Create the receiverStream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
+
+        # Ringbuffer capacity is not a command line argument as it is not expected that the user will gain much value
+        # by having control over this. It could just cause confusion. The developers should instead set this value once.
         ringbuffer_capacity = 15
         self.ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
         self.receiverStream = recv.Stream(
@@ -344,7 +346,7 @@ class XBEngine:
         # RAM than GPU RAM.
         # These values are not configurable as they have been acceptable for most tests cases up until now. If the
         # pipeline starts bottlenecking, then maybe look at increasing these values.
-        n_rx_items = 3  # To high means to much GPU memory gets allocated
+        n_rx_items = 3  # Too high means too much GPU memory gets allocated
         n_tx_items = 2
         n_free_chunks = 20
 

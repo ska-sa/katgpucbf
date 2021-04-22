@@ -147,6 +147,7 @@ async def async_main() -> None:
         batches_per_chunk=args.batches_per_chunk,
     )
 
+    # Attach this transport to receive channelisation products from the network at high rates.
     xbengine.add_udp_ibv_receiver_transport(
         src_ip=args.src_multicast_address,
         src_port=args.src_port,
@@ -154,6 +155,7 @@ async def async_main() -> None:
         comp_vector_affinity=args.receiver_comp_vector_affinity,
     )
 
+    # Attach this transport to send the baseline correlation products to the network.
     xbengine.add_udp_ibv_sender_transport(
         dest_ip=args.dest_multicast_address,
         dest_port=args.dest_port,
