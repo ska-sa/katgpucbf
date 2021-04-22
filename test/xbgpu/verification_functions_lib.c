@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#pragma region precorrelation_reorder_test
+
 /**
  *  \brief Function that implements verification of data output by the pre-correlation reorder kernel.
  *
@@ -119,6 +121,10 @@ int verify_precorrelation_reorder(int8_t *pi8Array, int8_t *pi8ArrayReordered, i
     return 1;
 }
 
+#pragma endregion precorrelation_reorder_test
+
+#pragma region xbengine_test
+
 /**
  * Struct representing a complex number where the real and complex components are each stored as a 32-bit integer.
  *
@@ -212,16 +218,16 @@ int compare_complex_values(struct si32Complex sComplexValue1, struct si32Complex
  * the actual values generate by the xbengine pipeline. This function only checks the values for a single channel.
  *
  * This function assumes that the X-Engine input data is equal to the values assigned in the createHeaps(...) function
- * in xbengine_test.py 
+ * in xbengine_test.py
  *
  * This function is used within in the verify_xbengine(...) verification function scope.
  *
- * \param[in] uBatchStartIndex      Index of the first batch of heaps in the accumulation epoch.
+ * \param[in] ulBatchStartIndex     Index of the first batch of heaps in the accumulation epoch.
  * \param[in] ulNumBatches          Number of heaps per antenna in the accumulation epoch.
  * \param[in] ulChannelIndex        Index of the channel being considered.
  * \param[in] ulNumSamplesPerChan   Number of samples per channel in a single heap.
- * \param[in] uAnt1Index            First antenna in the correlation pair.
- * \param[in] uAnt2Index            Second antenna in the correlation pair.
+ * \param[in] ulAnt1Index           First antenna in the correlation pair.
+ * \param[in] ulAnt2Index           Second antenna in the correlation pair.
  * \param[in] u64Pol00              Packed 32-bit complex value containing the pol0pol0 product of the correlation pair.
  * \param[in] u64Pol01              Packed 32-bit complex value containing the pol0pol1 product of the correlation pair.
  * \param[in] u64Pol10              Packed 32-bit complex value containing the pol1pol0 product of the correlation pair.
@@ -229,9 +235,9 @@ int compare_complex_values(struct si32Complex sComplexValue1, struct si32Complex
  *
  * \return Returns 1 if the four polarisation poducts are all correct or 0 otherwise.
  */
-int verify_antpair_visibilities(uint uBatchStartIndex, uint ulNumBatches, uint ulChannelIndex, uint ulNumSamplesPerChan,
-                                uint uAnt1Index, uint uAnt2Index, uint64_t u64Pol00, uint64_t u64Pol01,
-                                uint64_t u64Pol10, uint64_t u64Pol11)
+int verify_antpair_visibilities(size_t ulBatchStartIndex, size_t ulNumBatches, size_t ulChannelIndex,
+                                size_t ulNumSamplesPerChan, size_t ulAnt1Index, size_t ulAnt2Index, uint64_t u64Pol00,
+                                uint64_t u64Pol01, uint64_t u64Pol10, uint64_t u64Pol11)
 {
     // 1. Convert the 64 bit uint containing the actual complex samples into an si32Complex as it is easier to work
     // with,
@@ -247,11 +253,11 @@ int verify_antpair_visibilities(uint uBatchStartIndex, uint ulNumBatches, uint u
     struct si32Complex sGeneratedPol10 = {0, 0};
     struct si32Complex sGeneratedPol11 = {0, 0};
 
-    // 2.2 For a specific channel in a heap, the values of all antenna samples are kept constant and can multiplied by
-    // the number of samples per channel (instead of generating them for each sample in the channel and added them 
+    // 2.2 For a specific channel in a heap, the values of all antenna samples are kept constant and can be multiplied
+    // by the number of samples per channel (instead of generating them for each sample in the channel and added them
     // individually). This reduces computation time significantly. However for different batches the samples
     // change so we need iterate over each batch in the epoch and add all these values together.
-    for (size_t ulBatchIndex = uBatchStartIndex; ulBatchIndex < uBatchStartIndex + ulNumBatches; ulBatchIndex++)
+    for (size_t ulBatchIndex = ulBatchStartIndex; ulBatchIndex < ulBatchStartIndex + ulNumBatches; ulBatchIndex++)
     {
         // 2.2.1 Generate the samples for the specific channel in this specific batch for each polarisation for each
         // antenna.
@@ -259,11 +265,11 @@ int verify_antpair_visibilities(uint uBatchStartIndex, uint ulNumBatches, uint u
         struct si32Complex sAnt1Pol0 =
             createBoundedComplex((int8_t)(iSign * ulBatchIndex), (int8_t)(iSign * ulChannelIndex));
         struct si32Complex sAnt1Pol1 =
-            createBoundedComplex((int8_t)(-iSign * uAnt1Index), (int8_t)(-iSign * ulChannelIndex));
+            createBoundedComplex((int8_t)(-iSign * ulAnt1Index), (int8_t)(-iSign * ulChannelIndex));
         struct si32Complex sAnt2Pol0 =
             createBoundedComplex((int8_t)(iSign * ulBatchIndex), (int8_t)(iSign * ulChannelIndex));
         struct si32Complex sAnt2Pol1 =
-            createBoundedComplex((int8_t)(-iSign * uAnt2Index), (int8_t)(-iSign * ulChannelIndex));
+            createBoundedComplex((int8_t)(-iSign * ulAnt2Index), (int8_t)(-iSign * ulChannelIndex));
 
         // 2.2.2 Multiply the samples of the two antennas. There are ulNumSamplesPerChan of these identical samples in
         // a batch so we multiply the output by ulNumSamplesPerChan. This is then added to the value in sGeneratedPol00
@@ -278,29 +284,29 @@ int verify_antpair_visibilities(uint uBatchStartIndex, uint ulNumBatches, uint u
     // and exit if the value is not as expected. Return 1 if all values are correct.
     if (compare_complex_values(sGeneratedPol00, sActualPol00) == 0)
     {
-        printf("Ant 1 %d, Ant 2 %d, Polarisation product 00 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
-               uAnt1Index, uAnt2Index, sGeneratedPol00.i32Real, sGeneratedPol00.i32Imag, sActualPol00.i32Real,
+        printf("Ant 1 %ld, Ant 2 %ld, Polarisation product 00 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               ulAnt1Index, ulAnt2Index, sGeneratedPol00.i32Real, sGeneratedPol00.i32Imag, sActualPol00.i32Real,
                sActualPol00.i32Imag);
         return 0;
     }
     if (compare_complex_values(sGeneratedPol01, sActualPol01) == 0)
     {
-        printf("Ant 1 %d, Ant 2 %d, Polarisation product 01 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
-               uAnt1Index, uAnt2Index, sGeneratedPol01.i32Real, sGeneratedPol01.i32Imag, sActualPol01.i32Real,
+        printf("Ant 1 %ld, Ant 2 %ld, Polarisation product 01 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               ulAnt1Index, ulAnt2Index, sGeneratedPol01.i32Real, sGeneratedPol01.i32Imag, sActualPol01.i32Real,
                sActualPol01.i32Imag);
         return 0;
     }
     if (compare_complex_values(sGeneratedPol10, sActualPol10) == 0)
     {
-        printf("Ant 1 %d, Ant 2 %d, Polarisation product 10 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
-               uAnt1Index, uAnt2Index, sGeneratedPol10.i32Real, sGeneratedPol10.i32Imag, sActualPol10.i32Real,
+        printf("Ant 1 %ld, Ant 2 %ld, Polarisation product 10 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               ulAnt1Index, ulAnt2Index, sGeneratedPol10.i32Real, sGeneratedPol10.i32Imag, sActualPol10.i32Real,
                sActualPol10.i32Imag);
         return 0;
     }
     if (compare_complex_values(sGeneratedPol11, sActualPol11) == 0)
     {
-        printf("Ant 1 %d, Ant 2 %d, Polarisation product 11 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
-               uAnt1Index, uAnt2Index, sGeneratedPol11.i32Real, sGeneratedPol11.i32Imag, sActualPol11.i32Real,
+        printf("Ant 1 %ld, Ant 2 %ld, Polarisation product 11 is incorrect. Expected: %d + %dj, Received %d + %dj\n",
+               ulAnt1Index, ulAnt2Index, sGeneratedPol11.i32Real, sGeneratedPol11.i32Imag, sActualPol11.i32Real,
                sActualPol11.i32Imag);
         return 0;
     }
@@ -309,29 +315,29 @@ int verify_antpair_visibilities(uint uBatchStartIndex, uint ulNumBatches, uint u
 }
 
 /**
- * Function called by the xbengine unit test to check that the data out of the engine is correct. 
+ * Function called by the xbengine unit test to check that the data out of the engine is correct.
  *
  * This function assumes that the X-Engine input data is equal to the values assigned in the createHeaps(...) function
- * in xbengine_test.py and that the output visibilities data is formatted as described in the 
+ * in xbengine_test.py and that the output visibilities data is formatted as described in the
  * katxgpu.tensorcore_xengine_core module.
  *
  * This function is called directly in the xbengine_test.py module.
  *
  * \param[in] pu64Baselines         Pointer to the visibilities matrix generated by the xbengine pipeline.
- * \param[in] uBatchStartIndex      Index of the first batch of heaps in the accumulation epoch.
+ * \param[in] ulBatchStartIndex     Index of the first batch of heaps in the accumulation epoch.
  * \param[in] ulNumBatches          Number of batches (heaps per antenna) in the accumulation epoch.
- * \param[in] ulNumChannels         NUmber of channels within a single heap.
+ * \param[in] ulNumChannels         Number of channels within a single heap.
  * \param[in] ulNumSamplesPerChan   Number of samples per channel in a single heap.
- * \param[in] uNumPols              Number of polarisations per antenna (only 2 is supported at the moment).
+ * \param[in] ulNumPols             Number of polarisations per antenna (only 2 is supported at the moment).
  *
  * \return Returns 1 the visibilities are all correct or 0 otherwise.
  */
-int verify_xbengine(uint64_t *pu64Baselines, uint uBatchStartIndex, size_t ulNumBatches, size_t ulNumAnts,
+int verify_xbengine(uint64_t *pu64Baselines, size_t ulBatchStartIndex, size_t ulNumBatches, size_t ulNumAnts,
                     size_t ulNumChans, size_t ulNumSamplesPerChan, size_t uNumPols)
 {
     // 1. Determine the different strides used when calculating the location of the correlation produts for an antenna
     // pair in the pu64Baselines visibilities matrix. This matrix will have the shape as described in the
-    // katxgpu.tensorcore_xengine_core module and the strides generated here correspond to the strides in that matrix. 
+    // katxgpu.tensorcore_xengine_core module and the strides generated here correspond to the strides in that matrix.
     const size_t ulNumBaselines = ulNumAnts * (ulNumAnts + 1) / 2;
     const size_t ulBaselineStride = uNumPols * uNumPols;
     const size_t ulChannelStride = ulNumBaselines * ulBaselineStride;
@@ -346,15 +352,15 @@ int verify_xbengine(uint64_t *pu64Baselines, uint uBatchStartIndex, size_t ulNum
             {
                 // 2.1 For a specific antenna pair and channel, determine the location of the polarisation products in
                 // the visibilities matrix.
-                uint uBaselineIndex = get_baseline_index(ulAnt1Index, ulAnt2Index);
-                uint uSampleIndex = ulChannelIndex * ulChannelStride + ulBaselineStride * uBaselineIndex;
+                size_t ulBaselineIndex = get_baseline_index(ulAnt1Index, ulAnt2Index);
+                size_t ulSampleIndex = ulChannelIndex * ulChannelStride + ulBaselineIndex * ulBaselineStride;
 
                 // 2.2 Check that the polarsiation products for the specific antenna pair are equal to what we expect
                 // them to be. If the values are incorrect this test immediately exits.
                 int iSuccess = verify_antpair_visibilities(
-                    uBatchStartIndex, ulNumBatches, ulChannelIndex, ulNumSamplesPerChan, ulAnt1Index, ulAnt2Index,
-                    pu64Baselines[uSampleIndex], pu64Baselines[uSampleIndex + 1], pu64Baselines[uSampleIndex + 2],
-                    pu64Baselines[uSampleIndex + 3]);
+                    ulBatchStartIndex, ulNumBatches, ulChannelIndex, ulNumSamplesPerChan, ulAnt1Index, ulAnt2Index,
+                    pu64Baselines[ulSampleIndex], pu64Baselines[ulSampleIndex + 1], pu64Baselines[ulSampleIndex + 2],
+                    pu64Baselines[ulSampleIndex + 3]);
                 if (iSuccess == 0)
                 {
                     return 0;
@@ -365,3 +371,5 @@ int verify_xbengine(uint64_t *pu64Baselines, uint uBatchStartIndex, size_t ulNum
 
     return 1;
 }
+
+#pragma endregion xbengine_test

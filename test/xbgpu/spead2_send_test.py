@@ -179,7 +179,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
                     has_channel_offset = True
                     assert (
                         item.value == n_channels_per_stream * 4
-                    ), f"Channel offset incorrect. Expected: {hex(n_channels_per_stream * 4)}, actual {hex(item.value)}"
+                    ), f"Channel offset incorrect. Expected: {hex(n_channels_per_stream * 4)}, actual: {hex(item.value)}"
 
                 # 5.2.2 Check that the received heap has an xeng_raw data buffer item. Check that the buffer is the
                 # correct size and that the values are all the expected value.
@@ -190,7 +190,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
                     )
                     assert (
                         item.value.size * 8 == data_length_bytes  # *8 as there are 64 bytes in a sample
-                    ), f"xeng_raw data not correct size. Expected: {data_length_bytes} bytes, actual {item.value.size} bytes"
+                    ), f"xeng_raw data not correct size. Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
                     assert (
                         item.value.dtype == np.uint64
                     ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
