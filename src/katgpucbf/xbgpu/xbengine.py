@@ -353,7 +353,7 @@ class XBEngine:
 
         # 5.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.
-        self._rx_item_queue: asyncio.Queue = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue: asyncio.Queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
         self._tx_item_queue: asyncio.Queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
