@@ -57,6 +57,8 @@ folder, this will need to be updated to reflect the new links to prevent stale d
 license classifier in the `setuptools.setup()` function in [setup.py](setup.py) that will need to be updated.
 6. Most of the repos documentation is just in the form of readmes and inline commenting. It is worth investigating 
 something like [sphinx](http://www.sphinx-doc.org) that can generate a proper readthedocs page for this repo.
+There is currently a [docs](./docs) directory in this repo where some documentation has been stored. This will need
+to be incorporated into the formal documentation at some stage.
 7. The [unit tests](test/tensorcore_xengine_core_test.py) for the TensorCoreXEngineCore are executed in python and take
 a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
 8. The [spead2_send_test.py](test/spead2_send_test.py) file has some TODOs that can improve the test coverage. These
@@ -229,93 +231,8 @@ occur.
 
 ## Theory of Operation
 
-### Signal Flow
-
-The general flow of data through the system is shown in the the image below:
-
-![signal_path](./katxgpu_concept.png)
-
-The X-Engine processing pipeline can be broken into four different stages:
-1. Receive data from the network and assemble it into a chunk. This chunk is then transferred to the GPU. This receiver
-has been implemented using SPEAD2 in C++ and bound into python. See the "SPEAD2 Network Side Software" section below
-for more information. 
-2. Reorder the chunk so that it is in a format that is ready for correlation. This reorder is implemented in the
-[precorrelation_reorder.py](katxgpu/precorrelation_reorder.py) module.
-3. The data is then correlated using the ASTRON Tensor Core Kernel. This is done by the 
-[tensorcore_xengine_core.py](katxgpu/tensorcore_xengine_core.py) class. This correlated data is then transferred back to
-system RAM.
-4. Send the correlated data (known as baseline correlation products) back into the network. This is implemented by
-the [xsend.py](katxgpu/xsend.py) module.
-
-The image below shows where the data is located at the various stages mentioned above:
-
-![hardware_data_path](./katxgpu_hardware_path.png)
-
-The numbers in the above image correspond to the following actions:
-
-0\. Receive heaps from F-Engines.</br>
-1\. Assemble heaps into a chunk in system RAM.</br>
-2\. Transfer chunk to GPU memory.</br>
-3\. & 4. Launch a GPU kernel to reorder a chunk and transfer reordered data back to GPU memory.
-5\. & 6. Correlate reordered data and transfer baselines to GPU memory.</br>
-7\. Transfer baselines from GPU memory to host memory.</br>
-8\. Transfer baselines from host memory to the NIC and onto the network.</br>
-
-### Synchronization and Coordination
-
-The [xbengine.py](katxgpu/xbengine.py) module does the work of assembling all the different modules
-into a pipeline. This module has three different async processing pipelines know as the `_receiver_loop`,
-`_gpu_proc_loop` and the `_sender_loop`. Data is passed between these three processing loops using `asyncio.Queues`.
-Buffers in queues are reused to prevent unecessary memory allocations. Additionally, buffers are passed between the
-python program to the network threads and back in order to reuse these buffers too.
-
-The image below demonstrates how data moves through the pipeline and how it is reused:
-
-![async_loops](./katxgpu_async_loops.png)
-
-The `asyncio.Queues` help to coordinate the flow of data through the different asyncio functions. However the GPU
-requires a seperate type of coordination. The GPU has three different command queues that manage the coordination. 
-A command queue is an OpenCL term - within katsdpsigproc, this is still called a command queue even though it can be
-implemented as a CUDA stream. One command queue is for processing and the other two are for transferring data from host
-memory to the GPU and back. Events are put onto the command queue and the async processing loops can `await` for these
-events to be complete. Often one async function will enqueue some commands followed by an event onto the GPU command
-queue and the next async function will `await` for this event to complete as it is the function that needs to work with
-this data. Tracking the different events across functions requires a bit of care to prevent race conditions and
-deadlock.
-
-The image below shows the interaction between the processing loops and the command queues:
-
-![command_queues](./katxgpu_gpu_command_queues.png)
-
-The numbers in the image above correspond to the following actions:
-1. Copy chunk to GPU memory from host 
-2. Reorder Chunk
-3. Correlate chunk
-4. Transfer heap to host memory from GPU
-
-### Accumulation Epochs and Auto resync
-
-The input data is accumulated before being output. For every output heap, multiple input heaps are received.
-
-A heap from a single F-Engine consists of a set number of samples specified by the `--samples-per-channel` flag. Each
-of these time samples is part of a different spectrum. Meaning that the timestamp difference per sample is
-equal to the `--channels-total` multiplied by 2 (multiple for two to account for the fact that we throw half the
-spectrum away due to the symmetric properties of the Fourier Transform). The timestamp difference between consecutive
-two heaps from the same F-Engine is equal to: `--samples-per-channel * --channels-total * 2`.
-
-A batch of heaps is a collection of heaps from different F-Engines with the same timestamp. Correlation occurs on a
-batch of heaps at a time. The correlated data is then accumulated. An accumulation period is called an epoch. The
-number of batches to accumulate in an epoch is equal to the `--heap-accumulation-threshold` flag. The timestamp
-difference between succesive epochs is equal to: 
-`timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`
-
-The output heap timestamp is aligned to an integer multiple of `timestamp_difference` 
-(equivalent to the current SKARAB "auto-resync" logic). The total epoch time is equal to:
-`accumulation_time_s = timestamp_difference * --adc-sample-rate(Hz)` seconds.
-
-The output heap contains multiple packets and these packets are distributed over the entire `accumulation_time_s`
-interval to reduce network burstiness. The default configuration in [main.py](katxgpu/main.py) is for 0.5 second
-epochs when using the MeerKAT 1712 MHz sample rate L-band digitisers.
+Documentation describing how the XB-Engine works is under construction. It can currently be found
+[here](./docs/THEORY.md).
 
 ## Test Framework
 
@@ -417,7 +334,7 @@ This software uses the high-performance SPEAD2 networking library for all high s
 The SPEAD2 library has been extended in C++ and this has been turned into a project submodule. This module can be
 imported using `import katxgpu._katxgpu`.
 
-The makeup of this module is quite complex. This [file](src/README.md) within this repo describes the entire module in
+The makeup of this module is quite complex. This [file](docs/networking.md) within this repo describes the entire module in
 great detail. A simple example of how to use the receiver network code is shown in
 [receiver_example.py](scratch/receiver_example.py) in the katxgpu/scratch directory. This example is probably the
 quickest way to figure out how the receiver works. Likewise the [send_example.py](scratch/send_example.py) file in the 
@@ -430,7 +347,7 @@ The `katxgpu._katxgpu` module only provides functionality for receiving data. Th
 for sending X-Engine output data. This is because the X-Engine accumulates data and transmits it at a much lower data 
 rate than it is received meaning that the chunking approach is not necessary. The [xsend.py](katxgpu/xsend.py) module
 handles the transmission of correlated data. The high level description of this module can also be found
-in the same [file](src/README.md) that describes the data receiver module.
+in the same [file](docs/networking.md) that describes the data receiver module.
 
 ### F-Engine Packet Simulator
 
