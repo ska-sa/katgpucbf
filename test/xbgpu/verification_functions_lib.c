@@ -183,7 +183,7 @@ uint get_baseline_index(uint uAnt1, uint uAnt2)
  *
  * This function is used within in the verify_xbengine(...) verification function scope.
  *
- * \param[out]  sC     Pointer to complex struct c where calculated data is acumulated.
+ * \param[out]  sC     Pointer to complex struct c where calculated data is accumulated.
  * \param[in]   sA      Struct containing complex input value a.
  * \param[in]   sB      Struct containing complex input value a.
  * \param[in]   iAlpha  Scalar value alpha.

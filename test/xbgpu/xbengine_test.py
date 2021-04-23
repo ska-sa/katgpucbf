@@ -55,7 +55,7 @@ def createHeaps(
     supported by the tensor cores.
 
     This coded sample value can then be generated at the verification side and used to determine the expected output
-    value without having to implement a full CPU side correlator.
+    value without having to implement a full CPU-side correlator.
 
     NOTE: There is significant overlap between this function and the spead2_receiver_test.createHeaps(...) function.
     The only difference is that their data is encoded differently. There is scope to merge these two functions.
