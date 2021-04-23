@@ -154,7 +154,7 @@ class XBEngine:
     # * The _tx_item_queue passes items from the _gpu_proc_loop to the _sender_loop function.
     # Once the destination function is finished with an item, it will be pass it back to the corresponding
     # _(rx/tx)_free_item_queue to ensure that all allocated buffers are in continuous circulation.
-    _rx_item_queue: "asyncio.Queue[RxQueueItem]"
+    _rx_item_queue: asyncio.Queue[RxQueueItem]
     _rx_free_item_queue: "asyncio.Queue[RxQueueItem]"
     _tx_item_queue: "asyncio.Queue[QueueItem]"
     _tx_free_item_queue: "asyncio.Queue[QueueItem]"
