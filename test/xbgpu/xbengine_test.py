@@ -277,7 +277,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         n_pols=n_pols,
         sample_bits=sample_bits,
         heap_accumulation_threshold=heap_accumulation_threshold,
-        channel_offset_value=0,
+        channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
         rx_thread_affinity=0,
         batches_per_chunk=heaps_per_fengine_per_chunk,
     )
@@ -343,12 +343,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
             heap = await recvStream.get()
             items = ig_recv.update(heap)
 
-            # 8.2.2 Ensure that the timestamp from the heap is what we expect.
-            assert (
-                ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
-            ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
-
-            # 8.2.3 The first heap is an incomplete epoch containing a single batch, we need to make sure that this is
+            # 8.2.2 The first heap is an incomplete epoch containing a single batch, we need to make sure that this is
             # taken into account by the verification function.
             if i == 0:
                 num_batches_in_current_accumulation = 1
@@ -357,7 +352,21 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
                 num_batches_in_current_accumulation = heap_accumulation_threshold
                 base_batch_index = i * heap_accumulation_threshold
 
-            # 8.2.3 Send the received data to the C verification function and assert that this function return is
+            # 8.2.3 Ensure that the timestamp from the heap is what we expect.
+            assert (
+                ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
+            ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+
+            assert (
+                ig_recv["timestamp"].value == timestamp_step * heap_accumulation_threshold * i
+            ), f"Output timestamp is not correct. Expected: {hex(timestamp_step * heap_accumulation_threshold * i)}, actual: {hex(ig_recv['timestamp'].value)}."
+
+            assert (
+                ig_recv["channel offset"].value
+                == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
+            ), f"Output channel offset not correct. Expected: {n_channels_per_stream * 4}, actual: {ig_recv['channel offset'].value}."
+
+            # 8.2.4 Send the received data to the C verification function and assert that this function return is
             # what we expect.
             result = verify_xbengine_C(
                 ig_recv["xeng_raw"].value.flatten(order="C"),
