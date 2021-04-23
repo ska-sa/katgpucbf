@@ -353,10 +353,10 @@ class XBEngine:
 
         # 5.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.
-        self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)  # type: asyncio.Queue[RxQueueItem]
-        self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
-        self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
+        self._rx_item_queue: asyncio.Queue = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_free_item_queue: asyncio.Queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._tx_item_queue: asyncio.Queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue: asyncio.Queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         # 5.3 Create buffers and assign them correctly.
         # 5.3.1 Create items that will store received chunks that have been transferred to the GPU.

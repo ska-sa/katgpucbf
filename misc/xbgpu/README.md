@@ -116,6 +116,11 @@ and `--sender-thread-affinity`. It is likely that all of these wil be set to use
 creating a new argument in [main.py](katxgpu/main.py) to assign all these values to a specific core. We must then
 decide if we want to give the user access to the above three arguments. If this is done, the "Launching the XB-Engine"
 section below will need to be updated to reflect this new command.
+19. The [verification_functions_lib.c](test/verification_functions_lib.c) has different regions for functions relating
+to different unit tests. It may be worth splitting out these regions into different C files. The
+[Makefile](test/Makefile) would need to be adjusted to build these different files and the .py unit tests calling these
+functions would need to be modified to call the correct .so file. (Unless we combine the different C files into a single
+.so file).
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
