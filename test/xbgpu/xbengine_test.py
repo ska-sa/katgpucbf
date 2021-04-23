@@ -182,7 +182,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     """
     Unit tests for the xbengine.py module.
 
-    Data is generated for a number of accumulation epochs and then the ouput of these epochs is verified.
+    Data is generated for a number of accumulations and then the ouput of these dumps is verified.
 
     This unit test creates simulated input data and passes it to the xbengine using a SPEAD2 buffer transport. The
     xbengine then processes this data and gives it to the process using the SPEAD2 inproc transport. These transports
@@ -193,8 +193,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     improving processing time. Even with this encoding, verification takes a very long time in python. The verification
     function has been moved to C to greatly accelerate this process.
 
-    This test simulates an incomplete simulation epoch at the start of transmission to ensure that the auto-resync
-    logic works correctly.
+    This test simulates an incomplete accumulation at the start of transmission to ensure that the auto-resync logic
+    works correctly.
     """
     # 1. Configuration parameters
     n_ants = num_ants
@@ -304,14 +304,14 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     verify_xbengine_C.restype = ctypes.c_int
 
-    # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulation epochs. Each
-    # epoch requires heap_accumulation_threshold batches of heaps. Additionally, we generate one extra batch to
-    # simulate an incomplete epoch to check that epochs are aligned correctly even if the first received batch is
-    # from the middle of an epoch
+    # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulations. Each
+    # accumulation requires heap_accumulation_threshold batches of heaps. Additionally, we generate one extra batch to
+    # simulate an incomplete accumulation to check that dumps are aligned correctly even if the first received batch is
+    # from the middle of an accumulation.
     for i in range(heap_accumulation_threshold * n_accumulations + 1):
         # 6.1. Generate the batch index. By setting the first batch timestamp value to
-        # timestamp_step * (heap_accumulation_threshold - 1) we generate only a single batch for the first epoch. As
-        # the epochs are aligned to integer multiples of heap_accumulation_threshold * timestamp_step
+        # timestamp_step * (heap_accumulation_threshold - 1) we generate only a single batch for the first accumulation
+        # as the accumulations are aligned to integer multiples of heap_accumulation_threshold * timestamp_step
         batch_index = i + (heap_accumulation_threshold - 1)
         timestamp = batch_index * timestamp_step
         heaps = createHeaps(
@@ -341,8 +341,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
             heap = await recvStream.get()
             items = ig_recv.update(heap)
 
-            # 8.2.2 The first heap is an incomplete epoch containing a single batch, we need to make sure that this is
-            # taken into account by the verification function.
+            # 8.2.2 The first heap is an incomplete accumulation containing a single batch, we need to make sure that
+            # this is taken into account by the verification function.
             if i == 0:
                 num_batches_in_current_accumulation = 1
                 base_batch_index = heap_accumulation_threshold - 1

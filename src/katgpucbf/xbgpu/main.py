@@ -48,7 +48,8 @@ def parse_args() -> argparse.Namespace:
         "--channel-offset-value",
         type=int,
         default=0,
-        help="First channel in the band of channels that this engine must process. [%(default)s]",
+        help="Index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value "
+        "in the XB-Engine output heaps for spectrum reassembly by the downstream receiver. [%(default)s]",
     )
     parser.add_argument(
         "--samples-per-channel",
@@ -76,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         "--heap-accumulation-threshold",
         type=int,
         default=52,
-        help="Number of batches of heaps to accumulate in an accumulation epoch. [%(default)s]",
+        help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
     )
     parser.add_argument(
         "--receiver-thread-affinity", type=int, required=True, help="Core to which the reciever thread must be bound."

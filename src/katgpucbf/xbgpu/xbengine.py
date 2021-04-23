@@ -163,10 +163,10 @@ class XBEngine:
         sample_bits: int
             The number of bits per sample. Only 8 bits is supported at the moment.
         heap_accumulation_threshold: int
-            The number of consecutive heaps to accumulate. Used to determine the sync epoch.
+            The number of consecutive heaps to accumulate. This value is used to determine the dump rate.
         channel_offset_value: int
-            Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
-            Must be a multiple of n_channels_per_stream.
+            The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
+            in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
         rx_thread_affinity: int
             Specifc CPU core to assign the RX stream processing thread to.
         batches_per_chunk: int
@@ -178,7 +178,7 @@ class XBEngine:
         # 0. List object variables and provide type hints - This has no function other to improve readability.
         # 0.1 Array Configuration Parameters - Parameters used to configure the entire array
         self.adc_sample_rate_Hz: int
-        self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation epoch.
+        self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation.
         self.n_ants: int
         self.n_channels_total: int
         self.n_channels_per_stream: int
@@ -188,7 +188,7 @@ class XBEngine:
 
         # 0.2 Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
         self.rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
-        self.timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulation epochs.
+        self.timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulations.
         self.rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
         self.dump_interval_s: float  # Number of seconds between output heaps.
 
@@ -265,7 +265,7 @@ class XBEngine:
         self.rx_bytes_per_heap_batch = (
             self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
         )
-        # This is how much the timestamp increments by between succesive accumulation epochs
+        # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # 1.4 Assign engine configuration parameters
@@ -629,8 +629,8 @@ class XBEngine:
                 self.tensorCoreXEngineCoreOperation.bind(inSamples=buffer_slice)
                 self.tensorCoreXEngineCoreOperation()
 
-                # 3.2.2 If the batch timestamp corresponds to the accumulation epoch interval, transfer the correlated
-                # data to the sender function. NOTE: The timestamp representing the end of an epoch does not necessarily
+                # 3.2.2 If the batch timestamp corresponds to the accumulation interval, transfer the correlated data to
+                # the sender function. NOTE: The timestamp representing the end of an accumulation does not necessarily
                 # line up with the chunk timestamp. It will line up with a specific batch within a chunk though, this is
                 # why this check has to happen for each batch.
                 # This check is the equivilant of the MeerKAT SKARAB X-Engine auto-resync logic.
