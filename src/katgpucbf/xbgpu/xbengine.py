@@ -155,9 +155,9 @@ class XBEngine:
     # Once the destination function is finished with an item, it will be pass it back to the corresponding
     # _(rx/tx)_free_item_queue to ensure that all allocated buffers are in continuous circulation.
     _rx_item_queue: asyncio.Queue[RxQueueItem]
-    _rx_free_item_queue: "asyncio.Queue[RxQueueItem]"
-    _tx_item_queue: "asyncio.Queue[QueueItem]"
-    _tx_free_item_queue: "asyncio.Queue[QueueItem]"
+    _rx_free_item_queue: asyncio.Queue[RxQueueItem]
+    _tx_item_queue: asyncio.Queue[QueueItem]
+    _tx_free_item_queue: asyncio.Queue[QueueItem]
 
     # 7. Objects for sending and receiving data
     ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
