@@ -121,62 +121,6 @@ class XBEngine:
     allow for in-process unit tests to be created that do not require access to the network.
     """
 
-    # 1. Array Configuration Parameters - Parameters used to configure the entire array
-    adc_sample_rate_Hz: int
-    heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation epoch.
-    n_ants: int
-    n_channels_total: int
-    n_channels_per_stream: int
-    n_samples_per_channel: int
-    n_pols: int
-    sample_bits: int
-
-    # 2. Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
-    rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
-    timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulation epochs.
-    rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
-    dump_interval_s: float  # Number of seconds between output heaps.
-
-    # 3. Engine Parameters - Parameters not used in the array but needed for this engine
-    batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
-    channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
-
-    # 4. Flags used at some point in this class.
-    rx_transport_added: bool  # False if no rx transport has been added, true otherwise
-    tx_transport_added: bool  # False if no tx transport has been added, true otherwise
-    running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio functions.
-
-    # 5. Monitor for tracking the number of chunks queued in the receiver and items in the queues
-    monitor: katxgpu.monitor.Monitor
-
-    # 6. Queues for passing items between different asyncio functions.
-    # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.
-    # * The _tx_item_queue passes items from the _gpu_proc_loop to the _sender_loop function.
-    # Once the destination function is finished with an item, it will be pass it back to the corresponding
-    # _(rx/tx)_free_item_queue to ensure that all allocated buffers are in continuous circulation.
-    _rx_item_queue: asyncio.Queue[RxQueueItem]
-    _rx_free_item_queue: asyncio.Queue[RxQueueItem]
-    _tx_item_queue: asyncio.Queue[QueueItem]
-    _tx_free_item_queue: asyncio.Queue[QueueItem]
-
-    # 7. Objects for sending and receiving data
-    ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
-    receiverStream: recv.Stream
-    sendStream: katxgpu.xsend.XEngineSPEADAbstractSend
-
-    # 8. GPU Kernels and GPU Context
-    context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
-    tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
-    preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorder
-    reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
-
-    # 9. Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
-    # stream. An abstract command queue can either be implemented as an OpenCL command queue or a CUDA stream depending
-    # on the context.
-    _upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-    _proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-    _download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-
     def __init__(
         self,
         adc_sample_rate_Hz: int,
@@ -231,6 +175,63 @@ class XBEngine:
             system RAM is allocated, the lower this value is, the more work the python processing thread is required to
             do.
         """
+        # 0. List object variables and provide type hints - This has no function other to improve readability.
+        # 0.1 Array Configuration Parameters - Parameters used to configure the entire array
+        self.adc_sample_rate_Hz: int
+        self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation epoch.
+        self.n_ants: int
+        self.n_channels_total: int
+        self.n_channels_per_stream: int
+        self.n_samples_per_channel: int
+        self.n_pols: int
+        self.sample_bits: int
+
+        # 0.2 Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
+        self.rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
+        self.timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulation epochs.
+        self.rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
+        self.dump_interval_s: float  # Number of seconds between output heaps.
+
+        # 0.3 Engine Parameters - Parameters not used in the array but needed for this engine
+        self.batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
+        self.channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
+
+        # 0.4 Flags used at some point in this class.
+        self.rx_transport_added: bool  # False if no rx transport has been added, true otherwise
+        self.tx_transport_added: bool  # False if no tx transport has been added, true otherwise
+        self.running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio functions.
+
+        # 0.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
+        self.monitor: katxgpu.monitor.Monitor
+
+        # 0.6 Queues for passing items between different asyncio functions.
+        # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.
+        # * The _tx_item_queue passes items from the _gpu_proc_loop to the _sender_loop function.
+        # Once the destination function is finished with an item, it will be pass it back to the corresponding
+        # _(rx/tx)_free_item_queue to ensure that all allocated buffers are in continuous circulation.
+        self._rx_item_queue: asyncio.Queue[RxQueueItem]
+        self._rx_free_item_queue: asyncio.Queue[RxQueueItem]
+        self._tx_item_queue: asyncio.Queue[QueueItem]
+        self._tx_free_item_queue: asyncio.Queue[QueueItem]
+
+        # 0.7 Objects for sending and receiving data
+        self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
+        self.receiverStream: recv.Stream
+        self.sendStream: katxgpu.xsend.XEngineSPEADAbstractSend
+
+        # 0.8 GPU Kernels and GPU Context
+        self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
+        self.tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
+        self.preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorder
+        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
+
+        # 0.9 Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
+        # stream. An abstract command queue can either be implemented as an OpenCL command queue or a CUDA stream depending
+        # on the context.
+        self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+        self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+        self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
+
         # 1. Assign configuration variables.
         # 1.1 Ensure that constructor arguments are within the expected range.
         if n_pols != 2:
@@ -353,10 +354,10 @@ class XBEngine:
 
         # 5.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_item_queue", n_rx_items)
-        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_item_queue", n_tx_items)
-        self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
+        self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         # 5.3 Create buffers and assign them correctly.
         # 5.3.1 Create items that will store received chunks that have been transferred to the GPU.
