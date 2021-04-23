@@ -121,6 +121,25 @@ to different unit tests. It may be worth splitting out these regions into differ
 [Makefile](test/Makefile) would need to be adjusted to build these different files and the .py unit tests calling these
 functions would need to be modified to call the correct .so file. (Unless we combine the different C files into a single
 .so file).
+20. Currently there is quite a bit of redundancy when creating a docstring for an `__init__()`. Much of the information
+already sits in the class docstring. We want to change our commenting style so that the `__init__()` function does not
+have a docstring or a minimal one for information that does not need to be said about the class as a whole. The 
+"Parameters" comments should also be put in the class docstring. See:
+https://github.com/ska-sa/katsdpsigproc/blob/master/katsdpsigproc/accel.py#L1191-L1217 for an example. 
+
+    The following
+lines of code must be added to the `.pydocstyle.ini` file to tell pydocstyle to ignore the docstring on the `__init()__`
+function in the pre-commit flow (This repo does not have this file - it likely fits in the
+[pyproject.toml](pyproject.toml) file):
+    ```
+    [pydocstyle]
+    # D107 tells pydocstyle to ignore __init__ functions. Since we document the class, this is fine.
+    ignore = D107
+    ```
+    This change needs to be applied across all modules in the repo. Dont forget to look at the 
+[py_recv.cpp](https://github.com/ska-sa/katfgpu/blob/master/src/py_recv.cpp) file. The longer we wait to apply this
+change the more work it will require as more modules are added to the repos, so dont put it off.
+
 
 ## License
 The license for this repository still needs to be specified. At the moment this repo is private so its not an issue.
