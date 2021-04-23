@@ -125,14 +125,14 @@ def createTestObjects(
     ig.add_item(
         FENGINE_ID,
         "fengine id",
-        "F-Engine heap is received from",
+        "F-Engine heap is received from.",
         shape=[],
         format=[("u", default_spead_flavour["heap_address_bits"])],
     )
     ig.add_item(
         CHANNEL_OFFSET,
         "channel offset",
-        "Value of first channel in collections stored here",
+        "Value of first channel in collections stored here.",
         shape=[],
         format=[("u", default_spead_flavour["heap_address_bits"])],
     )

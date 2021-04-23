@@ -37,7 +37,6 @@ def createHeaps(
     ig: spead2.send.ItemGroup,
 ):
     """
-
     Generate a list of heaps to send to the xbengine.
 
     One heap is generated per antenna in the array. All heaps will have the same timestamp. The 8-bit complex samples
@@ -141,7 +140,7 @@ def createHeaps(
             )
 
             # 2.1.3 Set each sample in this channel to contain the same value.
-            sample_array[chan_index][:] = np.full((n_samples_per_channel, 1, 1), coded_sample_value, np.uint32)
+            sample_array[chan_index][:] = coded_sample_value
 
         # 2.2 Change dtype and shape of the array back to the correct values required by the receiver. The data itself
         # is not modified, its just how it is intepreted that is changed.
@@ -239,14 +238,14 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     ig_send.add_item(
         spead2_receiver_test.FENGINE_ID,
         "fengine id",
-        "F-Engine heap is received from",
+        "F-Engine heap is received from.",
         shape=[],
         format=[("u", spead2_receiver_test.default_spead_flavour["heap_address_bits"])],
     )
     ig_send.add_item(
         spead2_receiver_test.CHANNEL_OFFSET,
         "channel offset",
-        "Value of first channel in collections stored here",
+        "Value of first channel in collections stored here.",
         shape=[],
         format=[("u", spead2_receiver_test.default_spead_flavour["heap_address_bits"])],
     )
@@ -305,7 +304,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     verify_xbengine_C.restype = ctypes.c_int
 
-    # 6. Generate Data to be sent to the receiver. We are performing n_accumulations full accumulation epochs. Each
+    # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulation epochs. Each
     # epoch requires heap_accumulation_threshold batches of heaps. Additionally, we generate one extra batch to
     # simulate an incomplete epoch to check that epochs are aligned correctly even if the first received batch is
     # from the middle of an epoch
@@ -328,7 +327,6 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     xbengine.add_buffer_receiver_transport(buffer)
 
     # 8. Function to receive data.
-    @pytest.mark.asyncio
     async def recv_process():
         """Receives data from the xbengine and checks that it correct."""
         # 8.1 It is expected that the first packet will be a descriptor. We check to ensure that this is the case.

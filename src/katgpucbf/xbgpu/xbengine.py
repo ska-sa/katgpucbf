@@ -30,7 +30,7 @@ import asyncio
 import numpy as np
 from typing import List
 
-# SARAO Developed Package Imports
+# SARAO-Developed Package Imports
 import spead2
 import katsdpsigproc
 import katsdpsigproc.abc
@@ -51,8 +51,8 @@ class QueueItem:
     Object to enable communication and synchronisation between different functions in the XBEngine object.
 
     This queue item contains a buffer of preallocated GPU memory. This memory is reused many times in the processing
-    loops to prevent unecessary allocations. The item also contains a list of events. Before accessing the data in the
-    buffer, the user needs to ensure that the events have all been completed.
+    functions to prevent unecessary allocations. The item also contains a list of events. Before accessing the data in
+    the buffer, the user needs to ensure that the events have all been completed.
     """
 
     timestamp: int
@@ -64,7 +64,7 @@ class QueueItem:
         self.reset(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp and events in the QueueItem object."""
+        """Reset the timestamp and events."""
         self.timestamp = timestamp
         self.events = []
         # Need to reset chunk
@@ -90,7 +90,7 @@ class RxQueueItem(QueueItem):
     chunk: katxgpu._katxgpu.recv.Chunk
 
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events and chunk in the QueueItem object."""
+        """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
         self.chunk = None
 
@@ -101,15 +101,15 @@ class XBEngine:
 
     Currently the B-Engine functionality has not been added. This class currently only creates an X-Engine pipeline.
 
-    This pipeline encompasses receiving SPEAD heaps from F-Engine. Sending them to the GPU for processing and then
+    This pipeline encompasses receiving SPEAD heaps from F-Engines, sending them to the GPU for processing and then
     sending them back out on the network.
 
     The X-Engine processing is performed across three different async_methods. Data is passed between these items
-    using asyncio.Queues. The three processing loops are as follows:
+    using asyncio.Queues. The three processing functions are as follows:
     1. _receiver_loop - Receive chunks from network and initiate transfer to GPU.
     2. _gpu_proc_loop - Reorder chunk in GPU memory and perform the correlation operation on this reordered data.
     3. _sender_loop - Transfer correlated data to system RAM and then send it out on the network.
-    There is also a seperate loop for sending descriptors onto the network.
+    There is also a seperate function for sending descriptors onto the network.
 
     Items passed between queues may still have GPU operations in progress. Each item stores a list of events that can be
     used to determine if a GPU operation is complete.
@@ -144,7 +144,7 @@ class XBEngine:
     # 4. Flags used at some point in this class.
     rx_transport_added: bool  # False if no rx transport has been added, true otherwise
     tx_transport_added: bool  # False if no tx transport has been added, true otherwise
-    running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio loops.
+    running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio functions.
 
     # 5. Monitor for tracking the number of chunks queued in the receiver and items in the queues
     monitor: katxgpu.monitor.Monitor
@@ -194,7 +194,7 @@ class XBEngine:
         """
         Construct an XBEngine object.
 
-        This constructor allocates all memory buffers to be used during the lifetime of the XBEngine object. These
+        This initialiser allocates all memory buffers to be used during the lifetime of the XBEngine object. These
         buffers are continuously reused to ensure memory use remains constrained.
 
         It does not specify the transports to be used. These need to be specified by the add_*_receiver_transport() and
@@ -237,7 +237,7 @@ class XBEngine:
             raise ValueError("n_pols must equal 2 - no other values supported at the moment.")
 
         if sample_bits != 8:
-            raise ValueError("sample_bits must equal 2 - no other values supported at the moment.")
+            raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         if channel_offset_value % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
@@ -274,7 +274,7 @@ class XBEngine:
         # 1.5 Set runtime flags to their initial states
         self.tx_transport_added = False
         self.rx_transport_added = False
-        self.running = True
+        self.running = False
 
         # 2. Set up file monitor for tracking the state of the reciever chunks and the queues. This monitor is hardcoded
         # to not write data to a file. If debugging of the queues is needed, setting the use_file_monitor to true should
@@ -342,7 +342,7 @@ class XBEngine:
         # 5. Create various buffers and assign them to the correct queues or objects.
         # 5.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
         # setting these values too high results in too much GPU memory being consumed. There just need to be enough
-        # of them that the different processing loops do not get starved waiting for items. The low single digits is
+        # of them that the different processing functions do not get starved waiting for items. The low single digits is
         # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
         # RAM than GPU RAM.
         # These values are not configurable as they have been acceptable for most tests cases up until now. If the
@@ -375,7 +375,7 @@ class XBEngine:
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        # 5.3.1 Create empty chunks and give them to the receiver to use to assemble heaps.
+        # 5.3.3 Create empty chunks and give them to the receiver to use to assemble heaps.
         for i in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
                 self.preCorrelationReorderOperation.template.inputDataShape, np.int16, context=self.context
@@ -402,7 +402,7 @@ class XBEngine:
             IP address of interface to listen for data on.
         comp_vector_affinity: int
             Received packets will generate interrupts from the NIC. These interrupts can be assigned to a specific CPU
-            core. This parameters determines which core to assign these interrupts to.
+            core. This parameter determines which core to assign these interrupts to.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
@@ -528,7 +528,7 @@ class XBEngine:
 
         The above steps are performed in a loop until the running flag is set to false.
 
-        TODO: If no data is being streamed and the running flag is set to false, this loop will be stuck waiting for
+        TODO: If no data is being streamed and the running flag is set to false, this function will be stuck waiting for
         the next chunk. Try find a way to exit cleanly without adding to much additional logic to this function.
         """
         # 1. Set up initial conditions
@@ -563,10 +563,10 @@ class XBEngine:
             item.buffer_device.set_async(self._upload_command_queue, chunk.base)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
-            # 2.4. Give the rx item to the _gpu_proc_loop.
+            # 2.4. Give the rx item to the _gpu_proc_loop function.
             await self._rx_item_queue.put(item)
 
-            # 3. If the loop must close, stop the stream.
+            # 3. If the function must close, stop the stream.
             if self.running is not True:
                 self.receiverStream.stop()
 
@@ -579,7 +579,7 @@ class XBEngine:
         2. Performs the reorder operation on the buffer in the rx item. This gets the buffer data into a format that
         the correlation kernel requires.
         3.1 Apply the correlation kernel to small subsets of the reordered data until all the data has been processed.
-        3.2 If sufficient  correlations have occured, transfer the correlated data to a tx_item, pass the tx_item to
+        3.2 If sufficient correlations have occured, transfer the correlated data to a tx_item, pass the tx_item to
         the _tx_item_queue and get a new item from the _tx_free_item_queue.
 
         The ratio of rx_items to tx_items is not one to one. There are expected to be many more rx_items in for every
@@ -587,7 +587,7 @@ class XBEngine:
 
         The above steps are performed in a loop until the running flag is set to false.
 
-        TODO: Add B-Engine processing in this loop.
+        TODO: Add B-Engine processing in this function.
         """
         # 1. Set up initial conditions
         tx_item = await self._tx_free_item_queue.get()
@@ -598,8 +598,8 @@ class XBEngine:
         self.tensorCoreXEngineCoreOperation.zero_visibilities()
 
         while self.running:
-            # 2. Get item from receiver loop - wait for the HtoD transfers to complete and then give the chunk back to
-            # the receiver for reuse.
+            # 2. Get item from receiver function - wait for the HtoD transfers to complete and then give the chunk back
+            #  to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
@@ -636,7 +636,7 @@ class XBEngine:
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
 
-                    # 3.2.3 Transfer the TX item to the sender loop
+                    # 3.2.3 Transfer the TX item to the sender function
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
 
@@ -649,7 +649,7 @@ class XBEngine:
                 # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
 
-            # 5. Finished with the RX item - reset it and give it back to the receiver loop.
+            # 5. Finished with the RX item - reset it and give it back to the receiver loop function.
             rx_item.reset()
             await self._rx_free_item_queue.put(rx_item)
 
@@ -741,7 +741,7 @@ class XBEngine:
         """
         Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
 
-        This loop is not part of the main run loop as we do not want it running during the unit tests.
+        This function is not part of the main run function as we do not want it running during the unit tests.
         """
         while self.running:
             self.sendStream.send_descriptor_heap()
@@ -759,6 +759,7 @@ class XBEngine:
             raise AttributeError("Transport for sending data has not yet been set.")
 
         # NOTE: Put in todo about upgrading this to python 3.8
+        self.running = True
         loop = asyncio.get_event_loop()
         self.receiver_task = loop.create_task(self._receiver_loop())
         self.gpu_proc_task = loop.create_task(self._gpu_proc_loop())
@@ -773,8 +774,8 @@ class XBEngine:
 
         NOTE 1: This function may not be working correctly. If you have trouble closing the tasks, it may be worth
         re-evaluating this function.
-        NOTE 2: The descriptors loop is not launched by the run() function. It is the users responsibility to stop that
-        loop.
+        NOTE 2: The descriptors loop function is not launched by the run() function. It is the user's responsibility to
+        stop that function.
         """
         self.receiverStream.stop()
         self.running = False

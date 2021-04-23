@@ -236,7 +236,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group.add_item(
             XEngineSPEADAbstractSend.CHANNEL_OFFSET,
             "channel offset",
-            "Value of first channel in collections stored here",
+            "Value of first channel in collections stored here.",
             shape=[],
             format=[("u", XEngineSPEADAbstractSend.default_spead_flavour["heap_address_bits"])],
         )
@@ -250,7 +250,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group.add_item(
             XEngineSPEADAbstractSend.DATA_ID,
             "xeng_raw",
-            "Integrated baseline correlation products",
+            "Integrated baseline correlation products.",
             shape=self.heap_shape,
             dtype=np.uint64,
         )
