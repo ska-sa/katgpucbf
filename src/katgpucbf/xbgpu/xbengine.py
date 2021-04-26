@@ -175,8 +175,8 @@ class XBEngine:
             system RAM is allocated, the lower this value is, the more work the python processing thread is required to
             do.
         """
-        # 0. List object variables and provide type hints - This has no function other to improve readability.
-        # 0.1 Array Configuration Parameters - Parameters used to configure the entire array
+        # 1. List object variables and provide type hints - This has no function other than to improve readability.
+        # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
         self.adc_sample_rate_Hz: int
         self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation.
         self.n_ants: int
@@ -186,25 +186,25 @@ class XBEngine:
         self.n_pols: int
         self.sample_bits: int
 
-        # 0.2 Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
+        # 1.2 Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
         self.rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
         self.timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulations.
         self.rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
         self.dump_interval_s: float  # Number of seconds between output heaps.
 
-        # 0.3 Engine Parameters - Parameters not used in the array but needed for this engine
+        # 1.3 Engine Parameters - Parameters not used in the array but needed for this engine
         self.batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
         self.channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
 
-        # 0.4 Flags used at some point in this class.
+        # 1.4 Flags used at some point in this class.
         self.rx_transport_added: bool  # False if no rx transport has been added, true otherwise
         self.tx_transport_added: bool  # False if no tx transport has been added, true otherwise
         self.running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio functions.
 
-        # 0.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
+        # 1.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
         self.monitor: katxgpu.monitor.Monitor
 
-        # 0.6 Queues for passing items between different asyncio functions.
+        # 1.6 Queues for passing items between different asyncio functions.
         # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.
         # * The _tx_item_queue passes items from the _gpu_proc_loop to the _sender_loop function.
         # Once the destination function is finished with an item, it will be pass it back to the corresponding
@@ -214,26 +214,26 @@ class XBEngine:
         self._tx_item_queue: asyncio.Queue[QueueItem]
         self._tx_free_item_queue: asyncio.Queue[QueueItem]
 
-        # 0.7 Objects for sending and receiving data
+        # 1.7 Objects for sending and receiving data
         self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
         self.receiverStream: recv.Stream
         self.sendStream: katxgpu.xsend.XEngineSPEADAbstractSend
 
-        # 0.8 GPU Kernels and GPU Context
+        # 1.8 GPU Kernels and GPU Context
         self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
         self.tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
         self.preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorder
         self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
 
-        # 0.9 Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
+        # 1.9 Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
         # stream. An abstract command queue can either be implemented as an OpenCL command queue or a CUDA stream depending
         # on the context.
         self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
         self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
         self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
 
-        # 1. Assign configuration variables.
-        # 1.1 Ensure that constructor arguments are within the expected range.
+        # 2. Assign configuration variables.
+        # 2.1 Ensure that constructor arguments are within the expected range.
         if n_pols != 2:
             raise ValueError("n_pols must equal 2 - no other values supported at the moment.")
 
@@ -243,7 +243,7 @@ class XBEngine:
         if channel_offset_value % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
-        # 1.2 Assign array configuration variables
+        # 2.2 Assign array configuration variables
         self.adc_sample_rate_Hz = adc_sample_rate_Hz
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.n_ants = n_ants
@@ -254,7 +254,7 @@ class XBEngine:
         self.sample_bits = sample_bits
         complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
 
-        # 1.3 Calculate derived parameters.
+        # 2.3 Calculate derived parameters.
         # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
         # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the Fourier Transform.
         # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
@@ -268,16 +268,16 @@ class XBEngine:
         # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
-        # 1.4 Assign engine configuration parameters
+        # 2.4 Assign engine configuration parameters
         self.batches_per_chunk = batches_per_chunk
         self.channel_offset_value = channel_offset_value
 
-        # 1.5 Set runtime flags to their initial states
+        # 2.5 Set runtime flags to their initial states
         self.tx_transport_added = False
         self.rx_transport_added = False
         self.running = False
 
-        # 2. Set up file monitor for tracking the state of the reciever chunks and the queues. This monitor is hardcoded
+        # 3. Set up file monitor for tracking the state of the reciever chunks and the queues. This monitor is hardcoded
         # to not write data to a file. If debugging of the queues is needed, setting the use_file_monitor to true should
         # aid in this debugging.
         # TODO: Decide how to configure and manage the monitor.
@@ -287,7 +287,7 @@ class XBEngine:
         else:
             self.monitor = katxgpu.monitor.NullMonitor()
 
-        # 3. Create the receiverStream object. This object has no attached transport yet and will not function until
+        # 4. Create the receiverStream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
 
         # Ringbuffer capacity is not a command line argument as it is not expected that the user will gain much value
@@ -308,16 +308,16 @@ class XBEngine:
             monitor=self.monitor,
         )
 
-        # 4. Create GPU specific objects.
-        # 4.1 Create a GPU context, the x.is_cuda flag forces CUDA to be used instead of OpenCL.
+        # 5. Create GPU specific objects.
+        # 5.1 Create a GPU context, the x.is_cuda flag forces CUDA to be used instead of OpenCL.
         self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
-        # 4.2 Create various command queues (or CUDA streams) to queue GPU functions on.
+        # 5.2 Create various command queues (or CUDA streams) to queue GPU functions on.
         self._upload_command_queue = self.context.create_command_queue()
         self._proc_command_queue = self.context.create_command_queue()
         self._download_command_queue = self.context.create_command_queue()
 
-        # 4.3 Create reorder and correlation operations and create buffer linking the two operations.
+        # 5.3 Create reorder and correlation operations and create buffer linking the two operations.
         tensorCoreTemplate = katxgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
             self.context,
             n_ants=self.n_ants,
@@ -340,8 +340,8 @@ class XBEngine:
         )
         self.preCorrelationReorderOperation.bind(outReordered=self.reordered_buffer_device)
 
-        # 5. Create various buffers and assign them to the correct queues or objects.
-        # 5.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
+        # 6. Create various buffers and assign them to the correct queues or objects.
+        # 6.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
         # setting these values too high results in too much GPU memory being consumed. There just need to be enough
         # of them that the different processing functions do not get starved waiting for items. The low single digits is
         # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
@@ -352,15 +352,15 @@ class XBEngine:
         n_tx_items = 2
         n_free_chunks = 20
 
-        # 5.2 Create various queues for communication between async funtions. These queues are extended in the monitor
+        # 6.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.
         self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
         self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
-        # 5.3 Create buffers and assign them correctly.
-        # 5.3.1 Create items that will store received chunks that have been transferred to the GPU.
+        # 6.3 Create buffers and assign them correctly.
+        # 6.3.1 Create items that will store received chunks that have been transferred to the GPU.
         for i in range(n_rx_items):
             rx_item = RxQueueItem()
             rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
@@ -368,7 +368,7 @@ class XBEngine:
             )
             self._rx_free_item_queue.put_nowait(rx_item)
 
-        # 5.3.2 Create items that will store correlated data in GPU memory, ready for transferring back to system RAM.
+        # 6.3.2 Create items that will store correlated data in GPU memory, ready for transferring back to system RAM.
         for i in range(n_tx_items):
             tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
@@ -376,7 +376,7 @@ class XBEngine:
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        # 5.3.3 Create empty chunks and give them to the receiver to use to assemble heaps.
+        # 6.3.3 Create empty chunks and give them to the receiver to use to assemble heaps.
         for i in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
                 self.preCorrelationReorderOperation.template.inputDataShape, np.int16, context=self.context
