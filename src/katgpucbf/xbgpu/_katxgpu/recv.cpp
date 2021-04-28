@@ -58,8 +58,8 @@ stream::stream(int iNumAnts, int iNumChannels, int iNumSamplesPerChannel, int iN
                                .set_memcpy(bUseGDRCopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
                                .set_allow_out_of_order(true)),
       m_iNumAnts(iNumAnts), m_iNumChannels(iNumChannels), m_iNumSamplesPerChannel(iNumSamplesPerChannel),
-      m_iNumPols(iNumPols), m_iSampleBits(iSampleBits), m_iTimestampStep(iTimestampStep),
-      m_iHeapsPerFenginePerChunk(iHeapsPerFenginePerChunk),
+      m_iNumPols(iNumPols), m_iSampleBits(iSampleBits), m_i64TimestampStep(iTimestampStep),
+      m_i64HeapsPerFenginePerChunk(iHeapsPerFenginePerChunk),
       m_ulPacketSize_bytes(iNumSamplesPerChannel * iNumPols * m_iComplexity / 8 * iSampleBits),
       m_ulChunkSize_bytes(m_ulPacketSize_bytes * iNumChannels * iNumAnts * iHeapsPerFenginePerChunk),
       m_completedChunksRingbuffer(completedChunksRingbuffer)
@@ -90,7 +90,7 @@ void stream::add_chunk(std::unique_ptr<chunk> &&pChunk)
         throw std::invalid_argument("Chunk has incorrect size");
 
     pChunk->m_vbPacketPresent.clear();
-    pChunk->m_vbPacketPresent.resize(m_iNumAnts * m_iHeapsPerFenginePerChunk);
+    pChunk->m_vbPacketPresent.resize(m_iNumAnts * m_i64HeapsPerFenginePerChunk);
     {
         std::lock_guard<std::mutex> lock(m_freeChunksLock);
         m_freeChunksStack.push(std::move(pChunk));
@@ -136,7 +136,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
                                                                               std::int64_t i64FengineID, chunk &chunk)
 {
     // The timestamp index is a number of  m_timestamp_steps from the chunks base timestamp.
-    std::size_t ulTimestampIndex = (i64Timestamp - chunk.m_i64timestamp) / (m_iTimestampStep);
+    std::size_t ulTimestampIndex = (i64Timestamp - chunk.m_i64timestamp) / (m_i64TimestampStep);
 
     // The fengine index is very simple to calculate
     std::size_t ulFengineIndex = i64FengineID;
@@ -164,9 +164,9 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         m_i64FirstTimestamp = i64Timestamp;
         grab_chunk(m_i64FirstTimestamp);
     }
-    // 2. We check that the heap timestamp is a multiple of m_iTimestampStep from the first timestamp. If not, then
+    // 2. We check that the heap timestamp is a multiple of m_i64TimestampStep from the first timestamp. If not, then
     // something has gone very wrong.
-    if ((i64Timestamp - m_i64FirstTimestamp) % m_iTimestampStep != 0)
+    if ((i64Timestamp - m_i64FirstTimestamp) % m_i64TimestampStep != 0)
     {
         spead2::log_info("Timestamp is broken");
         return std::make_tuple(nullptr, nullptr, 0);
@@ -178,7 +178,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
     for (const auto &chunk : m_activeChunksQueue)
     {
         if (i64Timestamp >= chunk->m_i64timestamp &&
-            i64Timestamp < chunk->m_i64timestamp + m_iTimestampStep * m_iHeapsPerFenginePerChunk)
+            i64Timestamp < chunk->m_i64timestamp + m_i64TimestampStep * m_i64HeapsPerFenginePerChunk)
         {
             // 3.1. If the heap falls within a specific active chunk we use the timestamp and the fengine_id to
             // determine the exact destination in the timestamp by calling the overloaded calculate_packet_destination()
@@ -206,21 +206,24 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         // link between the katxgpu host server and the network.
         std::size_t ulMaxActiveChunks = 2;
         std::int64_t i64StartTimestamp =
-            m_activeChunksQueue.back()->m_i64timestamp + m_iTimestampStep * m_iHeapsPerFenginePerChunk;
+            m_activeChunksQueue.back()->m_i64timestamp + m_i64TimestampStep * m_i64HeapsPerFenginePerChunk;
 
         // 4.2.1 If the next chunk is not the next sequential one, then the pipeline is flushed. This is done by setting
         // max_chunks to zero.
         if (i64Timestamp >=
             i64StartTimestamp +
-                std::int64_t(m_iTimestampStep *
-                             m_iHeapsPerFenginePerChunk)) // True if the next chunk is not the next sequential one
+                std::int64_t(m_i64TimestampStep *
+                             m_i64HeapsPerFenginePerChunk)) // True if the next chunk is not the next sequential one
         {
-            spead2::log_info("The next chunk is not the next sequential one. SPEAD RX pipeline is being flushed");
+            spead2::log_info("The next chunk is not the next sequential one. SPEAD RX pipeline is being flushed. "
+                             "Actual: %1%, Expected %2%",
+                             i64Timestamp,
+                             (i64StartTimestamp + std::int64_t(m_i64TimestampStep * m_i64HeapsPerFenginePerChunk)));
             // 4.2.2 The i64StartTimestamp of the next chunk needs to be aligned correctly to multiples of
-            // m_iTimestampStep * m_iHeapsPerFenginePerChunk. The step variable below is calculated using integer
+            // m_i64TimestampStep * m_i64HeapsPerFenginePerChunk. The step variable below is calculated using integer
             // division to determine how many multiples the new chunk is off from the old.
-            int64_t step = (i64Timestamp - i64StartTimestamp) / (m_iTimestampStep * m_iHeapsPerFenginePerChunk);
-            i64StartTimestamp += (step * m_iTimestampStep * m_iHeapsPerFenginePerChunk);
+            int64_t step = (i64Timestamp - i64StartTimestamp) / (m_i64TimestampStep * m_i64HeapsPerFenginePerChunk);
+            i64StartTimestamp += (step * m_i64TimestampStep * m_i64HeapsPerFenginePerChunk);
             ulMaxActiveChunks = 0;
         }
 
@@ -251,7 +254,8 @@ void *stream::allocate(std::size_t ulHeapSize_bytes, spead2::recv::packet_header
     // 1. Perform some basic checks on the received packet of the new heap to confirm that it is what we expect.
     if (ulHeapSize_bytes != m_ulPacketSize_bytes * m_iNumChannels)
     {
-        spead2::log_info("Allocating incorrect size");
+        spead2::log_info(
+            "Received heap is the wrong size - is this a descriptor? (This message can be removed in production)");
         return nullptr;
     }
     std::int64_t i64Timestamp = -1;
@@ -287,8 +291,12 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     // 1. Check that all required packets in a heap have been received.
     if (!live_heap.is_complete())
     {
-        spead2::log_info("Heap not complete. Received Length %1% Expected Length %2%.", live_heap.get_received_length(),
-                         live_heap.get_heap_length());
+        // This log message has been commented out as when it occurs, it results in a number of additional packets being
+        // dropped and extra incomplete heaps. This error is still detected on the python level as the
+        // m_vbPacketPresent array is not marked as true for this packet.
+        // spead2::log_info("Heap not complete. Received Length %1% Expected Length %2%.",
+        // live_heap.get_received_length(),
+        //                 live_heap.get_heap_length());
         return;
     }
 
@@ -324,8 +332,9 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     }
     if (ulHeapSize_bytes != m_ulPacketSize_bytes * m_iNumChannels)
     {
-        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes", ulHeapSize_bytes,
-                         m_ulPacketSize_bytes * m_iNumChannels);
+        spead2::log_info("Heap size incorrect. Received (%1%) bytes, expected (%2%) bytes. Is this a descriptor? (This "
+                         "message can be removed in production)",
+                         ulHeapSize_bytes, m_ulPacketSize_bytes * m_iNumChannels);
         return;
     }
 
@@ -337,7 +346,7 @@ void stream::heap_ready(spead2::recv::live_heap &&live_heap)
     std::tie(pExpectedDataPtr, pChunk, ulHeapIndex) = calculate_packet_destination(i64Timestamp, i64FengineID);
     if (pExpectedDataPtr != pActualDataPtr)
     {
-        spead2::log_info("This should only happen if we receive data that is too old (%1%)", m_iTimestampStep);
+        spead2::log_info("This should only happen if we receive data that is too old (%1%)", m_i64TimestampStep);
         // TODO: Figure out what to do in this case.
         return;
     }

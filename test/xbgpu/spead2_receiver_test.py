@@ -112,7 +112,6 @@ def createTestObjects(
         thread_pool,
         spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
     )
-    del thread_pool  # This line is copied from the SPEAD2 examples.
 
     # 3. Create ItemGroup and add all the required fields.
     ig = spead2.send.ItemGroup(flavour=spead2.Flavour(**default_spead_flavour))
@@ -126,14 +125,14 @@ def createTestObjects(
     ig.add_item(
         FENGINE_ID,
         "fengine id",
-        "F-Engine heap is received from",
+        "F-Engine heap is received from.",
         shape=[],
         format=[("u", default_spead_flavour["heap_address_bits"])],
     )
     ig.add_item(
         CHANNEL_OFFSET,
         "channel offset",
-        "Value of first channel in collections stored here",
+        "Value of first channel in collections stored here.",
         shape=[],
         format=[("u", default_spead_flavour["heap_address_bits"])],
     )
@@ -232,7 +231,7 @@ def createHeaps(
     -------
     heaps: [spead2.send.HeapReference]
         The required heaps are stored in an array. EAch heap is wrapped in a HeapReference object is this is what is
-        required by tge SPEAD2 send_heaps() function.
+        required by the SPEAD2 send_heaps() function.
     """
     # The heaps shape has been modified with the complexity dimension equal to 1 instead of 2. This is because we treat
     # the two 8-bit complex samples

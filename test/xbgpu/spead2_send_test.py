@@ -68,7 +68,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     heaps_to_send = (
         20  # Number of heaps to transmit in the this test. I do not see a need for this number to be larger.
     )
-    dump_rate_s = 0.05  # Normally 0.4 but we set it very low so that the test runs quickly
+    dump_interval_s = 0  # Normally 0.4 but we set it to as fast as possible so things run quickly.
 
     n_pols = 2
     complexity = 2
@@ -81,7 +81,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
     # The // 4 is here because in the MeerKAT case, there are 4*num_ants multicast streams.
     n_channels_per_stream = num_channels // num_ants // 4
-    n_baselines = (n_pols * num_ants + 1) * (num_ants * n_pols) // 2
+    n_baselines = (num_ants + 1) * (num_ants) // 2
 
     # 2. Create cuda context - all buffers created in the XEngineSPEADInprocSend object are created from this context.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
@@ -96,7 +96,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         n_ants=num_ants,
         n_channels_per_stream=n_channels_per_stream,
         n_pols=n_pols,
-        dump_rate_s=dump_rate_s,
+        dump_interval_s=dump_interval_s,
         channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
         context=context,
         queue=queue,
@@ -179,16 +179,21 @@ def test_send_simple(event_loop, num_ants, num_channels):
                     has_channel_offset = True
                     assert (
                         item.value == n_channels_per_stream * 4
-                    ), f"Channel offset incorrect. Expected: {hex(n_channels_per_stream * 4)}, actual {hex(item.value)}"
+                    ), f"Channel offset incorrect. Expected: {hex(n_channels_per_stream * 4)}, actual: {hex(item.value)}"
 
                 # 5.2.2 Check that the received heap has an xeng_raw data buffer item. Check that the buffer is the
                 # correct size and that the values are all the expected value.
                 if item.id == 0x1800:
                     has_xeng_raw = True
-                    data_length_bytes = n_baselines * n_channels_per_stream * complexity * sample_bits // 8
+                    data_length_bytes = (
+                        n_baselines * n_channels_per_stream * n_pols * n_pols * complexity * sample_bits // 8
+                    )
                     assert (
-                        len(item.value) == data_length_bytes
-                    ), f"xeng_raw data not correct size. Expected: {data_length_bytes} bytes, actual {data_length_bytes} bytes"
+                        item.value.size * 8 == data_length_bytes  # *8 as there are 64 bytes in a sample
+                    ), f"xeng_raw data not correct size. Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
+                    assert (
+                        item.value.dtype == np.uint64
+                    ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
                     assert np.all(item.value == num_received)
 
             assert (

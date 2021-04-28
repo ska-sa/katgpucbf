@@ -1,6 +1,6 @@
 # Network Interface Code and SPEAD2
 
-This README attempts to give an overview of the different moving parts of transmit and receive code for the katxgpu
+This file attempts to give an overview of the different moving parts of transmit and receive code for the katxgpu
 program. This explanation attempts to be as complete as possible, but there are many moving parts to this system so 
 missing information is likely. 
 
@@ -117,9 +117,10 @@ The C++ code can be quite dense and complicated. Much effort has been put into m
 without having to delve into the C++ code.
 
 The [pybind11 library](https://pybind11.readthedocs.io/en/stable/index.html) is used for registering C++ code as a
-python module. The C++ files doing this can be found in the [katxgpu/src](.) directory. The [setup.py](../setup.py) file
-handles turning these C++ files into python modules. The [py_register.cpp](./py_register.cpp) contains the
-`PYBIND11_MODULE` macro which kicks off the process during installation.
+python module. The C++ files doing this can be found in the [katxgpu/src](../src) directory. The
+[setup.py](../setup.py) file handles turning these C++ files into python modules. The
+[py_register.cpp](../src/py_register.cpp) contains the `PYBIND11_MODULE` macro which kicks off the process
+during installation.
 
 ## 2. Receiver
 
@@ -135,9 +136,9 @@ The above diagram shows how the receiver module is broken up into three main lay
 the receiver is configured the main processing loop gives the katxgpu python layer new chunks (or old chunks that no
 longer have any use) and the katxgpu python layer returns filled chunks. The underlying assembly and management of these
 chunks is abstracted away at this layer. The classes relevant at this level can be found in the
-[py_recv.cpp](./py_recv.cpp), [py_recv.h](./py_recv.h), [py_common.cpp](./py_recv.cpp) and [py_common.h](./py_recv.h).
-These files are slightly difficult to read, but the python modules they create will have standard python docstrings 
-that can be read in an iPython session once the module has been installed.
+[py_recv.cpp](../src/py_recv.cpp), [py_recv.h](../src/py_recv.h), [py_common.cpp](../src/py_recv.cpp) and
+[py_common.h](../src/py_recv.h). These files are slightly difficult to read, but the python modules they create will
+have standard python docstrings that can be read in an iPython session once the module has been installed.
 2. katxgpu C++ layer - The katxgpu python layer interfaces with the katxgpu C++ layer. The katxgpu C++ layer manages 
 the chunks received from the python layer. When the SPEAD2 stream receives a heap, the C++ layer tells it both to which
 chunk the heap must be copied to and the offset within the chunk buffer that the heap data belongs. The C++ layer
@@ -244,12 +245,12 @@ within a buffer. The unit test can be found [here](../test/spead2_receiver_test.
 
 ## 3. Sender
 
-The X-Engine transmit code can be found in the [xsend.py](./katxgpu/xsend.py) file in the katxgpu/katxgpu subfolder.
+The X-Engine transmit code can be found in the [xsend.py](../katxgpu/xsend.py) file in the katxgpu/katxgpu subfolder.
 Unlike the receiver logic, the sender logic just makes use of the normal SPEAD2 python code - no custom C++ bindings are
 required. The X-Engine implements accumulation and drastically reduces data rates. A heap is sent out on the order of 
 seconds, not milliseconds, and as such no chunking is required to manage these rates.
 
-The [xsend.py](./katxgpu/xsend.py) module defines a number of classes to deal with transmission. The main parent class
+The [xsend.py](../katxgpu/xsend.py) module defines a number of classes to deal with transmission. The main parent class
 for these classes is called the `XEngineSPEADAbstractSend` class. 
 
 The image below gives conceptual overview of how the katxgpu sender code is implemented:
@@ -272,7 +273,7 @@ marked as done once the transmission is complete.
 
 ## 3.1 Unit Tests
 
-The unit test for the send object can be found [here](../test/spead2_sender_test.py)
+The unit test for the send object can be found [here](../test/spead2_send_test.py)
 
 ## 4. Peerdirect Support
 
@@ -283,5 +284,7 @@ not pass through system RAM.
 
 Currently GPUDirect is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server-grade
 cards (such as the A100.).
+
+Currently katxgpu does not make use of the Peerdirect functionality.
 
 TODO: Write a script demonstrating how to use Peerdirect works. Update this descrption once this script has been written.

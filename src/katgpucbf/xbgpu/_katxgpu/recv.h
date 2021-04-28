@@ -143,8 +143,8 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     const int m_iComplexity = 2;       ///< Indicates two values per sample - one real and one imaginary.
 
     // Internal parameters
-    const int m_iHeapsPerFenginePerChunk;   ///< A chunk has this many heaps per F-Engine.
-    const int m_iTimestampStep;             ///< Increase in timestamp between successive heaps from the same F-Engine.
+    const int64_t m_i64HeapsPerFenginePerChunk;   ///< A chunk has this many heaps per F-Engine.
+    const int64_t m_i64TimestampStep;             ///< Increase in timestamp between successive heaps from the same F-Engine.
     const std::size_t m_ulPacketSize_bytes; ///< Number of payload bytes in each packet
     const std::size_t m_ulChunkSize_bytes;  ///< Number of payload bytes in each chunk
 

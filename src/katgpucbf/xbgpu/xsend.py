@@ -120,7 +120,7 @@ class XEngineSPEADAbstractSend(ABC):
         n_ants: int,
         n_channels_per_stream: int,
         n_pols: int,
-        dump_rate_s: float,
+        dump_interval_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         n_send_heaps_in_flight: int = 5,
@@ -136,8 +136,8 @@ class XEngineSPEADAbstractSend(ABC):
             The number of frequency channels contained per stream.
         n_pols: int
             The number of pols per antenna. Expected to always be 2.
-        dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds.
+        dump_interval_s: float
+            A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -152,8 +152,8 @@ class XEngineSPEADAbstractSend(ABC):
         if n_pols != 2:
             raise ValueError("n_pols must equal 2 - no other modes supported at the moment.")
 
-        if dump_rate_s <= 0:
-            raise ValueError("Dump rate must be greater than 0 seconds.")
+        if dump_interval_s < 0:
+            raise ValueError("Dump interval must be 0 or greater.")
 
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
@@ -162,15 +162,24 @@ class XEngineSPEADAbstractSend(ABC):
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
         self.n_pols: Final[int] = n_pols
-        self.n_baselines: Final[int] = (self.n_pols * self.n_ants + 1) * (self.n_ants * self.n_pols) // 2
-        self.dump_rate_s: Final[float] = dump_rate_s
+        self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) // 2
+        self.dump_interval_s: Final[float] = dump_interval_s
         self._sample_bits: Final[int] = 32
 
         # 3. Multicast Stream Parameters
         self.channel_offset: Final[int] = channel_offset
+
+        # n_pols is meant to be here twice to represent the hh, vv, hv, vh pols.
         self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * XEngineSPEADAbstractSend.complexity * self._sample_bits // 8
+            self.n_channels_per_stream
+            * self.n_baselines
+            * self.n_pols
+            * self.n_pols
+            * XEngineSPEADAbstractSend.complexity
+            * self._sample_bits
+            // 8
         )
+        self.heap_shape: Final[typing.Tuple] = (self.n_channels_per_stream, self.n_baselines, self.n_pols, self.n_pols)
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         # 4. Allocate memory buffers
@@ -185,7 +194,7 @@ class XEngineSPEADAbstractSend(ABC):
         # 4.2 Create buffers once-off to be reused for sending data.
         for i in range(self._n_send_heaps_in_flight):
             # 4.2.1 Create a buffer from the accel context.
-            buffer = accel.HostArray((self.heap_payload_size_bytes,), np.uint8, context=self.context)
+            buffer = accel.HostArray(self.heap_shape, np.int64, context=self.context)
 
             # 4.2.2 Create a dummy future object that is already marked as "done" Each buffer is paired with a future
             # so these dummy onces are necessary for initial start up.
@@ -203,9 +212,14 @@ class XEngineSPEADAbstractSend(ABC):
         # 5. Generate all required stream information that is not specific to transports defined in the child classes
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / XEngineSPEADAbstractSend.max_payload_size)
         packet_header_overhead_bytes = packets_per_heap * XEngineSPEADAbstractSend.header_size
-        send_rate_Bps = (
-            (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_rate_s * 1.1
-        )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+
+        # 5.1 If the dump_interval is set to zero, pass zero to streamConfig to send as fast as possible.
+        if self.dump_interval_s != 0:
+            send_rate_Bps = (
+                (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_interval_s * 1.1
+            )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+        else:
+            send_rate_Bps = 0
 
         self.streamConfig = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
@@ -222,7 +236,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group.add_item(
             XEngineSPEADAbstractSend.CHANNEL_OFFSET,
             "channel offset",
-            "Value of first channel in collections stored here",
+            "Value of first channel in collections stored here.",
             shape=[],
             format=[("u", XEngineSPEADAbstractSend.default_spead_flavour["heap_address_bits"])],
         )
@@ -236,13 +250,13 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group.add_item(
             XEngineSPEADAbstractSend.DATA_ID,
             "xeng_raw",
-            "Integrated baseline correlation products",
-            shape=(self.heap_payload_size_bytes,),
-            dtype=np.int8,
+            "Integrated baseline correlation products.",
+            shape=self.heap_shape,
+            dtype=np.uint64,
         )
 
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
-        self.descriptor_heap = self.item_group.get_heap(descriptors="stale", data="none")
+        self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
         """
@@ -262,7 +276,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.item_group["channel offset"].value = self.channel_offset
         self.item_group["xeng_raw"].value = bufferWrapper.buffer
 
-        heap_to_send = self.item_group.get_heap(descriptors="none", data="stale")
+        heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
         # This flag forces the heap to include all item_group pointers in every packet belonging to a single heap
         # instead of just in the first packet. This is done to duplicate the format of the packets out of the MeerKAT
         # SKARABs.
@@ -322,7 +336,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
         n_ants: int,
         n_channels_per_stream: int,
         n_pols: int,
-        dump_rate_s: float,
+        dump_interval_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         endpoint: typing.Tuple[str, int],
@@ -342,8 +356,8 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
             The number of frequency channels contained in the stream.
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
-        dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds.
+        dump_interval_s: float
+            A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -361,7 +375,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
             n_ants=n_ants,
             n_channels_per_stream=n_channels_per_stream,
             n_pols=n_pols,
-            dump_rate_s=dump_rate_s,
+            dump_interval_s=dump_interval_s,
             channel_offset=channel_offset,
             context=context,
         )
@@ -396,7 +410,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         n_ants: int,
         n_channels_per_stream: int,
         n_pols: int,
-        dump_rate_s: float,
+        dump_interval_s: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         queue: spead2.InprocQueue,
@@ -415,9 +429,9 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             The number of frequency channels contained in the stream.
         n_pols: int
             The number of pols per antenna. Expected to always be 2 at the moment.
-        dump_rate_s: float
-            A new heap is transmitted every dump_rate_s seconds. For the inproc transport this rate is respected but is
-            not very useful.
+        dump_interval_s: float
+            A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected
+            but is not very useful. Set to zero to send as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -430,7 +444,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             n_ants=n_ants,
             n_channels_per_stream=n_channels_per_stream,
             n_pols=n_pols,
-            dump_rate_s=dump_rate_s,
+            dump_interval_s=dump_interval_s,
             channel_offset=channel_offset,
             context=context,
         )
