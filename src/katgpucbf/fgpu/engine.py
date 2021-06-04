@@ -157,7 +157,7 @@ class Engine:
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
         chunk_samples = spectra * channels * 2
-        extra_samples = taps * channels * 2 - 8
+        extra_samples = taps * channels * 2
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, acc_len, channels)
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
