@@ -9,6 +9,8 @@ actual running of the processing.
 import argparse
 import asyncio
 import ipaddress
+import logging
+import signal
 from typing import List, Tuple, Union, Optional, TypeVar, Callable
 
 import katsdpservices
@@ -22,6 +24,7 @@ from .monitor import Monitor, FileMonitor, NullMonitor
 
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
+logger = logging.getLogger(__name__)
 
 
 def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
@@ -161,8 +164,35 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def add_signal_handlers():
+    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
+
+    .. todo::
+
+       This is still not particularly clean, sometimes hangs if digitiser data
+       is still flowing, and possibly exits in the middle of sending a heap.
+       However, it's still useful as it ensures CUDA is shut down properly,
+       which is necessary for NSight to operate correctly.
+    """
+    signums = [signal.SIGINT, signal.SIGTERM]
+
+    def handler():
+        # Remove the handlers so that if it fails to shut down, the next
+        # attempt will try harder.
+        logger.info("Received signal, shutting down")
+        for signum in signums:
+            loop.remove_signal_handler(signum)
+        task.cancel()
+
+    loop = asyncio.get_event_loop()
+    task = asyncio.current_task()
+    for signum in signums:
+        loop.add_signal_handler(signum, handler)
+
+
 async def async_main() -> None:
     """Start the F-Engine asynchronously."""
+    add_signal_handlers()
     args = parse_args()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
@@ -210,6 +240,8 @@ def main() -> None:
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(async_main())
+    except asyncio.CancelledError:
+        pass
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
