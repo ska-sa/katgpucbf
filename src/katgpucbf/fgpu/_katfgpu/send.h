@@ -53,6 +53,7 @@ private:
     spead2::thread_pool thread_pool;
     std::unique_ptr<spead2::send::stream> stream;
     ringbuffer_t free_ring;
+    int feng_id;
 
     // Hooks for monitoring
     virtual void pre_push_free_ring() {}
@@ -61,7 +62,7 @@ private:
 public:
     sender(std::size_t free_ring_capacity,
            const std::vector<std::pair<const void *, std::size_t>> &memory_regions,
-           int thread_affinity, int comp_vector,
+           int thread_affinity, int comp_vector, int feng_id,
            const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
            int ttl, const std::string &interface_address, bool ibv,
            std::size_t max_packet_size, double rate, std::size_t max_heaps);

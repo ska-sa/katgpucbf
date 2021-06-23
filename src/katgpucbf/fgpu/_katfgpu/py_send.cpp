@@ -89,14 +89,14 @@ private:
 public:
     py_sender(std::size_t free_ring_capacity,
               std::vector<py::buffer> &memory_regions,
-              int thread_affinity, int comp_vector,
+              int thread_affinity, int comp_vector, int feng_id,
               const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
               int ttl, const std::string &interface_address, bool ibv,
               std::size_t max_packet_size, double rate, std::size_t max_heaps,
               py::object monitor)
         : memory_regions_holder(memory_regions),
         sender(free_ring_capacity, get_memory_regions(),
-               thread_affinity, comp_vector, endpoints,
+               thread_affinity, comp_vector, feng_id, endpoints,
                ttl, interface_address, ibv, max_packet_size, rate, max_heaps),
         monitor(std::move(monitor))
     {
@@ -161,6 +161,8 @@ py::module register_module(py::module &parent)
             CPU core for output-handling thread.
         comp_vector
             Completion vector for transmission, or -1 for polling.
+        feng_id
+            ID of the F-engine indicating which one in the array this is.
         endpoints
             IP addresses and ports of multicast stream to listen for traffic on.
         ttl
@@ -181,7 +183,7 @@ py::module register_module(py::module &parent)
         .def(py::init<
                  std::size_t,
                  std::vector<py::buffer> &,
-                 int, int,
+                 int, int, int,
                  const std::vector<std::pair<std::string, std::uint16_t>> &,
                  int, const std::string &, bool,
                  std::size_t, double, std::size_t,
@@ -190,6 +192,7 @@ py::module register_module(py::module &parent)
             "memory_regions"_a,
             "thread_affinity"_a,
             "comp_vector"_a,
+            "feng_id"_a,
             "endpoints"_a,
             "ttl"_a,
             "interface_address"_a,

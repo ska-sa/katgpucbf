@@ -123,6 +123,12 @@ def parse_args() -> argparse.Namespace:
         metavar="HZ",
         help="Digitiser sampling rate, used to determine transmission rate [fast as possible]",
     )
+    parser.add_argument(
+        "--feng-id",
+        type=int,
+        default=0,
+        help="ID of the F-engine indicating which one in the array it is. [%(default)s]",
+    )
     parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")
     parser.add_argument(
         "--acc-len", type=int, default=256, metavar="SPECTRA", help="Spectra in each output heap [%(default)s]"
@@ -221,6 +227,7 @@ async def async_main() -> None:
             dst_affinity=args.dst_affinity,
             dst_comp_vector=args.dst_comp_vector,
             adc_rate=args.adc_rate,
+            feng_id=args.feng_id,
             spectra=chunk_samples // (2 * args.channels),
             acc_len=args.acc_len,
             channels=args.channels,

@@ -37,12 +37,13 @@ struct context
 
 sender::sender(std::size_t free_ring_capacity,
                const std::vector<std::pair<const void *, std::size_t>> &memory_regions,
-               int thread_affinity, int comp_vector,
+               int thread_affinity, int comp_vector, int feng_id,
                const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                int ttl, const std::string &interface_address, bool ibv,
                std::size_t max_packet_size, double rate, std::size_t max_heaps)
     : thread_pool(1, thread_affinity >= 0 ? std::vector<int>{thread_affinity} : std::vector<int>{}),
-    free_ring(free_ring_capacity)
+    free_ring(free_ring_capacity),
+    feng_id(feng_id)
 {
     // Convert list of string & int endpoints to more useful boost::asio types.
     if (endpoints.empty())
@@ -152,7 +153,7 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
             // TODO: Consider pre-creating the heaps and recycling
             heap.set_repeat_pointers(true);
             heap.add_item(TIMESTAMP_ID, ctx->c->timestamp + i * timestamp_step);
-            heap.add_item(FENG_ID_ID, 0);    // TODO: take feng_id in constructor
+            heap.add_item(FENG_ID_ID, feng_id);
             heap.add_item(FREQUENCY_ID, j * channels_per_substream);
             heap.add_item(FENG_RAW_ID,
                           boost::asio::buffer_cast<const void *>(heap_data),

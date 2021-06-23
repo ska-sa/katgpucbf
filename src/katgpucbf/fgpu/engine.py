@@ -96,6 +96,10 @@ class Engine:
         See :class:`spead2.send.UdpIbvConfig` for further information.
     adc_rate
         Digitiser sampling rate (in Hz), used to determine transmission rate.
+    feng_id
+        ID of the F-engine indicating which one in the array this is. Included
+        in the output heaps so that the X-engine can determine where the data
+        fits in.
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
@@ -138,6 +142,7 @@ class Engine:
         dst_affinity: int,
         dst_comp_vector: int,
         adc_rate: float,
+        feng_id: int,
         spectra: int,
         acc_len: int,
         channels: int,
@@ -230,6 +235,7 @@ class Engine:
             memory_regions,
             dst_affinity,
             dst_comp_vector,
+            feng_id,
             [(d.host, d.port) for d in dst],
             dst_ttl,
             dst_interface,

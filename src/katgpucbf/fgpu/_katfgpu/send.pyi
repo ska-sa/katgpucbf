@@ -4,18 +4,15 @@ from katsdpsigproc.accel import DeviceArray
 
 from .monitor import Monitor
 
-
 class Chunk:
     timestamp: int
     channels: int
     acc_len: int
     frames: int
     pols: int
-    base: object       # Python buffer protocol
+    base: object  # Python buffer protocol
     device: Optional[DeviceArray]
-
     def __init__(self, base: object, device: Optional[DeviceArray] = None) -> None: ...
-
 
 class Ringbuffer:
     def __init__(self, cap: int) -> None: ...
@@ -25,16 +22,23 @@ class Ringbuffer:
     @property
     def data_fd(self) -> int: ...
 
-
 class Sender:
-    def __init__(self,
-                 free_ring_capacity: int,
-                 memory_regions: Sequence[object],
-                 thread_affinity: int, comp_vector: int,
-                 endpoints: Sequence[Tuple[str, int]],
-                 ttl: int, interface_address: str, ibv: bool,
-                 max_packet_size: int, rate: float, max_heaps: int,
-                 monitor: Monitor = ...) -> None: ...
+    def __init__(
+        self,
+        free_ring_capacity: int,
+        memory_regions: Sequence[object],
+        thread_affinity: int,
+        comp_vector: int,
+        feng_id: int,
+        endpoints: Sequence[Tuple[str, int]],
+        ttl: int,
+        interface_address: str,
+        ibv: bool,
+        max_packet_size: int,
+        rate: float,
+        max_heaps: int,
+        monitor: Monitor = ...,
+    ) -> None: ...
     def send_chunk(self, chunk: Chunk) -> None: ...
     def stop(self) -> None: ...
     def push_free_ring(self, chunk: Chunk) -> None: ...
