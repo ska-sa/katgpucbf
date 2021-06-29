@@ -123,7 +123,7 @@ class XBEngine:
 
     def __init__(
         self,
-        adc_sample_rate_Hz: int,
+        adc_sample_rate_Hz: float,
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
@@ -146,7 +146,7 @@ class XBEngine:
 
         Parameters
         ----------
-        adc_sample_rate_Hz: int
+        adc_sample_rate_Hz: float
             Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
             of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
             stall as heaps queue at the sender faster than they are sent.
@@ -177,7 +177,7 @@ class XBEngine:
         """
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
-        self.adc_sample_rate_Hz: int
+        self.adc_sample_rate_Hz: float
         self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation.
         self.n_ants: int
         self.n_channels_total: int

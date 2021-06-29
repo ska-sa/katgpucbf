@@ -26,8 +26,8 @@ def parse_args() -> argparse.Namespace:
     # 2. Configure flagged arguments
     parser.add_argument(
         "--adc-sample-rate",
-        type=int,
-        default=1712000000,
+        type=float,
+        default=1712000000.0,
         help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall."
         "[%(default)s]",
     )
