@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = $(shell pkg-config --cflags spead2) -std=c++17 -Wall -Wextra -g -O3 -pthread
+CXXFLAGS = $(shell pkg-config --cflags spead2) -std=c++17 -Wall -Wextra -g -O3 -pthread -pipe
 LDFLAGS = $(shell pkg-config --static --libs spead2) -lboost_program_options
 TARGETS = dsim
 
