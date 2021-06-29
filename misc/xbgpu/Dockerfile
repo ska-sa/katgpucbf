@@ -22,13 +22,15 @@ FROM nvidia/cuda:10.1-devel-ubuntu18.04
 # that these commands are not re-run by docker when SPEAD2 is updated.
 RUN apt-get update
 
-# 2.1 Install all packages required for running python3.
+# 2.1 Install all packages required for running python3
+# (curl is needed for launching under katsdpcontroller).
 RUN apt-get install -y \
     python3.6 \
     python3-pip \
     python-pybind11 \
     python3.6-dev \
-    git
+    git \
+    curl
 
 # 2.2 Install all packages required for using SPEAD2.
 RUN apt-get install -y \
