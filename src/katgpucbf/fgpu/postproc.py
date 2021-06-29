@@ -3,9 +3,13 @@
 These classes handle the operation of the GPU in performing the fine-delay,
 requantisation and corner-turn through a mako-templated kernel.
 
-.. rubric:: TODO
+.. todo::
 
-- Fine-delay needs ... work.
+  Phase is currently added from the bottom of the band. Needs to be added from
+  the centre. I haven't implemented that properly yet because I haven't thought
+  of an elegant and efficient way to do it (i.e. expensive calculations on the
+  host vs lots of wasted calculations by each thread on the device). This note
+  is here so that I don't forget about this.
 """
 
 
@@ -100,6 +104,7 @@ class Postproc(accel.Operation):
         self.slots["out"] = accel.IOSlot((spectra // acc_len, channels, acc_len, _2, _2), np.int8)
 
         self.slots["fine_delay"] = accel.IOSlot((spectra,), np.float32)
+        self.slots["phase"] = accel.IOSlot((spectra,), np.float32)
         self.quant_scale = 1.0
 
     def _run(self) -> None:
@@ -118,6 +123,7 @@ class Postproc(accel.Operation):
                 in0.buffer,
                 in1.buffer,
                 self.buffer("fine_delay").buffer,
+                self.buffer("phase").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(in0.padded_shape[1]),  # in_stride

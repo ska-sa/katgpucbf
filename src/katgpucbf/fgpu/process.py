@@ -221,6 +221,9 @@ class OutItem(EventItem):
         Provides a scratch space for collecting per-spectrum fine delays while
         the `OutItem` is being prepared. When the `OutItem` is placed onto the
         queue it is copied to the `Compute`.
+    phase
+        A similar scratch space for collecting per-spectrum phase offsets while
+        the :class:`OutItem` is being prepared.
     n_spectra
         Number of spectra contained in :attr:`spectra`.
 
@@ -235,11 +238,13 @@ class OutItem(EventItem):
 
     spectra: accel.DeviceArray
     fine_delay: accel.HostArray
+    phase: accel.HostArray
     n_spectra: int
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
         self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
+        self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -294,9 +299,9 @@ class Processor:
     managed by the Processor. The Events contained by the Items are the link
     between these two kinds of queues.
 
-    .. rubric:: TODO
+    .. todo::
 
-    - There is also a command_queue in the Engine class, it may be better to
+      There is also a command_queue in the Engine class; it may be better to
       consolidate these.
 
     Attributes
@@ -436,6 +441,7 @@ class Processor:
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
             self.compute.buffer("fine_delay").set_async(self.compute.command_queue, self._out_item.fine_delay)
+            self.compute.buffer("phase").set_async(self.compute.command_queue, self._out_item.phase)
             self.compute.run_backend(self._out_item.spectra)
             self._out_item.events.append(self.compute.command_queue.enqueue_marker())
             self.out_queue.put_nowait(self._out_item)
@@ -506,7 +512,7 @@ class Processor:
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
             timestamp = self._out_item.end_timestamp
-            orig_timestamp, _fine_delay = self.delay_model.invert(timestamp)
+            orig_timestamp, _fine_delay, _phase = self.delay_model.invert(timestamp)
             if orig_timestamp < self._in_items[0].timestamp:
                 align = self.acc_len * self.spectra_samples
                 timestamp = max(timestamp, self._in_items[0].timestamp)
@@ -515,7 +521,7 @@ class Processor:
                 # Might not be needed, since max delay is not many multiples of
                 # align.
                 while True:
-                    orig_timestamp, _fine_delay = self.delay_model.invert(timestamp)
+                    orig_timestamp, _fine_delay, _phase = self.delay_model.invert(timestamp)
                     if orig_timestamp >= self._in_items[0].timestamp:
                         break
                     timestamp += align
@@ -541,7 +547,9 @@ class Processor:
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
             timestamps = np.arange(timestamp, max_end, self.spectra_samples)
-            orig_timestamps, fine_delays = self.delay_model.invert_range(timestamp, max_end, self.spectra_samples)
+            orig_timestamps, fine_delays, phase = self.delay_model.invert_range(
+                timestamp, max_end, self.spectra_samples
+            )
             coarse_delays = timestamps - orig_timestamps
             # Uses fact that argmax returns first maximum i.e. first true value
             delay_change = np.argmax(coarse_delays != coarse_delay)
@@ -552,6 +560,7 @@ class Processor:
                 )
                 orig_timestamps = orig_timestamps[:delay_change]
                 fine_delays = fine_delays[:delay_change]
+                phase = phase[:delay_change]
                 batch_spectra = delay_change
             else:
                 batch_spectra = len(orig_timestamps)
@@ -565,6 +574,9 @@ class Processor:
                 self._out_item.fine_delay[
                     self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra
                 ] = fine_delays
+                self._out_item.phase[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra] = (
+                    phase / np.pi  # because the arguments of sincospif() used in the kernel are in radians/PI
+                )
                 self.compute.run_frontend(self._in_items[0].samples, offset, self._out_item.n_spectra, batch_spectra)
                 self._out_item.n_spectra += batch_spectra
 

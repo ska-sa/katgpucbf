@@ -36,12 +36,12 @@ DEVICE_FN char quant(float value, float quant_scale)
  *
  * Work group sizing:
  * - Each thread handles vtx channels from vty spectra.
- * - Thread-blocks are block × block × 1.
+ * - Thread-blocks are block x block x 1.
  * - A set of thread-blocks with the same z coordinate handles transposition of
  *   acc_len complete spectra.
  *
  * A note on stride length:
- * `out` is a multi-dimensional array of shape (heaps × channels × acc_len). If
+ * `out` is a multi-dimensional array of shape (heaps x channels x acc_len). If
  * it's contiguous then the strides will coincide with these dimensions, but
  * katsdpsigproc may have added some padding to satisfy alignment requirements.
  * At the moment, this isn't the case, but this code aims for robustness against
@@ -51,12 +51,13 @@ KERNEL void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory.
     const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
     const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
-    const GLOBAL float * RESTRICT fine_delay, // Fine delay. TODO: this needs to be figured out more.
+    const GLOBAL float * RESTRICT fine_delay, // Fine delay, in fraction of a sample.
+    const GLOBAL float * phase,               // Constant phase offset for fine delay [radians].
     int out_stride_z,                         // Output stride between heaps.
     int out_stride,                           // Output stride between channels within a heap.
     int in_stride,                            // Input stride between successive spectra.
     int acc_len,                              // Number of spectra per output heap.
-    float delay_scale,                        // Scale factor for delay.
+    float delay_scale,                        // Scale factor for delay. 1/channels in magnitude.
     float quant_scale)                        // Scale factor for quantiser.
 {
     LOCAL_DECL scratch_t scratch;
@@ -78,9 +79,14 @@ KERNEL void postproc(
         // Apply fine delay.
         // TODO: load delays more efficiently (it's common across channels)
         float delay = fine_delay[spectrum];
+        float ph = phase[spectrum];
         float re, im;
+        /* Fine delay is in fractions of a sample. Gets multiplied by
+         * delay_scale x ${c} to scale appropriately for the channel, and then
+         * constant phase is added.
+         */
         // Note: delay_scale incorporates the minus sign
-        sincospif(delay * delay_scale * ${c}, &im, &re);
+        sincospif(delay * delay_scale * ${c} + ph, &im, &re);
         v0 = apply_delay(v0, re, im);
         v1 = apply_delay(v1, re, im);
 

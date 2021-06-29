@@ -125,6 +125,7 @@ class Compute(accel.OperationSequence):
             "weights": [f"pfb_fir{pol}:weights" for pol in range(self.pols)],
             "out": ["postproc:out"],
             "fine_delay": ["postproc:fine_delay"],
+            "phase": ["postproc:phase"],
         }
         for pol in range(self.pols):
             compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]

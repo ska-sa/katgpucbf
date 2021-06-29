@@ -25,7 +25,7 @@ class AbstractDelayModel(ABC):
         """
 
     @abstractmethod
-    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:
+    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find input timestamps corresponding to a range of output samples.
 
         For each output sample with timestamp in ``range(start, stop, step)``,
@@ -46,9 +46,11 @@ class AbstractDelayModel(ABC):
             Undelayed timestamps corresponding to ``range(start, stop, step)``
         residual
             Fractional sample delay not accounted for by ``time - orig_time``.
+        phase
+            Fringe-stopping phase to be added.
         """
 
-    def invert(self, time: int) -> Tuple[int, float]:
+    def invert(self, time: int) -> Tuple[int, float, float]:
         """Find  input sample timestamp corresponding to a given output sample.
 
         Parameters
@@ -62,9 +64,11 @@ class AbstractDelayModel(ABC):
             Undelayed timestamp corresponding to `time`.
         residual
             Fractional sample delay not accounted for by ``time - orig_time``.
+        phase
+            Fringe-stopping phase to be added.
         """
-        orig_time, residual = self.invert_range(time, time + 1, 1)
-        return int(orig_time[0]), float(residual[0])
+        orig_time, residual, phase = self.invert_range(time, time + 1, 1)
+        return int(orig_time[0]), float(residual[0]), float(phase[0])
 
 
 class LinearDelayModel(AbstractDelayModel):
@@ -76,8 +80,12 @@ class LinearDelayModel(AbstractDelayModel):
         Sample at which the model should start being used.
     delay
         Delay to apply at `start`.
-    rate
+    delay_rate
         Unit-less rate of change of delay.
+    phase
+        Fringe-stopping phase to apply with the fine delay. [radians]
+    phase_rate
+        Rate of change of the fringe-stopping phase. [radians/second]
 
     Raises
     ------
@@ -85,31 +93,42 @@ class LinearDelayModel(AbstractDelayModel):
         if `rate` is less than or equal to -1 or `start` is negative
     """
 
-    def __init__(self, start: int, delay: float, rate: float) -> None:
+    def __init__(self, start: int, delay: float, delay_rate: float, phase: float, phase_rate: float) -> None:
         if delay <= -1.0:
             raise ValueError("delay rate must be greater than -1")
         if start < 0:
             raise ValueError("start must be non-negative")
         self.start = start
         self.delay = float(delay)
-        self.rate = float(rate)
+        self.delay_rate = float(delay_rate)
+        self.phase = float(phase)
+        self.phase_rate = float(phase_rate)
 
     def __call__(self, time: float) -> float:  # noqa: D102
         rel_time = time - self.start
-        return rel_time * self.rate + self.delay
+        return rel_time * self.delay_rate + self.delay
 
-    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:  # noqa: D102
+    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         time = np.arange(start, stop, step)
         # Variables with names prefixed rel_ treat start of delay model as t_0.
         # Makes it easier to apply the rate.
         rel_time = time - self.start
         # Solve `rel_time = rel_orig + delay + rel_orig*rate` for rel_orig and
-        # you end up with the following equation. (rel_time is the corrected
-        # timestamp, i.e. after the delay-model has been applied.)
-        rel_orig = (rel_time - self.delay) / (self.rate + 1)
+        # you end up with the following equation.
+        # rel_time is the (relative) corrected timestamp, i.e. after the delay
+        # model has been applied, while rel_orig is the (relative) original
+        # timestamp, the one that would have come from the digitiser before
+        # correction.
+        rel_orig = (rel_time - self.delay) / (self.delay_rate + 1)
         rel_orig_rnd = np.rint(rel_orig).astype(np.int64)
         residual = rel_orig_rnd - rel_orig
-        return rel_orig_rnd + self.start, residual
+
+        # Calculate the phase
+        phase = rel_time * self.phase_rate + self.phase
+
+        # add self.start back again to return the timestamps in the original
+        # epoch
+        return rel_orig_rnd + self.start, residual, phase
 
 
 class MultiDelayModel(AbstractDelayModel):
@@ -123,7 +142,7 @@ class MultiDelayModel(AbstractDelayModel):
     """
 
     def __init__(self) -> None:
-        self._models = deque([LinearDelayModel(0, 0.0, 0.0)])
+        self._models = deque([LinearDelayModel(0, 0.0, 0.0, 0.0, 0.0)])
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:
@@ -132,10 +151,11 @@ class MultiDelayModel(AbstractDelayModel):
             warnings.warn("Timestamp is before start of first linear model - possibly due to non-monotonic queries")
         return self._models[0](time)
 
-    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray]:  # noqa: D102
-        orig, fine_delay = self._models[0].invert_range(start, stop, step)
+    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+        orig, fine_delay, phase = self._models[0].invert_range(start, stop, step)
+
         if len(orig) == 0:  # Defence against corner case breaking things.
-            return orig, fine_delay
+            return orig, fine_delay, phase
 
         if orig[0] < self._models[0].start:
             warnings.warn("Timestamp is before start of first linear model - possibly due to non-monotonic queries")
@@ -152,16 +172,17 @@ class MultiDelayModel(AbstractDelayModel):
                 # Models are assumed to have positive delays, so the
                 # inverse of stop in any model is <= stop.
                 break
-            new_orig, new_fine_delay = model.invert_range(start, stop, step)
+            new_orig, new_fine_delay, new_phase = model.invert_range(start, stop, step)
             mask = new_orig >= model.start
             np.copyto(orig, new_orig, where=mask)
             np.copyto(fine_delay, new_fine_delay, where=mask)
+            np.copyto(phase, new_phase, where=mask)
             if mask[0]:
                 # The previous model is completely overwritten
                 cull = i
         for _ in range(cull):
             self._models.popleft()
-        return orig, fine_delay
+        return orig, fine_delay, phase
 
     def add(self, model: LinearDelayModel) -> None:
         """Extend the model with a new linear model.
