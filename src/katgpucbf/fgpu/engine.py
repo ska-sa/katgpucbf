@@ -159,6 +159,15 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__("localhost", katcp_port)
+        dropped_pkt_sensor = aiokatcp.Sensor(
+            int,
+            "dropped-pkts",
+            "number of packets dropped on the input",
+            default=0,
+            initial_status=aiokatcp.Sensor.Status.NOMINAL,
+        )
+        self.sensors.add(dropped_pkt_sensor)
+
         if use_gdrcopy:
             import gdrcopy.pycuda
 
@@ -174,7 +183,7 @@ class Engine(aiokatcp.DeviceServer):
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor)
+        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
 
         ringbuffer_capacity = 2
         ring = recv.Ringbuffer(ringbuffer_capacity)
@@ -254,6 +263,10 @@ class Engine(aiokatcp.DeviceServer):
         monitor.event_qsize("send_free_ringbuffer", 0, len(send_chunks))
         for schunk in send_chunks:
             self._sender.push_free_ring(schunk)
+
+    async def request_quant_scale(self, ctx, quant_scale: float):
+        """Set the quant scale."""
+        self._processor.compute.quant_scale = quant_scale
 
     async def run(self) -> None:
         """Run the engine.

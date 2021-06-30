@@ -2,6 +2,7 @@
 
 import logging
 from typing import List, Optional, AsyncGenerator
+from aiokatcp import Sensor
 
 from .monitor import Monitor
 from .ringbuffer import AsyncRingbuffer
@@ -11,7 +12,9 @@ from ._katfgpu.recv import Stream, Chunk, Ringbuffer
 logger = logging.getLogger(__name__)
 
 
-async def chunk_sets(streams: List[Stream], monitor: Monitor) -> AsyncGenerator[List[Chunk], None]:
+async def chunk_sets(
+    streams: List[Stream], monitor: Monitor, dropped_pkt_sensor: Sensor = None
+) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
     This code receives chunks of data from the C++-domain Ringbuffer, matches
@@ -44,6 +47,8 @@ async def chunk_sets(streams: List[Stream], monitor: Monitor) -> AsyncGenerator[
             good = sum(chunk.present)
             lost += total - good
             if good < total:
+                if dropped_pkt_sensor:
+                    dropped_pkt_sensor.set_value(lost)
                 logger.warning(
                     "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
                     chunk.timestamp,

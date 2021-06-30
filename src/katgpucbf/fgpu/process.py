@@ -14,6 +14,7 @@ from typing import Deque, List, Sequence, cast
 import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.resource import async_wait_for_events
+from aiokatcp import SensorSet
 
 from .delay import AbstractDelayModel
 from .compute import Compute
@@ -329,7 +330,9 @@ class Processor:
         and reporting their events.
     """
 
-    def __init__(self, compute: Compute, delay_model: AbstractDelayModel, use_gdrcopy: bool, monitor: Monitor) -> None:
+    def __init__(
+        self, compute: Compute, delay_model: AbstractDelayModel, use_gdrcopy: bool, monitor: Monitor, sensors: SensorSet
+    ) -> None:
         self.compute = compute
         self.delay_model = delay_model
         n_in = 3
@@ -342,6 +345,8 @@ class Processor:
         self.in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
         self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
+
+        self.sensors = sensors
 
         self.monitor = monitor
         self._spectra = []
@@ -620,7 +625,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, self.monitor):
+        async for chunks in recv.chunk_sets(streams, self.monitor, self.sensors["dropped-pkts"]):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
