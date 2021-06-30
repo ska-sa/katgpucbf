@@ -6,6 +6,7 @@ from katsdptelstate.endpoint import Endpoint
 
 import numpy as np
 import katsdpsigproc.accel as accel
+import aiokatcp
 
 from . import recv, send
 from .compute import ComputeTemplate
@@ -46,7 +47,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     return weights.astype(np.float32)
 
 
-class Engine:
+class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
     The Engine class is essentially a wrapper around a
@@ -123,9 +124,13 @@ class Engine:
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
+    VERSION = "katfgpu-0.1"
+    BUILD_STATE = "katfgpu-0.1.1.dev0"
+
     def __init__(
         self,
         *,
+        katcp_port: int = 7147,  # TODO: Is this the best place? Or would it be better in the cli-args?
         context: AbstractContext,
         srcs: List[Union[str, List[Tuple[str, int]]]],
         src_interface: Optional[str],
@@ -153,6 +158,7 @@ class Engine:
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
+        super(Engine, self).__init__("localhost", katcp_port)
         if use_gdrcopy:
             import gdrcopy.pycuda
 
@@ -257,6 +263,8 @@ class Engine:
         concurrently.
         """
         loop = asyncio.get_event_loop()
+        self.loop = loop
+        self.start()
         try:
             for pol, stream in enumerate(self._src_streams):
                 src = self._srcs[pol]
@@ -277,3 +285,4 @@ class Engine:
             for stream in self._src_streams:
                 stream.stop()
             self._sender.stop()
+            self.stop()
