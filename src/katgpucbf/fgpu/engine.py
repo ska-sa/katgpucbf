@@ -264,7 +264,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         loop = asyncio.get_event_loop()
         self.loop = loop
-        self.start()
+        await self.start()
         try:
             for pol, stream in enumerate(self._src_streams):
                 src = self._srcs[pol]
@@ -285,4 +285,4 @@ class Engine(aiokatcp.DeviceServer):
             for stream in self._src_streams:
                 stream.stop()
             self._sender.stop()
-            self.stop()
+            await self.stop()
