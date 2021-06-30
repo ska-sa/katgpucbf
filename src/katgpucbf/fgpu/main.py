@@ -17,6 +17,13 @@ import katsdpservices
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 import katsdpsigproc.accel as accel
+from importlib.metadata import version, PackageNotFoundError  # type: ignore
+
+try:
+    __version__ = version("katfgpu")
+except PackageNotFoundError:
+    # package is not installed
+    __version__ = "unknown"
 
 from .engine import Engine
 from .monitor import Monitor, FileMonitor, NullMonitor
@@ -157,7 +164,7 @@ def parse_args() -> argparse.Namespace:
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
-
+    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, nargs=N_POL, help="Source endpoints (or pcap file)")
     parser.add_argument("dst", type=endpoint_list_parser(7148), help="Destination endpoints")
     args = parser.parse_args()

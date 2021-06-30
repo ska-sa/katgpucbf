@@ -14,6 +14,7 @@
 import os
 import sys
 import warnings
+from importlib.metadata import version as version_func  # type: ignore
 
 sys.path.insert(0, os.path.abspath("."))
 
@@ -23,7 +24,9 @@ sys.path.insert(0, os.path.abspath("."))
 project = "katfgpu"
 copyright = "2021, National Research Foundation (SARAO)"
 author = "Bruce Merry, James Smith"
-
+release = version_func(project)
+# for example take major/minor
+version = ".".join(release.split(".")[:3])
 
 # -- General configuration ---------------------------------------------------
 
