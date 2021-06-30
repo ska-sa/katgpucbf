@@ -31,50 +31,50 @@ class StateMachine:
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('filename')
+parser.add_argument("filename")
 args = parser.parse_args()
 
 events = []
-with open(args.filename, 'r') as f:
+with open(args.filename, "r") as f:
     for line in f:
-        if not line.endswith('\n'):
+        if not line.endswith("\n"):
             break
         events.append(json.loads(line))
 
-events.sort(key=lambda event: event['time'])
+events.sort(key=lambda event: event["time"])
 queues = {}
 state_machines = {}
 for data in events:
-    if data['type'] == 'qsize':
-        name = data['name']
+    if data["type"] == "qsize":
+        name = data["name"]
         if name not in queues:
-            queues[name] = Queue(name, data['maxsize'])
+            queues[name] = Queue(name, data["maxsize"])
         queue = queues[name]
-        if data['maxsize'] != queue.maxsize:
+        if data["maxsize"] != queue.maxsize:
             raise RuntimeError(f'Queue {name} changed ({queue.maxsize} -> {data["maxsize"]}')
-        queues[name].add(data['time'], data['qsize'])
-    elif data['type'] == 'qsize-delta':
-        name = data['name']
+        queues[name].add(data["time"], data["qsize"])
+    elif data["type"] == "qsize-delta":
+        name = data["name"]
         queue = queues.get(name)
         if not queue:
-            raise KeyError(f'qsize-delta on {name} requires the queue to be defined first')
-        queue.add(data['time'], queue.y[-1] + data['delta'])
-    elif data['type'] == 'state':
-        name = data['name']
+            raise KeyError(f"qsize-delta on {name} requires the queue to be defined first")
+        queue.add(data["time"], queue.y[-1] + data["delta"])
+    elif data["type"] == "state":
+        name = data["name"]
         if name not in state_machines:
             state_machines[name] = StateMachine(name)
-        state_machines[name].add(data['time'], data['state'])
+        state_machines[name].add(data["time"], data["state"])
 
 fig, axes = plt.subplots(len(queues) + len(state_machines), 1, sharex=True)
-queue_axes = axes[:len(queues)]
-state_machine_axes = axes[len(queues):]
+queue_axes = axes[: len(queues)]
+state_machine_axes = axes[len(queues) :]
 for ax, queue in zip(queue_axes, queues.values()):
-    ax.axhline(queue.maxsize, color='r', alpha=0.3)
-    ax.plot(queue.x, queue.y, drawstyle='steps-post', label=queue.name)
+    ax.axhline(queue.maxsize, color="r", alpha=0.3)
+    ax.plot(queue.x, queue.y, drawstyle="steps-post", label=queue.name)
     ax.set_xticks(np.arange(0, queue.x[-1], 4096 * 16384 / 1712000000))
-    ax.legend(loc='upper left')
+    ax.legend(loc="upper left")
 for ax, state_machine in zip(state_machine_axes, state_machines.values()):
-    ax.plot(state_machine.x, state_machine.y, drawstyle='steps-post', label=state_machine.name)
+    ax.plot(state_machine.x, state_machine.y, drawstyle="steps-post", label=state_machine.name)
     ax.set_xticks(np.arange(0, queue.x[-1], 4096 * 16384 / 1712000000))
-    ax.legend(loc='upper left')
+    ax.legend(loc="upper left")
 plt.show()

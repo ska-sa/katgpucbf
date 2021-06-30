@@ -12,15 +12,15 @@ import ctypes
 import math
 
 _libcufft.cufftGetSize.restype = int
-_libcufft.cufftGetSize.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p]
+_libcufft.cufftGetSize.argtypes = [ctypes.c_int, ctypes.c_void_p]
+
 
 def cufftGetSize(handle):
     work_size = ctypes.c_size_t()
     status = _libcufft.cufftGetSize(handle, ctypes.byref(work_size))
     cufft.cufftCheckStatus(status)
     return work_size.value
+
 
 def time_gpu(func, passes):
     func()  # Warmup
@@ -34,15 +34,21 @@ def time_gpu(func, passes):
     end.synchronize()
     return (end.time_since(start)) / args.passes * 1e-3  # Convert ms to s
 
+
 def benchmark_real(args):
     shape = (args.batch, 2 * args.channels)
     fshape = (args.batch, args.channels + 1)
 
-    plan = fft.Plan(shape[1], np.float32, np.complex64, args.batch,
-                    inembed=np.array([shape[1]], np.int32),
-                    idist=shape[1],
-                    onembed=np.array([fshape[1]], np.int32),
-                    odist=fshape[1])
+    plan = fft.Plan(
+        shape[1],
+        np.float32,
+        np.complex64,
+        args.batch,
+        inembed=np.array([shape[1]], np.int32),
+        idist=shape[1],
+        onembed=np.array([fshape[1]], np.int32),
+        odist=fshape[1],
+    )
 
     x = np.random.standard_normal(shape).astype(np.float32)
     x_gpu = gpuarray.to_gpu(x)
@@ -53,16 +59,14 @@ def benchmark_real(args):
     fmt = "{0}: Time: {1} Speed: {2} GFlop/s BW: {3} GiB/s Scratch: {4} MiB"
 
     time = time_gpu(lambda: fft.fft(x_gpu, X_gpu, plan), args.passes)
-    print(fmt.format("R2C",
-            time, flops / time / 1e9,
-            bw / time / 1e9,
-            cufftGetSize(plan.handle) / 1024**2))
+    print(fmt.format("R2C", time, flops / time / 1e9, bw / time / 1e9, cufftGetSize(plan.handle) / 1024 ** 2))
+
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-c', '--channels', type=int, default=32768)
-parser.add_argument('-b', '--batch', type=int, default=1024)
-parser.add_argument('-p', '--passes', type=int, default=100)
-parser.add_argument('-i', '--in-place', action='store_true')
+parser.add_argument("-c", "--channels", type=int, default=32768)
+parser.add_argument("-b", "--batch", type=int, default=1024)
+parser.add_argument("-p", "--passes", type=int, default=100)
+parser.add_argument("-i", "--in-place", action="store_true")
 args = parser.parse_args()
 
 benchmark_real(args)

@@ -21,12 +21,12 @@ FENG_RAW_ID = 0x4300
 
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--channels', '-c', type=int, required=True)
-    parser.add_argument('--substreams', '-s', type=int)
-    parser.add_argument('--acc-len', '-a', type=int, default=256)
-    parser.add_argument('--keep-ratio', '-k', type=int, default=64)
-    parser.add_argument('--interface', '-i', required=True)
-    parser.add_argument('address')
+    parser.add_argument("--channels", "-c", type=int, required=True)
+    parser.add_argument("--substreams", "-s", type=int)
+    parser.add_argument("--acc-len", "-a", type=int, default=256)
+    parser.add_argument("--keep-ratio", "-k", type=int, default=64)
+    parser.add_argument("--interface", "-i", required=True)
+    parser.add_argument("address")
     return parser.parse_args(args)
 
 
@@ -45,10 +45,16 @@ class DisplayFrame:
 
 
 class Backend:
-    def __init__(self, address: str, interface: str,
-                 channels: int, substreams: Optional[int], acc_len: int,
-                 keep_ratio: int,
-                 server_context: bokeh.server.contexts.BokehServerContext) -> None:
+    def __init__(
+        self,
+        address: str,
+        interface: str,
+        channels: int,
+        substreams: Optional[int],
+        acc_len: int,
+        keep_ratio: int,
+        server_context: bokeh.server.contexts.BokehServerContext,
+    ) -> None:
         endpoints = endpoint_list_parser(7148)(address)
         endpoint_tuples = [(ep.host, ep.port) for ep in endpoints]
         if substreams is None:
@@ -64,10 +70,9 @@ class Backend:
         self.stream = spead2.recv.asyncio.Stream(
             spead2.ThreadPool(),
             spead2.recv.StreamConfig(max_heaps=2 * substreams, memory_allocator=pool),
-            spead2.recv.RingStreamConfig(heaps=32 * substreams))
-        self.stream.add_udp_ibv_reader(endpoint_tuples,
-                                       get_interface_address(interface),
-                                       buffer_size=64 * 1024 * 1024)
+            spead2.recv.RingStreamConfig(heaps=32 * substreams),
+        )
+        self.stream.add_udp_ibv_reader(endpoint_tuples, get_interface_address(interface), buffer_size=64 * 1024 * 1024)
         self.frames: Deque[Frame] = deque()
         self.last_full_timestamp = -1
         self.server_context = server_context
@@ -88,10 +93,10 @@ class Backend:
 
     def _update_document(self, doc: bokeh.document.document.Document, display: DisplayFrame) -> None:
         for pol in range(2):
-            source = doc.get_model_by_name(f'source{pol}')
+            source = doc.get_model_by_name(f"source{pol}")
             new_data = copy.copy(source.data)
-            new_data['mag'] = [display.mag[..., pol].T]
-            new_data['phase'] = [display.phase[..., pol].T]
+            new_data["mag"] = [display.mag[..., pol].T]
+            new_data["phase"] = [display.phase[..., pol].T]
             source.data = new_data
 
     async def _update_sessions(self, frame: Frame) -> None:
@@ -119,17 +124,16 @@ class Backend:
                     frame = self._get_frame(timestamp)
                     if frame is not None:
                         end = frequency + self.channels_per_substream
-                        frame.data[frequency : end] = data
-                        frame.present[frequency : end] = True
+                        frame.data[frequency:end] = data
+                        frame.present[frequency:end] = True
                         if frame.timestamp > self.last_full_timestamp and np.all(frame.present):
                             self._last_full_timestamp = frame.timestamp
-                            self.server_context.add_next_tick_callback(
-                                functools.partial(self._update_sessions, frame))
+                            self.server_context.add_next_tick_callback(functools.partial(self._update_sessions, frame))
 
                 # Allow them to be reclaimed before popping next heap
                 del heap
                 del item
                 del raw_data
         except Exception as exc:
-            print('Error in run', exc)
+            print("Error in run", exc)
             raise

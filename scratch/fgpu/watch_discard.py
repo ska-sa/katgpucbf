@@ -7,18 +7,21 @@ import time
 from datetime import datetime
 
 parser = argparse.ArgumentParser()
-parser.add_argument('interface')
+parser.add_argument("interface")
 args = parser.parse_args()
 
 last = 0
 while True:
-    result = subprocess.run(['ethtool', '-S', args.interface],
-                            check=True, encoding='utf-8',
-                            stdout=subprocess.PIPE,
-                            stdin=subprocess.DEVNULL)
+    result = subprocess.run(
+        ["ethtool", "-S", args.interface],
+        check=True,
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+    )
     discards = None
     for line in result.stdout.splitlines():
-        match = re.search(r'rx_discards_phy: (\d+)', line)
+        match = re.search(r"rx_discards_phy: (\d+)", line)
         if match:
             discards = int(match.group(1))
             break
@@ -28,6 +31,6 @@ while True:
     if discards != last:
         ts = datetime.now().isoformat()
         delta = discards - last
-        print(f'{ts}: discards: {discards} (+{delta})')
+        print(f"{ts}: discards: {discards} (+{delta})")
         last = discards
     time.sleep(1)

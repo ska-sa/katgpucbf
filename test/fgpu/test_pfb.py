@@ -10,7 +10,7 @@ def decode_10bit_host(data):
     extra = np.tile(bits[:, 0:1], (1, 6))
     combined = np.hstack([extra, bits])
     packed = np.packbits(combined)
-    return packed.view('>i2').astype('i2')
+    return packed.view(">i2").astype("i2")
 
 
 def pfb_fir_host(data, channels, weights):
@@ -41,8 +41,8 @@ def test_pfb_fir(repeat=1):
     template = pfb.PFBFIRTemplate(ctx, taps)
     fn = template.instantiate(queue, samples, spectra, channels)
     fn.ensure_all_bound()
-    fn.buffer('in').set(queue, h_in)
-    fn.buffer('weights').set(queue, weights)
+    fn.buffer("in").set(queue, h_in)
+    fn.buffer("weights").set(queue, weights)
     for i in range(repeat):
         # Split into two parts to test the offsetting
         fn.in_offset = 0
@@ -53,7 +53,7 @@ def test_pfb_fir(repeat=1):
         fn.out_offset = fn.spectra
         fn.spectra = spectra - fn.spectra
         fn()
-    h_out = fn.buffer('out').get(queue)
+    h_out = fn.buffer("out").get(queue)
     np.testing.assert_allclose(h_out, expected, rtol=1e-5, atol=1e-3)
 
 
@@ -67,11 +67,11 @@ def test_fft():
 
     fn = pfb.FFT(queue, spectra, channels)
     fn.ensure_all_bound()
-    fn.buffer('in').set(queue, h_data)
+    fn.buffer("in").set(queue, h_data)
     fn()
-    h_out = fn.buffer('out').get(queue)
+    h_out = fn.buffer("out").get(queue)
     np.testing.assert_allclose(h_out, expected, rtol=1e-4)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_pfb_fir(repeat=100)

@@ -2,11 +2,9 @@ from typing import Optional, Sequence, Tuple, Any
 
 from .monitor import Monitor
 
-
 class Chunk:
     timestamp: int
     pol: int
-
     def __init__(self, base: Any, device: Any = None) -> None: ...
     @property
     def present(self) -> Sequence[bool]: ...
@@ -14,7 +12,6 @@ class Chunk:
     def base(self) -> Any: ...
     @property
     def device(self) -> Any: ...
-
 
 class Ringbuffer:
     def __init__(self, cap: int) -> None: ...
@@ -24,14 +21,20 @@ class Ringbuffer:
     @property
     def data_fd(self) -> int: ...
 
-
 class Stream:
-    def __init__(self, pol: int, sample_bits: int, packet_samples: int,
-                 chunk_samples: int, ringbuffer: Ringbuffer,
-                 thread_affinity: int = ..., *,
-                 mask_timestamp: bool = ...,
-                 use_gdrcopy: bool = ...,
-                 monitor: Optional[Monitor] = ...) -> None: ...
+    def __init__(
+        self,
+        pol: int,
+        sample_bits: int,
+        packet_samples: int,
+        chunk_samples: int,
+        ringbuffer: Ringbuffer,
+        thread_affinity: int = ...,
+        *,
+        mask_timestamp: bool = ...,
+        use_gdrcopy: bool = ...,
+        monitor: Optional[Monitor] = ...
+    ) -> None: ...
     @property
     def ringbuffer(self) -> Ringbuffer: ...
     @property
@@ -48,7 +51,12 @@ class Stream:
     def chunk_bytes(self) -> int: ...
     def add_chunk(self, chunk: Chunk) -> None: ...
     def add_udp_pcap_file_reader(self, filename: str) -> None: ...
-    def add_udp_ibv_reader(self, endpoints: Sequence[Tuple[str, int]],
-                           interface_address: str, buffer_size: int, comp_vector: int = ...,
-                           max_poll: int = ...) -> None: ...
+    def add_udp_ibv_reader(
+        self,
+        endpoints: Sequence[Tuple[str, int]],
+        interface_address: str,
+        buffer_size: int,
+        comp_vector: int = ...,
+        max_poll: int = ...,
+    ) -> None: ...
     def stop(self) -> None: ...
