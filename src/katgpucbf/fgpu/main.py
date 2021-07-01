@@ -24,6 +24,7 @@ from .monitor import Monitor, FileMonitor, NullMonitor
 
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
+DEFAULT_KATCP_PORT = 7147
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +69,12 @@ def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> 
 def parse_args() -> argparse.Namespace:
     """Declare and parse command-line arguments."""
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--katcp-port",
+        type=int,
+        default=DEFAULT_KATCP_PORT,
+        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
+    )
     parser.add_argument("--src-interface", type=get_interface_address, help="Name of input network device")
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
@@ -211,6 +218,7 @@ async def async_main() -> None:
         monitor = NullMonitor()
     with monitor:
         engine = Engine(
+            katcp_port=args.katcp_port,
             context=ctx,
             srcs=args.src,
             src_interface=args.src_interface,

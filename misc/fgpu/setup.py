@@ -75,6 +75,7 @@ setup(
         "katsdpsigproc[CUDA]",
         "katsdpservices",
         "katsdptelstate",
+        "aiokatcp",
         "numpy",
         "scikit-cuda",
         "typing_extensions",

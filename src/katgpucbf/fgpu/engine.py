@@ -57,10 +57,20 @@ class Engine(aiokatcp.DeviceServer):
     .. todo::
 
       Perhaps in a future iteration, :class:`~katfgpu.process.Processor` could
-      be sfolded into :class:`Engine`.
+      be folded into :class:`Engine`.
+
+    .. todo::
+
+      The :class:`Engine` needs to have more sensors and requests added to it,
+      according to whatever the design is going to be. SKARAB didn't have katcp
+      capability, that was all in corr2, so we need to figure out how to best
+      control these engines. This docstring should also be updated to reflect
+      its new nature as an inheritor of :class:`aiokatcp.DeviceServer`.
 
     Parameters
     ----------
+    katcp_port
+        Network port on which to listen for KATCP C&M connections.
     context
         The accelerator (OpenCL or CUDA) context to use for running the Engine.
     srcs
@@ -124,13 +134,15 @@ class Engine(aiokatcp.DeviceServer):
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
+    # TODO: Un-hardcode these things once some sort of versioning system is in
+    # place.
     VERSION = "katfgpu-0.1"
     BUILD_STATE = "katfgpu-0.1.1.dev0"
 
     def __init__(
         self,
         *,
-        katcp_port: int = 7147,  # TODO: Is this the best place? Or would it be better in the cli-args?
+        katcp_port: int,
         context: AbstractContext,
         srcs: List[Union[str, List[Tuple[str, int]]]],
         src_interface: Optional[str],
@@ -158,13 +170,24 @@ class Engine(aiokatcp.DeviceServer):
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
-        super(Engine, self).__init__("localhost", katcp_port)
+        super(Engine, self).__init__("", katcp_port)
+        # TODO: Think about whether we want to listen on all interfaces. Perhaps
+        # it might be better not to have the katcp server accessible in-band? Or
+        # do we? Or do we just not care enough to actually implement any logic
+        # here?
         dropped_pkt_sensor = aiokatcp.Sensor(
             int,
-            "dropped-pkts",
+            "input-missing-heaps-total",
             "number of packets dropped on the input",
             default=0,
             initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            # TODO: Think about what status_func should do for the status of the
+            # sensor. If it goes into "warning" as soon as a single packet is
+            # dropped, then it may not be too useful. Having the information
+            # necessary to implement this may involve shifting things between
+            # classes.
+            auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
         )
         self.sensors.add(dropped_pkt_sensor)
 
@@ -264,7 +287,7 @@ class Engine(aiokatcp.DeviceServer):
         for schunk in send_chunks:
             self._sender.push_free_ring(schunk)
 
-    async def request_quant_scale(self, ctx, quant_scale: float):
+    async def request_quant_scale(self, ctx, quant_scale: float) -> None:
         """Set the quant scale."""
         self._processor.compute.quant_scale = quant_scale
 
@@ -274,9 +297,17 @@ class Engine(aiokatcp.DeviceServer):
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
         concurrently.
+
+        .. todo::
+
+          The shutdown process is something of a wild west at the moment. It
+          needs fairly serious cleaning up. One aspect of this will be the
+          `await self.stop()` in the `finally:` statement. If the task is
+          cancelled, it will raise an exception, and if the finally was already
+          doing cleanup from an exception then I think you lose one of the
+          exceptions. Which is a problem.
         """
         loop = asyncio.get_event_loop()
-        self.loop = loop
         await self.start()
         try:
             for pol, stream in enumerate(self._src_streams):

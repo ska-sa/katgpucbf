@@ -328,6 +328,10 @@ class Processor:
     monitor
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
         and reporting their events.
+    sensors
+        The set of sensors from the parent :class:`~katfgpu.Engine` object,
+        currently needed for passing the dropped packet sensor down to the
+        receiver for updating.
     """
 
     def __init__(
@@ -347,7 +351,6 @@ class Processor:
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
 
         self.sensors = sensors
-
         self.monitor = monitor
         self._spectra = []
         for _ in range(n_in):

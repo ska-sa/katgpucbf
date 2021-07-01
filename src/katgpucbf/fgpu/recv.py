@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def chunk_sets(
-    streams: List[Stream], monitor: Monitor, dropped_pkt_sensor: Sensor = None
+    streams: List[Stream], monitor: Monitor, dropped_pkt_sensor: Optional[Sensor] = None
 ) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
@@ -25,6 +25,12 @@ async def chunk_sets(
     from each of the streams all have the same timestamp, they are yielded.
     Chunks that are not yielded are returned to their streams.
 
+    .. todo::
+
+      Think about replacing the sensor with a callback perhaps. It might be
+      more elegant than having to pass random sensor objects around the entire
+      hierarchy.
+
     Parameters
     ----------
     streams
@@ -32,11 +38,13 @@ async def chunk_sets(
         each represents a polarisation.
     monitor
         Used for performance monitoring of the ringbuffer.
+    dropped_pkt_sensor
+        The mechanism by which dropped packets are reported.
     """
     n_pol = len(streams)
     buf: List[Optional[Chunk]] = [None] * n_pol  # Working buffer to match up pairs of chunks from both pols.
     ring = AsyncRingbuffer(streams[0].ringbuffer, monitor, "recv_ringbuffer", "run_receive")
-    lost = 0  # TODO this is probably something that can be reported as a katcp sensor.
+    lost = 0
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
@@ -49,6 +57,7 @@ async def chunk_sets(
             if good < total:
                 if dropped_pkt_sensor:
                     dropped_pkt_sensor.set_value(lost)
+                # TODO: Do we need both a sensor and a logger?
                 logger.warning(
                     "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
                     chunk.timestamp,
