@@ -175,21 +175,31 @@ class Engine(aiokatcp.DeviceServer):
         # it might be better not to have the katcp server accessible in-band? Or
         # do we? Or do we just not care enough to actually implement any logic
         # here?
-        dropped_pkt_sensor = aiokatcp.Sensor(
-            int,
-            "input-missing-heaps-total",
-            "number of packets dropped on the input",
-            default=0,
-            initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            # TODO: Think about what status_func should do for the status of the
-            # sensor. If it goes into "warning" as soon as a single packet is
-            # dropped, then it may not be too useful. Having the information
-            # necessary to implement this may involve shifting things between
-            # classes.
-            auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
-        )
-        self.sensors.add(dropped_pkt_sensor)
+        sensors = [
+            aiokatcp.Sensor(
+                int,
+                "input-missing-heaps-total",
+                "number of packets dropped on the input",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                # TODO: Think about what status_func should do for the status of the
+                # sensor. If it goes into "warning" as soon as a single packet is
+                # dropped, then it may not be too useful. Having the information
+                # necessary to implement this may involve shifting things between
+                # classes.
+                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
+            ),
+            aiokatcp.Sensor(
+                int,
+                "quant-scale",
+                "rescaling factor to apply before 8-bit requantisation",
+                default=quant_scale,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            ),
+        ]
+        for sensor in sensors:
+            self.sensors.add(sensor)
 
         if use_gdrcopy:
             import gdrcopy.pycuda
@@ -290,6 +300,10 @@ class Engine(aiokatcp.DeviceServer):
     async def request_quant_scale(self, ctx, quant_scale: float) -> None:
         """Set the quant scale."""
         self._processor.compute.quant_scale = quant_scale
+        # We'll use the actual value for the setter instead of the argument
+        # passed here, in case there's some kind of setter function which may
+        # modify it in any way.
+        self.sensors["quant-scale"].set_value(self._processor.compute.quant_scale)
 
     async def run(self) -> None:
         """Run the engine.
