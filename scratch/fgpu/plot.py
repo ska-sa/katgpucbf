@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from typing import Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -43,6 +44,7 @@ with open(args.filename, "r") as f:
 
 events.sort(key=lambda event: event["time"])
 queues = {}
+queue: Optional[Queue]
 state_machines = {}
 for data in events:
     if data["type"] == "qsize":
