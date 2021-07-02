@@ -9,6 +9,7 @@ requires = [
 ]
 
 [tool.setuptools_scm]
+write_to = "katfgpu/version.py"
 
 [tool.black]
 line-length = 120
