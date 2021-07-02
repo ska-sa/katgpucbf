@@ -16,25 +16,26 @@
 
 # 1. Use the nvidia development image as a base. This gives access to all 
 # nvidia and cuda runtime and development tools.
-FROM nvidia/cuda:10.1-devel-ubuntu18.04
+FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
 
 # 2. Install all packages that are independent of katxgpu. This will ensure
 # that these commands are not re-run by docker when SPEAD2 is updated.
-RUN apt-get update
 
 # 2.1 Install all packages required for running python3
 # (curl is needed for launching under katsdpcontroller).
-RUN apt-get install -y \
-    python3.6 \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    python3.8 \
     python3-pip \
-    python-pybind11 \
-    python3.6-dev \
+    python3-wheel \
+    python3.8-dev \
+    python-is-python3 \
     git \
     curl
 
 # 2.2 Install all packages required for using SPEAD2.
-RUN apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     autoconf \
+    pkg-config \
     libboost-all-dev \
     libibverbs-dev \
     librdmacm-dev \
@@ -51,19 +52,18 @@ RUN pip3 install numpy==1.19.5 pycparser jinja2 pybind11
 # files.
 WORKDIR /katxgpu
 
-# Copy entire docker build context into katxgpu folder with the container.
-COPY . . 
+# Install requirements.
+COPY requirements.txt .
 RUN pip3 install -r requirements.txt
 
 # NOTE: These packages do not need to be installed. I currently use it when I
 # have to open the container and verify that things are running by running
 # pytest. The line below can be safetly removed if needed.
+COPY requirements-dev.txt .
 RUN pip3 install -r requirements-dev.txt 
 
-# Hack to force python3 use by default. Needed as the install of SPEAD2 calls 
-# `python` while expecting it to be `python3`. This is probably not advisable
-# in most situations.
-RUN rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python 
+# Copy entire docker build context into katxgpu folder with the container.
+COPY . .
 
 RUN pip3 install .
 
