@@ -14,19 +14,22 @@
 import os
 import sys
 import warnings
-from importlib.metadata import version as version_func  # type: ignore
+from pkg_resources import get_distribution
 
 sys.path.insert(0, os.path.abspath("."))
-
 
 # -- Project information -----------------------------------------------------
 
 project = "katfgpu"
 copyright = "2021, National Research Foundation (SARAO)"
 author = "Bruce Merry, James Smith"
-release = version_func(project)
-# for example take major/minor
-version = ".".join(release.split(".")[:3])
+# Sphinx provides for these to be different. See here:
+# https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-release
+# I think for our purposes, it's better if the two are the same, at least for
+# now, so that you know immediately if you're reading documentation from a non-
+# tagged commit.
+release = get_distribution("katfgpu").version
+version = release
 
 # -- General configuration ---------------------------------------------------
 
