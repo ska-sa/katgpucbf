@@ -72,10 +72,10 @@ setup(
     cmdclass={"build_ext": BuildExt},
     python_requires=">=3.5",
     install_requires=[
+        "aiokatcp",
         "katsdpsigproc[CUDA]",
         "katsdpservices",
         "katsdptelstate",
-        "aiokatcp",
         "numpy",
         "scikit-cuda",
         "typing_extensions",

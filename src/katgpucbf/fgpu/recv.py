@@ -27,9 +27,9 @@ async def chunk_sets(
 
     .. todo::
 
-      Think about replacing the sensor with a callback perhaps. It might be
-      more elegant than having to pass random sensor objects around the entire
-      hierarchy.
+      It may be more scalable to pass the entire :class:`~aiokatcp.SensorSet`
+      around than to do individual sensors, because we will likely have multiple
+      sensors coming from here in future.
 
     Parameters
     ----------
@@ -57,7 +57,9 @@ async def chunk_sets(
             if good < total:
                 if dropped_pkt_sensor:
                     dropped_pkt_sensor.set_value(lost)
-                # TODO: Do we need both a sensor and a logger?
+                # TODO: Do we need both a sensor and a logger? Suggestion made
+                # to make this a debug-level message once we have infrastructure
+                # in place to monitor the sensors.
                 logger.warning(
                     "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
                     chunk.timestamp,

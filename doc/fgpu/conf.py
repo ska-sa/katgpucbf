@@ -49,6 +49,7 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
+    "aiokatcp": ("https://aiokatcp.readthedocs.io/en/latest/", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "spead2": ("https://spead2.readthedocs.io/en/latest", None),
     "katsdpsigproc": ("https://katsdpsigproc.readthedocs.io/en/latest", None),

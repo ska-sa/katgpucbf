@@ -69,6 +69,8 @@ class Engine(aiokatcp.DeviceServer):
 
     Parameters
     ----------
+    katcp_interface
+        Network interface on which to listen for KATCP C&M connections.
     katcp_port
         Network port on which to listen for KATCP C&M connections.
     context
@@ -142,6 +144,7 @@ class Engine(aiokatcp.DeviceServer):
     def __init__(
         self,
         *,
+        katcp_interface: str,
         katcp_port: int,
         context: AbstractContext,
         srcs: List[Union[str, List[Tuple[str, int]]]],
@@ -170,7 +173,7 @@ class Engine(aiokatcp.DeviceServer):
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
-        super(Engine, self).__init__("", katcp_port)
+        super(Engine, self).__init__(katcp_interface, katcp_port)
         # TODO: Think about whether we want to listen on all interfaces. Perhaps
         # it might be better not to have the katcp server accessible in-band? Or
         # do we? Or do we just not care enough to actually implement any logic
@@ -300,7 +303,7 @@ class Engine(aiokatcp.DeviceServer):
     async def request_quant_scale(self, ctx, quant_scale: float) -> None:
         """Set the quant scale."""
         self._processor.compute.quant_scale = quant_scale
-        # We'll use the actual value for the setter instead of the argument
+        # We'll use the actual value of the property instead of the argument
         # passed here, in case there's some kind of setter function which may
         # modify it in any way.
         self.sensors["quant-scale"].set_value(self._processor.compute.quant_scale)
