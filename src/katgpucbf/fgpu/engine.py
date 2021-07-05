@@ -12,7 +12,7 @@ from .compute import ComputeTemplate
 from .process import Processor
 from .delay import MultiDelayModel
 from .monitor import Monitor
-from .types import AbstractContext
+from katsdpsigproc.abc import AbstractContext
 
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:
