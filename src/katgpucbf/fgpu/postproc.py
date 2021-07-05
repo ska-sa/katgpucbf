@@ -17,7 +17,7 @@ import pkg_resources
 import numpy as np
 from katsdpsigproc import accel
 
-from .types import AbstractContext, AbstractCommandQueue
+from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue
 
 
 class PostprocTemplate:
