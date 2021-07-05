@@ -6,5 +6,5 @@ __pycache__
 /demo
 /build
 /katfgpu/*.so
-katfgpu/version.py
+/katfgpu/version.py
 .vscode/

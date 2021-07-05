@@ -14,7 +14,7 @@
 import os
 import sys
 import warnings
-from pkg_resources import get_distribution
+from importlib.metadata import distribution
 
 sys.path.insert(0, os.path.abspath("."))
 
@@ -22,13 +22,21 @@ sys.path.insert(0, os.path.abspath("."))
 
 project = "katfgpu"
 copyright = "2021, National Research Foundation (SARAO)"
-author = "Bruce Merry, James Smith"
-# Sphinx provides for these to be different. See here:
+
+# Get the information from the installed package, no need to maintain it in
+# multiple places.
+dist = distribution(project)
+
+# TODO: Sphinx doesn't recognise the "maintainer" field, which we don't use
+# right now but may in future. Should we concatenate them here?
+author = dist.metadata["Author"]
+
+# Sphinx provides for "release" and "vesion" to be different. See here:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-release
 # I think for our purposes, it's better if the two are the same, at least for
 # now, so that you know immediately if you're reading documentation from a non-
 # tagged commit.
-release = get_distribution("katfgpu").version
+release = dist.metadata["Version"]
 version = release
 
 # -- General configuration ---------------------------------------------------

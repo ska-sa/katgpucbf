@@ -61,12 +61,16 @@ extensions = [
     )
 ]
 
+# TODO: Include a bit more package metadata:
+# https://docs.python.org/3/distutils/setupscript.html#additional-meta-data
+
 setup(
     author="Bruce Merry",
     author_email="bmerry@ska.ac.za",
+    maintainer="James Smith",
+    maintainer_email="jsmith@ska.ac.za",
     name="katfgpu",
     use_scm_version=True,
-    setup_requires=["setuptools_scm"],
     description="GPU-accelerated F-engine for MeerKAT",
     ext_package="katfgpu",
     ext_modules=extensions,

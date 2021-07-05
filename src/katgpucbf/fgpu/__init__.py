@@ -1,12 +1,12 @@
 # noqa: D104
 from ._katfgpu import Stopped, Empty
 
-try:
-    from .version import version
+from importlib.metadata import PackageNotFoundError, version as version_func
 
-    __version__ = version
-except ImportError:
-    # Something went wrong because .version should have been generated on install.
+try:
+    __version__ = version_func(__name__)
+except PackageNotFoundError:
+    # Package wasn't installed yet?
     __version__ = "unknown"
 
 __all__ = ["Stopped", "Empty"]
