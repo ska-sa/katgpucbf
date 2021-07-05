@@ -1,8 +1,6 @@
 # noqa D100
 import asyncio
-from typing import Optional, AsyncIterator, Generic, TypeVar
-
-from typing_extensions import Protocol
+from typing import Optional, AsyncIterator, Generic, TypeVar, Protocol
 
 from . import Empty, Stopped
 from .monitor import Monitor
