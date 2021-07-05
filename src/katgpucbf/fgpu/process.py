@@ -14,10 +14,10 @@ from typing import Deque, List, Sequence, cast
 import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.resource import async_wait_for_events
+from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue, AbstractEvent
 
 from .delay import AbstractDelayModel
 from .compute import Compute
-from .types import AbstractContext, AbstractCommandQueue, AbstractEvent
 from .monitor import Monitor
 from . import recv, send, ringbuffer
 
@@ -552,7 +552,7 @@ class Processor:
             )
             coarse_delays = timestamps - orig_timestamps
             # Uses fact that argmax returns first maximum i.e. first true value
-            delay_change = np.argmax(coarse_delays != coarse_delay)
+            delay_change = int(np.argmax(coarse_delays != coarse_delay))
             if coarse_delays[delay_change] != coarse_delay:
                 print(
                     f"Coarse delay changed from {coarse_delays[delay_change]} to "
@@ -691,6 +691,7 @@ class Processor:
                 events = out_item.events
             else:
                 self._download_queue.enqueue_wait_for_events(out_item.events)
+                assert isinstance(chunk.base, accel.HostArray)
                 out_item.spectra.get_async(self._download_queue, chunk.base)
                 events = [self._download_queue.enqueue_marker()]
             chunk.timestamp = out_item.timestamp

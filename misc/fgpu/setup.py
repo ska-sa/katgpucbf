@@ -78,7 +78,6 @@ setup(
         "katsdptelstate",
         "numpy",
         "scikit-cuda",
-        "typing_extensions",
     ],
     extras_require={"gdrcopy": ["gdrcopy"]},
     entry_points={"console_scripts": ["fgpu = katfgpu.main:main"]},
