@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 from collections import defaultdict
 import json
+from typing import Any, Dict
 
 import pandas
 
 
-columns = defaultdict(dict)
+columns: Dict[str, Dict[str, Any]] = defaultdict(dict)
 with open("dropped2.json") as f:
     for line in f:
         data = json.loads(line)["performanceCounters"]

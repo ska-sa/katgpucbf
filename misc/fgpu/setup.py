@@ -61,16 +61,21 @@ extensions = [
     )
 ]
 
+# TODO: Include a bit more package metadata:
+# https://docs.python.org/3/distutils/setupscript.html#additional-meta-data
+
 setup(
     author="Bruce Merry",
     author_email="bmerry@ska.ac.za",
+    maintainer="James Smith",
+    maintainer_email="jsmith@ska.ac.za",
     name="katfgpu",
-    version="0.1.dev0",
+    use_scm_version=True,
     description="GPU-accelerated F-engine for MeerKAT",
     ext_package="katfgpu",
     ext_modules=extensions,
     cmdclass={"build_ext": BuildExt},
-    python_requires=">=3.5",
+    python_requires=">=3.8",
     install_requires=[
         "aiokatcp",
         "katsdpsigproc[CUDA]",
@@ -78,7 +83,6 @@ setup(
         "katsdptelstate",
         "numpy",
         "scikit-cuda",
-        "typing_extensions",
     ],
     extras_require={"gdrcopy": ["gdrcopy"]},
     entry_points={"console_scripts": ["fgpu = katfgpu.main:main"]},

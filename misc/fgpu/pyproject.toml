@@ -1,5 +1,15 @@
 [build-system]
-requires = ["setuptools", "wheel", "jinja2==2.10.1", "pycparser==2.19", "pybind11==2.5.0"]
+requires = [
+	"setuptools>=45",
+	"wheel",
+	"setuptools_scm[toml]>=6.0",
+	"jinja2==2.10.1",
+	"pycparser==2.19",
+	"pybind11==2.5.0",
+]
+
+[tool.setuptools_scm]
+write_to = "katfgpu/_version.py"  # Do we actually need this if we use importlib?
 
 [tool.black]
 line-length = 120

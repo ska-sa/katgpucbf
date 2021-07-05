@@ -8,7 +8,7 @@ from typing import List, Tuple, Sequence
 from katsdpsigproc import accel
 
 from . import pfb, postproc
-from .types import AbstractContext, AbstractCommandQueue
+from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue
 
 
 class ComputeTemplate:

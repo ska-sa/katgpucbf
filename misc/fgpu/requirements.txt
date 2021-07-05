@@ -4,7 +4,6 @@
 aiokatcp
 numpy
 scikit-cuda
-typing_extensions
 
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
 katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc
