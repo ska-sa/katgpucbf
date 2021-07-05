@@ -27,7 +27,7 @@ from .monitor import Monitor, FileMonitor, NullMonitor
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
 DEFAULT_KATCP_PORT = 7147
-DEFAULT_KATCP_INTERFACE = ""  # Default to all interfaces, but user can override with a specific one.
+DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
 logger = logging.getLogger(__name__)
 
 
@@ -73,10 +73,10 @@ def parse_args() -> argparse.Namespace:
     """Declare and parse command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--katcp-interface",
+        "--katcp-host",
         type=str,
-        default=DEFAULT_KATCP_INTERFACE,
-        help="Network interface on which to listen for KATCP C&M connections [%(default)s]",
+        default=DEFAULT_KATCP_HOST,
+        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
     )
     parser.add_argument(
         "--katcp-port",
@@ -227,7 +227,7 @@ async def async_main() -> None:
         monitor = NullMonitor()
     with monitor:
         engine = Engine(
-            katcp_interface=args.katcp_interface,
+            katcp_host=args.katcp_host,
             katcp_port=args.katcp_port,
             context=ctx,
             srcs=args.src,

@@ -15,6 +15,8 @@ from .delay import MultiDelayModel
 from .monitor import Monitor
 from katsdpsigproc.abc import AbstractContext
 
+import katfgpu
+
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
@@ -69,8 +71,8 @@ class Engine(aiokatcp.DeviceServer):
 
     Parameters
     ----------
-    katcp_interface
-        Network interface on which to listen for KATCP C&M connections.
+    katcp_host
+        Hostname or IP on which to listen for KATCP C&M connections.
     katcp_port
         Network port on which to listen for KATCP C&M connections.
     context
@@ -138,13 +140,13 @@ class Engine(aiokatcp.DeviceServer):
 
     # TODO: Un-hardcode these things once some sort of versioning system is in
     # place.
-    VERSION = "katfgpu-0.1"
-    BUILD_STATE = "katfgpu-0.1.1.dev0"
+    VERSION = katfgpu.__version__
+    BUILD_STATE = katfgpu.__version__
 
     def __init__(
         self,
         *,
-        katcp_interface: str,
+        katcp_host: str,
         katcp_port: int,
         context: AbstractContext,
         srcs: List[Union[str, List[Tuple[str, int]]]],
@@ -173,11 +175,7 @@ class Engine(aiokatcp.DeviceServer):
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
-        super(Engine, self).__init__(katcp_interface, katcp_port)
-        # TODO: Think about whether we want to listen on all interfaces. Perhaps
-        # it might be better not to have the katcp server accessible in-band? Or
-        # do we? Or do we just not care enough to actually implement any logic
-        # here?
+        super(Engine, self).__init__(katcp_host, katcp_port)
         sensors = [
             aiokatcp.Sensor(
                 int,
