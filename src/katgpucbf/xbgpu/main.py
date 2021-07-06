@@ -183,12 +183,7 @@ def main() -> None:
     This method only sets up the asyncio loop and calls the async_main() method which is where the real work is done.
     """
     args = parse_args()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(async_main(args))
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    asyncio.run(async_main(args))
 
 
 if __name__ == "__main__":

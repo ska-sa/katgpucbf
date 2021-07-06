@@ -88,10 +88,10 @@ setuptools.setup(
     classifiers=[
         # "License :: OSI Approved :: GNU General Public License v2 (GPLv2)", # TBD before taking this repo public
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.8",
         "Topic :: Scientific/Engineering :: Astronomy",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     # The following three lines are needed to install the pybind11 C++ modules:
     # 1. ext_package ensures that the pybind modules fall under the katxgpu module when importing
     # 2. ext_modules lists the pybind modules to install
