@@ -6,6 +6,7 @@
 #include <cmath>
 #include <memory>
 #include <random>
+#include <chrono>
 #include <boost/program_options.hpp>
 #include <spead2/send_udp_ibv.h>
 
@@ -20,6 +21,7 @@ struct options
     double adc_rate = 1712000000.0;
     double signal_freq = 232101234.0;
     int ttl = 4;
+    double sync_time = 0.0;
 };
 
 static constexpr int sample_bits = 10;
@@ -45,6 +47,7 @@ static options parse_options(int argc, const char **argv)
         ("ttl", make_opt(opts.ttl), "Output TTL")
         ("signal-freq", make_opt(opts.signal_freq), "Frequency of simulated tone")
         ("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create")
+        ("sync-time", po::value(&opts.sync_time), "Sync time in UNIX epoch seconds (must be in the past)")
     ;
 
     hidden.add_options()
@@ -238,6 +241,23 @@ struct digitiser
                 .set_memory_regions(get_memory_regions(pols))
         )
     {
+        if (opts.sync_time)
+        {
+            using namespace std::chrono;
+            duration<double> now_epoch = system_clock::now() - system_clock::from_time_t(0);
+            // Get current time relative to sync time.
+            duration<double> past = now_epoch - duration<double>(opts.sync_time);
+            if (past.count() < 0)
+            {
+                throw std::invalid_argument("sync time is in the future");
+            }
+            // Convert to heap count (rounding)
+            auto first_heap = std::int64_t(std::round(past.count() * opts.adc_rate / heap_samples));
+            // Convert to a sample count
+            std::int64_t first_timestamp = first_heap * heap_samples;
+            for (polarisation &pol : pols)
+                pol.timestamp = first_timestamp;
+        }
     }
 
     void callback(const boost::system::error_code &ec, std::size_t)
