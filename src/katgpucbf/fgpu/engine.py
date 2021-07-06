@@ -138,6 +138,8 @@ class Engine(aiokatcp.DeviceServer):
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
+    # TODO: Once we have determined a suitable best-practice for the difference
+    # between VERSION and BUILD_STATE, update these.
     VERSION = __version__
     BUILD_STATE = __version__
 
