@@ -70,7 +70,6 @@ setup(
     maintainer="James Smith",
     maintainer_email="jsmith@ska.ac.za",
     name="katfgpu",
-    use_scm_version=True,
     description="GPU-accelerated F-engine for MeerKAT",
     ext_package="katfgpu",
     ext_modules=extensions,
