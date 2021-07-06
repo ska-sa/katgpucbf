@@ -14,6 +14,8 @@ from .delay import MultiDelayModel
 from .monitor import Monitor
 from katsdpsigproc.abc import AbstractContext
 
+from . import __version__
+
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
@@ -122,6 +124,9 @@ class Engine:
         objects needed to communicate between functions, and handling basic
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
+
+    VERSION = __version__
+    BUILD_STATE = __version__
 
     def __init__(
         self,
