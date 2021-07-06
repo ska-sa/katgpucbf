@@ -16,7 +16,7 @@ import skcuda.fft
 import skcuda.cufft
 from katsdpsigproc import accel
 
-from .types import AbstractContext, AbstractCommandQueue
+from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue
 
 
 class PFBFIRTemplate:
@@ -190,7 +190,7 @@ class FFT(accel.Operation):
                 np.float32,
                 np.complex64,
                 spectra,
-                stream=command_queue._pycuda_stream,
+                stream=command_queue._pycuda_stream,  # type: ignore
                 inembed=np.array([2 * channels], np.int32),
                 idist=2 * channels,
                 onembed=np.array([channels + 1], np.int32),
