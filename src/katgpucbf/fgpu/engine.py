@@ -138,8 +138,6 @@ class Engine(aiokatcp.DeviceServer):
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
-    # TODO: Un-hardcode these things once some sort of versioning system is in
-    # place.
     VERSION = __version__
     BUILD_STATE = __version__
 
