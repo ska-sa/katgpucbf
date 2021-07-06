@@ -246,14 +246,7 @@ async def async_main() -> None:
 def main() -> None:
     """Start the F-engine."""
     katsdpservices.setup_logging()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(async_main())
-    except asyncio.CancelledError:
-        pass
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
