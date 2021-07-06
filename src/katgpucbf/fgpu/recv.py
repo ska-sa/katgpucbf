@@ -2,6 +2,7 @@
 
 import logging
 from typing import List, Optional, AsyncGenerator
+from aiokatcp import Sensor
 
 from .monitor import Monitor
 from .ringbuffer import AsyncRingbuffer
@@ -11,7 +12,9 @@ from ._katfgpu.recv import Stream, Chunk, Ringbuffer
 logger = logging.getLogger(__name__)
 
 
-async def chunk_sets(streams: List[Stream], monitor: Monitor) -> AsyncGenerator[List[Chunk], None]:
+async def chunk_sets(
+    streams: List[Stream], monitor: Monitor, dropped_pkt_sensor: Optional[Sensor] = None
+) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
     This code receives chunks of data from the C++-domain Ringbuffer, matches
@@ -22,6 +25,12 @@ async def chunk_sets(streams: List[Stream], monitor: Monitor) -> AsyncGenerator[
     from each of the streams all have the same timestamp, they are yielded.
     Chunks that are not yielded are returned to their streams.
 
+    .. todo::
+
+      It may be more scalable to pass the entire :class:`~aiokatcp.SensorSet`
+      around than to do individual sensors, because we will likely have multiple
+      sensors coming from here in future.
+
     Parameters
     ----------
     streams
@@ -29,11 +38,13 @@ async def chunk_sets(streams: List[Stream], monitor: Monitor) -> AsyncGenerator[
         each represents a polarisation.
     monitor
         Used for performance monitoring of the ringbuffer.
+    dropped_pkt_sensor
+        The mechanism by which dropped packets are reported.
     """
     n_pol = len(streams)
     buf: List[Optional[Chunk]] = [None] * n_pol  # Working buffer to match up pairs of chunks from both pols.
     ring = AsyncRingbuffer(streams[0].ringbuffer, monitor, "recv_ringbuffer", "run_receive")
-    lost = 0  # TODO this is probably something that can be reported as a katcp sensor.
+    lost = 0
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
@@ -44,6 +55,11 @@ async def chunk_sets(streams: List[Stream], monitor: Monitor) -> AsyncGenerator[
             good = sum(chunk.present)
             lost += total - good
             if good < total:
+                if dropped_pkt_sensor:
+                    dropped_pkt_sensor.set_value(lost)
+                # TODO: Do we need both a sensor and a logger? Suggestion made
+                # to make this a debug-level message once we have infrastructure
+                # in place to monitor the sensors.
                 logger.warning(
                     "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
                     chunk.timestamp,

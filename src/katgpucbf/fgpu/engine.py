@@ -6,6 +6,7 @@ from katsdptelstate.endpoint import Endpoint
 
 import numpy as np
 import katsdpsigproc.accel as accel
+import aiokatcp
 
 from . import recv, send
 from .compute import ComputeTemplate
@@ -48,7 +49,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     return weights.astype(np.float32)
 
 
-class Engine:
+class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
     The Engine class is essentially a wrapper around a
@@ -58,10 +59,22 @@ class Engine:
     .. todo::
 
       Perhaps in a future iteration, :class:`~katfgpu.process.Processor` could
-      be sfolded into :class:`Engine`.
+      be folded into :class:`Engine`.
+
+    .. todo::
+
+      The :class:`Engine` needs to have more sensors and requests added to it,
+      according to whatever the design is going to be. SKARAB didn't have katcp
+      capability, that was all in corr2, so we need to figure out how to best
+      control these engines. This docstring should also be updated to reflect
+      its new nature as an inheritor of :class:`aiokatcp.DeviceServer`.
 
     Parameters
     ----------
+    katcp_host
+        Hostname or IP on which to listen for KATCP C&M connections.
+    katcp_port
+        Network port on which to listen for KATCP C&M connections.
     context
         The accelerator (OpenCL or CUDA) context to use for running the Engine.
     srcs
@@ -125,12 +138,16 @@ class Engine:
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
-    VERSION = __version__
+    # TODO: VERSION means interface version, rather than software version. It
+    # will need to wait on a proper ICD for a release.
+    VERSION = "katfgpu-icd-0.1"
     BUILD_STATE = __version__
 
     def __init__(
         self,
         *,
+        katcp_host: str,
+        katcp_port: int,
         context: AbstractContext,
         srcs: List[Union[str, List[Tuple[str, int]]]],
         src_interface: Optional[str],
@@ -158,6 +175,33 @@ class Engine:
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
+        super(Engine, self).__init__(katcp_host, katcp_port)
+        sensors = [
+            aiokatcp.Sensor(
+                int,
+                "input-missing-heaps-total",
+                "number of heaps dropped on the input",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                # TODO: Think about what status_func should do for the status of the
+                # sensor. If it goes into "warning" as soon as a single packet is
+                # dropped, then it may not be too useful. Having the information
+                # necessary to implement this may involve shifting things between
+                # classes.
+                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
+            ),
+            aiokatcp.Sensor(
+                float,
+                "quant-scale",
+                "rescaling factor to apply before 8-bit requantisation",
+                default=quant_scale,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            ),
+        ]
+        for sensor in sensors:
+            self.sensors.add(sensor)
+
         if use_gdrcopy:
             import gdrcopy.pycuda
 
@@ -173,7 +217,7 @@ class Engine:
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor)
+        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
 
         ringbuffer_capacity = 2
         ring = recv.Ringbuffer(ringbuffer_capacity)
@@ -254,14 +298,32 @@ class Engine:
         for schunk in send_chunks:
             self._sender.push_free_ring(schunk)
 
+    async def request_quant_scale(self, ctx, quant_scale: float) -> None:
+        """Set the quant scale."""
+        self._processor.compute.quant_scale = quant_scale
+        # We'll use the actual value of the property instead of the argument
+        # passed here, in case there's some kind of setter function which may
+        # modify it in any way.
+        self.sensors["quant-scale"].set_value(self._processor.compute.quant_scale)
+
     async def run(self) -> None:
         """Run the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
         concurrently.
+
+        .. todo::
+
+          The shutdown process is something of a wild west at the moment. It
+          needs fairly serious cleaning up. One aspect of this will be the
+          `await self.stop()` in the `finally:` statement. If the task is
+          cancelled, it will raise an exception, and if the finally was already
+          doing cleanup from an exception then I think you lose one of the
+          exceptions. Which is a problem.
         """
         loop = asyncio.get_event_loop()
+        await self.start()
         try:
             for pol, stream in enumerate(self._src_streams):
                 src = self._srcs[pol]
@@ -282,3 +344,4 @@ class Engine:
             for stream in self._src_streams:
                 stream.stop()
             self._sender.stop()
+            await self.stop()

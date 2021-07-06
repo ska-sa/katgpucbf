@@ -15,6 +15,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.resource import async_wait_for_events
 from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue, AbstractEvent
+from aiokatcp import SensorSet
 
 from .delay import AbstractDelayModel
 from .compute import Compute
@@ -327,9 +328,15 @@ class Processor:
     monitor
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
         and reporting their events.
+    sensors
+        The set of sensors from the parent :class:`~katfgpu.Engine` object,
+        currently needed for passing the dropped packet sensor down to the
+        receiver for updating.
     """
 
-    def __init__(self, compute: Compute, delay_model: AbstractDelayModel, use_gdrcopy: bool, monitor: Monitor) -> None:
+    def __init__(
+        self, compute: Compute, delay_model: AbstractDelayModel, use_gdrcopy: bool, monitor: Monitor, sensors: SensorSet
+    ) -> None:
         self.compute = compute
         self.delay_model = delay_model
         n_in = 3
@@ -343,6 +350,7 @@ class Processor:
         self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
 
+        self.sensors = sensors
         self.monitor = monitor
         self._spectra = []
         for _ in range(n_in):
@@ -620,7 +628,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, self.monitor):
+        async for chunks in recv.chunk_sets(streams, self.monitor, self.sensors["input-missing-heaps-total"]):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):

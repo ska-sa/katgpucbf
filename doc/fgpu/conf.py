@@ -31,7 +31,7 @@ dist = distribution(project)
 # right now but may in future. Should we concatenate them here?
 author = dist.metadata["Author"]
 
-# Sphinx provides for "release" and "vesion" to be different. See here:
+# Sphinx provides for "release" and "version" to be different. See here:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-release
 # I think for our purposes, it's better if the two are the same, at least for
 # now, so that you know immediately if you're reading documentation from a non-
@@ -63,6 +63,7 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
+    "aiokatcp": ("https://aiokatcp.readthedocs.io/en/latest/", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "spead2": ("https://spead2.readthedocs.io/en/latest", None),
     "katsdpsigproc": ("https://katsdpsigproc.readthedocs.io/en/latest", None),

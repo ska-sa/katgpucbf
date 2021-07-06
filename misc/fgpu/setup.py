@@ -76,6 +76,7 @@ setup(
     cmdclass={"build_ext": BuildExt},
     python_requires=">=3.8",
     install_requires=[
+        "aiokatcp",
         "katsdpsigproc[CUDA]",
         "katsdpservices",
         "katsdptelstate",
