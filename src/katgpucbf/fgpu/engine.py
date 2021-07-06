@@ -15,7 +15,7 @@ from .delay import MultiDelayModel
 from .monitor import Monitor
 from katsdpsigproc.abc import AbstractContext
 
-import katfgpu
+from . import __version__
 
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:
@@ -140,8 +140,8 @@ class Engine(aiokatcp.DeviceServer):
 
     # TODO: Un-hardcode these things once some sort of versioning system is in
     # place.
-    VERSION = katfgpu.__version__
-    BUILD_STATE = katfgpu.__version__
+    VERSION = __version__
+    BUILD_STATE = __version__
 
     def __init__(
         self,
