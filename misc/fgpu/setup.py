@@ -61,16 +61,20 @@ extensions = [
     )
 ]
 
+# TODO: Include a bit more package metadata:
+# https://docs.python.org/3/distutils/setupscript.html#additional-meta-data
+
 setup(
     author="Bruce Merry",
     author_email="bmerry@ska.ac.za",
+    maintainer="James Smith",
+    maintainer_email="jsmith@ska.ac.za",
     name="katfgpu",
-    version="0.1.dev0",
     description="GPU-accelerated F-engine for MeerKAT",
     ext_package="katfgpu",
     ext_modules=extensions,
     cmdclass={"build_ext": BuildExt},
-    python_requires=">=3.5",
+    python_requires=">=3.8",
     install_requires=[
         "katsdpsigproc[CUDA]",
         "katsdpservices",
