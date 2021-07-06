@@ -138,9 +138,9 @@ class Engine(aiokatcp.DeviceServer):
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
-    # TODO: Once we have determined a suitable best-practice for the difference
-    # between VERSION and BUILD_STATE, update these.
-    VERSION = __version__
+    # TODO: VERSION means interface version, rather than software version. It
+    # will need to wait on a proper ICD for a release.
+    VERSION = "katfgpu-icd-0.1"
     BUILD_STATE = __version__
 
     def __init__(
@@ -180,7 +180,7 @@ class Engine(aiokatcp.DeviceServer):
             aiokatcp.Sensor(
                 int,
                 "input-missing-heaps-total",
-                "number of packets dropped on the input",
+                "number of heaps dropped on the input",
                 default=0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 # TODO: Think about what status_func should do for the status of the
@@ -192,7 +192,7 @@ class Engine(aiokatcp.DeviceServer):
                 auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
             ),
             aiokatcp.Sensor(
-                int,
+                float,
                 "quant-scale",
                 "rescaling factor to apply before 8-bit requantisation",
                 default=quant_scale,
