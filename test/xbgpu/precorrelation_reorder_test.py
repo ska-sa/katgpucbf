@@ -33,12 +33,14 @@ Ultimately both kernels:
 """
 
 import os
+from ctypes import c_int  # Only need this from the library
+
+import numpy as np
 import pytest
 import test_parameters
-import numpy as np
-from ctypes import c_int  # Only need this from the library
-from katxgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 from katsdpsigproc import accel
+
+from katxgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 
 
 def verify_reorder(

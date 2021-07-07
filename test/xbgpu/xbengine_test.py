@@ -7,21 +7,20 @@ products.
 The test_xbengine(...) function is the entry point for these tests.
 """
 
-# 1. Import local modules
-import test_parameters
+import asyncio
+import ctypes
+import os
+
+import numpy as np
+import pytest
+import spead2
+import spead2.recv.asyncio
+import spead2.send
 import spead2_receiver_test
+import test_parameters
+
 import katxgpu.ringbuffer
 import katxgpu.xbengine
-
-# 2. Import external modules
-import os
-import ctypes
-import pytest
-import asyncio
-import numpy as np
-import spead2
-import spead2.send
-import spead2.recv.asyncio
 
 # 3. Define Constants
 complexity = 2

@@ -5,18 +5,16 @@ channelised voltage stream (or more simply an X-Engine input stream).
 
 It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxgpu receiver.
 """
-# 1. Imports
-# 1.1 Local imports
+import argparse
+import asyncio
+import logging
+
+import katsdpsigproc.accel as accel
+import numpy as np
+
 import katxgpu._katxgpu.recv as recv
 import katxgpu.monitor
 import katxgpu.ringbuffer
-
-# 1.2 External imports
-import argparse
-import logging
-import asyncio
-import numpy as np
-import katsdpsigproc.accel as accel
 
 logger = logging.getLogger(__name__)
 

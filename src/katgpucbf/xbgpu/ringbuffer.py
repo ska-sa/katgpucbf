@@ -19,13 +19,12 @@ TODO: Look at moving this class to a different repo to avoid repitition between 
 """
 
 import asyncio
-from typing import Optional, AsyncIterator, Generic, TypeVar
+from typing import AsyncIterator, Generic, Optional, TypeVar
 
 from typing_extensions import Protocol
 
 from katxgpu._katxgpu import Empty, Stopped
 from katxgpu.monitor import Monitor
-
 
 _T = TypeVar("_T")
 

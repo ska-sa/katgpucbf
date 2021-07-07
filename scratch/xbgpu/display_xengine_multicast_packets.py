@@ -10,10 +10,9 @@ output/X-Engine input packet format.
 TODO: It would be useful to make this script display the xeng_raw data graphically.
 """
 
-# 1. Imports
+import argparse
 import socket
 import struct
-import argparse
 
 # 2. Address and ports
 parser = argparse.ArgumentParser(description="Script for displaying key information from the xengine output packets.")

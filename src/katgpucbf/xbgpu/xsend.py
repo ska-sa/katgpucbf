@@ -25,17 +25,20 @@ data to be transmitted can sent from its current memory location directly to the
 an intermediary memory location in the process, thereby halving the memory bandwidth required to send.
 """
 
-import spead2
-import spead2.send.asyncio
+import asyncio
+import math
+import queue
+import typing
+from abc import ABC
+
 import katsdpsigproc
 import katsdpsigproc.accel as accel
 import numpy as np
-import asyncio
-from typing_extensions import Final  # type: ignore # This should change from "typing_extensions" to  "typing" in Python 3.8
-import typing
-import queue
-import math
-from abc import ABC
+import spead2
+import spead2.send.asyncio
+from typing_extensions import (
+    Final,  # type: ignore # This should change from "typing_extensions" to  "typing" in Python 3.8
+)
 
 
 class XEngineSPEADAbstractSend(ABC):

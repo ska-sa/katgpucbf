@@ -15,10 +15,9 @@ TODO:
 
 """
 
-import pkg_resources
 import numpy as np
-from katsdpsigproc import accel
-from katsdpsigproc import cuda
+import pkg_resources
+from katsdpsigproc import accel, cuda
 from typing_extensions import Final
 
 

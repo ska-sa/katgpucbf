@@ -24,26 +24,23 @@ TODO:
     this to use the new asyncio syntax.
 """
 
-# General Imports
-import time
 import asyncio
-import numpy as np
+import time
 from typing import List
 
-# SARAO-Developed Package Imports
-import spead2
 import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
+import numpy as np
+import spead2
 
-# Internal katxgpu Package Imports
-import katxgpu.monitor
-import katxgpu.tensorcore_xengine_core
-import katxgpu.precorrelation_reorder
 import katxgpu._katxgpu.recv as recv
-import katxgpu.xsend
+import katxgpu.monitor
+import katxgpu.precorrelation_reorder
 import katxgpu.ringbuffer
+import katxgpu.tensorcore_xengine_core
+import katxgpu.xsend
 
 
 class QueueItem:

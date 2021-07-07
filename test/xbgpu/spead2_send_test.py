@@ -24,17 +24,16 @@ TODO: Implement a pcap test as described in the above note.
 TODO: Review the xsend.py class to see if some functionality has not been covered in all of these tests.
 """
 
-# 1. Import local modules
-import test_parameters
-import katxgpu.xsend
+import asyncio
 
-# 2. Import external modules
+import katsdpsigproc.accel as accel
+import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
-import asyncio
-import numpy as np
-import katsdpsigproc.accel as accel
+import test_parameters
+
+import katxgpu.xsend
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)

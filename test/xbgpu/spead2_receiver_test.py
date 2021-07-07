@@ -18,20 +18,19 @@ display_fsim_multicast_packets.py script in the scratch folder of this repo as a
 TODO: Turn createTestObjects() into a pytest fixture.
 """
 
-# 1. Import local modules
+import asyncio
+import logging
+
+import katsdpsigproc.accel as accel
+import numpy as np
+import pytest
+import spead2
+import spead2.send
 import test_parameters
+
 import katxgpu._katxgpu.recv as recv
 import katxgpu.monitor
 import katxgpu.ringbuffer
-
-# 2. Import external modules
-import pytest
-import logging
-import asyncio
-import numpy as np
-import katsdpsigproc.accel as accel
-import spead2
-import spead2.send
 
 logging.basicConfig(level=logging.INFO)
 

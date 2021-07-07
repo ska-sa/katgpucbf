@@ -1,13 +1,13 @@
 """Script for installing the katxgpu package."""
 
-import setuptools
-from pybind11.setup_helpers import Pybind11Extension, build_ext
-
 # These three imports are used in the BuildExt class.
 import configparser
-import subprocess
 import os
+import subprocess
 from glob import glob
+
+import setuptools
+from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 
 class BuildExt(build_ext):

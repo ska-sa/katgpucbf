@@ -7,12 +7,12 @@ Contains two unit tests:
     2. @test_correlator_quick - this test runs very quickly but is less exhaustive. It is used for quickly testing
     much larger array sizes.
 """
-import pytest
 import numpy as np
-from katxgpu import tensorcore_xengine_core
+import pytest
+import test_parameters
 from katsdpsigproc import accel
 
-import test_parameters
+from katxgpu import tensorcore_xengine_core
 
 
 def get_simple_test_ant_value(channel_index, ant_index):

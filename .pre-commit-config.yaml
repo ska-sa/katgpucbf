@@ -6,6 +6,14 @@ repos:
     rev: 20.8b1
     hooks:
       - id: black
+  - repo: https://github.com/pycqa/isort
+    rev: 5.9.1
+    hooks:
+      - id: isort
+        name: isort (python)
+      - id: isort
+        name: isort (pyi)
+        types: [pyi]
   - repo: https://gitlab.com/pycqa/flake8
     rev: 3.9.0
     hooks:
