@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple, Optional, Any
+from typing import Any, Optional, Sequence, Tuple
 
 from katsdpsigproc.accel import DeviceArray
 

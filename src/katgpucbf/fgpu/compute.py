@@ -3,12 +3,12 @@
 Allocations of memory for input, intermediate and output are also handled here.
 """
 
-from typing import List, Tuple, Sequence
+from typing import List, Sequence, Tuple
 
 from katsdpsigproc import accel
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from . import pfb, postproc
-from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue
 
 
 class ComputeTemplate:

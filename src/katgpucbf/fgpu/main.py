@@ -11,18 +11,16 @@ import asyncio
 import ipaddress
 import logging
 import signal
-from typing import List, Tuple, Union, Optional, TypeVar, Callable
+from typing import Callable, List, Optional, Tuple, TypeVar, Union
 
 import katsdpservices
+import katsdpsigproc.accel as accel
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
-import katsdpsigproc.accel as accel
 
 from . import __version__
-
 from .engine import Engine
-from .monitor import Monitor, FileMonitor, NullMonitor
-
+from .monitor import FileMonitor, Monitor, NullMonitor
 
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?

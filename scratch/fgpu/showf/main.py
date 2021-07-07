@@ -1,15 +1,14 @@
-import sys
 import argparse
 import math
+import sys
 
+import backend
+import colorcet
 import numpy as np
+from bokeh.layouts import gridplot
 from bokeh.models import ColumnDataSource, Range1d
 from bokeh.models.mappers import LinearColorMapper, LogColorMapper
 from bokeh.plotting import curdoc, figure
-from bokeh.layouts import gridplot
-import colorcet
-
-import backend
 
 
 def make_figure(x_range, y_range):

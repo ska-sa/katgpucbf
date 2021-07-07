@@ -1,18 +1,16 @@
 import argparse
 import asyncio
 import copy
-from collections import deque
 import functools
-from typing import List, Deque, Optional
+from collections import deque
+from typing import Deque, List, Optional
 
-import numpy as np
 import bokeh.server.contexts
-import tornado.gen
-
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
-from katsdpservices import get_interface_address
+import numpy as np
 import spead2.recv.asyncio
-
+import tornado.gen
+from katsdpservices import get_interface_address
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 TIMESTAMP_ID = 0x1600
 FREQUENCY_ID = 0x4103

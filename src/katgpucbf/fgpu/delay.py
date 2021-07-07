@@ -1,9 +1,9 @@
 """A collection of classes and methods for delay-tracking."""
 
-from collections import deque
-from typing import Tuple
 import warnings
 from abc import ABC, abstractmethod
+from collections import deque
+from typing import Tuple
 
 import numpy as np
 

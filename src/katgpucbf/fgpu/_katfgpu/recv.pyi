@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Tuple, Any
+from typing import Any, Optional, Sequence, Tuple
 
 from .monitor import Monitor
 

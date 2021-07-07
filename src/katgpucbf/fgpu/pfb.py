@@ -10,13 +10,12 @@ through a mako-templated kernel, and the cuFFT library for the FFT part.
 """
 
 
-import pkg_resources
 import numpy as np
-import skcuda.fft
+import pkg_resources
 import skcuda.cufft
+import skcuda.fft
 from katsdpsigproc import accel
-
-from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 
 class PFBFIRTemplate:

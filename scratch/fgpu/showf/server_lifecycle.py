@@ -1,8 +1,7 @@
-import sys
 import asyncio
+import sys
 
 from backend import Backend, parse_args
-
 
 _argv = sys.argv
 

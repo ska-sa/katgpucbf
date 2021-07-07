@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 
-import pycuda.autoinit
-import pycuda.driver as cuda
-import pycuda.gpuarray as gpuarray
-import skcuda.fft as fft
-import skcuda.cufft as cufft
-from skcuda.cufft import _libcufft
-import numpy as np
 import argparse
 import ctypes
 import math
+
+import numpy as np
+import pycuda.autoinit
+import pycuda.driver as cuda
+import pycuda.gpuarray as gpuarray
+import skcuda.cufft as cufft
+import skcuda.fft as fft
+from skcuda.cufft import _libcufft
 
 _libcufft.cufftGetSize.restype = int
 _libcufft.cufftGetSize.argtypes = [ctypes.c_int, ctypes.c_void_p]

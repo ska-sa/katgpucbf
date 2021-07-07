@@ -13,11 +13,10 @@ requantisation and corner-turn through a mako-templated kernel.
 """
 
 
-import pkg_resources
 import numpy as np
+import pkg_resources
 from katsdpsigproc import accel
-
-from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 
 class PostprocTemplate:

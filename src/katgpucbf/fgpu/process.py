@@ -12,15 +12,15 @@ from collections import deque
 from typing import Deque, List, Sequence, cast
 
 import numpy as np
-from katsdpsigproc import accel
-from katsdpsigproc.resource import async_wait_for_events
-from katsdpsigproc.abc import AbstractContext, AbstractCommandQueue, AbstractEvent
 from aiokatcp import SensorSet
+from katsdpsigproc import accel
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
+from katsdpsigproc.resource import async_wait_for_events
 
-from .delay import AbstractDelayModel
+from . import recv, ringbuffer, send
 from .compute import Compute
+from .delay import AbstractDelayModel
 from .monitor import Monitor
-from . import recv, send, ringbuffer
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:

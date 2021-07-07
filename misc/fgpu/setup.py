@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 import configparser
-from glob import glob
 import os
 import subprocess
-
-from setuptools import setup, find_packages, Extension
 from distutils.command.build_ext import build_ext  # type: ignore  # typeshed doesn't capture it
+from glob import glob
 
 import pybind11
+from setuptools import Extension, find_packages, setup
 
 
 class BuildExt(build_ext):

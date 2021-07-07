@@ -1,7 +1,8 @@
 # noqa: D104
-from ._katfgpu import Stopped, Empty
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as version_func
 
-from importlib.metadata import PackageNotFoundError, version as version_func
+from ._katfgpu import Empty, Stopped
 
 try:
     __version__ = version_func(__name__)

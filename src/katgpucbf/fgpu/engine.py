@@ -1,21 +1,19 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
-from typing import List, Tuple, Union, Optional
+from typing import List, Optional, Tuple, Union
+
+import aiokatcp
+import katsdpsigproc.accel as accel
+import numpy as np
+from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-import numpy as np
-import katsdpsigproc.accel as accel
-import aiokatcp
-
-from . import recv, send
+from . import __version__, recv, send
 from .compute import ComputeTemplate
-from .process import Processor
 from .delay import MultiDelayModel
 from .monitor import Monitor
-from katsdpsigproc.abc import AbstractContext
-
-from . import __version__
+from .process import Processor
 
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:

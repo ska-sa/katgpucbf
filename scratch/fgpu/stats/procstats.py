@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-from collections import defaultdict
 import json
+from collections import defaultdict
 from typing import Any, Dict
 
 import pandas
-
 
 columns: Dict[str, Dict[str, Any]] = defaultdict(dict)
 with open("dropped2.json") as f:

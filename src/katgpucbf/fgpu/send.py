@@ -1,5 +1,4 @@
 # noqa: D100
-from ._katfgpu.send import Sender, Chunk, Ringbuffer
-
+from ._katfgpu.send import Chunk, Ringbuffer, Sender
 
 __all__ = ["Sender", "Chunk", "Ringbuffer"]

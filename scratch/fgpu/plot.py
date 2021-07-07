@@ -4,8 +4,8 @@ import argparse
 import json
 from typing import Optional
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 class Queue:

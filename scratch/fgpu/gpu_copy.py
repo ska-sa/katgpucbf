@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 
-import sys
-import time
 import argparse
 import mmap
+import sys
+import time
 
 import numpy as np
 import pycuda.autoinit
 import pycuda.driver
 from pycuda.gpuarray import GPUArray
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--size", "-s", type=int, default=1024 * 1024 * 1024)

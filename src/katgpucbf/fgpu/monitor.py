@@ -7,14 +7,13 @@ to see what bottlenecks there are, because if the queues get full (or the "free"
 queues get empty) it will result in dropped packets.
 """
 
-from abc import ABC, abstractmethod
 import asyncio
 import contextlib
 import json
 import threading
+from abc import ABC, abstractmethod
 from time import monotonic
-from typing import Generator, TypeVar, Any
-
+from typing import Any, Generator, TypeVar
 
 _M = TypeVar("_M", bound="Monitor")
 

@@ -1,13 +1,13 @@
 """Recv module."""
 
 import logging
-from typing import List, Optional, AsyncGenerator
+from typing import AsyncGenerator, List, Optional
+
 from aiokatcp import Sensor
 
+from ._katfgpu.recv import Chunk, Ringbuffer, Stream
 from .monitor import Monitor
 from .ringbuffer import AsyncRingbuffer
-from ._katfgpu.recv import Stream, Chunk, Ringbuffer
-
 
 logger = logging.getLogger(__name__)
 
