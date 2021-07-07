@@ -30,15 +30,13 @@ import math
 import queue
 import typing
 from abc import ABC
+from typing import Final
 
 import katsdpsigproc
 import katsdpsigproc.accel as accel
 import numpy as np
 import spead2
 import spead2.send.asyncio
-from typing_extensions import (
-    Final,  # type: ignore # This should change from "typing_extensions" to  "typing" in Python 3.8
-)
 
 
 class XEngineSPEADAbstractSend(ABC):

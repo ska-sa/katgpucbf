@@ -15,10 +15,11 @@ TODO:
 
 """
 
+from typing import Final
+
 import numpy as np
 import pkg_resources
 from katsdpsigproc import accel, cuda
-from typing_extensions import Final
 
 
 class PreCorrelationReorderTemplate:
