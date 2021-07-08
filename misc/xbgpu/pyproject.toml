@@ -1,0 +1,40 @@
+# PEP 518 defines pyproject.toml as a configuration file to store build system requirements for Python projects.
+# The intention is for it to eventually completly replace setup.py files. Pip can make use of this file, but that has
+# not been tested yet. 
+#
+# The [build-system] section is not used by any tools in this repo.
+#
+# Pythons black formatter makes use of the information in the [tool.black] section.
+
+[build-system]
+# This is a list of all packages required to install katxgpu. Without these packages the install will fail: 
+# 1. setuptools and wheel are required to install all python packages.
+# 2. pybind11 is used for wrapping C++ functions in python. Required to be here so it is available when pip install is run.
+# 3. jinja2 is required to run bootstrap.sh when installing the spead2 submodule
+# 4. pycparser is required to run bootstrap.sh when installing the spead2 submodule
+requires = ["setuptools", "wheel", "pybind11==2.6.0", "jinja2==2.10.1", "pycparser"]
+
+[tool.black]
+# Configuration for Black, the tools used for auto-formatting the python code in katxgpu
+line-length = 120
+include = '\.pyi?$'
+exclude ='''
+/(
+		  \.eggs	# exclude a few common directories
+		| \.git		# in the root of the project
+		| \.hg
+		| \.mypy_cache
+		| \.nox
+		| \.tox
+		| \.venv
+		| _build
+		| buck-out
+		| build
+		| dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip_glob = ["3rdparty/*"]
