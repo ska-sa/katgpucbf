@@ -1,0 +1,167 @@
+/* This file tells Jenkins how to test this repo. Everything runs in docker 
+ * containers, so in theory any Jenkins server should be able to parse this 
+ * file. However in the katxgpu case, the Jenkins server needs access to a GPU. 
+ * This means that the docker engine being used needs to have been configured to
+ * use the Nvidia Container Runtime and the node the container run on needs a 
+ * Nvidia GPU with the Nvidia Driver installed. 
+ *
+ * Additionally the Jenkins server also needs access to a Mellanox NIC that 
+ * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
+ * container using specific flags.
+ */
+ 
+pipeline {
+  agent {
+    docker {
+      /* This nvidia/cuda:10.1-devel-ubuntu18.04 docker image contains the CUDA 
+       * developement environment which is required to compile the kernels used
+       * by PyCUDA. 
+       */
+      image 'nvidia/cuda:10.1-devel-ubuntu18.04'
+
+      /* A number of arguments need to be  specified in order for the container
+       * to launch correctly.
+       *
+       * --gpus=all: This argument passes the Nvidia driver and devices from the
+       * host to the container. It requires the NVIDIA Container Runtime to be 
+       * installed on the host.
+       * 
+       * --network=host: The docker container needs access to the internet to
+       * install packages and an interface to transmit test networking code.
+       * This command passes all the host interfaces to the container to be 
+       * used as required.
+       *
+       * -u=root: The container needs to be root when running the "apt-get
+       * install" commands. Additionally, programs running with ibverbs 
+       * generally need to be run as root unless the CAP_NET_RAW capability
+       * flag is set (Have not looked into how to do that). 
+       *
+       * -ulimit=memlock=-1: Not sure what this is for. The author of SPEAD2
+       * recommended that this flag be here.
+       *
+       * --device=/dev/infiniband/rdma_cm and --device=/dev/infiniband/uverbs0:
+       * These flags pass the drivers required for ibverbs to the container.
+       * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
+       * 2 etc. The correct once needs to be specified.
+       */
+      args '--gpus=all --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
+    }
+
+  }
+
+  /* This stage should ideally be part of the initial Docker image, as it
+   * takes time and downloads multple Gigabytes from the internet. A new 
+   * Dockerfile needs to be created that will extend the 
+   * nvidia/cuda:10.1-devel-ubuntu18.04 image to include this install.
+   */
+  stages {
+    stage('Configure Environment') {
+      steps {
+        sh 'apt-get update'
+        sh 'apt-get install -y python3.6 python3-pip python-pybind11 python3.6-dev git' //Required for python
+        sh 'apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev' //Required for installing SPEAD2. Much of this is installed when using MLNX_OFED, TODO: Clarify
+      }
+    } 
+
+    /* This stage is kept seperate from the "Install katxgpu package" stage
+     * below as the stage one will fail when something external goes wrong while
+     * the next stage will fail if we have done something wrong in the katxgpu
+     * package. It seems best to split them to make it easier to pinpoint the 
+     * source of the problem.
+     *
+     * NOTE: Numpy is installed first because if it is installed as part of the
+     * requirements.txt install, pycuda tries to install a later version of
+     * numpy which requires python 3.7 or greater. Pybind11 is also installed
+     * like this for a similar reason. It will not install when part of 
+     * requirements.txt. This has not been investigated
+     *
+     * NOTE: Jinja2 and pycparser are used by SPEAD2 for generating some source 
+     * files. They are not used in the running program.
+     */
+    stage('Install required python packages') {
+      steps {
+        sh 'pip3 install numpy==1.19.5 pycparser jinja2 pybind11'
+        sh 'pip3 install -r requirements.txt'
+        sh 'pip3 install -r requirements-dev.txt'
+      }
+    }
+   
+    /* This stage ensures that all the python style guidelines checks pass.
+     * This will catch if someone has commited to the repo without installing 
+     * the required pre-commit hooks.
+     */
+    stage('Check pre-commit hooks have been applied') {
+      steps {
+        sh 'pre-commit install'
+        sh 'pre-commit run --all-files'
+      }
+    }
+
+    stage('Install katxgpu package') {
+      steps {
+        sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
+        sh 'pip3 install .'
+      }
+    }
+
+    /* This test verifies that the fsim can send a burst of traffic on the
+     * network. Currently no unit tests run on the network, so this stage
+     * serves to catch a few issues that could be missed by the unit tests when
+     * it comes to networking  This stage verifies two things:
+     * 1. SPEAD2 normaly installs with ibverbs settings enabled but under some
+     *    conditions SPEAD2 will not install ibverbs functions. When running
+     *    make on the fsim, an error will be thrown if SPEAD2 does not install
+     *    correctly.
+     * 2. The commands required to to run a docker container that makes use of
+     *    ibverbs are not trivial to determine. Attempting to send a burst of
+     *    data out on the network with the fsim will quickly reveal if there are
+     *    any issues with mechanism
+     */
+    stage('Run fsim') {
+      steps {
+        // Install SPEAD2 C++ library so that we can install the fsim
+        dir('3rdparty/spead2'){
+          sh './bootstrap.sh'
+          sh './configure'
+          sh 'make'
+          sh 'make install'
+        }
+        /* Make and run the fsim. NOTE: The interface IP has been hardcoded to
+         * 10.100.44.1. This corresponds to the 100 GBE interface on qgpu02
+         * within the SARAO test lab. If testing will happen on a different
+         * machine, this interface needs to be changed. An ideal way of
+         * running this test would be for the IP address for an interface
+         * supporting ibverbs to be determined automatically. This would make
+         * the test machine agnostic.
+         */
+        dir('scratch'){
+          sh 'make'
+          sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --run-once=true'
+        }
+      }
+    }
+
+    /* This stage actually runs pytest. Pytest has a number of flags that are
+     * not required but make life easier:
+     * 1. -n X: Launches X threads and runs the tests in parallel across
+     *     multiple threads. This speeds up testing significantly. NOTE: This
+     *     can create resource contention over things like GPU RAM. If it
+     *     starts becoming an issue set X to 1. I have noticed an issue once
+     *     where sometimes one thread got stuck and it stalled the pipeline.
+     *     Until this has been solved, I am removing this argument entirely
+     * 2. -v: Increases verbosity
+     * 3. --junitxml=reports/result.xml' Writes the results to a file for later
+     *    examination.
+     */
+    stage('Run pytest') {
+      steps {
+        // Compile the shared C library with verification functions.
+        dir('test'){
+          sh 'make'
+        }
+        sh 'pytest -v --junitxml=reports/result.xml'
+      }
+    }
+    
+  }
+}
