@@ -1,0 +1,9 @@
+session_name: dsim
+windows:
+  - window_name: window
+    layout: tiled
+    panes:
+      - ./run-dsim.sh 0
+      - ./run-dsim.sh 1
+      - ./run-dsim.sh 2
+      - ./run-dsim.sh 3
