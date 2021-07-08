@@ -15,14 +15,13 @@ an item is pushed to or removed from the queue it is recorded in the monitor.
 TODO: Look at moving this class to a different repo to avoid repitition between here and katxgpu.
 """
 
-from abc import ABC, abstractmethod
 import asyncio
 import contextlib
 import json
 import threading
+from abc import ABC, abstractmethod
 from time import monotonic
-from typing import Generator, TypeVar, Any
-
+from typing import Any, Generator, TypeVar
 
 _M = TypeVar("_M", bound="Monitor")
 

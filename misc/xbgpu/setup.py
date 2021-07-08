@@ -1,13 +1,13 @@
 """Script for installing the katxgpu package."""
 
-import setuptools
-from pybind11.setup_helpers import Pybind11Extension, build_ext
-
 # These three imports are used in the BuildExt class.
 import configparser
-import subprocess
 import os
+import subprocess
 from glob import glob
+
+import setuptools
+from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 
 class BuildExt(build_ext):
@@ -88,10 +88,10 @@ setuptools.setup(
     classifiers=[
         # "License :: OSI Approved :: GNU General Public License v2 (GPLv2)", # TBD before taking this repo public
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.8",
         "Topic :: Scientific/Engineering :: Astronomy",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     # The following three lines are needed to install the pybind11 C++ modules:
     # 1. ext_package ensures that the pybind modules fall under the katxgpu module when importing
     # 2. ext_modules lists the pybind modules to install

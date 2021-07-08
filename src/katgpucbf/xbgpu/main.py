@@ -15,6 +15,7 @@ as this uses some useful parsing functions that could be of use here.
 
 import argparse
 import asyncio
+
 import katxgpu.xbengine
 
 
@@ -26,8 +27,8 @@ def parse_args() -> argparse.Namespace:
     # 2. Configure flagged arguments
     parser.add_argument(
         "--adc-sample-rate",
-        type=int,
-        default=1712000000,
+        type=float,
+        default=1712000000.0,
         help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall."
         "[%(default)s]",
     )
@@ -183,12 +184,7 @@ def main() -> None:
     This method only sets up the asyncio loop and calls the async_main() method which is where the real work is done.
     """
     args = parse_args()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(async_main(args))
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    asyncio.run(async_main(args))
 
 
 if __name__ == "__main__":

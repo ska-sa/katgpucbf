@@ -14,10 +14,9 @@ TODO:
     exposed to the reader. There is no use case for this at the moment, so this is a low priority.
 """
 
-import pkg_resources
 import numpy as np
-from katsdpsigproc import accel
-from katsdpsigproc import cuda
+import pkg_resources
+from katsdpsigproc import accel, cuda
 
 
 class TensorCoreXEngineCoreTemplate:

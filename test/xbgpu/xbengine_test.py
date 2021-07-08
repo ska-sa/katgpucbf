@@ -7,21 +7,20 @@ products.
 The test_xbengine(...) function is the entry point for these tests.
 """
 
-# 1. Import local modules
-import test_parameters
+import asyncio
+import ctypes
+import os
+
+import numpy as np
+import pytest
+import spead2
+import spead2.recv.asyncio
+import spead2.send
 import spead2_receiver_test
+import test_parameters
+
 import katxgpu.ringbuffer
 import katxgpu.xbengine
-
-# 2. Import external modules
-import os
-import ctypes
-import pytest
-import asyncio
-import numpy as np
-import spead2
-import spead2.send
-import spead2.recv.asyncio
 
 # 3. Define Constants
 complexity = 2
@@ -268,7 +267,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     # 4. Create xbengine
     xbengine = katxgpu.xbengine.XBEngine(
-        adc_sample_rate_Hz=1712000000,  # L-Band, not important
+        adc_sample_rate_Hz=1712000000.0,  # L-Band, not important
         n_ants=n_ants,
         n_channels_total=n_channels_total,
         n_channels_per_stream=n_channels_per_stream,

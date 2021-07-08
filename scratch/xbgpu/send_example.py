@@ -9,15 +9,13 @@ It also shows how a chunk can be received asynchronously and how to pass a used 
 TODO: When the katxgpu repo has been ported to python version 3.7 and above, update the asyncio functionality to use the
 asyncio.gather() syntax.
 """
-# 1. Imports
-# 1.1 Local imports
-import katxgpu.xsend
-
-# 1.2 External imports
 import argparse
 import asyncio
-import numpy as np
+
 import katsdpsigproc.accel as accel
+import numpy as np
+
+import katxgpu.xsend
 
 # 2. Relevant variables
 # 2.1 Parsing command line arguments
