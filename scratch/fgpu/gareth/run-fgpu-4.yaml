@@ -1,0 +1,9 @@
+session_name: stress
+windows:
+    - window_name: window
+      layout: tiled
+      panes:
+          - ./run-fgpu.sh 0
+          - ./run-fgpu.sh 1
+          - ./run-fgpu.sh 2
+          - ./run-fgpu.sh 3
