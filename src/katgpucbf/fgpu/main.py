@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""katfgpu main script.
+"""fgpu main script.
 
 This is what kicks everything off. Command-line arguments are parsed, and used
-to create an :class:`~katfgpu.engine.Engine` object, which then takes over the
+to create an :class:`~katgpucbf.fgpu.engine.Engine` object, which then takes over the
 actual running of the processing.
 """
 
