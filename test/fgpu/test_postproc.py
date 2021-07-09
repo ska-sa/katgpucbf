@@ -1,7 +1,7 @@
 import numpy as np
 from katsdpsigproc import accel
 
-from katfgpu import postproc
+from katgpucbf.fgpu import postproc
 
 
 def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, fringe_phase, quant_scale):

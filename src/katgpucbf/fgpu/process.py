@@ -286,7 +286,7 @@ class OutItem(EventItem):
 class Processor:
     """Controls the bulk of the moving of data around the computer.
 
-    The Processor creates input and output :class:`~katfgpu.monitor.Queue`
+    The Processor creates input and output :class:`~katgpucbf.fgpu.monitor.Queue`
     objects as well as a few :class:`InItem` and :class:`OutItem` objects to use
     on them. The actual Items (and the memory associated) are then continuously
     re-used because the allocation of memory is expensive. The data buffers are
@@ -329,7 +329,7 @@ class Processor:
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
         and reporting their events.
     sensors
-        The set of sensors from the parent :class:`~katfgpu.Engine` object,
+        The set of sensors from the parent :class:`~katgpucbf.fgpu.Engine` object,
         currently needed for passing the dropped packet sensor down to the
         receiver for updating.
     """
@@ -512,7 +512,7 @@ class Processor:
                     # This could only happen if we'd lost a whole input chunk of
                     # data from the digitiser. In that case the data we'd like
                     # to copy is missing so we can't do this step.
-                    # TODO: Currently katfgpu doesn't have much (really any)
+                    # TODO: Currently fgpu doesn't have much (really any)
                     # handling for missing data.
                     pass
 

@@ -1,6 +1,6 @@
 from katsdpsigproc import accel
 
-from katfgpu import compute
+from katgpucbf.fgpu import compute
 
 
 def test_compute():
