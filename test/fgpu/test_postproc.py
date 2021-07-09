@@ -53,7 +53,7 @@ def test_postproc(repeat=1):
     fn.buffer("fine_delay").set(queue, h_fine_delay)
     fn.buffer("phase").set(queue, h_phase / np.pi)
     fn.quant_scale = quant_scale
-    for i in range(repeat):
+    for _ in range(repeat):
         fn()
     h_out = fn.buffer("out").get(queue)
 

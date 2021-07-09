@@ -174,7 +174,7 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
-        sensors = [
+        sensors: List[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 int,
                 "input-missing-heaps-total",

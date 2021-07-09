@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """fgpu main script.
 
 This is what kicks everything off. Command-line arguments are parsed, and used

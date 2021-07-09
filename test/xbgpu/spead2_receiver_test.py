@@ -174,7 +174,7 @@ def createTestObjects(
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = 8
-    for i in range(src_chunks_per_stream):
+    for _ in range(src_chunks_per_stream):
         buf = accel.HostArray((receiverStream.chunk_bytes,), np.uint8, context=context)
         chunk = recv.Chunk(buf)
         receiverStream.add_chunk(chunk)
@@ -346,7 +346,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
 
     # 3.1 Transmit first 5 chunks completly in order
     heap_index = 0
-    for i in range(5):
+    for _ in range(5):
         heaps = createHeaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
@@ -377,7 +377,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     heap_index += 2
 
     # 3.2.3 Transmit the rest of the heaps in chunk 6 in order
-    for i in range(heaps_per_fengine_per_chunk - 2):
+    for _ in range(heaps_per_fengine_per_chunk - 2):
         heaps = createHeaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
@@ -387,7 +387,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 3.3 For chunk 7 and 8 transmit the first set of heaps of chunk 8 before the last set of heaps of chunk 7.
 
     # 3.3.1 Transmit all but the last collection of heaps of chunk 7
-    for i in range(heaps_per_fengine_per_chunk - 1):
+    for _ in range(heaps_per_fengine_per_chunk - 1):
         heaps = createHeaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
@@ -415,7 +415,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     heap_index += 2
 
     # 3.3.4 Transmit the rest of the heaps in chunk 8 in order
-    for i in range(heaps_per_fengine_per_chunk - 2):
+    for _ in range(heaps_per_fengine_per_chunk - 2):
         heaps = createHeaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
@@ -423,7 +423,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         heap_index += 1
 
     # 3.4 Transmit the remaining chunks
-    for i in range(heap_index, n_heaps_in_flight_per_antenna):
+    for _ in range(heap_index, n_heaps_in_flight_per_antenna):
         heaps = createHeaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
@@ -452,15 +452,18 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         async for chunk in asyncRingbuffer:
             received += len(chunk.present)
             dropped += len(chunk.present) - sum(chunk.present)
-            assert (
-                len(chunk.present) == n_ants * heaps_per_fengine_per_chunk
-            ), f"Incorrect number of heaps in chunk. Expected: {n_ants*heaps_per_fengine_per_chunk}. actual: {len(chunk.present)}"
-            assert len(chunk.present) == sum(
-                chunk.present
-            ), f"{sum(chunk.present)} dropped heaps in chunk"  # Should not be dropping anything when just reading a buffer
+            assert len(chunk.present) == n_ants * heaps_per_fengine_per_chunk, (
+                "Incorrect number of heaps in chunk. "
+                f"Expected: {n_ants*heaps_per_fengine_per_chunk}. actual: {len(chunk.present)}"
+            )
+            # Should not be dropping anything when just reading a buffer
+            assert len(chunk.present) == sum(chunk.present), f"{sum(chunk.present)} dropped heaps in chunk"
             chunk.base.dtype = np.uint16  # We read the real and imaginary samples together
             # print(
-            #     f"Chunk: {chunk_index:>5} Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. All time dropped/received heaps: {dropped}/{received}. Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.base.shape}"
+            #     f"Chunk: {chunk_index:>5} "
+            #     f"Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. "
+            #     f"All time dropped/received heaps: {dropped}/{received}. "
+            #     f"Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.base.shape}"
             # )
 
             # 5.2 Iterate through data in chunk to check that it contains the corrected data for each antenna and heap.
@@ -473,9 +476,10 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
                         (heap_index * n_ants + ant_index) * n_channels_per_stream * n_samples_per_channel * n_pols
                     )
                     fengine_stop_index = fengine_start_index + n_channels_per_stream * n_samples_per_channel * n_pols
-                    assert np.all(
-                        chunk.base[fengine_start_index:fengine_stop_index] == expected_sample_value
-                    ), f"Chunk {chunk_index}, heap {heap_index}, ant {ant_index}. Expected all values to equal: {hex(expected_sample_value)}"
+                    assert np.all(chunk.base[fengine_start_index:fengine_stop_index] == expected_sample_value), (
+                        f"Chunk {chunk_index}, heap {heap_index}, ant {ant_index}. "
+                        f"Expected all values to equal: {hex(expected_sample_value)}"
+                    )
 
             # 5.3 Give chunk back to receiver once we are done using it.
             receiverStream.add_chunk(chunk)

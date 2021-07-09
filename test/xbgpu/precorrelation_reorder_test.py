@@ -115,9 +115,12 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     """
     Parametrised unit test of the Pre-correlation Reorder kernel.
 
-    This unit test runs the kernel on a combination of parameters indicated in test_parameters.py. The values parametrised
-    are indicated in the parameter list, operating on a *single* batch. This unit test also invokes verification of the reordered data.
-    However, due to the CPU-side verification taking quite long, the batch-mode test is done in a separate unit test using static parameters.
+    This unit test runs the kernel on a combination of parameters indicated in
+    test_parameters.py. The values parametrised are indicated in the parameter
+    list, operating on a *single* batch. This unit test also invokes
+    verification of the reordered data.  However, due to the CPU-side
+    verification taking quite long, the batch-mode test is done in a separate
+    unit test using static parameters.
 
     Parameters
     ----------
@@ -137,7 +140,8 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
 
     # This integer division is so that when num_ants % num_channels !=0 then the remainder will be dropped.
     # - This will only occur in the MeerKAT Extension correlator.
-    # TODO: Need to consider the case where we round up as some X-Engines will need to do this to capture all the channels.
+    # TODO: Need to consider the case where we round up as some X-Engines will
+    # need to do this to capture all the channels.
     n_channels_per_stream = num_channels // num_ants // 4
 
     # Merging the batched test into here because the C-based reorder verification is *much* faster (than Python)

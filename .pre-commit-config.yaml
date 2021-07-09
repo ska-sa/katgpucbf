@@ -10,7 +10,7 @@ repos:
       - id: check-executables-have-shebangs
       - id: end-of-file-fixer
       - id: mixed-line-ending
-        fix: lf
+        args: [--fix=lf]
       - id: no-commit-to-branch # without arguments, master/main will be protected.
   - repo: https://github.com/psf/black
     rev: 21.6b0
