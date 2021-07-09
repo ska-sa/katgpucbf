@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from katfgpu.delay import LinearDelayModel
+from katgpucbf.fgpu.delay import LinearDelayModel
 
 
 @pytest.fixture

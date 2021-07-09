@@ -19,8 +19,8 @@ import spead2.send
 import spead2_receiver_test
 import test_parameters
 
-import katxbgpu.ringbuffer
-import katxbgpu.xbengine
+import katgpucbf.xbgpu.ringbuffer
+import katgpucbf.xbgpu.xbengine
 
 # 3. Define Constants
 complexity = 2
@@ -169,7 +169,7 @@ def createHeaps(
         # cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be
         # added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to
         # look at using the inproc transport. The inproc transport supports substreams, but requires porting a bunch
-        # of things from SPEAD2 python to katxbgpu python. This will require much more work.
+        # of things from SPEAD2 python to xbgpu python. This will require much more work.
         heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
     return heaps
 
@@ -266,7 +266,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     recvStream.add_inproc_reader(queue)
 
     # 4. Create xbengine
-    xbengine = katxbgpu.xbengine.XBEngine(
+    xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         adc_sample_rate_Hz=1712000000.0,  # L-Band, not important
         n_ants=n_ants,
         n_channels_total=n_channels_total,
@@ -282,7 +282,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     # 5. Import C function that will be used for verifying data.
     verificationFunctionsLib_C = np.ctypeslib.load_library(
-        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/")
+        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/xbgpu")
     )
     verify_xbengine_C = verificationFunctionsLib_C.verify_xbengine
 

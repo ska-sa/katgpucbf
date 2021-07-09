@@ -1,7 +1,7 @@
 """Monitor classes allowing for rudimentary performance monitoring.
 
 Queues in the form of :class:`asyncio.Queue` are used for synchronisation
-between coroutines in :mod:`katfgpu`, but we may like to know a bit more about
+between coroutines in :mod:`katgpucbf.fgpu`, but we may like to know a bit more about
 what's happening to them as items are pushed and popped. These metrics help us
 to see what bottlenecks there are, because if the queues get full (or the "free"
 queues get empty) it will result in dropped packets.

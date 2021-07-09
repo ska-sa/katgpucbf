@@ -32,7 +32,8 @@ class AsyncRingbuffer(Generic[_T]):
     same event loop.
 
     More information can be obtained by looking at
-    :class:`katfgpu.recv.Ringbuffer` or :class:`katfgpu.send.Ringbuffer`.
+    :class:`katgpucbf.fgpu.recv.Ringbuffer` or
+    :class:`katgpucbf.fgpu.send.Ringbuffer`.
 
     Parameters
     ----------

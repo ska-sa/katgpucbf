@@ -1,4 +1,0 @@
-# This file lists all non-python files within this package directory to include when installing katxbgpu using pip.
-# The package_data entry in setup.py is also meant to do this, but it does not work when using pip to install the
-# module.
-include katxbgpu/kernels/*.mako

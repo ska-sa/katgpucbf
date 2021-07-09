@@ -51,13 +51,13 @@ class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
     The Engine class is essentially a wrapper around a
-    :class:`~katfgpu.process.Processor` object, but adds a delay model, and
-    source and sender functionality.
+    :class:`~katgpucbf.fgpu.process.Processor` object, but adds a delay model,
+    and source and sender functionality.
 
     .. todo::
 
-      Perhaps in a future iteration, :class:`~katfgpu.process.Processor` could
-      be folded into :class:`Engine`.
+      Perhaps in a future iteration, :class:`~katgpucbf.fgpu.process.Processor`
+      could be folded into :class:`Engine`.
 
     .. todo::
 
@@ -138,7 +138,7 @@ class Engine(aiokatcp.DeviceServer):
 
     # TODO: VERSION means interface version, rather than software version. It
     # will need to wait on a proper ICD for a release.
-    VERSION = "katfgpu-icd-0.1"
+    VERSION = "katgpucbf-fgpu-icd-0.1"
     BUILD_STATE = __version__
 
     def __init__(

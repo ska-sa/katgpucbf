@@ -12,7 +12,7 @@ import pytest
 import test_parameters
 from katsdpsigproc import accel
 
-from katxbgpu import tensorcore_xengine_core
+from katgpucbf.xbgpu import tensorcore_xengine_core
 
 
 def get_simple_test_ant_value(channel_index, ant_index):

@@ -18,11 +18,11 @@
  * This function does not do much. It basically calls the register functions for the different submodules within this
  * module.
  *
- * This module can be imported using "import katxbgpu._katxbgpu".
+ * This module can be imported using "import katgpucbf.xbgpu._katxbgpu".
  */
 PYBIND11_MODULE(_katxbgpu, m)
 {
-    m.doc() = "C++ backend for katxbgpu";
+    m.doc() = "C++ backend for katgpucbf.xbgpu";
 
     // Not quite sure where these exceptions occur or what they do but they seem important.
     pybind11::register_exception<spead2::ringbuffer_stopped>(m, "Stopped");
