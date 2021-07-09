@@ -2,8 +2,13 @@
 -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-gpu-build/requirements.txt
 
 aiokatcp
+llvmlite
 numpy
+pybind11
+pycuda
 scikit-cuda
+spead2
+typing
 
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
 katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc

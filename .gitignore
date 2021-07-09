@@ -1,7 +1,11 @@
-.vscode
-*.o
-*__pycache__
-*.so
-/build
 *.egg-info
-/scratch/fsim
+*.eggs
+*.o
+*.so
+*__pycache__
+.mypy_cache
+.venv
+.vscode/
+/build
+/demo
+__pycache__
