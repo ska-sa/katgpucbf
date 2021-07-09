@@ -2,8 +2,6 @@
 *.eggs
 *.o
 *.so
-*__pycache__
-.mypy_cache
 .venv
 .vscode/
 /build
