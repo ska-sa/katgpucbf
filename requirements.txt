@@ -31,16 +31,15 @@ hiredis==1.1.0
     # via
     #   -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
     #   katsdptelstate
-git+https://github.com/ska-sa/katsdpservices
+katsdpservices==1.1
     # via -r requirements.in
-git+https://github.com/ska-sa/katsdpsigproc
+katsdpsigproc[cuda]==1.2
     # via -r requirements.in
 git+https://github.com/ska-sa/katsdptelstate
     # via -r requirements.in
 llvmlite==0.34.0
     # via
     #   -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
-    #   -r requirements.in
     #   numba
 mako==1.1.4
     # via
@@ -84,8 +83,6 @@ pandas==1.2.2
     # via
     #   -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
     #   katsdpsigproc
-pybind11==2.6.2
-    # via -r requirements.in
 pycuda==2020.1
     # via
     #   -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-gpu-build/requirements.txt
@@ -127,10 +124,6 @@ six==1.15.0
     #   katsdptelstate
     #   python-dateutil
 spead2==3.2.1
-    # via
-    #   -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
-    #   -r requirements.in
-typing==3.7.4.3
     # via
     #   -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
     #   -r requirements.in

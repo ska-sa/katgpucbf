@@ -7,5 +7,4 @@
 .venv
 .vscode/
 /build
-/demo
 __pycache__
