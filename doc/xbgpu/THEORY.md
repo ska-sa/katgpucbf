@@ -4,23 +4,23 @@
 
 The general flow of data through the system is shown in the the image below:
 
-![signal_path](./katxgpu_concept.png)
+![signal_path](./katxbgpu_concept.png)
 
 The X-Engine processing pipeline can be broken into four different stages:
 1. Receive data from the network and assemble it into a chunk. This chunk is then transferred to the GPU. This receiver
 has been implemented using SPEAD2 in C++ and bound into python. See the "SPEAD2 Network Side Software" section below
 for more information. 
 2. Reorder the chunk so that it is in a format that is ready for correlation. This reorder is implemented in the
-[precorrelation_reorder.py](../katxgpu/precorrelation_reorder.py) module.
+[precorrelation_reorder.py](../katxbgpu/precorrelation_reorder.py) module.
 3. The data is then correlated using the ASTRON Tensor Core Kernel. This is done by the 
-[tensorcore_xengine_core.py](../katxgpu/tensorcore_xengine_core.py) class. This correlated data is then transferred back to
+[tensorcore_xengine_core.py](../katxbgpu/tensorcore_xengine_core.py) class. This correlated data is then transferred back to
 system RAM.
 4. Send the correlated data (known as baseline correlation products) back into the network. This is implemented by
-the [xsend.py](../katxgpu/xsend.py) module.
+the [xsend.py](../katxbgpu/xsend.py) module.
 
 The image below shows where the data is located at the various stages mentioned above:
 
-![hardware_data_path](./katxgpu_hardware_path.png)
+![hardware_data_path](./katxbgpu_hardware_path.png)
 
 The numbers in the above image correspond to the following actions:
 
@@ -34,7 +34,7 @@ The numbers in the above image correspond to the following actions:
 
 ### Synchronization and Coordination
 
-The [xbengine.py](../katxgpu/xbengine.py) module does the work of assembling all the different modules
+The [xbengine.py](../katxbgpu/xbengine.py) module does the work of assembling all the different modules
 into a pipeline. This module has three different async processing pipelines know as the `_receiver_loop`,
 `_gpu_proc_loop` and the `_sender_loop`. Data is passed between these three processing loops using `asyncio.Queues`.
 Buffers in queues are reused to prevent unecessary memory allocations. Additionally, buffers are passed between the
@@ -42,7 +42,7 @@ python program to the network threads and back in order to reuse these buffers t
 
 The image below demonstrates how data moves through the pipeline and how it is reused:
 
-![async_loops](./katxgpu_async_loops.png)
+![async_loops](./katxbgpu_async_loops.png)
 
 The `asyncio.Queues` help to coordinate the flow of data through the different asyncio functions. However the GPU
 requires a seperate type of coordination. The GPU has three different command queues that manage the coordination. 
@@ -56,7 +56,7 @@ deadlock.
 
 The image below shows the interaction between the processing loops and the command queues:
 
-![command_queues](./katxgpu_gpu_command_queues.png)
+![command_queues](./katxbgpu_gpu_command_queues.png)
 
 The numbers in the image above correspond to the following actions:
 1. Copy chunk to GPU memory from host 
@@ -86,7 +86,7 @@ The output heap timestamp is aligned to an integer multiple of `timestamp_differ
 `accumulation_time_s = timestamp_difference * --adc-sample-rate(Hz)` seconds.
 
 The output heap contains multiple packets and these packets are distributed over the entire `accumulation_time_s`
-interval to reduce network burstiness. The default configuration in [main.py](../katxgpu/main.py) is for 0.5 second
+interval to reduce network burstiness. The default configuration in [main.py](../katxbgpu/main.py) is for 0.5 second
 dumps when using the MeerKAT 1712 MSPs L-band digitisers.
 
 ## Network Interface Code and SPEAD2

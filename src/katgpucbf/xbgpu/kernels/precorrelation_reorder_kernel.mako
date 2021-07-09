@@ -1,5 +1,5 @@
 /*
- *  This kernel aims to carry out the reorder functionality required by katxgpu.
+ *  This kernel aims to carry out the reorder functionality required by katxbgpu.
  *  This GPU-side reorder makes provision for batched operations (i.e. reordering batches of matrices),
  *  and transforms a 1D block of data in the following matrix format:
  *  - uint16_t [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarizations]

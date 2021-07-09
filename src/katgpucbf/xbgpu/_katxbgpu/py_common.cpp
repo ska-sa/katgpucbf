@@ -3,7 +3,7 @@
 
 namespace py = pybind11;
 
-namespace katxgpu
+namespace katxbgpu
 {
 
 py::buffer_info request_buffer_info(py::buffer &buffer, int extra_flags)
@@ -17,4 +17,4 @@ py::buffer_info request_buffer_info(py::buffer &buffer, int extra_flags)
     return info;
 }
 
-} // namespace katxgpu
+} // namespace katxbgpu

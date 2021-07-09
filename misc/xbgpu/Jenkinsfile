@@ -1,6 +1,6 @@
 /* This file tells Jenkins how to test this repo. Everything runs in docker 
  * containers, so in theory any Jenkins server should be able to parse this 
- * file. However in the katxgpu case, the Jenkins server needs access to a GPU. 
+ * file. However in the katxbgpu case, the Jenkins server needs access to a GPU. 
  * This means that the docker engine being used needs to have been configured to
  * use the Nvidia Container Runtime and the node the container run on needs a 
  * Nvidia GPU with the Nvidia Driver installed. 
@@ -63,9 +63,9 @@ pipeline {
       }
     } 
 
-    /* This stage is kept seperate from the "Install katxgpu package" stage
+    /* This stage is kept seperate from the "Install katxbgpu package" stage
      * below as the stage one will fail when something external goes wrong while
-     * the next stage will fail if we have done something wrong in the katxgpu
+     * the next stage will fail if we have done something wrong in the katxbgpu
      * package. It seems best to split them to make it easier to pinpoint the 
      * source of the problem.
      *
@@ -97,7 +97,7 @@ pipeline {
       }
     }
 
-    stage('Install katxgpu package') {
+    stage('Install katxbgpu package') {
       steps {
         sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
         sh 'pip3 install .'

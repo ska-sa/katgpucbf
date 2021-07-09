@@ -1,12 +1,12 @@
-"""Katxgpu X-Engine send example script.
+"""Katxbgpu X-Engine send example script.
 
-This script demonstrates how to configure a katxgpu.xsend.XEngineSPEADIbvSend object to transmit a "Baseline
+This script demonstrates how to configure a katxbgpu.xsend.XEngineSPEADIbvSend object to transmit a "Baseline
 Correlation Products Hardware Heaps" stream (or more simply an X-Engine output stream) onto the network
 channelised voltage stream
 
-It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxgpu receiver.
+It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxbgpu receiver.
 
-TODO: When the katxgpu repo has been ported to python version 3.7 and above, update the asyncio functionality to use the
+TODO: When the katxbgpu repo has been ported to python version 3.7 and above, update the asyncio functionality to use the
 asyncio.gather() syntax.
 """
 import argparse
@@ -15,11 +15,11 @@ import asyncio
 import katsdpsigproc.accel as accel
 import numpy as np
 
-import katxgpu.xsend
+import katxbgpu.xsend
 
 # 2. Relevant variables
 # 2.1 Parsing command line arguments
-parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxgpu receiver software.")
+parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxbgpu receiver software.")
 parser.add_argument("--mcast_dest_ip", default="239.10.10.11", help="IP address of multicast stream to transmit on.")
 parser.add_argument("--mcast_dest_port", default="7149", type=int, help="Port of multicast stream to transmit on.")
 parser.add_argument("--interface", default="10.100.44.1", help="IP Address of interface that will receive the data.")
@@ -31,7 +31,7 @@ interface_ip = args.interface
 print(f"Transmitting to {dest_multicast_ip}:{dest_multicast_port} on the {interface_ip} interface.")
 
 # 2.2 Adjustable parameters - The description of these parameters can be found in the documentation for the
-# katxgpu.xsend.XEngineSPEADIbvSend object. These default values have been chosen to represent a typical correlator
+# katxbgpu.xsend.XEngineSPEADIbvSend object. These default values have been chosen to represent a typical correlator
 # configuration.
 thread_affinity = 3
 n_ants = 64
@@ -45,7 +45,7 @@ context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
 # 4. Create object to transmit X-Engine output heaps. This constructor creates its own internal collection of buffers
 # that are registered in such a way as to allow zero copy sends.
-sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
+sendStream = katxbgpu.xsend.XEngineSPEADIbvSend(
     n_ants=n_ants,
     n_channels_per_stream=n_channels_per_stream,
     n_pols=n_pols,

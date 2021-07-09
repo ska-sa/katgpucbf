@@ -1,10 +1,10 @@
 """
-Module for performing unit tests on the katxgpu SPEAD2 receiver.
+Module for performing unit tests on the katxbgpu SPEAD2 receiver.
 
 Testing network code is difficult to do on a single thread. SPEAD2 has the concept of transports. A transport generally
 receives data from a network. SPEAD2 provides two other transports that can receive simulated network data - these can
 be used for testing the receiver in once process. The two transports are an inproc and a buffer transport. The
-inproc transport is more flexible but requires porting the inproc code to katxgpu. So we use the buffer one instead.
+inproc transport is more flexible but requires porting the inproc code to katxbgpu. So we use the buffer one instead.
 It is more limited but easier to work with. One downside of the buffer transport is that it cannot interleave packets
 from different antennas. This functionality has not yet been added to the buffer transport but it is available in the
 inproc transport.
@@ -28,9 +28,9 @@ import spead2
 import spead2.send
 import test_parameters
 
-import katxgpu._katxgpu.recv as recv
-import katxgpu.monitor
-import katxgpu.ringbuffer
+import katxbgpu._katxbgpu.recv as recv
+import katxbgpu.monitor
+import katxbgpu.ringbuffer
 
 logging.basicConfig(level=logging.INFO)
 
@@ -93,9 +93,9 @@ def createTestObjects(
     ig: spead2.send.ItemGroup
         The ig is used to generate heaps that will  be passed to the source
         stream.
-    receiverStream: katxgpu._katxgpu.recv.Stream
+    receiverStream: katxbgpu._katxbgpu.recv.Stream
         The receiver under test - will receive data from the sourceStream.
-    asyncRingbuffer: katxgpu.ringbuffer.AsyncRingbuffer
+    asyncRingbuffer: katxbgpu.ringbuffer.AsyncRingbuffer
         Wraps the receiverStream ringbuffer so that it can be called using
         asyncio in python.
     """
@@ -149,7 +149,7 @@ def createTestObjects(
     # 4. Configure receiver
 
     # 4.1 Create monitor - it is not used in these tests but it is required to be passed as an argument.
-    monitor = katxgpu.monitor.NullMonitor()
+    monitor = katxbgpu.monitor.NullMonitor()
 
     # 4.2 Create ringbuffer that all received chunks will be placed on.
     ringbuffer_capacity = 10
@@ -180,7 +180,7 @@ def createTestObjects(
         receiverStream.add_chunk(chunk)
 
     # 5. Wrap ringbuffer in an Asycnringbuffer class for asyncio functionality.
-    asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
+    asyncRingbuffer = katxbgpu.ringbuffer.AsyncRingbuffer(
         receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
     )
 
@@ -267,7 +267,7 @@ def createHeaps(
         # cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be
         # added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to
         # look at using the inproc transport. The inproc transport would be much better, but requires porting a bunch
-        # of things from SPEAD2 python to katxgpu python. This will require much more work.
+        # of things from SPEAD2 python to katxbgpu python. This will require much more work.
         heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
     return heaps
 
@@ -276,9 +276,9 @@ def createHeaps(
 @pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
 @pytest.mark.parametrize("num_channels", test_parameters.num_channels)
 def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels):
-    """Tests the katxgpu SPEAD2 reciever.
+    """Tests the katxbgpu SPEAD2 reciever.
 
-    This test is run using simulated packets that are passed to katxgpu receiver as a ByteArray. This test is useful
+    This test is run using simulated packets that are passed to katxbgpu receiver as a ByteArray. This test is useful
     for determining that the receiver is doing what is expected when receiving the correct data. It is not able to
     simulate real network conditions.
 
@@ -436,8 +436,8 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
 
     # 5. Define function that will test all received data.
     async def get_chunks(
-        asyncRingbuffer: katxgpu.ringbuffer.AsyncRingbuffer,
-        receiverStream: katxgpu._katxgpu.recv.Stream,
+        asyncRingbuffer: katxbgpu.ringbuffer.AsyncRingbuffer,
+        receiverStream: katxbgpu._katxbgpu.recv.Stream,
         total_chunks: int,
     ):
         """Iterate through chunks processed by the receiver.
