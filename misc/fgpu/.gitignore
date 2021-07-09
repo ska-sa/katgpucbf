@@ -1,9 +1,0 @@
-*.o
-*.egg-info
-*.eggs
-__pycache__
-.mypy_cache
-/demo
-/build
-/katfgpu/*.so
-.vscode/
