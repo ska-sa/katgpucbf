@@ -9,7 +9,7 @@
 
 #include <pybind11/pybind11.h>
 
-namespace katxgpu
+namespace katxbgpu
 {
 
 /* Registers a SPEAD2 ringbuffer into python.
@@ -80,6 +80,6 @@ pybind11::class_<R> register_ringbuffer(pybind11::module &m, const char *name, c
  */
 pybind11::buffer_info request_buffer_info(pybind11::buffer &buffer, int extra_flags);
 
-} // namespace katxgpu
+} // namespace katxbgpu
 
 #endif // KATXGPU_PY_COMMON_H

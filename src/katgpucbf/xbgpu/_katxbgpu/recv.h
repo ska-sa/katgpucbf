@@ -2,24 +2,24 @@
  * receives data from multiple F-Engines.
  *
  * The three classes that are defined here are:
- * 1. katxgpu::recv::chunk - A chunk is a class containing a buffer and associated metadata where a number of
+ * 1. katxbgpu::recv::chunk - A chunk is a class containing a buffer and associated metadata where a number of
  * received heaps are stored in a single contigous manner.
- * 2. katxgpu::recv::stream - A stream manages the process of receiving network packets and reassembling them
+ * 2. katxbgpu::recv::stream - A stream manages the process of receiving network packets and reassembling them
  * into SPEAD heaps. The stream then copies these heaps into the relevant chunk.
  * 3. katxgp::recv::allocator - This allocator is used for telling the SPEAD receiver where in a chunk a specific heap
  * must be copied. This allocator also determines the specific chunk that this heap belongs to. The allocator is very
- * lightweight with most of its logic being shifted to sub-functions within the katxgpu::recv::stream class.
+ * lightweight with most of its logic being shifted to sub-functions within the katxbgpu::recv::stream class.
  *
  * This class is registered as a C++ module. SPEAD2 already has a python module. The reason a custom module is used over
  * the standard SPEAD2 module is because the data rates being dealt with are very high. The standard SPEAD2 python
  * library would be producing heaps too quickly for Python to keep up. This class combines a number of heaps into a
  * single chunk significantly reducing the amount of computation that is required to be done in Python.
  *
- * The functioning of this class is explained in more detail in katxgpu/src/README.md
+ * The functioning of this class is explained in more detail in katxbgpu/src/README.md
  *
  * TODO: Move 'pybind11::buffer_info m_BufferView' and associated functions to py_recv.h
  * TODO: Implement logging slightly differently - at the moment, the SPEAD2 logger is used. It may be worthwhile to have
- * a seperate katxgpu logger to seperate a SPEAD2 log from a katxgpu log.
+ * a seperate katxbgpu logger to seperate a SPEAD2 log from a katxbgpu log.
  * TODO: Class member variables should start with an m_ for clarity.
  */
 
@@ -45,7 +45,7 @@
 #include <utility>
 #include <vector>
 
-namespace katxgpu::recv
+namespace katxbgpu::recv
 {
 
 /* Collection of contiguous samples in memory, together with information about which samples are present. It references
@@ -266,6 +266,6 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     virtual void stop() override;
 };
 
-} // namespace katxgpu::recv
+} // namespace katxbgpu::recv
 
 #endif // KATXGPU_RECV_H

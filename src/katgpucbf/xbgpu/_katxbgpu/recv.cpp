@@ -15,7 +15,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-namespace katxgpu::recv
+namespace katxbgpu::recv
 {
 
 static constexpr int HEAP_OFFSET_ID = 0x0003;
@@ -54,7 +54,7 @@ stream::stream(int iNumAnts, int iNumChannels, int iNumSamplesPerChannel, int iN
                            spead2::recv::stream_config()
                                .set_max_heaps(iNumAnts * iHeapsPerFenginePerChunk * 10)
                                .set_allow_unsized_heaps(false)
-                               .set_memory_allocator(std::make_shared<katxgpu::recv::allocator>(*this))
+                               .set_memory_allocator(std::make_shared<katxbgpu::recv::allocator>(*this))
                                .set_memcpy(bUseGDRCopy ? spead2::MEMCPY_NONTEMPORAL : spead2::MEMCPY_STD)
                                .set_allow_out_of_order(true)),
       m_iNumAnts(iNumAnts), m_iNumChannels(iNumChannels), m_iNumSamplesPerChannel(iNumSamplesPerChannel),
@@ -203,7 +203,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         //
         // This discontiunity will happen very rarely as data is being received from multiple senders and the chance of
         // all senders being down is negligible. The most likely cause of this issue would be an interruption in the
-        // link between the katxgpu host server and the network.
+        // link between the katxbgpu host server and the network.
         std::size_t ulMaxActiveChunks = 2;
         std::int64_t i64StartTimestamp =
             m_activeChunksQueue.back()->m_i64timestamp + m_i64TimestampStep * m_i64HeapsPerFenginePerChunk;
@@ -369,9 +369,9 @@ void stream::add_buffer_reader(pybind11::buffer buffer)
     // This view object needs to be held as long as the receiver is making use of the buffer. If it is released, Python
     // will release the buffer back to the OS causing segfaults when C++ tries to access the buffer. Took me a while to
     // figure this out - dont make my mistakes.
-    m_BufferView = katxgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
+    m_BufferView = katxbgpu::request_buffer_info(buffer, PyBUF_C_CONTIGUOUS);
     // In normal SPEAD2, a buffer_reader wraps a mem reader and handles all the casting seen in the line below. In the
-    // katxgpu case, I just copied the logic of the buffer_reader without creating the class.
+    // katxbgpu case, I just copied the logic of the buffer_reader without creating the class.
     emplace_reader<spead2::recv::mem_reader>(reinterpret_cast<const std::uint8_t *>(m_BufferView.ptr),
                                              m_BufferView.itemsize * m_BufferView.size);
 }
@@ -418,4 +418,4 @@ void stream::stop()
     spead2::recv::stream::stop();
 }
 
-} // namespace katxgpu::recv
+} // namespace katxbgpu::recv

@@ -1,5 +1,5 @@
 
-/* This top level file is called when the katxgpu module is being installed (i.e. When setup.py is run). This file
+/* This top level file is called when the katxbgpu module is being installed (i.e. When setup.py is run). This file
  * starts the process of wrapping the C++ code into python modules. This process is known as "registering".
  *
  * The pybind11 library is used to facilitate this process. The pybind11 documentation can be found here:
@@ -13,22 +13,22 @@
 #include <spead2/common_ringbuffer.h>
 //#include "py_send.h" - This file still needs to be written.
 
-/* This function registers the _katxgpu networking submodule in the katxgpu python project.
+/* This function registers the _katxbgpu networking submodule in the katxbgpu python project.
  *
  * This function does not do much. It basically calls the register functions for the different submodules within this
  * module.
  *
- * This module can be imported using "import katxgpu._katxgpu".
+ * This module can be imported using "import katxbgpu._katxbgpu".
  */
-PYBIND11_MODULE(_katxgpu, m)
+PYBIND11_MODULE(_katxbgpu, m)
 {
-    m.doc() = "C++ backend for katxgpu";
+    m.doc() = "C++ backend for katxbgpu";
 
     // Not quite sure where these exceptions occur or what they do but they seem important.
     pybind11::register_exception<spead2::ringbuffer_stopped>(m, "Stopped");
     pybind11::register_exception<spead2::ringbuffer_empty>(m, "Empty");
 
     // Register various submodules
-    katxgpu::recv::register_module(m);
-    // katxgpu::send::register_module(m); 
+    katxbgpu::recv::register_module(m);
+    // katxbgpu::send::register_module(m); 
 }

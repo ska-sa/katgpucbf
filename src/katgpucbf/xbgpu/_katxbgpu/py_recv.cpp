@@ -5,7 +5,7 @@
 #include <pybind11/stl.h>
 #include <utility>
 
-namespace katxgpu::recv
+namespace katxbgpu::recv
 {
 
 /* This class wraps a chunk class so that it can be registered in a python module.
@@ -103,7 +103,7 @@ pybind11::module register_module(pybind11::module &parent)
     using namespace pybind11::literals;
 
     pybind11::module m = parent.def_submodule("recv");
-    m.doc() = "receiver for katxgpu";
+    m.doc() = "receiver for katxbgpu";
 
     pybind11::class_<py_chunk>(
         m, "Chunk",
@@ -159,14 +159,14 @@ pybind11::module register_module(pybind11::module &parent)
              "heaps_per_fengine_per_chunk: int\n"
              "    Each chunk out of the SPEAD2 receiver will contain multiple heaps from each antenna. This parameter "
              "specifies the number of heaps per antenna that each chunk will contain.\n"
-             "ringbuffer: katxgpu._katxgpu.recv.Ringbuffer\n"
+             "ringbuffer: katxbgpu._katxbgpu.recv.Ringbuffer\n"
              "    All completed heaps will be queued on this ringbuffer object.\n"
              "thread_affinity: int\n"
              "    CPU Thread that this receiver will use for processing.\n"
              "use_gdrcopy: bool\n"
-             "    Set to true when transferring data directly from the NIC to the GPU using gpudirect. See katxgpu "
+             "    Set to true when transferring data directly from the NIC to the GPU using gpudirect. See katxbgpu "
              "documentation for more information on how to do this.\n"
-             "monitor: katxgpu.monitor.Monitor\n"
+             "monitor: katxbgpu.monitor.Monitor\n"
              "    Monitor object for collecting metrics.\n"
              "\n")
         .def_property_readonly("ringbuffer",
@@ -184,7 +184,7 @@ pybind11::module register_module(pybind11::module &parent)
             "\n"
             "Parameters\n"
             "----------\n"
-            "chunk: katxgpu._katxgpu.recv.Chunk\n"
+            "chunk: katxbgpu._katxbgpu.recv.Chunk\n"
             "    Empty chunk to be given to receiver.\n")
         .def("add_udp_pcap_file_reader", &py_stream::add_udp_pcap_file_reader, "filename"_a,
              "Add the pcap transport to the receiver. The receiver will read packet data from a pcap file.\n"
@@ -238,4 +238,4 @@ pybind11::module register_module(pybind11::module &parent)
     return m;
 }
 
-} // namespace katxgpu::recv
+} // namespace katxbgpu::recv

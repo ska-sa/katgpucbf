@@ -1,6 +1,6 @@
 # Network Interface Code and SPEAD2
 
-This file attempts to give an overview of the different moving parts of transmit and receive code for the katxgpu
+This file attempts to give an overview of the different moving parts of transmit and receive code for the katxbgpu
 program. This explanation attempts to be as complete as possible, but there are many moving parts to this system so 
 missing information is likely. 
 
@@ -20,7 +20,7 @@ over a network at high data rates. SPEAD functions as a layer on top of UDP. The
 SPEAD transmits logical collections of data known as heaps. A heap consists of one or more UDP packets. A SPEAD 
 transmitter will decompose a heap into packets and the receiver will collect all the packets and reassemble the heap.
 
-The heaps and corresponding packet formats received by katxgpu have already been defined. This 
+The heaps and corresponding packet formats received by katxbgpu have already been defined. This 
 [document](https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg) explains these formats in 
 detail.
 
@@ -108,70 +108,70 @@ many more threads meaning far better utilisation of the GPU takes place.
 
 ### 1.5 Low level C++ code and python bindings
 
-katxgpu does not make use of the SPEAD2 python bindings. Instead it makes use of the lower level C++ SPEAD2 functions 
+katxbgpu does not make use of the SPEAD2 python bindings. Instead it makes use of the lower level C++ SPEAD2 functions 
 and then exposes them to python with its own bindings. This was done because ordinarily SPEAD2 does not have the concept
 of a chunk. Using C++ to implement SPEAD2 allows these heaps to be assembled into chunks before transferring them to
 python.
 
-The C++ code can be quite dense and complicated. Much effort has been put into making katxgpu readable and functional
+The C++ code can be quite dense and complicated. Much effort has been put into making katxbgpu readable and functional
 without having to delve into the C++ code.
 
 The [pybind11 library](https://pybind11.readthedocs.io/en/stable/index.html) is used for registering C++ code as a
-python module. The C++ files doing this can be found in the [katxgpu/src](../src) directory. The
+python module. The C++ files doing this can be found in the [katxbgpu/src](../src) directory. The
 [setup.py](../setup.py) file handles turning these C++ files into python modules. The
 [py_register.cpp](../src/py_register.cpp) contains the `PYBIND11_MODULE` macro which kicks off the process
 during installation.
 
 ## 2. Receiver
 
-The image below gives conceptual overview of how the katxgpu receive code is implemented:
+The image below gives conceptual overview of how the katxbgpu receive code is implemented:
 
-![Receiver](./katxgpu_receiver.png)
+![Receiver](./katxbgpu_receiver.png)
 
 In the normal operational case, a main processing loop is running in python and this loop will interface with the
-katxgpu receiver module in order to get data from the network.
+katxbgpu receiver module in order to get data from the network.
 
 The above diagram shows how the receiver module is broken up into three main layers:
-1. katxgpu Python layer - This is the layer that the main processing loop will interact with to use the receiver. Once
-the receiver is configured the main processing loop gives the katxgpu python layer new chunks (or old chunks that no
-longer have any use) and the katxgpu python layer returns filled chunks. The underlying assembly and management of these
+1. katxbgpu Python layer - This is the layer that the main processing loop will interact with to use the receiver. Once
+the receiver is configured the main processing loop gives the katxbgpu python layer new chunks (or old chunks that no
+longer have any use) and the katxbgpu python layer returns filled chunks. The underlying assembly and management of these
 chunks is abstracted away at this layer. The classes relevant at this level can be found in the
 [py_recv.cpp](../src/py_recv.cpp), [py_recv.h](../src/py_recv.h), [py_common.cpp](../src/py_recv.cpp) and
 [py_common.h](../src/py_recv.h). These files are slightly difficult to read, but the python modules they create will
 have standard python docstrings that can be read in an iPython session once the module has been installed.
-2. katxgpu C++ layer - The katxgpu python layer interfaces with the katxgpu C++ layer. The katxgpu C++ layer manages 
+2. katxbgpu C++ layer - The katxbgpu python layer interfaces with the katxbgpu C++ layer. The katxbgpu C++ layer manages 
 the chunks received from the python layer. When the SPEAD2 stream receives a heap, the C++ layer tells it both to which
 chunk the heap must be copied to and the offset within the chunk buffer that the heap data belongs. The C++ layer
 monitors the active chunks that are being filled by the SPEAD2 stream and when a chunk is complete, it sends it back to
 the Python layer via a ringbuffer. The classes relevant to this section can be found in recv.h and recv.cpp.
 3. SPEAD2 Stream layer - This is the underlying SPEAD2 layer that receives packets, assembles them into heaps and passes
-them to the katxgpu C++ layer. This layer creates its own thread pool and runs concurrently with the main processing
+them to the katxbgpu C++ layer. This layer creates its own thread pool and runs concurrently with the main processing
 loop. This layer is part of the standrd SPEAD2 package.
 
 An example of how to use the receiver can be found in the [receiver_example.py](../scratch/receiver_example.py) script in
-the katxgpu/scratch folder. Understanding this [receiver_example.py](../scratch/receiver_example.py) is all that is 
+the katxbgpu/scratch folder. Understanding this [receiver_example.py](../scratch/receiver_example.py) is all that is 
 required to use the receiver. The remaining information in this document is only relevant when trying to modify or 
-duplicate the katxgpu receiver functionality.
+duplicate the katxbgpu receiver functionality.
 
-Once the katxgpu module has been installed, the receiver module can be accesed using `import katxgpu._katxgpu.recv` in
+Once the katxbgpu module has been installed, the receiver module can be accesed using `import katxbgpu._katxbgpu.recv` in
 Python.
 
 ### 2.1 Chunk Lifecycle
 
-A chunk is the main mechanism that allows for data to be transferred around the katxgpu program
+A chunk is the main mechanism that allows for data to be transferred around the katxbgpu program
 
 A chunk has to be created by the main program. The user assigns a buffer of a specific size to the chunk and then passes
 the chunk to the receiver using the `add_chunk()` function. This chunk is added to a free chunks stack. Chunks on this
 stack are not being used. They will be popped off of this stack when a new chunk is required.
 
-The katxgpu C++ code maintains a queue of chunks that are in an "active" state. Active chunks are chunks that are being
+The katxbgpu C++ code maintains a queue of chunks that are in an "active" state. Active chunks are chunks that are being
 assembled - this means that the SPEAD2 stream is busy receiving and assembling heaps from the underlying transport.
 These heaps are assembled in the various chunks in the active hunks queue. When a packet belonging to a chunk that is
 not in the active queue is received, a chunk is moved from the free chunks stack by calling the
-`katxgpu::recv::stream::grab_chunk()` function.
+`katxbgpu::recv::stream::grab_chunk()` function.
 
 Once a chunk has been fully assembled it is moved off of the active queue and put on a ringbuffer using the
-`katxgpu::recv::stream::flush()` function. The main program can then access the underlying chunks asynchronously in
+`katxbgpu::recv::stream::flush()` function. The main program can then access the underlying chunks asynchronously in
 Python using an asyncio for loop (`async for chunk in asyncRingbuffer`) which calls the underlying `ringbuffer.pop()`
 function.
 
@@ -181,18 +181,18 @@ controlled preventing excessive memory use. Additionally allocating new memory i
 chunks, this expensive operation is eliminated.
 
 The main program only knows about the ringbuffer, the free chunks stack and the active chunks queue are managed within
-the katxgpu C++ code.
+the katxbgpu C++ code.
 
 ### 2.2 Chunk and heap coordination and management
 
 The SPEAD2 stream creates its own thread pool to manage the internals of the SPEAD2 transport and heap assembly. 
-Tracing through these threads is a time-consuming process and is not necessary to understand the katxgpu receiver. The
+Tracing through these threads is a time-consuming process and is not necessary to understand the katxbgpu receiver. The
 SPEAD2 stream interacts with the main program using callback functions. When the first packet in a heap is received, the
-SPEAD2 stream calls the `katxgpu::recv::allocator::allocate()` function. When the last packet is received, the SPEAD2
-stream calls the `katxgpu::recv::stream::heap_ready()` function. Both of these functions eventually call the
-`katxgpu::recv::stream::calculate_packet_destination()` function. 
+SPEAD2 stream calls the `katxbgpu::recv::allocator::allocate()` function. When the last packet is received, the SPEAD2
+stream calls the `katxbgpu::recv::stream::heap_ready()` function. Both of these functions eventually call the
+`katxbgpu::recv::stream::calculate_packet_destination()` function. 
 
-The `calculate_packet_destination()` function can be thought of as the main coordinating funtion within the katxgpu C++
+The `calculate_packet_destination()` function can be thought of as the main coordinating funtion within the katxbgpu C++
 code. It determines when to move data from the free chunks stack to the active chunks queue to the ringbuffer. It also
 calculates where in a chunk the heap must be copied and passes this information to the SPEAD2 stream. Understanding this
 function will give a great deal of insight into the operation of the entire receiver.
@@ -241,21 +241,21 @@ transports are also exposed for debugging and unit tests.
 ### 2.5 Unit Tests
 
 As mentioned previously, the memory transport is used to unit test the receiver software on simulated packets stored
-within a buffer. The unit test can be found [here](../test/spead2_receiver_test.py) in the katxgpu/test folder.
+within a buffer. The unit test can be found [here](../test/spead2_receiver_test.py) in the katxbgpu/test folder.
 
 ## 3. Sender
 
-The X-Engine transmit code can be found in the [xsend.py](../katxgpu/xsend.py) file in the katxgpu/katxgpu subfolder.
+The X-Engine transmit code can be found in the [xsend.py](../katxbgpu/xsend.py) file in the katxbgpu/katxbgpu subfolder.
 Unlike the receiver logic, the sender logic just makes use of the normal SPEAD2 python code - no custom C++ bindings are
 required. The X-Engine implements accumulation and drastically reduces data rates. A heap is sent out on the order of 
 seconds, not milliseconds, and as such no chunking is required to manage these rates.
 
-The [xsend.py](../katxgpu/xsend.py) module defines a number of classes to deal with transmission. The main parent class
+The [xsend.py](../katxbgpu/xsend.py) module defines a number of classes to deal with transmission. The main parent class
 for these classes is called the `XEngineSPEADAbstractSend` class. 
 
-The image below gives conceptual overview of how the katxgpu sender code is implemented:
+The image below gives conceptual overview of how the katxbgpu sender code is implemented:
 
-![Sender](./katxgpu_sender.png)
+![Sender](./katxbgpu_sender.png)
 
 The above diagram shows how the sender module is broken up into three main layers:
 1. XEngineSPEADAbstractSend class - This is the interface to the sender module. Once the program is running,
@@ -285,6 +285,6 @@ not pass through system RAM.
 Currently GPUDirect is not supported on the gaming cards (RTX and GTX cards). It is only supported on the server-grade
 cards (such as the A100.).
 
-Currently katxgpu does not make use of the Peerdirect functionality.
+Currently katxbgpu does not make use of the Peerdirect functionality.
 
 TODO: Write a script demonstrating how to use Peerdirect works. Update this descrption once this script has been written.

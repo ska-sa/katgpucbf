@@ -6,13 +6,13 @@ documentation is also a straight copy from katfgpu. As such the documentation co
 This class defines a Monitor. A monitor records events. A FileMonitor will write these events to file for examination
 at a later date. This adds a performance overhead to a program. If this is causing issues or monitoring is not
 important, then the FileMonitor can be replaced with a NullMonitor which implements the abstract functions as an empty
-function. Some components of the katxgpu SPEAD interface require a monitor to be passed - this is why the NullMonitor is
+function. Some components of the katxbgpu SPEAD interface require a monitor to be passed - this is why the NullMonitor is
 needed.
 
 Additionally this class also defines a Queue object. This object has a monitor and wraps an asyncio.Queue so. Whenever
 an item is pushed to or removed from the queue it is recorded in the monitor.
 
-TODO: Look at moving this class to a different repo to avoid repitition between here and katxgpu.
+TODO: Look at moving this class to a different repo to avoid repitition between here and katxbgpu.
 """
 
 import asyncio

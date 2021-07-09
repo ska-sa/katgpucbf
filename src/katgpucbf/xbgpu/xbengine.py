@@ -35,12 +35,12 @@ import katsdpsigproc.resource
 import numpy as np
 import spead2
 
-import katxgpu._katxgpu.recv as recv
-import katxgpu.monitor
-import katxgpu.precorrelation_reorder
-import katxgpu.ringbuffer
-import katxgpu.tensorcore_xengine_core
-import katxgpu.xsend
+import katxbgpu._katxbgpu.recv as recv
+import katxbgpu.monitor
+import katxbgpu.precorrelation_reorder
+import katxbgpu.ringbuffer
+import katxbgpu.tensorcore_xengine_core
+import katxbgpu.xsend
 
 
 class QueueItem:
@@ -84,7 +84,7 @@ class RxQueueItem(QueueItem):
     is complete to reuse resources.
     """
 
-    chunk: katxgpu._katxgpu.recv.Chunk
+    chunk: katxbgpu._katxbgpu.recv.Chunk
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
@@ -199,7 +199,7 @@ class XBEngine:
         self.running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio functions.
 
         # 1.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
-        self.monitor: katxgpu.monitor.Monitor
+        self.monitor: katxbgpu.monitor.Monitor
 
         # 1.6 Queues for passing items between different asyncio functions.
         # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.
@@ -214,12 +214,12 @@ class XBEngine:
         # 1.7 Objects for sending and receiving data
         self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
         self.receiverStream: recv.Stream
-        self.sendStream: katxgpu.xsend.XEngineSPEADAbstractSend
+        self.sendStream: katxbgpu.xsend.XEngineSPEADAbstractSend
 
         # 1.8 GPU Kernels and GPU Context
         self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
-        self.tensorCoreXEngineCoreOperation: katxgpu.tensorcore_xengine_core.TensorCoreXEngineCore
-        self.preCorrelationReorderOperation: katxgpu.precorrelation_reorder.PreCorrelationReorder
+        self.tensorCoreXEngineCoreOperation: katxbgpu.tensorcore_xengine_core.TensorCoreXEngineCore
+        self.preCorrelationReorderOperation: katxbgpu.precorrelation_reorder.PreCorrelationReorder
         self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
 
         # 1.9 Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
@@ -280,9 +280,9 @@ class XBEngine:
         # TODO: Decide how to configure and manage the monitor.
         use_file_monitor = False
         if use_file_monitor:
-            self.monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+            self.monitor = katxbgpu.monitor.FileMonitor("temp_file.log")
         else:
-            self.monitor = katxgpu.monitor.NullMonitor()
+            self.monitor = katxbgpu.monitor.NullMonitor()
 
         # 4. Create the receiverStream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
@@ -315,7 +315,7 @@ class XBEngine:
         self._download_command_queue = self.context.create_command_queue()
 
         # 5.3 Create reorder and correlation operations and create buffer linking the two operations.
-        tensorCoreTemplate = katxgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
+        tensorCoreTemplate = katxbgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
@@ -323,7 +323,7 @@ class XBEngine:
         )
         self.tensorCoreXEngineCoreOperation = tensorCoreTemplate.instantiate(self._proc_command_queue)
 
-        reorderTemplate = katxgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
+        reorderTemplate = katxbgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
@@ -474,7 +474,7 @@ class XBEngine:
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_Hz
 
-        self.sendStream = katxgpu.xsend.XEngineSPEADIbvSend(
+        self.sendStream = katxbgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
@@ -504,7 +504,7 @@ class XBEngine:
         # queue and a high dump rate just makes the unit tests take very long to run.
         self.dump_interval_s = 0
 
-        self.sendStream = katxgpu.xsend.XEngineSPEADInprocSend(
+        self.sendStream = katxbgpu.xsend.XEngineSPEADInprocSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
@@ -530,7 +530,7 @@ class XBEngine:
         the next chunk. Try find a way to exit cleanly without adding to much additional logic to this function.
         """
         # 1. Set up initial conditions
-        asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
+        asyncRingbuffer = katxbgpu.ringbuffer.AsyncRingbuffer(
             self.receiverStream.ringbuffer, self.monitor, "recv_ringbuffer", "get_chunks"
         )
         chunk_index = 0

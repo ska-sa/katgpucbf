@@ -1,12 +1,12 @@
 # This file describes a nomad "job", which is similar to what Docker would call a "stack" or kubernetes a "deployment".
 # In order to use it, the following command should be run on the nomad server:
-# `nomad job plan katxgpu.nomad`
+# `nomad job plan katxbgpu.nomad`
 # This will tell you whether or not we are good to go ahead, and if so, it'll give you the command to run in order
 # to put the planned job into action.
 
-# This particular job launches an fsim on qgpu01, and a katxgpu spead receiver on qgpu02.
+# This particular job launches an fsim on qgpu01, and a katxbgpu spead receiver on qgpu02.
 
-job "katxgpu_job" {
+job "katxbgpu_job" {
   datacenters = ["brp"]
 
   group "fsim_host" {
@@ -19,7 +19,7 @@ job "katxgpu_job" {
       config {
         # Here I tag the image with a specific "version" to prevent nomad from trying to pull the image from a non-
         # existant repo. This way, it uses just the one that is already on the host, with this tag.
-        image = "katxgpu:fsim"
+        image = "katxbgpu:fsim"
         # Tell docker to use the host network. There may be a way to not have to do this, but currently we don't know
         # it. Perhaps it is the most elegant solution for telling containers which interface to use for the multicast
         # data streams.
@@ -59,15 +59,15 @@ job "katxgpu_job" {
     }
   }
 
-  group "katxgpu_host" {
+  group "katxbgpu_host" {
     constraint {
       attribute = "${attr.unique.hostname}"
       value     = "qgpu02"
     }
-    task "katxgpu_ingest" {
+    task "katxbgpu_ingest" {
       driver = "docker"
       config {
-        image = "katxgpu:fsim"
+        image = "katxbgpu:fsim"
         network_mode = "host"
         privileged = true
         ulimit {

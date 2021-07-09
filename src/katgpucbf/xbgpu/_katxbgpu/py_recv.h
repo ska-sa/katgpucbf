@@ -1,4 +1,4 @@
-/* This file along with the py_recv.cpp registers the SPEAD2 C++ receiver katxgpu._katxgpu.recv module in python.
+/* This file along with the py_recv.cpp registers the SPEAD2 C++ receiver katxbgpu._katxbgpu.recv module in python.
  *
  * This module enables efficient, lightweight packet reception of MeerKAT F-Engine output multicast data at high data
  * rates.
@@ -12,19 +12,19 @@
 
 #include <pybind11/pybind11.h>
 
-namespace katxgpu::recv
+namespace katxbgpu::recv
 {
 
-/* This function registers the SPEAD2 C++ katxgpu receiver module in python. This module can be imported into python
- * using "import katxgpu._katxgpu.recv". This function exposes three main classes into python. Interacting with these
+/* This function registers the SPEAD2 C++ katxbgpu receiver module in python. This module can be imported into python
+ * using "import katxbgpu._katxbgpu.recv". This function exposes three main classes into python. Interacting with these
  * three classes gives the user all the functionality needed to control the receiver.
  *
  * The three classes of interest are:
- * 1. katxgpu._katxgpu.recv.Chunk - A chunk is a class containing a buffer and associated metadata where a number of
+ * 1. katxbgpu._katxbgpu.recv.Chunk - A chunk is a class containing a buffer and associated metadata where a number of
  * received heaps are stored.
- * 2. katxgpu._katxgpu.recv.Stream - A stream manages the process of receiving network packets and reassembling them
+ * 2. katxbgpu._katxbgpu.recv.Stream - A stream manages the process of receiving network packets and reassembling them
  * into SPEAD heaps. These heaps are then copied to the relevant chunk.
- * 3. katxgpu._katxgpu.recv.Ringbuffer - Once the receiver has copied all the required heaps into a chunk, the chunk is
+ * 3. katxbgpu._katxbgpu.recv.Ringbuffer - Once the receiver has copied all the required heaps into a chunk, the chunk is
  * moved to this ringbuffer. The user can then pop the chunks off of this ringbuffer for processing.
  *
  * These three classes are all described in more detail in py_recv.cpp. The main description can be found in the
@@ -35,6 +35,6 @@ namespace katxgpu::recv
  */
 pybind11::module register_module(pybind11::module &parent);
 
-} // namespace katxgpu::recv
+} // namespace katxbgpu::recv
 
 #endif // KATXGPU_PY_RECV_H

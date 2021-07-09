@@ -1,4 +1,4 @@
-# katxgpu
+# katxbgpu
 
 This repository implements a GPU-based XB-Engine for the MeerKAT Extension Project. 
 
@@ -33,19 +33,19 @@ The X-Engine in its current form works as expected. The B-Engine and control and
 implemented and there are some quality-of-life improvements that can be made. The recommeded improvements are as
 follows:
 
-katxgpu is still in early development with more modules being added every few weeks. Attempts are made for each of these
+katxbgpu is still in early development with more modules being added every few weeks. Attempts are made for each of these
 modules to be complete, but when there are lingering issues that eventually need to be resolved but are not critical
 to development. Many of these TODOs are listed in the relevant files, but sometimes the TODO has no associated file.
 In this case the TODO is listed here.
 1. A number of google doc links are present in this readme and the [readme](src/README.md) in the src file. These
 files must be converted to PDF and the links updated accordingly when this program nears release. The 
 [display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py), [fsim.cpp](scratch/fsim.cpp) and 
-[display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py), [xsend.py](katxgpu/xsend.py) 
+[display_xengine_multicast_packets.py](scratch/display_xengine_multicast_packets.py), [xsend.py](katxbgpu/xsend.py) 
 also have links that must be updated. This README.md also has these links. 
 2. Move Jenkins file and docker containers to use Ubuntu 20.04 and Python 3.8. Once this port has been done. Change the
 [send_example.py](scratch/send_example.py) example to use the updated `asyncio.gather()` syntax instead of the the 
 `loop.run_until_complete(run())` syntax. This syntax also needs to be changed in the 
-[xbengine.py](katxgpu/xbengine.py)
+[xbengine.py](katxbgpu/xbengine.py)
 3. The scratch folder is getting a bit crowded. Its original purpose was to contain a bunch of misc files that had 
 no real place in the repo, but now its contains the fsim and useful python files. The fsim could go in its 
 own folder and then another folder called scripts should be added where things like receiver_example.py will go. 
@@ -63,7 +63,7 @@ to be incorporated into the formal documentation at some stage.
 a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
 8. The [spead2_send_test.py](test/spead2_send_test.py) file has some TODOs that can improve the test coverage. These
 should be implemented.
-9. The `default_spead_flavour` variable is duplicated in two places ([xsend.py](katxgpu/xsend.py) and
+9. The `default_spead_flavour` variable is duplicated in two places ([xsend.py](katxbgpu/xsend.py) and
 [test/spead2_receiver_test.py](test/spead2_receiver_test.py)) with the potential to be duplicated in more places
 if a bsend.py file is created. It may be worth looking at putting all this information in the same place.
 10. When the Jenkins CI server runs its unit tests, sometimes a test/spead2_receiver_test.py::test_recv_simple test
@@ -71,19 +71,19 @@ will just hang (not error out) forever. This causes the test to never end and th
 launch more tests due to this stall. This can be fixed by manually restarting the tests but this is far from ideal.
 This only occurs about once every ten runs, but when multiple branches are being PR'd and merged, this tends to
 kick off many tests. This problem needs to be investigate. I think this is due to the async function here:
-https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
+https://github.com/ska-sa/katxbgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
 but I dont know for sure.
-11. There are a list of TODOs in the [xbengine](katxgpu/xbengine.py). These should be implemented. The most
+11. There are a list of TODOs in the [xbengine](katxbgpu/xbengine.py). These should be implemented. The most
 pressing of these is the implementation of a clean exit and the addition of control and monitoring.
-12. In the [xbengine](katxgpu/xbengine.py) a number of print statements are in place of proper logging
+12. In the [xbengine](katxbgpu/xbengine.py) a number of print statements are in place of proper logging
 messages. These should be replaced with log messages. In addition, it must be decided what logging and metric measuring
 tools must be used. (There was talk on using something like logstash for centralised logging and Prometheus for
 managing metrics.)
 13. The receiver requires a few different classes to set up correctly. The recv.Stream, recv.Ringbuffer and 
-katxgpu.ringbuffer.AsyncRingbuffer objects. See [receiver_example.py](scratch/receiver_example.py) for an example. It
+katxbgpu.ringbuffer.AsyncRingbuffer objects. See [receiver_example.py](scratch/receiver_example.py) for an example. It
 may be worth creating some top level class that encapsulates all of these classes as there is no real value added by
 having them seperate and it is a bit confusing to have to work with so many classes to do essentially one function.
-14. The command-line parameters in [main.py](katxgpu/main.py) could be made more intuitive, for example instead of
+14. The command-line parameters in [main.py](katxbgpu/main.py) could be made more intuitive, for example instead of
 having mcast addresses and port numbers as seperate arguments, accept something formatted as
 `<ip address>:<port number>` and parse the argument to seperate out the parameters. Additionally checks need to be put
 in place to ensure the command-line parameters are correct - is the port number valid, is the IP address a multicast
@@ -94,28 +94,28 @@ parsing functions that could be of use here.
 16. The current Tensor Core kernel is designed to work on the Nvidia RTX 20xx series of GPUs. The newer ranges of
 cards (RTX 30xx and above) may not be compatible with this kernel. This needs to be tested as soon as possible on 
 a newer card to see if it works. If this does not work, there are a few options. Either the
-[tensorcore_xengine_core.py](katxgpu/tensorcore_xengine_core.py) might require some tweaking in which case the changes
+[tensorcore_xengine_core.py](katxbgpu/tensorcore_xengine_core.py) might require some tweaking in which case the changes
 are quite well contained. A complication may be that the Tensor Core kernel needs to be changed so much that the input
-and output data formats change. In this case, the [precorrelation_reorder.py](katxgpu/precorrelation_reorder.py) may
+and output data formats change. In this case, the [precorrelation_reorder.py](katxbgpu/precorrelation_reorder.py) may
 need to be changed too. The entirety of the `async def _gpu_proc_loop(self)` function in
-[xbengine.py](katxgpu/xbengine.py) would then need to be modified. If you begin modifying other
+[xbengine.py](katxbgpu/xbengine.py) would then need to be modified. If you begin modifying other
 functions in xbengine.py to get the new Tensor Cores working then I suspect you have done something wrong as
 only the `_gpu_proc_loop` function launches GPU kernels. Nvidia has some cuBLAS functions that could potentially
 perform the operation we want after a bit of reordering 
 (see [here](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-syrk) - but you may need to dig deeper into
 the cuBLAS options available) - I am just not certain that this uses Tensor Cores under the hood. You will need to
 investigate and profile this further.
-17. The katxgpu._katxgpu module only exists in the C++ realm. IDEs (and I suspect documentation generators) do not pickup
+17. The katxbgpu._katxbgpu module only exists in the C++ realm. IDEs (and I suspect documentation generators) do not pickup
 up these C++ python modules very well. It would be nice if these modules were detected by IDEs. In katfgpu, there is a
 solution to this that involves using .pyi files (stub files). The folder with these stub files is
 [here](https://github.com/ska-sa/katfgpu/tree/master/katfgpu/_katfgpu). The 
 [recv.pyi](https://github.com/ska-sa/katfgpu/blob/master/katfgpu/_katfgpu/recv.pyi) file in this folder defines stubs
 of the functions in [py_recv.cpp](https://github.com/ska-sa/katfgpu/blob/master/src/py_recv.cpp). We should do something
-similar to this in katxgpu. Addtitionally we should move the comments that were placed in py_recv.cpp to a py_recv.pyi
-file in katxgpu/_katxgpu/recv.pyi so that it can get checked by mypy and used in your IDE of choice.
-18. Currently to run katxgpu, three arguments are given: `--receiver-thread-affinity, --receiver-comp-vector-affinity`, 
+similar to this in katxbgpu. Addtitionally we should move the comments that were placed in py_recv.cpp to a py_recv.pyi
+file in katxbgpu/_katxbgpu/recv.pyi so that it can get checked by mypy and used in your IDE of choice.
+18. Currently to run katxbgpu, three arguments are given: `--receiver-thread-affinity, --receiver-comp-vector-affinity`, 
 and `--sender-thread-affinity`. It is likely that all of these wil be set to use the same core. It may be worth
-creating a new argument in [main.py](katxgpu/main.py) to assign all these values to a specific core. We must then
+creating a new argument in [main.py](katxbgpu/main.py) to assign all these values to a specific core. We must then
 decide if we want to give the user access to the above three arguments. If this is done, the "Launching the XB-Engine"
 section below will need to be updated to reflect this new command.
 19. The [verification_functions_lib.c](test/verification_functions_lib.c) has different regions for functions relating
@@ -163,15 +163,15 @@ __DO NOT__ make this repo public before specifying the license.
 libboost-all-dev, libibverbs-dev,librdmacm-dev, and libpcap-dev.
 
 ## Installation
-In order to install the katxgpu module, the following commands must be run:
+In order to install the katxbgpu module, the following commands must be run:
 1. Install required C++ libraries for SPEAD2: `apt-get install autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev`
 2. Create a python 3.6 virtual environment: `virtualenv -p python3.6 <venv name>`.
 3. Activate virtual environment: `source <venv name>/bin/activate`
 4. Install all required python packages: `pip install -r requirements.txt`
 5. Checkout spead2 submodule: `git submodule update --init --recursive`
-6. Install the katxgpu package: `pip install .`
+6. Install the katxbgpu package: `pip install .`
 
-NOTE: Due to the underlying complexity of turning the SPEAD2 C++ code into a python module, installing the katxgpu 
+NOTE: Due to the underlying complexity of turning the SPEAD2 C++ code into a python module, installing the katxbgpu 
 module can take quite a while as the SPEAD2 software is installed each time. Build times over a minute long are quite
 normal. To reduce these build times look at using the [ccache](https://ccache.dev/) utility. 
 
@@ -185,7 +185,7 @@ followed in order to do this:
 6. `make`
 7. `sudo make install`
 
-The SPEAD2 C++ install and the katxgpu module install run different programs and as such the once can be installed 
+The SPEAD2 C++ install and the katxbgpu module install run different programs and as such the once can be installed 
 without the other.
 
 ## Configuring pre-commit workflow
@@ -200,12 +200,12 @@ will be rejected with extreme prejudice.
 
 ## Launching the XB-Engine.
 
-The [main.py](katxgpu/main.py) file launches the entire XB-Engine pipeline. When installing the katxgpu package, the
-main.py file is wrapped in a script called `xgpu` that can be called from the command line. The pipeline can be
+The [main.py](katxbgpu/main.py) file launches the entire XB-Engine pipeline. When installing the katxbgpu package, the
+main.py file is wrapped in a script called `xbgpu` that can be called from the command line. The pipeline can be
 launched using the following command: 
 
 ```
-xgpu \
+xbgpu \
     --receiver-thread-affinity <CPU core index> \
     --receiver-comp-vector-affinity <CPU core index> \
     --src-interface-address <interface IP> \
@@ -216,12 +216,12 @@ xgpu \
 ```
 
 An example with the fields populated is: 
-`xgpu --receiver-thread-affinity 0 --receiver-comp-vector-affinity 0 --src-interface-address 10.100.44.1 --sender-thread-affinity 0 --dest-interface-address 10.100.44.1 239.10.10.10 7149 239.10.10.11 7149`
+`xbgpu --receiver-thread-affinity 0 --receiver-comp-vector-affinity 0 --src-interface-address 10.100.44.1 --sender-thread-affinity 0 --dest-interface-address 10.100.44.1 239.10.10.10 7149 239.10.10.11 7149`
 
 The command above launches the XB-Engine with the minimum number of arguments required to run. The interface with
 address 10.100.44.1 is used to send and receive data. Data is received from the 239.10.10.10:7149 address and sent out
 on the 239.10.10.11:7149 address. All the different affinities are set to use core 0. This XB-Engine uses the default 
-configuration of a 64 antenna, 32 768 channels, L-Band array. Running `xgpu --help` will list all other arguments that
+configuration of a 64 antenna, 32 768 channels, L-Band array. Running `xbgpu --help` will list all other arguments that
 can be used to configure the array.
 
 This pipeline requires three core indices to be specified 
@@ -237,7 +237,7 @@ Documentation describing how the XB-Engine works is under construction. It can c
 ## Test Framework
 
 The test framework has been implemented using [pytest](https://docs.pytest.org).
-To run the framework, run the command `pytest` from the katxgpu parent directory.
+To run the framework, run the command `pytest` from the katxbgpu parent directory.
 
 This assumes the package installation and pre-commit configuration has already been done.
 
@@ -274,11 +274,11 @@ in more detail how Jenkins is configured on SARAO's servers. This document is a 
 
 ## Running within a Docker container
 
-This repository contains a Dockerfile for building a docker image that can launch katxgpu. As with the Jenkins CI
+This repository contains a Dockerfile for building a docker image that can launch katxbgpu. As with the Jenkins CI
 server, the nvidia-container-runtime needs to be installed when running the image.
 
-In order to build the container, the following command needs to be run from the top level katxgpu directory: 
-`docker image build -t katxgpu .`
+In order to build the container, the following command needs to be run from the top level katxbgpu directory: 
+`docker image build -t katxbgpu .`
 
 To run the container and open a terminal within the container run:
 ```
@@ -290,7 +290,7 @@ docker run \
     --device=/dev/infiniband/uverbs0 \
     --rm \
     -it \
-    katxgpu
+    katxbgpu
 ```
 
 To launch the entire XB-Engine in a container run the following command:
@@ -304,9 +304,9 @@ docker run \
     --device=/dev/infiniband/uverbs0 \
     --rm \
     -d \
-    --name=katxgpu_container \
-    katxgpu \
-    xgpu \
+    --name=katxbgpu_container \
+    katxbgpu \
+    xbgpu \
     --receiver-thread-affinity <CPU core index> \
     --receiver-comp-vector-affinity <CPU core index> \
     --src-interface-address <interface IP> \
@@ -316,7 +316,7 @@ docker run \
     <dest mcast address> <dest port>
 ```
 
-To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxgpu_container`
+To view the output from the receiver script run the following command: `watch docker logs -t --tail 10 katxbgpu_container`
 
 The `--network host`, `--ulimit=memlock=-1`, `--device=/dev/infiniband/rdma_cm`, `--device=/dev/infiniband/uverbs0`
 flags are required to pass the ibverbs devices to the container for high-performance networking.
@@ -332,20 +332,20 @@ be found in the Jenkinsfile.
 
 This software uses the high-performance SPEAD2 networking library for all high speed data transmission and reception.
 The SPEAD2 library has been extended in C++ and this has been turned into a project submodule. This module can be
-imported using `import katxgpu._katxgpu`.
+imported using `import katxbgpu._katxbgpu`.
 
 The makeup of this module is quite complex. This [file](docs/networking.md) within this repo describes the entire module in
 great detail. A simple example of how to use the receiver network code is shown in
-[receiver_example.py](scratch/receiver_example.py) in the katxgpu/scratch directory. This example is probably the
+[receiver_example.py](scratch/receiver_example.py) in the katxbgpu/scratch directory. This example is probably the
 quickest way to figure out how the receiver works. Likewise the [send_example.py](scratch/send_example.py) file in the 
-katxgpu/scratch folder demonstrates network transmit code works.
+katxbgpu/scratch folder demonstrates network transmit code works.
 
-The `katxgpu._katxgpu` module uses the SPEAD2 C++ bindings (not the python bindings) and as such requires the SPEAD2
-submodule to be included in this repository. This module is located in the katxgpu/3rdparty directory.
+The `katxbgpu._katxbgpu` module uses the SPEAD2 C++ bindings (not the python bindings) and as such requires the SPEAD2
+submodule to be included in this repository. This module is located in the katxbgpu/3rdparty directory.
 
-The `katxgpu._katxgpu` module only provides functionality for receiving data. The normal SPEAD2 python module is used
+The `katxbgpu._katxbgpu` module only provides functionality for receiving data. The normal SPEAD2 python module is used
 for sending X-Engine output data. This is because the X-Engine accumulates data and transmits it at a much lower data 
-rate than it is received meaning that the chunking approach is not necessary. The [xsend.py](katxgpu/xsend.py) module
+rate than it is received meaning that the chunking approach is not necessary. The [xsend.py](katxbgpu/xsend.py) module
 handles the transmission of correlated data. The high level description of this module can also be found
 in the same [file](docs/networking.md) that describes the data receiver module.
 
@@ -378,7 +378,7 @@ useful configuration arguments.
 
 A rough description of the ingest packet format is described 
 [here](https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg/edit). The
-[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) in katxgpu/scratch will capture packets
+[display_fsim_multicast_packets.py](scratch/display_fsim_multicast_packets.py) in katxbgpu/scratch will capture packets
 out of the F-Engine and display the most useful packet information. This will give an intuitive understanding of the
 packet formats.
 
@@ -410,5 +410,5 @@ sample). For the 1 KiB packets, `--samples-per-channel` is equal to 256. 1 KiB p
 computation to assemble into heaps. By switching to 2 KiB packets, the total CPU processing requirements can be reduced
 to 2/3 of the 1 KiB packets. Packet sizes of 4 and 8 KiB also improve on the 2 KiB packet size but the improvement is
 not as drastic. By increasing the packet sizes, the less chance there is of your CPU being overloaded and dropping
-packets. The [fsim.cpp](scratch/fsim.cpp) and [main.py](katxgpu/main.py) both have a `--samples-per-channel` flag.
+packets. The [fsim.cpp](scratch/fsim.cpp) and [main.py](katxbgpu/main.py) both have a `--samples-per-channel` flag.
 Using these two files the thread performance at different packet sizes can be analysed.

@@ -1,9 +1,9 @@
-"""Katxgpu receiver example script.
+"""Katxbgpu receiver example script.
 
-This script demonstrates how to configure a katxgpu receiver object to receive data from an fsim or MeerKAT
+This script demonstrates how to configure a katxbgpu receiver object to receive data from an fsim or MeerKAT
 channelised voltage stream (or more simply an X-Engine input stream).
 
-It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxgpu receiver.
+It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxbgpu receiver.
 """
 import argparse
 import asyncio
@@ -12,16 +12,16 @@ import logging
 import katsdpsigproc.accel as accel
 import numpy as np
 
-import katxgpu._katxgpu.recv as recv
-import katxgpu.monitor
-import katxgpu.ringbuffer
+import katxbgpu._katxbgpu.recv as recv
+import katxbgpu.monitor
+import katxbgpu.ringbuffer
 
 logger = logging.getLogger(__name__)
 
 # 2. Relevant variables
 # 2.1 Parsing command line arguments
 
-parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxgpu receiver software.")
+parser = argparse.ArgumentParser(description="Simple example demonstrating how to use katxbgpu receiver software.")
 parser.add_argument("--mcast_src_ip", default="239.10.10.10", help="IP address of multicast stream to subscribe to.")
 parser.add_argument("--mcast_src_port", default="7149", type=int, help="Port of multicast stream to subscribe to.")
 parser.add_argument(
@@ -44,7 +44,7 @@ print(f"Subscribing to {src_multicast_ip}:{src_multicast_port} on the {src_inter
 
 
 # 2.2 Adjustable parameters - The description of these parameters can be found in the documentation for the
-# katxgpu._katxgpu.recv.Stream object.
+# katxbgpu._katxbgpu.recv.Stream object.
 thread_affinity = 2
 n_ants = 64
 n_channels_total = 32768
@@ -69,9 +69,9 @@ print(f"Timestamp step: {hex(timestamp_step)}")
 # when this is set to true to see the format of the log file.
 use_file_monitor = False
 if use_file_monitor:
-    monitor: katxgpu.monitor.Monitor = katxgpu.monitor.FileMonitor("temp_file.log")
+    monitor: katxbgpu.monitor.Monitor = katxbgpu.monitor.FileMonitor("temp_file.log")
 else:
-    monitor = katxgpu.monitor.NullMonitor()
+    monitor = katxbgpu.monitor.NullMonitor()
 
 # 4. Create ringbuffer - All chunks that the receiver assembles are placed on this ringbuffer.
 # The ringbuffer capacity has been set to 8 as its give a bit of a buffer to play with without consuming too much
@@ -123,13 +123,13 @@ receiverStream.add_udp_ibv_reader([(src_multicast_ip, src_multicast_port)], src_
 
 # 8.1 Wrap the receiver ringbuffer in an AsyncRIngbuffer object so that chunks can be passed to python in an asyncio
 # loop.
-asyncRingbuffer = katxgpu.ringbuffer.AsyncRingbuffer(
+asyncRingbuffer = katxbgpu.ringbuffer.AsyncRingbuffer(
     receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
 )
 
 
 async def get_chunks():
-    """Receive and process completed chunks from the katxgpu receiver."""
+    """Receive and process completed chunks from the katxbgpu receiver."""
     print("Main asyncio loop now running.")
     i = 0
     dropped = 0
