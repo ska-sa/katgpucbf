@@ -1,6 +1,3 @@
--c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
--c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-gpu-build/requirements.txt
-
 aiokatcp
 katsdpservices
 katsdpsigproc[CUDA]
