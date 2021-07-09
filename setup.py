@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import configparser
 import os
 import subprocess
@@ -22,9 +20,7 @@ class BuildExt(build_ext):
         # Generate the configure script and some source files
         subprocess.check_call(["./bootstrap.sh"], cwd="3rdparty/spead2")
         # Run the configure script
-        subprocess.check_call(
-            os.path.abspath("3rdparty/spead2/configure"), cwd=self.build_temp
-        )
+        subprocess.check_call(os.path.abspath("3rdparty/spead2/configure"), cwd=self.build_temp)
         # The configure script writes a python-build.cfg with information about
         # the necessary libraries and flags.
         config = configparser.ConfigParser()

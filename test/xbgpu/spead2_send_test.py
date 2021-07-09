@@ -176,9 +176,10 @@ def test_send_simple(event_loop, num_ants, num_channels):
                 # 5.2.2 Check that the received heap has a channel offset item with the correct expected value.
                 if item.id == 0x4103:
                     has_channel_offset = True
-                    assert (
-                        item.value == n_channels_per_stream * 4
-                    ), f"Channel offset incorrect. Expected: {hex(n_channels_per_stream * 4)}, actual: {hex(item.value)}"
+                    assert item.value == n_channels_per_stream * 4, (
+                        "Channel offset incorrect. "
+                        f"Expected: {hex(n_channels_per_stream * 4)}, actual: {hex(item.value)}"
+                    )
 
                 # 5.2.2 Check that the received heap has an xeng_raw data buffer item. Check that the buffer is the
                 # correct size and that the values are all the expected value.
@@ -187,23 +188,27 @@ def test_send_simple(event_loop, num_ants, num_channels):
                     data_length_bytes = (
                         n_baselines * n_channels_per_stream * n_pols * n_pols * complexity * sample_bits // 8
                     )
-                    assert (
-                        item.value.size * 8 == data_length_bytes  # *8 as there are 64 bytes in a sample
-                    ), f"xeng_raw data not correct size. Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
+                    assert item.value.size * 8 == data_length_bytes, (  # *8 as there are 64 bytes in a sample
+                        "xeng_raw data not correct size. "
+                        f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
+                    )
                     assert (
                         item.value.dtype == np.uint64
                     ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
                     assert np.all(item.value == num_received)
 
-            assert (
-                has_timestamp
-            ), f"Received heap is missing timestamp item with ID {hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.TIMESTAMP_ID)}"
-            assert (
-                has_channel_offset
-            ), f"Received heap is missing channel offset item with ID {hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.CHANNEL_OFFSET)}"
-            assert (
-                has_xeng_raw
-            ), f"Received heap is missing xeng_raw data buffer item with ID {hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.DATA_ID)}"
+            assert has_timestamp, (
+                "Received heap is missing timestamp item with ID "
+                f"{hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.TIMESTAMP_ID)}"
+            )
+            assert has_channel_offset, (
+                "Received heap is missing channel offset item with ID "
+                f"{hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.CHANNEL_OFFSET)}"
+            )
+            assert has_xeng_raw, (
+                "Received heap is missing xeng_raw data buffer item with ID "
+                f"{hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.DATA_ID)}"
+            )
 
             num_received += 1
 

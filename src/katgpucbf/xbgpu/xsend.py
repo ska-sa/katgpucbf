@@ -193,7 +193,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.buffers: typing.List[accel.HostArray] = []
 
         # 4.2 Create buffers once-off to be reused for sending data.
-        for i in range(self._n_send_heaps_in_flight):
+        for _ in range(self._n_send_heaps_in_flight):
             # 4.2.1 Create a buffer from the accel context.
             buffer = accel.HostArray(self.heap_shape, np.int64, context=self.context)
 
