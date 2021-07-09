@@ -33,7 +33,7 @@ import spead2
 import spead2.recv.asyncio
 import test_parameters
 
-import katxbgpu.xsend
+import katgpucbf.xbgpu.xsend
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
@@ -90,8 +90,8 @@ def test_send_simple(event_loop, num_ants, num_channels):
     # 3.1 Create the queue that will link the sender and receiver together.
     queue = spead2.InprocQueue()
 
-    # 3.2 Create katxbgpu.xsend.XEngineSPEADInprocSend that will wrap a SPEAD2 send stream.
-    sendStream = katxbgpu.xsend.XEngineSPEADInprocSend(
+    # 3.2 Create katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend that will wrap a SPEAD2 send stream.
+    sendStream = katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend(
         n_ants=num_ants,
         n_channels_per_stream=n_channels_per_stream,
         n_pols=n_pols,
@@ -197,13 +197,13 @@ def test_send_simple(event_loop, num_ants, num_channels):
 
             assert (
                 has_timestamp
-            ), f"Received heap is missing timestamp item with ID {hex(katxbgpu.xsend.XEngineSPEADAbstractSend.TIMESTAMP_ID)}"
+            ), f"Received heap is missing timestamp item with ID {hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.TIMESTAMP_ID)}"
             assert (
                 has_channel_offset
-            ), f"Received heap is missing channel offset item with ID {hex(katxbgpu.xsend.XEngineSPEADAbstractSend.CHANNEL_OFFSET)}"
+            ), f"Received heap is missing channel offset item with ID {hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.CHANNEL_OFFSET)}"
             assert (
                 has_xeng_raw
-            ), f"Received heap is missing xeng_raw data buffer item with ID {hex(katxbgpu.xsend.XEngineSPEADAbstractSend.DATA_ID)}"
+            ), f"Received heap is missing xeng_raw data buffer item with ID {hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.DATA_ID)}"
 
             num_received += 1
 

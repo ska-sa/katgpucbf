@@ -15,14 +15,14 @@ Defines two classes that enable the SPEAD2 C++ ringbuffer to operate in Python:
 
 This file has been copied directly from the katfgpu documentation. The functionality is not fully understood.
 
-TODO: Look at moving this class to a different repo to avoid repitition between here and katxbgpu.
+TODO: Look at moving this class to a different repo to avoid repetition between here and fgpu.
 """
 
 import asyncio
 from typing import AsyncIterator, Generic, Optional, Protocol, TypeVar
 
-from katxbgpu._katxbgpu import Empty, Stopped
-from katxbgpu.monitor import Monitor
+from katgpucbf.xbgpu._katxbgpu import Empty, Stopped
+from katgpucbf.xbgpu.monitor import Monitor
 
 _T = TypeVar("_T")
 

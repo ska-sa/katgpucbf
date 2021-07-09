@@ -1,4 +1,4 @@
-/* This file along with the py_recv.cpp registers the SPEAD2 C++ receiver katxbgpu._katxbgpu.recv module in python.
+/* This file along with the py_recv.cpp registers the SPEAD2 C++ receiver katgpucbf.xbgpu._katxbgpu.recv module in python.
  *
  * This module enables efficient, lightweight packet reception of MeerKAT F-Engine output multicast data at high data
  * rates.
@@ -20,11 +20,11 @@ namespace katxbgpu::recv
  * three classes gives the user all the functionality needed to control the receiver.
  *
  * The three classes of interest are:
- * 1. katxbgpu._katxbgpu.recv.Chunk - A chunk is a class containing a buffer and associated metadata where a number of
+ * 1. katgpucbf.xbgpu._katxbgpu.recv.Chunk - A chunk is a class containing a buffer and associated metadata where a number of
  * received heaps are stored.
- * 2. katxbgpu._katxbgpu.recv.Stream - A stream manages the process of receiving network packets and reassembling them
+ * 2. katgpucbf.xbgpu._katxbgpu.recv.Stream - A stream manages the process of receiving network packets and reassembling them
  * into SPEAD heaps. These heaps are then copied to the relevant chunk.
- * 3. katxbgpu._katxbgpu.recv.Ringbuffer - Once the receiver has copied all the required heaps into a chunk, the chunk is
+ * 3. katgpucbf.xbgpu._katxbgpu.recv.Ringbuffer - Once the receiver has copied all the required heaps into a chunk, the chunk is
  * moved to this ringbuffer. The user can then pop the chunks off of this ringbuffer for processing.
  *
  * These three classes are all described in more detail in py_recv.cpp. The main description can be found in the

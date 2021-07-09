@@ -40,7 +40,7 @@ import pytest
 import test_parameters
 from katsdpsigproc import accel
 
-from katxbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
+from katgpucbf.xbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 
 
 def verify_reorder(
@@ -196,9 +196,9 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
 
     # 5.1. Now using the external C-library for a more efficient verification
     #   - TODO: Need to figure out a better way of indicating the loader_path
-    #   - Using './test/' as this function is called from the parent (root) katxbgpu directory
+    #   - Using './test/xbgpu' as this function is called from the parent (root) directory
     verificationFunctionsLib_C = np.ctypeslib.load_library(
-        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/")
+        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/xbgpu")
     )
     verify_precorr_reorder_C = verificationFunctionsLib_C.verify_precorrelation_reorder
 

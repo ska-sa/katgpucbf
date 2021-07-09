@@ -160,7 +160,7 @@ struct si32Complex createBoundedComplex(int8_t i8Real, int8_t i8Imag)
 /**
  * Return the index in the visibilities matrix of the visibility produced by ant1 and ant2.
  *
- * This function is a C port of the katxbgpu.tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(...)
+ * This function is a C port of the katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(...)
  * function.
  *
  * This function is used within in the verify_xbengine(...) verification function scope.
@@ -319,7 +319,7 @@ int verify_antpair_visibilities(size_t ulBatchStartIndex, size_t ulNumBatches, s
  *
  * This function assumes that the X-Engine input data is equal to the values assigned in the createHeaps(...) function
  * in xbengine_test.py and that the output visibilities data is formatted as described in the
- * katxbgpu.tensorcore_xengine_core module.
+ * katgpucbf.xbgpu.tensorcore_xengine_core module.
  *
  * This function is called directly in the xbengine_test.py module.
  *
@@ -337,7 +337,7 @@ int verify_xbengine(uint64_t *pu64Baselines, size_t ulBatchStartIndex, size_t ul
 {
     // 1. Determine the different strides used when calculating the location of the correlation produts for an antenna
     // pair in the pu64Baselines visibilities matrix. This matrix will have the shape as described in the
-    // katxbgpu.tensorcore_xengine_core module and the strides generated here correspond to the strides in that matrix.
+    // katgpucbf.xbgpu.tensorcore_xengine_core module and the strides generated here correspond to the strides in that matrix.
     const size_t ulNumBaselines = ulNumAnts * (ulNumAnts + 1) / 2;
     const size_t ulBaselineStride = uNumPols * uNumPols;
     const size_t ulChannelStride = ulNumBaselines * ulBaselineStride;
