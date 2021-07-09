@@ -2,6 +2,16 @@ default_language_version:
   python: python3
 
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.0.1
+    hooks:
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-executables-have-shebangs
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        fix: clrf
+      - id: no-commit-to-branch # without arguments, master/main will be protected.
   - repo: https://github.com/psf/black
     rev: 21.6b0
     hooks:
