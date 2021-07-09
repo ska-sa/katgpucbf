@@ -3,9 +3,9 @@ requires = [
 	"setuptools>=45",
 	"wheel",
 	"setuptools_scm[toml]>=6.0",
-	"jinja2==2.10.1",
-	"pycparser==2.19",
-	"pybind11==2.5.0",
+	"jinja2==2.10.1",  # required to run bootstrap.sh when installing the spead2 submodule
+	"pycparser==2.19",  # required to run bootstrap.sh when installing the spead2 submodule
+	"pybind11==2.6.0",  # wrapping C++ functions in python
 ]
 
 [tool.setuptools_scm]
