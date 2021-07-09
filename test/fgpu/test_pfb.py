@@ -1,7 +1,7 @@
 import numpy as np
 from katsdpsigproc import accel
 
-from katfgpu import pfb
+from katgpucbf.fgpu import pfb
 
 
 def decode_10bit_host(data):
