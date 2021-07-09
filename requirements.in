@@ -1,9 +1,8 @@
 aiokatcp
 katsdpservices
 katsdpsigproc[CUDA]
+katsdptelstate
 numpy
 pycuda
 scikit-cuda
 spead2
-
-katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
