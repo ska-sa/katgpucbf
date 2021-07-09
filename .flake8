@@ -1,5 +1,6 @@
 [flake8]
 max-line-length = 120
+exclude = 3rdparty
 
 # configure the maximum complexity to allow
 # 15 is recommended for more complex modules
@@ -9,7 +10,6 @@ max-complexity = 15
 # this list is tailored to work well with the black formatter
 ignore = 
 	E203, # 'whitespace before :' error
-	E501, # 'line too long' error
 	W503  # 'line break before binary operator' error
 
 # specify which checks to enable

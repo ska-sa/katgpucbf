@@ -2,8 +2,18 @@ default_language_version:
   python: python3
 
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.0.1
+    hooks:
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-executables-have-shebangs
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        fix: lf
+      - id: no-commit-to-branch # without arguments, master/main will be protected.
   - repo: https://github.com/psf/black
-    rev: 20.8b1
+    rev: 21.6b0
     hooks:
       - id: black
   - repo: https://github.com/pycqa/isort
@@ -18,11 +28,25 @@ repos:
     rev: 3.9.0
     hooks:
       - id: flake8
+        additional_dependencies: [
+          'flake8-bugbear==21.4.3'
+        ]
+        exclude: 'scratch/'
   - repo: https://github.com/pycqa/pydocstyle
     rev: 6.0.0
     hooks:
       - id: pydocstyle
+        exclude: 'setup.py|scratch/'  # Because complaining about docstrings here is annoying.
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v0.812'
+    rev: 'v0.910'
     hooks:
       - id: mypy
+        exclude: 'scratch/'
+        additional_dependencies: [
+            'aiokatcp==0.8.0',
+            'katsdpsigproc==1.2',
+            'katsdptelstate==0.11',
+            'numpy==1.21.0',
+            'spead2==3.2.2',
+            'types-setuptools==57.0.0'
+        ]

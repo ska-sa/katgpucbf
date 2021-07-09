@@ -13,5 +13,3 @@ Welcome to katfgpu's documentation!
    design
    glossary
    katfgpu
-
-
