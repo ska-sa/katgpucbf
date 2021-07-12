@@ -1,6 +1,6 @@
-katfgpu.ringbuffer module
+katgpucbf.fgpu.pfb module
 -------------------------
 
-.. automodule:: katfgpu.ringbuffer
+.. automodule:: katgpucbf.fgpu.pfb
    :members:
    :show-inheritance:
