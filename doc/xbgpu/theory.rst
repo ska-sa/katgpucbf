@@ -1,18 +1,20 @@
-# Theory Of Operation
+Theory Of Operation
+===================
 
-## Signal Flow
+Signal Flow
+-----------
 
 The general flow of data through the system is shown in the the image below:
 
-![signal_path](./katxbgpu_concept.png)
+..figure ./katxbgpu_concept.png)
 
 The X-Engine processing pipeline can be broken into four different stages:
 1. Receive data from the network and assemble it into a chunk. This chunk is then transferred to the GPU. This receiver
 has been implemented using SPEAD2 in C++ and bound into python. See the "SPEAD2 Network Side Software" section below
-for more information. 
+for more information.
 2. Reorder the chunk so that it is in a format that is ready for correlation. This reorder is implemented in the
 [precorrelation_reorder.py](../katxbgpu/precorrelation_reorder.py) module.
-3. The data is then correlated using the ASTRON Tensor Core Kernel. This is done by the 
+3. The data is then correlated using the ASTRON Tensor Core Kernel. This is done by the
 [tensorcore_xengine_core.py](../katxbgpu/tensorcore_xengine_core.py) class. This correlated data is then transferred back to
 system RAM.
 4. Send the correlated data (known as baseline correlation products) back into the network. This is implemented by
@@ -45,7 +47,7 @@ The image below demonstrates how data moves through the pipeline and how it is r
 ![async_loops](./katxbgpu_async_loops.png)
 
 The `asyncio.Queues` help to coordinate the flow of data through the different asyncio functions. However the GPU
-requires a seperate type of coordination. The GPU has three different command queues that manage the coordination. 
+requires a seperate type of coordination. The GPU has three different command queues that manage the coordination.
 A command queue is an OpenCL term - within katsdpsigproc, this is still called a command queue even though it can be
 implemented as a CUDA stream. One command queue is for processing and the other two are for transferring data from host
 memory to the GPU and back. Events are put onto the command queue and the async processing loops can `await` for these
@@ -59,7 +61,7 @@ The image below shows the interaction between the processing loops and the comma
 ![command_queues](./katxbgpu_gpu_command_queues.png)
 
 The numbers in the image above correspond to the following actions:
-1. Copy chunk to GPU memory from host 
+1. Copy chunk to GPU memory from host
 2. Reorder Chunk
 3. Correlate chunk
 4. Transfer heap to host memory from GPU
@@ -78,10 +80,10 @@ A batch of heaps is a collection of heaps from different F-Engines with the same
 batch of heaps at a time. The correlated data is then accumulated. An accumulation period is called an __accumulation__
 and the data output from that accumulation is normally called a __dump__ - the terms are used interchangeably. The
 number of batches to accumulate in an accumulation is equal to the `--heap-accumulation-threshold` flag. The timestamp
-difference between succesive dumps is equal to: 
+difference between succesive dumps is equal to:
 `timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`
 
-The output heap timestamp is aligned to an integer multiple of `timestamp_difference` 
+The output heap timestamp is aligned to an integer multiple of `timestamp_difference`
 (equivalent to the current SKARAB "auto-resync" logic). The total accumulation time is equal to:
 `accumulation_time_s = timestamp_difference * --adc-sample-rate(Hz)` seconds.
 
