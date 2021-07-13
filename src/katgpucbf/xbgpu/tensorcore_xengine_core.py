@@ -63,7 +63,8 @@ class TensorCoreXEngineCoreTemplate:
             )
         elif self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
             raise ValueError(
-                f"Sample bitwidth of {self._sample_bitwidth} will eventually be supported but has not yet been implemented."
+                f"Sample bitwidth of {self._sample_bitwidth} "
+                "will eventually be supported but has not yet been implemented."
             )
 
         if self.n_samples_per_channel % self.n_times_per_block != 0:
@@ -162,8 +163,10 @@ class TensorCoreXEngineCore(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [outVisibilities_buffer.buffer, inSamples_buffer.buffer],
-            # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
-            # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
+            # Even though we are using CUDA, we follow OpenCLs grid/block
+            # conventions. As such we need to multiply the number of
+            # blocks(global_size) by the block size(local_size) in order to
+            # specify global threads not global blocks.
             global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * 1),
             local_size=(32, 2, 2),
         )

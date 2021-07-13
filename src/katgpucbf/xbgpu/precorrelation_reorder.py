@@ -1,14 +1,18 @@
 """
 Module wrapping the pre-correlation reorder Kernel.
 
-The pre-correlation reorder kernel operates on a set of data with dimensions explained below (and in its _kernel.mako file).
-It makes provision for batched operations, i.e. reordering multiple sets of data (matrices) passed to the kernel in a single array.
+The pre-correlation reorder kernel operates on a set of data with dimensions
+explained below (and in its _kernel.mako file).  It makes provision for batched
+operations, i.e. reordering multiple sets of data (matrices) passed to the
+kernel in a single array.
 
 This module has two classes:
     1. PreCorrelationReorderTemplate
-        - This class allows for multiple different compilations of the same kernel with different parameters to take place.
+        - This class allows for multiple different compilations of the same
+          kernel with different parameters to take place.
     2. PreCorrelationReorder
-        - This class provides the interface to call the kernel created in a PreCorrelationReorderTemplate object.
+        - This class provides the interface to call the kernel created in a
+          PreCorrelationReorderTemplate object.
 
 TODO:
     1. Update naming conventions as necessary.
@@ -128,20 +132,24 @@ class PreCorrelationReorder(accel.Operation):
     This class specifies the shape of the input sample and output reordered buffers required by the kernel. The
     parameters specified in the PreCorrelationReorderTemplate object are used to determine the shape of the buffers.
 
-    It is worth noting these matrices follow the C convention, with the fastest-changing dimension being the last on the list.
-    The input sample buffer must have the shape:
+    It is worth noting these matrices follow the C convention, with the
+    fastest-changing dimension being the last on the list. The input sample
+    buffer must have the shape:
     [batch][antennas][channels][samples_per_channel][polarisations]
 
     The output sample buffer must have the shape:
     [batch][channels][samples_per_channel//times_per_block][n_ants][polarisations][times_per_block]
 
-    A complexity that is introduced by the pre-correlation reorder kernel is that the samples_per_channel index is split over two
-    different indices. The first index ranges from 0 to samples_per_channel//times_per_block and the second index
-    ranges from 0 to times_per_block. Times per block is calculated by the PreCorrelationReorderTemplate object.
-    In 8-bit input mode times_per_block is equal to 16.
+    A complexity that is introduced by the pre-correlation reorder kernel is
+    that the samples_per_channel index is split over two different indices. The
+    first index ranges from 0 to samples_per_channel//times_per_block and the
+    second index ranges from 0 to times_per_block. Times per block is
+    calculated by the PreCorrelationReorderTemplate object.  In 8-bit input
+    mode times_per_block is equal to 16.
 
-    Each input element is a complex 8-bit integer sample. Numpy does not support 8-bit complex numbers,
-    so the input sample array has dtype of np.int16 as a placeholder.
+    Each input element is a complex 8-bit integer sample. Numpy does not
+    support 8-bit complex numbers, so the input sample array has dtype of
+    np.int16 as a placeholder.
     """
 
     def __init__(self, template: PreCorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
@@ -160,8 +168,10 @@ class PreCorrelationReorder(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [inSamples_buffer.buffer, outReordered_buffer.buffer],
-            # Even though we are using CUDA, we follow OpenCLs grid/block conventions. As such we need to multiply the number
-            # of blocks(global_size) by the block size(local_size) in order to specify global threads not global blocks.
+            # Even though we are using CUDA, we follow OpenCLs grid/block
+            # conventions. As such we need to multiply the number of
+            # blocks(global_size) by the block size(local_size) in order to
+            # specify global threads not global blocks.
             # - Global size is across the x- and y-dimensions (for this application).
             global_size=(1024 * self.template.n_blocks_x, self.template.n_batches),
             local_size=(1024, 1),

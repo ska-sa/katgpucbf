@@ -191,12 +191,15 @@ class XBEngine:
 
         # 1.3 Engine Parameters - Parameters not used in the array but needed for this engine
         self.batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
-        self.channel_offset_value: int  # Used in the heap to indicate the first channel in the sequence of channels in the stream
+        # Used in the heap to indicate the first channel in the sequence of channels in the stream
+        self.channel_offset_value: int
 
         # 1.4 Flags used at some point in this class.
         self.rx_transport_added: bool  # False if no rx transport has been added, true otherwise
         self.tx_transport_added: bool  # False if no tx transport has been added, true otherwise
-        self.running: bool  # Remains true until the user tells the process to stop - then set to false and close the asyncio functions.
+        # Remains true until the user tells the process to stop - then set to
+        # false and close the asyncio functions.
+        self.running: bool
 
         # 1.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
         self.monitor: katgpucbf.xbgpu.monitor.Monitor
@@ -220,11 +223,13 @@ class XBEngine:
         self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
         self.tensorCoreXEngineCoreOperation: katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore
         self.preCorrelationReorderOperation: katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorder
-        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray  # Buffer linking reorder kernel to correlation kernel
+        # Buffer linking reorder kernel to correlation kernel
+        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray
 
-        # 1.9 Command queues for syncing different operations on the GPU - a command queue is the OpenCL name for a CUDA
-        # stream. An abstract command queue can either be implemented as an OpenCL command queue or a CUDA stream depending
-        # on the context.
+        # 1.9 Command queues for syncing different operations on the GPU - a
+        # command queue is the OpenCL name for a CUDA stream. An abstract
+        # command queue can either be implemented as an OpenCL command queue or
+        # a CUDA stream depending on the context.
         self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
         self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
         self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
@@ -252,11 +257,14 @@ class XBEngine:
         complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
 
         # 2.3 Calculate derived parameters.
-        # This step represents the difference in timestamp between two consecutive heaps received from the same F-Engine. We
-        # multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the Fourier Transform.
-        # While we can workout the timestamp_step from other parameters that configure the receiver, we pass it as a seperate
-        # argument to the reciever for cases where the n_channels_per_stream changes across streams (likely for non-power-of-
-        # two array sizes).
+        # This step represents the difference in timestamp between two
+        # consecutive heaps received from the same F-Engine. We multiply step
+        # by 2 to account for dropping half of the spectrum due to symmetric
+        # properties of the Fourier Transform.  While we can workout the
+        # timestamp_step from other parameters that configure the receiver, we
+        # pass it as a seperate argument to the reciever for cases where the
+        # n_channels_per_stream changes across streams (likely for
+        # non-power-of- two array sizes).
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_samples_per_channel
         # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
@@ -358,7 +366,7 @@ class XBEngine:
 
         # 6.3 Create buffers and assign them correctly.
         # 6.3.1 Create items that will store received chunks that have been transferred to the GPU.
-        for i in range(n_rx_items):
+        for _ in range(n_rx_items):
             rx_item = RxQueueItem()
             rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context, self.preCorrelationReorderOperation.template.inputDataShape, np.int16
@@ -366,7 +374,7 @@ class XBEngine:
             self._rx_free_item_queue.put_nowait(rx_item)
 
         # 6.3.2 Create items that will store correlated data in GPU memory, ready for transferring back to system RAM.
-        for i in range(n_tx_items):
+        for _ in range(n_tx_items):
             tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context, self.tensorCoreXEngineCoreOperation.template.outputDataShape, np.int64
@@ -374,7 +382,7 @@ class XBEngine:
             self._tx_free_item_queue.put_nowait(tx_item)
 
         # 6.3.3 Create empty chunks and give them to the receiver to use to assemble heaps.
-        for i in range(n_free_chunks):
+        for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
                 self.preCorrelationReorderOperation.template.inputDataShape, np.int16, context=self.context
             )
@@ -547,7 +555,9 @@ class XBEngine:
             # TODO: This must become a proper logging message
             if dropped_heaps != 0:
                 print(
-                    f"LOG WARNING: Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. All time dropped/received heaps: {dropped_total}/{received_total}."
+                    f"LOG WARNING: Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
+                    f"Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. "
+                    f"All time dropped/received heaps: {dropped_total}/{received_total}."
                 )
 
             chunk_index += 1
@@ -700,7 +710,8 @@ class XBEngine:
             )
 
             # 3.2. Ensure that the timestamp between output heaps is the value that is expected,
-            # Not sure under which conditions that this would occur. Something funny would have to happen at the receiver.
+            # Not sure under which conditions that this would occur. Something
+            # funny would have to happen at the receiver.
             # This check is here pre-emptivly - this issue has not been detected yet.
             if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
                 print(
@@ -714,9 +725,10 @@ class XBEngine:
             # overflowing.
             if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
                 print(
-                    f"LOG WARNING: Time between output heaps: {round(time_difference_between_heaps_s,2)} which is less "
-                    f"the expected {round(self.dump_interval_s,2)}. If this warning occurs too often, the pipeline will "
-                    f"stall because the rate limited sender will not keep up with the input rate."
+                    f"LOG WARNING: Time between output heaps: {round(time_difference_between_heaps_s,2)} "
+                    f"which is less the expected {round(self.dump_interval_s,2)}. "
+                    "If this warning occurs too often, the pipeline will stall "
+                    "because the rate limited sender will not keep up with the input rate."
                 )
 
             # 3.4 Update variables used for warning checks.

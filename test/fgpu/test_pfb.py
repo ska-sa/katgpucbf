@@ -43,7 +43,7 @@ def test_pfb_fir(repeat=1):
     fn.ensure_all_bound()
     fn.buffer("in").set(queue, h_in)
     fn.buffer("weights").set(queue, weights)
-    for i in range(repeat):
+    for _ in range(repeat):
         # Split into two parts to test the offsetting
         fn.in_offset = 0
         fn.out_offset = 0
