@@ -6,7 +6,7 @@ Signal Flow
 
 The general flow of data through the system is shown in the the image below:
 
-.. figure:: xbgpu/concept.png
+.. figure:: images/concept.png
   :width: 1087px
 
   XBGPU Concept
@@ -28,7 +28,7 @@ The X-Engine processing pipeline can be broken into four different stages:
 
 The image below shows where the data is located at the various stages mentioned above:
 
-.. figure:: xbgpu/hardware_path.png
+.. figure:: images/hardware_path.png
   :width: 1096px
 
   Hardware Path
@@ -61,7 +61,7 @@ network threads and back in order to reuse these buffers too.
 The image below demonstrates how data moves through the pipeline and how it is
 reused:
 
-.. figure:: xbgpu/async_loops.png
+.. figure:: images/async_loops.png
   :width: 1112px
 
 The :class:`asyncio.Queue` objects help to coordinate the flow of data through
@@ -82,7 +82,7 @@ across functions requires a bit of care to prevent race conditions and deadlock.
 The image below shows the interaction between the processing loops and the
 command queues:
 
-.. figure:: xbgpu/gpu_command_queues.png
+.. figure:: images/gpu_command_queues.png
   :width: 1094px
 
 The numbers in the image above correspond to the following actions:

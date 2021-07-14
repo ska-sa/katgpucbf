@@ -174,7 +174,7 @@ Receiver
 The image below gives conceptual overview of how the katxbgpu receive code is
 implemented:
 
-.. figure:: xbgpu/receiver.png
+.. figure:: images/receiver.png
   :width: 831px
 
   Receiver
@@ -368,7 +368,7 @@ with transmission. The main parent class for these classes is called the
 The image below gives conceptual overview of how the katxbgpu sender code is
 implemented:
 
-.. figure:: xbgpu/sender.png
+.. figure:: images/sender.png
   :width: 881px
 
   Sender

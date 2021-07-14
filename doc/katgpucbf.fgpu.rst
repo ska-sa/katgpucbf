@@ -1,29 +1,28 @@
 katgpucbf.fgpu package
 ======================
 
-Main Plumbing
--------------
-
-.. toctree::
-
-  fgpu/engine
-  fgpu/process
-  fgpu/compute
-  fgpu/monitor
-  fgpu/delay
-
-Networking
+Submodules
 ----------
 
 .. toctree::
+   :maxdepth: 4
 
-  fgpu/recv
-  fgpu/send
-  fgpu/ringbuffer
+   katgpucbf.fgpu.compute
+   katgpucbf.fgpu.delay
+   katgpucbf.fgpu.engine
+   katgpucbf.fgpu.main
+   katgpucbf.fgpu.monitor
+   katgpucbf.fgpu.pfb
+   katgpucbf.fgpu.postproc
+   katgpucbf.fgpu.process
+   katgpucbf.fgpu.recv
+   katgpucbf.fgpu.ringbuffer
+   katgpucbf.fgpu.send
 
-GPU Operations
---------------
-.. toctree::
+Module contents
+---------------
 
-  fgpu/pfb
-  fgpu/postproc
+.. automodule:: katgpucbf.fgpu
+   :members:
+   :undoc-members:
+   :show-inheritance:
