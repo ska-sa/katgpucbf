@@ -18,9 +18,8 @@ echo "Installing the repo in editable mode"
 pip install -e .
 
 echo "Compiling the C modules needed to run xbengine tests"
-cd test/xbgpu
-make
-cd -
+make -C test/xbgpu
+
 
 echo "Setting up pre-commit"
 pre-commit install
