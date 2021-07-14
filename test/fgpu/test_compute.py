@@ -1,10 +1,14 @@
+"""Smoke test for Compute class."""
 from katsdpsigproc import accel
 
 from katgpucbf.fgpu import compute
 
 
 def test_compute():
-    # TODO: this isn't a proper test, just a smoke test
+    """Test creation and running of :class:`Compute`.
+
+    .. todo:: This isn't a proper test, just a smoke test.
+    """
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
 
