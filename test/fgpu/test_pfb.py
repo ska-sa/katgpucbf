@@ -1,3 +1,5 @@
+"""Unit tests for PFB, for numerical correctness."""
+
 import numpy as np
 from katsdpsigproc import accel
 
@@ -5,6 +7,7 @@ from katgpucbf.fgpu import pfb
 
 
 def decode_10bit_host(data):
+    """Convert a signed 10-bit integer to a signed 16-bit representation."""
     bits = np.unpackbits(data).reshape(-1, 10)
     # Replicate the high (sign) bit
     extra = np.tile(bits[:, 0:1], (1, 6))
@@ -14,6 +17,7 @@ def decode_10bit_host(data):
 
 
 def pfb_fir_host(data, channels, weights):
+    """Apply a PFB-FIR filter to a set of data on the host."""
     step = 2 * channels
     assert len(weights) % step == 0
     taps = len(weights) // step
@@ -27,6 +31,7 @@ def pfb_fir_host(data, channels, weights):
 
 
 def test_pfb_fir(repeat=1):
+    """Test the GPU PFB-FIR for numerical correctness."""
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
 
@@ -58,6 +63,7 @@ def test_pfb_fir(repeat=1):
 
 
 def test_fft():
+    """Test the GPU FFT for numerical correctness."""
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
     spectra = 37
