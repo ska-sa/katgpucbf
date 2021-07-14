@@ -53,9 +53,9 @@ Synchronization and Coordination
 
 The :mod:`~katgpucbf.xbgpu.xbengine` module does the work of assembling all
 the different modules into a pipeline. This module has three different async
-processing pipelines know as the `_receiver_loop`, `_gpu_proc_loop` and the
-`_sender_loop`. Data is passed between these three processing loops using
-`asyncio.Queues`. Buffers in queues are reused to prevent unecessary memory
+processing pipelines know as the ``_receiver_loop``, ``_gpu_proc_loop`` and the
+``_sender_loop``. Data is passed between these three processing loops using
+:class:`asyncio.Queue`\ s. Buffers in queues are reused to prevent unnecessary memory
 allocations. Additionally, buffers are passed between the python program to the
 network threads and back in order to reuse these buffers too.
 
@@ -66,7 +66,7 @@ reused:
   :width: 1112px
 
 The :class:`asyncio.Queue` objects help to coordinate the flow of data through
-the different asyncio functions. However the GPU requires a seperate type of
+the different asyncio functions. However the GPU requires a separate type of
 coordination. The GPU has three different command queues that manage the
 coordination.
 
@@ -74,9 +74,9 @@ A command queue is an OpenCL term - within katsdpsigproc, this is still called a
 command queue even though it can be implemented as a CUDA stream. One command
 queue is for processing and the other two are for transferring data from host
 memory to the GPU and back. Events are put onto the command queue and the async
-processing loops can `await` for these events to be complete. Often one async
+processing loops can :keyword:`await` for these events to be complete. Often one async
 function will enqueue some commands followed by an event onto the GPU command
-queue and the next async function will `await` for this event to complete as it
+queue and the next async function will :keyword:`await` for this event to complete as it
 is the function that needs to work with this data. Tracking the different events
 across functions requires a bit of care to prevent race conditions and deadlock.
 
@@ -100,19 +100,19 @@ The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
 
 A heap from a single F-Engine consists of a set number of samples specified by
-the `--samples-per-channel` flag. Each of these time samples is part of a
+the :option:`!--samples-per-channel` flag. Each of these time samples is part of a
 different spectrum. Meaning that the timestamp difference per sample is equal to
-the `--channels-total` multiplied by 2 (multiple for two to account for the fact
+the :option:`!--channels-total` multiplied by 2 (multiple for two to account for the fact
 that we throw half the spectrum away due to the symmetric properties of the
 Fourier Transform). The timestamp difference between consecutive two heaps from
 the same F-Engine is equal to: `--samples-per-channel * --channels-total * 2`.
 
 A batch of heaps is a collection of heaps from different F-Engines with the same
 timestamp. Correlation occurs on a batch of heaps at a time. The correlated data
-is then accumulated. An accumulation period is called an __accumulation__ and
-the data output from that accumulation is normally called a __dump__ - the terms
+is then accumulated. An accumulation period is called an :dfn:`accumulation` and
+the data output from that accumulation is normally called a :dfn:`dump` - the terms
 are used interchangeably. The number of batches to accumulate in an accumulation
-is equal to the `--heap-accumulation-threshold` flag. The timestamp difference
+is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
 between succesive dumps is equal to:
 
   `timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`

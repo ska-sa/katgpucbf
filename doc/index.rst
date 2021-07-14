@@ -10,7 +10,7 @@ Welcome to katgpucbf's documentation!
 
 .. toctree::
    :maxdepth: 3
-   :caption: fgpu
+   :caption: F engine
 
    fgpu.design
    fgpu.glossary
@@ -18,7 +18,7 @@ Welcome to katgpucbf's documentation!
 
 .. toctree::
    :maxdepth: 3
-   :caption: xbgpu
+   :caption: X and B engines
 
    xbgpu.theory
 

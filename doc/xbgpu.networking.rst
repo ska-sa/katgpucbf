@@ -76,12 +76,12 @@ connected to the network.
 
 The only intervention required by the user is to tell SPEAD2 what transport to
 use. When receiving data, this is done using functions such as
-`add_udp_ibv_reader`, `add_udp_pcap_reader` or `add_memory_reader`.
+``add_udp_ibv_reader``, ``add_udp_pcap_reader`` or ``add_memory_reader``.
 
 .. todo::
 
   List the functions required to specify what transport to use for transmitting
-  data when the tranmit code is added.
+  data when the transmit code is added.
 
 ibverbs
 ^^^^^^^
@@ -159,7 +159,7 @@ code.
 The `pybind11 library`_ is used for registering C++ code as a python module. The
 C++ files doing this can be found in the ``src`` directory. The ``setup.py``
 file handles turning these C++ files into python modules. ``py_register.cpp``
-contains the `PYBIND11_MODULE` macro which kicks off the process during
+contains the :c:macro:`PYBIND11_MODULE` macro which kicks off the process during
 installation.
 
 .. _pybind11 library: https://pybind11.readthedocs.io/en/stable/index.html
@@ -191,7 +191,7 @@ layers:
      found in the ``py_recv.cpp``, ``py_recv.h``, ``py_common.cpp`` and
      ``py_common.h``. These files are slightly difficult to read, but the python
      modules they create will have standard python docstrings that can be read
-     in an iPython session once the module has been installed.
+     in an IPython session once the module has been installed.
   2. katxbgpu C++ layer - The katxbgpu python layer interfaces with the katxbgpu
      C++ layer. The katxbgpu C++ layer manages the chunks received from the
      python layer. When the SPEAD2 stream receives a heap, the C++ layer tells
@@ -203,7 +203,7 @@ layers:
   3. SPEAD2 Stream layer - This is the underlying SPEAD2 layer that receives
      packets, assembles them into heaps and passes them to the katxbgpu C++
      layer. This layer creates its own thread pool and runs concurrently with
-     the main processing loop. This layer is part of the standrd SPEAD2 package.
+     the main processing loop. This layer is part of the standard SPEAD2 package.
 
 An example of how to use the receiver can be found in the ``receiver_example.py``
 script in the ``scratch`` folder. Understanding this is all that is required to
@@ -211,17 +211,17 @@ use the receiver. The remaining information in this document is only relevant
 when trying to modify or duplicate the katxbgpu receiver functionality.
 
 Once the katxbgpu module has been installed, the receiver module can be accesed
-using `import katxbgpu._katxbgpu.recv` in Python.
+using ``import katxbgpu._katxbgpu.recv`` in Python.
 
 Chunk Lifecycle
 ---------------
 
 A chunk is the main mechanism that allows for data to be transferred around the
-katxbgpu program
+katxbgpu program.
 
 A chunk has to be created by the main program. The user assigns a buffer of a
 specific size to the chunk and then passes the chunk to the receiver using the
-`add_chunk()` function. This chunk is added to a free chunks stack. Chunks on
+:meth:`!.add_chunk` function. This chunk is added to a free chunks stack. Chunks on
 this stack are not being used. They will be popped off of this stack when a new
 chunk is required.
 
@@ -231,16 +231,16 @@ stream is busy receiving and assembling heaps from the underlying transport.
 These heaps are assembled in the various chunks in the active hunks queue. When
 a packet belonging to a chunk that is not in the active queue is received, a
 chunk is moved from the free chunks stack by calling the
-``katxbgpu::recv::stream::grab_chunk()`` function.
+:cpp:func:`katxbgpu::recv::stream::grab_chunk` function.
 
 Once a chunk has been fully assembled it is moved off of the active queue and
-put on a ringbuffer using the `katxbgpu::recv::stream::flush()` function. The
+put on a ringbuffer using the :cpp:func:`katxbgpu::recv::stream::flush` function. The
 main program can then access the underlying chunks asynchronously in Python
-using an asyncio for loop (`async for chunk in asyncRingbuffer`) which calls the
-underlying `ringbuffer.pop()` function.
+using an asyncio for loop (``async for chunk in asyncRingbuffer``) which calls the
+underlying :meth:`~katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer.async_pop` function.
 
 Once a chunk has been popped off the ringbuffer and its data has been consumed
-by the GPU, it should be given back to the receiver again using the `add_chunk()`
+by the GPU, it should be given back to the receiver again using the :meth:`!.add_chunk`
 function. By reusing the chunk, the system memory use remains tightly controlled
 preventing excessive memory use. Additionally allocating new memory is an
 expensive operation. By reusing chunks, this expensive operation is eliminated.
@@ -256,12 +256,12 @@ SPEAD2 transport and heap assembly. Tracing through these threads is a
 time-consuming process and is not necessary to understand the katxbgpu receiver.
 The SPEAD2 stream interacts with the main program using callback functions. When
 the first packet in a heap is received, the SPEAD2 stream calls the
-``katxbgpu::recv::allocator::allocate()`` function. When the last packet is
-received, the SPEAD2 stream calls the ``katxbgpu::recv::stream::heap_ready()``
+:cpp:func:`katxbgpu::recv::allocator::allocate` function. When the last packet is
+received, the SPEAD2 stream calls the :cpp:func:`katxbgpu::recv::stream::heap_ready`
 function. Both of these functions eventually call the
-``katxbgpu::recv::stream::calculate_packet_destination()`` function.
+:cpp:func:`katxbgpu::recv::stream::calculate_packet_destination` function.
 
-The ``calculate_packet_destination()`` function can be thought of as the main
+The :cpp:func:`calculate_packet_destination` function can be thought of as the main
 coordinating funtion within the katxbgpu C++ code. It determines when to move
 data from the free chunks stack to the active chunks queue to the ringbuffer. It
 also calculates where in a chunk the heap must be copied and passes this
@@ -272,11 +272,11 @@ Receiver Chunk Internal Construction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A chunk contains both a buffer object and associated metadata. For the receiver
-chunk this metadata contains a `present` boolean array and a timestamp field.
+chunk this metadata contains a ``present`` boolean array and a timestamp field.
 
 This array will contains as many elements as heaps in the chunk. A true value at
-a specific index indicates that the corresponding chunk is present. A false
-value indicates that the chunk was either not received or was corrupted and has
+a specific index indicates that the corresponding heap is present. A false
+value indicates that the heap was either not received or was corrupted and has
 not been copied correctly into the chunk. It is expected that 99.999999% of
 heaps will be received over the receiver lifetime. Large numbers of missing
 heaps point to a system issue that must be resolved.
@@ -285,7 +285,7 @@ Data layout
 ^^^^^^^^^^^
 
 Each heap contains a single contigous set of data. Indexed as a multidimensional
-array, this array looks like: `heap_data[n_channels_per_stream][n_samples_per_channel][n_pols]`.
+array, this array looks like: ``heap_data[n_channels_per_stream][n_samples_per_channel][n_pols]``.
 The drawing linked above describes these heaps in more detail.
 
 The X-Engine receives data from each F-Engine. There is one F-Engine per antenna
@@ -307,8 +307,8 @@ array correctly.
 Timestamp Alignment
 ^^^^^^^^^^^^^^^^^^^
 
-The timestamp field in the chunk represents the timestamp of the earliest-
-received set of F-Engine heaps within the chunk.
+The timestamp field in the chunk represents the timestamp of the
+earliest-received set of F-Engine heaps within the chunk.
 
 Between succesive heaps from a specific F-Engine, the difference in timestamp is
 known as the `timestamp_step`. This value is calculated as follows:
@@ -373,8 +373,8 @@ layers:
 
   1. XEngineSPEADAbstractSend class - This is the interface to the sender
      module. Once the program is running, the main processing loop will request
-     free buffers (`get_free_heap()`) from the xsend module, populate the
-     buffers and then tell the module to send these buffers(`send_free_heap()`).
+     free buffers (:meth:`.get_free_heap`) from the xsend module, populate the
+     buffers and then tell the module to send these buffers (:meth:`send_heap`).
      The sending happens asynchronously but the xsend class ensures that buffers
      are not recycled until they are sent.
   2. XEngineSPEADAbstractSend internal workings - This class manages a queue of
@@ -404,10 +404,10 @@ use of GPUDirect. By using GPUDirect, the system memory bandwidth requirements
 are significantly reduced as the data does not pass through system RAM.
 
 Currently GPUDirect is not supported on the gaming cards (RTX and GTX cards). It
-is only supported on the server-grade cards (such as the A100.).
+is only supported on the server-grade cards (such as the A100).
 
 Currently katxbgpu does not make use of the Peerdirect functionality.
 
 .. todo::
 
-  Write a script demonstrating how to use Peerdirect works. Update this descrption once this script has been written.
+  Write a script demonstrating how to use Peerdirect works. Update this description once this script has been written.
