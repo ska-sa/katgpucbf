@@ -246,7 +246,7 @@ def createHeaps(
         sample_array = np.full(modified_heap_shape, coded_sample_value, np.uint16)
         # Here we change the dtype of the array from uint16 back to int8. This does not modify the actual data in the
         # array. It just changes the shape back to what we expect. (The complexity dimension is now back to 2 from 1).
-        sample_array.dtype = np.int8
+        sample_array = sample_array.view(np.int8)
 
         ig["timestamp"].value = timestamp
         ig["fengine id"].value = ant_index

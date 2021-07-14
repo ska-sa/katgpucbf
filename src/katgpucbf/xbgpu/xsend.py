@@ -228,7 +228,9 @@ class XEngineSPEADAbstractSend(ABC):
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_Bps,
         )
-        self.sourceStream: spead2.send.asyncio.AbstractStream  # Left unassigned to remain abstract.
+        # This class is currently marked as _private in the spead2 stub files,
+        # in a future revision it may be changed to public.
+        self.sourceStream: spead2.send.asyncio._AsyncStream  # Left unassigned to remain abstract.
 
         # 6. Create item group - This is the SPEAD2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(

@@ -23,7 +23,8 @@ from typing import Final
 
 import numpy as np
 import pkg_resources
-from katsdpsigproc import accel, cuda
+from katsdpsigproc import accel
+from katsdpsigproc.abc import AbstractContext
 
 
 class PreCorrelationReorderTemplate:
@@ -34,7 +35,7 @@ class PreCorrelationReorderTemplate:
     """
 
     def __init__(
-        self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int, n_batches: int
+        self, context: AbstractContext, n_ants: int, n_channels: int, n_samples_per_channel: int, n_batches: int
     ) -> None:
         """
         Initialise the PreCorrelationReorderTemplate class and compile the pre-correlation reorder kernel.
@@ -44,17 +45,17 @@ class PreCorrelationReorderTemplate:
 
         Parameters
         ----------
-        context: cuda.Context
+        context
             The GPU device's context provided by katsdpsigproc's abstraction of PyCUDA.
             A context is associated with a single device and 'owns' all memory allocations.
             For the purposes of this python module, and its Tensor Core usage, the CUDA context is required.
-        n_ants: int
+        n_ants
             The number of antennas that will be correlated. Each antennas is expected to produce two polarisations.
-        n_channels: int
+        n_channels
             The number of frequency channels to be processed.
-        n_samples_per_channel: int
+        n_samples_per_channel
             The number of time samples to be processed per frequency channel.
-        n_batches: int
+        n_batches
             The number of matrices to be reordered, a single data matrix = one batch.
         """
         # 1. Set member variables that are used to calculate indices for the input and output buffers
