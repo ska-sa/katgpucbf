@@ -21,5 +21,6 @@ Welcome to katgpucbf's documentation!
    :caption: X and B engines
 
    xbgpu.theory
+   xbgpu.networking
 
    katgpucbf.xbgpu

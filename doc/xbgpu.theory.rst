@@ -9,7 +9,7 @@ The general flow of data through the system is shown in the the image below:
 .. figure:: xbgpu/concept.png
   :width: 1087px
 
-  XGPU Concept
+  XBGPU Concept
 
 The X-Engine processing pipeline can be broken into four different stages:
 
@@ -24,8 +24,7 @@ The X-Engine processing pipeline can be broken into four different stages:
      done by the :class:`katgpucbf.xbgpu.tensorcore_xengine_core` class. This
      correlated data is then transferred back to system RAM.
   4. Send the correlated data (known as baseline correlation products) back into
-     the network. This is implemented by the :mod:`~katgpucbf.xbgpu.xsend`
-     module.
+     the network. This is implemented by :mod:`.xsend`.
 
 The image below shows where the data is located at the various stages mentioned above:
 
@@ -125,11 +124,5 @@ The total accumulation time is equal to:
 
 The output heap contains multiple packets and these packets are distributed over
 the entire `accumulation_time_s` interval to reduce network burstiness. The
-default configuration in [main.py](../katxbgpu/main.py) is for 0.5 second dumps
+default configuration in :mod:`katgpucbf.xbgpu.main` is for 0.5 second dumps
 when using the MeerKAT 1712 MSPs L-band digitisers.
-
-.. toctree::
-   :maxdepth: 3
-   :caption: Network Interface Code and SPEAD2
-
-   xbgpu.networking

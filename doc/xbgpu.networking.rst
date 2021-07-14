@@ -45,6 +45,8 @@ SPEAD2 has both Python and C++ bindings. Python is the conventional way to use
 SPEAD2 with C++ being used to implement additional features for high performance
 needs.
 
+.. _spead2-transports:
+
 SPEAD2 transports
 ^^^^^^^^^^^^^^^^^
 
@@ -55,8 +57,8 @@ transport will make use of the Linux networking stack to receive packets off of
 an ethernet interface.
 
 SPEAD2 supports a number of different transports including a udp transport for
-standard UDP networking, a udp_ibv transport (explained in 1.2.2 below), a PCAP
-transport for reading data from a PCAP file, a buffer transport for reading
+standard UDP networking, a udp_ibv transport (explained in :ref:`ibverbs`), a
+PCAP transport for reading data from a PCAP file, a buffer transport for reading
 simulating packets in memory and others.
 
 The advantage of having these different transports is that the interface from
@@ -82,6 +84,8 @@ use. When receiving data, this is done using functions such as
 
   List the functions required to specify what transport to use for transmitting
   data when the transmit code is added.
+
+.. _ibverbs:
 
 ibverbs
 ^^^^^^^
@@ -281,6 +285,8 @@ not been copied correctly into the chunk. It is expected that 99.999999% of
 heaps will be received over the receiver lifetime. Large numbers of missing
 heaps point to a system issue that must be resolved.
 
+.. _data-layout:
+
 Data layout
 ^^^^^^^^^^^
 
@@ -322,9 +328,9 @@ when using arbitrary array sizes. (The exact mechanism calculating
 equation above is due to the F-Engines discarding half of the spectrum due to
 symmetric properties of a fourier transform on real input data.
 
-As mentioned in 2.4.1, chunk contains `heaps_per_fengine_per_chunk` consecutive
-heaps from a particular F-Engine. The step in time between timestamps of two
-consecutive chunks can be calculated using the following:
+As mentioned in :ref:`data-layout`, chunk contains `heaps_per_fengine_per_chunk`
+consecutive heaps from a particular F-Engine. The step in time between
+timestamps of two consecutive chunks can be calculated using the following:
 `timestamp_step_per_chunk = heaps_per_fengine_per_chunk * timestamp_step`.
 
 .. todo::
@@ -335,9 +341,9 @@ consecutive chunks can be calculated using the following:
 Transport and readers
 ~~~~~~~~~~~~~~~~~~~~~
 
-As mentioned in 1.2.1 above, SPEAD2 defines a number of transports. This
-receiver only exposes three of these transports. The most important one is the
-udb_ibv transport for normal operation. Additionally, the PCAP and memory
+As mentioned in :ref:`spead2-transports`, SPEAD2 defines a number of transports.
+This receiver only exposes three of these transports. The most important one is
+the udb_ibv transport for normal operation. Additionally, the PCAP and memory
 transports are also exposed for debugging and unit tests.
 
 Unit Tests
@@ -349,12 +355,11 @@ software on simulated packets stored within a buffer.
 Sender
 ------
 
-The X-Engine transmit code can be found in the [xsend.py](../katxbgpu/xsend.py)
-file in the katxbgpu/katxbgpu subfolder. Unlike the receiver logic, the sender
-logic just makes use of the normal SPEAD2 python code - no custom C++ bindings
-are required. The X-Engine implements accumulation and drastically reduces data
-rates. A heap is sent out on the order of seconds, not milliseconds, and as such
-no chunking is required to manage these rates.
+The X-Engine transmit code can be found in :mod:`.xsend`. Unlike the receiver
+logic, the sender logic just makes use of the normal SPEAD2 python code - no
+custom C++ bindings are required. The X-Engine implements accumulation and
+drastically reduces data rates. A heap is sent out on the order of seconds, not
+milliseconds, and as such no chunking is required to manage these rates.
 
 The :mod:`~katgpucbf.xbgpu.xsend` module defines a number of classes to deal
 with transmission. The main parent class for these classes is called the
@@ -388,11 +393,6 @@ layers:
      buffer object into a SPEAD heap and sends it out onto the network (in the
      normal case). It returns a future that will be marked as done once the
      transmission is complete.
-
-Unit Tests
-----------
-
-The unit test for the send object can be found [here](../test/spead2_send_test.py)
 
 Peerdirect Support
 ------------------

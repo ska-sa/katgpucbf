@@ -2,16 +2,18 @@
 Class for wrapping SPEAD2 ringbuffers.
 
 Defines two classes that enable the SPEAD2 C++ ringbuffer to operate in Python:
+
 1. RingbufferProtocol - This object seems to define some functions that already exist in the SPEAD2 ringbuffer class. It
    does not add any functionality to this ringbuffer. As far as I can tell it is just there as a placeholder for a
    pybind11 wrapped SPEAD2 C++ ringbuffer object.
 2. AsyncRingbuffer - This takes a ringbuffer object and gives it asyncio functionality. This is the main object that
    will be used when receiving data from a SPEAD2 object. For example if the receiver ringbuffer object is wrapped in an
    AsyncRingbuffer object called asyncRingbuffer then this can be iterated through asynchronously as follows:
-   ---
-   async for chunk in asyncRingbuffer:
+
+   .. code-block:: python
+
+    async for chunk in asyncRingbuffer:
        print(chunk)
-   ---
 
 This file has been copied directly from the katfgpu documentation. The functionality is not fully understood.
 
