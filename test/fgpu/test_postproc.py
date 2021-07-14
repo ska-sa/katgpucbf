@@ -1,3 +1,4 @@
+"""Unit tests for Postproc class."""
 import numpy as np
 from katsdpsigproc import accel
 
@@ -5,6 +6,7 @@ from katgpucbf.fgpu import postproc
 
 
 def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, fringe_phase, quant_scale):
+    """Calculate postproc steps on the host CPU for a single polarisation."""
     # Throw out last channel (Nyquist frequency)
     data = data[:, :channels]
     # Compute delay phases
@@ -26,12 +28,14 @@ def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, fringe_phase
 
 
 def postproc_host(in0, in1, channels, acc_len, spectra, fine_delay, fringe_phase, quant_scale):
+    """Aggregate both polarisation's postproc on the host CPU."""
     out0 = postproc_host_pol(in0, channels, acc_len, spectra, fine_delay, fringe_phase, quant_scale)
     out1 = postproc_host_pol(in1, channels, acc_len, spectra, fine_delay, fringe_phase, quant_scale)
     return np.stack([out0, out1], axis=3)
 
 
 def test_postproc(repeat=1):
+    """Test GPU PostProc for numerical correctness."""
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
     channels = 4096
