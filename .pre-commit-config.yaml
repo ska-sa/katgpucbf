@@ -41,12 +41,22 @@ repos:
     rev: 'v0.910'
     hooks:
       - id: mypy
-        exclude: 'scratch/'
+        # Passing filenames to mypy can do odd things. See
+        # https://github.com/pre-commit/mirrors-mypy/issues/33.
+        # mypy.ini determines the set of files that will actually be checked.
+        pass_filenames: false
+        # The pre-commit hook passes some options, but we set options in mypy.ini.
+        args: []
+        # The pre-commit hook only has python, not pyi.
+        types: []
+        types_or: [python, pyi]
         additional_dependencies: [
             'aiokatcp==0.8.0',
             'katsdpsigproc==1.2',
             'katsdptelstate==0.11',
             'numpy==1.21.0',
             'spead2==3.2.2',
-            'types-setuptools==57.0.0'
+            'types-decorator==0.1.5',
+            'types-setuptools==57.0.0',
+            'types-six==0.1.7',
         ]
