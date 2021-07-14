@@ -4,24 +4,26 @@ This module defines an XBEngine object that implements an entire GPU XB-Engine p
 Additionally this module defines the QueueItem and RxQueueItem objects that are used in the XBEngine for
 passing information between different async processing loops within the object.
 
-TODO:
+.. todo::
+
     1. Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
-    docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
-    attempts this but needs some work.
+       docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
+       attempts this but needs some work.
     2. Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
-    worth parameterising this function to give it a custom file name and set it to write changes to a file.
+       worth parameterising this function to give it a custom file name and set it to write changes to a file.
     3. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
-    instead of these print statements.
+       instead of these print statements.
     4. The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
-    logic will need to go in the _gpu_proc_loop for the B-Engine processing and then a seperate sender loop would need
-    to be created for sending B-Engine data.
+       logic will need to go in the _gpu_proc_loop for the B-Engine processing and then a seperate sender loop would need
+       to be created for sending B-Engine data.
     5. Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
-    pipeline.
+       pipeline.
     6. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
-    crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
-    could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
+       crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
+       could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
     7. The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
-    this to use the new asyncio syntax.
+       this to use the new asyncio syntax.
+
 """
 
 import asyncio
