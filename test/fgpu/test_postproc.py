@@ -35,7 +35,7 @@ def postproc_host(in0, in1, channels, acc_len, spectra, fine_delay, fringe_phase
 
 
 def test_postproc(repeat=1):
-    """Test GPU PostProc for numerical correctness."""
+    """Test GPU Postproc for numerical correctness."""
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
     channels = 4096

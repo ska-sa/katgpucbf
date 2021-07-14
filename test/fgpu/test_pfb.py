@@ -7,7 +7,7 @@ from katgpucbf.fgpu import pfb
 
 
 def decode_10bit_host(data):
-    """Convert a signed 10-bit integer to a signed 16-bit representation."""
+    """Convert an array of signed 10-bit integers to signed 16-bit representation."""
     bits = np.unpackbits(data).reshape(-1, 10)
     # Replicate the high (sign) bit
     extra = np.tile(bits[:, 0:1], (1, 6))
@@ -31,7 +31,14 @@ def pfb_fir_host(data, channels, weights):
 
 
 def test_pfb_fir(repeat=1):
-    """Test the GPU PFB-FIR for numerical correctness."""
+    """Test the GPU PFB-FIR for numerical correctness.
+
+    Parameters
+    ----------
+    repeat
+        Number of times to repeat the GPU operation, default 1. A larger value
+        can be used for benchmarking purposes.
+    """
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
 

@@ -118,17 +118,15 @@ def createHeaps(
             pol1Imag = np.int8(-sign * chan_index)
 
             # 2.1.1 Make sure none of these samples are equal to -128 as that is not a supported value with the Tensor
-            # cores.
-            # Note: using np.byte on the assignment satsifies mypy but there may
-            # be a more elegant way to do this.
+            # cores. Have to re-assign the numpy scalars because they are immutable.
             if pol0Real == -128:
-                pol0Real = np.byte(-127)
+                pol0Real = np.int8(-127)
             if pol0Imag == -128:
-                pol0Imag = np.byte(-127)
+                pol0Imag = np.int8(-127)
             if pol1Real == -128:
-                pol1Real = np.byte(-127)
+                pol1Real = np.int8(-127)
             if pol1Imag == -128:
-                pol1Imag = np.byte(-127)
+                pol1Imag = np.int8(-127)
 
             # 2.1.2 Combine values into a code word. The values are all cast to uint8s as when I was casting them to
             # int8s, the sign extension would behave strangly and what I expected to be in the code word would be
@@ -145,8 +143,7 @@ def createHeaps(
 
         # 2.2 Change dtype and shape of the array back to the correct values required by the receiver. The data itself
         # is not modified, its just how it is intepreted that is changed.
-        # Mypy will complain about this - the dtype is supposed to be read-only. But we're all consenting adults here.
-        sample_array.dtype = np.int8  # type: ignore
+        sample_array = sample_array.view(np.int8)
         sample_array = np.reshape(sample_array, heap_shape)
 
         # 2.3 Assign all values to the heap fields.

@@ -14,7 +14,7 @@ def linear() -> LinearDelayModel:
 def test_linear_call(linear: LinearDelayModel) -> None:
     """Test the calling of the DelayModel, monotonically.
 
-    .. todo:: Try to break the model and test for failures?
+    .. todo:: Try to the model in unexpected ways to confirm it handles failures gracefully?
     """
     assert linear(12000.0) == 13.75
     assert linear(12345.0) == 100.0
