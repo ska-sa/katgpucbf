@@ -2,7 +2,9 @@
 *.eggs
 *.o
 *.so
+.coverage
 .venv
 .vscode/
 /build
+/htmlcov
 __pycache__

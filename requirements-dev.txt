@@ -10,6 +10,8 @@ attrs==21.2.0
     # via pytest
 cfgv==3.3.0
     # via pre-commit
+coverage==5.5
+    # via -r requirements-dev.in
 distlib==0.3.2
     # via virtualenv
 execnet==1.9.0

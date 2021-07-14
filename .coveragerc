@@ -1,0 +1,11 @@
+[run]
+branch = True
+command_line = -m pytest
+source = src/
+dynamic_context = test_function
+
+# So that we can know exactly what code was tested and whether it was dirty
+context = $(git describe --tags --dirty)
+
+[html]
+show_contexts = True
