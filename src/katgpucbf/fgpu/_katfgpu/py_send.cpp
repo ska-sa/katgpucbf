@@ -177,7 +177,7 @@ py::module register_module(py::module &parent)
             Target network transmission rate.
         max_heaps
             Maximum number of in-flight heaps for the sender Stream.
-        monitor: Optional[Monitor]
+        monitor: Optional[katgpucbf.xgpu.monitor.Monitor]
             Monitor to use for collecting metrics.
         )pydocstring")
         .def(py::init<
