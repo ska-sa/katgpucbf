@@ -6,9 +6,9 @@ within the source code.
 
 Stream
 ------
- - In the katfgpu sense, this is derived from a spead2 recv or send stream.
+ - In the katgpucbf.fgpu sense, this is derived from a spead2 recv or send stream.
  - Not to be confused with a CUDA stream, which is here encapsulated as a
-   command queue. CUDA streams aren't referred to directly in katfgpu.
+   command queue. CUDA streams aren't referred to directly in katgpucbf.fgpu.
 
 Queue
 -----
@@ -16,13 +16,13 @@ Queue
 - asyncio.Queue
 
   - This is a python Queue object that is designed for use in async programs.
-    In katfgpu, we use EventItems on Queues.
+    In katgpucbf.fgpu, we use EventItems on Queues.
 
 - CommandQueue.
 
   - This is relevant to the GPU. Things placed in this queue are guaranteed to
     be executed in order.
-  - There can be an arbitrary number of command queues. In katfgpu, we use one
+  - There can be an arbitrary number of command queues. In katgpucbf.fgpu, we use one
     for uploading, one for the actual DSP, and one for downloading from the GPU.
   - You can put markers called Events in these command queues to synchronise
     between different ones, or even just to make sure you don't download data

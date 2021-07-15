@@ -16,7 +16,8 @@ TODO:
 
 import numpy as np
 import pkg_resources
-from katsdpsigproc import accel, cuda
+from katsdpsigproc import accel
+from katsdpsigproc.abc import AbstractContext
 
 
 class TensorCoreXEngineCoreTemplate:
@@ -26,7 +27,7 @@ class TensorCoreXEngineCoreTemplate:
     This object will be used to create a TensorCoreXEngineCore object that will be able to run the created kernel.
     """
 
-    def __init__(self, context: cuda.Context, n_ants: int, n_channels: int, n_samples_per_channel: int) -> None:
+    def __init__(self, context: AbstractContext, n_ants: int, n_channels: int, n_samples_per_channel: int) -> None:
         """
         Initialise the TensorCoreXEngineCoreTemplate class and compile the Tensor core correlation kernel.
 
@@ -35,11 +36,11 @@ class TensorCoreXEngineCoreTemplate:
 
         Parameters
         ----------
-        n_ants: int
+        n_ants
             The number of antennas that will be correlated. Each antennas is expected to produce two polarisations.
-        n_channels: int
+        n_channels
             The number of frequency channels to be processed.
-        n_samples_per_channel: int
+        n_samples_per_channel
             The number of time samples to be processed per frequency channel.
         """
         # 1. Set accesible member functions that are used to calculate indices to the input and output buffers.

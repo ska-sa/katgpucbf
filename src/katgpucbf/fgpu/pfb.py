@@ -53,7 +53,9 @@ class PFBFIR(accel.Operation):
     The best place to look in order to understand how these work from a strictly
     DSP sense is Danny C. Price's paper :cite:`price2018spectrometers`.
 
-    .. bibliography:: references.bib
+    .. bibliography::
+
+        price2018spectrometers
 
     .. rubric:: Slots
 
