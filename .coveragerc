@@ -1,7 +1,7 @@
 [run]
 branch = True
 command_line = -m pytest
-source = src/
+source = src/,test/
 dynamic_context = test_function
 
 # So that we can know exactly what code was tested and whether it was dirty
