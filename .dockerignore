@@ -8,8 +8,8 @@
 **/build
 **/__pycache__
 **/doc/_build
-scratch/fgpu/dsim
 scratch/fgpu/memcpy_loop
-scratch/xbgpu/fsim
+src/tools/dsim
+src/tools/fsim
 Dockerfile
 .dockerignore
