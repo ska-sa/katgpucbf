@@ -352,12 +352,12 @@ class XBEngine:
         # setting these values too high results in too much GPU memory being consumed. There just need to be enough
         # of them that the different processing functions do not get starved waiting for items. The low single digits is
         # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
-        # RAM than GPU RAM.
+        # RAM than GPU RAM. It should be higher than ulMaxActiveChunks in recv.cpp.
         # These values are not configurable as they have been acceptable for most tests cases up until now. If the
         # pipeline starts bottlenecking, then maybe look at increasing these values.
         n_rx_items = 3  # Too high means too much GPU memory gets allocated
         n_tx_items = 2
-        n_free_chunks = 20
+        n_free_chunks = 40
 
         # 6.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.

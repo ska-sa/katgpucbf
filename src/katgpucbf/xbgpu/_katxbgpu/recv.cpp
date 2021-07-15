@@ -172,11 +172,13 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         return std::make_tuple(nullptr, nullptr, 0);
     }
 
-    // 3. We search through all active chunks in the m_activeChunksQueue queue to see if the new heap falls within one
-    // of these chunks.
+    // 3. We search through all active chunks in the m_activeChunksQueue queue
+    // to see if the new heap falls within one of these chunks. We work
+    // backwards since the most common case is that it is the most recent chunk.
     std::int64_t i64BaseTimestamp = m_activeChunksQueue[0]->m_i64timestamp;
-    for (const auto &chunk : m_activeChunksQueue)
+    for (auto chunk_it = m_activeChunksQueue.rbegin(); chunk_it != m_activeChunksQueue.rend(); ++chunk_it)
     {
+        const auto &chunk = *chunk_it;
         if (i64Timestamp >= chunk->m_i64timestamp &&
             i64Timestamp < chunk->m_i64timestamp + m_i64TimestampStep * m_i64HeapsPerFenginePerChunk)
         {
@@ -204,7 +206,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         // This discontiunity will happen very rarely as data is being received from multiple senders and the chance of
         // all senders being down is negligible. The most likely cause of this issue would be an interruption in the
         // link between the katxbgpu host server and the network.
-        std::size_t ulMaxActiveChunks = 2;
+        std::size_t ulMaxActiveChunks = 32;
         std::int64_t i64StartTimestamp =
             m_activeChunksQueue.back()->m_i64timestamp + m_i64TimestampStep * m_i64HeapsPerFenginePerChunk;
 
