@@ -142,9 +142,12 @@ def test_correlator_exhaustive(num_ants):
     np.testing.assert_array_equal(buf_correct_visibilities_host, buf_visibilities_host)
 
 
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
-@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+@pytest.mark.combinations(
+    "num_ants, num_channels, num_samples_per_channel",
+    test_parameters.array_size,
+    test_parameters.num_channels,
+    test_parameters.num_samples_per_channel,
+)
 def test_correlator_quick(num_ants, num_samples_per_channel, num_channels):
     """
     Lightweight unit test of the Tensor core correlation algorithm.

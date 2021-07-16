@@ -174,9 +174,12 @@ def create_heaps(
     return heaps
 
 
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
-@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+@pytest.mark.combinations(
+    "num_ants, num_channels, num_samples_per_channel",
+    test_parameters.array_size,
+    test_parameters.num_channels,
+    test_parameters.num_samples_per_channel,
+)
 def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     """
     Unit tests for the xbengine.py module.
