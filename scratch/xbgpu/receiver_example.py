@@ -84,7 +84,7 @@ monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
 
 
 # 5. Create receiver object
-receiverStream = recv.Stream(
+receiver_stream = recv.Stream(
     n_ants=n_ants,
     n_channels=n_channels_per_stream,
     n_samples_per_channel=n_samples_per_channel,
@@ -107,24 +107,24 @@ src_chunks_per_stream = 8
 monitor.event_qsize("free_chunks", 0, src_chunks_per_stream)
 for i in range(src_chunks_per_stream):
     # 6.1.1 Create a buffer from this accel context. The size of the buffer is equal to the chunk size.
-    buf = accel.HostArray((receiverStream.chunk_bytes,), np.uint8, context=context)
+    buf = accel.HostArray((receiver_stream.chunk_bytes,), np.uint8, context=context)
     # 6.2 Create a chunk - the buffer object is given to this chunk. This is where sample data in a chunk is stored.
     chunk = recv.Chunk(buf)
     # 6.3 Give the chunk to the receiver - once this is done we no longer need to track the chunk object.
-    receiverStream.add_chunk(chunk)
+    receiver_stream.add_chunk(chunk)
 
 # 7. Add a "transport" to the reciever. The add_udp_ibv_reader() transport tells the receiver to listen on a specific
 # ethernet interface using the ibverbs acceleration tools. Once this transport is added, the receiver stream will start
 # receiving any relevant packets off of the network.
 
-receiverStream.add_udp_ibv_reader([(src_multicast_ip, src_multicast_port)], src_interface_ip, 10000000, 0)
+receiver_stream.add_udp_ibv_reader([(src_multicast_ip, src_multicast_port)], src_interface_ip, 10000000, 0)
 
 # 8. Receive chunks asyncronously in python from the receiver.
 
 # 8.1 Wrap the receiver ringbuffer in an AsyncRIngbuffer object so that chunks can be passed to python in an asyncio
 # loop.
-asyncRingbuffer = katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer(
-    receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
+async_ringbuffer = katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer(
+    receiver_stream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
 )
 
 
@@ -134,8 +134,8 @@ async def get_chunks():
     i = 0
     dropped = 0
     received = 0
-    # 8.2 Run async for loop to wait for completed chunks from the receiver using the asyncRingbuffer object.
-    async for chunk in asyncRingbuffer:
+    # 8.2 Run async for loop to wait for completed chunks from the receiver using the async_ringbuffer object.
+    async for chunk in async_ringbuffer:
         received += len(chunk.present)
         dropped += len(chunk.present) - sum(chunk.present)
         print(
@@ -143,7 +143,7 @@ async def get_chunks():
         )
         # 8.3 Once we are done with the chunk, give it back to the receiver so that the receiver has access to more
         # chunks without having to allocate more memory.
-        receiverStream.add_chunk(chunk)
+        receiver_stream.add_chunk(chunk)
         i += 1
 
 

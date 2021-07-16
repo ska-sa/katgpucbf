@@ -72,14 +72,14 @@ class TensorCoreXEngineCoreTemplate:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
-        self.inputDataShape = (
+        self.input_data_shape = (
             self.n_channels,
             self.n_samples_per_channel // self.n_times_per_block,
             self.n_ants,
             self.n_polarizations,
             self.n_times_per_block,
         )
-        self.outputDataShape = (self.n_channels, self.n_baselines, self.n_polarizations, self.n_polarizations)
+        self.output_data_shape = (self.n_channels, self.n_baselines, self.n_polarizations, self.n_polarizations)
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
         # of the object.
@@ -152,18 +152,18 @@ class TensorCoreXEngineCore(accel.Operation):
         """Initialise the TensorCoreXEngineCore object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
-        self.slots["inSamples"] = accel.IOSlot(
-            dimensions=self.template.inputDataShape, dtype=np.int16
+        self.slots["in_samples"] = accel.IOSlot(
+            dimensions=self.template.input_data_shape, dtype=np.int16
         )  # TODO: This must depend on input bitwidth
-        self.slots["outVisibilities"] = accel.IOSlot(dimensions=self.template.outputDataShape, dtype=np.int64)
+        self.slots["out_visibilities"] = accel.IOSlot(dimensions=self.template.output_data_shape, dtype=np.int64)
 
     def _run(self) -> None:
-        """Run the correlation kernel and add the generated values to the outVisibilities buffer."""
-        inSamples_buffer = self.buffer("inSamples")
-        outVisibilities_buffer = self.buffer("outVisibilities")
+        """Run the correlation kernel and add the generated values to the out_visibilities buffer."""
+        in_samples_buffer = self.buffer("in_samples")
+        out_visibilities_buffer = self.buffer("out_visibilities")
         self.command_queue.enqueue_kernel(
             self.template.kernel,
-            [outVisibilities_buffer.buffer, inSamples_buffer.buffer],
+            [out_visibilities_buffer.buffer, in_samples_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
@@ -173,8 +173,8 @@ class TensorCoreXEngineCore(accel.Operation):
         )
 
     def zero_visibilities(self):
-        """Zero all the values in the outVisibilities buffer."""
-        self.buffer("outVisibilities").zero(self.command_queue)
+        """Zero all the values in the out_visibilities buffer."""
+        self.buffer("out_visibilities").zero(self.command_queue)
 
     @staticmethod
     def get_baseline_index(ant1, ant2):

@@ -18,5 +18,5 @@ select =
 	E, # pep8 errors
 	F, # pyflakes fatals
 	W, # pep8 warnings
-	B  # bugbear checks for design issues
-	# bugbear requires flake8-bugbear, otherwise this is ignored
+	B, # bugbear checks for design issues (requires flake8-bugbear)
+	N  # pep8 naming (requires pep8-naming)

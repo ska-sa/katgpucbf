@@ -26,7 +26,7 @@ import katgpucbf.xbgpu.xbengine
 complexity = 2
 
 
-def createHeaps(
+def create_heaps(
     timestamp: int,
     batch_index: int,
     n_ants: int,
@@ -56,7 +56,7 @@ def createHeaps(
     This coded sample value can then be generated at the verification side and used to determine the expected output
     value without having to implement a full CPU-side correlator.
 
-    NOTE: There is significant overlap between this function and the spead2_receiver_test.createHeaps(...) function.
+    NOTE: There is significant overlap between this function and the spead2_receiver_test.create_heaps(...) function.
     The only difference is that their data is encoded differently. There is scope to merge these two functions.
 
     Parameters
@@ -75,7 +75,7 @@ def createHeaps(
         The number of pols per antenna. Expected to always be 2 at the moment.
     ig: spead2.send.ItemGroup
         The ig is used to generate heaps that will be passed to the source stream. This ig is expected to have been
-        configured correctly using the createTestObjects function.
+        configured correctly using the create_test_objects function.
 
     Returns
     -------
@@ -112,30 +112,30 @@ def createHeaps(
             sign = 1 if batch_index % 2 == 0 else -1
 
             # 2.1.1 Generate the samples to combine into a code word.
-            pol0Real = np.int8(sign * batch_index)
-            pol0Imag = np.int8(sign * chan_index)
-            pol1Real = np.int8(-sign * ant_index)
-            pol1Imag = np.int8(-sign * chan_index)
+            pol0_real = np.int8(sign * batch_index)
+            pol0_imag = np.int8(sign * chan_index)
+            pol1_real = np.int8(-sign * ant_index)
+            pol1_imag = np.int8(-sign * chan_index)
 
             # 2.1.1 Make sure none of these samples are equal to -128 as that is not a supported value with the Tensor
             # cores. Have to re-assign the numpy scalars because they are immutable.
-            if pol0Real == -128:
-                pol0Real = np.int8(-127)
-            if pol0Imag == -128:
-                pol0Imag = np.int8(-127)
-            if pol1Real == -128:
-                pol1Real = np.int8(-127)
-            if pol1Imag == -128:
-                pol1Imag = np.int8(-127)
+            if pol0_real == -128:
+                pol0_real = np.int8(-127)
+            if pol0_imag == -128:
+                pol0_imag = np.int8(-127)
+            if pol1_real == -128:
+                pol1_real = np.int8(-127)
+            if pol1_imag == -128:
+                pol1_imag = np.int8(-127)
 
             # 2.1.2 Combine values into a code word. The values are all cast to uint8s as when I was casting them to
             # int8s, the sign extension would behave strangly and what I expected to be in the code word would be
             # one bit off.
             coded_sample_value = np.uint32(
-                (np.uint8(pol1Imag) << 24)
-                + (np.uint8(pol1Real) << 16)
-                + (np.uint8(pol0Imag) << 8)
-                + (np.uint8(pol0Real) << 0)
+                (np.uint8(pol1_imag) << 24)
+                + (np.uint8(pol1_real) << 16)
+                + (np.uint8(pol0_imag) << 8)
+                + (np.uint8(pol0_real) << 0)
             )
 
             # 2.1.3 Set each sample in this channel to contain the same value.
@@ -216,9 +216,9 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     heap_shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
     timestamp_step = n_channels_total * 2 * n_samples_per_channel
 
-    # 2. Create sourceStream object - transforms "transmitted" heaps into a byte array to simulate received data.
+    # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
-    sourceStream = spead2.send.BytesStream(
+    source_stream = spead2.send.BytesStream(
         thread_pool,
         spead2.send.StreamConfig(
             max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk * 10
@@ -262,12 +262,12 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     # 3. Create receiver object to receive data from the xbengine.
     queue = spead2.InprocQueue()
     thread_pool = spead2.ThreadPool()
-    recvStream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
-    recvStream.add_inproc_reader(queue)
+    recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
+    recv_stream.add_inproc_reader(queue)
 
     # 4. Create xbengine
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
-        adc_sample_rate_Hz=1712000000.0,  # L-Band, not important
+        adc_sample_rate_hz=1712000000.0,  # L-Band, not important
         n_ants=n_ants,
         n_channels_total=n_channels_total,
         n_channels_per_stream=n_channels_per_stream,
@@ -281,13 +281,13 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     )
 
     # 5. Import C function that will be used for verifying data.
-    verificationFunctionsLib_C = np.ctypeslib.load_library(
+    verification_functions_lib_c = np.ctypeslib.load_library(
         libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/xbgpu")
     )
-    verify_xbengine_C = verificationFunctionsLib_C.verify_xbengine
+    verify_xbengine_c = verification_functions_lib_c.verify_xbengine
 
     baselines_products = n_ants * (n_ants + 1) // 2 * n_pols * n_pols * n_channels_per_stream
-    verify_xbengine_C.argtypes = [
+    verify_xbengine_c.argtypes = [
         np.ctypeslib.ndpointer(
             dtype=np.uint64,  # Output data array
             shape=(baselines_products,),
@@ -301,7 +301,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         ctypes.c_size_t,  # Polarisations per sample
     ]
 
-    verify_xbengine_C.restype = ctypes.c_int
+    verify_xbengine_c.restype = ctypes.c_int
 
     # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulations. Each
     # accumulation requires heap_accumulation_threshold batches of heaps. Additionally, we generate one extra batch to
@@ -313,16 +313,16 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         # as the accumulations are aligned to integer multiples of heap_accumulation_threshold * timestamp_step
         batch_index = i + (heap_accumulation_threshold - 1)
         timestamp = batch_index * timestamp_step
-        heaps = createHeaps(
+        heaps = create_heaps(
             timestamp, batch_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send
         )
-        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # 7. Add transports to xbengine.
     xbengine.add_inproc_sender_transport(queue)
-    xbengine.sendStream.send_descriptor_heap()
+    xbengine.send_stream.send_descriptor_heap()
 
-    buffer = sourceStream.getvalue()
+    buffer = source_stream.getvalue()
     xbengine.add_buffer_receiver_transport(buffer)
 
     # 8. Function to receive data.
@@ -330,14 +330,14 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         """Receives data from the xbengine and checks that it correct."""
         # 8.1 It is expected that the first packet will be a descriptor. We check to ensure that this is the case.
         ig_recv = spead2.ItemGroup()
-        heap = await recvStream.get()
+        heap = await recv_stream.get()
         items = ig_recv.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
         # 8.2 We expect to receive (n_accumulations + 1) output heaps. Each of these heaps is verified for correctness
         for i in range(n_accumulations + 1):
             # 8.2.1 Wait for heap to be ready and then update out item group with the new values
-            heap = await recvStream.get()
+            heap = await recv_stream.get()
             items = ig_recv.update(heap)
 
             # 8.2.2 The first heap is an incomplete accumulation containing a single batch, we need to make sure that
@@ -371,7 +371,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
             # 8.2.4 Send the received data to the C verification function and assert that this function return is
             # what we expect.
-            result = verify_xbengine_C(
+            result = verify_xbengine_c(
                 ig_recv["xeng_raw"].value.flatten(order="C"),
                 base_batch_index,
                 num_batches_in_current_accumulation,

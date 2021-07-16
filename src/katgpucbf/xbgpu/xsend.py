@@ -44,9 +44,9 @@ class XEngineSPEADAbstractSend(ABC):
     Base class for turning baseline correlation products into SPEAD heaps and transmitting them.
 
     This class creates a queue of buffers that can be sent out onto the network. To get one of these buffers call the
-    buffer_wrapper = thisObject.get_free_heap() object function - it will return a buffer wrapped in a
+    buffer_wrapper = this_object.get_free_heap() object function - it will return a buffer wrapped in a
     XEngineHeapBufferWrapper object. Once the necessary data has been copied to the buffer and it is ready to be sent
-    onto the network, pass it back to this object using the thisObject.send_heap(buffer_wrapper) command. This object
+    onto the network, pass it back to this object using the this_object.send_heap(buffer_wrapper) command. This object
     will create a limited number of buffers and keep recycling them - avoiding any memory allocation at runtime.
 
     This has been designed to run in an asyncio loop, and the get_free_heap() function makes sure that the next buffer
@@ -56,7 +56,7 @@ class XEngineSPEADAbstractSend(ABC):
     responsible for implementing the specific transports.
 
     While this base class is meant to be abstract, it has no abstract functions and so it can be constructed
-    without generating an error (the self.sourceStream: spead2.send.asyncio.AbstractStream class member is the
+    without generating an error (the self.source_stream: spead2.send.asyncio.AbstractStream class member is the
     abstract part). An error will only be thrown once an attempt is made to access the self.context object.
     """
 
@@ -65,8 +65,8 @@ class XEngineSPEADAbstractSend(ABC):
         Holds a buffer object that has been configured so that it can be zero-copy transferred onto the network.
 
         In order to preserve the zero-copy properties of th buffer, data can only be copied to the buffer within this
-        class, the buffer handle cannot be overwritten. For example: "buffer_wrapper.buffer = newArray" will fail as
-        it attempts to assign a new object to the buffer variable while "buffer_wrapper.buffer[:] = newArray" will
+        class, the buffer handle cannot be overwritten. For example: "buffer_wrapper.buffer = new_array" will fail as
+        it attempts to assign a new object to the buffer variable while "buffer_wrapper.buffer[:] = new_array" will
         succeed as it overwrites the values in the buffer, not the buffer itself.
 
         There may be a better way to hold these buffer objects and prevent them being overwritten other than
@@ -199,12 +199,12 @@ class XEngineSPEADAbstractSend(ABC):
 
             # 4.2.2 Create a dummy future object that is already marked as "done" Each buffer is paired with a future
             # so these dummy onces are necessary for initial start up.
-            dummyFuture: asyncio.Future = asyncio.Future()
-            dummyFuture.set_result("")
+            dummy_future: asyncio.Future = asyncio.Future()
+            dummy_future.set_result("")
 
             # 4.2.3. Wrap buffer in XEngineHeapBufferWrapper, join it together with its future as a tuple and put it
             # on the heaps queue
-            self._heaps_queue.put((dummyFuture, XEngineSPEADAbstractSend.XEngineHeapBufferWrapper(buffer)))
+            self._heaps_queue.put((dummy_future, XEngineSPEADAbstractSend.XEngineHeapBufferWrapper(buffer)))
 
             # 4.2.4 Store buffer in array so that it can be assigned to ibverbs memory regions in the
             # XEngineSPEADIbvSend stream.
@@ -214,23 +214,23 @@ class XEngineSPEADAbstractSend(ABC):
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / XEngineSPEADAbstractSend.max_payload_size)
         packet_header_overhead_bytes = packets_per_heap * XEngineSPEADAbstractSend.header_size
 
-        # 5.1 If the dump_interval is set to zero, pass zero to streamConfig to send as fast as possible.
+        # 5.1 If the dump_interval is set to zero, pass zero to stream_config to send as fast as possible.
         if self.dump_interval_s != 0:
-            send_rate_Bps = (
+            send_rate_bytes_per_second = (
                 (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_interval_s * 1.1
             )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
         else:
-            send_rate_Bps = 0
+            send_rate_bytes_per_second = 0
 
-        self.streamConfig = spead2.send.StreamConfig(
+        self.stream_config = spead2.send.StreamConfig(
             max_packet_size=self.max_packet_size,
             max_heaps=self._n_send_heaps_in_flight,
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=send_rate_Bps,
+            rate=send_rate_bytes_per_second,
         )
         # This class is currently marked as _private in the spead2 stub files,
         # in a future revision it may be changed to public.
-        self.sourceStream: spead2.send.asyncio._AsyncStream  # Left unassigned to remain abstract.
+        self.source_stream: spead2.send.asyncio._AsyncStream  # Left unassigned to remain abstract.
 
         # 6. Create item group - This is the SPEAD2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(
@@ -261,7 +261,7 @@ class XEngineSPEADAbstractSend(ABC):
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
-    def send_heap(self, timestamp: int, bufferWrapper: XEngineHeapBufferWrapper) -> None:
+    def send_heap(self, timestamp: int, buffer_wrapper: XEngineHeapBufferWrapper) -> None:
         """
         Take in an XEngineHeapBufferWrapper object and send it onto the network as a SPEAD heap.
 
@@ -272,12 +272,12 @@ class XEngineSPEADAbstractSend(ABC):
         ----------
         timestamp: int
             The timestamp that will be assigned to the buffer when it is encapsulated in a SPEAD heap.
-        bufferWrapper: XEngineHeapBufferWrapper
+        buffer_wrapper: XEngineHeapBufferWrapper
             Wrapped buffer to sent as a SPEAD heap.
         """
         self.item_group["timestamp"].value = timestamp
         self.item_group["channel offset"].value = self.channel_offset
-        self.item_group["xeng_raw"].value = bufferWrapper.buffer
+        self.item_group["xeng_raw"].value = buffer_wrapper.buffer
 
         heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
         # This flag forces the heap to include all item_group pointers in every packet belonging to a single heap
@@ -285,8 +285,8 @@ class XEngineSPEADAbstractSend(ABC):
         # SKARABs.
         heap_to_send.repeat_pointers = True
 
-        future = self.sourceStream.async_send_heap(heap_to_send)
-        self._heaps_queue.put((future, bufferWrapper))
+        future = self.source_stream.async_send_heap(heap_to_send)
+        self._heaps_queue.put((future, buffer_wrapper))
 
     async def get_free_heap(self) -> XEngineHeapBufferWrapper:
         """
@@ -302,17 +302,17 @@ class XEngineSPEADAbstractSend(ABC):
         ----------
         timestamp: int
             The timestamp that will be assigned to the buffer when it is encapsulated in a SPEAD heap.
-        bufferWrapper: XEngineHeapBufferWrapper
+        buffer_wrapper: XEngineHeapBufferWrapper
             Wrapped buffer to sent as a SPEAD heap.
 
         Returns
         -------
-        bufferWrapper: XEngineHeapBufferWrapper
+        buffer_wrapper: XEngineHeapBufferWrapper
             Free buffer wrapped in an XEngineHeapBufferWrapper object.
         """
-        future, bufferWrapper = self._heaps_queue.get()
+        future, buffer_wrapper = self._heaps_queue.get()
         await asyncio.wait([future])
-        return bufferWrapper
+        return buffer_wrapper
 
     def send_descriptor_heap(self):
         """
@@ -324,7 +324,7 @@ class XEngineSPEADAbstractSend(ABC):
         This function has no associated unit test - it will likely need to be revisited later as its need and function
         become clear.
         """
-        self.sourceStream.async_send_heap(self.descriptor_heap)
+        self.source_stream.async_send_heap(self.descriptor_heap)
 
 
 class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
@@ -388,9 +388,9 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
 
         # 3. Create SPEAD2 stream using ibverbs transport for sending data onto a network
         thread_pool = spead2.ThreadPool()
-        self.sourceStream = spead2.send.asyncio.UdpIbvStream(
+        self.source_stream = spead2.send.asyncio.UdpIbvStream(
             thread_pool,
-            self.streamConfig,
+            self.stream_config,
             spead2.send.UdpIbvConfig(
                 endpoints=[self.endpoint],
                 interface_address=interface_address,
@@ -453,8 +453,8 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         )
         self.queue: spead2.InprocQueue = queue
         thread_pool = spead2.ThreadPool()
-        self.sourceStream = spead2.send.asyncio.InprocStream(
+        self.source_stream = spead2.send.asyncio.InprocStream(
             thread_pool,
             [self.queue],
-            self.streamConfig,
+            self.stream_config,
         )
