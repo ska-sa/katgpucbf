@@ -1,9 +1,11 @@
 Guideline for Development
 =========================
 
+.. _getting-started:
 
 Getting Started
 ---------------
+
 First, clone the repo from Github. Don't forget to clone :option:`!--recursive`,
 so that the 3rd-party :mod:`.spead2` dependency gets pulled in.
 
@@ -47,14 +49,88 @@ And you are ready to start developing with :mod:`katgpucbf`!
 Pre-commit
 ----------
 
-`Pre-commit's documentation`_ describes more or less what it does. The
+Pre-commit's `documentation`_ describes what it does in sufficient detail. The
 configuration is located in ``.pre-commit-config.yaml``, though the various
 other modules which are loaded in this repo will have their configuration in
 various places.
 
-.. todo:: Bring in the readme from the pre-commit repo here?
+.. todo:: Merge the readme from the pre-commit repo into this section?
 
-.. _Pre-commit's documentation:: https://pre-commit.com/
+.. _documentation: https://pre-commit.com/
 
 Unit Testing
 ------------
+
+Unit testing for this module is performed using :mod:`.pytest` with support from
+:mod:`!pytest-asyncio`. Unit test files should follow :mod:`.pytest` conventions.
+Additionally, :mod:'.coverage' is used to give the developer insight into what
+the unit tests are actually testing, and what code remains untested. Both of
+these packages are installed if the ``dev-setup.sh`` script is used as described
+in :ref:`getting-started`.
+
+In order to run the tests, use the following command:
+
+.. code-block:: bash
+
+  coverage run
+
+:mod:'.coverage' will take its configuration from the ``.coveragerc`` file, and
+execute pytest which will actually run the unit tests, printing its report to
+``stdout`` as usual.
+
+.. note::
+
+  Coverage's concept of a "dynamic context" is configured in the ``.coveragerc``
+  file to tell you which unit test(s) executed a particular line of code. I
+  currently run it using the following command:
+
+  .. code-block:: bash
+
+    coverage run --context=$(git describe --tags --dirty)
+
+  This gives more useful information about exactly what code was run, and whether
+  it's committed or dirty. Unfortunately, the configuration file doesn't support
+  evaluating commands to produce a string as I've done on the cli (see
+  `this issue`_).
+
+.. _this issue: https://github.com/nedbat/coveragepy/issues/1190
+
+In order to generate an actual coverage report, use the
+following command:
+
+.. code-block:: bash
+
+  coverage html
+
+Other options are available, but the html format is convenient for viewing. You
+can easily view it using the following command:
+
+.. code-block:: bash
+
+  cd htmlcov && python -m http.server 8089
+
+If you are using VSCode, the editor will prompt you to open the link in a
+browser, and automatically fowrard the port to your ``localhost``. If not, or if
+you'd prefer to do it the old-fashioned way, point a browser at port ``8089``
+(or any other port of your preference) on the machine that you are developing on.
+
+The results will look something like this:
+
+.. image:: images/coverage_screenshot.png
+
+The colour key is at the top of the page, but briefly, lines marked in green
+were executed by the tests, red were not. Yellow lines indicate branches which
+were only partially covered, i.e. all possible ways to branch were not tested.
+In the cases shown, it is because only expected values were passed to the
+function in question, the unit tests didn't try to break to test for whether
+it would fail.
+
+On the right hand side, a context is shown for the lines that were executed, as
+shown in this image:
+
+.. image:: images/coverage_screenshot_contexts.png
+
+On the left side of the `|` is the static context - in this case showing
+information regarding the git commit that I ran the test on. The right side
+shows the dynamic context - in this case, two different tests both executed this
+code during the course of their run.
