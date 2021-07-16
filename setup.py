@@ -61,6 +61,12 @@ for mod in ["fgpu", "xbgpu"]:
             cxx_std=17,
             include_dirs=[src_dir, "3rdparty/spead2/include"],
             extra_compile_args=["-O3"],
+            # Trick pybind11 into believing each of these modules is
+            # ABI-incompatible with the Python spead2 module (and each other)
+            # so that it doesn't try to make them interoperable, which seems to
+            # cause test failures (the exact reason for the failures hasn't
+            # been investigated).
+            define_macros=[("PYBIND11_INTERNALS_KIND", f'"katgpucbf_{mod}_local"')],
         )
     )
 
