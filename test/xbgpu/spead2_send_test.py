@@ -91,7 +91,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     queue = spead2.InprocQueue()
 
     # 3.2 Create katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend that will wrap a SPEAD2 send stream.
-    sendStream = katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend(
+    send_stream = katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend(
         n_ants=num_ants,
         n_channels_per_stream=n_channels_per_stream,
         n_pols=n_pols,
@@ -103,8 +103,8 @@ def test_send_simple(event_loop, num_ants, num_channels):
 
     # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the XEngineSPEADInprocSend over the queue.
     thread_pool = spead2.ThreadPool()
-    recvStream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
-    recvStream.add_inproc_reader(queue)
+    recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
+    recv_stream.add_inproc_reader(queue)
 
     # 4. Define an async function to manage sending of X-Engine heaps. This function generates the heaps to be tested.
     async def send_process():
@@ -115,14 +115,14 @@ def test_send_simple(event_loop, num_ants, num_channels):
         """
         num_sent = 0
 
-        # 4.1 Send the descriptor as the recvStream object needs it to interpret the received heaps correctly.
-        sendStream.send_descriptor_heap()
+        # 4.1 Send the descriptor as the recv_stream object needs it to interpret the received heaps correctly.
+        send_stream.send_descriptor_heap()
 
         # 4.2 Run until a set number of heaps have been transferred.
         while num_sent < heaps_to_send:
             # 4.2.1 Get a free buffer to store the next heap - there is not always a free buffer available. This
             # function yields until one it available.
-            buffer_wrapper = await sendStream.get_free_heap()
+            buffer_wrapper = await send_stream.get_free_heap()
 
             # 4.2.2 Populate the buffer with dummy data - notice how we copy new values into the buffer, we dont
             # overwrite the buffer. Attempts to overwrite the buffer will throw an error. This is intended behavour as
@@ -132,9 +132,9 @@ def test_send_simple(event_loop, num_ants, num_channels):
             # would be garbage collected.
             buffer_wrapper.buffer[:] = np.full(buffer_wrapper.buffer.shape, num_sent, np.uint8)
 
-            # 4.2.3 Give the buffer back to the sendStream to transmit out onto the network. The timestamp is
+            # 4.2.3 Give the buffer back to the send_stream to transmit out onto the network. The timestamp is
             # multiplied by 0x1000000 so that its value is different from the values in the buffer_wrapper array.
-            sendStream.send_heap(num_sent * 0x1000000, buffer_wrapper)
+            send_stream.send_heap(num_sent * 0x1000000, buffer_wrapper)
             num_sent += 1
 
     # 5. Define an async function to manage receiving of X-Engine heaps. This function checks that the data is correct.
@@ -149,8 +149,8 @@ def test_send_simple(event_loop, num_ants, num_channels):
         ig = spead2.ItemGroup()
 
         # 5.1 Wait for the first packet to arrive - it is expected to be the SPEAD descriptor. Without the desciptor
-        # the recvStream cannot interpret the heaps correctly.
-        heap = await recvStream.get()
+        # the recv_stream cannot interpret the heaps correctly.
+        heap = await recv_stream.get()
         items = ig.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
@@ -158,7 +158,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         while num_received < heaps_to_send:
             # 5.2.1 The next heap may not be available immediatly. This function waits asynchronously until a
             # heap arrives.
-            heap = await recvStream.get()
+            heap = await recv_stream.get()
 
             items = ig.update(heap)
             has_timestamp = False
