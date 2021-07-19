@@ -1,8 +1,0 @@
-[run]
-branch = True
-command_line = -m pytest
-source = katgpucbf,test/
-dynamic_context = test_function
-
-[html]
-show_contexts = True
