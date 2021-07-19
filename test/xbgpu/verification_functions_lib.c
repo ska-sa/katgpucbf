@@ -217,7 +217,7 @@ int compare_complex_values(struct si32Complex sComplexValue1, struct si32Complex
  * Calculates the expected visibility data for all polarisation products for a pair of antennas and compares them to
  * the actual values generate by the xbengine pipeline. This function only checks the values for a single channel.
  *
- * This function assumes that the X-Engine input data is equal to the values assigned in the createHeaps(...) function
+ * This function assumes that the X-Engine input data is equal to the values assigned in the create_heaps(...) function
  * in xbengine_test.py
  *
  * This function is used within in the verify_xbengine(...) verification function scope.
@@ -317,7 +317,7 @@ int verify_antpair_visibilities(size_t ulBatchStartIndex, size_t ulNumBatches, s
 /**
  * Function called by the xbengine unit test to check that the data out of the engine is correct.
  *
- * This function assumes that the X-Engine input data is equal to the values assigned in the createHeaps(...) function
+ * This function assumes that the X-Engine input data is equal to the values assigned in the create_heaps(...) function
  * in xbengine_test.py and that the output visibilities data is formatted as described in the
  * katgpucbf.xbgpu.tensorcore_xengine_core module.
  *

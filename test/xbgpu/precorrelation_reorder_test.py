@@ -93,59 +93,59 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
         n_samples_per_channel=num_samples_per_channel,
         n_batches=n_batches,
     )
-    preCorrelationReorder = template.instantiate(queue)
-    preCorrelationReorder.ensure_all_bound()
+    pre_correlation_reorder = template.instantiate(queue)
+    pre_correlation_reorder.ensure_all_bound()
 
-    bufSamples_device = preCorrelationReorder.buffer("inSamples")
-    bufSamples_host = bufSamples_device.empty_like()
+    buf_samples_device = pre_correlation_reorder.buffer("in_samples")
+    buf_samples_host = buf_samples_device.empty_like()
 
-    bufReordered_device = preCorrelationReorder.buffer("outReordered")
-    bufReordered_host = bufReordered_device.empty_like()
+    buf_reordered_device = pre_correlation_reorder.buffer("out_reordered")
+    buf_reordered_host = buf_reordered_device.empty_like()
 
     # 3. Generate random input data - need to modify the dtype and  shape of the array as numpy does not have a packet
     # 8-bit int complex type.
 
-    bufSamplesInt16Shape = template.inputDataShape
-    bufSamplesInt8Shape = list(bufSamplesInt16Shape)  # Typecasting to manipulate the data
-    bufSamplesInt8Shape[-1] *= 2  # By converting from int16 to int8, the length of the last dimension doubles.
-    bufSamplesInt8Shape = tuple(bufSamplesInt8Shape)  # type: ignore
+    buf_samples_int16_shape = template.input_data_shape
+    buf_samples_int8_shape = list(buf_samples_int16_shape)  # Typecasting to manipulate the data
+    buf_samples_int8_shape[-1] *= 2  # By converting from int16 to int8, the length of the last dimension doubles.
+    buf_samples_int8_shape = tuple(buf_samples_int8_shape)  # type: ignore
 
-    bufSamples_host.dtype = np.int8
-    bufSamples_host[:] = np.random.randint(
+    buf_samples_host.dtype = np.int8
+    buf_samples_host[:] = np.random.randint(
         low=-127,
         high=128,
-        size=bufSamplesInt8Shape,
+        size=buf_samples_int8_shape,
         dtype=np.int8,
     )
-    bufSamples_host.dtype = np.int16
+    buf_samples_host.dtype = np.int16
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output Reordered array to the CPU.
-    bufSamples_device.set(queue, bufSamples_host)
-    preCorrelationReorder()
-    bufReordered_device.get(queue, bufReordered_host)
+    buf_samples_device.set(queue, buf_samples_host)
+    pre_correlation_reorder()
+    buf_reordered_device.get(queue, buf_reordered_host)
 
     # 5. Verify the processed/returned result
     #    - Both the input and output data are ultimately of type np.int8
-    bufSamples_host = bufSamples_host.astype(np.int8)
-    bufSamples_host.dtype = np.int8
+    buf_samples_host = buf_samples_host.astype(np.int8)
+    buf_samples_host.dtype = np.int8
 
-    bufReordered_host.dtype = np.int16
-    bufReordered_host = bufReordered_host.astype(np.int8)
-    bufReordered_host.dtype = np.int8
+    buf_reordered_host.dtype = np.int16
+    buf_reordered_host = buf_reordered_host.astype(np.int8)
+    buf_reordered_host.dtype = np.int8
 
     # 5.1. Now using the external C-library for a more efficient verification
     #   - TODO: Need to figure out a better way of indicating the loader_path
     #   - Using './test/xbgpu' as this function is called from the parent (root) directory
-    verificationFunctionsLib_C = np.ctypeslib.load_library(
+    verification_functions_lib_c = np.ctypeslib.load_library(
         libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/xbgpu")
     )
-    verify_precorr_reorder_C = verificationFunctionsLib_C.verify_precorrelation_reorder
+    verify_precorr_reorder_c = verification_functions_lib_c.verify_precorrelation_reorder
 
     # 5.1.1. Need to clarify these argument types
     #   - Ideally we want to pass Pointers to the array in here
     #   - As well as the array dimensions to calculate the strides
     #   - Fortunately, we can flatten numpy.ndarrays, so its shape is simply the total matrix size
-    verify_precorr_reorder_C.argtypes = [
+    verify_precorr_reorder_c.argtypes = [
         np.ctypeslib.ndpointer(
             dtype=np.int8,  # Input data array
             shape=(template.matrix_size * template.n_batches,),
@@ -165,12 +165,12 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     ]
 
     #   - Function return type - 0/1: Fail/Success
-    verify_precorr_reorder_C.restype = c_int
+    verify_precorr_reorder_c.restype = c_int
 
     # 5.1.2. Call the function with the required variables
-    result = verify_precorr_reorder_C(
-        bufSamples_host.flatten(order="C"),  # Flatten in row-major (C-style) order
-        bufReordered_host.flatten(order="C"),
+    result = verify_precorr_reorder_c(
+        buf_samples_host.flatten(order="C"),  # Flatten in row-major (C-style) order
+        buf_reordered_host.flatten(order="C"),
         template.n_batches,
         template.n_ants,
         template.n_channels,

@@ -77,7 +77,7 @@ class PreCorrelationReorderTemplate:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Declare the input and output data shapes
-        self.inputDataShape = (
+        self.input_data_shape = (
             self.n_batches,
             self.n_ants,
             self.n_channels,
@@ -85,7 +85,7 @@ class PreCorrelationReorderTemplate:
             self.n_polarisations,
         )
 
-        self.outputDataShape = (
+        self.output_data_shape = (
             self.n_batches,
             self.n_channels,
             self.n_samples_per_channel // self.n_times_per_block,
@@ -97,7 +97,7 @@ class PreCorrelationReorderTemplate:
         # The size of a data matrix required to be reordered is the same for Input or Output data shapes
         self.matrix_size = self.n_ants * self.n_channels * self.n_samples_per_channel * self.n_polarisations
         # Maximum number of threads per block, as per Section I of Nvidia's CUDA Programming Guide
-        THREADS_PER_BLOCK: Final[int] = 1024
+        THREADS_PER_BLOCK: Final[int] = 1024  # noqa: N806
 
         # 4. Calculate the number of thread blocks to launch per kernel call
         # - This is in the x-dimension and remains constant for the lifetime of the object.
@@ -157,18 +157,18 @@ class PreCorrelationReorder(accel.Operation):
         """Initialise the PreCorrelationReorder object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
-        self.slots["inSamples"] = accel.IOSlot(
-            dimensions=self.template.inputDataShape, dtype=np.int16
+        self.slots["in_samples"] = accel.IOSlot(
+            dimensions=self.template.input_data_shape, dtype=np.int16
         )  # TODO: This must depend on input bitwidth
-        self.slots["outReordered"] = accel.IOSlot(dimensions=self.template.outputDataShape, dtype=np.int16)
+        self.slots["out_reordered"] = accel.IOSlot(dimensions=self.template.output_data_shape, dtype=np.int16)
 
     def _run(self) -> None:
         """Run the correlation kernel."""
-        inSamples_buffer = self.buffer("inSamples")
-        outReordered_buffer = self.buffer("outReordered")
+        in_samples_buffer = self.buffer("in_samples")
+        out_reordered_buffer = self.buffer("out_reordered")
         self.command_queue.enqueue_kernel(
             self.template.kernel,
-            [inSamples_buffer.buffer, outReordered_buffer.buffer],
+            [in_samples_buffer.buffer, out_reordered_buffer.buffer],
             # Even though we are using CUDA, we follow OpenCLs grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to

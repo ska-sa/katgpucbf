@@ -13,7 +13,7 @@ from .. import __version__
 from . import recv, send
 from .compute import ComputeTemplate
 from .delay import MultiDelayModel
-from .monitor import Monitor
+from .monitor import FileMonitor, Monitor, NullMonitor
 from .process import Processor
 
 
@@ -172,7 +172,7 @@ class Engine(aiokatcp.DeviceServer):
         mask_timestamp: bool,
         use_gdrcopy: bool,
         use_peerdirect: bool,
-        monitor: Monitor,
+        monitor: str = None,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         sensors: List[aiokatcp.Sensor] = [
@@ -216,11 +216,18 @@ class Engine(aiokatcp.DeviceServer):
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_scale = quant_scale
         pols = compute.pols
-        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
+
+        self.monitor: Monitor
+        if monitor is not None:
+            self.monitor = FileMonitor(monitor)
+        else:
+            self.monitor = NullMonitor()
+
+        self._processor = Processor(compute, self.delay_model, use_gdrcopy, self.monitor, self.sensors)
 
         ringbuffer_capacity = 2
         ring = recv.Ringbuffer(ringbuffer_capacity)
-        monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
+        self.monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
@@ -235,12 +242,12 @@ class Engine(aiokatcp.DeviceServer):
                 src_affinity[pol],
                 mask_timestamp=mask_timestamp,
                 use_gdrcopy=use_gdrcopy,
-                monitor=monitor,
+                monitor=self.monitor,
             )
             for pol in range(pols)
         ]
         src_chunks_per_stream = 4
-        monitor.event_qsize("free_chunks", 0, src_chunks_per_stream * len(self._src_streams))
+        self.monitor.event_qsize("free_chunks", 0, src_chunks_per_stream * len(self._src_streams))
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_gdrcopy:
@@ -291,9 +298,9 @@ class Engine(aiokatcp.DeviceServer):
             dst_packet_payload + 96,  # TODO make this into some kind of parameter. A naked 96 makes me nervous.
             rate,
             len(send_chunks) * spectra // acc_len * len(dst),
-            monitor,
+            self.monitor,
         )
-        monitor.event_qsize("send_free_ringbuffer", 0, len(send_chunks))
+        self.monitor.event_qsize("send_free_ringbuffer", 0, len(send_chunks))
         for schunk in send_chunks:
             self._sender.push_free_ring(schunk)
 
@@ -322,25 +329,28 @@ class Engine(aiokatcp.DeviceServer):
           exceptions. Which is a problem.
         """
         loop = asyncio.get_event_loop()
-        await self.start()
-        try:
-            for pol, stream in enumerate(self._src_streams):
-                src = self._srcs[pol]
-                if isinstance(src, str):
-                    stream.add_udp_pcap_file_reader(src)
-                else:
-                    if self._src_interface is None:
-                        raise ValueError("src_interface is required for UDP sources")
-                    # TODO: use src_ibv                     ...?
-                    stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer, self._src_comp_vector[pol])
-            tasks = [
-                loop.create_task(self._processor.run_processing(self._src_streams)),
-                loop.create_task(self._processor.run_receive(self._src_streams)),
-                loop.create_task(self._processor.run_transmit(self._sender)),
-            ]
-            await asyncio.gather(*tasks)
-        finally:
-            for stream in self._src_streams:
-                stream.stop()
-            self._sender.stop()
-            await self.stop()
+        with self.monitor:
+            await self.start()
+            try:
+                for pol, stream in enumerate(self._src_streams):
+                    src = self._srcs[pol]
+                    if isinstance(src, str):
+                        stream.add_udp_pcap_file_reader(src)
+                    else:
+                        if self._src_interface is None:
+                            raise ValueError("src_interface is required for UDP sources")
+                        # TODO: use src_ibv                     ...?
+                        stream.add_udp_ibv_reader(
+                            src, self._src_interface, self._src_buffer, self._src_comp_vector[pol]
+                        )
+                tasks = [
+                    loop.create_task(self._processor.run_processing(self._src_streams)),
+                    loop.create_task(self._processor.run_receive(self._src_streams)),
+                    loop.create_task(self._processor.run_transmit(self._sender)),
+                ]
+                await asyncio.gather(*tasks)
+            finally:
+                for stream in self._src_streams:
+                    stream.stop()
+                self._sender.stop()
+                await self.stop()

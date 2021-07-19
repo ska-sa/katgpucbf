@@ -63,8 +63,7 @@ RUN pip install --no-deps . && pip check
 # Build simulation utilities.
 # We use make clean to ensure that an existing build from the build context
 # won't accidentally get used instead.
-RUN cd scratch/fgpu && make clean && make -j dsim
-RUN cd scratch/xbgpu && make clean && make -j fsim
+RUN cd src/tools && make clean && make -j dsim fsim
 
 #######################################################################
 
@@ -92,6 +91,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libcap2
 
 COPY --from=build /venv /venv
-COPY --from=build /tmp/katgpucbf/scratch/fgpu/dsim /usr/local/bin
-COPY --from=build /tmp/katgpucbf/scratch/xbgpu/fsim /usr/local/bin
+COPY --from=build /tmp/katgpucbf/src/tools/dsim /usr/local/bin
+COPY --from=build /tmp/katgpucbf/src/tools/fsim /usr/local/bin
 ENV PATH=/venv/bin:$PATH

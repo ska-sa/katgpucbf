@@ -139,7 +139,7 @@ async def async_main(args: argparse.Namespace) -> None:
     """
     print("Initialising XB-Engine")
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
-        adc_sample_rate_Hz=args.adc_sample_rate,
+        adc_sample_rate_hz=args.adc_sample_rate,
         n_ants=args.array_size,
         n_channels_total=args.channels_total,
         n_channels_per_stream=args.channels_in_stream,
