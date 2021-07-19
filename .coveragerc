@@ -1,7 +1,7 @@
 [run]
 branch = True
 command_line = -m pytest
-source = src/,test/
+source = katgpucbf,test/
 dynamic_context = test_function
 
 [html]

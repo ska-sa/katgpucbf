@@ -8,6 +8,7 @@
 **/build
 **/__pycache__
 **/doc/_build
+htmlcov/
 scratch/fgpu/dsim
 scratch/fgpu/memcpy_loop
 scratch/xbgpu/fsim

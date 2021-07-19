@@ -1,5 +1,5 @@
-Guideline for Development
-=========================
+Guidelines for Development
+==========================
 
 .. _getting-started:
 
@@ -30,7 +30,7 @@ get going.
 
 The script will perform the following actions:
 
-  - Create a fresh Python 3.8 virtual environment.
+  - Create a fresh Python virtual environment.
   - Install all the requirements for running, developing and building this
     documentation.
   - Install the :mod:`katgpucbf` package itself, in editable mode.
@@ -63,7 +63,7 @@ Unit Testing
 
 Unit testing for this module is performed using :mod:`.pytest` with support from
 :mod:`!pytest-asyncio`. Unit test files should follow :mod:`.pytest` conventions.
-Additionally, :mod:'.coverage' is used to give the developer insight into what
+Additionally, :mod:`.coverage` is used to give the developer insight into what
 the unit tests are actually testing, and what code remains untested. Both of
 these packages are installed if the ``dev-setup.sh`` script is used as described
 in :ref:`getting-started`.
@@ -107,10 +107,16 @@ can easily view it using the following command:
 
 .. code-block:: bash
 
+  xdg-open htmlcov/index.html
+
+Or, if you are developing on a remote server:
+
+.. code-block:: bash
+
   cd htmlcov && python -m http.server 8089
 
 If you are using VSCode, the editor will prompt you to open the link in a
-browser, and automatically fowrard the port to your ``localhost``. If not, or if
+browser, and automatically forward the port to your ``localhost``. If not, or if
 you'd prefer to do it the old-fashioned way, point a browser at port ``8089``
 (or any other port of your preference) on the machine that you are developing on.
 
