@@ -9,7 +9,7 @@ import pytest
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.fgpu.main import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT
+from katgpucbf.fgpu.main import DEFAULT_KATCP_HOST
 from katgpucbf.fgpu.monitor import NullMonitor
 
 pytestmark = pytest.mark.asyncio
@@ -26,7 +26,7 @@ def event_loop():
 @pytest.fixture(scope="module")
 async def gpu_context():
     """Generate a GPU context."""
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
+    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda, interactive=False)
     return ctx
 
 
@@ -46,7 +46,7 @@ async def engine_server(gpu_context):
     monitor = NullMonitor()
     server = Engine(
         katcp_host=DEFAULT_KATCP_HOST,
-        katcp_port=DEFAULT_KATCP_PORT,
+        katcp_port=0,  # This lets the OS assign an unused port, avoiding any conflicts.
         context=gpu_context,
         srcs=src_endpoints,
         src_interface=LOCALHOST,
