@@ -75,7 +75,7 @@ def parse_args(arglist: List[str] = None) -> argparse.Namespace:
         in test situations, to make use of the configured defaults. If None,
         arguments from ``sys.argv`` will be used.
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog="fgpu")
     parser.add_argument(
         "--katcp-host",
         type=str,
