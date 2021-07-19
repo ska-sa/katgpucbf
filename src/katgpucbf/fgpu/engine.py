@@ -12,7 +12,7 @@ from katsdptelstate.endpoint import Endpoint
 from .. import __version__
 from . import recv, send
 from .compute import ComputeTemplate
-from .delay import MultiDelayModel
+from .delay import LinearDelayModel, MultiDelayModel
 from .monitor import FileMonitor, Monitor, NullMonitor
 from .process import Processor
 
@@ -311,6 +311,35 @@ class Engine(aiokatcp.DeviceServer):
         # passed here, in case there's some kind of setter function which may
         # modify it in any way.
         self.sensors["quant-scale"].set_value(self._processor.compute.quant_scale)
+
+    async def request_delays(self, ctx, start_time: int, delays: str) -> None:
+        """Set the delay and fringe correction using a first-order polynomial.
+
+        .. danger::
+
+          For the time being, this function takes the ``start_time`` argument and
+          just sticks it in the (seemingly) appropriate place in the delay model.
+          However, this is actually wrong. The time given by CAM is in UNIX time,
+          while the time expected there is in digitiser sample counts.
+
+          In order to convert between the two, we need to know the digitiser's
+          "epoch", and we don't have provision for that in the F-engine so far,
+          as far as I am aware.
+        """
+
+        def comma_string_to_float(comma_string: str) -> Tuple[float, float]:
+            a_str, b_str = comma_string.split(",")
+            a = float(a_str)
+            b = float(b_str)
+            return a, b
+
+        delay_str, phase_str = delays.split(":")
+        delay, delay_rate = comma_string_to_float(delay_str)
+        phase, phase_rate = comma_string_to_float(phase_str)
+
+        new_linear_model = LinearDelayModel(start_time, delay, delay_rate, phase, phase_rate)
+
+        self.delay_model.add(new_linear_model)
 
     async def run(self) -> None:
         """Run the engine.
