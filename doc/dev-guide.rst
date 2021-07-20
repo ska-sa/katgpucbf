@@ -153,4 +153,15 @@ code during the course of their run.
   boiler-plate file in the repository, so I leave this to the discretion of the
   individual developer to make use of as desired.
 
+  .. tip::
+
+    Although having said that, the Makefile could also replace dev-setup.sh,
+    allowing the developer to do something like
+
+    .. code-block:: bash
+
+      made develop  # to set up the environment
+      make test     # to actually run the tests
+
+
   .. _suggests: https://github.com/nedbat/coveragepy/issues/1190
