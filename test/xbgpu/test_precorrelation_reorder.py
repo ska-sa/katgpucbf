@@ -37,15 +37,19 @@ from ctypes import c_int  # Only need this from the library
 
 import numpy as np
 import pytest
-import test_parameters
 from katsdpsigproc import accel
 
 from katgpucbf.xbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 
+from . import test_parameters
 
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
-@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
+
+@pytest.mark.combinations(
+    "num_ants, num_channels, num_samples_per_channel",
+    test_parameters.array_size,
+    test_parameters.num_channels,
+    test_parameters.num_samples_per_channel,
+)
 def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_channel):
     """
     Parametrised unit test of the Pre-correlation Reorder kernel.

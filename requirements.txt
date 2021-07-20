@@ -4,7 +4,7 @@
 #
 #    pip-compile requirements.in
 #
-aiokatcp==0.8.0
+aiokatcp==1.0.0
     # via -r requirements.in
 appdirs==1.4.4
     # via

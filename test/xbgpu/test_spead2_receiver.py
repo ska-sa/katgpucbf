@@ -26,11 +26,12 @@ import numpy as np
 import pytest
 import spead2
 import spead2.send
-import test_parameters
 
 import katgpucbf.xbgpu._katxbgpu.recv as recv
 import katgpucbf.xbgpu.monitor
 import katgpucbf.xbgpu.ringbuffer
+
+from . import test_parameters
 
 logging.basicConfig(level=logging.INFO)
 
@@ -272,9 +273,12 @@ def create_heaps(
     return heaps
 
 
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
-@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+@pytest.mark.combinations(
+    "num_ants, num_channels, num_samples_per_channel",
+    test_parameters.array_size,
+    test_parameters.num_channels,
+    test_parameters.num_samples_per_channel,
+)
 def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels):
     """Tests the xbgpu SPEAD2 reciever.
 

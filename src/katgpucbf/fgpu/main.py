@@ -10,7 +10,7 @@ import asyncio
 import ipaddress
 import logging
 import signal
-from typing import Callable, List, Optional, Tuple, TypeVar, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -66,9 +66,17 @@ def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> 
     return func
 
 
-def parse_args() -> argparse.Namespace:
-    """Declare and parse command-line arguments."""
-    parser = argparse.ArgumentParser()
+def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Declare and parse command-line arguments.
+
+    Parameters
+    ----------
+    arglist
+        You can pass a list of argument strings in this parameter, for example
+        in test situations, to make use of the configured defaults. If None,
+        arguments from ``sys.argv`` will be used.
+    """
+    parser = argparse.ArgumentParser(prog="fgpu")
     parser.add_argument(
         "--katcp-host",
         type=str,
@@ -173,7 +181,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, nargs=N_POL, help="Source endpoints (or pcap file)")
     parser.add_argument("dst", type=endpoint_list_parser(7148), help="Destination endpoints")
-    args = parser.parse_args()
+    args = parser.parse_args(arglist)
 
     if args.use_peerdirect and not args.dst_ibv:
         parser.error("--use-peerdirect requires --dst-ibv")
@@ -209,50 +217,65 @@ def add_signal_handlers():
         loop.add_signal_handler(signum, handler)
 
 
-async def async_main() -> None:
-    """Start the F-Engine asynchronously."""
-    add_signal_handlers()
-    args = parse_args()
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
+def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
+    """Make an :class:`Engine` object, given a GPU context.
 
-    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.acc_len)
+    Parameters
+    ----------
+    ctx
+        The GPU context in which the :class:`.Engine` will operate.
+    arglist
+        [Optional] list of arguments. See :func:`parse_args` for more details.
+    """
+    args = parse_args(arglist)
 
     monitor: Monitor
     if args.monitor_log is not None:
         monitor = FileMonitor(args.monitor_log)
     else:
         monitor = NullMonitor()
+
+    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.acc_len)
+    engine = Engine(
+        katcp_host=args.katcp_host,
+        katcp_port=args.katcp_port,
+        context=ctx,
+        srcs=args.src,
+        src_interface=args.src_interface,
+        src_ibv=args.src_ibv,
+        src_affinity=args.src_affinity,
+        src_comp_vector=args.src_comp_vector,
+        src_packet_samples=args.src_packet_samples,
+        src_buffer=args.src_buffer,
+        dst=args.dst,
+        dst_interface=args.dst_interface,
+        dst_ttl=args.dst_ttl,
+        dst_ibv=args.dst_ibv,
+        dst_packet_payload=args.dst_packet_payload,
+        dst_affinity=args.dst_affinity,
+        dst_comp_vector=args.dst_comp_vector,
+        adc_rate=args.adc_rate,
+        feng_id=args.feng_id,
+        spectra=chunk_samples // (2 * args.channels),
+        acc_len=args.acc_len,
+        channels=args.channels,
+        taps=args.taps,
+        quant_scale=args.quant_scale,
+        mask_timestamp=args.mask_timestamp,
+        use_gdrcopy=args.use_gdrcopy,
+        use_peerdirect=args.use_peerdirect,
+        monitor=monitor,
+    )
+
+    return engine, monitor
+
+
+async def async_main() -> None:
+    """Start the F-Engine asynchronously."""
+    add_signal_handlers()
+    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
+    engine, monitor = make_engine(ctx)
     with monitor:
-        engine = Engine(
-            katcp_host=args.katcp_host,
-            katcp_port=args.katcp_port,
-            context=ctx,
-            srcs=args.src,
-            src_interface=args.src_interface,
-            src_ibv=args.src_ibv,
-            src_affinity=args.src_affinity,
-            src_comp_vector=args.src_comp_vector,
-            src_packet_samples=args.src_packet_samples,
-            src_buffer=args.src_buffer,
-            dst=args.dst,
-            dst_interface=args.dst_interface,
-            dst_ttl=args.dst_ttl,
-            dst_ibv=args.dst_ibv,
-            dst_packet_payload=args.dst_packet_payload,
-            dst_affinity=args.dst_affinity,
-            dst_comp_vector=args.dst_comp_vector,
-            adc_rate=args.adc_rate,
-            feng_id=args.feng_id,
-            spectra=chunk_samples // (2 * args.channels),
-            acc_len=args.acc_len,
-            channels=args.channels,
-            taps=args.taps,
-            quant_scale=args.quant_scale,
-            mask_timestamp=args.mask_timestamp,
-            use_gdrcopy=args.use_gdrcopy,
-            use_peerdirect=args.use_peerdirect,
-            monitor=monitor,
-        )
         await engine.run()
 
 

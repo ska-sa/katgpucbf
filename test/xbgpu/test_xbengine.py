@@ -16,11 +16,11 @@ import pytest
 import spead2
 import spead2.recv.asyncio
 import spead2.send
-import spead2_receiver_test
-import test_parameters
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
+
+from . import test_parameters, test_spead2_receiver
 
 # 3. Define Constants
 complexity = 2
@@ -56,7 +56,7 @@ def create_heaps(
     This coded sample value can then be generated at the verification side and used to determine the expected output
     value without having to implement a full CPU-side correlator.
 
-    NOTE: There is significant overlap between this function and the spead2_receiver_test.create_heaps(...) function.
+    NOTE: There is significant overlap between this function and the test_spead2_receiver.create_heaps(...) function.
     The only difference is that their data is encoded differently. There is scope to merge these two functions.
 
     Parameters
@@ -174,9 +174,12 @@ def create_heaps(
     return heaps
 
 
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-@pytest.mark.parametrize("num_samples_per_channel", test_parameters.num_samples_per_channel)
-@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+@pytest.mark.combinations(
+    "num_ants, num_channels, num_samples_per_channel",
+    test_parameters.array_size,
+    test_parameters.num_channels,
+    test_parameters.num_samples_per_channel,
+)
 def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     """
     Unit tests for the xbengine.py module.
@@ -226,37 +229,37 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     )
 
     # 2.1. Create ItemGroup and add all the required fields.
-    ig_send = spead2.send.ItemGroup(flavour=spead2.Flavour(**spead2_receiver_test.default_spead_flavour))
+    ig_send = spead2.send.ItemGroup(flavour=spead2.Flavour(**test_spead2_receiver.default_spead_flavour))
     ig_send.add_item(
-        spead2_receiver_test.TIMESTAMP_ID,
+        test_spead2_receiver.TIMESTAMP_ID,
         "timestamp",
         "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
         shape=[],
-        format=[("u", spead2_receiver_test.default_spead_flavour["heap_address_bits"])],
+        format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
     )
     ig_send.add_item(
-        spead2_receiver_test.FENGINE_ID,
+        test_spead2_receiver.FENGINE_ID,
         "fengine id",
         "F-Engine heap is received from.",
         shape=[],
-        format=[("u", spead2_receiver_test.default_spead_flavour["heap_address_bits"])],
+        format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
     )
     ig_send.add_item(
-        spead2_receiver_test.CHANNEL_OFFSET,
+        test_spead2_receiver.CHANNEL_OFFSET,
         "channel offset",
         "Value of first channel in collections stored here.",
         shape=[],
-        format=[("u", spead2_receiver_test.default_spead_flavour["heap_address_bits"])],
+        format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
     )
-    ig_send.add_item(spead2_receiver_test.DATA_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
+    ig_send.add_item(test_spead2_receiver.DATA_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
     # 2.1 Adding padding to header so it is the required width.
     for i in range(3):
         ig_send.add_item(
-            spead2_receiver_test.CHANNEL_OFFSET + 1 + i,
+            test_spead2_receiver.CHANNEL_OFFSET + 1 + i,
             f"padding {i}",
             "Padding field {i} to align header to 256-bit boundary.",
             shape=[],
-            format=[("u", spead2_receiver_test.default_spead_flavour["heap_address_bits"])],
+            format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
         )
 
     # 3. Create receiver object to receive data from the xbengine.
