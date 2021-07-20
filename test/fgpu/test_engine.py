@@ -1,9 +1,5 @@
 """Unit tests for Engine functions."""
 
-# import pytest
-
-# from katgpucbf.fgpu.main import make_engine
-
 
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
