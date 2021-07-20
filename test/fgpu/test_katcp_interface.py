@@ -22,8 +22,8 @@ class TestKatcpRequests:
 
     async def test_quant_gain_set(self, engine_client, engine_server):
         """Test that the quant gain is correctly set."""
-        _reply, _informs = await engine_client.request("quant-scale", 0.2)
-        assert engine_server._processor.compute.quant_scale == 0.2
+        _reply, _informs = await engine_client.request("quant-gain", 0.2)
+        assert engine_server._processor.compute.quant_gain == 0.2
 
     async def test_delay_model_update(self, engine_client, engine_server):
         """Test that the delay model is correctly updated.

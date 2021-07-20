@@ -123,7 +123,7 @@ class Engine(aiokatcp.DeviceServer):
         Number of output channels to produce.
     taps
         Number of taps in each branch of the PFB-FIR
-    quant_scale
+    quant_gain
         Rescaling factor to apply before 8-bit requantisation.
     sync_epoch
         UNIX time at which the digitisers were synced.
@@ -170,7 +170,7 @@ class Engine(aiokatcp.DeviceServer):
         acc_len: int,
         channels: int,
         taps: int,
-        quant_scale: float,
+        quant_gain: float,
         sync_epoch: int,
         mask_timestamp: bool,
         use_gdrcopy: bool,
@@ -195,9 +195,9 @@ class Engine(aiokatcp.DeviceServer):
             ),
             aiokatcp.Sensor(
                 float,
-                "quant-scale",
+                "quant-gain",
                 "rescaling factor to apply before 8-bit requantisation",
-                default=quant_scale,
+                default=quant_gain,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             ),
         ]
@@ -217,7 +217,7 @@ class Engine(aiokatcp.DeviceServer):
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, acc_len, channels)
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
-        compute.quant_scale = quant_scale
+        compute.quant_gain = quant_gain
         pols = compute.pols
         self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
 
@@ -300,13 +300,13 @@ class Engine(aiokatcp.DeviceServer):
         for schunk in send_chunks:
             self._sender.push_free_ring(schunk)
 
-    async def request_quant_scale(self, ctx, quant_scale: float) -> None:
-        """Set the quant scale."""
-        self._processor.compute.quant_scale = quant_scale
+    async def request_quant_gain(self, ctx, quant_gain: float) -> None:
+        """Set the quant gain."""
+        self._processor.compute.quant_gain = quant_gain
         # We'll use the actual value of the property instead of the argument
         # passed here, in case there's some kind of setter function which may
         # modify it in any way.
-        self.sensors["quant-scale"].set_value(self._processor.compute.quant_scale)
+        self.sensors["quant-gain"].set_value(self._processor.compute.quant_gain)
 
     async def request_delays(self, ctx, start_time: int, delays: str) -> None:
         """Set the delay and fringe correction using a first-order polynomial.

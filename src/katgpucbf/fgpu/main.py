@@ -164,7 +164,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
     parser.add_argument(
-        "--quant-scale", type=float, default=0.001, help="Rescaling factor before 8-bit requantisation [%(default)s]"
+        "--quant-gain", type=float, default=0.001, help="Rescaling factor before 8-bit requantisation [%(default)s]"
     )
     parser.add_argument(
         "--sync-epoch",
@@ -265,7 +265,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         acc_len=args.acc_len,
         channels=args.channels,
         taps=args.taps,
-        quant_scale=args.quant_scale,
+        quant_gain=args.quant_gain,
         sync_epoch=args.sync_epoch,
         mask_timestamp=args.mask_timestamp,
         use_gdrcopy=args.use_gdrcopy,

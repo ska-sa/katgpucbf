@@ -23,7 +23,7 @@ async def engine_server(request, gpu_context):
     get the :class:`~.fgpu.Engine` running so that the KATCP interface can be
     tested.
     """
-    server = make_engine(gpu_context, arglist=request.cls.engine_arglist)
+    server, _monitor = make_engine(gpu_context, arglist=request.cls.engine_arglist)
 
     await server.start()
     yield server
