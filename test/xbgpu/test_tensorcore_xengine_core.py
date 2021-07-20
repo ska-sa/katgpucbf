@@ -9,10 +9,11 @@ Contains two unit tests:
 """
 import numpy as np
 import pytest
-import test_parameters
 from katsdpsigproc import accel
 
 from katgpucbf.xbgpu import tensorcore_xengine_core
+
+from . import test_parameters
 
 
 def get_simple_test_ant_value(channel_index, ant_index):

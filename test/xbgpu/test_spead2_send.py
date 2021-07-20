@@ -31,9 +31,10 @@ import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
-import test_parameters
 
 import katgpucbf.xbgpu.xsend
+
+from . import test_parameters
 
 
 @pytest.mark.combinations(
