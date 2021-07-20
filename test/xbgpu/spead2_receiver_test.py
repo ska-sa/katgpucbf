@@ -15,7 +15,7 @@ or a full implementation of the SPEAD protocol. However, the exact packet size a
 within the a packet are not checked. Some sort of external test should be done to check this. See the
 display_fsim_multicast_packets.py script in the scratch folder of this repo as a starting point to check packet formats.
 
-TODO: Turn createTestObjects() into a pytest fixture.
+TODO: Turn create_test_objects() into a pytest fixture.
 """
 
 import asyncio
@@ -47,7 +47,7 @@ default_spead_flavour = {"version": 4, "item_pointer_bits": 64, "heap_address_bi
 complexity = 2
 
 
-def createTestObjects(
+def create_test_objects(
     n_ants: int,
     n_channels_per_stream: int,
     n_samples_per_channel: int,
@@ -87,16 +87,16 @@ def createTestObjects(
 
     Returns
     -------
-    sourceStream: spead2.send.BytesStream
+    source_stream: spead2.send.BytesStream
         Source SPEAD2 object that will generate the byte array representing
         simulated data.
     ig: spead2.send.ItemGroup
         The ig is used to generate heaps that will  be passed to the source
         stream.
-    receiverStream: katgpucbf.xbgpu._katxbgpu.recv.Stream
-        The receiver under test - will receive data from the sourceStream.
-    asyncRingbuffer: katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer
-        Wraps the receiverStream ringbuffer so that it can be called using
+    receiver_stream: katgpucbf.xbgpu._katxbgpu.recv.Stream
+        The receiver under test - will receive data from the source_stream.
+    async_ringbuffer: katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer
+        Wraps the receiver_stream ringbuffer so that it can be called using
         asyncio in python.
     """
     # 1. Calculate important parameters.
@@ -105,9 +105,9 @@ def createTestObjects(
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
     heap_shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
 
-    # 2. Create sourceStream object - transforms "transmitted" heaps into a byte array to simulate received data.
+    # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
-    sourceStream = spead2.send.BytesStream(
+    source_stream = spead2.send.BytesStream(
         thread_pool,
         spead2.send.StreamConfig(max_packet_size=max_packet_size, max_heaps=n_ants * heaps_per_fengine_per_chunk),
     )
@@ -157,7 +157,7 @@ def createTestObjects(
 
     # 4.3 Create Receiver
     thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
-    receiverStream = recv.Stream(
+    receiver_stream = recv.Stream(
         n_ants,
         n_channels_per_stream,
         n_samples_per_channel,
@@ -175,20 +175,20 @@ def createTestObjects(
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = 8
     for _ in range(src_chunks_per_stream):
-        buf = accel.HostArray((receiverStream.chunk_bytes,), np.uint8, context=context)
+        buf = accel.HostArray((receiver_stream.chunk_bytes,), np.uint8, context=context)
         chunk = recv.Chunk(buf)
-        receiverStream.add_chunk(chunk)
+        receiver_stream.add_chunk(chunk)
 
     # 5. Wrap ringbuffer in an Asycnringbuffer class for asyncio functionality.
-    asyncRingbuffer = katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer(
-        receiverStream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
+    async_ringbuffer = katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer(
+        receiver_stream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
     )
 
     # 6. Return relevant objects
-    return sourceStream, ig, receiverStream, asyncRingbuffer
+    return source_stream, ig, receiver_stream, async_ringbuffer
 
 
-def createHeaps(
+def create_heaps(
     timestamp: int,
     id: int,
     n_ants: int,
@@ -198,7 +198,7 @@ def createHeaps(
     ig: spead2.send.ItemGroup,
 ):
     """
-    Generate a list of heaps to send via the sourceStream.
+    Generate a list of heaps to send via the source_stream.
 
     One heap is generated per antenna in the array. All heaps will have the same timestamp. The 8-bit complex samples
     are treated as a single 16-bit value. Per heap, all sample values are the same. This makes for faster verification
@@ -224,7 +224,7 @@ def createHeaps(
         The number of pols per antenna. Expected to always be 2 at the moment.
     ig: spead2.send.ItemGroup
         The ig is used to generate heaps that will be passed to the source stream. This ig is expected to have been
-        configured correctly using the createTestObjects function.
+        configured correctly using the create_test_objects function.
 
     Returns
     -------
@@ -330,7 +330,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     n_heaps_in_flight_per_antenna = heaps_per_fengine_per_chunk * total_chunks
 
     # 2. Create all required test objects.
-    sourceStream, ig, receiverStream, asyncRingbuffer = createTestObjects(
+    source_stream, ig, receiver_stream, async_ringbuffer = create_test_objects(
         n_ants,
         n_channels_per_stream,
         n_samples_per_channel,
@@ -347,17 +347,17 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 3.1 Transmit first 5 chunks completly in order
     heap_index = 0
     for _ in range(5):
-        heaps = createHeaps(
+        heaps = create_heaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
-        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
     # 3.2 For chunk 6, transmit the second collection of heaps in the chunk before the first to ensure that heaps
     # received out of order are processed correctly
 
     # 3.2.1 Transmit the second heap first
-    heaps = createHeaps(
+    heaps = create_heaps(
         timestamp_step * (heap_index + 1),
         (heap_index + 1),
         n_ants,
@@ -366,36 +366,36 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         n_pols,
         ig,
     )
-    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # 3.2.2 Transmit the first heap second
-    heaps = createHeaps(
+    heaps = create_heaps(
         timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
     )
-    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     heap_index += 2
 
     # 3.2.3 Transmit the rest of the heaps in chunk 6 in order
     for _ in range(heaps_per_fengine_per_chunk - 2):
-        heaps = createHeaps(
+        heaps = create_heaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
-        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
     # 3.3 For chunk 7 and 8 transmit the first set of heaps of chunk 8 before the last set of heaps of chunk 7.
 
     # 3.3.1 Transmit all but the last collection of heaps of chunk 7
     for _ in range(heaps_per_fengine_per_chunk - 1):
-        heaps = createHeaps(
+        heaps = create_heaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
-        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
     # 3.3.2 Transmit the first collection of heaps of chunk 8
-    heaps = createHeaps(
+    heaps = create_heaps(
         timestamp_step * (heap_index + 1),
         (heap_index + 1),
         n_ants,
@@ -404,40 +404,40 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         n_pols,
         ig,
     )
-    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # 3.3.3 Transmit the last collection of heaps of chunk 7
-    heaps = createHeaps(
+    heaps = create_heaps(
         timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
     )
-    sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     heap_index += 2
 
     # 3.3.4 Transmit the rest of the heaps in chunk 8 in order
     for _ in range(heaps_per_fengine_per_chunk - 2):
-        heaps = createHeaps(
+        heaps = create_heaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
-        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
     # 3.4 Transmit the remaining chunks
     for _ in range(heap_index, n_heaps_in_flight_per_antenna):
-        heaps = createHeaps(
+        heaps = create_heaps(
             timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
         )
-        sourceStream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
-    # 4. Pass simulated buffer from sourceStream to the receiver.
-    buffer = sourceStream.getvalue()
-    receiverStream.add_buffer_reader(buffer)
+    # 4. Pass simulated buffer from source_stream to the receiver.
+    buffer = source_stream.getvalue()
+    receiver_stream.add_buffer_reader(buffer)
 
     # 5. Define function that will test all received data.
     async def get_chunks(
-        asyncRingbuffer: katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer,
-        receiverStream: katgpucbf.xbgpu._katxbgpu.recv.Stream,
+        async_ringbuffer: katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer,
+        receiver_stream: katgpucbf.xbgpu._katxbgpu.recv.Stream,
         total_chunks: int,
     ):
         """Iterate through chunks processed by the receiver.
@@ -449,7 +449,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         received = 0
 
         # 5.1 Iterate through complete chunks in the ringbuffer asynchronously
-        async for chunk in asyncRingbuffer:
+        async for chunk in async_ringbuffer:
             received += len(chunk.present)
             dropped += len(chunk.present) - sum(chunk.present)
             assert len(chunk.present) == n_ants * heaps_per_fengine_per_chunk, (
@@ -482,13 +482,13 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
                     )
 
             # 5.3 Give chunk back to receiver once we are done using it.
-            receiverStream.add_chunk(chunk)
+            receiver_stream.add_chunk(chunk)
             chunk_index += 1
 
             # 5.4 Exit condition
             # I am not sure if I am happy that this is here - some of my Jenkins unit tests fail when this is not here
             # throwing a "spead2._spead2.Stopped: ring buffer has been stopped" error. I think its still trying to
-            # iterate through the asyncRingbuffer once the buffer is "finished" but I dont know enough about the
+            # iterate through the async_ringbuffer once the buffer is "finished" but I dont know enough about the
             # internal workings of asyncio to be sure. Just going to leave it for now and can revisit it later if we
             # decide the coverage is not enough. It does make the assert (chunk_index == total_chunk) test below a
             # bit less useful.
@@ -498,13 +498,13 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         assert chunk_index == total_chunks, f"Expected to receive {total_chunks} chunks. Only received {chunk_index}"
 
     # 6. Run get_chunks() function
-    event_loop.run_until_complete(get_chunks(asyncRingbuffer, receiverStream, total_chunks))
+    event_loop.run_until_complete(get_chunks(async_ringbuffer, receiver_stream, total_chunks))
 
     # 7. Final cleanup
     # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that
     # is run.
-    receiverStream.stop()  # Not really useful when using the buffer transport.
-    del sourceStream, ig, receiverStream, asyncRingbuffer
+    receiver_stream.stop()  # Not really useful when using the buffer transport.
+    del source_stream, ig, receiver_stream, async_ringbuffer
 
 
 # A manual run useful when debugging the unit tests.

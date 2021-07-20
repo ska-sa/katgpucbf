@@ -240,7 +240,7 @@ chunk is moved from the free chunks stack by calling the
 Once a chunk has been fully assembled it is moved off of the active queue and
 put on a ringbuffer using the :cpp:func:`katxbgpu::recv::stream::flush` function. The
 main program can then access the underlying chunks asynchronously in Python
-using an asyncio for loop (``async for chunk in asyncRingbuffer``) which calls the
+using an asyncio for loop (``async for chunk in async_ringbuffer``) which calls the
 underlying :meth:`~katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer.async_pop` function.
 
 Once a chunk has been popped off the ringbuffer and its data has been consumed
@@ -387,9 +387,9 @@ layers:
      has an associated future. This class monitors the futures when more buffer
      resources are requested by the main processing loop and will only return a
      free buffer when the corresponding resource is marked as done.
-  3. SPEAD2 sourceStream - The XEngineSPEADAbstractSend creates a SPEAD2 send
+  3. SPEAD2 source_stream - The XEngineSPEADAbstractSend creates a SPEAD2 send
      stream object. Every buffer passed to the XEngineSPEADAbstractSend object
-     is given to this sourceStream. The sourceStream object encapsulates the
+     is given to this source_stream. The source_stream object encapsulates the
      buffer object into a SPEAD heap and sends it out onto the network (in the
      normal case). It returns a future that will be marked as done once the
      transmission is complete.
