@@ -66,7 +66,7 @@ def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> 
     return func
 
 
-def parse_args(arglist: List[str] = None) -> argparse.Namespace:
+def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Declare and parse command-line arguments.
 
     Parameters
@@ -225,7 +225,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
     ctx
         The GPU context in which the :class:`.Engine` will operate.
     arglist
-        [Optional] list of arguments, otherwise :func:`parse_args` will use its
+        Optional list of arguments. If not specified, :func:`parse_args` will use its
         default method to obtain runtime parameters.
     """
     args = parse_args(arglist)
