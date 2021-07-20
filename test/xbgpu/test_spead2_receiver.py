@@ -504,12 +504,6 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 6. Run get_chunks() function
     event_loop.run_until_complete(get_chunks(async_ringbuffer, receiver_stream, total_chunks))
 
-    # 7. Final cleanup
-    # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that
-    # is run.
-    receiver_stream.stop()  # Not really useful when using the buffer transport.
-    del source_stream, ig, receiver_stream, async_ringbuffer
-
 
 # A manual run useful when debugging the unit tests.
 if __name__ == "__main__":
