@@ -36,8 +36,11 @@ import test_parameters
 import katgpucbf.xbgpu.xsend
 
 
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-@pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+@pytest.mark.combinations(
+    "num_ants, num_channels",
+    test_parameters.array_size,
+    test_parameters.num_channels,
+)
 def test_send_simple(event_loop, num_ants, num_channels):
     """
     Tests the XEngineSPEADAbstractSend class in the xsend.py module.
