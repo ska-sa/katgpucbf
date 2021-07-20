@@ -16,11 +16,11 @@ import pytest
 import spead2
 import spead2.recv.asyncio
 import spead2.send
-import test_parameters
-import test_spead2_receiver
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
+
+from . import test_parameters, test_spead2_receiver
 
 # 3. Define Constants
 complexity = 2
