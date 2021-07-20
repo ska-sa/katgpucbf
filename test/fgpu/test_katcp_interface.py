@@ -15,6 +15,7 @@ class TestKatcpRequests:
         "--src-interface=lo",
         "--dst-interface=lo",
         "--channels=4096",
+        "--sync-epoch=1632561921",
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
         "239.10.11.0+15:7149",  # dst

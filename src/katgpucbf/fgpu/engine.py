@@ -171,7 +171,7 @@ class Engine(aiokatcp.DeviceServer):
         channels: int,
         taps: int,
         quant_gain: float,
-        sync_epoch: int,
+        sync_epoch: float,
         mask_timestamp: bool,
         use_gdrcopy: bool,
         use_peerdirect: bool,
@@ -208,7 +208,7 @@ class Engine(aiokatcp.DeviceServer):
             import gdrcopy.pycuda
 
             gdr = gdrcopy.Gdr()
-
+        self.sync_epoch = sync_epoch
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
