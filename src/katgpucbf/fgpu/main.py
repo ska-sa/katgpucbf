@@ -10,7 +10,7 @@ import asyncio
 import ipaddress
 import logging
 import signal
-from typing import Callable, List, Optional, Tuple, TypeVar, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -225,8 +225,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
     ctx
         The GPU context in which the :class:`.Engine` will operate.
     arglist
-        Optional list of arguments. If not specified, :func:`parse_args` will use its
-        default method to obtain runtime parameters.
+        [Optional] list of arguments. See :func:`parse_args` for more details.
     """
     args = parse_args(arglist)
 
