@@ -72,38 +72,17 @@ In order to run the tests, use the following command:
 
 .. code-block:: bash
 
-  coverage run
+  pytest
 
-:mod:'.coverage' will take its configuration from the ``.coveragerc`` file, and
-execute pytest which will actually run the unit tests, printing its report to
-``stdout`` as usual.
-
-.. note::
-
-  Coverage's concept of a "dynamic context" is configured in the ``.coveragerc``
-  file to tell you which unit test(s) executed a particular line of code. I
-  currently run it using the following command:
-
-  .. code-block:: bash
-
-    coverage run --context=$(git describe --tags --dirty)
-
-  This gives more useful information about exactly what code was run, and whether
-  it's committed or dirty. Unfortunately, the configuration file doesn't support
-  evaluating commands to produce a string as I've done on the cli (see
-  `this issue`_).
-
-.. _this issue: https://github.com/nedbat/coveragepy/issues/1190
-
-In order to generate an actual coverage report, use the
-following command:
-
-.. code-block:: bash
-
-  coverage html
-
-Other options are available, but the html format is convenient for viewing. You
-can easily view it using the following command:
+:mod:`.pytest` reads its configuration from ``pyproject.toml``. Also installed
+as part of this project's ``requirements-dev.txt`` are :mod:`.coverage` and
+:mod:`.pytest-cov`. As currently configured, running the unit tests as described
+above will execute a subset of the parameterised tests (see the docstring for
+``test/conftest.py``), while every combination of parameters won't always be
+tested, each individual parameter will be tested at least once. An html test-
+coverage rerport will be generated. Other options are available, but the html
+format is convenient for viewing. You can easily view it using the following
+command:
 
 .. code-block:: bash
 
@@ -118,7 +97,7 @@ Or, if you are developing on a remote server:
 If you are using VSCode, the editor will prompt you to open the link in a
 browser, and automatically forward the port to your ``localhost``. If not, or if
 you'd prefer to do it the old-fashioned way, point a browser at port ``8089``
-(or any other port of your preference) on the machine that you are developing on.
+on the machine that you are developing on.
 
 The results will look something like this:
 
@@ -140,3 +119,38 @@ On the left side of the `|` is the static context - in this case showing
 information regarding the git commit that I ran the test on. The right side
 shows the dynamic context - in this case, two different tests both executed this
 code during the course of their run.
+
+.. note::
+
+  :mod:`.coverage`\'s "dynamic context" output is currently specified by
+  :mod:`.pytest-cov` to describe the test function which executed the line of
+  code in question. If desired, it can instead be specified in coverage's
+  configuration as described in `coverage's documentation`_. This produces a
+  slightly different output which conveys more or less similar information.
+
+  .. _coverage's documentation: https://coverage.readthedocs.io/en/stable/contexts.html#dynamic-contexts
+
+  :mod:`.coverage`\'s `static context`_ is more difficult to specify in a way that
+  is useful. To generate the report above, I executed the following command:
+
+  .. _static context: https://coverage.readthedocs.io/en/stable/contexts.html#static-contexts
+
+  .. code-block:: bash
+
+    coverage run --context=$(git describe --tags --dirty)
+
+  This gives more useful information about exactly what code was run, and whether
+  it's committed or dirty. Unfortunately, doing things this way you miss out on
+  the features of :mod:`.pytest-cov`. :mod:`.coverage` supports specifying a
+  static context using either the command line (as shown) or via its
+  configuration file, including reading of environment variables, but support
+  doesn't extend to evaluating arbitrary shell expressions as is possible from
+  the command line.
+
+  The package author `suggests`_ the use of a Makefile to generate an environment
+  variable which the configuration can then use in generating a static context.
+  This strikes me as a good solution, but I am reluctant to include yet another
+  boiler-plate file in the repository, so I leave this to the discretion of the
+  individual developer to make use of as desired.
+
+  .. _suggests: https://github.com/nedbat/coveragepy/issues/1190

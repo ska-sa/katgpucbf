@@ -45,7 +45,6 @@ source = [
 	"katgpucbf",
 	"test/",
 ]
-dynamic_context = "test_function"
 
 [tool.coverage.html]
 show_contexts = true
