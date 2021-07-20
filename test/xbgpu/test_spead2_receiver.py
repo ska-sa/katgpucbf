@@ -174,7 +174,7 @@ def create_test_objects(
 
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    src_chunks_per_stream = 8
+    src_chunks_per_stream = 40
     for _ in range(src_chunks_per_stream):
         buf = accel.HostArray((receiver_stream.chunk_bytes,), np.uint8, context=context)
         chunk = recv.Chunk(buf)
