@@ -125,6 +125,8 @@ class Engine(aiokatcp.DeviceServer):
         Number of taps in each branch of the PFB-FIR
     quant_scale
         Rescaling factor to apply before 8-bit requantisation.
+    sync_epoch
+        UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
     use_gdrcopy
@@ -169,6 +171,7 @@ class Engine(aiokatcp.DeviceServer):
         channels: int,
         taps: int,
         quant_scale: float,
+        sync_epoch: int,
         mask_timestamp: bool,
         use_gdrcopy: bool,
         use_peerdirect: bool,

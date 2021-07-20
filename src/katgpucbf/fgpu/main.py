@@ -167,6 +167,11 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--quant-scale", type=float, default=0.001, help="Rescaling factor before 8-bit requantisation [%(default)s]"
     )
     parser.add_argument(
+        "--sync-epoch",
+        type=int,  # AFAIK, the digitisers sync on PPS signals, so it makes sense for this to be an int.
+        help="UNIX time at which digitisers were synced.",
+    )
+    parser.add_argument(
         "--mask-timestamp",
         action="store_true",
         help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
@@ -261,6 +266,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         channels=args.channels,
         taps=args.taps,
         quant_scale=args.quant_scale,
+        sync_epoch=args.sync_epoch,
         mask_timestamp=args.mask_timestamp,
         use_gdrcopy=args.use_gdrcopy,
         use_peerdirect=args.use_peerdirect,
