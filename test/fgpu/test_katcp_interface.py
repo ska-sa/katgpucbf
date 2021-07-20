@@ -16,6 +16,7 @@ class TestKatcpRequests:
         "--dst-interface=lo",
         "--channels=4096",
         "--sync-epoch=1632561921",
+        "--adc-rate=1.712e9",
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
         "239.10.11.0+15:7149",  # dst
@@ -37,9 +38,12 @@ class TestKatcpRequests:
           Don't just compare the start_time value, compute the actual timestamp
           number in sync_epoch terms.
         """
-        start_time = int(time.time()) + 10
+        assert engine_server.adc_rate == 1.712e9
+
+        start_time = 1632561931  # i.e. 10 seconds after the --sync-epoch option
         _reply, _informs = await engine_client.request("delays", start_time, "3.76,0.12:7.322,1.91")
-        assert engine_server._processor.delay_model._models[-1].start == start_time
+
+        assert engine_server._processor.delay_model._models[-1].start == int(1.712e10)
         assert engine_server._processor.delay_model._models[-1].delay == 3.76
         assert engine_server._processor.delay_model._models[-1].delay_rate == 0.12
         assert engine_server._processor.delay_model._models[-1].phase == 7.322

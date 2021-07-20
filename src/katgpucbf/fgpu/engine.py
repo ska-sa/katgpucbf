@@ -209,6 +209,7 @@ class Engine(aiokatcp.DeviceServer):
 
             gdr = gdrcopy.Gdr()
         self.sync_epoch = sync_epoch
+        self.adc_rate = adc_rate
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -338,7 +339,9 @@ class Engine(aiokatcp.DeviceServer):
         delay, delay_rate = comma_string_to_float(delay_str)
         phase, phase_rate = comma_string_to_float(phase_str)
 
-        new_linear_model = LinearDelayModel(start_time, delay, delay_rate, phase, phase_rate)
+        start_mcount = int((start_time - self.sync_epoch) * self.adc_rate)
+
+        new_linear_model = LinearDelayModel(start_mcount, delay, delay_rate, phase, phase_rate)
 
         self.delay_model.add(new_linear_model)
 
