@@ -10,7 +10,7 @@ import asyncio
 import ipaddress
 import logging
 import signal
-from typing import Callable, List, Optional, Tuple, TypeVar, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -19,6 +19,7 @@ from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import __version__
 from .engine import Engine
+from .monitor import FileMonitor, Monitor, NullMonitor
 
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
@@ -65,7 +66,7 @@ def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> 
     return func
 
 
-def parse_args(arglist: List[str] = None) -> argparse.Namespace:
+def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Declare and parse command-line arguments.
 
     Parameters
@@ -216,13 +217,24 @@ def add_signal_handlers():
         loop.add_signal_handler(signum, handler)
 
 
-def make_engine(ctx, *, arglist: List[str] = None):
+def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
     """Make an :class:`Engine` object, given a GPU context.
 
-    An optional list of arguments may be passed, otherwise :func:`parse_args`
-    will use its default method to obtain runtime parameters.
+    Parameters
+    ----------
+    ctx
+        The GPU context in which the :class:`.Engine` will operate.
+    arglist
+        [Optional] list of arguments. See :func:`parse_args` for more details.
     """
     args = parse_args(arglist)
+
+    monitor: Monitor
+    if args.monitor_log is not None:
+        monitor = FileMonitor(args.monitor_log)
+    else:
+        monitor = NullMonitor()
+
     chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.acc_len)
     engine = Engine(
         katcp_host=args.katcp_host,
@@ -252,18 +264,19 @@ def make_engine(ctx, *, arglist: List[str] = None):
         mask_timestamp=args.mask_timestamp,
         use_gdrcopy=args.use_gdrcopy,
         use_peerdirect=args.use_peerdirect,
-        monitor=args.monitor_log,
+        monitor=monitor,
     )
 
-    return engine
+    return engine, monitor
 
 
 async def async_main() -> None:
     """Start the F-Engine asynchronously."""
     add_signal_handlers()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    engine = make_engine(ctx)
-    await engine.run()
+    engine, monitor = make_engine(ctx)
+    with monitor:
+        await engine.run()
 
 
 def main() -> None:
