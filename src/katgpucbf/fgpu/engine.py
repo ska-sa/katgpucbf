@@ -325,6 +325,11 @@ class Engine(aiokatcp.DeviceServer):
           In order to convert between the two, we need to know the digitiser's
           "epoch", and we don't have provision for that in the F-engine so far,
           as far as I am aware.
+
+        .. todo::
+
+          Make the request's fail replies more informative in the case of
+          malformed requests.
         """
 
         def comma_string_to_float(comma_string: str) -> Tuple[float, float]:

@@ -1,7 +1,7 @@
 """Collection of tests for the KATCP interface of katgpucbf.fgpu."""
-
 import time
 
+import aiokatcp
 import pytest
 
 pytestmark = pytest.mark.asyncio
@@ -37,12 +37,22 @@ class TestKatcpRequests:
           number in sync_epoch terms.
         """
         start_time = int(time.time()) + 10
-        _reply, _informs = await engine_client.request("delays", str(start_time), "3.76,0.12:7.322,1.91")
+        _reply, _informs = await engine_client.request("delays", start_time, "3.76,0.12:7.322,1.91")
         assert engine_server._processor.delay_model._models[-1].start == start_time
         assert engine_server._processor.delay_model._models[-1].delay == 3.76
         assert engine_server._processor.delay_model._models[-1].delay_rate == 0.12
         assert engine_server._processor.delay_model._models[-1].phase == 7.322
         assert engine_server._processor.delay_model._models[-1].phase_rate == 1.91
+
+    async def test_delay_model_update_malformed(self, engine_client, engine_server):
+        """Test that a malformed delay model is rejected."""
+        start_time = int(time.time()) + 10
+        with pytest.raises(aiokatcp.FailReply):
+            # Bad delay-string
+            _reply, _informs = await engine_client.request("delays", start_time, "3.76-0.12<>7.322-1.91")
+        with pytest.raises(aiokatcp.FailReply):
+            # Missing start time argument
+            _reply, _informs = await engine_client.request("delays", "3.76,0.12:7.322,1.91")
 
 
 class TestKatcpSensors:
