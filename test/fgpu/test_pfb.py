@@ -83,7 +83,7 @@ def test_fft():
     fn.buffer("in").set(queue, h_data)
     fn()
     h_out = fn.buffer("out").get(queue)
-    np.testing.assert_allclose(h_out, expected, rtol=1e-4)
+    np.testing.assert_allclose(h_out, expected, rtol=1e-3)
 
 
 if __name__ == "__main__":
