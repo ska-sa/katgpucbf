@@ -7,6 +7,11 @@ Welcome to katgpucbf's documentation!
    :maxdepth: 3
    :caption: Contents:
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Development
+
+   dev-guide
 
 .. toctree::
    :maxdepth: 3
