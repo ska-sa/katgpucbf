@@ -27,6 +27,7 @@ passing information between different async processing loops within the object.
 """
 
 import asyncio
+import math
 import time
 from typing import List
 
@@ -133,7 +134,7 @@ class XBEngine:
         channel_offset_value: int,
         rx_thread_affinity: int,
         batches_per_chunk: int,  # Used for GPU memory tuning
-        max_active_chunks: int,
+        rx_reorder_tol: int,
     ):
         """
         Construct an XBEngine object.
@@ -174,10 +175,9 @@ class XBEngine:
             the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
             system RAM is allocated, the lower this value is, the more work the python processing thread is required to
             do.
-        max_active_chunks: int
-            The number of chunks that the receiver will assemble at this time.
-            Larger values increase tolerance to data arriving out-of-order, at
-            the expensive of increased memory usage.
+        rx_reorder_tol: int
+            Maximum tolerance for jitter between received packets, as a time
+            expressed in ADC sample ticks.
         """
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
@@ -283,7 +283,7 @@ class XBEngine:
 
         # 2.4 Assign engine configuration parameters
         self.batches_per_chunk = batches_per_chunk
-        self.max_active_chunks = max_active_chunks
+        self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.batches_per_chunk) + 1
         self.channel_offset_value = channel_offset_value
 
         # 2.5 Set runtime flags to their initial states
@@ -365,7 +365,7 @@ class XBEngine:
         # pipeline starts bottlenecking, then maybe look at increasing these values.
         n_rx_items = 3  # Too high means too much GPU memory gets allocated
         n_tx_items = 2
-        n_free_chunks = max_active_chunks + 8
+        n_free_chunks = self.max_active_chunks + 8
 
         # 6.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.

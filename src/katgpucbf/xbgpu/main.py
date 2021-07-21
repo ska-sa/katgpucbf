@@ -75,10 +75,11 @@ def parse_args() -> argparse.Namespace:
         "is required to do. [%(default)s]",
     )
     parser.add_argument(
-        "--max-active-chunks",
+        "--rx-reorder-tol",
         type=int,
-        default=32,
-        help="Maximum number of chunks that can be received concurrently. [%(default)s]",
+        default=2 ** 29,
+        help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
+        "and still be accepted. [%(default)s]",
     )
     parser.add_argument(
         "--heap-accumulation-threshold",
@@ -87,7 +88,7 @@ def parse_args() -> argparse.Namespace:
         help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
     )
     parser.add_argument(
-        "--receiver-thread-affinity", type=int, required=True, help="Core to which the reciever thread must be bound."
+        "--receiver-thread-affinity", type=int, required=True, help="Core to which the receiver thread must be bound."
     )
     parser.add_argument(
         "--receiver-comp-vector-affinity",
@@ -156,7 +157,7 @@ async def async_main(args: argparse.Namespace) -> None:
         channel_offset_value=args.channel_offset_value,
         rx_thread_affinity=args.receiver_thread_affinity,
         batches_per_chunk=args.batches_per_chunk,
-        max_active_chunks=args.max_active_chunks,
+        rx_reorder_tol=args.rx_reorder_tol,
     )
 
     # Attach this transport to receive channelisation products from the network at high rates.

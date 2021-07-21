@@ -210,7 +210,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     n_pols = 2
     sample_bits = 8
     heaps_per_fengine_per_chunk = 2
-    max_active_chunks = 8
+    rx_reorder_tol = 2 ** 26  # Increase if needed; this is small to keep memory usage manageable
     heap_accumulation_threshold = 4
     n_accumulations = 3
 
@@ -282,7 +282,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
         rx_thread_affinity=0,
         batches_per_chunk=heaps_per_fengine_per_chunk,
-        max_active_chunks=max_active_chunks,
+        rx_reorder_tol=rx_reorder_tol,
     )
 
     # 5. Import C function that will be used for verifying data.
