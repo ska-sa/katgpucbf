@@ -81,7 +81,7 @@ above will execute a subset of the parameterised tests (see the docstring for
 ``test/conftest.py``), while every combination of parameters won't always be
 tested, each individual parameter will be tested at least once.
 
-If you'd like an HTML test-coverage rerport (at the expense of a slightly longer
+If you'd like an HTML test-coverage report (at the expense of a slightly longer
 time taken to run the test), execute ``pytest`` with the :option:`!--cov` flag.
 This report can then be viewed by:
 
