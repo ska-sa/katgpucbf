@@ -33,3 +33,19 @@ exclude ='''
 profile = "black"
 line_length = 120
 skip_glob = ["3rdparty/*"]
+
+[tool.pytest.ini_options]
+testpaths = "test"
+addopts = "--cov-context=test --cov-report html"
+import_mode = "importlib"
+
+[tool.coverage.run]
+branch = true
+command_line = "-m pytest"
+source = [
+	"katgpucbf",
+	"test/",
+]
+
+[tool.coverage.html]
+show_contexts = true

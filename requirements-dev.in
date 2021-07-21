@@ -1,4 +1,6 @@
+coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 pre-commit
 pytest
 pytest-asyncio
-pytest-xdist #Allows for pytest to launch multiple threads
+pytest-cov
+pytest-xdist  # Allows for pytest to launch multiple threads
