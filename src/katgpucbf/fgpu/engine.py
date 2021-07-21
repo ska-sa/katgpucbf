@@ -328,9 +328,9 @@ class Engine(aiokatcp.DeviceServer):
         delay, delay_rate = comma_string_to_float(delay_str)
         phase, phase_rate = comma_string_to_float(phase_str)
 
-        start_mcount = int((start_time - self.sync_epoch) * self.adc_rate)
+        start_sample_count = int((start_time - self.sync_epoch) * self.adc_rate)
 
-        new_linear_model = LinearDelayModel(start_mcount, delay, delay_rate, phase, phase_rate)
+        new_linear_model = LinearDelayModel(start_sample_count, delay, delay_rate, phase, phase_rate)
 
         self.delay_model.add(new_linear_model)
 
