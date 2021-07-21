@@ -310,18 +310,7 @@ class Engine(aiokatcp.DeviceServer):
         self.sensors["quant-gain"].set_value(self._processor.compute.quant_gain)
 
     async def request_delays(self, ctx, start_time: int, delays: str) -> None:
-        """Set the delay and fringe correction using a first-order polynomial.
-
-        .. danger::
-
-          For the time being, this function takes the ``start_time`` argument and
-          just sticks it in the (seemingly) appropriate place in the delay model.
-          However, this is actually wrong. The time given by CAM is in UNIX time,
-          while the time expected there is in digitiser sample counts.
-
-          In order to convert between the two, we need to know the digitiser's
-          "epoch", and we don't have provision for that in the F-engine so far,
-          as far as I am aware.
+        """Add a new first-order polynomial to the delay and fringe correction model.
 
         .. todo::
 
