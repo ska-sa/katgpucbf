@@ -59,19 +59,19 @@ license classifier in the `setuptools.setup()` function in [setup.py](setup.py) 
 something like [sphinx](http://www.sphinx-doc.org) that can generate a proper readthedocs page for this repo.
 There is currently a [docs](./docs) directory in this repo where some documentation has been stored. This will need
 to be incorporated into the formal documentation at some stage.
-7. The [unit tests](test/tensorcore_xengine_core_test.py) for the TensorCoreXEngineCore are executed in python and take
+7. The [unit tests](test/xbgpu/test_tensorcore_xengine_core.py) for the TensorCoreXEngineCore are executed in python and take
 a long time to verify. This verification should be moved to C as is done in some of the other unit tests.
-8. The [spead2_send_test.py](test/spead2_send_test.py) file has some TODOs that can improve the test coverage. These
+8. The [test_spead2_send.py](test/xbgpu/test_spead2_send.py) file has some TODOs that can improve the test coverage. These
 should be implemented.
 9. The `default_spead_flavour` variable is duplicated in two places ([xsend.py](katxbgpu/xsend.py) and
-[test/spead2_receiver_test.py](test/spead2_receiver_test.py)) with the potential to be duplicated in more places
+[test/test_spead2_receiver.py](test/xbgpu/spead2_receiver.py)) with the potential to be duplicated in more places
 if a bsend.py file is created. It may be worth looking at putting all this information in the same place.
-10. When the Jenkins CI server runs its unit tests, sometimes a test/spead2_receiver_test.py::test_recv_simple test
+10. When the Jenkins CI server runs its unit tests, sometimes a test/xbgpu/test_spead2_receiver.py::test_recv_simple test
 will just hang (not error out) forever. This causes the test to never end and the Jenkins server is then unable to
 launch more tests due to this stall. This can be fixed by manually restarting the tests but this is far from ideal.
 This only occurs about once every ten runs, but when multiple branches are being PR'd and merged, this tends to
 kick off many tests. This problem needs to be investigate. I think this is due to the async function here:
-https://github.com/ska-sa/katxbgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
+https://github.com/ska-sa/katxgpu/blob/6ad82705394052b62065da3cfeac7953f1a45dd7/test/spead2_receiver_test.py#L451-L496 
 but I dont know for sure.
 11. There are a list of TODOs in the [xbengine](katxbgpu/xbengine.py). These should be implemented. The most
 pressing of these is the implementation of a clean exit and the addition of control and monitoring.

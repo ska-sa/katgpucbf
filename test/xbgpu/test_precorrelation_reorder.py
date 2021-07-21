@@ -37,10 +37,11 @@ from ctypes import c_int  # Only need this from the library
 
 import numpy as np
 import pytest
-import test_parameters
 from katsdpsigproc import accel
 
 from katgpucbf.xbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
+
+from . import test_parameters
 
 
 @pytest.mark.combinations(

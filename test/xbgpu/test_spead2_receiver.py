@@ -26,11 +26,12 @@ import numpy as np
 import pytest
 import spead2
 import spead2.send
-import test_parameters
 
 import katgpucbf.xbgpu._katxbgpu.recv as recv
 import katgpucbf.xbgpu.monitor
 import katgpucbf.xbgpu.ringbuffer
+
+from . import test_parameters
 
 logging.basicConfig(level=logging.INFO)
 
