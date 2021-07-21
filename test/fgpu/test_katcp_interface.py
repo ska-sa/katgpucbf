@@ -32,17 +32,13 @@ class TestKatcpRequests:
 
         The new element is a piecewise-linear section, and it should go onto the
         end of the :class:`.MultiDelayModel` list.
-
-        .. todo::
-
-          Don't just compare the start_time value, compute the actual timestamp
-          number in sync_epoch terms.
         """
         assert engine_server.adc_rate == 1.712e9
 
         start_time = 1632561931  # i.e. 10 seconds after the --sync-epoch option
         _reply, _informs = await engine_client.request("delays", start_time, "3.76,0.12:7.322,1.91")
 
+        # We expect the start time to be (10 seconds * 1.712e9 samples / second) i.e. 1.712e10.
         assert engine_server._processor.delay_model._models[-1].start == int(1.712e10)
         assert engine_server._processor.delay_model._models[-1].delay == 3.76
         assert engine_server._processor.delay_model._models[-1].delay_rate == 0.12
@@ -50,7 +46,12 @@ class TestKatcpRequests:
         assert engine_server._processor.delay_model._models[-1].phase_rate == 1.91
 
     async def test_delay_model_update_malformed(self, engine_client, engine_server):
-        """Test that a malformed delay model is rejected."""
+        """Test that a malformed delay model is rejected.
+
+        We test for a wrong delay string, and for a missing argument, the start
+        time in this case but since the number of arguments is wrong it shouldn't
+        matter which of them is missing.
+        """
         start_time = int(time.time()) + 10
         with pytest.raises(aiokatcp.FailReply):
             # Bad delay-string
