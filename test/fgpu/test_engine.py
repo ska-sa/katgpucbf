@@ -16,7 +16,14 @@ class TestEngine:
     ]
 
     def test_engine_required_arguments(self, engine_server):
-        """Test proper setting of required arguments."""
+        """Test proper setting of required arguments.
+
+        .. note::
+
+          This doesn't test if the functionality described by these is in any
+          way correct, just whether or not the member variables are being
+          correctly populated.
+        """
         assert engine_server._port == 0
         assert engine_server._src_interface == "127.0.0.1"
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
