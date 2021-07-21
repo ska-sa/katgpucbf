@@ -82,7 +82,7 @@ above will execute a subset of the parameterised tests (see the docstring for
 tested, each individual parameter will be tested at least once.
 
 If you'd like an HTML test-coverage rerport (at the expense of a slightly longer
-time taken to run the test), execute ``pytest`` with the :option:`--cov` flag.
+time taken to run the test), execute ``pytest`` with the :option:`!--cov` flag.
 This report can then be viewed by:
 
 .. code-block:: bash
@@ -166,3 +166,18 @@ code during the course of their run.
 
 
   .. _suggests: https://github.com/nedbat/coveragepy/issues/1190
+
+
+TODOs
+-----
+
+This list is assembled from throughout the documentation. If you're looking for
+something to keep yourself busy, this is a good place to start.
+
+.. tip::
+
+  This list only includes TODOs formatted in a way that Sphinx understands.
+  There are likely others formatted as comments in Python or C++ throughout the
+  code which don't appear listed here. ``grep`` can help you find them!
+
+.. todolist::
