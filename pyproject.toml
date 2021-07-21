@@ -36,7 +36,7 @@ skip_glob = ["3rdparty/*"]
 
 [tool.pytest.ini_options]
 testpaths = "test"
-addopts = "--cov --cov-context=test --cov-report html"
+addopts = "--cov-context=test --cov-report html"
 import_mode = "importlib"
 
 [tool.coverage.run]
