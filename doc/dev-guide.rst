@@ -180,4 +180,7 @@ something to keep yourself busy, this is a good place to start.
   There are likely others formatted as comments in Python or C++ throughout the
   code which don't appear listed here. ``grep`` can help you find them!
 
+  The ``test/`` folder is not pulled in by Sphinx, and so any TODOs there will
+  also not be included in this list.
+
 .. todolist::
