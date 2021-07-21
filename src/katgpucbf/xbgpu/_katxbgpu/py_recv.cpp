@@ -55,10 +55,11 @@ class py_stream : public stream
     pybind11::object monitor;
 
     py_stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
-              std::size_t heaps_per_fengine_per_chunk, ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy,
+              std::size_t heaps_per_fengine_per_chunk, std::size_t max_active_chunks,
+              ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy,
               pybind11::object monitor)
         : stream(n_ants, n_channels, n_samples_per_channel, n_pols, sample_bits, timestamp_step,
-                 heaps_per_fengine_per_chunk, ringbuffer, thread_affinity, use_gdrcopy),
+                 heaps_per_fengine_per_chunk, max_active_chunks, ringbuffer, thread_affinity, use_gdrcopy),
           monitor(std::move(monitor))
     {
     }
@@ -125,13 +126,14 @@ pybind11::module register_module(pybind11::module &parent)
         .def_readonly("device", &py_chunk::device);
 
     pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
-        .def(pybind11::init<int, int, int, int, int, int, std::size_t, stream::ringbuffer_t &, int, bool,
+        .def(pybind11::init<int, int, int, int, int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int, bool,
                             pybind11::object>(),
              "n_ants"_a, "n_channels"_a, "n_samples_per_channel"_a, "n_pols"_a, "sample_bits"_a, "timestamp_step"_a,
-             "heaps_per_fengine_per_chunk"_a, "ringbuffer"_a, "thread_affinity"_a = -1, "use_gdrcopy"_a = false,
+             "heaps_per_fengine_per_chunk"_a, "max_active_chunks"_a,
+             "ringbuffer"_a, "thread_affinity"_a = -1, "use_gdrcopy"_a = false,
              "monitor"_a = pybind11::none(),
-             pybind11::keep_alive<1, 9>(), // The keep_alive is used to tell python not to release
-                                           // the ringbuffer until the pystream object is destroyed.
+             pybind11::keep_alive<1, 10>(), // The keep_alive is used to tell python not to release
+                                            // the ringbuffer until the pystream object is destroyed.
              "Initialises a custom high performance SPEAD2 receiver to receive F-Engine output data on a specific "
              "multicast stream at high data rates. This receiver stores received data in chunks and passes those "
              "chunks to the user.\n"
@@ -159,6 +161,8 @@ pybind11::module register_module(pybind11::module &parent)
              "heaps_per_fengine_per_chunk: int\n"
              "    Each chunk out of the SPEAD2 receiver will contain multiple heaps from each antenna. This parameter "
              "specifies the number of heaps per antenna that each chunk will contain.\n"
+             "max_active_chunks: int\n"
+             "    Maximum number of chunks under construction.\n"
              "ringbuffer: katxbgpu._katxbgpu.recv.Ringbuffer\n"
              "    All completed heaps will be queued on this ringbuffer object.\n"
              "thread_affinity: int\n"

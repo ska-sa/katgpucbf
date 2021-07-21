@@ -47,7 +47,8 @@ void allocator::free(std::uint8_t *ptr, void *user)
 }
 
 stream::stream(int iNumAnts, int iNumChannels, int iNumSamplesPerChannel, int iNumPols, int iSampleBits,
-               int iTimestampStep, size_t iHeapsPerFenginePerChunk, ringbuffer_t &completedChunksRingbuffer,
+               int iTimestampStep, size_t iHeapsPerFenginePerChunk, size_t ulMaxActiveChunks,
+               ringbuffer_t &completedChunksRingbuffer,
                int iThreadAffinity, bool bUseGDRCopy)
     : spead2::thread_pool(1, iThreadAffinity < 0 ? std::vector<int>{} : std::vector<int>{iThreadAffinity}),
       spead2::recv::stream(*static_cast<thread_pool *>(this),
@@ -60,6 +61,7 @@ stream::stream(int iNumAnts, int iNumChannels, int iNumSamplesPerChannel, int iN
       m_iNumAnts(iNumAnts), m_iNumChannels(iNumChannels), m_iNumSamplesPerChannel(iNumSamplesPerChannel),
       m_iNumPols(iNumPols), m_iSampleBits(iSampleBits), m_i64TimestampStep(iTimestampStep),
       m_i64HeapsPerFenginePerChunk(iHeapsPerFenginePerChunk),
+      m_ulMaxActiveChunks(ulMaxActiveChunks),
       m_ulPacketSize_bytes(iNumSamplesPerChannel * iNumPols * m_iComplexity / 8 * iSampleBits),
       m_ulChunkSize_bytes(m_ulPacketSize_bytes * iNumChannels * iNumAnts * iHeapsPerFenginePerChunk),
       m_completedChunksRingbuffer(completedChunksRingbuffer)
@@ -206,7 +208,7 @@ std::tuple<void *, chunk *, std::size_t> stream::calculate_packet_destination(st
         // This discontiunity will happen very rarely as data is being received from multiple senders and the chance of
         // all senders being down is negligible. The most likely cause of this issue would be an interruption in the
         // link between the katxbgpu host server and the network.
-        std::size_t ulMaxActiveChunks = 32;
+        std::size_t ulMaxActiveChunks = m_ulMaxActiveChunks;
         std::int64_t i64StartTimestamp =
             m_activeChunksQueue.back()->m_i64timestamp + m_i64TimestampStep * m_i64HeapsPerFenginePerChunk;
 

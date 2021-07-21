@@ -144,6 +144,7 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
 
     // Internal parameters
     const int64_t m_i64HeapsPerFenginePerChunk;   ///< A chunk has this many heaps per F-Engine.
+    const std::size_t m_ulMaxActiveChunks;  ///< Maximum number of chunks in m_activeChunksQueue
     const int64_t m_i64TimestampStep;             ///< Increase in timestamp between successive heaps from the same F-Engine.
     const std::size_t m_ulPacketSize_bytes; ///< Number of payload bytes in each packet
     const std::size_t m_ulChunkSize_bytes;  ///< Number of payload bytes in each chunk
@@ -231,7 +232,8 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
      * descritpion of this constructor.
      */
     stream(int iNumAnts, int iNumChannels, int iNumSamplesPerChannel, int iNumPols, int iSampleBits, int iTimestampStep,
-           size_t iHeapsPerFenginePerChunk, ringbuffer_t &m_completedChunksRingbuffer, int iThreadAffinity = -1,
+           size_t iHeapsPerFenginePerChunk, size_t ulMaxActiveChunks,
+           ringbuffer_t &m_completedChunksRingbuffer, int iThreadAffinity = -1,
            bool bUseGDRCopy = false);
     ~stream();
 

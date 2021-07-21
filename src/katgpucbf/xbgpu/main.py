@@ -75,6 +75,12 @@ def parse_args() -> argparse.Namespace:
         "is required to do. [%(default)s]",
     )
     parser.add_argument(
+        "--max-active-chunks",
+        type=int,
+        default=32,
+        help="Maximum number of chunks that can be received concurrently. [%(default)s]",
+    )
+    parser.add_argument(
         "--heap-accumulation-threshold",
         type=int,
         default=52,
@@ -150,6 +156,7 @@ async def async_main(args: argparse.Namespace) -> None:
         channel_offset_value=args.channel_offset_value,
         rx_thread_affinity=args.receiver_thread_affinity,
         batches_per_chunk=args.batches_per_chunk,
+        max_active_chunks=args.max_active_chunks,
     )
 
     # Attach this transport to receive channelisation products from the network at high rates.
