@@ -33,8 +33,8 @@ async def engine_server(request, gpu_context):
 @pytest.fixture
 async def engine_client(engine_server):
     """Create a KATCP client for communicating with the dummy server."""
-    address = engine_server.server.sockets[0].getsockname()
-    client = await aiokatcp.Client.connect(address[0], address[1])
+    host, port = engine_server.server.sockets[0].getsockname()
+    client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()
     await client.wait_closed()
