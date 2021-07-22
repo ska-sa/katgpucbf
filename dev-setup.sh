@@ -20,4 +20,6 @@ make -C doc html
 echo "Setting up pre-commit"
 pre-commit install
 
+# Print a different message based on whether you've sourced the
+# file. Works on bash, may not on other shells.
 (return 0 2>/dev/null) && echo "Done." || echo "Don't forget to source the new virtual env before you start!"
