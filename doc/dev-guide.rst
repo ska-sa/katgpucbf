@@ -26,7 +26,7 @@ get going.
 .. code-block:: bash
 
   cd katgpucbf
-  ./dev-setup.sh
+  source dev-setup.sh
 
 The script will perform the following actions:
 
@@ -37,14 +37,22 @@ The script will perform the following actions:
   - Compile the ``.so`` files needed to run the :mod:`.xbgpu` unit tests.
   - Install :program:`pre-commit` to help with keeping things tidy.
 
-You will still need to activate your new virtual environment before you can get
-going:
+Sourcing the script instead of executing it directly will preserve your virtual
+environment, so you can get going straight away. Next time you want to work,
+you can just source the virtual environment directly:
 
 .. code-block:: bash
 
   source .venv/bin/activate
 
 And you are ready to start developing with :mod:`katgpucbf`!
+
+.. tip::
+
+  If you ``source dev-setup.sh`` again, the module will be re-installed in
+  editable mode. Usually you probably won't want to do that, but if you do,
+  the option is there.
+
 
 Pre-commit
 ----------
