@@ -1,6 +1,13 @@
+-c requirements.txt
+-e .
 coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
+ipython
 pre-commit
 pytest
 pytest-asyncio
 pytest-cov
 pytest-xdist  # Allows for pytest to launch multiple threads
+sphinx
+sphinx-rtd-theme
+sphinxcontrib-bibtex
+sphinxcontrib-tikz

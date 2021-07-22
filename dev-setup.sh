@@ -7,19 +7,11 @@ echo "Activating the virtual env"
 source .venv/bin/activate
 
 pip install wheel  # Makes the process a bit slicker.
-echo "Installing package's requirements"
-pip install -r requirements.txt
 echo "Installing dev requirements"
 pip install -r requirements-dev.txt
-echo "Installing doc requirements"
-pip install -r requirements-doc.txt
-
-echo "Installing the repo in editable mode"
-pip install -e .
 
 echo "Compiling the C modules needed to run xbengine tests"
 make -C test/xbgpu
-
 
 echo "Setting up pre-commit"
 pre-commit install
