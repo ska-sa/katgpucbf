@@ -238,7 +238,7 @@ six==1.16.0
     #   virtualenv
 snowballstemmer==2.1.0
     # via sphinx
-spead2==3.2.2
+spead2==3.3.2
     # via
     #   -c requirements.txt
     #   katgpucbf
