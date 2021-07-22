@@ -37,9 +37,9 @@ The script will perform the following actions:
   - Compile the ``.so`` files needed to run the :mod:`.xbgpu` unit tests.
   - Install :program:`pre-commit` to help with keeping things tidy.
 
-Sourcing the script instead of executing it directly will preserve your virtual
-environment, so you can get going straight away. Next time you want to work,
-you can just source the virtual environment directly:
+Sourcing the script instead of executing it directly will keep your virtual
+environment active, so you can get going straight away. Next time you want to
+work, you can just source the virtual environment directly:
 
 .. code-block:: bash
 
