@@ -9,7 +9,7 @@ source .venv/bin/activate
 pip install --upgrade pip # stops pip from complaining
 pip install wheel pip-tools # Makes the process a bit slicker.
 echo "Installing dev requirements"
-#pip-sync requirements-dev.txt
+pip-sync requirements-dev.txt
 
 echo "Compiling the C modules needed to run xbengine tests"
 make -C test/xbgpu
