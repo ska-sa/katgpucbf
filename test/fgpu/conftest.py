@@ -23,7 +23,7 @@ async def engine_server(request, device_context):
     get the :class:`~.fgpu.Engine` running so that the KATCP interface can be
     tested.
     """
-    marker = request.node.get_closest_marker("engine_arglist_override")
+    marker = request.node.get_closest_marker("engine_arglist_extend")
     arglist = request.cls.engine_arglist
     if marker is not None:
         arglist.extend(marker.args)
