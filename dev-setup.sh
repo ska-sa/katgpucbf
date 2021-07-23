@@ -7,7 +7,7 @@ echo "Activating the virtual env"
 source .venv/bin/activate
 
 pip install --upgrade pip # stops pip from complaining
-pip install wheel pip-tools # Makes the process a bit slicker.
+pip install wheel # Makes the process a bit slicker.
 echo "Installing requirements for running and development"
 pip install -r requirements.txt -r requirements-dev.txt
 

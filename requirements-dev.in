@@ -1,6 +1,7 @@
 -c requirements.txt
 coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 ipython
+pip-tools
 pre-commit
 pytest
 pytest-asyncio

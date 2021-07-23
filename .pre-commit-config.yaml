@@ -61,3 +61,14 @@ repos:
             'types-setuptools==57.0.0',
             'types-six==0.1.7',
         ]
+  - repo: https://github.com/jazzband/pip-tools
+    rev: 6.2.0
+    hooks:
+      - id: pip-compile
+        name: pip-compile requirements.in
+        args: [requirements.in]
+        files: ^requirements\.(in|txt)$
+      - id: pip-compile
+        name: pip-compile requirements-dev.in
+        args: [requirements-dev.in]
+        files: ^requirements(-dev)?\.(in|txt)$
