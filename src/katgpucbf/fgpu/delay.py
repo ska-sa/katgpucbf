@@ -79,9 +79,9 @@ class LinearDelayModel(AbstractDelayModel):
     start
         Sample at which the model should start being used.
     delay
-        Delay to apply at `start`.
+        Delay to apply at `start`. [seconds]
     delay_rate
-        Unit-less rate of change of delay.
+        Rate of change of delay. [seconds/second]
     phase
         Fringe-stopping phase to apply with the fine delay. [radians]
     phase_rate

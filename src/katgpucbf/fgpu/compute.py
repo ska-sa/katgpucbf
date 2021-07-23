@@ -181,10 +181,10 @@ class Compute(accel.OperationSequence):
         self.postproc()
 
     @property
-    def quant_scale(self) -> float:  # noqa: D401
+    def quant_gain(self) -> float:  # noqa: D401
         """Scaling factor used for requantisation."""
-        return self.postproc.quant_scale
+        return self.postproc.quant_gain
 
-    @quant_scale.setter
-    def quant_scale(self, value: float) -> None:
-        self.postproc.quant_scale = value
+    @quant_gain.setter
+    def quant_gain(self, value: float) -> None:
+        self.postproc.quant_gain = value

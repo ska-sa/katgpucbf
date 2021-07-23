@@ -104,7 +104,7 @@ class Postproc(accel.Operation):
 
         self.slots["fine_delay"] = accel.IOSlot((spectra,), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra,), np.float32)
-        self.quant_scale = 1.0
+        self.quant_gain = 1.0
 
     def _run(self) -> None:
         block_x = self.template.block * self.template.vtx
@@ -128,7 +128,7 @@ class Postproc(accel.Operation):
                 np.int32(in0.padded_shape[1]),  # in_stride
                 np.int32(self.acc_len),  # acc_len
                 np.float32(-1 / self.channels),  # delay_scale
-                np.float32(self.quant_scale),  # quant_scale
+                np.float32(self.quant_gain),  # quant_gain
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
             local_size=(self.template.block, self.template.block, 1),

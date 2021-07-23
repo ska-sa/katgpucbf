@@ -12,7 +12,7 @@ from katsdptelstate.endpoint import Endpoint
 from .. import __version__
 from . import recv, send
 from .compute import ComputeTemplate
-from .delay import MultiDelayModel
+from .delay import LinearDelayModel, MultiDelayModel
 from .monitor import Monitor
 from .process import Processor
 
@@ -123,8 +123,10 @@ class Engine(aiokatcp.DeviceServer):
         Number of output channels to produce.
     taps
         Number of taps in each branch of the PFB-FIR
-    quant_scale
+    quant_gain
         Rescaling factor to apply before 8-bit requantisation.
+    sync_epoch
+        UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
     use_gdrcopy
@@ -168,7 +170,8 @@ class Engine(aiokatcp.DeviceServer):
         acc_len: int,
         channels: int,
         taps: int,
-        quant_scale: float,
+        quant_gain: float,
+        sync_epoch: float,
         mask_timestamp: bool,
         use_gdrcopy: bool,
         use_peerdirect: bool,
@@ -192,9 +195,9 @@ class Engine(aiokatcp.DeviceServer):
             ),
             aiokatcp.Sensor(
                 float,
-                "quant-scale",
+                "quant-gain",
                 "rescaling factor to apply before 8-bit requantisation",
-                default=quant_scale,
+                default=quant_gain,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             ),
         ]
@@ -205,7 +208,8 @@ class Engine(aiokatcp.DeviceServer):
             import gdrcopy.pycuda
 
             gdr = gdrcopy.Gdr()
-
+        self.sync_epoch = sync_epoch
+        self.adc_rate = adc_rate
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -214,7 +218,7 @@ class Engine(aiokatcp.DeviceServer):
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, acc_len, channels)
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
-        compute.quant_scale = quant_scale
+        compute.quant_gain = quant_gain
         pols = compute.pols
         self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
 
@@ -297,13 +301,44 @@ class Engine(aiokatcp.DeviceServer):
         for schunk in send_chunks:
             self._sender.push_free_ring(schunk)
 
-    async def request_quant_scale(self, ctx, quant_scale: float) -> None:
-        """Set the quant scale."""
-        self._processor.compute.quant_scale = quant_scale
+    async def request_quant_gain(self, ctx, quant_gain: float) -> None:
+        """Set the quant gain."""
+        self._processor.compute.quant_gain = quant_gain
         # We'll use the actual value of the property instead of the argument
         # passed here, in case there's some kind of setter function which may
         # modify it in any way.
-        self.sensors["quant-scale"].set_value(self._processor.compute.quant_scale)
+        self.sensors["quant-gain"].set_value(self._processor.compute.quant_gain)
+
+    async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, delays: str) -> None:
+        """Add a new first-order polynomial to the delay and fringe correction model.
+
+        .. todo::
+
+          Make the request's fail replies more informative in the case of
+          malformed requests.
+        """
+
+        def comma_string_to_float(comma_string: str) -> Tuple[float, float]:
+            a_str, b_str = comma_string.split(",")
+            a = float(a_str)
+            b = float(b_str)
+            return a, b
+
+        delay_str, phase_str = delays.split(":")
+        delay, delay_rate = comma_string_to_float(delay_str)
+        phase, phase_rate = comma_string_to_float(phase_str)
+
+        # This will round the start time of the new delay model to the nearest
+        # ADC sample. If the start time given doesn't coincide with an ADC sample,
+        # then all subsequent delays for this model will be off by the product
+        # of this delta and the delay_rate (same for phase).
+        # This may be too small to be a concern, but if it is a concern,
+        # then we'd need to compensate for that here.
+        start_sample_count = int((start_time - self.sync_epoch) * self.adc_rate)
+
+        new_linear_model = LinearDelayModel(start_sample_count, delay, delay_rate, phase, phase_rate)
+
+        self.delay_model.add(new_linear_model)
 
     async def run(self) -> None:
         """Run the engine.

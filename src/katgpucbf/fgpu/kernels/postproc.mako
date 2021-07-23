@@ -9,9 +9,9 @@ DEVICE_FN float2 apply_delay(float2 in, float re, float im)
     return make_float2(in.x * re - in.y * im, in.y * re + in.x * im);
 }
 
-DEVICE_FN char quant(float value, float quant_scale)
+DEVICE_FN char quant(float value, float quant_gain)
 {
-    value *= quant_scale;
+    value *= quant_gain;
 #ifdef __OPENCL_VERSION__
     return convert_char_sat_rte(value);
 #else
@@ -58,7 +58,7 @@ KERNEL void postproc(
     int in_stride,                            // Input stride between successive spectra.
     int acc_len,                              // Number of spectra per output heap.
     float delay_scale,                        // Scale factor for delay. 1/channels in magnitude.
-    float quant_scale)                        // Scale factor for quantiser.
+    float quant_gain)                        // Scale factor for quantiser.
 {
     LOCAL_DECL scratch_t scratch;
     transpose_coords coords;
@@ -92,10 +92,10 @@ KERNEL void postproc(
 
         // Interleave polarisations. Quantise at the same time.
         char4 packed;
-        packed.x = quant(v0.x, quant_scale);
-        packed.y = quant(v0.y, quant_scale);
-        packed.z = quant(v1.x, quant_scale);
-        packed.w = quant(v1.y, quant_scale);
+        packed.x = quant(v0.x, quant_gain);
+        packed.y = quant(v0.y, quant_gain);
+        packed.z = quant(v1.x, quant_gain);
+        packed.w = quant(v1.y, quant_gain);
         scratch.arr[${lr}][${lc}] = packed;
     </%transpose:transpose_load>
 
