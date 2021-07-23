@@ -8,6 +8,7 @@
 #include <random>
 #include <chrono>
 #include <boost/program_options.hpp>
+#include <spead2/send_udp.h>
 #include <spead2/send_udp_ibv.h>
 
 namespace po = boost::program_options;
@@ -22,6 +23,7 @@ struct options
     double signal_freq = 232101234.0;
     int ttl = 4;
     double sync_time = 0.0;
+    bool ibv = false;
 };
 
 static constexpr int sample_bits = 10;
@@ -45,6 +47,7 @@ static options parse_options(int argc, const char **argv)
         ("max-heaps", make_opt(opts.max_heaps), "Depth of send queue (per polarisation)")
         ("adc-rate", make_opt(opts.adc_rate), "Sampling rate")
         ("ttl", make_opt(opts.ttl), "Output TTL")
+        ("ibv", po::bool_switch(&opts.ibv), "Use ibverbs for acceleration")
         ("signal-freq", make_opt(opts.signal_freq), "Frequency of simulated tone")
         ("signal-heaps", make_opt(opts.signal_heaps), "Number of pre-computed heaps to create")
         ("sync-time", po::value(&opts.sync_time), "Sync time in UNIX epoch seconds (must be in the past)")
@@ -70,6 +73,8 @@ static options parse_options(int argc, const char **argv)
             throw po::error("--max-heaps must be positive");
         if (opts.signal_heaps <= 0)
             throw po::error("--signal-heaps must be positive");
+        if (opts.addresses.empty())
+            throw po::error("at least one address must be specified");
         // Round target frequency to fit an integer number of waves into signal_heaps
         double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_rate;
         waves = std::max(1.0, std::round(waves));
@@ -170,7 +175,7 @@ struct polarisation
     }
 
     template<typename Callback>
-    void send_next(spead2::send::udp_ibv_stream &stream, Callback &&callback)
+    void send_next(spead2::send::stream &stream, Callback &&callback)
     {
         heaps[next].heap.get_item(heaps[next].timestamp_handle).data.immediate = timestamp;
         timestamp += heap_samples;
@@ -193,7 +198,7 @@ struct digitiser
 {
     boost::asio::io_service io_service;
     std::vector<polarisation> pols;
-    spead2::send::udp_ibv_stream stream;
+    std::unique_ptr<spead2::send::stream> stream;
     std::size_t next_pol = 0;
 
     static std::vector<polarisation> make_pols(
@@ -223,23 +228,43 @@ struct digitiser
         return memory_regions;
     }
 
+    static std::unique_ptr<spead2::send::stream> make_stream(
+        const options &opts,
+        const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
+        const boost::asio::ip::address &interface_address,
+        boost::asio::io_service &io_service,
+        const std::vector<polarisation> &pols)
+    {
+        auto config = spead2::send::stream_config()
+            // Value doesn't matter, just needs to be bigger than actual size
+            .set_max_packet_size(heap_size + 128)
+            .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
+            .set_max_heaps(opts.max_heaps);
+        if (opts.ibv)
+            return std::make_unique<spead2::send::udp_ibv_stream>(
+                io_service,
+                config,
+                spead2::send::udp_ibv_config()
+                    .set_endpoints(flatten(endpoints))
+                    .set_interface_address(interface_address)
+                    .set_ttl(opts.ttl)
+                    .set_memory_regions(get_memory_regions(pols))
+            );
+        else
+            return std::make_unique<spead2::send::udp_stream>(
+                io_service,
+                flatten(endpoints),
+                config,
+                spead2::send::udp_stream::default_buffer_size,
+                opts.ttl,
+                interface_address);
+    }
+
     digitiser(const options &opts,
               const std::vector<std::vector<boost::asio::ip::udp::endpoint>> &endpoints,
               const boost::asio::ip::address &interface_address)
         : pols(make_pols(opts, endpoints)),
-        stream(
-            io_service,
-            spead2::send::stream_config()
-                // Value doesn't matter, just needs to be bigger than actual size
-                .set_max_packet_size(heap_size + 128)
-                .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
-                .set_max_heaps(opts.max_heaps),
-            spead2::send::udp_ibv_config()
-                .set_endpoints(flatten(endpoints))
-                .set_interface_address(interface_address)
-                .set_ttl(opts.ttl)
-                .set_memory_regions(get_memory_regions(pols))
-        )
+        stream(make_stream(opts, endpoints, interface_address, io_service, pols))
     {
         if (opts.sync_time)
         {
@@ -274,7 +299,7 @@ struct digitiser
     void send_next()
     {
         using namespace std::placeholders;
-        pols[next_pol].send_next(stream, std::bind(&digitiser::callback, this, _1, _2));
+        pols[next_pol].send_next(*stream, std::bind(&digitiser::callback, this, _1, _2));
         next_pol++;
         if (next_pol == pols.size())
             next_pol = 0;
