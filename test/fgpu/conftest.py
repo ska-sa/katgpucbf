@@ -8,14 +8,14 @@ from katgpucbf.fgpu.main import make_engine
 
 
 @pytest.fixture
-async def gpu_context():
+async def device_context():
     """Generate a GPU context."""
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda, interactive=False)
     return ctx
 
 
 @pytest.fixture
-async def engine_server(request, gpu_context):
+async def engine_server(request, device_context):
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
     The arguments passed are based on the default arguments from
@@ -23,7 +23,7 @@ async def engine_server(request, gpu_context):
     get the :class:`~.fgpu.Engine` running so that the KATCP interface can be
     tested.
     """
-    server, _monitor = make_engine(gpu_context, arglist=request.cls.engine_arglist)
+    server, _monitor = make_engine(device_context, arglist=request.cls.engine_arglist)
 
     await server.start()
     yield server
@@ -33,7 +33,7 @@ async def engine_server(request, gpu_context):
 @pytest.fixture
 async def engine_client(engine_server):
     """Create a KATCP client for communicating with the dummy server."""
-    host, port = engine_server.server.sockets[0].getsockname()
+    host, port = engine_server.server.sockets[0].getsockname()[:2]
     client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()

@@ -169,6 +169,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--sync-epoch",
         type=int,  # AFAIK, the digitisers sync on PPS signals, so it makes sense for this to be an int.
+        required=True,
         help="UNIX time at which digitisers were synced.",
     )
     parser.add_argument(
@@ -266,7 +267,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         channels=args.channels,
         taps=args.taps,
         quant_gain=args.quant_gain,
-        sync_epoch=float(args.sync_epoch),  # but we'll store internally as a float.
+        sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
         mask_timestamp=args.mask_timestamp,
         use_gdrcopy=args.use_gdrcopy,
         use_peerdirect=args.use_peerdirect,

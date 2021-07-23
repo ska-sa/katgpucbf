@@ -309,7 +309,7 @@ class Engine(aiokatcp.DeviceServer):
         # modify it in any way.
         self.sensors["quant-gain"].set_value(self._processor.compute.quant_gain)
 
-    async def request_delays(self, ctx, start_time: int, delays: str) -> None:
+    async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model.
 
         .. todo::
