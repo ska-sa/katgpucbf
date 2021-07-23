@@ -328,6 +328,12 @@ class Engine(aiokatcp.DeviceServer):
         delay, delay_rate = comma_string_to_float(delay_str)
         phase, phase_rate = comma_string_to_float(phase_str)
 
+        # This will round the start time of the new delay model to the nearest
+        # ADC sample. If the start time given doesn't coincide with an ADC sample,
+        # then all subsequent delays for this model will be off by the product
+        # of this delta and the delay_rate (same for phase).
+        # This may be too small to be a concern, but if it is a concern,
+        # then we'd need to compensate for that here.
         start_sample_count = int((start_time - self.sync_epoch) * self.adc_rate)
 
         new_linear_model = LinearDelayModel(start_sample_count, delay, delay_rate, phase, phase_rate)
