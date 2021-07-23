@@ -55,6 +55,7 @@ def create_test_objects(
     n_pols: int,
     sample_bits: int,
     heaps_per_fengine_per_chunk: int,
+    max_active_chunks: int,
     timestamp_step: int,
 ):
     """Create all objects required to run a SPEAD receiver test.
@@ -78,6 +79,8 @@ def create_test_objects(
         Each chunk out of the SPEAD2 receiver will contain multiple heaps from
         each antenna. This parameters specifies the number of heaps per antenna
         that each chunk will contain.
+    max_active_chunks: int
+        The maximum number of chunks that can be received concurrently.
     timestamp_step: int
         Each heap contains a timestamp. The timestamp between consecutive heaps
         changes depending on the FFT size and the number of time samples per
@@ -166,6 +169,7 @@ def create_test_objects(
         sample_bits,
         timestamp_step,
         heaps_per_fengine_per_chunk,
+        max_active_chunks,
         ringbuffer,
         thread_affinity,
         monitor=monitor,
@@ -174,7 +178,7 @@ def create_test_objects(
 
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    src_chunks_per_stream = 8
+    src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
     for _ in range(src_chunks_per_stream):
         buf = accel.HostArray((receiver_stream.chunk_bytes,), np.uint8, context=context)
         chunk = recv.Chunk(buf)
@@ -325,6 +329,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     n_pols = 2
     sample_bits = 8
     heaps_per_fengine_per_chunk = 8
+    max_active_chunks = 8
 
     # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier
     # transform.
@@ -341,6 +346,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         n_pols,
         sample_bits,
         heaps_per_fengine_per_chunk,
+        max_active_chunks,
         timestamp_step,
     )
 
@@ -503,12 +509,6 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
 
     # 6. Run get_chunks() function
     event_loop.run_until_complete(get_chunks(async_ringbuffer, receiver_stream, total_chunks))
-
-    # 7. Final cleanup
-    # Something is not being cleared properly at the end - if I do not delete these I get an error on the next test that
-    # is run.
-    receiver_stream.stop()  # Not really useful when using the buffer transport.
-    del source_stream, ig, receiver_stream, async_ringbuffer
 
 
 # A manual run useful when debugging the unit tests.

@@ -27,6 +27,7 @@ passing information between different async processing loops within the object.
 """
 
 import asyncio
+import math
 import time
 from typing import List
 
@@ -133,6 +134,7 @@ class XBEngine:
         channel_offset_value: int,
         rx_thread_affinity: int,
         batches_per_chunk: int,  # Used for GPU memory tuning
+        rx_reorder_tol: int,
     ):
         """
         Construct an XBEngine object.
@@ -173,6 +175,9 @@ class XBEngine:
             the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
             system RAM is allocated, the lower this value is, the more work the python processing thread is required to
             do.
+        rx_reorder_tol: int
+            Maximum tolerance for jitter between received packets, as a time
+            expressed in ADC sample ticks.
         """
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
@@ -193,6 +198,7 @@ class XBEngine:
 
         # 1.3 Engine Parameters - Parameters not used in the array but needed for this engine
         self.batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
+        self.max_active_chunks: int
         # Used in the heap to indicate the first channel in the sequence of channels in the stream
         self.channel_offset_value: int
 
@@ -277,6 +283,7 @@ class XBEngine:
 
         # 2.4 Assign engine configuration parameters
         self.batches_per_chunk = batches_per_chunk
+        self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.batches_per_chunk) + 1
         self.channel_offset_value = channel_offset_value
 
         # 2.5 Set runtime flags to their initial states
@@ -309,6 +316,7 @@ class XBEngine:
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.batches_per_chunk,
+            max_active_chunks=self.max_active_chunks,
             ringbuffer=self.ringbuffer,
             thread_affinity=rx_thread_affinity,
             use_gdrcopy=False,
@@ -352,12 +360,12 @@ class XBEngine:
         # setting these values too high results in too much GPU memory being consumed. There just need to be enough
         # of them that the different processing functions do not get starved waiting for items. The low single digits is
         # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
-        # RAM than GPU RAM.
+        # RAM than GPU RAM. It should be higher than max_active_chunks.
         # These values are not configurable as they have been acceptable for most tests cases up until now. If the
         # pipeline starts bottlenecking, then maybe look at increasing these values.
         n_rx_items = 3  # Too high means too much GPU memory gets allocated
         n_tx_items = 2
-        n_free_chunks = 20
+        n_free_chunks = self.max_active_chunks + 8
 
         # 6.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.
