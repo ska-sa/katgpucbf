@@ -49,9 +49,11 @@ And you are ready to start developing with :mod:`katgpucbf`!
 
 .. tip::
 
-  If you ``source dev-setup.sh`` again, the module will be re-installed in
-  editable mode. Usually you probably won't want to do that, but if you do,
-  the option is there.
+  I don't recommend using the  ``dev-setup.sh`` for anything other than initial
+  setup. If you run it again, the requirements will be re-installed, and the
+  module will be re-installed in editable mode. It's unlikely that any of this
+  will be harmful in any way, but it will use up a few minutes for getting it
+  all compiled and installed. Usually you probably won't want to do that.
 
 
 Pre-commit

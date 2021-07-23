@@ -1,5 +1,4 @@
 -c requirements.txt
--e .
 coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 ipython
 pre-commit
