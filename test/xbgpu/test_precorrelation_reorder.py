@@ -35,9 +35,9 @@ def precorrelation_reorder_host_naive(
     ----------
     input_array
         Simulated F-engine data, with shape
-        (batches, antennas, channels, time, pols).
+        (batches, antennas, channels, samples_per_channel, pols).
     output_array
-        Re-ordered input data with shape
+        Reordered input data with shape
         (batches, channels, samples_per_chan//times_per_block, antennas, pols, times_per_block)
     n_batches
         Number of batches of data that will be reordered.
@@ -46,7 +46,7 @@ def precorrelation_reorder_host_naive(
     n_channels
         Number of frequency channels in the F-engine data, per stream.
     n_samples_per_channel
-        How many time-series we expect to get.
+        How many F-engine samples we expect to get, per channel, per batch.
     n_tpb
         [Optional] time samples per block. Required by the tensor-core
         correlator to better make use of its architecture. The default reflects
@@ -116,7 +116,13 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     buf_reordered_device = pre_correlation_reorder.buffer("out_reordered")
     buf_reordered_host = buf_reordered_device.empty_like()
 
+    # We seed np's random-number-generator in order to ensure unit tests that
+    # run the same way every time. The number is selected arbitrarily.
     rng = np.random.default_rng(seed=2021)
+
+    # We use `np.iinfo` to determine dynamically the min and max values that the
+    # array can contain. If the dtype changes in the kernel, the unit test
+    # should still work.
     buf_samples_host[:] = rng.uniform(
         np.iinfo(buf_samples_host.dtype).min, np.iinfo(buf_samples_host.dtype).max, buf_samples_host.shape
     ).astype(buf_samples_host.dtype)
@@ -125,13 +131,13 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     pre_correlation_reorder()
     buf_reordered_device.get(queue, buf_reordered_host)
 
-    host_reference_array = np.empty_like(buf_reordered_host)
+    reordered_reference_array_host = np.empty_like(buf_reordered_host)
     precorrelation_reorder_host_naive(
         buf_samples_host,
-        host_reference_array,
+        reordered_reference_array_host,
         template.n_batches,
         template.n_ants,
         template.n_channels,
         template.n_samples_per_channel,
     )
-    np.testing.assert_equal(buf_reordered_host, host_reference_array)
+    np.testing.assert_equal(buf_reordered_host, reordered_reference_array_host)
