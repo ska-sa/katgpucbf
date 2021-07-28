@@ -81,8 +81,10 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     buf_reordered_device.get(queue, buf_reordered_host)
 
     reordered_reference_array_host = np.empty_like(buf_reordered_host)
+    # Numpy's reshape and transpose work together to move the data around the
+    # same way as the GPU-reorder does.
     reordered_reference_array_host[:] = buf_samples_host.reshape(
-        n_batches, num_ants, n_channels_per_stream, -1, TPB, POLS
+        n_batches, num_ants, n_channels_per_stream, num_samples_per_channel // TPB, TPB, POLS
     ).transpose(0, 2, 3, 1, 5, 4)
 
     np.testing.assert_equal(buf_reordered_host, reordered_reference_array_host)
