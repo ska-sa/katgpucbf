@@ -3,64 +3,13 @@
 import numpy as np
 import pytest
 from katsdpsigproc import accel
-from numba import njit
 
 from katgpucbf.xbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 
 from . import test_parameters
 
-
-@njit
-def precorrelation_reorder_host_naive(
-    input_array,
-    output_array,
-    n_batches,
-    n_antennas,
-    n_channels,
-    n_samples_per_channel,
-    n_tpb=16,
-    n_polarisations=2,
-):
-    """Reorder data for correlation in a naive fashion on the host CPU.
-
-    This function uses simple for-loops to reorder the input data into the shape
-    of the output array. The Python implementation makes no attempt to optimise
-    things, that is taken care of by :mod:`!numba`.
-
-    These simple for-loops are very easy to verify for correctness. Numba speeds
-    the operation up by a factor of about 600 empirically, on larger dataset
-    sizes.
-
-    Parameters
-    ----------
-    input_array
-        Simulated F-engine data, with shape
-        (batches, antennas, channels, samples_per_channel, pols).
-    output_array
-        Reordered input data with shape
-        (batches, channels, samples_per_chan//times_per_block, antennas, pols, times_per_block)
-    n_batches
-        Number of batches of data that will be reordered.
-    n_antennas
-        Number of antennas we expect to receive data from.
-    n_channels
-        Number of frequency channels in the F-engine data, per stream.
-    n_samples_per_channel
-        How many F-engine samples we expect to get, per channel, per batch.
-    n_tpb
-        [Optional] time samples per block. Required by the tensor-core
-        correlator to better make use of its architecture. The default reflects
-        the correlator kernel's needed parameter.
-    n_polarisations
-        [Optional] number of polarisations. I don't see a reason for this to be
-        anything other than the default 2.
-    """
-    for b in range(n_batches):
-        for c in range(n_channels):
-            for s in range(n_samples_per_channel):
-                for a in range(n_antennas):
-                    for p in range(n_polarisations):
-                        output_array[b][c][s // n_tpb][a][p][s % n_tpb] = input_array[b][a][c][s][p]
+POLS = 2
+TPB = 16  # corresponding to times_per_block in the kernel.
 
 
 @pytest.mark.combinations(
@@ -132,12 +81,8 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     buf_reordered_device.get(queue, buf_reordered_host)
 
     reordered_reference_array_host = np.empty_like(buf_reordered_host)
-    precorrelation_reorder_host_naive(
-        buf_samples_host,
-        reordered_reference_array_host,
-        template.n_batches,
-        template.n_ants,
-        template.n_channels,
-        template.n_samples_per_channel,
-    )
+    reordered_reference_array_host[:] = buf_samples_host.reshape(
+        n_batches, num_ants, n_channels_per_stream, -1, TPB, POLS
+    ).transpose(0, 2, 3, 1, 5, 4)
+
     np.testing.assert_equal(buf_reordered_host, reordered_reference_array_host)
