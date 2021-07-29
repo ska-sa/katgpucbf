@@ -422,6 +422,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
                 n_ants,
                 n_samples_per_channel,
             )
+
+            # We reshape this to match the current output of the X-engine until NGC-225 is resolved.
             expected_output = expected_output.view(dtype=np.uint64).reshape(expected_output.shape[:-1])
             gpu_result = ig_recv["xeng_raw"].value
             np.testing.assert_equal(expected_output, gpu_result)
