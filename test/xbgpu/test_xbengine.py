@@ -175,7 +175,7 @@ def create_heaps(
 
 @njit
 def bounded_int8(val):
-    """Create an int8 value bounded to the range [-127,127]."""
+    """Create an int8 value bounded to the range [-127, 127]."""
     val = np.int8(val)
     if val == -128:
         val += 1
@@ -186,7 +186,7 @@ def bounded_int8(val):
 def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_samples_per_channel, n_pols=2):
     """Calculate the expected correlator output.
 
-    This doesn't do a full correlator, it calculates the results according to
+    This doesn't do a full correlator. It calculates the results according to
     what is expected from the specific input generated in :func:`create_heaps`.
     """
     baselines = antennas * (antennas + 1) // 2
@@ -212,7 +212,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                     a2vr = bounded_int8(-sign * a2)
                     a2vi = bounded_int8(-sign * c)
 
-                    # h1h2 real component
+                    # 1h2h real component
                     output_array[c, bl_idx, 0, 0, 0] += np.int32((a1hr * a2hr + a1hi * a2hi) * n_samples_per_channel)
                     # h1h2 imaginary component
                     output_array[c, bl_idx, 0, 0, 1] += np.int32((a1hi * a2hr - a1hr * a2hi) * n_samples_per_channel)
