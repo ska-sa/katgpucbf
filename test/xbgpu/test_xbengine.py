@@ -18,11 +18,14 @@ from numba import njit
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
+from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
 
 # 3. Define Constants
 complexity = 2
+
+get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
 
 
 def create_heaps(
@@ -179,7 +182,21 @@ def bounded_int8(val):
     val = np.int8(val)
     if val == -128:
         val += 1
-    return val
+    return np.int32(val)
+
+
+@njit
+def cmult_and_scale(a, b, c):
+    """Multiply complex numbers ``a`` and ``b``, and scale the result by ``c``.
+
+    Both ``a`` amd ``b`` inputs and the output are 2-element arrays of np.int32,
+    representing the real and imaginary components. ``c`` is a scalar.
+    """
+    result = np.empty((2,), dtype=np.int32)
+    result[0] = a[0] * b[0] + a[1] * b[1]
+    result[1] = a[1] * b[0] - a[0] * b[1]
+    result *= c
+    return result
 
 
 @njit
@@ -201,36 +218,17 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                     # the real and imaginary components in the last dimension. So
                     # it seems cleaner to do it this way, treating each component
                     # individually.
-                    bl_idx = a1 * (a1 + 1) // 2 + a2
+                    bl_idx = get_baseline_index(a1, a2)
                     sign = pow(-1, b)
-                    a1hr = bounded_int8(sign * b)
-                    a1hi = bounded_int8(sign * c)
-                    a1vr = bounded_int8(-sign * a1)
-                    a1vi = bounded_int8(-sign * c)
-                    a2hr = bounded_int8(sign * b)
-                    a2hi = bounded_int8(sign * c)
-                    a2vr = bounded_int8(-sign * a2)
-                    a2vi = bounded_int8(-sign * c)
+                    a1h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
+                    a1v = np.array([bounded_int8(-sign * a1), bounded_int8(-sign * c)])
+                    a2h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
+                    a2v = np.array([bounded_int8(-sign * a2), bounded_int8(-sign * c)])
 
-                    # 1h2h real component
-                    output_array[c, bl_idx, 0, 0, 0] += np.int32((a1hr * a2hr + a1hi * a2hi) * n_samples_per_channel)
-                    # h1h2 imaginary component
-                    output_array[c, bl_idx, 0, 0, 1] += np.int32((a1hi * a2hr - a1hr * a2hi) * n_samples_per_channel)
-
-                    # h1v2 real component
-                    output_array[c, bl_idx, 0, 1, 0] += np.int32((a1hr * a2vr + a1hi * a2vi) * n_samples_per_channel)
-                    # h1v2 imaginary component
-                    output_array[c, bl_idx, 0, 1, 1] += np.int32((a1hi * a2vr - a1hr * a2vi) * n_samples_per_channel)
-
-                    # v1h2 real component
-                    output_array[c, bl_idx, 1, 0, 0] += np.int32((a1vr * a2hr + a1vi * a2hi) * n_samples_per_channel)
-                    # v1h2 imaginary component
-                    output_array[c, bl_idx, 1, 0, 1] += np.int32((a1vi * a2hr - a1vr * a2hi) * n_samples_per_channel)
-
-                    # v1v2 real component
-                    output_array[c, bl_idx, 1, 1, 0] += np.int32((a1vr * a2vr + a1vi * a2vi) * n_samples_per_channel)
-                    # v1v2 imaginary component
-                    output_array[c, bl_idx, 1, 1, 1] += np.int32((a1vi * a2vr - a1vr * a2vi) * n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(a1h, a2h, n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(a1h, a2v, n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(a1v, a2h, n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(a1v, a2v, n_samples_per_channel)
 
     return output_array
 
