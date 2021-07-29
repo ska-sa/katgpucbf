@@ -174,7 +174,8 @@ def create_heaps(
 
 
 @njit
-def bounded_cplx_int8(val):
+def bounded_int8(val):
+    """Create an int8 value bounded to the range [-127,127]."""
     val = np.int8(val)
     if val == -128:
         val += 1
@@ -182,27 +183,34 @@ def bounded_cplx_int8(val):
 
 
 @njit
-def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_samples_per_channel):
+def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_samples_per_channel, n_pols=2):
+    """Calculate the expected correlator output.
 
-    POLS = 2
-    COMPLEXITY = 2
-
+    This doesn't do a full correlator, it calculates the results according to
+    what is expected from the specific input generated in :func:`create_heaps`.
+    """
     baselines = antennas * (antennas + 1) // 2
-    output_array = np.zeros((channels, baselines, POLS, POLS, COMPLEXITY), dtype=np.int32)
+    output_array = np.zeros((channels, baselines, n_pols, n_pols, complexity), dtype=np.int32)
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         for c in range(channels):
             for a1 in range(antennas):
                 for a2 in range(a1 + 1):
+                    # This process is a bit hand-draulic. Numba can handle Python's
+                    # complex numbers, BUT, they are represented as floating-point,
+                    # not integer. And it would involve reshaping the array to separate
+                    # the real and imaginary components in the last dimension. So
+                    # it seems cleaner to do it this way, treating each component
+                    # individually.
                     bl_idx = a1 * (a1 + 1) // 2 + a2
                     sign = pow(-1, b)
-                    a1hr = bounded_cplx_int8(sign * b)
-                    a1hi = bounded_cplx_int8(sign * c)
-                    a1vr = bounded_cplx_int8(-sign * a1)
-                    a1vi = bounded_cplx_int8(-sign * c)
-                    a2hr = bounded_cplx_int8(sign * b)
-                    a2hi = bounded_cplx_int8(sign * c)
-                    a2vr = bounded_cplx_int8(-sign * a2)
-                    a2vi = bounded_cplx_int8(-sign * c)
+                    a1hr = bounded_int8(sign * b)
+                    a1hi = bounded_int8(sign * c)
+                    a1vr = bounded_int8(-sign * a1)
+                    a1vi = bounded_int8(-sign * c)
+                    a2hr = bounded_int8(sign * b)
+                    a2hi = bounded_int8(sign * c)
+                    a2vr = bounded_int8(-sign * a2)
+                    a2vi = bounded_int8(-sign * c)
 
                     # h1h2 real component
                     output_array[c, bl_idx, 0, 0, 0] += np.int32((a1hr * a2hr + a1hi * a2hi) * n_samples_per_channel)
