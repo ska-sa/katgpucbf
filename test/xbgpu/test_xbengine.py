@@ -178,7 +178,15 @@ def create_heaps(
 
 @njit
 def bounded_int8(val):
-    """Create an int8 value bounded to the range [-127, 127]."""
+    """Create an int8 value bounded to the range [-127, 127].
+
+    Returns
+    -------
+    np.int32
+        This datatype is used to avoid overflow issues when the output is used
+        in multiplication operations, but the value is bounded by the closed
+        interval described above.
+    """
     val = np.int8(val)
     if val == -128:
         val += 1
@@ -187,9 +195,9 @@ def bounded_int8(val):
 
 @njit
 def cmult_and_scale(a, b, c):
-    """Multiply complex numbers ``a`` and ``b``, and scale the result by ``c``.
+    """Multiply ``a`` and ``conj(b)``, and scale the result by ``c``.
 
-    Both ``a`` amd ``b`` inputs and the output are 2-element arrays of np.int32,
+    Both ``a`` and ``b`` inputs and the output are 2-element arrays of np.int32,
     representing the real and imaginary components. ``c`` is a scalar.
     """
     result = np.empty((2,), dtype=np.int32)
@@ -209,8 +217,11 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     baselines = antennas * (antennas + 1) // 2
     output_array = np.zeros((channels, baselines, n_pols, n_pols, complexity), dtype=np.int32)
     for b in range(batch_start_idx, batch_start_idx + num_batches):
+        sign = pow(-1, b)
         for c in range(channels):
             for a1 in range(antennas):
+                a1h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
+                a1v = np.array([bounded_int8(-sign * a1), bounded_int8(-sign * c)])
                 for a2 in range(a1 + 1):
                     # This process is a bit hand-draulic. Numba can handle Python's
                     # complex numbers, BUT, they are represented as floating-point,
@@ -219,9 +230,6 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                     # it seems cleaner to do it this way, treating each component
                     # individually.
                     bl_idx = get_baseline_index(a1, a2)
-                    sign = pow(-1, b)
-                    a1h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
-                    a1v = np.array([bounded_int8(-sign * a1), bounded_int8(-sign * c)])
                     a2h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
                     a2v = np.array([bounded_int8(-sign * a2), bounded_int8(-sign * c)])
 
