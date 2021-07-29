@@ -223,12 +223,9 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                 a1h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
                 a1v = np.array([bounded_int8(-sign * a1), bounded_int8(-sign * c)])
                 for a2 in range(a1 + 1):
-                    # This process is a bit hand-draulic. Numba can handle Python's
+                    # This process is a bit non-intuitive. Numba can handle Python's
                     # complex numbers, BUT, they are represented as floating-point,
-                    # not integer. And it would involve reshaping the array to separate
-                    # the real and imaginary components in the last dimension. So
-                    # it seems cleaner to do it this way, treating each component
-                    # individually.
+                    # not integer. So we have helper functions here.
                     bl_idx = get_baseline_index(a1, a2)
                     a2h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
                     a2v = np.array([bounded_int8(-sign * a2), bounded_int8(-sign * c)])
