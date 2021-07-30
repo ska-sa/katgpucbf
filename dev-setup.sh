@@ -14,9 +14,6 @@ pip install -r requirements.txt -r requirements-dev.txt
 echo "Installing module in editable mode for development"
 pip install -e .
 
-echo "Compiling the C modules needed to run xbengine tests"
-make -C test/xbgpu
-
 echo "Building documentation for your convenience"
 make -C doc html
 

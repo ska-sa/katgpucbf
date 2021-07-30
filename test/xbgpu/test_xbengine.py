@@ -8,22 +8,24 @@ The test_xbengine(...) function is the entry point for these tests.
 """
 
 import asyncio
-import ctypes
-import os
 
 import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
 import spead2.send
+from numba import njit
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
+from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
 
 # 3. Define Constants
 complexity = 2
+
+get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
 
 
 def create_heaps(
@@ -174,6 +176,68 @@ def create_heaps(
     return heaps
 
 
+@njit
+def bounded_int8(val):
+    """Create an int8 value bounded to the range [-127, 127].
+
+    Returns
+    -------
+    np.int32
+        This datatype is used to avoid overflow issues when the output is used
+        in multiplication operations, but the value is bounded by the closed
+        interval described above.
+    """
+    val = np.int8(val)
+    if val == -128:
+        val += 1
+    return np.int32(val)
+
+
+@njit
+def cmult_and_scale(a, b, c):
+    """Multiply ``a`` and ``conj(b)``, and scale the result by ``c``.
+
+    Both ``a`` and ``b`` inputs and the output are 2-element arrays of np.int32,
+    representing the real and imaginary components. ``c`` is a scalar.
+    """
+    result = np.empty((2,), dtype=np.int32)
+    result[0] = a[0] * b[0] + a[1] * b[1]
+    result[1] = a[1] * b[0] - a[0] * b[1]
+    result *= c
+    return result
+
+
+@njit
+def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_samples_per_channel, n_pols=2):
+    """Calculate the expected correlator output.
+
+    This doesn't do a full correlator. It calculates the results according to
+    what is expected from the specific input generated in :func:`create_heaps`.
+    """
+    baselines = antennas * (antennas + 1) // 2
+    output_array = np.zeros((channels, baselines, n_pols, n_pols, complexity), dtype=np.int32)
+    for b in range(batch_start_idx, batch_start_idx + num_batches):
+        sign = pow(-1, b)
+        for c in range(channels):
+            for a1 in range(antennas):
+                a1h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
+                a1v = np.array([bounded_int8(-sign * a1), bounded_int8(-sign * c)])
+                for a2 in range(a1 + 1):
+                    # This process is a bit non-intuitive. Numba can handle Python's
+                    # complex numbers, BUT, they are represented as floating-point,
+                    # not integer. So we have helper functions here.
+                    bl_idx = get_baseline_index(a1, a2)
+                    a2h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
+                    a2v = np.array([bounded_int8(-sign * a2), bounded_int8(-sign * c)])
+
+                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(a1h, a2h, n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(a1h, a2v, n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(a1v, a2h, n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(a1v, a2v, n_samples_per_channel)
+
+    return output_array
+
+
 @pytest.mark.combinations(
     "num_ants, num_channels, num_samples_per_channel",
     test_parameters.array_size,
@@ -285,29 +349,6 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         rx_reorder_tol=rx_reorder_tol,
     )
 
-    # 5. Import C function that will be used for verifying data.
-    verification_functions_lib_c = np.ctypeslib.load_library(
-        libname="lib_verification_functions.so", loader_path=os.path.abspath("./test/xbgpu")
-    )
-    verify_xbengine_c = verification_functions_lib_c.verify_xbengine
-
-    baselines_products = n_ants * (n_ants + 1) // 2 * n_pols * n_pols * n_channels_per_stream
-    verify_xbengine_c.argtypes = [
-        np.ctypeslib.ndpointer(
-            dtype=np.uint64,  # Output data array
-            shape=(baselines_products,),
-            flags="C_CONTIGUOUS",
-        ),
-        ctypes.c_uint,  # Batch Start Index
-        ctypes.c_size_t,  # Batches to accumulate
-        ctypes.c_size_t,  # Number of antennas
-        ctypes.c_size_t,  # Channels per stream
-        ctypes.c_size_t,  # Samples per channel
-        ctypes.c_size_t,  # Polarisations per sample
-    ]
-
-    verify_xbengine_c.restype = ctypes.c_int
-
     # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulations. Each
     # accumulation requires heap_accumulation_threshold batches of heaps. Additionally, we generate one extra batch to
     # simulate an incomplete accumulation to check that dumps are aligned correctly even if the first received batch is
@@ -376,16 +417,19 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
             # 8.2.4 Send the received data to the C verification function and assert that this function return is
             # what we expect.
-            result = verify_xbengine_c(
-                ig_recv["xeng_raw"].value.flatten(order="C"),
+
+            expected_output = generate_expected_output(
                 base_batch_index,
                 num_batches_in_current_accumulation,
-                n_ants,
                 n_channels_per_stream,
+                n_ants,
                 n_samples_per_channel,
-                n_pols,
             )
-            assert result, "C verification function failed. Examine terminal output to see what caused the error."
+
+            # We reshape this to match the current output of the X-engine until NGC-225 is resolved.
+            expected_output = expected_output.view(dtype=np.uint64).reshape(expected_output.shape[:-1])
+            gpu_result = ig_recv["xeng_raw"].value
+            np.testing.assert_equal(expected_output, gpu_result)
 
     # 9. This function launches the XB-Engine loop and the receiver function that verifies the X-Engine data.
     @pytest.mark.asyncio
