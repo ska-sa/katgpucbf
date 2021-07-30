@@ -9,6 +9,7 @@ from katgpucbf.xbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
 from . import test_parameters
 
 POLS = 2
+CPLX = 2
 TPB = 16  # corresponding to times_per_block in the kernel.
 
 
@@ -84,7 +85,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     # Numpy's reshape and transpose work together to move the data around the
     # same way as the GPU-reorder does.
     reordered_reference_array_host[:] = buf_samples_host.reshape(
-        n_batches, num_ants, n_channels_per_stream, num_samples_per_channel // TPB, TPB, POLS
-    ).transpose(0, 2, 3, 1, 5, 4)
+        n_batches, num_ants, n_channels_per_stream, num_samples_per_channel // TPB, TPB, POLS, CPLX
+    ).transpose(0, 2, 3, 1, 5, 4, 6)
 
     np.testing.assert_equal(buf_reordered_host, reordered_reference_array_host)

@@ -230,7 +230,6 @@ class XBEngine:
         # 1.8 GPU Kernels and GPU Context
         self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
         self.tensor_core_x_engine_core_operation: katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore
-        self.pre_correlation_reorder_operation: katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorder
         # Buffer linking reorder kernel to correlation kernel
         self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray
 
@@ -348,12 +347,16 @@ class XBEngine:
             n_samples_per_channel=self.n_samples_per_channel,
             n_batches=self.batches_per_chunk,
         )
-        self.pre_correlation_reorder_operation = reorder_template.instantiate(self._proc_command_queue)
+        self.pre_correlation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorder = (
+            reorder_template.instantiate(self._proc_command_queue)
+        )
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
-            self.context, self.pre_correlation_reorder_operation.template.output_data_shape, np.int16
+            self.context,
+            self.pre_correlation_reorder.slots["out_reordered"].shape,  # type: ignore
+            self.pre_correlation_reorder.slots["out_reordered"].dtype,  # type: ignore
         )
-        self.pre_correlation_reorder_operation.bind(out_reordered=self.reordered_buffer_device)
+        self.pre_correlation_reorder.bind(out_reordered=self.reordered_buffer_device)
 
         # 6. Create various buffers and assign them to the correct queues or objects.
         # 6.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
@@ -379,7 +382,9 @@ class XBEngine:
         for _ in range(n_rx_items):
             rx_item = RxQueueItem()
             rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
-                self.context, self.pre_correlation_reorder_operation.template.input_data_shape, np.int16
+                self.context,
+                self.pre_correlation_reorder.slots["in_samples"].shape,  # type: ignore
+                self.pre_correlation_reorder.slots["in_samples"].dtype,  # type: ignore
             )
             self._rx_free_item_queue.put_nowait(rx_item)
 
@@ -394,7 +399,9 @@ class XBEngine:
         # 6.3.3 Create empty chunks and give them to the receiver to use to assemble heaps.
         for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
-                self.pre_correlation_reorder_operation.template.input_data_shape, np.int16, context=self.context
+                self.pre_correlation_reorder.slots["in_samples"].shape,  # type: ignore
+                self.pre_correlation_reorder.slots["in_samples"].dtype,  # type: ignore
+                context=self.context,
             )
             chunk = recv.Chunk(buf)
             self.receiver_stream.add_chunk(chunk)
@@ -628,8 +635,8 @@ class XBEngine:
 
             # 3. Process the received data.
             # 3.1 Reorder the entire chunk
-            self.pre_correlation_reorder_operation.bind(in_samples=rx_item.buffer_device)
-            self.pre_correlation_reorder_operation()
+            self.pre_correlation_reorder.bind(in_samples=rx_item.buffer_device)
+            self.pre_correlation_reorder()
 
             # 3.2 Perform correlation on reordered data. The correlation kernel does not have the
             # concept of a batch at this stage, so the kernel needs to be run on each different
