@@ -1,5 +1,6 @@
 #include <memory>
 #include <utility>
+#include <numeric>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "recv.h"
@@ -123,6 +124,9 @@ py::module register_module(py::module &parent)
         .def_readwrite("timestamp", &py_chunk::timestamp)
         .def_readwrite("pol", &py_chunk::pol)
         .def_readonly("present", &py_chunk::present)
+        .def_property_readonly("n_present", [](const py_chunk &c) {
+            return std::accumulate(c.present.begin(), c.present.end(), std::size_t(0));
+        })
         .def_readonly("base", &py_chunk::base)
         .def_readonly("device", &py_chunk::device)
     ;

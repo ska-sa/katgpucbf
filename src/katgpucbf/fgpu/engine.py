@@ -1,7 +1,7 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, TypedDict, Union
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -178,11 +178,50 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
+        # No more than once per second, at least once every 10 seconds.
+        # The TypedDict is necessary for mypy to believe the use as
+        # kwargs is valid.
+        AutoStrategy = TypedDict(  # noqa: N806
+            "AutoStrategy",
+            {
+                "auto_strategy": aiokatcp.SensorSampler.Strategy,
+                "auto_strategy_parameters": Tuple[float, float],
+            },
+        )
+        auto_strategy = AutoStrategy(
+            auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(1.0, 10.0),
+        )
+        # The type ignore are because mypy doesn't
         sensors: List[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 int,
+                "input-heaps-total",
+                "number of heaps received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-chunks-total",
+                "number of chunks received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-bytes-total",
+                "number of bytes of digitiser samples received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
                 "input-missing-heaps-total",
-                "number of heaps dropped on the input",
+                "number of heaps dropped on the input (prometheus: counter)",
                 default=0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 # TODO: Think about what status_func should do for the status of the
@@ -190,13 +229,12 @@ class Engine(aiokatcp.DeviceServer):
                 # dropped, then it may not be too useful. Having the information
                 # necessary to implement this may involve shifting things between
                 # classes.
-                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
+                **auto_strategy,
             ),
             aiokatcp.Sensor(
                 float,
                 "quant-gain",
-                "rescaling factor to apply before 8-bit requantisation",
+                "rescaling factor to apply before 8-bit requantisation (prometheus: gauge)",
                 default=quant_gain,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             ),

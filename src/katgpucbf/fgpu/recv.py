@@ -1,9 +1,10 @@
 """Recv module."""
 
 import logging
+import time
 from typing import AsyncGenerator, List, Optional
 
-from aiokatcp import Sensor
+from aiokatcp import Sensor, SensorSet
 
 from ._katfgpu.recv import Chunk, Ringbuffer, Stream
 from .monitor import Monitor
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 async def chunk_sets(
-    streams: List[Stream], monitor: Monitor, dropped_pkt_sensor: Optional[Sensor] = None
+    streams: List[Stream], monitor: Monitor, sensors: Optional[SensorSet] = None
 ) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
@@ -25,12 +26,6 @@ async def chunk_sets(
     from each of the streams all have the same timestamp, they are yielded.
     Chunks that are not yielded are returned to their streams.
 
-    .. todo::
-
-      It may be more scalable to pass the entire :class:`~aiokatcp.SensorSet`
-      around than to do individual sensors, because we will likely have multiple
-      sensors coming from here in future.
-
     Parameters
     ----------
     streams
@@ -38,34 +33,36 @@ async def chunk_sets(
         each represents a polarisation.
     monitor
         Used for performance monitoring of the ringbuffer.
-    dropped_pkt_sensor
-        The mechanism by which dropped packets are reported.
+    sensors
+        Sensors through which networking statistics will be reported (if provided).
     """
     n_pol = len(streams)
     buf: List[Optional[Chunk]] = [None] * n_pol  # Working buffer to match up pairs of chunks from both pols.
     ring = AsyncRingbuffer(streams[0].ringbuffer, monitor, "recv_ringbuffer", "run_receive")
     lost = 0
+    first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
+    packet_samples = streams[0].packet_samples
+    packet_bytes = packet_samples * streams[0].sample_bits // 8
+    chunk_packets = streams[0].chunk_packets
+    chunk_samples = streams[0].chunk_samples
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
     try:
         async for chunk in ring:
             # Inspect the chunk we have just received.
-            total = len(chunk.present)
-            good = sum(chunk.present)
-            lost += total - good
-            if good < total:
-                if dropped_pkt_sensor:
-                    dropped_pkt_sensor.set_value(lost)
-                # TODO: Do we need both a sensor and a logger? Suggestion made
-                # to make this a debug-level message once we have infrastructure
-                # in place to monitor the sensors.
-                logger.warning(
+            if first_timestamp == -1:
+                # TODO: use chunk.present to determine the actual first timestamp
+                first_timestamp = chunk.timestamp
+            good = chunk.n_present
+            lost += chunk_packets - good
+            if good < chunk_packets:
+                logger.debug(
                     "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
                     chunk.timestamp,
                     chunk.pol,
                     good,
-                    total,
+                    chunk_packets,
                     lost,
                 )
 
@@ -82,6 +79,30 @@ async def chunk_sets(
 
             # If we have both chunks and they match up, then we can yield.
             if all(c is not None and c.timestamp == chunk.timestamp for c in buf):
+                if sensors:
+                    # Get explicit timestamp to ensure that all the updated sensors
+                    # have the same timestamp.
+                    sensor_timestamp = time.time()
+
+                    def increment(sensor: Sensor, incr: int):
+                        sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+
+                    # mypy isn't smart enough to see that the list can't have Nones
+                    # in it at this point.
+                    buf_good = sum(c.n_present for c in buf)  # type: ignore
+                    increment(sensors["input-heaps-total"], buf_good)
+                    increment(sensors["input-chunks-total"], n_pol)
+                    increment(sensors["input-bytes-total"], buf_good * packet_bytes)
+                    # Determine how many heaps we expected to have seen by
+                    # now, and subtract from it the number actually seen to
+                    # determine the number missing. This accounts for both
+                    # packets lost within chunks and lost chunks.
+                    received_heaps = sensors["input-heaps-total"].value
+                    expected_heaps = (chunk.timestamp + chunk_samples) * n_pol // packet_samples
+                    missing = expected_heaps - received_heaps
+                    if missing > sensors["input-missing-heaps-total"].value:
+                        sensors["input-missing-heaps-total"].set_value(missing, timestamp=sensor_timestamp)
+
                 # mypy isn't smart enough to see that the list can't have Nones
                 # in it at this point.
                 yield buf  # type: ignore
