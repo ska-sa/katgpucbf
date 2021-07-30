@@ -1,146 +1,44 @@
-"""
-Module for performing unit tests on the Tensor core correlation kernel.
-
-Contains two unit tests:
-    1. @test_correlator_exhaustive - this test is time-consuming, taking many hours to run for larger input sizes. It
-    generates a high degree of certainty over the results.
-    2. @test_correlator_quick - this test runs very quickly but is less exhaustive. It is used for quickly testing
-    much larger array sizes.
-"""
+"""Module for performing unit tests on the Tensor core correlation kernel."""
 import numpy as np
 import pytest
 from katsdpsigproc import accel
+from numba import njit, prange
 
 from katgpucbf.xbgpu import tensorcore_xengine_core
 
 from . import test_parameters
 
-
-def get_simple_test_ant_value(channel_index, ant_index):
-    """Hashing function to generate a repeatable int8 number for a specific antenna channel combination.
-
-    The value returned is between -127 and 127 (inclusive) of type np.int8.
-    """
-    ant_value = np.uint8(channel_index * ant_index) - 128
-    if ant_value == -128:
-        ant_value += 1
-    return np.int8(ant_value)
+get_baseline_index = njit(tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index)
 
 
-def generate_antpair_visibilities_host(buf_samples_host, channel_index, ant1, ant2, time_outer_range, time_inner_range):
-    """
-    Host-side code to generate visibilities between two antennas.
+@njit(parallel=True)
+def correlate_host(input_array: np.ndarray) -> np.ndarray:
+    """Calculate correlation products on the host CPU."""
+    n_chans = input_array.shape[0]
+    n_ants = input_array.shape[2]
+    n_pols = input_array.shape[3]
+    n_samples_per_channel = input_array.shape[1] * input_array.shape[4]
+    complexity = input_array.shape[5]
+    # I think it's nicer to get the time-series all in one axis so that we can just use np.sum() across that axis.
+    ez_in = input_array.transpose(0, 2, 3, 1, 4, 5).copy()
+    ez_in = ez_in.reshape((n_chans, n_ants, n_pols, n_samples_per_channel, complexity)).astype(np.int32)
+    n_baselines = n_ants * (n_ants + 1) * 2
+    output_array = np.empty(shape=(n_chans, n_baselines, complexity), dtype=np.int32)
+    for c in prange(n_chans):
+        for a1 in range(n_ants):
+            for a2 in range(a1 + 1):
+                for p1 in range(n_pols):
+                    r1 = ez_in[c, a1, p1, :, 0]
+                    i1 = ez_in[c, a1, p1, :, 1]
+                    for p2 in range(n_pols):
+                        bl_idx = get_baseline_index(a1, a2) * 4 + 2 * p1 + p2
+                        r2 = ez_in[c, a2, p2, :, 0]
+                        i2 = ez_in[c, a2, p2, :, 1]
 
-    Will generate visibilities for a particular channel and antenna combination from an array of input samples that has
-    the shape (n_channels, n_samples_per_channel // n_times_per_block, n_ants, n_polarizastions, n_times_per_block)
-    required by the Tensor core correlation kernels.
+                        output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
+                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
 
-    This is a naive implementation of the correlation algorithm and is computationally very slow.
-
-    Returns visibilities hh, hv, vh and vv representing different interpolarisation products.
-    """
-    hh, hv, vh, vv = 0 + 0j, 0 + 0j, 0 + 0j, 0 + 0j
-    for time_index1 in range(0, time_outer_range):
-        for time_index2 in range(0, time_inner_range):
-            ant1h = buf_samples_host[channel_index][time_index1][ant1][0][time_index2]
-            ant1v = buf_samples_host[channel_index][time_index1][ant1][1][time_index2]
-            ant2h = buf_samples_host[channel_index][time_index1][ant2][0][time_index2]
-            ant2v = buf_samples_host[channel_index][time_index1][ant2][1][time_index2]
-
-            hh += ant1h * np.conj(ant2h)
-            vh += ant1h * np.conj(ant2v)
-            hv += ant1v * np.conj(ant2h)
-            vv += ant1v * np.conj(ant2v)
-
-    return hh, hv, vh, vv
-
-
-@pytest.mark.parametrize("num_ants", test_parameters.array_size)
-def test_correlator_exhaustive(num_ants):
-    """
-    Exhaustive unit test of the Tensor core correlation algorithm.
-
-    This unit test runs on random input data. The CPU-side check for correctness is very slow - the input sample
-    array size has been kept small to speed this up. For MeerKAT sizes, the input sample array will be much bigger.
-    """
-    # 1. Array parameters
-    n_ants = num_ants
-    n_channels = 2
-    n_samples_per_channel = 16
-
-    # 2. Initialise GPU kernels and buffers.
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    queue = ctx.create_command_queue()
-
-    template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=n_ants, n_channels=n_channels, n_samples_per_channel=n_samples_per_channel
-    )
-    tensor_core_x_engine_core = template.instantiate(queue)
-    tensor_core_x_engine_core.ensure_all_bound()
-
-    buf_samples_device = tensor_core_x_engine_core.buffer("in_samples")
-    buf_samples_host = buf_samples_device.empty_like()
-
-    buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
-    buf_visibilities_host = buf_visibilities_device.empty_like()
-
-    # 3. Generate random input data - need to modify the dtype and  shape of the array as numpy does not have a packet
-    # 8-bit int complex type.
-
-    buf_samples_int16_shape = template.input_data_shape
-    buf_samples_int8_shape = list(buf_samples_int16_shape)
-    buf_samples_int8_shape[-1] *= 2  # By converting from int16 to int8, the length of the last dimension doubles.
-    buf_samples_int8_shape = tuple(buf_samples_int8_shape)
-
-    buf_samples_host.dtype = np.int8
-    buf_samples_host[:] = np.random.randint(
-        low=-127,
-        high=128,
-        size=buf_samples_int8_shape,
-        dtype=np.int8,
-    )
-    buf_samples_host.dtype = np.int16
-
-    # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
-    buf_samples_device.set(queue, buf_samples_host)
-    tensor_core_x_engine_core()
-    buf_visibilities_device.get(queue, buf_visibilities_host)
-
-    # 5. Check that the GPU visibilities are correct.
-    # 5.1 Need to convert the input and output arrays to 32-bit float complex type as numpy has no 8-bit or 32-bit int
-    # complex type.
-    buf_samples_host.dtype = np.int8
-    buf_samples_host = buf_samples_host.astype(np.float32)
-    buf_samples_host.dtype = np.csingle
-
-    buf_visibilities_host.dtype = np.int32
-    buf_visibilities_host = buf_visibilities_host.astype(np.float32)
-    buf_visibilities_host.dtype = np.csingle
-
-    buf_correct_visibilities_host = np.empty_like(buf_visibilities_host)
-
-    # 5.2 Generate the visibilities on the CPU - this is not a simple matrix operation due to the indexing of the input
-    # samples, I am just going to do a naive brute-force for now to be optomised later if needs be.
-
-    time_outer_range = n_samples_per_channel // template.n_times_per_block
-    time_inner_range = template.n_times_per_block
-
-    for channel_index in range(0, n_channels):
-        for ant1_index in range(0, n_ants):
-            for ant2_index in range(0, ant1_index + 1):
-                hh, hv, vh, vv = generate_antpair_visibilities_host(
-                    buf_samples_host, channel_index, ant1_index, ant2_index, time_outer_range, time_inner_range
-                )
-                baseline_index = tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(
-                    ant1_index, ant2_index
-                )
-                buf_correct_visibilities_host[channel_index][baseline_index][0][0] = hh
-                buf_correct_visibilities_host[channel_index][baseline_index][1][0] = hv
-                buf_correct_visibilities_host[channel_index][baseline_index][0][1] = vh
-                buf_correct_visibilities_host[channel_index][baseline_index][1][1] = vv
-
-    # 5.3 Check that the CPU version and GPU version are identical
-    np.testing.assert_array_equal(buf_correct_visibilities_host, buf_visibilities_host)
+    return output_array
 
 
 @pytest.mark.combinations(
@@ -149,87 +47,37 @@ def test_correlator_exhaustive(num_ants):
     test_parameters.num_channels,
     test_parameters.num_samples_per_channel,
 )
-def test_correlator_quick(num_ants, num_samples_per_channel, num_channels):
-    """
-    Lightweight unit test of the Tensor core correlation algorithm.
-
-    This unit test uses a hashing function(@get_simple_test_ant_value(...)) to determine the values in the input
-    sample array for a specific antenna-channel combination. This value is kept constant over all time values. This
-    allows the output visibility values to be calculated quickly on the CPU without performing the full correlation
-    operation. This unit test runs much quicker than @test_correlator_exhaustive, while being much less exhaustive.
-    It is used to perform a quick check for the correctness on much larger input sample array sizes.
-    """
-    # 1. Array parameters
-    n_ants = num_ants
-
-    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
-    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
-    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
-    n_channels_per_stream = num_channels // n_ants // 4
-    n_samples_per_channel = num_samples_per_channel
-
-    # 2. Initialise GPU kernels and buffers.
+def test_correlator(num_ants, num_samples_per_channel, num_channels):
+    """Parameterised unit test of the Tensor-Core correlation kernel."""
+    # TODO: A lot of this is duplicated in other functions. It would be nice to
+    # move it into a test fixture.
+    n_chans_per_stream = num_channels // num_ants // 4
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
     template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=n_ants, n_channels=n_channels_per_stream, n_samples_per_channel=n_samples_per_channel
+        ctx, n_ants=num_ants, n_channels=n_chans_per_stream, n_samples_per_channel=num_samples_per_channel
     )
-    correlator = template.instantiate(queue)
-    correlator.ensure_all_bound()
+    tensor_core_x_engine_core = template.instantiate(queue)
+    tensor_core_x_engine_core.ensure_all_bound()
 
-    time_outer_range = n_samples_per_channel // template.n_times_per_block
-
-    buf_samples_device = correlator.buffer("in_samples")
+    buf_samples_device = tensor_core_x_engine_core.buffer("in_samples")
     buf_samples_host = buf_samples_device.empty_like()
 
-    buf_visibilities_device = correlator.buffer("out_visibilities")
+    rng = np.random.default_rng(seed=2021)
+    buf_samples_host[:] = rng.uniform(
+        np.iinfo(buf_samples_host.dtype).min, np.iinfo(buf_samples_host.dtype).max, buf_samples_host.shape
+    ).astype(buf_samples_host.dtype)
+
+    buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
 
-    # 3. Generate predictable input data. The time samples remain constant for every antenna-channel combination.
-    buf_samples_host.dtype = np.int8
-    for channel_index in range(n_channels_per_stream):
-        for ant_index in range(n_ants):
-            sample_value = get_simple_test_ant_value(channel_index, ant_index)
-            for time_outer_index in range(time_outer_range):
-                buf_samples_host[channel_index][time_outer_index][ant_index] = np.full(
-                    buf_samples_host.shape[3:], sample_value, dtype=np.int8
-                )
-    buf_samples_host.dtype = np.int16
-
-    # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
     buf_samples_device.set(queue, buf_samples_host)
-    correlator()
+    tensor_core_x_engine_core()
     buf_visibilities_device.get(queue, buf_visibilities_host)
 
-    # 5. Check that the GPU visibilities are correct.
-    # 5.1 Need to convert the output array to 32-bit float complex type as numpy has no  32-bit int complex type.
-
-    buf_visibilities_host.dtype = np.int32
-    buf_visibilities_host = buf_visibilities_host.astype(np.float32)
-    buf_visibilities_host.dtype = np.csingle
-
-    # 5.2 Generate the visibilities on the CPU and check they match the expected value. The output values are simple to
-    # calculate and do not require performing the matrix multiple as it is performed on the GPU.
-    for channel_index in range(0, n_channels_per_stream):
-        for ant1_index in range(0, n_ants):
-            for ant2_index in range(0, ant1_index + 1):
-                ant1_value = get_simple_test_ant_value(channel_index, ant1_index)
-                ant1_value = ant1_value + ant1_value * 1j
-                ant2_value = get_simple_test_ant_value(channel_index, ant2_index)
-                ant2_value = ant2_value + ant2_value * 1j
-                baseline_index = tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index(
-                    ant1_index, ant2_index
-                )
-
-                buf_samples_host.dtype = np.int8
-                product = ant1_value * np.conj(ant2_value)
-                product_accumulated = product * n_samples_per_channel
-
-                assert buf_visibilities_host[channel_index][baseline_index][0][0] == product_accumulated
-                assert buf_visibilities_host[channel_index][baseline_index][1][0] == product_accumulated
-                assert buf_visibilities_host[channel_index][baseline_index][0][1] == product_accumulated
-                assert buf_visibilities_host[channel_index][baseline_index][1][1] == product_accumulated
+    calculated_visibilties_host = correlate_host(buf_samples_host)
+    np.testing.assert_equal(buf_visibilities_host, calculated_visibilties_host)
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
@@ -263,11 +111,9 @@ def test_multikernel_accumulation(num_ants):
     buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
 
-    # 3. Populate sample buffer so that all real and complex values samples are the same. The real and complex 8-bit
-    # values are combined into a single 16-bit integer. This is easier to duplicate across the entire buffer.
+    # 3. Populate sample buffer so that all real and complex values samples are the same.
     sample_value_i8 = 8
-    sample_value_i16 = ((sample_value_i8 << 8) + sample_value_i8) & 0xFFFF
-    buf_samples_host = np.full(buf_samples_host.shape, sample_value_i16, dtype=np.int16)
+    buf_samples_host[:] = sample_value_i8
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
     buf_samples_device.set(queue, buf_samples_host)
@@ -280,14 +126,11 @@ def test_multikernel_accumulation(num_ants):
     # (x + jx)(x - jx) = x^2 + jx^2 - jx^2 + x^2 = 2x^2
     # The real value is 2x^2 and the imaginary value is 0. A single kernel launch will accumulate n_samples_per_channel
     # times, giving an output real visibility value of n_samples_per_channel * 2 * 2x^2.
-    #
-    # The dtype of the array is int64, the real value being packed in the bottom 32 bits and the imaginary value being
-    # packed in the top 32 bits.
-    expected_output_real = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
-    expected_output_imaginary = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
-    output_value_i64 = (expected_output_imaginary * n_samples_per_channel) << 32
-    output_value_i64 += expected_output_real * n_samples_per_channel
-    np.testing.assert_equal(buf_visibilities_host, output_value_i64)
+    expected_output = np.empty_like(buf_visibilities_host)
+    expected_output[:, :, 0] = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
+    expected_output[:, :, 1] = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
+    expected_output *= n_samples_per_channel
+    np.testing.assert_equal(buf_visibilities_host, expected_output)
 
     # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is
     # actually zero.
@@ -305,6 +148,5 @@ def test_multikernel_accumulation(num_ants):
     buf_visibilities_device.get(queue, buf_visibilities_host)
 
     # 8. Check that multikernel accumulation produces the correct results
-    output_value_i64 = (expected_output_imaginary * n_samples_per_channel * n_kernel_launches) << 32
-    output_value_i64 += expected_output_real * n_samples_per_channel * n_kernel_launches
-    np.testing.assert_equal(buf_visibilities_host, output_value_i64)
+    expected_output *= n_kernel_launches
+    np.testing.assert_equal(buf_visibilities_host, expected_output)

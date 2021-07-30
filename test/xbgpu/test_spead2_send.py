@@ -192,12 +192,12 @@ def test_send_simple(event_loop, num_ants, num_channels):
                     data_length_bytes = (
                         n_baselines * n_channels_per_stream * n_pols * n_pols * complexity * sample_bits // 8
                     )
-                    assert item.value.size * 8 == data_length_bytes, (  # *8 as there are 64 bytes in a sample
+                    assert item.value.size * 4 == data_length_bytes, (  # x4 because 4 bytes (32 bits) per sample
                         "xeng_raw data not correct size. "
                         f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
                     )
                     assert (
-                        item.value.dtype == np.uint64
+                        item.value.dtype == np.int32
                     ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
                     assert np.all(item.value == num_received)
 

@@ -35,7 +35,6 @@ import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
-import numpy as np
 import spead2
 
 import katgpucbf.xbgpu._katxbgpu.recv as recv
@@ -225,13 +224,6 @@ class XBEngine:
         # 1.7 Objects for sending and receiving data
         self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
         self.receiver_stream: recv.Stream
-        self.send_stream: katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend
-
-        # 1.8 GPU Kernels and GPU Context
-        self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
-        self.tensor_core_x_engine_core_operation: katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore
-        # Buffer linking reorder kernel to correlation kernel
-        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray
 
         # 1.9 Command queues for syncing different operations on the GPU - a
         # command queue is the OpenCL name for a CUDA stream. An abstract
@@ -324,7 +316,9 @@ class XBEngine:
 
         # 5. Create GPU specific objects.
         # 5.1 Create a GPU context, the x.is_cuda flag forces CUDA to be used instead of OpenCL.
-        self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
+        self.context: katsdpsigproc.abc.AbstractContext = katsdpsigproc.accel.create_some_context(
+            device_filter=lambda x: x.is_cuda
+        )
 
         # 5.2 Create various command queues (or CUDA streams) to queue GPU functions on.
         self._upload_command_queue = self.context.create_command_queue()
@@ -338,7 +332,9 @@ class XBEngine:
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
         )
-        self.tensor_core_x_engine_core_operation = tensor_core_template.instantiate(self._proc_command_queue)
+        self.tensor_core_x_engine_core: katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore = (
+            tensor_core_template.instantiate(self._proc_command_queue)
+        )
 
         reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
             self.context,
@@ -351,7 +347,7 @@ class XBEngine:
             reorder_template.instantiate(self._proc_command_queue)
         )
 
-        self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
+        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray = katsdpsigproc.accel.DeviceArray(
             self.context,
             self.pre_correlation_reorder.slots["out_reordered"].shape,  # type: ignore
             self.pre_correlation_reorder.slots["out_reordered"].dtype,  # type: ignore
@@ -392,7 +388,9 @@ class XBEngine:
         for _ in range(n_tx_items):
             tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
-                self.context, self.tensor_core_x_engine_core_operation.template.output_data_shape, np.int64
+                self.context,
+                self.tensor_core_x_engine_core.slots["out_visibilities"].shape,  # type: ignore
+                self.tensor_core_x_engine_core.slots["out_visibilities"].dtype,  # type: ignore
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
@@ -499,7 +497,7 @@ class XBEngine:
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend(
+        self.send_stream: katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend = katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
@@ -619,8 +617,8 @@ class XBEngine:
         # The very first heap sent out the X-Engine will have a timestamp of zero which is meaningless, every other
         # heap will have the correct timestamp.
         tx_item.timestamp = 0
-        self.tensor_core_x_engine_core_operation.bind(out_visibilities=tx_item.buffer_device)
-        self.tensor_core_x_engine_core_operation.zero_visibilities()
+        self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
+        self.tensor_core_x_engine_core.zero_visibilities()
 
         while self.running:
             # 2. Get item from receiver function - wait for the HtoD transfers to complete and then give the chunk back
@@ -646,12 +644,12 @@ class XBEngine:
                 # buffer.
                 buffer_slice = katsdpsigproc.accel.DeviceArray(
                     self.context,
-                    self.tensor_core_x_engine_core_operation.template.input_data_shape,
-                    np.int16,
+                    self.tensor_core_x_engine_core.slots["in_samples"].shape,  # type: ignore
+                    self.tensor_core_x_engine_core.slots["in_samples"].dtype,  # type: ignore
                     raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
                 )
-                self.tensor_core_x_engine_core_operation.bind(in_samples=buffer_slice)
-                self.tensor_core_x_engine_core_operation()
+                self.tensor_core_x_engine_core.bind(in_samples=buffer_slice)
+                self.tensor_core_x_engine_core()
 
                 # 3.2.2 If the batch timestamp corresponds to the accumulation interval, transfer the correlated data to
                 # the sender function. NOTE: The timestamp representing the end of an accumulation does not necessarily
@@ -668,8 +666,8 @@ class XBEngine:
                     # 3.2.4 Get a new tx item, assign its buffer correctly and reset the buffer to zero.
                     tx_item = await self._tx_free_item_queue.get()
                     tx_item.timestamp = next_heap_timestamp
-                    self.tensor_core_x_engine_core_operation.bind(out_visibilities=tx_item.buffer_device)
-                    self.tensor_core_x_engine_core_operation.zero_visibilities()
+                    self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
+                    self.tensor_core_x_engine_core.zero_visibilities()
 
                 # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
