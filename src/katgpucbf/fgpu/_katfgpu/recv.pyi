@@ -53,11 +53,12 @@ class Stream:
     def chunk_bytes(self) -> int: ...
     def add_chunk(self, chunk: Chunk) -> None: ...
     def add_udp_pcap_file_reader(self, filename: str) -> None: ...
-    def add_udp_ibv_reader(
+    def add_udp_reader(
         self,
         endpoints: Sequence[Tuple[str, int]],
         interface_address: str,
         buffer_size: int,
+        ibv: bool,
         comp_vector: int = ...,
         max_poll: int = ...,
     ) -> None: ...

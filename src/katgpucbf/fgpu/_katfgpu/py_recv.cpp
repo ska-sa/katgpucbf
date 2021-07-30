@@ -204,15 +204,14 @@ py::module register_module(py::module &parent)
             filename
                 Name of PCAP file to open.
             )pydocstring")
-        .def("add_udp_ibv_reader", &py_stream::add_udp_ibv_reader,
-            "endpoints"_a, "interface_address"_a, "buffer_size"_a,
+        .def("add_udp_reader", &py_stream::add_udp_reader,
+            "endpoints"_a, "interface_address"_a, "buffer_size"_a, "ibv"_a,
             "comp_vector"_a = 0,
             "max_poll"_a = spead2::recv::udp_ibv_config::default_max_poll,
             R"pydocstring(
-            Add the ibv_udp transport.
+            Add the UDP transport.
 
-            The receiver will read UDP packets off of the specified interface
-            using the ibverbs library to offload processing from the CPU.
+            The receiver will read UDP packets off of the specified interface.
 
             Parameters
             ----------
@@ -224,6 +223,9 @@ py::module register_module(py::module &parent)
             buffer_size
                 The size in bytes of buffer where packets are received before
                 being transferred to a chunk.
+            ibv
+                If true, use ibverbs to bypass the kernel for higher efficiency.
+                If false, `comp_vector` and `max_poll` are ignored.
             comp_vector
                 The completion channel vector (interrupt) for asynchronous
                 operation. Use a negative value to poll continuously. If a

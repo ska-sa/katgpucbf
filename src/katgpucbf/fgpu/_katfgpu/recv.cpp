@@ -262,20 +262,34 @@ void stream::add_udp_pcap_file_reader(const std::string &filename)
     emplace_reader<spead2::recv::udp_pcap_file_reader>(filename);
 }
 
-void stream::add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
-                                const std::string &interface_address,
-                                std::size_t buffer_size, int comp_vector, int max_poll)
+void stream::add_udp_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+                            const std::string &interface_address,
+                            std::size_t buffer_size, bool ibv, int comp_vector, int max_poll)
 {
-    spead2::recv::udp_ibv_config config;
-    for (const auto &ep : endpoints)
-        config.add_endpoint(boost::asio::ip::udp::endpoint(
-            boost::asio::ip::address::from_string(ep.first), ep.second));
-    config.set_interface_address(boost::asio::ip::address::from_string(interface_address));
-    config.set_max_size(packet_bytes + 128);
-    config.set_buffer_size(buffer_size);
-    config.set_comp_vector(comp_vector);
-    config.set_max_poll(max_poll);
-    emplace_reader<spead2::recv::udp_ibv_reader>(config);
+    std::size_t max_size = packet_bytes + 128;
+    auto if_address = boost::asio::ip::address::from_string(interface_address);
+    if (ibv)
+    {
+        spead2::recv::udp_ibv_config config;
+        for (const auto &ep : endpoints)
+            config.add_endpoint(boost::asio::ip::udp::endpoint(
+                boost::asio::ip::address::from_string(ep.first), ep.second));
+        config.set_interface_address(if_address);
+        config.set_max_size(max_size);
+        config.set_buffer_size(buffer_size);
+        config.set_comp_vector(comp_vector);
+        config.set_max_poll(max_poll);
+        emplace_reader<spead2::recv::udp_ibv_reader>(config);
+    }
+    else
+    {
+        buffer_size /= endpoints.size();  // split it across the endpoints
+        for (const auto &ep : endpoints)
+            emplace_reader<spead2::recv::udp_reader>(
+                boost::asio::ip::udp::endpoint(
+                    boost::asio::ip::address::from_string(ep.first), ep.second),
+                max_size, buffer_size, if_address);
+    }
 }
 
 stream::ringbuffer_t &stream::get_ringbuffer()

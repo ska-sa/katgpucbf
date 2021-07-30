@@ -282,6 +282,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
+        self._src_ibv = src_ibv
         self._src_streams = [
             recv.Stream(
                 pol,
@@ -419,8 +420,9 @@ class Engine(aiokatcp.DeviceServer):
                 else:
                     if self._src_interface is None:
                         raise ValueError("src_interface is required for UDP sources")
-                    # TODO: use src_ibv                     ...?
-                    stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer, self._src_comp_vector[pol])
+                    stream.add_udp_reader(
+                        src, self._src_interface, self._src_buffer, self._src_ibv, self._src_comp_vector[pol]
+                    )
             tasks = [
                 loop.create_task(self._processor.run_processing(self._src_streams)),
                 loop.create_task(self._processor.run_receive(self._src_streams)),
