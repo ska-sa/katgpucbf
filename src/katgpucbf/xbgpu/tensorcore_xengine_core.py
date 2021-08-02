@@ -1,4 +1,4 @@
-"""Module wrapping the ASTRON Tensor Core Correlation Kernels in the MeerKAT katsdpsig proc framework.
+"""Module wrapping the ASTRON Tensor-Core Correlation Kernels in the MeerKAT katsdpsigproc framework.
 
 .. todo::
 
@@ -19,7 +19,7 @@ complexity = 2
 
 
 class TensorCoreXEngineCoreTemplate:
-    r"""Template class for the Tensor core correlation kernel.
+    r"""Template class for the Tensor-Core correlation kernel.
 
     The template creates a :class:`TensorCoreXEngineCore` that will run the
     compiled kernel. The parameters are used to compile the kernel and by the
@@ -61,7 +61,7 @@ class TensorCoreXEngineCoreTemplate:
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
 
-        # This 128 is hardcoded in the original tensor core kernel. The reason it is set to this needs to be determined.
+        # This 128 is hardcoded in the original Tensor-Core kernel. The reason it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
@@ -152,7 +152,7 @@ class TensorCoreXEngineCore(accel.Operation):
     calculated by the :class:`TensorCoreXEngineCoreTemplate`. In 8-bit input mode,
     ``times_per_block`` is equal to 16.
 
-    Each input element is n complex 8-bit integer sample. :mod:`.numpy` does not
+    Each input element is a complex 8-bit integer sample. :mod:`.numpy` does not
     support 8-bit complex numbers, so the dimensionality is extended by 1, with
     the last dimension sized ``2`` to represent the complexity.
 
@@ -162,7 +162,7 @@ class TensorCoreXEngineCore(accel.Operation):
 
     The output visibility buffer must have the shape
     ``[channels][baselines][complexity]``. In 8-bit mode, each element in this
-    visibility matrix is a 32-bit integer  value.
+    visibility matrix is a 32-bit integer value.
 
     Currently only 8-bit input mode is supported.
     """
