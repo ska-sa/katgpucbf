@@ -192,7 +192,6 @@ class Engine(aiokatcp.DeviceServer):
             auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
             auto_strategy_parameters=(1.0, 10.0),
         )
-        # The type ignore are because mypy doesn't
         sensors: List[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 int,
