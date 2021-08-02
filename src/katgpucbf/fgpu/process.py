@@ -8,11 +8,12 @@ ultimately to the NIC is also handled.
 """
 
 import asyncio
+import time
 from collections import deque
 from typing import Deque, List, Optional, Sequence, cast
 
 import numpy as np
-from aiokatcp import SensorSet
+from aiokatcp import Sensor, SensorSet
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -717,3 +718,20 @@ class Processor:
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             sender.send_chunk(chunk)
+            if self.sensors is not None:
+                # Note: it's not strictly true to say that the data has been
+                # sent at this point; it's only been queued for sending. But it
+                # should be close enough for monitoring data rates at the
+                # granularity that this is typically done.
+                # Get a common timestamp for all the updates
+                sensor_timestamp = time.time()
+
+                def increment(sensor: Sensor, incr: int):
+                    sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+
+                increment(self.sensors["output-heaps-total"], chunk.frames * sender.num_substreams)
+                # out_item.spectra.shape[1:] is the shape of each frame
+                increment(
+                    self.sensors["output-bytes-total"],
+                    chunk.frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize,
+                )

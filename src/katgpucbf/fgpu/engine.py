@@ -231,6 +231,22 @@ class Engine(aiokatcp.DeviceServer):
                 **auto_strategy,
             ),
             aiokatcp.Sensor(
+                int,
+                "output-heaps-total",
+                "number of heaps transmitted (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "output-bytes-total",
+                "number of payload bytes transmitted (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
                 float,
                 "quant-gain",
                 "rescaling factor to apply before 8-bit requantisation (prometheus: gauge)",

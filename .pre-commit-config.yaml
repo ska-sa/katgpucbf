@@ -58,6 +58,7 @@ repos:
             'numpy==1.21.0',
             'spead2==3.3.2',
             'types-decorator==0.1.5',
+            'types-redis==3.5.4',
             'types-setuptools==57.0.0',
             'types-six==0.1.7',
         ]

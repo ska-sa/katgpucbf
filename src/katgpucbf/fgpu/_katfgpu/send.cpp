@@ -178,4 +178,9 @@ const ringbuffer_t &sender::get_free_ring() const
     return free_ring;
 }
 
+std::size_t sender::get_num_substreams() const
+{
+    return stream->get_num_substreams();
+}
+
 } // namespace katfgpu::send
