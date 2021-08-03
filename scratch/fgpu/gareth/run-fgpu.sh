@@ -35,7 +35,8 @@ exec cap_net_raw taskset -c $other_affinity fgpu \
     --dst-affinity $dst_affinity --dst-comp-vector=$dst_comp \
     --adc-rate 1712000000 \
     --channels 32768 \
-    --quant-scale 0.0001 \
+    --quant-gain 0.0001 \
     --dst-packet-payload 8192 \
     --katcp-port 0 \
+    --sync-epoch 0 \
     $srcs $dst

@@ -9,11 +9,12 @@ ultimately to the NIC is also handled.
 
 import asyncio
 import logging
+import time
 from collections import deque
-from typing import Deque, List, Sequence, cast
+from typing import Deque, List, Optional, Sequence, cast
 
 import numpy as np
-from aiokatcp import SensorSet
+from aiokatcp import Sensor, SensorSet
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -338,7 +339,12 @@ class Processor:
     """
 
     def __init__(
-        self, compute: Compute, delay_model: AbstractDelayModel, use_gdrcopy: bool, monitor: Monitor, sensors: SensorSet
+        self,
+        compute: Compute,
+        delay_model: AbstractDelayModel,
+        use_gdrcopy: bool,
+        monitor: Monitor,
+        sensors: Optional[SensorSet],
     ) -> None:
         self.compute = compute
         self.delay_model = delay_model
@@ -631,7 +637,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, self.monitor, self.sensors["input-missing-heaps-total"]):
+        async for chunks in recv.chunk_sets(streams, self.monitor, self.sensors):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
@@ -715,3 +721,20 @@ class Processor:
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             sender.send_chunk(chunk)
+            if self.sensors is not None:
+                # Note: it's not strictly true to say that the data has been
+                # sent at this point; it's only been queued for sending. But it
+                # should be close enough for monitoring data rates at the
+                # granularity that this is typically done.
+                # Get a common timestamp for all the updates
+                sensor_timestamp = time.time()
+
+                def increment(sensor: Sensor, incr: int):
+                    sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+
+                increment(self.sensors["output-heaps-total"], chunk.frames * sender.num_substreams)
+                # out_item.spectra.shape[1:] is the shape of each frame
+                increment(
+                    self.sensors["output-bytes-total"],
+                    chunk.frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize,
+                )
