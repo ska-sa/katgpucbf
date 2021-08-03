@@ -1,7 +1,7 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, TypedDict, Union
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -178,11 +178,49 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
+        # No more than once per second, at least once every 10 seconds.
+        # The TypedDict is necessary for mypy to believe the use as
+        # kwargs is valid.
+        AutoStrategy = TypedDict(  # noqa: N806
+            "AutoStrategy",
+            {
+                "auto_strategy": aiokatcp.SensorSampler.Strategy,
+                "auto_strategy_parameters": Tuple[float, float],
+            },
+        )
+        auto_strategy = AutoStrategy(
+            auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(1.0, 10.0),
+        )
         sensors: List[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 int,
+                "input-heaps-total",
+                "number of heaps received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-chunks-total",
+                "number of chunks received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-bytes-total",
+                "number of bytes of digitiser samples received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
                 "input-missing-heaps-total",
-                "number of heaps dropped on the input",
+                "number of heaps dropped on the input (prometheus: counter)",
                 default=0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 # TODO: Think about what status_func should do for the status of the
@@ -190,13 +228,28 @@ class Engine(aiokatcp.DeviceServer):
                 # dropped, then it may not be too useful. Having the information
                 # necessary to implement this may involve shifting things between
                 # classes.
-                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(1.0, 10.0),  # No more than once per second, at least once every 10 seconds.
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "output-heaps-total",
+                "number of heaps transmitted (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "output-bytes-total",
+                "number of payload bytes transmitted (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
             ),
             aiokatcp.Sensor(
                 float,
                 "quant-gain",
-                "rescaling factor to apply before 8-bit requantisation",
+                "rescaling factor to apply before 8-bit requantisation (prometheus: gauge)",
                 default=quant_gain,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             ),
@@ -229,6 +282,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
+        self._src_ibv = src_ibv
         self._src_streams = [
             recv.Stream(
                 pol,
@@ -366,8 +420,9 @@ class Engine(aiokatcp.DeviceServer):
                 else:
                     if self._src_interface is None:
                         raise ValueError("src_interface is required for UDP sources")
-                    # TODO: use src_ibv                     ...?
-                    stream.add_udp_ibv_reader(src, self._src_interface, self._src_buffer, self._src_comp_vector[pol])
+                    stream.add_udp_reader(
+                        src, self._src_interface, self._src_buffer, self._src_ibv, self._src_comp_vector[pol]
+                    )
             tasks = [
                 loop.create_task(self._processor.run_processing(self._src_streams)),
                 loop.create_task(self._processor.run_receive(self._src_streams)),

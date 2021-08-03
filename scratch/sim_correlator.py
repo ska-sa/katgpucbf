@@ -37,7 +37,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("controller", help="Hostname of the SDP master controller")
     parser.add_argument("--port", type=int, default=5001, help="TCP port of the SDP master controller [%(default)s]")
-    parser.add_argument("--name", default="sim_correlator", help="Subarray product name [%(default)]")
+    parser.add_argument("--name", default="sim_correlator", help="Subarray product name [%(default)s]")
     parser.add_argument("-a", "--antennas", type=int, required=True, help="Number of antennas")
     parser.add_argument("-c", "--channels", type=int, required=True, help="Number of channels")
     parser.add_argument("-i", "--int-time", type=float, help="Integration time in seconds [%(default)s]")
@@ -51,6 +51,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
+    parser.add_argument("--katgpucbf-image", help="Full path to katgpucbf image to use (overrides --image-tag)")
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
     )
@@ -71,6 +72,8 @@ def generate_config(args: argparse.Namespace) -> dict:
     }
     if args.image_tag is not None:
         config["config"]["image_tag"] = args.image_tag
+    if args.katgpucbf_image is not None:
+        config["config"]["image_overrides"] = {"katgpucbf": args.katgpucbf_image}
     for ant_index in range(args.antennas):
         number = 800 + ant_index  # Avoid confusion with real antennas
         for pol in ["v", "h"]:

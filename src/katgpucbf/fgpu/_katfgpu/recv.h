@@ -191,10 +191,10 @@ public:
 
     void add_udp_pcap_file_reader(const std::string &filename);
 
-    void add_udp_ibv_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
-                            const std::string &interface_address,
-                            std::size_t buffer_size, int comp_vector = 0,
-                            int max_poll = spead2::recv::udp_ibv_config::default_max_poll);
+    void add_udp_reader(const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
+                        const std::string &interface_address,
+                        std::size_t buffer_size, bool ibv, int comp_vector = 0,
+                        int max_poll = spead2::recv::udp_ibv_config::default_max_poll);
 
     /// Get the referenced ringbuffer
     ringbuffer_t &get_ringbuffer();

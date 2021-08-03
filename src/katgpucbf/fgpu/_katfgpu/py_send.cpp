@@ -164,7 +164,7 @@ py::module register_module(py::module &parent)
         feng_id
             ID of the F-engine indicating which one in the array this is.
         endpoints
-            IP addresses and ports of multicast stream to listen for traffic on.
+            IP addresses and ports of multicast stream to send data to.
         ttl
             TTL for outgoing packets.
         interface_address: str
@@ -231,6 +231,10 @@ py::module register_module(py::module &parent)
         .def_property_readonly("free_ring", [](py_sender &self) -> ringbuffer_t &
         {
             return self.get_free_ring();
+        })
+        .def_property_readonly("num_substreams", [](const py_sender &self)
+        {
+            return self.get_num_substreams();
         })
     ;
 
