@@ -219,21 +219,23 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         sign = pow(-1, b)
         for c in range(channels):
+            h = np.empty((antennas, 2), np.int32)
+            v = np.empty((antennas, 2), np.int32)
+            for a in range(antennas):
+                # This process is a bit non-intuitive. Numba can handle Python's
+                # complex numbers, BUT, they are represented as floating-point,
+                # not integer. So we have helper functions here.
+                h[a, 0] = bounded_int8(sign * b)
+                h[a, 1] = bounded_int8(sign * c)
+                v[a, 0] = bounded_int8(-sign * a)
+                v[a, 1] = bounded_int8(-sign * c)
             for a1 in range(antennas):
-                a1h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
-                a1v = np.array([bounded_int8(-sign * a1), bounded_int8(-sign * c)])
                 for a2 in range(a1 + 1):
-                    # This process is a bit non-intuitive. Numba can handle Python's
-                    # complex numbers, BUT, they are represented as floating-point,
-                    # not integer. So we have helper functions here.
                     bl_idx = get_baseline_index(a1, a2)
-                    a2h = np.array([bounded_int8(sign * b), bounded_int8(sign * c)])
-                    a2v = np.array([bounded_int8(-sign * a2), bounded_int8(-sign * c)])
-
-                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(a1h, a2h, n_samples_per_channel)
-                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(a1h, a2v, n_samples_per_channel)
-                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(a1v, a2h, n_samples_per_channel)
-                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(a1v, a2v, n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(v[a1], h[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_samples_per_channel)
 
     return output_array
 
