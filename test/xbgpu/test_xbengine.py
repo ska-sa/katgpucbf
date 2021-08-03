@@ -8,6 +8,7 @@ The test_xbengine(...) function is the entry point for these tests.
 """
 
 import asyncio
+import logging
 
 import numpy as np
 import pytest
@@ -244,7 +245,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     test_parameters.num_channels,
     test_parameters.num_samples_per_channel,
 )
-def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
+def test_xbengine(caplog, event_loop, num_ants, num_samples_per_channel, num_channels):
     """
     Unit tests for the xbengine.py module.
 
@@ -262,6 +263,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     This test simulates an incomplete accumulation at the start of transmission to ensure that the auto-resync logic
     works correctly.
     """
+    caplog.set_level(logging.INFO)
     # 1. Configuration parameters
     n_ants = num_ants
     n_channels_total = num_channels
