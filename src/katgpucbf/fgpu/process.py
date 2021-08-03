@@ -8,6 +8,7 @@ ultimately to the NIC is also handled.
 """
 
 import asyncio
+import logging
 from collections import deque
 from typing import Deque, List, Sequence, cast
 
@@ -21,6 +22,8 @@ from . import recv, ringbuffer, send
 from .compute import Compute
 from .delay import AbstractDelayModel
 from .monitor import Monitor
+
+logger = logging.getLogger(__name__)
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -562,7 +565,7 @@ class Processor:
             # Uses fact that argmax returns first maximum i.e. first true value
             delay_change = int(np.argmax(coarse_delays != coarse_delay))
             if coarse_delays[delay_change] != coarse_delay:
-                print(
+                logger.info(
                     f"Coarse delay changed from {coarse_delays[delay_change]} to "
                     f"{coarse_delay} at {orig_timestamps[delay_change]}"
                 )

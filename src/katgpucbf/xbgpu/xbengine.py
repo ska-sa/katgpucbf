@@ -6,27 +6,26 @@ passing information between different async processing loops within the object.
 
 .. todo::
 
-    1. Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
-       docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
-       attempts this but needs some work.
-    2. Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
-       worth parameterising this function to give it a custom file name and set it to write changes to a file.
-    3. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
-       instead of these print statements.
-    4. The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
-       logic will need to go in the _gpu_proc_loop for the B-Engine processing
-       and then a seperate sender loop would need to be created for sending B-Engine data.
-    5. Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
-       pipeline.
-    6. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
-       crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
-       could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
-    7. The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
-       this to use the new asyncio syntax.
+    - Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
+      docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
+      attempts this but needs some work.
+    - Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
+      worth parameterising this function to give it a custom file name and set it to write changes to a file.
+    - The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
+      logic will need to go in the _gpu_proc_loop for the B-Engine processing
+      and then a seperate sender loop would need to be created for sending B-Engine data.
+    - Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
+      pipeline.
+    - Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
+      crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
+      could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
+    - The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
+      this to use the new asyncio syntax.
 
 """
 
 import asyncio
+import logging
 import math
 import time
 from typing import List
@@ -44,6 +43,8 @@ import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
+
+logger = logging.getLogger(__name__)
 
 
 class QueueItem:
@@ -564,8 +565,8 @@ class XBEngine:
 
             # TODO: This must become a proper logging message
             if dropped_heaps != 0:
-                print(
-                    f"LOG WARNING: Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
+                logger.warning(
+                    f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
                     f"Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. "
                     f"All time dropped/received heaps: {dropped_total}/{received_total}."
                 )
@@ -705,16 +706,16 @@ class XBEngine:
             # 2. Get a free heap buffer to copy the GPU data to
             buffer_wrapper = await self.send_stream.get_free_heap()
 
-            # 3 Perform some basic logging - these prints will need to be turned into proper python logging
-            # statements. We do not expect the time between dumps to be the same each time as the time.time() function
+            # 3 Perform some basic logging.
+            # We do not expect the time between dumps to be the same each time as the time.time() function
             # checks the wall time now, not the actual time between timestamps. The difference between dump timestamps
             # is expected to be constant
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            # 3.1 Print that a heap is about to be sent. This print message must become a debug.INFO message
-            print(
-                f"LOG INFO: Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
+            # 3.1 Log that a heap is about to be sent.
+            logger.info(
+                f"Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
                 f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
                 f"{round(time_difference_between_heaps_s, 2)} s"
             )
@@ -724,8 +725,8 @@ class XBEngine:
             # funny would have to happen at the receiver.
             # This check is here pre-emptivly - this issue has not been detected yet.
             if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
-                print(
-                    f"LOG WARNING: Timestamp between heaps equal to {hex(item.timestamp - old_timestamp)}, expected "
+                logger.warning(
+                    f"Timestamp between heaps equal to {hex(item.timestamp - old_timestamp)}, expected "
                     f"{hex(self.timestamp_increment_per_accumulation)}"
                 )
 
@@ -734,8 +735,8 @@ class XBEngine:
             # will result in data bottlenecking at the sender, the pipeline eventually stalling and the input buffer
             # overflowing.
             if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
-                print(
-                    f"LOG WARNING: Time between output heaps: {round(time_difference_between_heaps_s,2)} "
+                logger.warning(
+                    f"Time between output heaps: {round(time_difference_between_heaps_s,2)} "
                     f"which is less the expected {round(self.dump_interval_s,2)}. "
                     "If this warning occurs too often, the pipeline will stall "
                     "because the rate limited sender will not keep up with the input rate."
