@@ -79,7 +79,7 @@ class TensorCoreXEngineCoreTemplate:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
-        self.input_data_shape = (
+        self.input_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_samples_per_channel // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
@@ -87,7 +87,7 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_times_per_block, exact=True),
             accel.Dimension(complexity, exact=True),
         )
-        self.output_data_shape = (
+        self.output_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_baselines * 4, exact=True),
             accel.Dimension(complexity, exact=True),
@@ -171,9 +171,9 @@ class TensorCoreXEngineCore(accel.Operation):
         super().__init__(command_queue)
         self.template = template
         self.slots["in_samples"] = accel.IOSlot(
-            dimensions=self.template.input_data_shape, dtype=np.int8
+            dimensions=self.template.input_data_dimensions, dtype=np.int8
         )  # TODO: This must depend on input bitwidth
-        self.slots["out_visibilities"] = accel.IOSlot(dimensions=self.template.output_data_shape, dtype=np.int32)
+        self.slots["out_visibilities"] = accel.IOSlot(dimensions=self.template.output_data_dimensions, dtype=np.int32)
 
     def _run(self) -> None:
         """Run the correlation kernel and add the generated values to the out_visibilities buffer."""

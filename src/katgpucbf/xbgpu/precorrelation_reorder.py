@@ -79,7 +79,7 @@ class PrecorrelationReorderTemplate:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Declare the input and output data shapes
-        self.input_data_shape = (
+        self.input_data_dimensions = (
             accel.Dimension(self.n_batches, exact=True),
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_channels, exact=True),
@@ -88,7 +88,7 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(complexity, exact=True),
         )
 
-        self.output_data_shape = (
+        self.output_data_dimensions = (
             accel.Dimension(self.n_batches, exact=True),
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_samples_per_channel // self.n_times_per_block, exact=True),
@@ -162,9 +162,9 @@ class PrecorrelationReorder(accel.Operation):
         super().__init__(command_queue)
         self.template = template
         self.slots["in_samples"] = accel.IOSlot(
-            dimensions=self.template.input_data_shape, dtype=np.int8
+            dimensions=self.template.input_data_dimensions, dtype=np.int8
         )  # TODO: This must depend on input bitwidth
-        self.slots["out_reordered"] = accel.IOSlot(dimensions=self.template.output_data_shape, dtype=np.int8)
+        self.slots["out_reordered"] = accel.IOSlot(dimensions=self.template.output_data_dimensions, dtype=np.int8)
 
     def _run(self) -> None:
         """Run the correlation kernel."""
