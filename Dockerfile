@@ -1,9 +1,7 @@
 # Use the nvidia development image as a base. This gives access to all
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
-# CUDA 11.3.1 is used rather than 11.4.0 because scikit-cuda seems not to work
-# with the latter.
-FROM nvidia/cuda:11.3.1-devel-ubuntu20.04 as build
+FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as build
 
 # Install system packages:
 # - git is needed for setuptools_scm
@@ -69,7 +67,7 @@ RUN cd src/tools && make clean && make -j dsim fsim
 
 # The above builds everything. Now install it into a lighter-weight runtime
 # image, without all the stuff needed for the build itself.
-FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
+FROM nvidia/cuda:11.4.1-devel-ubuntu20.04
 LABEL maintainer="MeerKAT CBF team <cbf@ska.ac.za>"
 
 # curl is needed for running under katsdpcontroller
