@@ -37,6 +37,11 @@ skip_glob = ["3rdparty/*"]
 [tool.pytest.ini_options]
 testpaths = "test"
 addopts = "--cov-context=test --cov-report html --import-mode=prepend"
+filterwarnings = [
+	'ignore:`np\..*` is a deprecated alias::pycuda\.compyte\.dtypes',
+	'ignore:`np\..*` is a deprecated alias::skcuda\.misc',
+	'ignore:creating CUBLAS context to get version number::skcuda\.cublas',
+]
 
 [tool.coverage.run]
 branch = true
