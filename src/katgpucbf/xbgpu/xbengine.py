@@ -317,9 +317,7 @@ class XBEngine:
 
         # 5. Create GPU specific objects.
         # 5.1 Create a GPU context, the x.is_cuda flag forces CUDA to be used instead of OpenCL.
-        self.context: katsdpsigproc.abc.AbstractContext = katsdpsigproc.accel.create_some_context(
-            device_filter=lambda x: x.is_cuda
-        )
+        self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
         # 5.2 Create various command queues (or CUDA streams) to queue GPU functions on.
         self._upload_command_queue = self.context.create_command_queue()
@@ -333,22 +331,20 @@ class XBEngine:
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
         )
-        self.tensor_core_x_engine_core: katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore = (
-            tensor_core_template.instantiate(self._proc_command_queue)
-        )
+        self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
 
-        reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
+        reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorderTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
             n_batches=self.batches_per_chunk,
         )
-        self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorder = (
+        self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorder = (
             reorder_template.instantiate(self._proc_command_queue)
         )
 
-        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray = katsdpsigproc.accel.DeviceArray(
+        self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
             self.context,
             self.precorrelation_reorder.slots["out_reordered"].shape,  # type: ignore
             self.precorrelation_reorder.slots["out_reordered"].dtype,  # type: ignore

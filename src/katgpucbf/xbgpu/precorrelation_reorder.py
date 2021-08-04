@@ -29,7 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 complexity = 2
 
 
-class PreCorrelationReorderTemplate:
+class PrecorrelationReorderTemplate:
     """
     Template class for compiling different variations of the pre-correlation reorder kernel.
 
@@ -125,12 +125,12 @@ class PreCorrelationReorderTemplate:
         )
         self.kernel = program.get_kernel("precorrelation_reorder")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "PreCorrelationReorder":
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "PrecorrelationReorder":
         """Create a PreCorrelationReorder object using this template to build the kernel."""
-        return PreCorrelationReorder(self, command_queue)
+        return PrecorrelationReorder(self, command_queue)
 
 
-class PreCorrelationReorder(accel.Operation):
+class PrecorrelationReorder(accel.Operation):
     """
     Class containing a pre-correlation reorder kernel compiled from a PreCorrelationReorderTemplate.
 
@@ -157,7 +157,7 @@ class PreCorrelationReorder(accel.Operation):
     np.int16 as a placeholder.
     """
 
-    def __init__(self, template: PreCorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+    def __init__(self, template: PrecorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
         """Initialise the PreCorrelationReorder object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template

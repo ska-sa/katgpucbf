@@ -13,13 +13,31 @@ get_baseline_index = njit(tensorcore_xengine_core.TensorCoreXEngineCore.get_base
 
 @njit(parallel=True)
 def correlate_host(input_array: np.ndarray) -> np.ndarray:
-    """Calculate correlation products on the host CPU."""
+    """Calculate correlation products on the host CPU.
+
+    Parameters
+    ----------
+    input_array
+        Dataset to be correlated. Required shape:
+        (n_chans, n_blocks, n_ants, n_pols, n_samples_per_block, complexity)
+
+    Returns
+    -------
+    np.ndarray
+        Correlation products or visibilities. Shape:
+        (n_chans, n_ants, n_pols, n_samples_per_channel, complexity)
+        where n_samples_per_channel is equal to n_blocks * n_samples_per_block
+        in the input.
+    """
     n_chans = input_array.shape[0]
     n_ants = input_array.shape[2]
     n_pols = input_array.shape[3]
     n_samples_per_channel = input_array.shape[1] * input_array.shape[4]
     complexity = input_array.shape[5]
-    # I think it's nicer to get the time-series all in one axis so that we can just use np.sum() across that axis.
+    # I think it's nicer to get the time-series all in one axis so that we can
+    # just use np.sum() across that axis.
+    # Numba can't work on non-contiguous arrays, so we have to copy this one in
+    # order to be able to reshape it in the next step.
     ez_in = input_array.transpose(0, 2, 3, 1, 4, 5).copy()
     ez_in = ez_in.reshape((n_chans, n_ants, n_pols, n_samples_per_channel, complexity)).astype(np.int32)
     n_baselines = n_ants * (n_ants + 1) * 2
@@ -65,9 +83,16 @@ def test_correlator(num_ants, num_samples_per_channel, num_channels):
     buf_samples_host = buf_samples_device.empty_like()
 
     rng = np.random.default_rng(seed=2021)
-    buf_samples_host[:] = rng.uniform(
-        np.iinfo(buf_samples_host.dtype).min, np.iinfo(buf_samples_host.dtype).max, buf_samples_host.shape
-    ).astype(buf_samples_host.dtype)
+    buf_samples_host[:] = rng.integers(
+        # The Tensor-Core correlator can't manage the maximum negative value,
+        # due to the asymmetry of signed integers, so we adjust the lower bound
+        # up by 1.
+        low=np.iinfo(buf_samples_host.dtype).min + 1,
+        high=np.iinfo(buf_samples_host.dtype).max,
+        size=buf_samples_host.shape,
+        dtype=buf_samples_host.dtype,
+        endpoint=True,  # We don't need to exclude the maximum positive value though.
+    )
 
     buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
@@ -76,8 +101,8 @@ def test_correlator(num_ants, num_samples_per_channel, num_channels):
     tensor_core_x_engine_core()
     buf_visibilities_device.get(queue, buf_visibilities_host)
 
-    calculated_visibilties_host = correlate_host(buf_samples_host)
-    np.testing.assert_equal(buf_visibilities_host, calculated_visibilties_host)
+    calculated_visibilities_host = correlate_host(buf_samples_host)
+    np.testing.assert_equal(buf_visibilities_host, calculated_visibilities_host)
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
@@ -126,10 +151,10 @@ def test_multikernel_accumulation(num_ants):
     # (x + jx)(x - jx) = x^2 + jx^2 - jx^2 + x^2 = 2x^2
     # The real value is 2x^2 and the imaginary value is 0. A single kernel launch will accumulate n_samples_per_channel
     # times, giving an output real visibility value of n_samples_per_channel * 2 * 2x^2.
-    expected_output = np.empty_like(buf_visibilities_host)
-    expected_output[:, :, 0] = sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
-    expected_output[:, :, 1] = sample_value_i8 * sample_value_i8 - sample_value_i8 * sample_value_i8
-    expected_output *= n_samples_per_channel
+    expected_output = np.zeros_like(buf_visibilities_host)
+    expected_output[:, :, 0] = (
+        sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
+    ) * n_samples_per_channel
     np.testing.assert_equal(buf_visibilities_host, expected_output)
 
     # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is

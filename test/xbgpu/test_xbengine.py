@@ -431,9 +431,9 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
             # We reshape this to match the current output of the X-engine. The
             # expected output is generated the old way, and if I naively change
             # it, things break. For some reason, this way, they work.
-            # I'd rather re-examine this unit test in its entirety than fix this
-            # particular little oddity, especially since the new correlator test
-            # works so well.
+            # TODO: I'd rather re-examine this unit test in its entirety than
+            # fix this particular little oddity, especially since the new
+            # correlator test works so well.
             gpu_result = ig_recv["xeng_raw"].value
             expected_output = expected_output.reshape(gpu_result.shape)
 

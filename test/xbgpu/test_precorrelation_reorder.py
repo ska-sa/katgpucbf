@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from katsdpsigproc import accel
 
-from katgpucbf.xbgpu.precorrelation_reorder import PreCorrelationReorderTemplate
+from katgpucbf.xbgpu.precorrelation_reorder import PrecorrelationReorderTemplate
 
 from . import test_parameters
 
@@ -50,7 +50,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     queue = ctx.create_command_queue()
 
-    template = PreCorrelationReorderTemplate(
+    template = PrecorrelationReorderTemplate(
         ctx,
         n_ants=num_ants,
         n_channels=n_channels_per_stream,
