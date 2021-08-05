@@ -428,9 +428,15 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
                 n_samples_per_channel,
             )
 
-            # We reshape this to match the current output of the X-engine until NGC-225 is resolved.
-            expected_output = expected_output.view(dtype=np.uint64).reshape(expected_output.shape[:-1])
+            # We reshape this to match the current output of the X-engine. The
+            # expected output is generated the old way, and if I naively change
+            # it, things break. For some reason, this way, they work.
+            # TODO: I'd rather re-examine this unit test in its entirety than
+            # fix this particular little oddity, especially since the new
+            # correlator test works so well.
             gpu_result = ig_recv["xeng_raw"].value
+            expected_output = expected_output.reshape(gpu_result.shape)
+
             np.testing.assert_equal(expected_output, gpu_result)
 
     # 9. This function launches the XB-Engine loop and the receiver function that verifies the X-Engine data.

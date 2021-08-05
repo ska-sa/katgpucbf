@@ -84,7 +84,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
     # The // 4 is here because in the MeerKAT case, there are 4*num_ants multicast streams.
     n_channels_per_stream = num_channels // num_ants // 4
-    n_baselines = (num_ants + 1) * (num_ants) // 2
+    n_baselines = (num_ants + 1) * (num_ants) * 2
 
     # 2. Create cuda context - all buffers created in the XEngineSPEADInprocSend object are created from this context.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
@@ -189,15 +189,13 @@ def test_send_simple(event_loop, num_ants, num_channels):
                 # correct size and that the values are all the expected value.
                 if item.id == 0x1800:
                     has_xeng_raw = True
-                    data_length_bytes = (
-                        n_baselines * n_channels_per_stream * n_pols * n_pols * complexity * sample_bits // 8
-                    )
-                    assert item.value.size * 8 == data_length_bytes, (  # *8 as there are 64 bytes in a sample
+                    data_length_bytes = n_baselines * n_channels_per_stream * complexity * sample_bits // 8
+                    assert item.value.nbytes == data_length_bytes, (
                         "xeng_raw data not correct size. "
                         f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
                     )
                     assert (
-                        item.value.dtype == np.uint64
+                        item.value.dtype == np.int32
                     ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
                     assert np.all(item.value == num_received)
 

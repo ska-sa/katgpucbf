@@ -163,7 +163,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
         self.n_pols: Final[int] = n_pols
-        self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) // 2
+        self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
         self.dump_interval_s: Final[float] = dump_interval_s
         self._sample_bits: Final[int] = 32
 
@@ -172,15 +172,13 @@ class XEngineSPEADAbstractSend(ABC):
 
         # n_pols is meant to be here twice to represent the hh, vv, hv, vh pols.
         self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream
-            * self.n_baselines
-            * self.n_pols
-            * self.n_pols
-            * XEngineSPEADAbstractSend.complexity
-            * self._sample_bits
-            // 8
+            self.n_channels_per_stream * self.n_baselines * XEngineSPEADAbstractSend.complexity * self._sample_bits // 8
         )
-        self.heap_shape: Final[typing.Tuple] = (self.n_channels_per_stream, self.n_baselines, self.n_pols, self.n_pols)
+        self.heap_shape: Final[typing.Tuple] = (
+            self.n_channels_per_stream,
+            self.n_baselines,
+            XEngineSPEADAbstractSend.complexity,
+        )
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         # 4. Allocate memory buffers
@@ -195,7 +193,9 @@ class XEngineSPEADAbstractSend(ABC):
         # 4.2 Create buffers once-off to be reused for sending data.
         for _ in range(self._n_send_heaps_in_flight):
             # 4.2.1 Create a buffer from the accel context.
-            buffer = accel.HostArray(self.heap_shape, np.int64, context=self.context)
+            # TODO: I'm not too happy about this hardcoded int32 here, but I don't
+            # have an object close by that I can get the dtype from.
+            buffer = accel.HostArray(self.heap_shape, np.int32, context=self.context)
 
             # 4.2.2 Create a dummy future object that is already marked as "done" Each buffer is paired with a future
             # so these dummy onces are necessary for initial start up.
@@ -255,7 +255,7 @@ class XEngineSPEADAbstractSend(ABC):
             "xeng_raw",
             "Integrated baseline correlation products.",
             shape=self.heap_shape,
-            dtype=np.uint64,
+            dtype=np.int32,
         )
 
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
