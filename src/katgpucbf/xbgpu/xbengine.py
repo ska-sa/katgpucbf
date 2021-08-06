@@ -6,27 +6,26 @@ passing information between different async processing loops within the object.
 
 .. todo::
 
-    1. Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
-       docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
-       attempts this but needs some work.
-    2. Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
-       worth parameterising this function to give it a custom file name and set it to write changes to a file.
-    3. Logging - THere are a number of print statements in this module. Proper python logging needs to be implemented
-       instead of these print statements.
-    4. The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
-       logic will need to go in the _gpu_proc_loop for the B-Engine processing
-       and then a seperate sender loop would need to be created for sending B-Engine data.
-    5. Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
-       pipeline.
-    6. Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
-       crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
-       could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
-    7. The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
-       this to use the new asyncio syntax.
+    - Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
+      docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
+      attempts this but needs some work.
+    - Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
+      worth parameterising this function to give it a custom file name and set it to write changes to a file.
+    - The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
+      logic will need to go in the _gpu_proc_loop for the B-Engine processing
+      and then a seperate sender loop would need to be created for sending B-Engine data.
+    - Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
+      pipeline.
+    - Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
+      crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
+      could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
+    - The asyncio syntax in the run() function uses old syntax, once this repo has been updated to python 3.8, update
+      this to use the new asyncio syntax.
 
 """
 
 import asyncio
+import logging
 import math
 import time
 from typing import List
@@ -35,7 +34,6 @@ import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
-import numpy as np
 import spead2
 
 import katgpucbf.xbgpu._katxbgpu.recv as recv
@@ -44,6 +42,8 @@ import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
+
+logger = logging.getLogger(__name__)
 
 
 class QueueItem:
@@ -225,14 +225,6 @@ class XBEngine:
         # 1.7 Objects for sending and receiving data
         self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
         self.receiver_stream: recv.Stream
-        self.send_stream: katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend
-
-        # 1.8 GPU Kernels and GPU Context
-        self.context: katsdpsigproc.abc.AbstractContext  # Implements either a CUDA or OpenCL context.
-        self.tensor_core_x_engine_core_operation: katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCore
-        self.pre_correlation_reorder_operation: katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorder
-        # Buffer linking reorder kernel to correlation kernel
-        self.reordered_buffer_device: katsdpsigproc.accel.DeviceArray
 
         # 1.9 Command queues for syncing different operations on the GPU - a
         # command queue is the OpenCL name for a CUDA stream. An abstract
@@ -339,21 +331,25 @@ class XBEngine:
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
         )
-        self.tensor_core_x_engine_core_operation = tensor_core_template.instantiate(self._proc_command_queue)
+        self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
 
-        reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PreCorrelationReorderTemplate(
+        reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorderTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_samples_per_channel=self.n_samples_per_channel,
             n_batches=self.batches_per_chunk,
         )
-        self.pre_correlation_reorder_operation = reorder_template.instantiate(self._proc_command_queue)
+        self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorder = (
+            reorder_template.instantiate(self._proc_command_queue)
+        )
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
-            self.context, self.pre_correlation_reorder_operation.template.output_data_shape, np.int16
+            self.context,
+            self.precorrelation_reorder.slots["out_reordered"].shape,  # type: ignore
+            self.precorrelation_reorder.slots["out_reordered"].dtype,  # type: ignore
         )
-        self.pre_correlation_reorder_operation.bind(out_reordered=self.reordered_buffer_device)
+        self.precorrelation_reorder.bind(out_reordered=self.reordered_buffer_device)
 
         # 6. Create various buffers and assign them to the correct queues or objects.
         # 6.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
@@ -379,7 +375,9 @@ class XBEngine:
         for _ in range(n_rx_items):
             rx_item = RxQueueItem()
             rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
-                self.context, self.pre_correlation_reorder_operation.template.input_data_shape, np.int16
+                self.context,
+                self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
+                self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
             )
             self._rx_free_item_queue.put_nowait(rx_item)
 
@@ -387,14 +385,18 @@ class XBEngine:
         for _ in range(n_tx_items):
             tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
-                self.context, self.tensor_core_x_engine_core_operation.template.output_data_shape, np.int64
+                self.context,
+                self.tensor_core_x_engine_core.slots["out_visibilities"].shape,  # type: ignore
+                self.tensor_core_x_engine_core.slots["out_visibilities"].dtype,  # type: ignore
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
         # 6.3.3 Create empty chunks and give them to the receiver to use to assemble heaps.
         for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
-                self.pre_correlation_reorder_operation.template.input_data_shape, np.int16, context=self.context
+                self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
+                self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
+                context=self.context,
             )
             chunk = recv.Chunk(buf)
             self.receiver_stream.add_chunk(chunk)
@@ -492,7 +494,7 @@ class XBEngine:
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend(
+        self.send_stream: katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend = katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
@@ -564,8 +566,8 @@ class XBEngine:
 
             # TODO: This must become a proper logging message
             if dropped_heaps != 0:
-                print(
-                    f"LOG WARNING: Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
+                logger.warning(
+                    f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
                     f"Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. "
                     f"All time dropped/received heaps: {dropped_total}/{received_total}."
                 )
@@ -612,8 +614,8 @@ class XBEngine:
         # The very first heap sent out the X-Engine will have a timestamp of zero which is meaningless, every other
         # heap will have the correct timestamp.
         tx_item.timestamp = 0
-        self.tensor_core_x_engine_core_operation.bind(out_visibilities=tx_item.buffer_device)
-        self.tensor_core_x_engine_core_operation.zero_visibilities()
+        self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
+        self.tensor_core_x_engine_core.zero_visibilities()
 
         while self.running:
             # 2. Get item from receiver function - wait for the HtoD transfers to complete and then give the chunk back
@@ -628,8 +630,8 @@ class XBEngine:
 
             # 3. Process the received data.
             # 3.1 Reorder the entire chunk
-            self.pre_correlation_reorder_operation.bind(in_samples=rx_item.buffer_device)
-            self.pre_correlation_reorder_operation()
+            self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
+            self.precorrelation_reorder()
 
             # 3.2 Perform correlation on reordered data. The correlation kernel does not have the
             # concept of a batch at this stage, so the kernel needs to be run on each different
@@ -639,12 +641,12 @@ class XBEngine:
                 # buffer.
                 buffer_slice = katsdpsigproc.accel.DeviceArray(
                     self.context,
-                    self.tensor_core_x_engine_core_operation.template.input_data_shape,
-                    np.int16,
+                    self.tensor_core_x_engine_core.slots["in_samples"].shape,  # type: ignore
+                    self.tensor_core_x_engine_core.slots["in_samples"].dtype,  # type: ignore
                     raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
                 )
-                self.tensor_core_x_engine_core_operation.bind(in_samples=buffer_slice)
-                self.tensor_core_x_engine_core_operation()
+                self.tensor_core_x_engine_core.bind(in_samples=buffer_slice)
+                self.tensor_core_x_engine_core()
 
                 # 3.2.2 If the batch timestamp corresponds to the accumulation interval, transfer the correlated data to
                 # the sender function. NOTE: The timestamp representing the end of an accumulation does not necessarily
@@ -661,8 +663,8 @@ class XBEngine:
                     # 3.2.4 Get a new tx item, assign its buffer correctly and reset the buffer to zero.
                     tx_item = await self._tx_free_item_queue.get()
                     tx_item.timestamp = next_heap_timestamp
-                    self.tensor_core_x_engine_core_operation.bind(out_visibilities=tx_item.buffer_device)
-                    self.tensor_core_x_engine_core_operation.zero_visibilities()
+                    self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
+                    self.tensor_core_x_engine_core.zero_visibilities()
 
                 # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
@@ -705,16 +707,16 @@ class XBEngine:
             # 2. Get a free heap buffer to copy the GPU data to
             buffer_wrapper = await self.send_stream.get_free_heap()
 
-            # 3 Perform some basic logging - these prints will need to be turned into proper python logging
-            # statements. We do not expect the time between dumps to be the same each time as the time.time() function
+            # 3 Perform some basic logging.
+            # We do not expect the time between dumps to be the same each time as the time.time() function
             # checks the wall time now, not the actual time between timestamps. The difference between dump timestamps
             # is expected to be constant
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            # 3.1 Print that a heap is about to be sent. This print message must become a debug.INFO message
-            print(
-                f"LOG INFO: Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
+            # 3.1 Log that a heap is about to be sent.
+            logger.info(
+                f"Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
                 f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
                 f"{round(time_difference_between_heaps_s, 2)} s"
             )
@@ -724,8 +726,8 @@ class XBEngine:
             # funny would have to happen at the receiver.
             # This check is here pre-emptivly - this issue has not been detected yet.
             if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
-                print(
-                    f"LOG WARNING: Timestamp between heaps equal to {hex(item.timestamp - old_timestamp)}, expected "
+                logger.warning(
+                    f"Timestamp between heaps equal to {hex(item.timestamp - old_timestamp)}, expected "
                     f"{hex(self.timestamp_increment_per_accumulation)}"
                 )
 
@@ -734,8 +736,8 @@ class XBEngine:
             # will result in data bottlenecking at the sender, the pipeline eventually stalling and the input buffer
             # overflowing.
             if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
-                print(
-                    f"LOG WARNING: Time between output heaps: {round(time_difference_between_heaps_s,2)} "
+                logger.warning(
+                    f"Time between output heaps: {round(time_difference_between_heaps_s,2)} "
                     f"which is less the expected {round(self.dump_interval_s,2)}. "
                     "If this warning occurs too often, the pipeline will stall "
                     "because the rate limited sender will not keep up with the input rate."

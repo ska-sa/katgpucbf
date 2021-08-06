@@ -78,6 +78,8 @@ public:
 
     const ringbuffer_t &get_free_ring() const;
     ringbuffer_t &get_free_ring();
+
+    std::size_t get_num_substreams() const;
 };
 
 } // namespace katfgpu::send

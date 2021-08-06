@@ -26,8 +26,10 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
+complexity = 2
 
-class PreCorrelationReorderTemplate:
+
+class PrecorrelationReorderTemplate:
     """
     Template class for compiling different variations of the pre-correlation reorder kernel.
 
@@ -77,21 +79,23 @@ class PreCorrelationReorderTemplate:
             raise ValueError(f"samples_per_channel must be divisible by {self.n_times_per_block}.")
 
         # 3. Declare the input and output data shapes
-        self.input_data_shape = (
-            self.n_batches,
-            self.n_ants,
-            self.n_channels,
-            self.n_samples_per_channel,
-            self.n_polarisations,
+        self.input_data_dimensions = (
+            accel.Dimension(self.n_batches, exact=True),
+            accel.Dimension(self.n_ants, exact=True),
+            accel.Dimension(self.n_channels, exact=True),
+            accel.Dimension(self.n_samples_per_channel, exact=True),
+            accel.Dimension(self.n_polarisations, exact=True),
+            accel.Dimension(complexity, exact=True),
         )
 
-        self.output_data_shape = (
-            self.n_batches,
-            self.n_channels,
-            self.n_samples_per_channel // self.n_times_per_block,
-            self.n_ants,
-            self.n_polarisations,
-            self.n_times_per_block,
+        self.output_data_dimensions = (
+            accel.Dimension(self.n_batches, exact=True),
+            accel.Dimension(self.n_channels, exact=True),
+            accel.Dimension(self.n_samples_per_channel // self.n_times_per_block, exact=True),
+            accel.Dimension(self.n_ants, exact=True),
+            accel.Dimension(self.n_polarisations, exact=True),
+            accel.Dimension(self.n_times_per_block, exact=True),
+            accel.Dimension(complexity, exact=True),
         )
 
         # The size of a data matrix required to be reordered is the same for Input or Output data shapes
@@ -121,12 +125,12 @@ class PreCorrelationReorderTemplate:
         )
         self.kernel = program.get_kernel("precorrelation_reorder")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "PreCorrelationReorder":
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "PrecorrelationReorder":
         """Create a PreCorrelationReorder object using this template to build the kernel."""
-        return PreCorrelationReorder(self, command_queue)
+        return PrecorrelationReorder(self, command_queue)
 
 
-class PreCorrelationReorder(accel.Operation):
+class PrecorrelationReorder(accel.Operation):
     """
     Class containing a pre-correlation reorder kernel compiled from a PreCorrelationReorderTemplate.
 
@@ -153,14 +157,14 @@ class PreCorrelationReorder(accel.Operation):
     np.int16 as a placeholder.
     """
 
-    def __init__(self, template: PreCorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+    def __init__(self, template: PrecorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
         """Initialise the PreCorrelationReorder object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
         self.slots["in_samples"] = accel.IOSlot(
-            dimensions=self.template.input_data_shape, dtype=np.int16
+            dimensions=self.template.input_data_dimensions, dtype=np.int8
         )  # TODO: This must depend on input bitwidth
-        self.slots["out_reordered"] = accel.IOSlot(dimensions=self.template.output_data_shape, dtype=np.int16)
+        self.slots["out_reordered"] = accel.IOSlot(dimensions=self.template.output_data_dimensions, dtype=np.int8)
 
     def _run(self) -> None:
         """Run the correlation kernel."""
