@@ -1,7 +1,7 @@
-/* This code is based on the work done by John Romein at Astron to develop a correlator that uses Nvidias Tensor core
- * correlator. This is almost an exact replica of version 0.3 of his TensorCoreCorrelator package. Slight modifications 
- * have been made so that it uses mako templating provided by the SARAO katsdpsigproc python package to set the values
- * of some of the macros.
+/* This code is based on the work done by John Romein at ASTRON to develop a correlator that uses NVIDIA's Tensor Cores.
+ * This is almost an exact replica of version 0.5 of his TensorCoreCorrelator kernel. Slight modifications have been
+ * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
+ * of the macros.
  *
  * No attempt has been made to document the functioning of this kernel. 
  */
@@ -216,7 +216,12 @@ __device__ inline float2 make_complex(float real, float imag)
 template <typename T> __device__ inline void storeVisibility(Visibilities visibilities, unsigned channel, unsigned baseline, unsigned statY, unsigned statX, unsigned tcY, unsigned tcX, unsigned polY, unsigned polX, bool skipCheckY, bool skipCheckX, T sumR, T sumI)
 {
   if ((skipCheckX || statX + tcX <= statY + tcY) && (skipCheckY || statY + tcY < NR_STATIONS))
-    visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] = make_complex(sumR, sumI);
+  {
+    // This allows accumulation across subsequent kernel calls, instead of simply make_complex(sumR, sumI)
+    visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] = 
+      make_complex(visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR, 
+                   visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y + sumI);
+  }
 }
 
 
@@ -335,7 +340,6 @@ template <bool fullTriangle> __device__ void doCorrelateTriangle(Visibilities vi
   tmp1.load(samples, channel, 0, firstStation, fullTriangle);
 #endif
 
-// #pragma unroll 1
   for (unsigned majorTime = 0; majorTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK; majorTime ++) {
     unsigned buffer = majorTime % NR_SHARED_BUFFERS;
 
@@ -471,7 +475,6 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
 #endif
 #endif
 
-// #pragma unroll 1
   for (unsigned majorTime = 0; majorTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK; majorTime ++) {
     unsigned buffer = majorTime % NR_SHARED_BUFFERS;
 
