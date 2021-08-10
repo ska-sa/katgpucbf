@@ -2,10 +2,10 @@
  *  This kernel aims to carry out the reorder functionality required by katxbgpu.
  *  This GPU-side reorder makes provision for batched operations (i.e. reordering batches of matrices),
  *  and transforms a 1D block of data in the following matrix format:
- *  - uint16_t [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarizations]
+ *  - uint16_t [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
  *    transposed to
  *    uint16_t [n_batches][n_channels] [n_samples_per_channel//times_per_block]
- *             [n_antennas] [polarizations] [times_per_block]
+ *             [n_antennas] [polarisations] [times_per_block]
  *  - Typical values for the dimensions
  *      - n_antennas (a) = 64
  *      - n_channels (c) = 128
@@ -33,7 +33,7 @@
  *  As mentioned at the top of this document, data is received as an array in the format of:
  *   - uint16_t [n_batches][n_antennas] [n_channels] [n_samples_per_channel] [polarisations]
  *   And is required to be reordered into an array of format:
- *   - uint16_t [n_batches][n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarizations] [times_per_block]
+ *   - uint16_t [n_batches][n_channels] [n_samples_per_channel // times_per_block] [n_antennas] [polarisations] [times_per_block]
  *
  *   Currently, all dimension-strides are calculated within the kernel itself.
  *   - Granted, there are some redudancies/inefficiences in variable usage; however,

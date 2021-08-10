@@ -54,7 +54,7 @@ class TensorCoreXEngineCoreTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_samples_per_channel = n_samples_per_channel
-        self.n_polarizations = 2  # Hardcoded to 2. No other values are supported
+        self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
@@ -83,7 +83,7 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_samples_per_channel // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(self.n_polarizations, exact=True),
+            accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
             accel.Dimension(complexity, exact=True),
         )
@@ -125,7 +125,7 @@ class TensorCoreXEngineCoreTemplate:
                 "n_ants": self.n_ants,
                 "sample_bitwidth": self._sample_bitwidth,
                 "n_channels": self.n_channels,
-                "n_polarizastions": self.n_polarizations,
+                "n_polarisations": self.n_polarisations,
                 "n_samples_per_channel": self.n_samples_per_channel,
                 "n_baselines": self.n_baselines,
                 "n_times_per_block": self.n_times_per_block,
@@ -148,7 +148,7 @@ class TensorCoreXEngineCore(accel.Operation):
     shape of the buffers.
 
     The input sample buffer must have the shape:
-    ``[channels][samples_per_channel//times_per_block][n_ants][polarizations][times_per_block]``
+    ``[channels][samples_per_channel//times_per_block][n_ants][polarisations][times_per_block]``
 
     A complexity that is introduced by the Tensor-Core kernel is that the
     ``samples_per_channel`` index is split over two different indices. The first
