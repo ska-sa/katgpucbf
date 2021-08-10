@@ -33,7 +33,7 @@
 #define NR_BITS ${sample_bitwidth}
 #define NR_CHANNELS ${n_channels}
 #define NR_SAMPLES_PER_CHANNEL ${n_samples_per_channel}
-#define NR_POLARIZATIONS ${n_polarizastions}
+#define NR_POLARIZATIONS ${n_polarisations}
 
 #define NR_BASELINES ${n_baselines}
 

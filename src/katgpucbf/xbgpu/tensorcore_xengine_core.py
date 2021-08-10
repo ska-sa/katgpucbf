@@ -59,7 +59,7 @@ class TensorCoreXEngineCoreTemplate:
 
         # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
+        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
 
         # This 128 is hardcoded in the original Tensor-Core kernel. The reason it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
@@ -95,7 +95,12 @@ class TensorCoreXEngineCoreTemplate:
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
         # of the object.
-        if self._n_ants_per_block == 48:
+        if self._n_ants_per_block == 32:
+            raise NotImplementedError(
+                "32 antennas per thread-block is not supported yet - \
+                Need to clarify the formula for thread-block calculation."
+            )
+        elif self._n_ants_per_block == 48:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
                 * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
