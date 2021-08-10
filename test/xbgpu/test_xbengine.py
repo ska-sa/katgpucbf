@@ -337,6 +337,13 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     # 4. Create xbengine
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+        katcp_host="",
+        # This is necessary because of the xbengine's shutdown not being
+        # particularly clean. If we hardcode a port here, the first test goes
+        # fine but subsequent ones just get stuck because the port is already in
+        # use. Setting the XBEngine up as a fixture as fgpu's tests currently do
+        # may solve this issue (See NGC-328).
+        katcp_port=np.random.randint(7000, 8000),
         adc_sample_rate_hz=1712000000.0,  # L-Band, not important
         n_ants=n_ants,
         n_channels_total=n_channels_total,

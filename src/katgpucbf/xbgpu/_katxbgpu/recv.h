@@ -261,6 +261,9 @@ class stream : private spead2::thread_pool, public spead2::recv::stream
     // Get the number of bytes in a specifc chunks buffer.
     std::size_t get_chunk_bytes() const;
 
+    /// Get the number of bits in each sample.
+    int get_sample_bits() const;
+
     /// Add a chunk to the free pool.
     void add_chunk(std::unique_ptr<chunk> &&pChunk);
 
