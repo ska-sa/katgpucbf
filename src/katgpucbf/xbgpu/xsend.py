@@ -264,18 +264,22 @@ class XEngineSPEADAbstractSend(ABC):
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, timestamp: int, buffer_wrapper: XEngineHeapBufferWrapper, sensors: SensorSet = None) -> None:
-        """
-        Take in an XEngineHeapBufferWrapper object and send it onto the network as a SPEAD heap.
+        """Take in a XEngineHeapBufferWrapper and send it as a SPEAD heap.
 
-        This funtion is non-blocking. There is no guarentee that a packet has been sent by the time the function
+        This funtion is non-blocking. There is no guarantee that a packet has
+        been sent by the time the function
         completes.
 
         Parameters
         ----------
-        timestamp: int
-            The timestamp that will be assigned to the buffer when it is encapsulated in a SPEAD heap.
-        buffer_wrapper: XEngineHeapBufferWrapper
+        timestamp
+            The timestamp that will be assigned to the buffer when it is
+            encapsulated in a SPEAD heap.
+        buffer_wrapper
             Wrapped buffer to sent as a SPEAD heap.
+        sensors
+            Sensors through which networking statistics will be reported (if
+            provided).
         """
         self.item_group["timestamp"].value = timestamp
         self.item_group["channel offset"].value = self.channel_offset
@@ -301,9 +305,7 @@ class XEngineSPEADAbstractSend(ABC):
                 sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
 
             increment(sensors["output-heaps-total"], 1)
-            increment(
-                sensors["output-bytes-total"], buffer_wrapper._buffer.size * buffer_wrapper._buffer.dtype.itemsize
-            )
+            increment(sensors["output-bytes-total"], buffer_wrapper.buffer.nbytes)
 
     async def get_free_heap(self) -> XEngineHeapBufferWrapper:
         """

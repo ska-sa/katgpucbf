@@ -150,40 +150,40 @@ class XBEngine(DeviceServer):
         Hostname or IP on which to listen for KATCP C&M connections.
     katcp_port
         Network port on which to listen for KATCP C&M connections.
-    adc_sample_rate_hz: float
+    adc_sample_rate_hz
         Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
         of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
         stall as heaps queue at the sender faster than they are sent.
-    n_ants: int
+    n_ants
         The number of antennas to be correlated.
-    n_channels_total: int
+    n_channels_total
         The total number of frequency channels out of the F-Engine.
-    n_channels_per_stream: int
+    n_channels_per_stream
         The number of frequency channels contained per stream.
-    n_pols: int
+    n_pols
         The number of pols per antenna. Expected to always be 2.
-    n_samples_per_channel: int
+    n_samples_per_channel
         The number of time samples received per frequency channel.
-    sample_bits: int
+    sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
-    heap_accumulation_threshold: int
+    heap_accumulation_threshold
         The number of consecutive heaps to accumulate. This value is used to determine the dump rate.
-    channel_offset_value: int
+    channel_offset_value
         The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
         in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
-    rx_thread_affinity: int
+    rx_thread_affinity
         Specific CPU core to assign the RX stream processing thread to.
-    batches_per_chunk: int
+    batches_per_chunk
         A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
         the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
         system RAM is allocated, the lower this value is, the more work the python processing thread is required to
         do.
-    rx_reorder_tol: int
+    rx_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
     """
 
-    VERSION = "katgpucbf-fgpu-icd-0.1"
+    VERSION = "katgpucbf-xbgpu-icd-0.1"
     BUILD_STATE = __version__
 
     def __init__(
@@ -679,7 +679,10 @@ class XBEngine(DeviceServer):
 
             increment(self.sensors["input-heaps-total"], received_heaps)
             increment(self.sensors["input-chunks-total"], 1)
-            increment(self.sensors["input-bytes-total"], 2 * self.receiver_stream.sample_bits // 8)
+            # Below won't be perfectly accurate because we don't know about
+            # individual dropped packets, only heaps. But it should be close
+            # enough.
+            increment(self.sensors["input-bytes-total"], self.receiver_stream.chunk_bytes)
 
             chunk_index += 1
 
@@ -859,8 +862,6 @@ class XBEngine(DeviceServer):
             old_timestamp = item.timestamp
 
             # 4. Transfer GPU buffer in item to free buffer.
-            # TODO: Can this get started before all the logging stuff? Might
-            # save a fraction of a second...
             item.buffer_device.get_async(self._download_command_queue, buffer_wrapper.buffer)
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
@@ -896,12 +897,12 @@ class XBEngine(DeviceServer):
         self.running = True
         loop = asyncio.get_event_loop()
         await self.start()
-        self.tasks = [
+        tasks = [
             loop.create_task(self._receiver_loop()),
             loop.create_task(self._gpu_proc_loop()),
             loop.create_task(self._sender_loop()),
         ]
-        await asyncio.gather(*self.tasks)
+        self.task = asyncio.gather(*tasks)
 
     def stop(self):
         """
@@ -914,5 +915,4 @@ class XBEngine(DeviceServer):
         """
         self.receiver_stream.stop()
         self.running = False
-        for task in self.tasks:
-            task.cancel()
+        self.task.cancel()
