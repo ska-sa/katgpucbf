@@ -3,21 +3,27 @@
  * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
  * of the macros.
  *
- * No attempt has been made to document the functioning of this kernel. 
+ * No attempt has been made to document the functioning of this kernel.
  */
 
 /* Yes, the first line of a file is a closing brace. Dont run away, dont panic, there is a reason for this. By default
  * pycuda surrounds a source file with `extern "C" {}`. However if #include <mma.h> is within an `extern "C"{}` block
- * it throws all sorts of errors. The actual solution to this is to pass a the `no_extern_c=True` argument to the 
- * `pycuda.compiler.SourceModule(...)` function, however, katsdpsigproc does not provide the ability to do this at the 
+ * it throws all sorts of errors. The actual solution to this is to pass a the `no_extern_c=True` argument to the
+ * `pycuda.compiler.SourceModule(...)` function, however, katsdpsigproc does not provide the ability to do this at the
  * moment. Therefore the quickest fix is to just add a } at the start of the file to close the extern function. The last
  * } in this file has also been commented out to compensate for the closing brace of the added `extern "C"{}`.
  *
- * When this code gets closer to production, the suggested fix is to modify the accel.build() and context.compile() 
+ * When this code gets closer to production, the suggested fix is to modify the accel.build() and context.compile()
  * functions in katsdpsigproc to take a no_extern_c flag as these ones are the ones that will call the SourceModule(...)
  * constructor.
  */
-}
+
+/* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects
+ * C++ linkage. So we wrap the whole original file in 'extern "C++"' to cancel
+ * that out.
+ */
+extern "C++" {
+
 #if 1000 * __CUDACC_VER_MAJOR__ + __CUDACC_VER_MINOR__ >= 11001 && __CUDA_ARCH__ >= 800
 #define ASYNC_COPIES
 #endif
@@ -27,7 +33,6 @@
 #endif
 #include <mma.h>
 
-<%include file="/port.mako"/>
 #define NR_STATIONS ${n_ants}
 #define NR_STATIONS_PER_BLOCK ${n_ants_per_block}
 #define NR_BITS ${sample_bitwidth}
@@ -39,7 +44,7 @@
 
 #define ALIGN(A,N)		(((A)+(N)-1)/(N)*(N))
 
-#define NR_TIMES_PER_BLOCK	(${n_times_per_block})
+#define NR_TIMES_PER_BLOCK	(128 / (NR_BITS))
 #define NR_STATIONS_PER_TCM_X	((NR_BITS) == 4 ? 2 : 4)
 #define NR_STATIONS_PER_TCM_Y	((NR_BITS) == 4 ? 4 : 8)
 
@@ -218,8 +223,8 @@ template <typename T> __device__ inline void storeVisibility(Visibilities visibi
   if ((skipCheckX || statX + tcX <= statY + tcY) && (skipCheckY || statY + tcY < NR_STATIONS))
   {
     // This allows accumulation across subsequent kernel calls, instead of simply make_complex(sumR, sumI)
-    visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] = 
-      make_complex(visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR, 
+    visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] =
+      make_complex(visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR,
                    visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y + sumI);
   }
 }
@@ -380,7 +385,7 @@ template <bool fullTriangle> __device__ void doCorrelateTriangle(Visibilities vi
       if (warp != 0) {
 	for (unsigned y = 0; y < nrFragmentsY; y ++)
 	  load_matrix_sync(aFrag[y], &bSamples[buffer][statYoffset + NR_STATIONS_PER_TCM_Y * y][0][0][minorTime][0], sizeof(bSamples[0][0][0]) * 8 / NR_BITS);
-											    
+
 	for (unsigned x = 0; x < nrFragmentsX; x ++)
 	  load_matrix_sync(bFrag[x], &bSamples[buffer][statXoffset + NR_STATIONS_PER_TCM_X * x][0][0][minorTime][0], sizeof(bSamples[0][0][0][0]) * 8 / NR_BITS);
 
@@ -391,7 +396,7 @@ template <bool fullTriangle> __device__ void doCorrelateTriangle(Visibilities vi
 	for (unsigned z = 0, i = 0; z < 3; z ++) {
 	  for (unsigned y = 0; y < (NR_BITS == 4 ? 4 : 2); y ++)
 	    load_matrix_sync(aFrag[y], &bSamples[buffer][/*statYoffset*/ 24 * z + NR_STATIONS_PER_TCM_Y * y][0][0][minorTime][0], sizeof(bSamples[0][0][0]) * 8 / NR_BITS);
-											    
+
 	  for (unsigned x = 0; x < (NR_BITS == 4 ? 8 : 4); x ++)
 	    load_matrix_sync(bFrag[x], &bSamples[buffer][/*statXoffset*/ 24 * z + NR_STATIONS_PER_TCM_X * x][0][0][minorTime][0], sizeof(bSamples[0][0][0][0]) * 8 / NR_BITS);
 
@@ -572,7 +577,6 @@ __global__
 __launch_bounds__(NR_WARPS * 32, NR_STATIONS_PER_BLOCK == 32 ? 4 : 2)
 void correlate(Visibilities visibilities, const Samples samples)
 {
-  
   const unsigned nrFragmentsY = NR_STATIONS_PER_BLOCK / NR_STATIONS_PER_TCM_Y / 2;
 
   unsigned block = blockIdx.x;
@@ -598,7 +602,7 @@ void correlate(Visibilities visibilities, const Samples samples)
     } triangle;
     ScratchSpace scratchSpace[NR_WARPS];
   };
-  
+
   // the following hack is necessary to run the correlator in the OpenCL environment,
   // as the maximum local memory size is 48K - 16 bytes.  Due to padding in bSamples,
   // the last 16 bytes are not used, so allocate 16 fewer bytes.
@@ -622,5 +626,6 @@ void correlate(Visibilities visibilities, const Samples samples)
     doCorrelateRectangle<nrFragmentsY, true, true, true, true>(visibilities, samples, firstStationY, firstStationX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 }
 
-//Normally this open brace should be uncommented, but because we are exploting that pycuda surrounds the source with `extern "C"{}`, this last curly bracket introduced by pycuda means we dont actually need to add this bracket
-//}
+} // extern "C++"
+
+}

@@ -128,7 +128,6 @@ class TensorCoreXEngineCoreTemplate:
                 "n_polarisations": self.n_polarisations,
                 "n_samples_per_channel": self.n_samples_per_channel,
                 "n_baselines": self.n_baselines,
-                "n_times_per_block": self.n_times_per_block,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )

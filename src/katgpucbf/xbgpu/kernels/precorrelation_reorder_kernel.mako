@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <sys/cdefs.h>
 
-<%include file="/port.mako"/>
 // Defines, now using mako parametrisation
 #define NR_STATIONS ${n_ants}
 #define NR_CHANNELS ${n_channels}
