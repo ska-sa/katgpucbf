@@ -54,12 +54,12 @@ class TensorCoreXEngineCoreTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_samples_per_channel = n_samples_per_channel
-        self.n_polarizations = 2  # Hardcoded to 2. No other values are supported
+        self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48 in the future
+        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
 
         # This 128 is hardcoded in the original Tensor-Core kernel. The reason it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
@@ -83,7 +83,7 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_samples_per_channel // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(self.n_polarizations, exact=True),
+            accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
             accel.Dimension(complexity, exact=True),
         )
@@ -95,7 +95,12 @@ class TensorCoreXEngineCoreTemplate:
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
         # of the object.
-        if self._n_ants_per_block == 48:
+        if self._n_ants_per_block == 32:
+            raise NotImplementedError(
+                "32 antennas per thread-block is not supported yet - \
+                Need to clarify the formula for thread-block calculation."
+            )
+        elif self._n_ants_per_block == 48:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
                 * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
@@ -120,10 +125,9 @@ class TensorCoreXEngineCoreTemplate:
                 "n_ants": self.n_ants,
                 "sample_bitwidth": self._sample_bitwidth,
                 "n_channels": self.n_channels,
-                "n_polarizastions": self.n_polarizations,
+                "n_polarisations": self.n_polarisations,
                 "n_samples_per_channel": self.n_samples_per_channel,
                 "n_baselines": self.n_baselines,
-                "n_times_per_block": self.n_times_per_block,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
@@ -143,7 +147,7 @@ class TensorCoreXEngineCore(accel.Operation):
     shape of the buffers.
 
     The input sample buffer must have the shape:
-    ``[channels][samples_per_channel//times_per_block][n_ants][polarizations][times_per_block]``
+    ``[channels][samples_per_channel//times_per_block][n_ants][polarisations][times_per_block]``
 
     A complexity that is introduced by the Tensor-Core kernel is that the
     ``samples_per_channel`` index is split over two different indices. The first
