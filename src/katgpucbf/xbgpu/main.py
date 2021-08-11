@@ -34,13 +34,13 @@ def parse_args() -> argparse.Namespace:
         "--katcp-host",
         type=str,
         default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
+        help="Hostname or IP address on which to listen for KATCP C&M connections [all interfaces]",
     )
     parser.add_argument(
         "--katcp-port",
         type=int,
         default=DEFAULT_KATCP_PORT,
-        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
+        help="TCP port on which to listen for KATCP C&M connections [%(default)s]",
     )
     parser.add_argument(
         "--adc-sample-rate",

@@ -172,7 +172,7 @@ class XBEngine(DeviceServer):
         The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
         in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
     rx_thread_affinity: int
-        Specifc CPU core to assign the RX stream processing thread to.
+        Specific CPU core to assign the RX stream processing thread to.
     batches_per_chunk: int
         A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
         the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
@@ -824,7 +824,7 @@ class XBEngine(DeviceServer):
             time_difference_between_heaps_s = new_time_s - old_time_s
 
             # 3.1 Log that a heap is about to be sent.
-            # TODO: change to an old-fasioned formatted string, fstrings aren't
+            # TODO: change to an old-fashioned formatted string. fstrings aren't
             # great for logging.
             logger.info(
                 f"Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
