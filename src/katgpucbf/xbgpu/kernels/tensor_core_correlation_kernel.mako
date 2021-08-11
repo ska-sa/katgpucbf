@@ -254,6 +254,11 @@ __device__ inline void storeVisibilities(Visibilities visibilities, unsigned cha
   unsigned statX    = firstStationX + statXoffset + NR_STATIONS_PER_TCM_X * x + _x;
   unsigned baseline = (statY * (statY + 1) / 2) + statX;
 
+  /* In the storing of visibilities below:
+   * - make_complex(visibilities[..].x + scratchSpace[..].x, visibilities[..].y + scratchSpace[..].y)
+   *   allows for accumulation across subsequent kernel calls,
+   * - Instead of simply visibilities[..] = scratchSpace[..]
+   */
   if ((skipCheckX || statX <= statY) && (skipCheckY || statY < NR_STATIONS))
 #if NR_BITS == 4
     visibilities[channel][baseline][polY][polX] =
