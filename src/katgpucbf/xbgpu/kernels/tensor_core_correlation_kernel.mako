@@ -3,24 +3,18 @@
  * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
  * of the macros.
  *
- * No attempt has been made to document the functioning of this kernel.
+ * There isn't *official* documentation (yet) for this kernel's operation, but the links below should give the developer
+ * some level of insight:
+ * - https://docs.google.com/document/d/1viAzRjnDh3D569JfNBiJjygZE8w0B8VHqO4QRjcdKsU/edit?usp=sharing
+ * - https://developer.nvidia.com/gtc/2019/video/s9306
  */
 
-/* Yes, the first line of a file is a closing brace. Dont run away, dont panic, there is a reason for this. By default
- * pycuda surrounds a source file with `extern "C" {}`. However if #include <mma.h> is within an `extern "C"{}` block
- * it throws all sorts of errors. The actual solution to this is to pass a the `no_extern_c=True` argument to the
- * `pycuda.compiler.SourceModule(...)` function, however, katsdpsigproc does not provide the ability to do this at the
- * moment. Therefore the quickest fix is to just add a } at the start of the file to close the extern function. The last
- * } in this file has also been commented out to compensate for the closing brace of the added `extern "C"{}`.
+/* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects C++ linkage. So we wrap the whole original
+ * file in 'extern "C++"' to cancel that out.
  *
  * When this code gets closer to production, the suggested fix is to modify the accel.build() and context.compile()
- * functions in katsdpsigproc to take a no_extern_c flag as these ones are the ones that will call the SourceModule(...)
- * constructor.
- */
-
-/* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects
- * C++ linkage. So we wrap the whole original file in 'extern "C++"' to cancel
- * that out.
+ * functions in katsdpsigproc to take a no_extern_c flag as these ones are the methods that will call the
+ * pycuda.compiler.SourceModule(...) constructor.
  */
 extern "C++" {
 
@@ -262,11 +256,15 @@ __device__ inline void storeVisibilities(Visibilities visibilities, unsigned cha
 
   if ((skipCheckX || statX <= statY) && (skipCheckY || statY < NR_STATIONS))
 #if NR_BITS == 4
-    visibilities[channel][baseline][polY][polX] = scratchSpace[warp][_y][polY][_x][polX];
+    visibilities[channel][baseline][polY][polX] =
+            make_complex(visibilities[channel][baseline][polY][polX].x + scratchSpace[warp][_y][polY][_x][polX].x,
+                         visibilities[channel][baseline][polY][polX].y + scratchSpace[warp][_y][polY][_x][polX].y);
 #elif NR_BITS == 8 || NR_BITS == 16
     for (unsigned polY = 0; polY < NR_POLARIZATIONS; polY ++)
       for (unsigned polX = 0; polX < NR_POLARIZATIONS; polX ++)
-        visibilities[channel][baseline][polY][polX] = scratchSpace[warp][_y][polY][_x][polX];
+        visibilities[channel][baseline][polY][polX] =
+            make_complex(visibilities[channel][baseline][polY][polX].x + scratchSpace[warp][_y][polY][_x][polX].x,
+                         visibilities[channel][baseline][polY][polX].y + scratchSpace[warp][_y][polY][_x][polX].y);
 #endif
 #else
 #if __CUDA_ARCH__ == 700 || (__CUDA_ARCH__ == 720 && NR_BITS == 16)
@@ -626,6 +624,6 @@ void correlate(Visibilities visibilities, const Samples samples)
     doCorrelateRectangle<nrFragmentsY, true, true, true, true>(visibilities, samples, firstStationY, firstStationX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 }
 
-} // extern "C++"
-
 }
+
+} // extern "C++"
