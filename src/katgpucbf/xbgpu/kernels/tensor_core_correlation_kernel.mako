@@ -3,10 +3,11 @@
  * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
  * of the macros.
  *
- * There isn't *official* documentation (yet) for this kernel's operation, but the links below should give the developer
- * some level of insight:
+ * The following links give a high-level overview:
  * - https://docs.google.com/document/d/1viAzRjnDh3D569JfNBiJjygZE8w0B8VHqO4QRjcdKsU/edit?usp=sharing
  * - https://developer.nvidia.com/gtc/2019/video/s9306
+ * Lower-level details are in the doc/xbgpu.tcc.rst (and built by Sphinx with
+ * the rest of the documentation).
  */
 
 /* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects C++ linkage. So we wrap the whole original
