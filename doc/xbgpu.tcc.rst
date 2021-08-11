@@ -8,6 +8,49 @@ multiplies) as well as the function of a correlator are assumed.
 
 .. _GTC presentation: https://developer.nvidia.com/gtc/2019/video/s9306
 
+Complex multiplications
+-----------------------
+The tensor cores can only perform calculations on real numbers. The
+correlation kernel takes complex numbers as adjacent pairs of real and
+imaginary parts, and constructs matrices in a way that allows complex
+multiplications to be performed. The `GTC presentation`_ shows diagrams of
+this, so only a brief explanation will be given.
+
+Consider a correlation product :math:`A \times B^H`. The real part of
+:math:`(a_r + ia_i)(\overline{b_r + ib_i})` is :math:`a_rb_r + a_ib_i`, so
+simply by placing the real and imaginary parts in alternate columns of
+:math:`A` and :math:`B`, each dot product between rows will give the desired
+real part.
+
+The imaginary part is :math:`a_ib_r - a_rb_i`, so we could construct a second
+matrix :math:`B'` containing :math:`(-b_i, b_r)` in each pair of adjacent real
+entries (instead of :math:`(b_r, b_i)`), and then the product would give the
+imaginary part. If instead of using two separate matrices, we interleave the
+rows of :math:`B` and :math:`B'`, the resulting product will interleave the
+original products (by column) and hence place the real and imaginary
+components together again.
+
+In the code this transformation is implemented by :c:func:`conj_perm`. It uses
+some bit manipulations to perform the calculation on a 32-bit integer that
+potentially has multiple samples. This code assumes a little-endian
+architecture, which is all that CUDA supports. Let's consider the code for
+:c:var:`NR_BITS` of 8:
+
+.. code:: c
+
+   __byte_perm(v, 0x00FF00FF - (v & 0xFF00FF00), 0x2705);
+
+In this case :c:var:`v` contains two complex numbers. The mask selects the
+imaginary components. These are effectively subtracted from 0 to negate them;
+the left-hand side of the subtraction is ``0x00FF00FF`` rather than 0 so that
+the lower component doesn't cause a carry that affects the higher component.
+The other two bytes of the result are not relevant. Next, :c:func:`__byte_perm`
+selects the four desired bytes in the appropriate order.
+
+It should be noted that this transformation will map -128 to -128 rather than
++128, because +128 cannot be represented in a two's-complement int8. The
+caller is responsible for ensuring that this input value is not used.
+
 Parameters and constants
 ------------------------
 :c:macro:`NR_BITS` specifies the type of the incoming samples:
@@ -42,9 +85,7 @@ the "Y" station corresponds to rows (and to :c:var:`aSamples` temporary
 storage, with "X" corresponding to :c:var:`bSamples`), this is 8×4 (4×2 for
 4-bit samples). With dual-pol antennas that equates to 16×8 inputs. The reason
 it is not 16×16 (to match the matrix shape supported by the tensor cores) is
-a 16×8 matrix is multiplied by :math:`i` and interleaved with the columns of
-the original to form the second factor in the matrix product. This is
-necessary for the complex multiplication (see the `GTC presentation`_).
+the expansion of the B matrix for complex multiplication as described above.
 
 In :c:func:`doCorrelateRectangle`, :c:var:`nrFragmentsX` and
 :c:var:`nrFragmentsY` indicate the number of "fragments" (tensor-core
@@ -63,9 +104,73 @@ computing each). In loading code, the :c:var:`threadIdx` is flattened into a
 
 The thread grid is 2D. The :c:var:`y` axis indicates the channel, while the
 :c:var:`x` axis selects an output block within the output triangle. Some
-trickery with square roots is used to perform this mapping. It works slightly
-differently when :c:macro:`NR_STATIONS_PER_BLOCK` is 64 due to the non-square
-output blocks.
+trickery with square roots is used to perform this mapping.
+
+When :c:var:`NR_STATIONS_PER_BLOCK` is 32 or 48, the output space is dealt with
+in square blocks, in :c:func:`doCorrelateRectangle`. The correlation matrix
+is conjugate symmetric, so this involves computing some redundant elements,
+which are discarded as part of :c:func:`storeVisibilities`. When it is 64,
+things get more complicated: certain blocks are processed with
+:c:func:`doCorrelateTriangle`, which is optimised for blocks that lie on the
+main diagonal.
+
+.. tikz:: Block, warp and fragment layout when :c:macro:`NR_STATIONS_PER_BLOCK` is 64
+   and :c:macro:`NR_BITS` is 8 or 16.
+   :libs: decorations.pathreplacing
+
+    [x=0.08cm, y=-0.08cm, brace/.style={decorate, decoration={brace, amplitude=4}}]
+    \foreach \x/\y/\b in {0/64/1, 32/64/2, 0/128/4, 32/128/5, 64/128/6, 96/128/7}
+    {
+        \fill[fill=green!10!white] (\x, \y) rectangle +(32, 64);
+        \draw[xstep=4, ystep=-8, help lines] (\x, \y) grid +(32, 64);
+        \draw[xstep=16, ystep=-32, thin] (\x, \y) grid +(32, 64);
+        \draw[thick] (\x, \y) rectangle +(32, 64);
+        \path (\x, \y) +(16, 32) coordinate (lbl\b);
+        \node[fill=white] at (lbl\b) {\b};
+    }
+    \foreach \x/\b in {0/0, 64/3, 128/8}
+    {
+        \fill[fill=blue!10!white] (\x, \x) -- +(0, 64) -- +(64, 64) -- cycle;
+        \foreach \diag in {0, 24, 48}
+        {
+            \fill[fill=red!10!white] (\x, \x) ++(\diag, \diag) -- +(0, 16) -- +(16, 16) -- cycle;
+            \foreach \oy/\maxx in {0/4, 8/12}
+                \foreach \ox in {0, 4, ..., \maxx}
+                {
+                    \draw[help lines] (\x, \x) ++(\diag, \diag) ++(\ox, \oy) rectangle +(4, 8);
+                }
+        }
+        \foreach \ox/\oy in {0/16, 0/40, 24/40}
+        {
+            \draw[xstep=4, ystep=-8, help lines] (\x, \x) ++(\ox, \oy) grid +(24, 24);
+            \draw[thin] (\x, \x) ++(\ox, \oy) rectangle +(24, 24);
+        }
+        \draw[thick] (\x, \x) -- +(0, 64) -- +(64, 64) -- cycle;
+        \path (\x, \x) +(24, 40) coordinate (lbl\b);
+        \node[fill=white] at (lbl\b) {\b};
+    };
+    \draw[very thick] (0, 0) rectangle (192, 192);
+    \draw[very thick] (0, 0) -- (192, 192);
+    \node[anchor=east] at (0, 96) {Y};
+    \node[anchor=south] at (96, 0) {X};
+    \draw[brace] (0, 192) to node[auto]{\tiny 64} (0, 128);
+    \draw[brace] (32, 192) to node[auto]{\tiny 32} (0, 192);
+    \draw[brace] (0, 128) to node[auto]{\tiny 32} (0, 96);
+    \draw[brace] (48, 192) to node[auto]{\tiny 16} (32, 192);
+    \draw[brace] (0, 72) to node[auto]{\tiny 8} (0, 64);
+    \draw[brace] (64, 192) to node[auto]{\tiny 4} (60, 192);
+
+The figure above illustrates the arrangement for a 192-antenna array. The
+numbers in white boxes are the block IDs (:c:var:`blockIdx.x`). Each green
+block is processed with :c:func:`doCorrelateRectangle`; it is shown divided
+into four quadrants (corresponding to the warps) and further subdivided into
+the fragments computed by each warp. The red/blue blocks are processed with
+:c:func:`doCorrelateTriangle`. The three blue regions are processed using
+warps 1-3 (a lookup table indicates the starting position), while the three
+red areas in each triangle are handled by warp 0.
+
+When :c:macro:`NR_BITS` is 4 the situation is very similar, but the fragments
+are 4×2 instead of 8×4.
 
 Data loading
 ------------
@@ -116,71 +221,3 @@ passing in all the data for the entire dump. While this is efficient (only
 writing results to global memory once), it would limit the dump period based
 on the available memory. In katgpucbf, the code has been modified so that
 results are added to the existing values in global memory.
-
-Rectangles and triangles
-------------------------
-When :c:var:`NR_STATIONS_PER_BLOCK` is 32 or 48, the output space is dealt with
-in (square) blocks, in :c:func:`doCorrelateRectangle`. The correlation matrix
-is conjugate symmetric, so this involves computing some redundant elements,
-which are discarded as part of :c:func:`storeVisibilities`. When it is 64,
-things get much more complicated: certain blocks are processed with
-:c:func:`doCorrelateTriangle`, which is optimised for blocks that lie on the
-main diagonal.
-
-.. tikz:: Block, warp and fragment layout when :c:macro:`NR_STATIONS_PER_BLOCK` is 64
-   and :c:macro:`NR_BITS` is 8 or 16.
-   :libs: decorations.pathreplacing
-
-    [x=0.08cm, y=-0.08cm, brace/.style={decorate, decoration={brace, amplitude=4}}]
-    \foreach \x/\y/\b in {0/64/1, 32/64/2, 0/128/4, 32/128/5, 64/128/6, 96/128/7}
-    {
-        \fill[fill=green!10!white] (\x, \y) rectangle +(32, 64);
-        \draw[xstep=4, ystep=-8, help lines] (\x, \y) grid +(32, 64);
-        \draw[xstep=16, ystep=-32, thin] (\x, \y) grid +(32, 64);
-        \draw[thick] (\x, \y) rectangle +(32, 64);
-        \path (\x, \y) +(16, 32) coordinate (lbl\b);
-        \node[fill=white] at (lbl\b) {\b};
-    }
-    \foreach \x/\b in {0/0, 64/3, 128/8}
-    {
-        \fill[fill=blue!10!white] (\x, \x) -- +(0, 64) -- +(64, 64) -- cycle;
-        \foreach \diag in {0, 24, 48}
-        {
-            \fill[fill=red!10!white] (\x, \x) ++(\diag, \diag) -- +(0, 16) -- +(16, 16) -- cycle;
-            \foreach \oy in {0, 8}
-                \foreach \ox in {0, 4, ..., \oy}
-                {
-                    \draw[help lines] (\x, \x) ++(\diag, \diag) ++(\ox, \oy) rectangle +(4, 8);
-                }
-        }
-        \foreach \ox/\oy in {0/16, 0/40, 24/40}
-        {
-            \draw[xstep=4, ystep=-8, help lines] (\x, \x) ++(\ox, \oy) grid +(24, 24);
-            \draw[thin] (\x, \x) ++(\ox, \oy) rectangle +(24, 24);
-        }
-        \draw[thick] (\x, \x) -- +(0, 64) -- +(64, 64) -- cycle;
-        \path (\x, \x) +(24, 40) coordinate (lbl\b);
-        \node[fill=white] at (lbl\b) {\b};
-    };
-    \draw[very thick] (0, 0) rectangle (192, 192);
-    \draw[very thick] (0, 0) -- (192, 192);
-    \node[anchor=east] at (0, 96) {Y};
-    \node[anchor=south] at (96, 0) {X};
-    \draw[brace] (0, 192) to node[auto]{\tiny 64} (0, 128);
-    \draw[brace] (32, 192) to node[auto]{\tiny 32} (0, 192);
-    \draw[brace] (0, 128) to node[auto]{\tiny 32} (0, 96);
-    \draw[brace] (48, 192) to node[auto]{\tiny 16} (32, 192);
-    \draw[brace] (0, 72) to node[auto]{\tiny 8} (0, 64);
-    \draw[brace] (64, 192) to node[auto]{\tiny 4} (60, 192);
-
-The figure above illustrates the arrangement for a 192-antenna array. The
-numbers in white boxes are the block IDs (:c:var:`blockIdx.x`). Each green
-block is processed with :c:func:`doCorrelateRectangle`; it is shown divided
-into four quadrants (corresponding to the warps) and further subdivided into
-the fragments computed by each warp. The red/blue blocks are processed with
-:c:func:`doCorrelateTriangle`. The three blue regions are processed using
-warps 1-3 (a lookup table indicates the starting position), while the three
-red areas in each triangle are handled by warp 0.
-
-When :c:macro:`NR_BITS` is 4 the situation is very similar, but the fragments
-are 4×2 instead of 8×4.
