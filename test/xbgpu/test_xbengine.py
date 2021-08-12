@@ -337,6 +337,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     # 4. Create xbengine
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+        katcp_host="",
+        katcp_port=0,
         adc_sample_rate_hz=1712000000.0,  # L-Band, not important
         n_ants=n_ants,
         n_channels_total=n_channels_total,

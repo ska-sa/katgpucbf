@@ -416,6 +416,11 @@ const stream::ringbuffer_t &stream::get_ringbuffer() const
     return m_completedChunksRingbuffer;
 }
 
+int stream::get_sample_bits() const
+{
+    return m_iSampleBits;
+}
+
 void stream::stop()
 {
     m_completedChunksRingbuffer.stop();

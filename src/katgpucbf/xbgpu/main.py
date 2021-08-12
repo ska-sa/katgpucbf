@@ -21,15 +21,27 @@ import katsdpservices
 
 import katgpucbf.xbgpu.xbengine
 
+DEFAULT_KATCP_PORT = 7147
+DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
+
 logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
     """Parse all command line parameters for the XB-Engine and ensure that they are valid."""
-    # 1. Create command line parsing argument and set help menu description
     parser = argparse.ArgumentParser(description="Launch an XB-Engine for a single multicast stream.")
-
-    # 2. Configure flagged arguments
+    parser.add_argument(
+        "--katcp-host",
+        type=str,
+        default=DEFAULT_KATCP_HOST,
+        help="Hostname or IP address on which to listen for KATCP C&M connections [all interfaces]",
+    )
+    parser.add_argument(
+        "--katcp-port",
+        type=int,
+        default=DEFAULT_KATCP_PORT,
+        help="TCP port on which to listen for KATCP C&M connections [%(default)s]",
+    )
     parser.add_argument(
         "--adc-sample-rate",
         type=float,
@@ -117,23 +129,19 @@ def parse_args() -> argparse.Namespace:
         help="IP address of the interface that this engine will transmit data on.",
     )
 
-    # 3. Set positional arguments
     parser.add_argument("src_multicast_address", type=str, help="Multicast address data is received from.")
     parser.add_argument("src_port", type=int, help="Port data is received from.")
     parser.add_argument("dest_multicast_address", type=str, help="Multicast address data is sent on.")
     parser.add_argument("dest_port", type=int, help="Port data is sent on.")
 
-    # 4. Read in command line arguments into ArgumentParser object
     args = parser.parse_args()
 
-    # 5. Verify that the command line arguments are valid.
     if args.pols != 2:
         parser.error("Only 2 polarisations per antenna currently supported.")
 
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
 
-    # 6. Return
     return args
 
 
@@ -151,6 +159,8 @@ async def async_main(args: argparse.Namespace) -> None:
     """
     logger.info("Initialising XB-Engine")
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+        katcp_host=args.katcp_host,
+        katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
         n_ants=args.array_size,
         n_channels_total=args.channels_total,

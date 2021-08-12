@@ -28,13 +28,14 @@ import asyncio
 import logging
 import math
 import time
-from typing import List
+from typing import List, Tuple, TypedDict
 
 import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
 import spead2
+from aiokatcp import DeviceServer, Sensor, SensorSampler
 
 import katgpucbf.xbgpu._katxbgpu.recv as recv
 import katgpucbf.xbgpu.monitor
@@ -42,6 +43,8 @@ import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
+
+from .. import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -95,34 +98,99 @@ class RxQueueItem(QueueItem):
         self.chunk = None
 
 
-class XBEngine:
-    """
-    Class that creates an entire GPU XB-Engine pipeline.
+class XBEngine(DeviceServer):
+    r"""GPU XB-Engine pipeline.
 
-    Currently the B-Engine functionality has not been added. This class currently only creates an X-Engine pipeline.
+    Currently the B-Engine functionality has not been added. This class currently
+    only creates an X-Engine pipeline.
 
-    This pipeline encompasses receiving SPEAD heaps from F-Engines, sending them to the GPU for processing and then
-    sending them back out on the network.
+    This pipeline encompasses receiving SPEAD heaps from F-Engines, sending them
+    to the GPU for processing and then sending them back out on the network.
 
-    The X-Engine processing is performed across three different async_methods. Data is passed between these items
-    using asyncio.Queues. The three processing functions are as follows:
-    1. _receiver_loop - Receive chunks from network and initiate transfer to GPU.
-    2. _gpu_proc_loop - Reorder chunk in GPU memory and perform the correlation operation on this reordered data.
-    3. _sender_loop - Transfer correlated data to system RAM and then send it out on the network.
+    The X-Engine processing is performed across three different async_methods.
+    Data is passed between these items using :class:`asyncio.Queue`\s. The three
+    processing functions are as follows:
+
+      1. :func:`_receiver_loop` - Receive chunks from network and initiate
+         transfer to GPU.
+      2. :func:`_gpu_proc_loop` - Reorder chunk in GPU memory and perform the
+         correlation operation on this reordered data.
+      3. :func:`_sender_loop` - Transfer correlated data to system RAM and then
+         send it out on the network.
+
     There is also a seperate function for sending descriptors onto the network.
 
-    Items passed between queues may still have GPU operations in progress. Each item stores a list of events that can be
-    used to determine if a GPU operation is complete.
+    Items passed between queues may still have GPU operations in progress. Each
+    item stores a list of events that can be used to determine if a GPU
+    operation is complete.
 
-    In order to reduce the load on the maim thread, received data is collected into chunks. A chunk consists of
-    multiple batches of F-Engine heaps where a batch is a collection of heaps from all F-Engine with the same timestamp.
+    In order to reduce the load on the maim thread, received data is collected
+    into chunks. A chunk consists of multiple batches of F-Engine heaps where a
+    batch is a collection of heaps from all F-Engine with the same timestamp.
 
-    This class allows for different types of transports to be used for the sender and receiver code. These transports
-    allow for in-process unit tests to be created that do not require access to the network.
+    This class allows for different types of transports to be used for the
+    sender and receiver code. These transports allow for in-process unit tests
+    to be created that do not require access to the network.
+
+    The initialiser allocates all memory buffers to be used during the lifetime
+    of the XBEngine object. These buffers are continuously reused to ensure
+    memory use remains constrained. It does not specify the transports to be
+    used. These need to be specified by the ``add_*_receiver_transport()`` and
+    the ``add_*_sender_transport()`` functions provided in this class.
+
+    .. todo::
+
+      A lot of the sensors are common to both the F- and X-engines. It may be
+      worth investigating some kind of abstract base class for engines to build
+      on top of.
+
+    Parameters
+    ----------
+    katcp_host
+        Hostname or IP on which to listen for KATCP C&M connections.
+    katcp_port
+        Network port on which to listen for KATCP C&M connections.
+    adc_sample_rate_hz
+        Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
+        of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
+        stall as heaps queue at the sender faster than they are sent.
+    n_ants
+        The number of antennas to be correlated.
+    n_channels_total
+        The total number of frequency channels out of the F-Engine.
+    n_channels_per_stream
+        The number of frequency channels contained per stream.
+    n_pols
+        The number of pols per antenna. Expected to always be 2.
+    n_samples_per_channel
+        The number of time samples received per frequency channel.
+    sample_bits
+        The number of bits per sample. Only 8 bits is supported at the moment.
+    heap_accumulation_threshold
+        The number of consecutive heaps to accumulate. This value is used to determine the dump rate.
+    channel_offset_value
+        The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
+        in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
+    rx_thread_affinity
+        Specific CPU core to assign the RX stream processing thread to.
+    batches_per_chunk
+        A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
+        the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
+        system RAM is allocated, the lower this value is, the more work the python processing thread is required to
+        do.
+    rx_reorder_tol
+        Maximum tolerance for jitter between received packets, as a time
+        expressed in ADC sample ticks.
     """
+
+    VERSION = "katgpucbf-xbgpu-icd-0.1"
+    BUILD_STATE = __version__
 
     def __init__(
         self,
+        *,
+        katcp_host: str,
+        katcp_port: int,
         adc_sample_rate_hz: float,
         n_ants: int,
         n_channels_total: int,
@@ -136,49 +204,80 @@ class XBEngine:
         batches_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
     ):
-        """
-        Construct an XBEngine object.
+        super(XBEngine, self).__init__(katcp_host, katcp_port)
 
-        This initialiser allocates all memory buffers to be used during the lifetime of the XBEngine object. These
-        buffers are continuously reused to ensure memory use remains constrained.
+        # No more than once per second, at least once every 10 seconds.
+        # The TypedDict is necessary for mypy to believe the use as
+        # kwargs is valid.
+        AutoStrategy = TypedDict(  # noqa: N806
+            "AutoStrategy",
+            {
+                "auto_strategy": SensorSampler.Strategy,
+                "auto_strategy_parameters": Tuple[float, float],
+            },
+        )
+        auto_strategy = AutoStrategy(
+            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(1.0, 10.0),
+        )
+        sensors: List[Sensor] = [
+            Sensor(
+                int,
+                "input-heaps-total",
+                "number of heaps received (prometheus: counter)",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            Sensor(
+                int,
+                "input-chunks-total",
+                "number of chunks received (prometheus: counter)",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            Sensor(
+                int,
+                "input-bytes-total",
+                "number of bytes of digitiser samples received (prometheus: counter)",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            Sensor(
+                int,
+                "input-missing-heaps-total",
+                "number of heaps dropped on the input (prometheus: counter)",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL,
+                # TODO: Think about what status_func should do for the status of the
+                # sensor. If it goes into "warning" as soon as a single packet is
+                # dropped, then it may not be too useful. Having the information
+                # necessary to implement this may involve shifting things between
+                # classes.
+                **auto_strategy,
+            ),
+            Sensor(
+                int,
+                "output-heaps-total",
+                "number of heaps transmitted (prometheus: counter)",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            Sensor(
+                int,
+                "output-bytes-total",
+                "number of payload bytes transmitted (prometheus: counter)",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+        ]
+        for sensor in sensors:
+            self.sensors.add(sensor)
 
-        It does not specify the transports to be used. These need to be specified by the add_*_receiver_transport() and
-        the add_*_sender_transport() functions provided in this class.
-
-        Parameters
-        ----------
-        adc_sample_rate_hz: float
-            Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
-            of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
-            stall as heaps queue at the sender faster than they are sent.
-        n_ants: int
-            The number of antennas to be correlated.
-        n_channels_total: int
-            The total number of frequency channels out of the F-Engine.
-        n_channels_per_stream: int
-            The number of frequency channels contained per stream.
-        n_pols: int
-            The number of pols per antenna. Expected to always be 2.
-        n_samples_per_channel: int
-            The number of time samples received per frequency channel.
-        sample_bits: int
-            The number of bits per sample. Only 8 bits is supported at the moment.
-        heap_accumulation_threshold: int
-            The number of consecutive heaps to accumulate. This value is used to determine the dump rate.
-        channel_offset_value: int
-            The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
-            in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
-        rx_thread_affinity: int
-            Specifc CPU core to assign the RX stream processing thread to.
-        batches_per_chunk: int
-            A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
-            the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
-            system RAM is allocated, the lower this value is, the more work the python processing thread is required to
-            do.
-        rx_reorder_tol: int
-            Maximum tolerance for jitter between received packets, as a time
-            expressed in ADC sample ticks.
-        """
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
         self.adc_sample_rate_hz: float
@@ -554,23 +653,36 @@ class XBEngine:
             self.receiver_stream.ringbuffer, self.monitor, "recv_ringbuffer", "get_chunks"
         )
         chunk_index = 0
-        received_total = 0
-        dropped_total = 0
+        expected_heaps_total = 0
+        dropped_heaps_total = 0
         # 2. Get complete chunks from the ringbuffer.
         async for chunk in async_ringbuffer:
             # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
-            received_heaps = len(chunk.present)
-            dropped_heaps = len(chunk.present) - sum(chunk.present)
-            received_total += received_heaps
-            dropped_total += dropped_heaps
+            expected_heaps = len(chunk.present)
+            received_heaps = sum(chunk.present)
+            dropped_heaps = expected_heaps - received_heaps
+            expected_heaps_total += expected_heaps
+            dropped_heaps_total += dropped_heaps
 
-            # TODO: This must become a proper logging message
+            sensor_timestamp = time.time()
+            # TODO: This must become a proper logging message; fstrings should
+            # be replaced with old-fashioned format strings.
             if dropped_heaps != 0:
                 logger.warning(
                     f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
-                    f"Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. "
-                    f"All time dropped/received heaps: {dropped_total}/{received_total}."
+                    f"Received: {received_heaps:>4} of {expected_heaps:>4} expected heaps. "
+                    f"All time dropped heaps: {dropped_heaps_total}/{expected_heaps_total}."
                 )
+                self.sensors["input-missing-heaps-total"].set_value(dropped_heaps_total, timestamp=sensor_timestamp)
+
+            def increment(sensor: Sensor, incr: int):
+                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+
+            increment(self.sensors["input-heaps-total"], expected_heaps)
+            increment(self.sensors["input-chunks-total"], 1)
+            increment(
+                self.sensors["input-bytes-total"], self.receiver_stream.chunk_bytes * received_heaps // expected_heaps
+            )
 
             chunk_index += 1
 
@@ -715,6 +827,8 @@ class XBEngine:
             time_difference_between_heaps_s = new_time_s - old_time_s
 
             # 3.1 Log that a heap is about to be sent.
+            # TODO: change to an old-fashioned formatted string. fstrings aren't
+            # great for logging.
             logger.info(
                 f"Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
                 f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
@@ -780,15 +894,15 @@ class XBEngine:
         if self.tx_transport_added is not True:
             raise AttributeError("Transport for sending data has not yet been set.")
 
-        # NOTE: Put in todo about upgrading this to python 3.8
         self.running = True
         loop = asyncio.get_event_loop()
-        self.receiver_task = loop.create_task(self._receiver_loop())
-        self.gpu_proc_task = loop.create_task(self._gpu_proc_loop())
-        self.sender_task = loop.create_task(self._sender_loop())
-        await self.receiver_task
-        await self.gpu_proc_task
-        await self.sender_task
+        await self.start()
+        tasks = [
+            loop.create_task(self._receiver_loop()),
+            loop.create_task(self._gpu_proc_loop()),
+            loop.create_task(self._sender_loop()),
+        ]
+        self.task = asyncio.gather(*tasks)
 
     def stop(self):
         """
@@ -801,6 +915,4 @@ class XBEngine:
         """
         self.receiver_stream.stop()
         self.running = False
-        self.receiver_task.cancel()
-        self.gpu_proc_task.cancel()
-        self.sender_task.cancel()
+        self.task.cancel()

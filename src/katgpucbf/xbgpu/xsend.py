@@ -28,6 +28,7 @@ an intermediary memory location in the process, thereby halving the memory bandw
 import asyncio
 import math
 import queue
+import time
 import typing
 from abc import ABC
 from typing import Final
@@ -37,6 +38,7 @@ import katsdpsigproc.accel as accel
 import numpy as np
 import spead2
 import spead2.send.asyncio
+from aiokatcp.sensor import Sensor, SensorSet
 
 
 class XEngineSPEADAbstractSend(ABC):
@@ -261,19 +263,22 @@ class XEngineSPEADAbstractSend(ABC):
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
-    def send_heap(self, timestamp: int, buffer_wrapper: XEngineHeapBufferWrapper) -> None:
-        """
-        Take in an XEngineHeapBufferWrapper object and send it onto the network as a SPEAD heap.
+    def send_heap(self, timestamp: int, buffer_wrapper: XEngineHeapBufferWrapper, sensors: SensorSet = None) -> None:
+        """Take in a XEngineHeapBufferWrapper and send it as a SPEAD heap.
 
-        This funtion is non-blocking. There is no guarentee that a packet has been sent by the time the function
-        completes.
+        This function is non-blocking. There is no guarantee that a packet has
+        been sent by the time the function completes.
 
         Parameters
         ----------
-        timestamp: int
-            The timestamp that will be assigned to the buffer when it is encapsulated in a SPEAD heap.
-        buffer_wrapper: XEngineHeapBufferWrapper
+        timestamp
+            The timestamp that will be assigned to the buffer when it is
+            encapsulated in a SPEAD heap.
+        buffer_wrapper
             Wrapped buffer to sent as a SPEAD heap.
+        sensors
+            Sensors through which networking statistics will be reported (if
+            provided).
         """
         self.item_group["timestamp"].value = timestamp
         self.item_group["channel offset"].value = self.channel_offset
@@ -287,6 +292,19 @@ class XEngineSPEADAbstractSend(ABC):
 
         future = self.source_stream.async_send_heap(heap_to_send)
         self._heaps_queue.put((future, buffer_wrapper))
+        if sensors:
+            # Note: it's not strictly true to say that the data has been sent at
+            # this point; it's only been queued for sending. But it should be close
+            # enough for monitoring data rates at the granularity that this is
+            # typically done.
+
+            sensor_timestamp = time.time()
+
+            def increment(sensor: Sensor, incr: int):
+                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+
+            increment(sensors["output-heaps-total"], 1)
+            increment(sensors["output-bytes-total"], buffer_wrapper.buffer.nbytes)
 
     async def get_free_heap(self) -> XEngineHeapBufferWrapper:
         """

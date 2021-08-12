@@ -176,6 +176,7 @@ pybind11::module register_module(pybind11::module &parent)
         .def_property_readonly("ringbuffer",
                                [](py_stream &self) -> stream::ringbuffer_t & { return self.get_ringbuffer(); })
         .def_property_readonly("chunk_bytes", &py_stream::get_chunk_bytes)
+        .def_property_readonly("sample_bits", &py_stream::get_sample_bits)
         .def(
             "add_chunk",
             [](py_stream &self, const py_chunk &chunk) {
