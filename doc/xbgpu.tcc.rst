@@ -197,9 +197,29 @@ access is outside the bounds, the data is not loaded and left as zero.
 
 Asynchronous loading
 ^^^^^^^^^^^^^^^^^^^^
-.. todo::
+When there is support in hardware (Compute Capability 8.0 or later, i.e.,
+Ampere) and a new enough CUDA version, an asynchronous memory copy is used for
+extra latency hiding (or possibly to reduce register pressure). It's
+implemented using an experimental (and deprecated) version of the API; for
+reference one needs to read the 11.1 CUDA programming guide rather than the
+latest version.
 
-  Write this section once the details are understood.
+The :c:macro:`READ_AHEAD` macro is slightly confusing. Let's assume a large
+enough :c:macro:`NR_SAMPLES_PER_CHANNEL` that :c:macro:`READ_AHEAD` is 2 and
+:c:macro:`NR_SHARED_BUFFERS` is 4. Then the following can all be occurring
+simultaneously:
+
+1. Reading from shared buffer `i` to do the computations.
+2. Asynchronous copies to shared buffers `i + 1` to `i + 3`, inclusive (note
+   that accounts for 3 buffers, not 2).
+
+Within a single thread there can only be two async copies outstanding while
+doing the computations, because before starting computation on a buffer it
+waits for the copy targeting that buffer to complete. But because there is no
+call to :c:func:`__syncthreads` between the end of computation and the
+scheduling of the following copy, the scenario above can occur overall, with
+different threads in different parts of the loop. This explains why 4 buffers
+are needed.
 
 Result storage
 --------------
