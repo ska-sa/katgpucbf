@@ -266,9 +266,8 @@ class XEngineSPEADAbstractSend(ABC):
     def send_heap(self, timestamp: int, buffer_wrapper: XEngineHeapBufferWrapper, sensors: SensorSet = None) -> None:
         """Take in a XEngineHeapBufferWrapper and send it as a SPEAD heap.
 
-        This funtion is non-blocking. There is no guarantee that a packet has
-        been sent by the time the function
-        completes.
+        This function is non-blocking. There is no guarantee that a packet has
+        been sent by the time the function completes.
 
         Parameters
         ----------

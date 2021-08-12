@@ -653,14 +653,15 @@ class XBEngine(DeviceServer):
             self.receiver_stream.ringbuffer, self.monitor, "recv_ringbuffer", "get_chunks"
         )
         chunk_index = 0
-        received_heaps_total = 0
+        expecteded_heaps_total = 0
         dropped_heaps_total = 0
         # 2. Get complete chunks from the ringbuffer.
         async for chunk in async_ringbuffer:
             # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
-            received_heaps = len(chunk.present)
-            dropped_heaps = len(chunk.present) - sum(chunk.present)
-            received_heaps_total += received_heaps
+            expected_heaps = len(chunk.present)
+            received_heaps = sum(chunk.present)
+            dropped_heaps = expected_heaps - received_heaps
+            expecteded_heaps_total += expected_heaps
             dropped_heaps_total += dropped_heaps
 
             sensor_timestamp = time.time()
@@ -669,20 +670,19 @@ class XBEngine(DeviceServer):
             if dropped_heaps != 0:
                 logger.warning(
                     f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
-                    f"Received: {sum(chunk.present):>4} of {received_heaps:>4} expected heaps. "
-                    f"All time dropped/received heaps: {dropped_heaps_total}/{received_heaps_total}."
+                    f"Received: {received_heaps:>4} of {expected_heaps:>4} expected heaps. "
+                    f"All time dropped heaps: {dropped_heaps_total}/{expecteded_heaps_total}."
                 )
                 self.sensors["input-missing-heaps-total"].set_value(dropped_heaps_total, timestamp=sensor_timestamp)
 
             def increment(sensor: Sensor, incr: int):
                 sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
 
-            increment(self.sensors["input-heaps-total"], received_heaps)
+            increment(self.sensors["input-heaps-total"], expected_heaps)
             increment(self.sensors["input-chunks-total"], 1)
-            # Below won't be perfectly accurate because we don't know about
-            # individual dropped packets, only heaps. But it should be close
-            # enough.
-            increment(self.sensors["input-bytes-total"], self.receiver_stream.chunk_bytes)
+            increment(
+                self.sensors["input-bytes-total"], self.receiver_stream.chunk_bytes * (received_heaps // expected_heaps)
+            )
 
             chunk_index += 1
 
