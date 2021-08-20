@@ -55,7 +55,7 @@ Parameters and constants
 ------------------------
 :c:macro:`NR_BITS` specifies the type of the incoming samples:
 
-- 4 means each byte contains a packet 4-bit real and 4-bit imaginary.
+- 4 means each byte contains a packed 4-bit real and 4-bit imaginary.
 - 8 means the real and imaginary components are signed bytes.
 - 16 means half-precision float.
 
