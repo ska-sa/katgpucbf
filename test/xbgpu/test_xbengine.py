@@ -195,14 +195,18 @@ def bounded_int8(val):
 
 @njit
 def cmult_and_scale(a, b, c):
-    """Multiply ``a`` and ``conj(b)``, and scale the result by ``c``.
+    """Multiply ``b`` and ``conj(a)``, and scale the result by ``c``.
 
     Both ``a`` and ``b`` inputs and the output are 2-element arrays of np.int32,
     representing the real and imaginary components. ``c`` is a scalar.
+
+    The order of ``a`` and ``b`` are backwards from what you might expect because
+    we want to imitate the John Romein Tensor-Core Kernel, but taking the complex
+    conjugate of the output - we want the other half of the triangle.
     """
     result = np.empty((2,), dtype=np.int32)
     result[0] = a[0] * b[0] + a[1] * b[1]
-    result[1] = a[1] * b[0] - a[0] * b[1]
+    result[1] = -(a[1] * b[0] - a[0] * b[1])
     result *= c
     return result
 

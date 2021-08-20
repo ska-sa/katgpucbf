@@ -54,7 +54,7 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
                         i2 = ez_in[c, a2, p2, :, 1]
 
                         output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
-                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
+                        output_array[c, bl_idx, 1] = -np.sum(r2 * i1 - r1 * i2)
 
     return output_array
 
