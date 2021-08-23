@@ -177,8 +177,9 @@ async def chunk_sets(
                         sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
 
                     # mypy isn't smart enough to see that the list can't have Nones
-                    # in it at this point.
-                    buf_good = sum(np.sum(c.present) for c in buf)  # type: ignore
+                    # in it at this point. The cast is to force numpy ints to
+                    # Python ints.
+                    buf_good = sum(int(np.sum(c.present)) for c in buf)  # type: ignore
                     increment(sensors["input-heaps-total"], buf_good)
                     increment(sensors["input-chunks-total"], n_pol)
                     increment(sensors["input-bytes-total"], buf_good * heap_bytes)
