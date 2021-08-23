@@ -8,6 +8,7 @@ from typing import AsyncGenerator, Final, List, Optional, cast
 import numba
 import numpy as np
 import scipy
+import spead2.numba
 import spead2.recv.asyncio
 from aiokatcp import Sensor, SensorSet
 from numba import types
@@ -43,38 +44,42 @@ chunk_layout_dtype: Final[np.dtype] = np.dtype(
 )
 
 
+# Use intp for pointer arguments because numba doesn't support pointers in Records
 # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
-# Reference arguments are ABI-compatible with pointer arguments.
+chunk_place_data = types.Record.make_c_struct(
+    [
+        ("packet", types.intp),  # uint8_t *
+        ("packet_size", types.uintp),
+        ("items", types.intp),  # s_item_pointer_t *
+        ("chunk_id", types.int64),
+        ("heap_index", types.uintp),
+        ("heap_offset", types.uintp),
+    ]
+)
+
+
+# numba.types doesn't have a size_t, so assume it is the same as uintptr_t
 @numba.cfunc(
-    types.void(
-        types.CPointer(types.uint8),
-        types.uintp,
-        types.CPointer(types.int64),
-        types.CPointer(types.uintp),
-        types.CPointer(types.int64),
-        types.CPointer(types.uintp),
-        types.CPointer(types.uintp),
-        types.voidptr,
-    ),
+    types.void(types.CPointer(chunk_place_data), types.uintp, types.voidptr),
     nopython=True,
 )
-def chunk_place(packet, packet_size, items, substream_index, chunk_id, index, offset, layout_ptr):
+def chunk_place(data_ptr, data_size, layout_ptr):
+    data = numba.carray(data_ptr, 1)
     layout = numba.carray(layout_ptr, 1, dtype=chunk_layout_dtype)
+    items = numba.carray(spead2.numba.intp_to_voidptr(data[0].items), 2, dtype=np.int64)
     timestamp = items[0]
     payload_size = items[1]
     if payload_size != layout[0].heap_bytes or timestamp < 0:
         # It's something unexpected - maybe it has descriptors or a stream
         # control item. Ignore it.
-        chunk_id[0] = -1
         return
     timestamp &= layout[0].timestamp_mask
     if timestamp % layout[0].heap_samples != 0:
         # TODO: log/count. The timestamp is broken.
-        chunk_id[0] = -1
         return
-    chunk_id[0] = timestamp // layout[0].chunk_samples
-    index[0] = timestamp // layout[0].heap_samples % layout[0].chunk_heaps
-    offset[0] = index[0] * layout[0].heap_bytes
+    data[0].chunk_id = timestamp // layout[0].chunk_samples
+    data[0].heap_index = timestamp // layout[0].heap_samples % layout[0].chunk_heaps
+    data[0].heap_offset = data[0].heap_index * layout[0].heap_bytes
 
 
 def add_chunk(stream: spead2.recv.ChunkRingStream, chunk: Chunk):
@@ -228,7 +233,7 @@ def make_stream(
     )
     place = scipy.LowLevelCallable(
         chunk_place.ctypes,
-        signature="void (uint8_t *, size_t, int64_t *, int64_t *, size_t *, int64_t *, size_t *, size_t *, void *)",
+        signature="void (void *, size_t, void *)",
         user_data=np.array(layout).ctypes.data_as(ctypes.c_void_p),
     )
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
