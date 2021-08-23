@@ -138,7 +138,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Completion vector for transmission, or -1 for polling [0]",
     )
     parser.add_argument(
-        "--adc-rate",
+        "--adc-sample-rate",
         type=float,
         default=0.0,
         metavar="HZ",
@@ -260,7 +260,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         dst_packet_payload=args.dst_packet_payload,
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
-        adc_rate=args.adc_rate,
+        adc_sample_rate=args.adc_sample_rate,
         feng_id=args.feng_id,
         spectra=chunk_samples // (2 * args.channels),
         acc_len=args.acc_len,
