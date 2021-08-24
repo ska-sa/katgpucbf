@@ -11,7 +11,7 @@
 -- pcap files that you have open will be re-parsed then.
 -- I used spead2's mcdump utility to capture the files used for this exercise.
 
-spead_proto = Proto("SPEAD","Spead Protocol")
+spead_proto = Proto("SPEAD","SPEAD Protocol")
 
 -- Best way to understand these fields is to look at the original SPEAD spec
 -- (2010 document on CASPER wiki) along with the data subscribers ICD
@@ -56,7 +56,7 @@ spead_proto.fields = {
 
 function spead_proto.dissector(buffer,pinfo,tree)
 	pinfo.cols.protocol = "SPEAD"
-	local subtree = tree:add(spead_proto,buffer(),"spead Protocol Data")
+	local subtree = tree:add(spead_proto,buffer(),"SPEAD Protocol Data")
 
 	subtree:add(magic_no, buffer(0,1))
 	subtree:add(version, buffer(1,1))
@@ -82,6 +82,6 @@ end
 
 udp_table = DissectorTable.get("udp.port")
 -- We've commonly used these two ports, 7148 is the usual one, 7149 is used
--- by Gareth's simulator. Adjust according to your needs.
+-- by src/tools/fsim. Adjust according to your needs.
 udp_table:add(7148,spead_proto)
 udp_table:add(7149,spead_proto)
