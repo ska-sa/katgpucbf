@@ -153,7 +153,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--array-size",
         type=int,
-        default=1,
+        default=65536,
         help="The number of antennas in the array. [%(default)s]",
     )
     parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")

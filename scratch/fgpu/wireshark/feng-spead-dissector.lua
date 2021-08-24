@@ -11,11 +11,11 @@
 -- pcap files that you have open will be re-parsed then.
 -- I used spead2's mcdump utility to capture the files used for this exercise.
 
-spead_proto = Proto("SPEAD","SPEAD Protocol")
+spead_proto = Proto("SPEAD", "SPEAD Protocol")
 
 -- Best way to understand these fields is to look at the original SPEAD spec
--- (2010 document on CASPER wiki) along with the data subscribers ICD
--- (M1000-0001-020 section 4.4.5.2.2.1.)
+-- (https://casper.astro.berkeley.edu/wiki/SPEAD) along with the CBF data
+-- subscribers ICD (M1000-0001-020 section 4.4.5.2.2.1.)
 local magic_no = ProtoField.uint8("SPEAD.magic_no", "Magic Number", base.HEX)
 local version = ProtoField.uint8("SPEAD.version", "Version", base.DEC)
 local item_pointer_width = ProtoField.uint8("SPEAD.item_pointer_width", "Item Pointer Width", base.DEC)
@@ -35,53 +35,56 @@ local field_11 = ProtoField.int64("SPEAD.field_11", "Field 11", base.DEC)
 local feng_raw = ProtoField.bytes("SPEAD2.feng_raw", "FEng raw", base.COLON)
 
 spead_proto.fields = {
-	magic_no,
-	version,
-	item_pointer_width,
-	heap_addr_width,
-	num_items,
-	heap_counter,
-	heap_size,
-	heap_offset,
-	packet_payload_length,
-	timestamp,
-	feng_id,
-	frequency,
-	feng_data_id,
-	field_9,
-	field_10,
-	field_11,
-	feng_raw,
+    magic_no,
+    version,
+    item_pointer_width,
+    heap_addr_width,
+    num_items,
+    heap_counter,
+    heap_size,
+    heap_offset,
+    packet_payload_length,
+    timestamp,
+    feng_id,
+    frequency,
+    feng_data_id,
+    field_9,
+    field_10,
+    field_11,
+    feng_raw,
 }
 
-function spead_proto.dissector(buffer,pinfo,tree)
-	pinfo.cols.protocol = "SPEAD"
-	local subtree = tree:add(spead_proto,buffer(),"SPEAD Protocol Data")
+function spead_proto.dissector(buffer, pinfo, tree)
+    pinfo.cols.protocol = "SPEAD"
+    local subtree = tree:add(spead_proto, buffer(), "SPEAD Protocol Data")
 
-	subtree:add(magic_no, buffer(0,1))
-	subtree:add(version, buffer(1,1))
-	subtree:add(item_pointer_width, buffer(2,1))
-	subtree:add(heap_addr_width, buffer(3,1))
-	subtree:add(num_items, buffer(6,2))
+    subtree:add(magic_no, buffer(0, 1))
+    subtree:add(version, buffer(1, 1))
+    subtree:add(item_pointer_width, buffer(2, 1))
+    subtree:add(heap_addr_width, buffer(3, 1))
+    subtree:add(num_items, buffer(6, 2))
     -- These are all only 6 bytes because the first two are just the item number:
     -- like 0x1600 for timestamp and 0x4101 for fengine ID. It's easier just to
     -- ignore those first two bytes, then you get the actual number.
-	subtree:add(heap_counter, buffer(10,6))
-	subtree:add(heap_size, buffer(18,6))
-	subtree:add(heap_offset, buffer(26,6))
-	subtree:add(packet_payload_length, buffer(34,6))
-	subtree:add(timestamp, buffer(42,6))
-	subtree:add(feng_id, buffer(50,6))
-	subtree:add(frequency, buffer(58,6))
-	subtree:add(feng_data_id, buffer(66,6))
-	subtree:add(field_9, buffer(74,6))
-	subtree:add(field_10, buffer(82,6))
-	subtree:add(field_11, buffer(90,6))
-	subtree:add(feng_raw, buffer(96,buffer:len()-96))
+    subtree:add(heap_counter, buffer(10, 6))
+    subtree:add(heap_size, buffer(18, 6))
+    subtree:add(heap_offset, buffer(26, 6))
+    subtree:add(packet_payload_length, buffer(34, 6))
+    subtree:add(timestamp, buffer(42, 6))
+    subtree:add(feng_id, buffer(50, 6))
+    subtree:add(frequency, buffer(58, 6))
+    subtree:add(feng_data_id, buffer(66, 6))
+    --- These are padding fields - I include them to make it explicit why they
+    -- are there, and why the raw data starts at byte 96 only.
+    -- Uncomment if you actually want to see them.
+    -- subtree:add(field_9, buffer(74, 6))
+    -- subtree:add(field_10, buffer(82, 6))
+    -- subtree:add(field_12, buffer(90, 6))
+    subtree:add(feng_raw, buffer(96, buffer:len()-96))
 end
 
 udp_table = DissectorTable.get("udp.port")
 -- We've commonly used these two ports, 7148 is the usual one, 7149 is used
 -- by src/tools/fsim. Adjust according to your needs.
-udp_table:add(7148,spead_proto)
-udp_table:add(7149,spead_proto)
+udp_table:add(7148, spead_proto)
+udp_table:add(7149, spead_proto)

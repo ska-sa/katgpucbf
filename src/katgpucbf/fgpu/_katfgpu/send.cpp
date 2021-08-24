@@ -43,8 +43,7 @@ sender::sender(std::size_t free_ring_capacity,
                std::size_t max_packet_size, double rate, std::size_t max_heaps)
     : thread_pool(1, thread_affinity >= 0 ? std::vector<int>{thread_affinity} : std::vector<int>{}),
     free_ring(free_ring_capacity),
-    feng_id(feng_id),
-    num_ants(num_ants)
+    feng_id(feng_id)
 {
     // Convert list of string & int endpoints to more useful boost::asio types.
     if (endpoints.empty())
@@ -79,7 +78,7 @@ sender::sender(std::size_t free_ring_capacity,
             thread_pool, ep, config, spead2::send::udp_stream::default_buffer_size,
             ttl, interface);
     }
-    stream->set_cnt_sequence(this->feng_id, this->num_ants);
+    stream->set_cnt_sequence(this->feng_id, num_ants);
 }
 
 sender::~sender()

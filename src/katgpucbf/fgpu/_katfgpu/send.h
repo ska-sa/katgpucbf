@@ -54,7 +54,6 @@ private:
     std::unique_ptr<spead2::send::stream> stream;
     ringbuffer_t free_ring;
     int feng_id;
-    int num_ants;
 
     // Hooks for monitoring
     virtual void pre_push_free_ring() {}
