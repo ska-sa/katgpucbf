@@ -8,11 +8,12 @@ from typing import AsyncGenerator, Final, List, Optional, cast
 import numba
 import numpy as np
 import scipy
-import spead2.numba
 import spead2.recv.asyncio
 from aiokatcp import Sensor, SensorSet
 from numba import types
 from numpy.typing import NDArray
+from spead2.numba import intp_to_voidptr
+from spead2.recv.numba import chunk_place_data
 
 from .monitor import Monitor
 
@@ -44,20 +45,6 @@ chunk_layout_dtype: Final[np.dtype] = np.dtype(
 )
 
 
-# Use intp for pointer arguments because numba doesn't support pointers in Records
-# numba.types doesn't have a size_t, so assume it is the same as uintptr_t
-chunk_place_data = types.Record.make_c_struct(
-    [
-        ("packet", types.intp),  # uint8_t *
-        ("packet_size", types.uintp),
-        ("items", types.intp),  # s_item_pointer_t *
-        ("chunk_id", types.int64),
-        ("heap_index", types.uintp),
-        ("heap_offset", types.uintp),
-    ]
-)
-
-
 # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
 @numba.cfunc(
     types.void(types.CPointer(chunk_place_data), types.uintp, types.voidptr),
@@ -66,7 +53,7 @@ chunk_place_data = types.Record.make_c_struct(
 def chunk_place(data_ptr, data_size, layout_ptr):
     data = numba.carray(data_ptr, 1)
     layout = numba.carray(layout_ptr, 1, dtype=chunk_layout_dtype)
-    items = numba.carray(spead2.numba.intp_to_voidptr(data[0].items), 2, dtype=np.int64)
+    items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
     timestamp = items[0]
     payload_size = items[1]
     if payload_size != layout[0].heap_bytes or timestamp < 0:
