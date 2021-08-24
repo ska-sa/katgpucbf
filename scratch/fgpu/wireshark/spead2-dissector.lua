@@ -5,6 +5,12 @@
 -- specified in the ICD. If the SPEAD header says there's another number of
 -- item fields, then this will be ignored.
 
+-- To install, open your copy of Wireshark and go Help -> About -> Folders ->
+-- Personal LUA Plugins, then paste this file into that directory, and either
+-- restart Wireshark or press Ctrl+Shift+L to re-load the LUA plugins. Any
+-- pcap files that you have open will be re-parsed then.
+-- I used spead2's mcdump utility to capture the files used for this exercise.
+
 spead_proto = Proto("SPEAD","Spead Protocol")
 
 -- Best way to understand these fields is to look at the original SPEAD spec
