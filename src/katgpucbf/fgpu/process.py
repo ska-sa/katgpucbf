@@ -620,7 +620,7 @@ class Processor:
                     item.events.append(event)
                 self.in_free_queue.put_nowait(item)
 
-    async def run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: np.generic) -> None:
+    async def run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -

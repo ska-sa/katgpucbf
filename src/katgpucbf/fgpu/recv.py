@@ -1,9 +1,10 @@
 """Recv module."""
 
-import ctypes
+import functools
 import logging
 import time
-from typing import AsyncGenerator, Final, List, Optional, cast
+from dataclasses import dataclass
+from typing import AsyncGenerator, List, Optional, cast
 
 import numba
 import numpy as np
@@ -11,7 +12,6 @@ import scipy
 import spead2.recv.asyncio
 from aiokatcp import Sensor, SensorSet
 from numba import types
-from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
@@ -23,8 +23,8 @@ TIMESTAMP_ID = 0x1600
 
 class Chunk(spead2.recv.Chunk):
     # Refine the type used in the base class
-    present: NDArray[np.uint8]
-    data: NDArray[np.uint8]
+    present: np.ndarray
+    data: np.ndarray
     # New fields
     timestamp: int
 
@@ -34,47 +34,58 @@ class Chunk(spead2.recv.Chunk):
         self.timestamp = 0  # Actual value filled in when chunk received
 
 
-chunk_layout_dtype: Final[np.dtype] = np.dtype(
-    [
-        ("heap_samples", np.int32),
-        ("heap_bytes", np.int32),
-        ("chunk_heaps", np.int64),
-        ("chunk_samples", np.int64),
-        ("timestamp_mask", np.uint64),
-    ]
-)
+@dataclass
+class Layout:
+    """Parameters controlling the sizes of heaps and chunks."""
 
+    sample_bits: int
+    heap_samples: int
+    chunk_samples: int
+    mask_timestamp: bool
 
-def make_chunk_place(layout: np.generic):
-    heap_samples = layout["heap_samples"]
-    heap_bytes = layout["heap_bytes"]
-    chunk_heaps = layout["chunk_heaps"]
-    chunk_samples = layout["chunk_samples"]
-    timestamp_mask = layout["timestamp_mask"]
+    @property
+    def heap_bytes(self) -> int:
+        return self.heap_samples * self.sample_bits // 8
 
-    # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
-    @numba.cfunc(
-        types.void(types.CPointer(chunk_place_data), types.uintp),
-        nopython=True,
-    )
-    def chunk_place(data_ptr, data_size):
-        data = numba.carray(data_ptr, 1)
-        items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
-        timestamp = items[0]
-        payload_size = items[1]
-        if payload_size != heap_bytes or timestamp < 0:
-            # It's something unexpected - maybe it has descriptors or a stream
-            # control item. Ignore it.
-            return
-        timestamp &= timestamp_mask
-        if timestamp % heap_samples != 0:
-            # TODO: log/count. The timestamp is broken.
-            return
-        data[0].chunk_id = timestamp // chunk_samples
-        data[0].heap_index = timestamp // heap_samples % chunk_heaps
-        data[0].heap_offset = data[0].heap_index * heap_bytes
+    @property
+    def chunk_heaps(self) -> int:
+        return self.chunk_samples // self.heap_samples
 
-    return chunk_place
+    @property
+    def timestamp_mask(self) -> np.uint64:
+        return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
+
+    @functools.cached_property
+    def chunk_place(self) -> scipy.LowLevelCallable:
+        heap_samples = self.heap_samples
+        heap_bytes = self.heap_bytes
+        chunk_heaps = self.chunk_heaps
+        chunk_samples = self.chunk_samples
+        timestamp_mask = self.timestamp_mask
+
+        # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
+        @numba.cfunc(
+            types.void(types.CPointer(chunk_place_data), types.uintp),
+            nopython=True,
+        )
+        def chunk_place_impl(data_ptr, data_size):
+            data = numba.carray(data_ptr, 1)
+            items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
+            timestamp = items[0]
+            payload_size = items[1]
+            if payload_size != heap_bytes or timestamp < 0:
+                # It's something unexpected - maybe it has descriptors or a stream
+                # control item. Ignore it.
+                return
+            timestamp &= timestamp_mask
+            if timestamp % heap_samples != 0:
+                # TODO: log/count. The timestamp is broken.
+                return
+            data[0].chunk_id = timestamp // chunk_samples
+            data[0].heap_index = timestamp // heap_samples % chunk_heaps
+            data[0].heap_offset = data[0].heap_index * heap_bytes
+
+        return scipy.LowLevelCallable(chunk_place_impl.ctypes, signature="void (void *, size_t)")
 
 
 def add_chunk(stream: spead2.recv.ChunkRingStream, chunk: Chunk):
@@ -90,7 +101,7 @@ def add_chunk(stream: spead2.recv.ChunkRingStream, chunk: Chunk):
 
 async def chunk_sets(
     streams: List[spead2.recv.ChunkRingStream],
-    layout: np.generic,
+    layout: Layout,
     monitor: Monitor,
     sensors: Optional[SensorSet] = None,
 ) -> AsyncGenerator[List[Chunk], None]:
@@ -121,11 +132,6 @@ async def chunk_sets(
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
-    # Convert from numpy types to plain Python ints
-    heap_samples = int(layout["heap_samples"])
-    heap_bytes = int(layout["heap_bytes"])
-    chunk_heaps = int(layout["chunk_heaps"])
-    chunk_samples = int(layout["chunk_samples"])
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
@@ -133,27 +139,27 @@ async def chunk_sets(
         async for chunk in ring:
             assert isinstance(chunk, Chunk)
             # Inspect the chunk we have just received.
-            chunk.timestamp = chunk.chunk_id * chunk_samples
+            chunk.timestamp = chunk.chunk_id * layout.chunk_samples
             pol = chunk.stream_id
             if first_timestamp == -1:
                 # TODO: use chunk.present to determine the actual first timestamp
                 first_timestamp = chunk.timestamp
             good = np.sum(chunk.present)
-            lost += chunk_heaps - good
-            if good < chunk_heaps:
+            lost += layout.chunk_heaps - good
+            if good < layout.chunk_heaps:
                 logger.debug(
                     "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
                     chunk.timestamp,
                     pol,
                     good,
-                    chunk_heaps,
+                    layout.chunk_heaps,
                     lost,
                 )
 
             # Check whether we have a chunk already for this pol.
             old = buf[pol]
             if old is not None:
-                logger.warning("Chunk not matched: timestamp=%#x pol=%d", old.chunk_id * chunk_samples, pol)
+                logger.warning("Chunk not matched: timestamp=%#x pol=%d", old.chunk_id * layout.chunk_samples, pol)
                 # Chunk was passed by without getting used. Return to the pool.
                 add_chunk(streams[pol], old)
                 buf[pol] = None
@@ -177,13 +183,13 @@ async def chunk_sets(
                     buf_good = sum(int(np.sum(c.present)) for c in buf)  # type: ignore
                     increment(sensors["input-heaps-total"], buf_good)
                     increment(sensors["input-chunks-total"], n_pol)
-                    increment(sensors["input-bytes-total"], buf_good * heap_bytes)
+                    increment(sensors["input-bytes-total"], buf_good * layout.heap_bytes)
                     # Determine how many heaps we expected to have seen by
                     # now, and subtract from it the number actually seen to
                     # determine the number missing. This accounts for both
                     # heaps lost within chunks and lost chunks.
                     received_heaps = sensors["input-heaps-total"].value
-                    expected_heaps = (chunk.timestamp + chunk_samples) * n_pol // heap_samples
+                    expected_heaps = (chunk.timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
                     missing = expected_heaps - received_heaps
                     if missing > sensors["input-missing-heaps-total"].value:
                         sensors["input-missing-heaps-total"].set_value(missing, timestamp=sensor_timestamp)
@@ -199,24 +205,9 @@ async def chunk_sets(
                 add_chunk(streams[c.stream_id], c)
 
 
-def make_chunk_layout(
-    sample_bits: int,
-    packet_samples: int,
-    chunk_samples: int,
-    mask_timestamp: bool,
-) -> np.generic:
-    layout = np.zeros((), chunk_layout_dtype)[()]
-    layout["heap_samples"] = packet_samples
-    layout["heap_bytes"] = packet_samples * sample_bits // 8
-    layout["chunk_heaps"] = chunk_samples // packet_samples
-    layout["chunk_samples"] = chunk_samples
-    layout["timestamp_mask"] = ~np.uint64(packet_samples - 1 if mask_timestamp else 0)
-    return layout
-
-
 def make_stream(
     pol: int,
-    layout: np.generic,
+    layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
     use_gdrcopy: bool,
@@ -227,13 +218,8 @@ def make_stream(
         memcpy=spead2.MEMCPY_NONTEMPORAL if use_gdrcopy else spead2.MEMCPY_STD,
         stream_id=pol,
     )
-    place = scipy.LowLevelCallable(
-        make_chunk_place(layout).ctypes,
-        signature="void (void *, size_t)",
-        user_data=np.array(layout).ctypes.data_as(ctypes.c_void_p),
-    )
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=2, place=place
+        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=2, place=layout.chunk_place
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.
@@ -249,4 +235,4 @@ def make_stream(
 
 
 # TODO: update
-__all__ = ["Chunk", "chunk_sets", "make_chunk_layout", "make_stream"]
+__all__ = ["Chunk", "Layout", "chunk_sets", "make_stream"]

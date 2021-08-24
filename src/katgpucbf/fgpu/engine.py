@@ -285,9 +285,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.make_chunk_layout(
-            compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp
-        )
+        self._src_layout = recv.Layout(compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_streams = [
             recv.make_stream(
                 pol,
