@@ -145,6 +145,13 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Digitiser sampling rate, used to determine transmission rate [fast as possible]",
     )
     parser.add_argument(
+        "--tx-rate-overhead-factor",
+        type=float,
+        default=1.1,
+        metavar="FACTOR",
+        help="Transmission rate factor to allow for any jitter on the network. [%(default)s]",
+    )
+    parser.add_argument(
         "--feng-id",
         type=int,
         default=0,
@@ -261,6 +268,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
         adc_sample_rate=args.adc_sample_rate,
+        tx_rate_overhead_factor=args.tx_rate_overhead_factor,
         feng_id=args.feng_id,
         spectra=chunk_samples // (2 * args.channels),
         acc_len=args.acc_len,

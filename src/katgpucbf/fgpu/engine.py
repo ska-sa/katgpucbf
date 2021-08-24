@@ -110,6 +110,10 @@ class Engine(aiokatcp.DeviceServer):
         See :class:`spead2.send.UdpIbvConfig` for further information.
     adc_sample_rate
         Digitiser sampling rate (in Hz), used to determine transmission rate.
+    tx_rate_overhead_factor
+        Transmission rate factor to allow for any jitter on the network.
+        For example, to account for an overhead of 10% the factor will be 1.1
+        # TODO: Find a better name for this variable
     feng_id
         ID of the F-engine indicating which one in the array this is. Included
         in the output heaps so that the X-engine can determine where the data
@@ -165,6 +169,7 @@ class Engine(aiokatcp.DeviceServer):
         dst_affinity: int,
         dst_comp_vector: int,
         adc_sample_rate: float,
+        tx_rate_overhead_factor: float,
         feng_id: int,
         spectra: int,
         acc_len: int,
@@ -261,8 +266,10 @@ class Engine(aiokatcp.DeviceServer):
             import gdrcopy.pycuda
 
             gdr = gdrcopy.Gdr()
+
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
+        self.tx_rate_overhead_factor = tx_rate_overhead_factor
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -333,7 +340,10 @@ class Engine(aiokatcp.DeviceServer):
         if use_peerdirect:
             memory_regions.extend(self._processor.peerdirect_memory_regions)
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_sample_rate * send_dtype.itemsize * 1.1
+        rate = pols * adc_sample_rate * send_dtype.itemsize * tx_rate_overhead_factor
+        print(rate)
+        # import IPython; IPython.embed()
+        # raise ValueError
         # There is a SPEAD header, 8 item pointers, and 3 padding pointers for
         # a 96 byte header, matching the MeerKAT packet format.
         self._sender = send.Sender(

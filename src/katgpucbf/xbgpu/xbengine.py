@@ -154,6 +154,10 @@ class XBEngine(DeviceServer):
         Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
         of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
         stall as heaps queue at the sender faster than they are sent.
+    tx_rate_overhead_factor
+        Transmission rate factor to allow for any jitter on the network.
+        For example, to account for an overhead of 10% the factor will be 1.1
+        # TODO: Find a better name for this variable
     n_ants
         The number of antennas to be correlated.
     n_channels_total
@@ -192,6 +196,7 @@ class XBEngine(DeviceServer):
         katcp_host: str,
         katcp_port: int,
         adc_sample_rate_hz: float,
+        tx_rate_overhead_factor: float,
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
@@ -281,6 +286,7 @@ class XBEngine(DeviceServer):
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
         self.adc_sample_rate_hz: float
+        self.tx_rate_overhead_factor: float
         self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation.
         self.n_ants: int
         self.n_channels_total: int
@@ -346,6 +352,7 @@ class XBEngine(DeviceServer):
 
         # 2.2 Assign array configuration variables
         self.adc_sample_rate_hz = adc_sample_rate_hz
+        self.tx_rate_overhead_factor = tx_rate_overhead_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
@@ -598,6 +605,7 @@ class XBEngine(DeviceServer):
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
+            tx_rate_overhead_factor=self.tx_rate_overhead_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             endpoint=(dest_ip, dest_port),
@@ -628,6 +636,7 @@ class XBEngine(DeviceServer):
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
+            tx_rate_overhead_factor=self.tx_rate_overhead_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             queue=queue,
