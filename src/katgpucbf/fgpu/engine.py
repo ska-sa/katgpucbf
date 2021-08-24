@@ -341,9 +341,6 @@ class Engine(aiokatcp.DeviceServer):
             memory_regions.extend(self._processor.peerdirect_memory_regions)
         # Send a bit faster than nominal rate to account for header overheads
         rate = pols * adc_sample_rate * send_dtype.itemsize * tx_rate_overhead_factor
-        print(rate)
-        # import IPython; IPython.embed()
-        # raise ValueError
         # There is a SPEAD header, 8 item pointers, and 3 padding pointers for
         # a 96 byte header, matching the MeerKAT packet format.
         self._sender = send.Sender(
