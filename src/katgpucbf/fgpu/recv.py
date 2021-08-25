@@ -34,7 +34,7 @@ class Chunk(spead2.recv.Chunk):
         self.timestamp = 0  # Actual value filled in when chunk received
 
 
-@dataclass
+@dataclass(frozen=True)
 class Layout:
     """Parameters controlling the sizes of heaps and chunks."""
 
