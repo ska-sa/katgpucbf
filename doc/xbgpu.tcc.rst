@@ -68,10 +68,11 @@ use a certain number of bits of the thread ID to index this dimension.
 Increasing it significantly (e.g., to match the 256 that is native to MeerKAT)
 would probably require too much shared memory.
 
-:c:macro:`NR_STATIONS_PER_BLOCK` has three possible values (32, 48 and 64),
-but the meaning is complicated. They correspond to processing 32×32, 48×48 or
-64×32 (*not* 64×64) regions of the correlation matrix. This leads to the
-expression ``NR_STATIONS_PER_BLOCK == 64 ? 32 : NR_STATIONS_PER_BLOCK``
+:c:macro:`NR_STATIONS_PER_BLOCK` refers to the size of the subsets of antenna
+data in the input matrix which will be correlated per thread block.  It has
+three possible values (32, 48 and 64) which correspond to processing 32×32,
+48×48 or 64×32 (*not* 64×64) regions of the correlation matrix. This leads
+to the expression ``NR_STATIONS_PER_BLOCK == 64 ? 32 : NR_STATIONS_PER_BLOCK``
 appearing in a lot of places.
 
 :c:macro:`NR_CHANNELS` is the number of channels over which to correlate, but
