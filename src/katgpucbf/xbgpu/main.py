@@ -50,10 +50,9 @@ def parse_args() -> argparse.Namespace:
         "[%(default)s]",
     )
     parser.add_argument(
-        "--tx-rate-overhead-factor",
+        "--send-rate-factor",
         type=float,
         default=1.1,
-        metavar="FACTOR",
         help="Transmission rate factor to allow for any jitter on the network. [%(default)s]",
     )
     parser.add_argument("--array-size", type=int, default=64, help="Number of antennas in the array. [%(default)s]")
@@ -169,7 +168,7 @@ async def async_main(args: argparse.Namespace) -> None:
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
-        tx_rate_overhead_factor=args.tx_rate_overhead_factor,
+        send_rate_factor=args.send_rate_factor,
         n_ants=args.array_size,
         n_channels_total=args.channels_total,
         n_channels_per_stream=args.channels_in_stream,
