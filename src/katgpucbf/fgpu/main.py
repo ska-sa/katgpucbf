@@ -150,6 +150,12 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=0,
         help="ID of the F-engine indicating which one in the array it is. [%(default)s]",
     )
+    parser.add_argument(
+        "--array-size",
+        type=int,
+        default=65536,
+        help="The number of antennas in the array. [%(default)s]",
+    )
     parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")
     parser.add_argument(
         "--acc-len", type=int, default=256, metavar="SPECTRA", help="Spectra in each output heap [%(default)s]"
@@ -262,6 +268,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         dst_comp_vector=args.dst_comp_vector,
         adc_rate=args.adc_rate,
         feng_id=args.feng_id,
+        num_ants=args.array_size,
         spectra=chunk_samples // (2 * args.channels),
         acc_len=args.acc_len,
         channels=args.channels,

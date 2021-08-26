@@ -115,6 +115,9 @@ class Engine(aiokatcp.DeviceServer):
         ID of the F-engine indicating which one in the array this is. Included
         in the output heaps so that the X-engine can determine where the data
         fits in.
+    num_ants
+        The number of antennas in the array. Used for numbering heaps so as
+        not to collide with other antennas transmitting to the same X-engine.
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
@@ -167,6 +170,7 @@ class Engine(aiokatcp.DeviceServer):
         dst_comp_vector: int,
         adc_rate: float,
         feng_id: int,
+        num_ants: int,
         spectra: int,
         acc_len: int,
         channels: int,
@@ -343,6 +347,7 @@ class Engine(aiokatcp.DeviceServer):
             dst_affinity,
             dst_comp_vector,
             feng_id,
+            num_ants,
             [(d.host, d.port) for d in dst],
             dst_ttl,
             dst_interface,

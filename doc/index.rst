@@ -27,5 +27,6 @@ Welcome to katgpucbf's documentation!
 
    xbgpu.theory
    xbgpu.networking
+   xbgpu.tcc
 
    katgpucbf.xbgpu

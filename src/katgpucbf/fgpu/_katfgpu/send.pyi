@@ -30,6 +30,7 @@ class Sender:
         thread_affinity: int,
         comp_vector: int,
         feng_id: int,
+        num_ants: int,
         endpoints: Sequence[Tuple[str, int]],
         ttl: int,
         interface_address: str,
