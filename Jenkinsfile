@@ -114,6 +114,7 @@ pipeline {
 
     stage('Install katxbgpu package') {
       steps {
+	sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
         sh 'pip3 install . --use-feature=in-tree-build'
       }
     }
