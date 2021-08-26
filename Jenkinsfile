@@ -1,9 +1,9 @@
 /* This file tells Jenkins how to test this repo. Everything runs in docker 
  * containers, so in theory any Jenkins server should be able to parse this 
- * file. However in the katxbgpu case, the Jenkins server needs access to a GPU. 
- * This means that the docker engine being used needs to have been configured to
- * use the Nvidia Container Runtime and the node the container run on needs a 
- * Nvidia GPU with the Nvidia Driver installed. 
+ * file. However in the katfgpu and katxbgpu case, the Jenkins server needs 
+ * access to a GPU. This means that the docker engine being used needs to have 
+ * been configured to use the Nvidia Container Runtime and the node the container 
+ * run on needs a Nvidia GPU with the Nvidia Driver installed. 
  *
  * Additionally the Jenkins server also needs access to a Mellanox NIC that 
  * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
@@ -13,11 +13,11 @@
 pipeline {
   agent {
     docker {
-      /* This nvidia/cuda:10.1-devel-ubuntu18.04 docker image contains the CUDA 
+      /* This nvidia/cuda:11.4.1-devel-ubuntu20.04 docker image contains the CUDA 
        * developement environment which is required to compile the kernels used
        * by PyCUDA. 
        */
-      image 'nvidia/cuda:10.1-devel-ubuntu18.04'
+      image 'nvidia/cuda:11.4.1-devel-ubuntu20.04'
 
       /* A number of arguments need to be  specified in order for the container
        * to launch correctly.
@@ -48,39 +48,42 @@ pipeline {
     }
 
   }
+  
+  environment {
+    DEBIAN_FRONTEND = 'noninteractive' // Required for zero interaction when installing or upgrading software packages
+  }
 
   /* This stage should ideally be part of the initial Docker image, as it
    * takes time and downloads multple Gigabytes from the internet. A new 
    * Dockerfile needs to be created that will extend the 
-   * nvidia/cuda:10.1-devel-ubuntu18.04 image to include this install.
+   * nvidia/cuda:11.4.1-devel-ubuntu20.04 image to include this install.
    */
   stages {
     stage('Configure Environment') {
       steps {
-        sh 'apt-get update'
-        sh 'apt-get install -y python3.6 python3-pip python-pybind11 python3.6-dev git' //Required for python
+	sh 'apt-get update'
+        sh 'apt-get install -y python3 python3-pip python3-pybind11 python3-dev git' //Required for python
         sh 'apt-get install -y autoconf libboost-all-dev libibverbs-dev librdmacm-dev libpcap-dev' //Required for installing SPEAD2. Much of this is installed when using MLNX_OFED, TODO: Clarify
       }
     } 
 
-    /* This stage is kept seperate from the "Install katxbgpu package" stage
-     * below as the stage one will fail when something external goes wrong while
-     * the next stage will fail if we have done something wrong in the katxbgpu
-     * package. It seems best to split them to make it easier to pinpoint the 
-     * source of the problem.
+    /* This stage is kept seperate from the "Install katxbgpu package" stage below,
+     * as the stage one will fail when something external goes wrong while the next
+	 * stage will fail if we have done something wrong in the katxbgpu package. 
+	 * It seems best to split them to make it easier to pinpoint the source of the problem.
      *
      * NOTE: Numpy is installed first because if it is installed as part of the
      * requirements.txt install, pycuda tries to install a later version of
      * numpy which requires python 3.7 or greater. Pybind11 is also installed
      * like this for a similar reason. It will not install when part of 
-     * requirements.txt. This has not been investigated
+     * requirements.txt. This has not been investigated.
      *
      * NOTE: Jinja2 and pycparser are used by SPEAD2 for generating some source 
      * files. They are not used in the running program.
      */
     stage('Install required python packages') {
       steps {
-        sh 'pip3 install numpy==1.19.5 pycparser jinja2 pybind11'
+        sh 'pip3 install numpy==1.21.0 pycparser jinja2 pybind11'
         sh 'pip3 install -r requirements.txt'
         sh 'pip3 install -r requirements-dev.txt'
       }
@@ -99,8 +102,7 @@ pipeline {
 
     stage('Install katxbgpu package') {
       steps {
-        sh 'rm /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python'//Hack to force python 3 use. Not advisable in most situations.
-        sh 'pip3 install .'
+        sh 'pip3 install . --use-feature=in-tree-build'
       }
     }
 
@@ -115,7 +117,7 @@ pipeline {
      * 2. The commands required to to run a docker container that makes use of
      *    ibverbs are not trivial to determine. Attempting to send a burst of
      *    data out on the network with the fsim will quickly reveal if there are
-     *    any issues with mechanism
+     *    any issues with mechanism.
      */
     stage('Run fsim') {
       steps {
@@ -134,8 +136,8 @@ pipeline {
          * supporting ibverbs to be determined automatically. This would make
          * the test machine agnostic.
          */
-        dir('src/tools'){
-          sh 'make'
+        dir('src/tools'){ // changed from scratch to src/tools directory when merged into katgpucbf
+          sh 'make'  
           sh ' ./fsim --interface 10.100.44.1 239.10.10.10:7149 --run-once=true'
         }
       }
@@ -153,15 +155,39 @@ pipeline {
      * 3. --junitxml=reports/result.xml' Writes the results to a file for later
      *    examination.
      */
-    stage('Run pytest') {
+    stage('Run pytest fgpu & xgpu') {
       steps {
         // Compile the shared C library with verification functions.
-        dir('test/xbgpu'){
-          sh 'make'
+        dir('test'){
+        //  sh 'make' // The line was commented out as the makefile is not included in katgpucbf
         }
         sh 'pytest -v --junitxml=reports/result.xml'
       }
     }
     
   }
+	/* This post stage is configured to always run at the end of the pipeline, 
+	 * regardless of the completion status. In this stage an email is sent to
+	 * the specified address with details of the jenkins job and a xml file
+	 * containing the pytest results. The final step removes the workspace when
+	 * when the build is complete.
+	 */
+      post {
+        always {
+          emailext attachLog: true, 
+          attachmentsPattern: 'reports/result.xml',
+          body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
+          <b>Node:</b> ${env.NODE_NAME}<br>
+          <b>Duration:</b> ${currentBuild.durationString}<br>
+          <b>Build URL:</b> ${env.BUILD_URL}<br>
+          <br>
+          <i>Note: This is an Automated email notification.</i>""", 
+          subject: '$PROJECT_NAME - $BUILD_STATUS!',
+          to: 'ijassiem@ska.ac.za'
+		    
+	  cleanWs()
+        }
+      }
+  
 }
+
