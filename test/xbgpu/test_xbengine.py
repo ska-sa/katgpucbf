@@ -202,7 +202,7 @@ def cmult_and_scale(a, b, c):
 
     The order of ``a`` and ``b`` are backwards from what you might expect because
     we want to imitate the John Romein Tensor-Core Kernel, but taking the complex
-    conjugate of the output - we want the other half of the triangle.
+    conjugate of the output - we want the other half of the visibilities matrix.
     """
     result = np.empty((2,), dtype=np.int32)
     result[0] = a[0] * b[0] + a[1] * b[1]
