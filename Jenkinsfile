@@ -161,7 +161,7 @@ pipeline {
         dir('test'){
         //  sh 'make' // The line was commented out as the makefile is not included in katgpucbf
         }
-        sh 'pytest -v --junitxml=reports/result.xml'
+        sh 'pytest -v --all-combinations --junitxml=reports/result.xml'
       }
     }
     
@@ -190,4 +190,3 @@ pipeline {
       }
   
 }
-
