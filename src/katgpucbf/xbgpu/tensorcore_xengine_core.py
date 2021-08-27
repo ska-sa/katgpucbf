@@ -216,6 +216,6 @@ class TensorCoreXEngineCore(accel.Operation):
 
         This function requires that :math:`ant2 \ge ant1`
         """
-        if ant2 > ant1:
+        if ant1 > ant2:
             raise ValueError("It is required that ant2 >= ant1 in all cases")
         return ant2 * (ant2 + 1) // 2 + ant1

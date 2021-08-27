@@ -202,7 +202,7 @@ def cmult_and_scale(a, b, c):
     """
     result = np.empty((2,), dtype=np.int32)
     result[0] = a[0] * b[0] + a[1] * b[1]
-    result[1] = -(a[1] * b[0] - a[0] * b[1])
+    result[1] = a[1] * b[0] - a[0] * b[1]
     result *= c
     return result
 
@@ -233,8 +233,8 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
                     output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(v[a1], h[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_samples_per_channel)
                     output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_samples_per_channel)
 
     return output_array

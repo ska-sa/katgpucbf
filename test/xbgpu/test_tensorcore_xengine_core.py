@@ -49,7 +49,7 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
                     r1 = ez_in[c, a1, p1, :, 0]
                     i1 = ez_in[c, a1, p1, :, 1]
                     for p2 in range(n_pols):
-                        bl_idx = get_baseline_index(a1, a2) * 4 + 2 * p1 + p2
+                        bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
                         r2 = ez_in[c, a2, p2, :, 0]
                         i2 = ez_in[c, a2, p2, :, 1]
 
