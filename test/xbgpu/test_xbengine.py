@@ -22,7 +22,7 @@ from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
 
-# 3. Define Constants
+# Define Constants
 complexity = 2
 
 get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
@@ -267,6 +267,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     # 1. Configuration parameters
     n_ants = num_ants
     n_channels_total = num_channels
+    adc_sample_rate = 1712000000.0  # L-Band, not important
+    send_rate_factor = 1.1
 
     # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
     # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
@@ -339,7 +341,8 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host="",
         katcp_port=0,
-        adc_sample_rate_hz=1712000000.0,  # L-Band, not important
+        adc_sample_rate_hz=adc_sample_rate,
+        send_rate_factor=send_rate_factor,
         n_ants=n_ants,
         n_channels_total=n_channels_total,
         n_channels_per_stream=n_channels_per_stream,

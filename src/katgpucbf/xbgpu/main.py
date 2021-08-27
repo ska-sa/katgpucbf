@@ -49,7 +49,14 @@ def parse_args() -> argparse.Namespace:
         help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall."
         "[%(default)s]",
     )
-    parser.add_argument("--array-size", type=int, default=64, help="Number of antennas in the array. [%(default)s]")
+    parser.add_argument(
+        "--send-rate-factor",
+        type=float,
+        default=1.1,
+        help="Target transmission rate faster than ADC sample rate by this factor.\
+            Set to zero to send as fast as possible. [%(default)s]",
+    )
+    parser.add_argument("--array-size", type=int, help="Number of antennas in the array.")
     parser.add_argument(
         "--channels-total",
         type=int,
@@ -162,6 +169,7 @@ async def async_main(args: argparse.Namespace) -> None:
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
+        send_rate_factor=args.send_rate_factor,
         n_ants=args.array_size,
         n_channels_total=args.channels_total,
         n_channels_per_stream=args.channels_in_stream,

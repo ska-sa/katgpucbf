@@ -124,6 +124,7 @@ class XEngineSPEADAbstractSend(ABC):
         n_channels_per_stream: int,
         n_pols: int,
         dump_interval_s: float,
+        send_rate_factor: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         n_send_heaps_in_flight: int = 5,
@@ -141,6 +142,12 @@ class XEngineSPEADAbstractSend(ABC):
             The number of pols per antenna. Expected to always be 2.
         dump_interval_s: float
             A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
+        send_rate_factor
+            Configure the SPEAD2 sender with a rate proportional to this factor.
+            This value is intended to dictate a data transmission rate slightly
+            higher/faster than the ADC rate.
+            NOTE:
+            - A factor of zero (0) tells the sender to transmit as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -167,6 +174,7 @@ class XEngineSPEADAbstractSend(ABC):
         self.n_pols: Final[int] = n_pols
         self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
         self.dump_interval_s: Final[float] = dump_interval_s
+        self.send_rate_factor: Final[float] = send_rate_factor
         self._sample_bits: Final[int] = 32
 
         # 3. Multicast Stream Parameters
@@ -219,8 +227,10 @@ class XEngineSPEADAbstractSend(ABC):
         # 5.1 If the dump_interval is set to zero, pass zero to stream_config to send as fast as possible.
         if self.dump_interval_s != 0:
             send_rate_bytes_per_second = (
-                (self.heap_payload_size_bytes + packet_header_overhead_bytes) / self.dump_interval_s * 1.1
-            )  # *1.1 adds a 10 percent buffer to the rate to compensate for any unexpected jitter
+                (self.heap_payload_size_bytes + packet_header_overhead_bytes)
+                / self.dump_interval_s
+                * self.send_rate_factor
+            )  # * send_rate_factor adds a buffer to the rate to compensate for any unexpected jitter
         else:
             send_rate_bytes_per_second = 0
 
@@ -358,6 +368,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
         n_channels_per_stream: int,
         n_pols: int,
         dump_interval_s: float,
+        send_rate_factor: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         endpoint: typing.Tuple[str, int],
@@ -379,6 +390,12 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
             The number of pols per antenna. Expected to always be 2 at the moment.
         dump_interval_s: float
             A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
+        send_rate_factor
+            Configure the SPEAD2 sender with a rate proportional to this factor.
+            This value is intended to dictate a data transmission rate slightly
+            higher/faster than the ADC rate.
+            NOTE:
+            - A factor of zero (0) tells the sender to transmit as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -397,6 +414,7 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
             n_channels_per_stream=n_channels_per_stream,
             n_pols=n_pols,
             dump_interval_s=dump_interval_s,
+            send_rate_factor=send_rate_factor,
             channel_offset=channel_offset,
             context=context,
         )
@@ -432,6 +450,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         n_channels_per_stream: int,
         n_pols: int,
         dump_interval_s: float,
+        send_rate_factor: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
         queue: spead2.InprocQueue,
@@ -453,6 +472,12 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
         dump_interval_s: float
             A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected
             but is not very useful. Set to zero to send as fast as possible.
+        send_rate_factor
+            Configure the SPEAD2 sender with a rate proportional to this factor.
+            This value is intended to dictate a data transmission rate slightly
+            higher/faster than the ADC rate.
+            NOTE:
+            - A factor of zero (0) tells the sender to transmit as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -466,6 +491,7 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             n_channels_per_stream=n_channels_per_stream,
             n_pols=n_pols,
             dump_interval_s=dump_interval_s,
+            send_rate_factor=send_rate_factor,
             channel_offset=channel_offset,
             context=context,
         )

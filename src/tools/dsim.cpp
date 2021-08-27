@@ -19,7 +19,7 @@ struct options
     std::vector<std::string> addresses;
     int max_heaps = 128;
     int signal_heaps = 512;
-    double adc_rate = 1712000000.0;
+    double adc_sample_rate = 1712000000.0;
     double signal_freq = 232101234.0;
     int ttl = 4;
     double sync_time = 0.0;
@@ -45,7 +45,7 @@ static options parse_options(int argc, const char **argv)
     desc.add_options()
         ("interface", po::value(&opts.interface)->required(), "Interface address")
         ("max-heaps", make_opt(opts.max_heaps), "Depth of send queue (per polarisation)")
-        ("adc-rate", make_opt(opts.adc_rate), "Sampling rate")
+        ("adc-sample-rate", make_opt(opts.adc_sample_rate), "Sampling rate")
         ("ttl", make_opt(opts.ttl), "Output TTL")
         ("ibv", po::bool_switch(&opts.ibv), "Use ibverbs for acceleration")
         ("signal-freq", make_opt(opts.signal_freq), "Frequency of simulated tone")
@@ -76,9 +76,9 @@ static options parse_options(int argc, const char **argv)
         if (opts.addresses.empty())
             throw po::error("at least one address must be specified");
         // Round target frequency to fit an integer number of waves into signal_heaps
-        double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_rate;
+        double waves = double(opts.signal_heaps) * heap_samples * opts.signal_freq / opts.adc_sample_rate;
         waves = std::max(1.0, std::round(waves));
-        opts.signal_freq = waves * opts.adc_rate / opts.signal_heaps / heap_samples;
+        opts.signal_freq = waves * opts.adc_sample_rate / opts.signal_heaps / heap_samples;
         std::cout << "Using frequency of " << std::setprecision(15) << opts.signal_freq << '\n';
     }
     catch (po::error &e)
@@ -133,7 +133,7 @@ struct heap_data
         heap.add_item(0x3300, data.get(), heap_size, false);
         heap.set_repeat_pointers(true);
 
-        double angle_scale = opts.signal_freq / opts.adc_rate * 2 * M_PI;
+        double angle_scale = opts.signal_freq / opts.adc_sample_rate * 2 * M_PI;
         unsigned int buffer = 0;
         int buffer_bits = 0;
         int pos = 0;
@@ -238,7 +238,7 @@ struct digitiser
         auto config = spead2::send::stream_config()
             // Value doesn't matter, just needs to be bigger than actual size
             .set_max_packet_size(heap_size + 128)
-            .set_rate(endpoints.size() * opts.adc_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
+            .set_rate(endpoints.size() * opts.adc_sample_rate * 10.0 / 8.0 * (heap_size + 72) / heap_size)
             .set_max_heaps(opts.max_heaps);
         if (opts.ibv)
             return std::make_unique<spead2::send::udp_ibv_stream>(
@@ -277,7 +277,7 @@ struct digitiser
                 throw std::invalid_argument("sync time is in the future");
             }
             // Convert to heap count (rounding)
-            auto first_heap = std::int64_t(std::round(past.count() * opts.adc_rate / heap_samples));
+            auto first_heap = std::int64_t(std::round(past.count() * opts.adc_sample_rate / heap_samples));
             // Convert to a sample count
             std::int64_t first_timestamp = first_heap * heap_samples;
             for (polarisation &pol : pols)
