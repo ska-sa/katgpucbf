@@ -22,10 +22,18 @@ TIMESTAMP_ID = 0x1600
 
 
 class Chunk(spead2.recv.Chunk):
-    # Refine the type used in the base class
+    """Collection of heaps passed to the GPU at one time.
+
+    It extends the spead2 base class to store a timestamp (computed from
+    the chunk ID when the chunk is received), and optionally store a
+    gdrcopy device array.
+    """
+
+    # Refine the types used in the base class
     present: np.ndarray
     data: np.ndarray
     # New fields
+    device: object
     timestamp: int
 
     def __init__(self, *args, device: object = None, **kwargs):
@@ -44,19 +52,23 @@ class Layout:
     mask_timestamp: bool
 
     @property
-    def heap_bytes(self) -> int:
+    def heap_bytes(self) -> int:  # noqa: D401
+        """Number of payload bytes per heap."""
         return self.heap_samples * self.sample_bits // 8
 
     @property
-    def chunk_heaps(self) -> int:
+    def chunk_heaps(self) -> int:  # noqa: D401
+        """Number of heaps per chunk."""
         return self.chunk_samples // self.heap_samples
 
     @property
-    def timestamp_mask(self) -> np.uint64:
+    def timestamp_mask(self) -> np.uint64:  # noqa: D401
+        """Mask to AND with incoming timestamps."""
         return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
 
     @functools.cached_property
-    def chunk_place(self) -> scipy.LowLevelCallable:
+    def chunk_place(self) -> scipy.LowLevelCallable:  # noqa: D401
+        """Low level code for placing heaps in chunks."""
         heap_samples = self.heap_samples
         heap_bytes = self.heap_bytes
         chunk_heaps = self.chunk_heaps
@@ -213,8 +225,29 @@ def make_stream(
     use_gdrcopy: bool,
     monitor: Monitor,
 ) -> spead2.recv.ChunkRingStream:
+    """Create a receive stream for one polarisation.
+
+    .. todo::
+
+       The `monitor` is not currently used.
+
+    Parameters
+    ----------
+    pol
+        Polarisation index
+    layout
+        Heap size and chunking parameters
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent
+    affinity
+        CPU core affinity for the worker thread (negative to not set an affinity)
+    use_gdrcopy
+        If true, assume that the chunk payload memory is allocated from gdrcopy
+    monitor
+        Queue performance monitor
+    """
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=1,
+        max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
         memcpy=spead2.MEMCPY_NONTEMPORAL if use_gdrcopy else spead2.MEMCPY_STD,
         stream_id=pol,
     )
@@ -231,8 +264,6 @@ def make_stream(
         data_ringbuffer,
         free_ringbuffer,
     )
-    # TODO: hook up Monitor somehow
 
 
-# TODO: update
-__all__ = ["Chunk", "Layout", "chunk_sets", "make_stream"]
+__all__ = ["Chunk", "Layout", "add_chunk", "chunk_sets", "make_stream"]
