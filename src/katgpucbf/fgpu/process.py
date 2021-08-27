@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from typing import Deque, List, Optional, Sequence, cast
+from typing import Deque, Iterable, List, Optional, Sequence, cast
 
 import numpy as np
 import spead2.recv
@@ -470,14 +470,16 @@ class Processor:
             self._out_item.timestamp = new_timestamp
 
     @staticmethod
-    async def _push_chunks(streams, chunks, event):
+    async def _push_chunks(
+        streams: Iterable[spead2.recv.ChunkRingStream], chunks: Iterable[recv.Chunk], event: AbstractEvent
+    ) -> None:
         """Return chunks to the streams once `event` has fired.
 
         This is only used when using gdrcopy.
         """
         await async_wait_for_events([event])
         for stream, chunk in zip(streams, chunks):
-            stream.add_chunk(chunk)
+            stream.add_free_chunk(chunk)
 
     async def run_processing(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
         """Do the hard work of the F-engine.
@@ -674,7 +676,7 @@ class Processor:
                 for pol in range(len(chunks)):
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])
-                    recv.add_chunk(streams[pol], chunks[pol])
+                    streams[pol].add_free_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
         """Get the processed data from the GPU to the Network.

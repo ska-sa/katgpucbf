@@ -322,7 +322,7 @@ class Engine(aiokatcp.DeviceServer):
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
                     chunk = recv.Chunk(data=buf)
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
-                recv.add_chunk(stream, chunk)
+                stream.add_free_chunk(chunk)
         send_chunks = []
         send_shape = (spectra // acc_len, channels, acc_len, pols, 2)
         send_dtype = np.dtype(np.int8)

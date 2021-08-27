@@ -100,17 +100,6 @@ class Layout:
         return scipy.LowLevelCallable(chunk_place_impl.ctypes, signature="void (void *, size_t)")
 
 
-def add_chunk(stream: spead2.recv.ChunkRingStream, chunk: Chunk):
-    """Return a chunk to the free ring."""
-    # TODO: this functionality may move into spead2
-    chunk.present.fill(0)
-    try:
-        stream.free_ringbuffer.put_nowait(chunk)
-    except spead2.Stopped:
-        # We're shutting down; just drop the chunk
-        pass
-
-
 async def chunk_sets(
     streams: List[spead2.recv.ChunkRingStream],
     layout: Layout,
@@ -173,7 +162,7 @@ async def chunk_sets(
             if old is not None:
                 logger.warning("Chunk not matched: timestamp=%#x pol=%d", old.chunk_id * layout.chunk_samples, pol)
                 # Chunk was passed by without getting used. Return to the pool.
-                add_chunk(streams[pol], old)
+                streams[pol].add_free_chunk(old)
                 buf[pol] = None
 
             # Stick the chunk in the buffer.
@@ -214,7 +203,7 @@ async def chunk_sets(
     finally:
         for c in buf:
             if c is not None:
-                add_chunk(streams[c.stream_id], c)
+                streams[c.stream_id].add_free_chunk(c)
 
 
 def make_stream(
@@ -266,4 +255,4 @@ def make_stream(
     )
 
 
-__all__ = ["Chunk", "Layout", "add_chunk", "chunk_sets", "make_stream"]
+__all__ = ["Chunk", "Layout", "chunk_sets", "make_stream"]
