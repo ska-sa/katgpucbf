@@ -3,10 +3,11 @@
  * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
  * of the macros.
  *
- * There isn't *official* documentation (yet) for this kernel's operation, but the links below should give the developer
- * some level of insight:
+ * The following links give a high-level overview:
  * - https://docs.google.com/document/d/1viAzRjnDh3D569JfNBiJjygZE8w0B8VHqO4QRjcdKsU/edit?usp=sharing
  * - https://developer.nvidia.com/gtc/2019/video/s9306
+ * Lower-level details are in the doc/xbgpu.tcc.rst (and built by Sphinx with
+ * the rest of the documentation).
  */
 
 /* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects C++ linkage. So we wrap the whole original
@@ -219,7 +220,11 @@ template <typename T> __device__ inline void storeVisibility(Visibilities visibi
     // This allows accumulation across subsequent kernel calls, instead of simply make_complex(sumR, sumI)
     visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX] =
       make_complex(visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR,
-                   visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y + sumI);
+                   /* There is a ``-`` on the following line because we want to use the complex
+                    * conjugate, i.e. the other half of the visibility matrix, to what John's
+                    * kernel actually calculates.
+                    */
+                   visibilities[channel][baseline + tcY * statY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y - sumI);
   }
 }
 
@@ -269,7 +274,11 @@ __device__ inline void storeVisibilities(Visibilities visibilities, unsigned cha
       for (unsigned polX = 0; polX < NR_POLARIZATIONS; polX ++)
         visibilities[channel][baseline][polY][polX] =
             make_complex(visibilities[channel][baseline][polY][polX].x + scratchSpace[warp][_y][polY][_x][polX].x,
-                         visibilities[channel][baseline][polY][polX].y + scratchSpace[warp][_y][polY][_x][polX].y);
+                         /* There is a ``-`` on the following line because we want to use the complex
+                          * conjugate, i.e. the other half of the visibility matrix, to what John's
+                          * kernel actually calculates.
+                          */
+                         visibilities[channel][baseline][polY][polX].y - scratchSpace[warp][_y][polY][_x][polX].y);
 #endif
 #else
 #if __CUDA_ARCH__ == 700 || (__CUDA_ARCH__ == 720 && NR_BITS == 16)

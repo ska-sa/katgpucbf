@@ -37,7 +37,7 @@ struct context
 
 sender::sender(std::size_t free_ring_capacity,
                const std::vector<std::pair<const void *, std::size_t>> &memory_regions,
-               int thread_affinity, int comp_vector, int feng_id,
+               int thread_affinity, int comp_vector, int feng_id, int num_ants,
                const std::vector<std::pair<std::string, std::uint16_t>> &endpoints,
                int ttl, const std::string &interface_address, bool ibv,
                std::size_t max_packet_size, double rate, std::size_t max_heaps)
@@ -78,6 +78,7 @@ sender::sender(std::size_t free_ring_capacity,
             thread_pool, ep, config, spead2::send::udp_stream::default_buffer_size,
             ttl, interface);
     }
+    stream->set_cnt_sequence(this->feng_id, num_ants);
 }
 
 sender::~sender()
