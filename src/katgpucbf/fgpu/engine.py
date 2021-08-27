@@ -111,8 +111,11 @@ class Engine(aiokatcp.DeviceServer):
     adc_sample_rate
         Digitiser sampling rate (in Hz), used to determine transmission rate.
     send_rate_factor
-        Transmission rate factor to allow for any jitter on the network.
-        For example, to account for an overhead of 10% the factor will be 1.1
+        Configure the SPEAD2 sender with a rate proportional to this factor.
+        This value is intended to dictate a data transmission rate slightly
+        higher/faster than the ADC rate.
+        NOTE:
+        - A factor of zero (0) tells the sender to transmit as fast as possible.
     feng_id
         ID of the F-engine indicating which one in the array this is. Included
         in the output heaps so that the X-engine can determine where the data

@@ -149,7 +149,8 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=float,
         default=1.1,
         metavar="FACTOR",
-        help="Transmission rate factor to allow for any jitter on the network. [%(default)s]",
+        help="Target transmission rate faster than ADC sample rate by this factor. \
+            Set to zero to send as fast as possible. [%(default)s]",
     )
     parser.add_argument(
         "--feng-id",

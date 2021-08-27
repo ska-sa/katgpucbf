@@ -53,9 +53,10 @@ def parse_args() -> argparse.Namespace:
         "--send-rate-factor",
         type=float,
         default=1.1,
-        help="Transmission rate factor to allow for any jitter on the network. [%(default)s]",
+        help="Target transmission rate faster than ADC sample rate by this factor.\
+            Set to zero to send as fast as possible. [%(default)s]",
     )
-    parser.add_argument("--array-size", type=int, default=64, help="Number of antennas in the array. [%(default)s]")
+    parser.add_argument("--array-size", type=int, help="Number of antennas in the array.")
     parser.add_argument(
         "--channels-total",
         type=int,

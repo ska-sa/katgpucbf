@@ -143,8 +143,11 @@ class XEngineSPEADAbstractSend(ABC):
         dump_interval_s: float
             A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
         send_rate_factor
-            Transmission rate factor to allow for any jitter on the network.
-            For example, to account for an overhead of 10% the factor will be 1.1
+            Configure the SPEAD2 sender with a rate proportional to this factor.
+            This value is intended to dictate a data transmission rate slightly
+            higher/faster than the ADC rate.
+            NOTE:
+            - A factor of zero (0) tells the sender to transmit as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -388,8 +391,11 @@ class XEngineSPEADIbvSend(XEngineSPEADAbstractSend):
         dump_interval_s: float
             A new heap is transmitted every dump_interval_s seconds. Set to zero to send as fast as possible.
         send_rate_factor
-            Transmission rate factor to allow for any jitter on the network.
-            For example, to account for an overhead of 10% the factor will be 1.1
+            Configure the SPEAD2 sender with a rate proportional to this factor.
+            This value is intended to dictate a data transmission rate slightly
+            higher/faster than the ADC rate.
+            NOTE:
+            - A factor of zero (0) tells the sender to transmit as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.
@@ -467,8 +473,11 @@ class XEngineSPEADInprocSend(XEngineSPEADAbstractSend):
             A new heap is transmitted every dump_interval_s seconds. For the inproc transport this rate is respected
             but is not very useful. Set to zero to send as fast as possible.
         send_rate_factor
-            Transmission rate factor to allow for any jitter on the network.
-            For example, to account for an overhead of 10% the factor will be 1.1
+            Configure the SPEAD2 sender with a rate proportional to this factor.
+            This value is intended to dictate a data transmission rate slightly
+            higher/faster than the ADC rate.
+            NOTE:
+            - A factor of zero (0) tells the sender to transmit as fast as possible.
         channel_offset: int
             Fixed value to be included in the SPEAD heap indicating the lowest channel value transmitted by this heap.
             Must be a multiple of n_channels_per_stream.

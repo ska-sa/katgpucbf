@@ -155,8 +155,11 @@ class XBEngine(DeviceServer):
         of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
         stall as heaps queue at the sender faster than they are sent.
     send_rate_factor
-        Transmission rate factor to allow for any jitter on the network.
-        For example, to account for an overhead of 10% the factor will be 1.1
+        Configure the SPEAD2 sender with a rate proportional to this factor.
+        This value is intended to dictate a data transmission rate slightly
+        higher/faster than the ADC rate.
+        NOTE:
+        - A factor of zero (0) tells the sender to transmit as fast as possible.
     n_ants
         The number of antennas to be correlated.
     n_channels_total
