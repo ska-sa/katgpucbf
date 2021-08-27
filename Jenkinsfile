@@ -79,7 +79,7 @@ pipeline {
 	
 	sh 'pwd'
 	sh 'ls'
-	sh 'ls /var/jenkins_home/workspace/katxgpu_pipeline3/3rdparty/spead2'
+	sh 'ls /var/jenkins_home/workspace/katgpucbf_jenkins/3rdparty/spead2'
       }
     }
 
