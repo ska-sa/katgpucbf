@@ -229,12 +229,12 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                 h[a, 1] = bounded_int8(sign * c)
                 v[a, 0] = bounded_int8(-sign * a)
                 v[a, 1] = bounded_int8(-sign * c)
-            for a1 in range(antennas):
-                for a2 in range(a1 + 1):
+            for a2 in range(antennas):
+                for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
                     output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(v[a1], h[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_samples_per_channel)
                     output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_samples_per_channel)
 
     return output_array
