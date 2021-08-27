@@ -346,7 +346,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # decode. These heaps are tranmitted in such a way as to perform the different test mentioned in this function's
     # docstring.
 
-    # 3.1 Transmit first 5 chunks completly in order
+    # 3.1 Transmit first 5 chunks completely in order
     heap_index = 0
     for _ in range(5):
         heaps = create_heaps(
