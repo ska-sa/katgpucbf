@@ -173,8 +173,8 @@ def create_test_objects(
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
-    chunk_heaps = n_ants * n_channels_per_stream * heaps_per_fengine_per_chunk
-    chunk_bytes = chunk_heaps * n_samples_per_channel * sample_bits * 2 // 8  # * 2 for complex samples
+    chunk_heaps = n_ants * heaps_per_fengine_per_chunk
+    chunk_bytes = chunk_heaps * n_channels_per_stream * n_samples_per_channel * sample_bits * complexity // 8
     for _ in range(src_chunks_per_stream):
         buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
         present = np.zeros((chunk_heaps,), np.uint8)
