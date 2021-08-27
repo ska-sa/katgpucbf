@@ -267,7 +267,6 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     # 1. Configuration parameters
     n_ants = num_ants
     n_channels_total = num_channels
-    # TODO: Clarify if it's ok to declare these values here
     adc_sample_rate = 1712000000.0  # L-Band, not important
     send_rate_factor = 1.1
 
