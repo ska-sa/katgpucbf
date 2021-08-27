@@ -69,13 +69,13 @@ pipeline {
 	  
     stage('Checkout katgpucbf repo') {
       steps {
-        checkout([$class: 'GitSCM', branches: [[name: '*/jenkins']], 
-        extensions: [[$class: 'CheckoutOption', timeout: 20], 
-        [$class: 'SubmoduleOption', disableSubmodules: false, parentCredentials: true, 
-        recursiveSubmodules: true, reference: '', timeout: 20, trackingSubmodules: false], 
-        [$class: 'CloneOption', noTags: false, reference: '', shallow: false, timeout: 20]], 
-        userRemoteConfigs: [[credentialsId: '627c8bda-7e03-48f8-b874-09b529594875', 
-        url: 'https://github.com/ska-sa/katgpucbf']]])
+//         checkout([$class: 'GitSCM', branches: [[name: '*/jenkins']], 
+//         extensions: [[$class: 'CheckoutOption', timeout: 20], 
+//         [$class: 'SubmoduleOption', disableSubmodules: false, parentCredentials: true, 
+//         recursiveSubmodules: true, reference: '', timeout: 20, trackingSubmodules: false], 
+//         [$class: 'CloneOption', noTags: false, reference: '', shallow: false, timeout: 20]], 
+//         userRemoteConfigs: [[credentialsId: '627c8bda-7e03-48f8-b874-09b529594875', 
+//         url: 'https://github.com/ska-sa/katgpucbf']]])
 	
 	sh 'pwd'
 	sh 'ls'
