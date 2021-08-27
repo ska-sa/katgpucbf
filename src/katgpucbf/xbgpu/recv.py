@@ -73,7 +73,8 @@ def make_stream(
     thread_affinity
         CPU Thread that this receiver will use for processing.
     """
-    heap_bytes = n_channels_per_stream * n_pols * 2 * sample_bits // 8  # * 2 because samples are complex
+    # * 2 because samples are complex
+    heap_bytes = n_channels_per_stream * n_samples_per_channel * n_pols * 2 * sample_bits // 8
 
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place_impl(data_ptr, data_size):
