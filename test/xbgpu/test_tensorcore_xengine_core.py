@@ -43,8 +43,8 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     n_baselines = n_ants * (n_ants + 1) * 2
     output_array = np.empty(shape=(n_chans, n_baselines, complexity), dtype=np.int32)
     for c in prange(n_chans):
-        for a1 in range(n_ants):
-            for a2 in range(a1 + 1):
+        for a2 in range(n_ants):
+            for a1 in range(a2 + 1):
                 for p1 in range(n_pols):
                     r1 = ez_in[c, a1, p1, :, 0]
                     i1 = ez_in[c, a1, p1, :, 1]
@@ -54,7 +54,7 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
                         i2 = ez_in[c, a2, p2, :, 1]
 
                         output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
-                        output_array[c, bl_idx, 1] = -np.sum(r2 * i1 - r1 * i2)
+                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
 
     return output_array
 

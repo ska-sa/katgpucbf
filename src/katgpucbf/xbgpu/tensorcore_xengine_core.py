@@ -206,16 +206,16 @@ class TensorCoreXEngineCore(accel.Operation):
 
         .. code::
 
-                  ant1 = 0  1  2  3  4
+                  ant2 = 0  1  2  3  4
                       +---------------
-             ant2 = 0 | 00 01 03 06 10
+             ant1 = 0 | 00 01 03 06 10
                     1 |    02 04 07 11
                     2 |       05 08 12
                     3 |          09 13
                     4 |             14
 
-        This function requires that :math:`ant1 \ge ant2`
+        This function requires that :math:`ant2 \ge ant1`
         """
         if ant2 > ant1:
-            raise ValueError("It is required that ant1 >= ant2 in all cases")
-        return ant1 * (ant1 + 1) // 2 + ant2
+            raise ValueError("It is required that ant2 >= ant1 in all cases")
+        return ant2 * (ant2 + 1) // 2 + ant1

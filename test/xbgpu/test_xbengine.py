@@ -195,14 +195,10 @@ def bounded_int8(val):
 
 @njit
 def cmult_and_scale(a, b, c):
-    """Multiply ``b`` and ``conj(a)``, and scale the result by ``c``.
+    """Multiply ``a`` and ``conj(b)``, and scale the result by ``c``.
 
     Both ``a`` and ``b`` inputs and the output are 2-element arrays of np.int32,
     representing the real and imaginary components. ``c`` is a scalar.
-
-    The order of ``a`` and ``b`` are backwards from what you might expect because
-    we want to imitate the John Romein Tensor-Core Kernel, but taking the complex
-    conjugate of the output - we want the other half of the visibilities matrix.
     """
     result = np.empty((2,), dtype=np.int32)
     result[0] = a[0] * b[0] + a[1] * b[1]
@@ -233,8 +229,8 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
                 h[a, 1] = bounded_int8(sign * c)
                 v[a, 0] = bounded_int8(-sign * a)
                 v[a, 1] = bounded_int8(-sign * c)
-            for a1 in range(antennas):
-                for a2 in range(a1 + 1):
+            for a2 in range(antennas):
+                for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
                     output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_samples_per_channel)
                     output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
