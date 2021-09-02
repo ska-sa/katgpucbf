@@ -22,6 +22,8 @@ from katsdptelstate.endpoint import endpoint_parser
 
 import katgpucbf.xbgpu.xbengine
 
+from .. import __version__
+
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
 
@@ -136,7 +138,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="IP address of the interface that this engine will transmit data on.",
     )
-
+    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=endpoint_parser(7149), help="Multicast address data is received from.")
     parser.add_argument("dst", type=endpoint_parser(7149), help="Multicast address data is sent on.")
 
