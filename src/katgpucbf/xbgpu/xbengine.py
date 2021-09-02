@@ -177,7 +177,7 @@ class XBEngine(DeviceServer):
     channel_offset_value
         The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
         in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
-    rx_thread_affinity
+    src_affinity
         Specific CPU core to assign the RX stream processing thread to.
     batches_per_chunk
         A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
@@ -207,7 +207,7 @@ class XBEngine(DeviceServer):
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
-        rx_thread_affinity: int,
+        src_affinity: int,
         batches_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
     ):
@@ -418,7 +418,7 @@ class XBEngine(DeviceServer):
             heaps_per_fengine_per_chunk=self.batches_per_chunk,
             max_active_chunks=self.max_active_chunks,
             ringbuffer=self.ringbuffer,
-            thread_affinity=rx_thread_affinity,
+            thread_affinity=src_affinity,
             use_gdrcopy=False,
             monitor=self.monitor,
         )
@@ -509,7 +509,7 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(buf)
             self.receiver_stream.add_chunk(chunk)
 
-    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector_affinity: int):
+    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):
         """
         Add the ibv_udp transport to the receiver.
 
@@ -526,7 +526,7 @@ class XBEngine(DeviceServer):
             Port of source data
         interface_ip: str
             IP address of interface to listen for data on.
-        comp_vector_affinity: int
+        comp_vector: int
             Received packets will generate interrupts from the NIC. These interrupts can be assigned to a specific CPU
             core. This parameter determines which core to assign these interrupts to.
         """
@@ -534,7 +534,7 @@ class XBEngine(DeviceServer):
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
         self.receiver_stream.add_udp_ibv_reader(
-            [(src_ip, src_port)], interface_ip, buffer_size=10000000, comp_vector=comp_vector_affinity
+            [(src_ip, src_port)], interface_ip, buffer_size=10000000, comp_vector=comp_vector
         )
 
     def add_buffer_receiver_transport(self, buffer: bytes):
