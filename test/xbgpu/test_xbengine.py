@@ -5,9 +5,6 @@ These tests ensure that the xbengine pipeline works from receiving the F-Engine 
 products.
 
 The test_xbengine(...) function is the entry point for these tests.
-
-.. todo::
-    - Change the monitor import during PR #63
 """
 
 import asyncio
@@ -21,7 +18,7 @@ from numba import njit
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
-from katgpucbf.xbgpu.monitor import FileMonitor
+from katgpucbf.xbgpu.monitor import NullMonitor
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
@@ -343,8 +340,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
 
     # 4. Create xbengine
     # 4.1. Create Monitor required by XBEngine
-    # TODO: Make provision for testing/usage of the NullMonitor, should the user want to
-    monitor = FileMonitor(filename="test_logfile.log")
+    monitor = NullMonitor()
 
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host="",
