@@ -18,6 +18,7 @@ from numba import njit
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
+from katgpucbf.xbgpu.monitor import NullMonitor
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
@@ -338,6 +339,9 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     recv_stream.add_inproc_reader(queue)
 
     # 4. Create xbengine
+    # 4.1. Create Monitor required by XBEngine
+    monitor = NullMonitor()
+
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host="",
         katcp_port=0,
@@ -354,6 +358,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         rx_thread_affinity=0,
         batches_per_chunk=heaps_per_fengine_per_chunk,
         rx_reorder_tol=rx_reorder_tol,
+        monitor=monitor,
     )
 
     # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulations. Each
