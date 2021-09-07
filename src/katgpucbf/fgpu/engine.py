@@ -109,8 +109,14 @@ class Engine(aiokatcp.DeviceServer):
     dst_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
-    adc_rate
+    adc_sample_rate
         Digitiser sampling rate (in Hz), used to determine transmission rate.
+    send_rate_factor
+        Configure the SPEAD2 sender with a rate proportional to this factor.
+        This value is intended to dictate a data transmission rate slightly
+        higher/faster than the ADC rate.
+        NOTE:
+        - A factor of zero (0) tells the sender to transmit as fast as possible.
     feng_id
         ID of the F-engine indicating which one in the array this is. Included
         in the output heaps so that the X-engine can determine where the data
@@ -168,7 +174,8 @@ class Engine(aiokatcp.DeviceServer):
         dst_packet_payload: int,
         dst_affinity: int,
         dst_comp_vector: int,
-        adc_rate: float,
+        adc_sample_rate: float,
+        send_rate_factor: float,
         feng_id: int,
         num_ants: int,
         spectra: int,
@@ -266,8 +273,10 @@ class Engine(aiokatcp.DeviceServer):
             import gdrcopy.pycuda
 
             gdr = gdrcopy.Gdr()
+
         self.sync_epoch = sync_epoch
-        self.adc_rate = adc_rate
+        self.adc_sample_rate = adc_sample_rate
+        self.send_rate_factor = send_rate_factor
         self.delay_model = MultiDelayModel()
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
@@ -338,7 +347,7 @@ class Engine(aiokatcp.DeviceServer):
         if use_peerdirect:
             memory_regions.extend(self._processor.peerdirect_memory_regions)
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_rate * send_dtype.itemsize * 1.1
+        rate = pols * adc_sample_rate * send_dtype.itemsize * send_rate_factor
         # There is a SPEAD header, 8 item pointers, and 3 padding pointers for
         # a 96 byte header, matching the MeerKAT packet format.
         self._sender = send.Sender(
@@ -394,7 +403,7 @@ class Engine(aiokatcp.DeviceServer):
         # of this delta and the delay_rate (same for phase).
         # This may be too small to be a concern, but if it is a concern,
         # then we'd need to compensate for that here.
-        start_sample_count = int((start_time - self.sync_epoch) * self.adc_rate)
+        start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
 
         new_linear_model = LinearDelayModel(start_sample_count, delay, delay_rate, phase, phase_rate)
 

@@ -43,6 +43,7 @@ import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.recv
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
+from katgpucbf.xbgpu.monitor import Monitor
 
 from .. import __version__
 
@@ -154,6 +155,12 @@ class XBEngine(DeviceServer):
         Sample rate of the digitisers in the current array. This value is required to calculate the packet spacing
         of the output heaps. If it is set incorrectly, the packet spacing could be too large causing the pipeline to
         stall as heaps queue at the sender faster than they are sent.
+    send_rate_factor
+        Configure the SPEAD2 sender with a rate proportional to this factor.
+        This value is intended to dictate a data transmission rate slightly
+        higher/faster than the ADC rate.
+        NOTE:
+        - A factor of zero (0) tells the sender to transmit as fast as possible.
     n_ants
         The number of antennas to be correlated.
     n_channels_total
@@ -192,6 +199,7 @@ class XBEngine(DeviceServer):
         katcp_host: str,
         katcp_port: int,
         adc_sample_rate_hz: float,
+        send_rate_factor: float,
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
@@ -203,6 +211,7 @@ class XBEngine(DeviceServer):
         rx_thread_affinity: int,
         batches_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
+        monitor: Monitor,
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
 
@@ -281,6 +290,7 @@ class XBEngine(DeviceServer):
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
         self.adc_sample_rate_hz: float
+        self.send_rate_factor: float
         self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation.
         self.n_ants: int
         self.n_channels_total: int
@@ -347,6 +357,7 @@ class XBEngine(DeviceServer):
 
         # 2.2 Assign array configuration variables
         self.adc_sample_rate_hz = adc_sample_rate_hz
+        self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
@@ -393,15 +404,8 @@ class XBEngine(DeviceServer):
         self.rx_transport_added = False
         self.running = False
 
-        # 3. Set up file monitor for tracking the state of the reciever chunks and the queues. This monitor is hardcoded
-        # to not write data to a file. If debugging of the queues is needed, setting the use_file_monitor to true should
-        # aid in this debugging.
-        # TODO: Decide how to configure and manage the monitor.
-        use_file_monitor = False
-        if use_file_monitor:
-            self.monitor = katgpucbf.xbgpu.monitor.FileMonitor("temp_file.log")
-        else:
-            self.monitor = katgpucbf.xbgpu.monitor.NullMonitor()
+        # 3. Declare the Monitor for tracking the state of the reciever chunks and the queues.
+        self.monitor = monitor
 
         # 4. Create the receiver_stream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
@@ -594,6 +598,7 @@ class XBEngine(DeviceServer):
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
+            send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             endpoint=(dest_ip, dest_port),
@@ -624,6 +629,7 @@ class XBEngine(DeviceServer):
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
+            send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             queue=queue,

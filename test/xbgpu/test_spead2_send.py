@@ -72,6 +72,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         20  # Number of heaps to transmit in the this test. I do not see a need for this number to be larger.
     )
     dump_interval_s = 0  # Normally 0.4 but we set it to as fast as possible so things run quickly.
+    send_rate_factor = 1.1  # Factor required by the sender to make provision for any headroom in transmission.
 
     n_pols = 2
     complexity = 2
@@ -100,6 +101,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         n_channels_per_stream=n_channels_per_stream,
         n_pols=n_pols,
         dump_interval_s=dump_interval_s,
+        send_rate_factor=send_rate_factor,
         channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
         context=context,
         queue=queue,

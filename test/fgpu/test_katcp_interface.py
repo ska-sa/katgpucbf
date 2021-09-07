@@ -16,7 +16,7 @@ class TestKatcpRequests:
         "--dst-interface=lo",
         "--channels=4096",
         f"--sync-epoch={SYNC_EPOCH}",
-        "--adc-rate=1.712e9",
+        "--adc-sample-rate=1.712e9",
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
         "239.10.11.0+15:7149",  # dst
@@ -33,7 +33,7 @@ class TestKatcpRequests:
         The new element is a piecewise-linear section, and it should go onto the
         end of the :class:`.MultiDelayModel` list.
         """
-        assert engine_server.adc_rate == 1.712e9
+        assert engine_server.adc_sample_rate == 1.712e9
 
         start_time = SYNC_EPOCH + 10
         _reply, _informs = await engine_client.request("delays", start_time, "3.76,0.12:7.322,1.91")
