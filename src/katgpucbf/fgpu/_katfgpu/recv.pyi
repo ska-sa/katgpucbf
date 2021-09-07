@@ -1,6 +1,6 @@
 from typing import Any, Optional, Sequence, Tuple
 
-from .monitor import Monitor
+from katgpucbf.monitor import Monitor
 
 class Chunk:
     timestamp: int

@@ -23,8 +23,8 @@ TODO: Look at moving this class to a different repo to avoid repetition between 
 import asyncio
 from typing import AsyncIterator, Generic, Optional, Protocol, TypeVar
 
+from katgpucbf.monitor import Monitor
 from katgpucbf.xbgpu._katxbgpu import Empty, Stopped
-from katgpucbf.xbgpu.monitor import Monitor
 
 _T = TypeVar("_T")
 

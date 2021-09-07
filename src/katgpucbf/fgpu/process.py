@@ -19,10 +19,11 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
+from katgpucbf.monitor import Monitor
+
 from . import recv, ringbuffer, send
 from .compute import Compute
 from .delay import AbstractDelayModel
-from .monitor import Monitor
 
 logger = logging.getLogger(__name__)
 

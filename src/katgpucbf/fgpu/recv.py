@@ -6,8 +6,9 @@ from typing import AsyncGenerator, List, Optional
 
 from aiokatcp import Sensor, SensorSet
 
+from katgpucbf.monitor import Monitor
+
 from ._katfgpu.recv import Chunk, Ringbuffer, Stream
-from .monitor import Monitor
 from .ringbuffer import AsyncRingbuffer
 
 logger = logging.getLogger(__name__)

@@ -20,7 +20,7 @@ import logging
 import katsdpservices
 
 import katgpucbf.xbgpu.xbengine
-from katgpucbf.xbgpu.monitor import FileMonitor, Monitor, NullMonitor
+from katgpucbf.monitor import FileMonitor, Monitor, NullMonitor
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.

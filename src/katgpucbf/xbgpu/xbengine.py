@@ -43,7 +43,7 @@ import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
-from katgpucbf.xbgpu.monitor import Monitor
+from katgpucbf.monitor import Monitor
 
 from .. import __version__
 
@@ -311,7 +311,7 @@ class XBEngine(DeviceServer):
         self.running: bool
 
         # 1.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
-        self.monitor: katgpucbf.xbgpu.monitor.Monitor
+        self.monitor: Monitor
 
         # 1.6 Queues for passing items between different asyncio functions.
         # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.

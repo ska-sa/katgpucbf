@@ -9,11 +9,12 @@ import numpy as np
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
+from katgpucbf.monitor import Monitor
+
 from .. import __version__
 from . import recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
-from .monitor import Monitor
 from .process import Processor
 
 
