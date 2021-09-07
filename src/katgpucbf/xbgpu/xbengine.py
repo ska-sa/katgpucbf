@@ -684,7 +684,7 @@ class XBEngine(DeviceServer):
             item.chunk = chunk
 
             # 2.3. Initiate transfer from recived chunk to rx_item buffer.
-            item.buffer_device.set_async(self._upload_command_queue, chunk.base)
+            item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
             # 2.4. Give the rx item to the _gpu_proc_loop function.
