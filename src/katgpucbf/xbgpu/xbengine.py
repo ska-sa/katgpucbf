@@ -657,13 +657,14 @@ class XBEngine(DeviceServer):
             dropped_heaps = expected_heaps - received_heaps
             expected_heaps_total += expected_heaps
             dropped_heaps_total += dropped_heaps
+            timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.batches_per_chunk
 
             sensor_timestamp = time.time()
             # TODO: This must become a proper logging message; fstrings should
             # be replaced with old-fashioned format strings.
             if dropped_heaps != 0:
                 logger.warning(
-                    f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
+                    f"Chunk: {chunk_index:>5} Timestamp: {hex(timestamp)} "
                     f"Received: {received_heaps:>4} of {expected_heaps:>4} expected heaps. "
                     f"All time dropped heaps: {dropped_heaps_total}/{expected_heaps_total}."
                 )
@@ -680,7 +681,7 @@ class XBEngine(DeviceServer):
 
             # 2.2. Get a free rx_item that will contain the GPU buffer to transfer the received chunk to.
             item = await self._rx_free_item_queue.get()
-            item.timestamp += chunk.timestamp
+            item.timestamp += timestamp
             item.chunk = chunk
 
             # 2.3. Initiate transfer from recived chunk to rx_item buffer.

@@ -14,17 +14,10 @@ FENGINE_ID = 0x4101
 
 
 class Chunk(spead2.recv.Chunk):
-    """Extend :class:`spead2.recv.Chunk` to track timestamp."""
+    """Extend :class:`spead2.recv.Chunk` to refine the types."""
 
-    # Refine base class types
     data: np.ndarray
     present: np.ndarray
-    # New attributes
-    timestamp: int
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.timestamp = -1  # Computed from chunk_id when we receive the chunk
 
 
 def make_stream(
