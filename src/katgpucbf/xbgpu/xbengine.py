@@ -43,6 +43,7 @@ import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
+from katgpucbf.xbgpu.monitor import Monitor
 
 from .. import __version__
 
@@ -210,6 +211,7 @@ class XBEngine(DeviceServer):
         rx_thread_affinity: int,
         batches_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
+        monitor: Monitor,
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
 
@@ -391,15 +393,8 @@ class XBEngine(DeviceServer):
         self.rx_transport_added = False
         self.running = False
 
-        # 3. Set up file monitor for tracking the state of the reciever chunks and the queues. This monitor is hardcoded
-        # to not write data to a file. If debugging of the queues is needed, setting the use_file_monitor to true should
-        # aid in this debugging.
-        # TODO: Decide how to configure and manage the monitor.
-        use_file_monitor = False
-        if use_file_monitor:
-            self.monitor = katgpucbf.xbgpu.monitor.FileMonitor("temp_file.log")
-        else:
-            self.monitor = katgpucbf.xbgpu.monitor.NullMonitor()
+        # 3. Declare the Monitor for tracking the state of the reciever chunks and the queues.
+        self.monitor = monitor
 
         # 4. Create the receiver_stream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
