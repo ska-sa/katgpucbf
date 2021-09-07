@@ -365,7 +365,6 @@ class XBEngine(DeviceServer):
         # pipeline starts bottlenecking, then maybe look at increasing these values.
         n_rx_items = 3  # Too high means too much GPU memory gets allocated
         n_tx_items = 2
-        n_free_chunks = self.max_active_chunks + 8
         # 2.3 Calculate derived parameters.
         # This step represents the difference in timestamp between two
         # consecutive heaps received from the same F-Engine. We multiply step
@@ -386,6 +385,7 @@ class XBEngine(DeviceServer):
         # 2.4 Assign engine configuration parameters
         self.batches_per_chunk = batches_per_chunk
         self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.batches_per_chunk) + 1
+        n_free_chunks = self.max_active_chunks + 8
         self.channel_offset_value = channel_offset_value
 
         # 2.5 Set runtime flags to their initial states
