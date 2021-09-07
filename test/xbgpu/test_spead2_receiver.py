@@ -174,7 +174,7 @@ def create_test_objects(
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
     chunk_heaps = n_ants * heaps_per_fengine_per_chunk
-    chunk_bytes = chunk_heaps * n_channels_per_stream * n_samples_per_channel * sample_bits * complexity // 8
+    chunk_bytes = chunk_heaps * n_channels_per_stream * n_samples_per_channel * sample_bits * n_pols * complexity // 8
     for _ in range(src_chunks_per_stream):
         buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
         present = np.zeros((chunk_heaps,), np.uint8)
