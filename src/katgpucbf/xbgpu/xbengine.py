@@ -527,8 +527,8 @@ class XBEngine(DeviceServer):
         interface_ip: str
             IP address of interface to listen for data on.
         comp_vector: int
-            Received packets will generate interrupts from the NIC. These interrupts can be assigned to a specific CPU
-            core. This parameter determines which core to assign these interrupts to.
+            Received packets will generate interrupts from the NIC. This value selects an interrupt vector,
+            and the OS controls the mapping from interrupt vector to CPU core.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
