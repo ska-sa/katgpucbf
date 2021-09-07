@@ -17,9 +17,8 @@ import katsdpsigproc.accel as accel
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from katgpucbf.monitor import FileMonitor, Monitor, NullMonitor
-
 from .. import __version__
+from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
 
 _T = TypeVar("_T")

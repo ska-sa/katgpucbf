@@ -2,8 +2,7 @@
 import asyncio
 from typing import AsyncIterator, Generic, Optional, Protocol, TypeVar
 
-from katgpucbf.monitor import Monitor
-
+from ..monitor import Monitor
 from . import Empty, Stopped
 
 _T = TypeVar("_T")
