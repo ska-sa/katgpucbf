@@ -188,6 +188,10 @@ class XBEngine(DeviceServer):
     rx_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
+    monitor
+        :class:`Monitor` to use for generating multiple :class:`~asyncio.Queue`
+        objects needed to communicate between functions, and handling basic
+        reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
     VERSION = "katgpucbf-xbgpu-icd-0.1"
