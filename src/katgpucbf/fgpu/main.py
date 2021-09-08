@@ -18,8 +18,8 @@ from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import __version__
+from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
-from .monitor import FileMonitor, Monitor, NullMonitor
 
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?

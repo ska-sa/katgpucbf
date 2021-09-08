@@ -24,7 +24,8 @@ import asyncio
 from typing import AsyncIterator, Generic, Optional, Protocol, TypeVar
 
 from katgpucbf.xbgpu._katxbgpu import Empty, Stopped
-from katgpucbf.xbgpu.monitor import Monitor
+
+from ..monitor import Monitor
 
 _T = TypeVar("_T")
 

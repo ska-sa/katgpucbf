@@ -27,8 +27,8 @@ import pytest
 import spead2
 import spead2.send
 
+import katgpucbf.monitor
 import katgpucbf.xbgpu._katxbgpu.recv as recv
-import katgpucbf.xbgpu.monitor
 import katgpucbf.xbgpu.ringbuffer
 
 from . import test_parameters
@@ -153,7 +153,7 @@ def create_test_objects(
     # 4. Configure receiver
 
     # 4.1 Create monitor - it is not used in these tests but it is required to be passed as an argument.
-    monitor = katgpucbf.xbgpu.monitor.NullMonitor()
+    monitor = katgpucbf.monitor.NullMonitor()
 
     # 4.2 Create ringbuffer that all received chunks will be placed on.
     ringbuffer_capacity = 10

@@ -9,8 +9,6 @@ passing information between different async processing loops within the object.
     - Close _receiver_loop properly - The receiver loop can potentially hang when trying to close. See the function
       docstring for more information. At the moment, there is no clean way to close the pipeline. The stop() function
       attempts this but needs some work.
-    - Decide what to do with the monitor object. The monitor object is hardcoded to be a null object. It may be
-      worth parameterising this function to give it a custom file name and set it to write changes to a file.
     - The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
       logic will need to go in the _gpu_proc_loop for the B-Engine processing
       and then a seperate sender loop would need to be created for sending B-Engine data.
@@ -38,14 +36,13 @@ import spead2
 from aiokatcp import DeviceServer, Sensor, SensorSampler
 
 import katgpucbf.xbgpu._katxbgpu.recv as recv
-import katgpucbf.xbgpu.monitor
 import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
-from katgpucbf.xbgpu.monitor import Monitor
 
 from .. import __version__
+from ..monitor import Monitor
 
 logger = logging.getLogger(__name__)
 
@@ -322,10 +319,7 @@ class XBEngine(DeviceServer):
         # false and close the asyncio functions.
         self.running: bool
 
-        # 1.5 Monitor for tracking the number of chunks queued in the receiver and items in the queues
-        self.monitor: katgpucbf.xbgpu.monitor.Monitor
-
-        # 1.6 Queues for passing items between different asyncio functions.
+        # 1.5 Queues for passing items between different asyncio functions.
         # * The _rx_item_queue passes items from the _receiver_loop function to the _gpu_proc_loop function.
         # * The _tx_item_queue passes items from the _gpu_proc_loop to the _sender_loop function.
         # Once the destination function is finished with an item, it will pass it back to the corresponding
@@ -335,11 +329,11 @@ class XBEngine(DeviceServer):
         self._tx_item_queue: asyncio.Queue[QueueItem]
         self._tx_free_item_queue: asyncio.Queue[QueueItem]
 
-        # 1.7 Objects for sending and receiving data
+        # 1.6 Objects for sending and receiving data
         self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
         self.receiver_stream: recv.Stream
 
-        # 1.9 Command queues for syncing different operations on the GPU - a
+        # 1.7 Command queues for syncing different operations on the GPU - a
         # command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
         # a CUDA stream depending on the context.

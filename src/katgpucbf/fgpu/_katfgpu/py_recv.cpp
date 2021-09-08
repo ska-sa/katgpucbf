@@ -158,7 +158,7 @@ py::module register_module(py::module &parent)
         use_gdrcopy
             Set to true when transferring data directly from the NIC to the GPU
             using GPUdirect.
-        monitor: Optional[katgpucbf.fgpu.monitor.Monitor]
+        monitor: Optional[katgpucbf.monitor.Monitor]
             Monitor object for collecting metrics.
         )pydocstring")
         /* TODO: These types are C++ types in many cases. Figure out how to get
