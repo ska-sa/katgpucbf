@@ -54,7 +54,7 @@ SPEAD2 has the concept of a "transport". A transport can be thought of the
 interface with the underlying system that the SPEAD heaps are transmitted on.
 The most basic example of a transport is a UDP transport. SPEAD2 with a UDP
 transport will make use of the Linux networking stack to receive packets off of
-an ethernet interface.
+an Ethernet interface.
 
 SPEAD2 supports a number of different transports including a udp transport for
 standard UDP networking, a udp_ibv transport (explained in :ref:`ibverbs`), a
@@ -70,7 +70,7 @@ program no matter the transport being used.
 
 In this repository, the main example of where these transports are useful is
 when unit testing. During normal operation, the udp_ibv transport is used for
-high-performance receiving of packets off of the ethernet network. It is not
+high-performance receiving of packets off of the Ethernet network. It is not
 practical to run unit tests on the network. When performing unit tests, a buffer
 transport is used instead and SPEAD2 assembles simulated packets from a memory
 buffer into heaps, thereby testing the SPEAD2 functionality without having to be
@@ -92,7 +92,7 @@ ibverbs
 
 SPEAD2 implements a transport using the ibverbs library for high-performance
 networking. This is the udp_ibv transport. The udp_ibv transport uses ibverbs
-both for sending and receiving data. Using ibverbs for ethernet NIC acceleration
+both for sending and receiving data. Using ibverbs for Ethernet NIC acceleration
 is not very well documented online. SARAO has produced this
 `ibverbs sample project`_ to demonstrate how to use ibverbs and explain how it
 functions. A deep understanding of ibverbs is not required here as SPEAD2
@@ -113,7 +113,7 @@ an event on a specified IO loop indicating that this action has occured.
 Multicast
 ~~~~~~~~~
 
-All SARAO SPEAD traffic is transmitted as ethernet multicast data. Ethernet
+All SARAO SPEAD traffic is transmitted as Ethernet multicast data. Ethernet
 multicast is not as simple as unicast. In general the switches need to be
 configured to handle multicast data (using the PIM protocol (in SARAO's case)
 for L3 or the IGMP protocol for L2 networks). A receiver also needs to subscribe

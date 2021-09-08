@@ -15,7 +15,7 @@ The X-Engine processing pipeline can be broken into four different stages:
 
   1. Receive data from the network and assemble it into a chunk. This chunk is
      then transferred to the GPU. This receiver has been implemented using
-     SPEAD2 in C++ and bound into python. See the "SPEAD2 Network Side Software"
+     SPEAD2 in C++ and bound into Python. See the "SPEAD2 Network Side Software"
      section below for more information.
   2. Reorder the chunk so that it is in a format that is ready for correlation.
      This reorder is implemented in the
