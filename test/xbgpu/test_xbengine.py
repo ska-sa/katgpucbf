@@ -18,7 +18,7 @@ from numba import njit
 
 import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
-from katgpucbf.xbgpu.monitor import NullMonitor
+from katgpucbf.monitor import NullMonitor
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
