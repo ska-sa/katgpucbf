@@ -84,7 +84,7 @@ pipeline {
      */
     stage('Install required python packages') {
       steps {
-        sh 'pip3 install numpy==1.21.0 pycparser jinja2 pybind11'
+        //sh 'pip3 install numpy==1.21.0 pycparser jinja2 pybind11'
         sh 'pip3 install -r requirements.txt -r requirements-dev.txt'
       }
     }
