@@ -136,10 +136,10 @@ chunk. The actual chunk object contains a buffer. The buffer holds the
 collection of heaps.
 
 An example of why this is necessary: a single F-Engine output heap is 0.125 MiB.
-At 7 Gbps, ~60 000 heaps are passed to python every second. This is a very high
-load on the CPU and results in the python thread not being able to keep up. A
+At 7 Gbps, ~60 000 heaps are passed to Python every second. This is a very high
+load on the CPU and results in the Python thread not being able to keep up. A
 single chunk consists of a collection of 10 heaps from every antenna for a chunk
-size of 10x64x0.125=80MiB. At 7 Gbps, ~90 chunks are passed to python per
+size of 10x64x0.125=80MiB. At 7 Gbps, ~90 chunks are passed to Python per
 second. This is a much more manageable number of chunks for slow Python code to
 deal with.
 
@@ -147,143 +147,40 @@ Additionally, executing a GPU kernel on a large chunk instead of a single heap
 allows the kernel to be launched with many more threads meaning far better
 utilisation of the GPU takes place.
 
-Low level C++ code and python bindings
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-katxbgpu does not make use of the SPEAD2 python bindings. Instead it makes use
-of the lower level C++ SPEAD2 functions and then exposes them to python with its
-own bindings. This was done because ordinarily SPEAD2 does not have the concept
-of a chunk. Using C++ to implement SPEAD2 allows these heaps to be assembled
-into chunks before transferring them to python.
-
-The C++ code can be quite dense and complicated. Much effort has been put into
-making katxbgpu readable and functional without having to delve into the C++
-code.
-
-The `pybind11 library`_ is used for registering C++ code as a python module. The
-C++ files doing this can be found in the ``src`` directory. The ``setup.py``
-file handles turning these C++ files into python modules. ``py_register.cpp``
-contains the :c:macro:`PYBIND11_MODULE` macro which kicks off the process during
-installation.
-
-.. _pybind11 library: https://pybind11.readthedocs.io/en/stable/index.html
-
 Receiver
 --------
 
-The image below gives conceptual overview of how the katxbgpu receive code is
-implemented:
+The hard work of collecting heaps into chunks is implemented by spead2. The
+katxbgpu code needs only to provide a function to determine where each heap
+belongs, by examining the timestamp and F-engine ID. This is compiled (using
+numba) on-the-fly in :func:`katgpucbf.xbgpu.recv.make_stream`. On-the-fly
+compilation has the advantage that parameters like the number of spectra per
+chunk can be treated as constants by LLVM and hence generate more efficient
+code.
 
-.. figure:: images/receiver.png
-  :width: 831px
-
-  Receiver
-
-In the normal operational case, a main processing loop is running in python and
-this loop will interface with the katxbgpu receiver module in order to get data
-from the network.
-
-The above diagram shows how the receiver module is broken up into three main
-layers:
-
-  1. katxbgpu Python layer - This is the layer that the main processing loop
-     will interact with to use the receiver. Once the receiver is configured the
-     main processing loop gives the katxbgpu python layer new chunks (or old
-     chunks that no longer have any use) and the katxbgpu python layer returns
-     filled chunks. The underlying assembly and management of these chunks is
-     abstracted away at this layer. The classes relevant at this level can be
-     found in the ``py_recv.cpp``, ``py_recv.h``, ``py_common.cpp`` and
-     ``py_common.h``. These files are slightly difficult to read, but the python
-     modules they create will have standard python docstrings that can be read
-     in an IPython session once the module has been installed.
-  2. katxbgpu C++ layer - The katxbgpu python layer interfaces with the katxbgpu
-     C++ layer. The katxbgpu C++ layer manages the chunks received from the
-     python layer. When the SPEAD2 stream receives a heap, the C++ layer tells
-     it both to which chunk the heap must be copied to and the offset within the
-     chunk buffer that the heap data belongs. The C++ layer monitors the active
-     chunks that are being filled by the SPEAD2 stream and when a chunk is
-     complete, it sends it back to the Python layer via a ringbuffer. The
-     classes relevant to this section can be found in recv.h and recv.cpp.
-  3. SPEAD2 Stream layer - This is the underlying SPEAD2 layer that receives
-     packets, assembles them into heaps and passes them to the katxbgpu C++
-     layer. This layer creates its own thread pool and runs concurrently with
-     the main processing loop. This layer is part of the standard SPEAD2 package.
-
-An example of how to use the receiver can be found in the ``receiver_example.py``
-script in the ``scratch`` folder. Understanding this is all that is required to
-use the receiver. The remaining information in this document is only relevant
-when trying to modify or duplicate the katxbgpu receiver functionality.
-
-Once the katxbgpu module has been installed, the receiver module can be accesed
-using ``import katxbgpu._katxbgpu.recv`` in Python.
-
-Chunk Lifecycle
----------------
-
-A chunk is the main mechanism that allows for data to be transferred around the
-katxbgpu program.
-
-A chunk has to be created by the main program. The user assigns a buffer of a
-specific size to the chunk and then passes the chunk to the receiver using the
-:meth:`!.add_chunk` function. This chunk is added to a free chunks stack. Chunks on
-this stack are not being used. They will be popped off of this stack when a new
-chunk is required.
-
-The katxbgpu C++ code maintains a queue of chunks that are in an "active" state.
-Active chunks are chunks that are being assembled - this means that the SPEAD2
-stream is busy receiving and assembling heaps from the underlying transport.
-These heaps are assembled in the various chunks in the active hunks queue. When
-a packet belonging to a chunk that is not in the active queue is received, a
-chunk is moved from the free chunks stack by calling the
-:cpp:func:`katxbgpu::recv::stream::grab_chunk` function.
-
-Once a chunk has been fully assembled it is moved off of the active queue and
-put on a ringbuffer using the :cpp:func:`katxbgpu::recv::stream::flush` function. The
-main program can then access the underlying chunks asynchronously in Python
-using an asyncio for loop (``async for chunk in async_ringbuffer``) which calls the
-underlying :meth:`~katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer.async_pop` function.
+When spead2 is done populating a chunk, it places it into a ringbuffer. This
+ringbuffer supports Python's asynchronous iterator protocol, so is processed
+with the idiom ``async for chunk in async_ringbuffer``.
 
 Once a chunk has been popped off the ringbuffer and its data has been consumed
-by the GPU, it should be given back to the receiver again using the :meth:`!.add_chunk`
-function. By reusing the chunk, the system memory use remains tightly controlled
-preventing excessive memory use. Additionally allocating new memory is an
-expensive operation. By reusing chunks, this expensive operation is eliminated.
-
-The main program only knows about the ringbuffer, the free chunks stack and the
-active chunks queue are managed within the katxbgpu C++ code.
-
-Chunk and heap coordination and management
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The SPEAD2 stream creates its own thread pool to manage the internals of the
-SPEAD2 transport and heap assembly. Tracing through these threads is a
-time-consuming process and is not necessary to understand the katxbgpu receiver.
-The SPEAD2 stream interacts with the main program using callback functions. When
-the first packet in a heap is received, the SPEAD2 stream calls the
-:cpp:func:`katxbgpu::recv::allocator::allocate` function. When the last packet is
-received, the SPEAD2 stream calls the :cpp:func:`katxbgpu::recv::stream::heap_ready`
-function. Both of these functions eventually call the
-:cpp:func:`katxbgpu::recv::stream::calculate_packet_destination` function.
-
-The :cpp:func:`calculate_packet_destination` function can be thought of as the main
-coordinating funtion within the katxbgpu C++ code. It determines when to move
-data from the free chunks stack to the active chunks queue to the ringbuffer. It
-also calculates where in a chunk the heap must be copied and passes this
-information to the SPEAD2 stream. Understanding this function will give a great
-deal of insight into the operation of the entire receiver.
+by the GPU, it should be given back to the receiver again using
+:meth:`spead2.recv.ChunkRingStream.add_free_chunk`. By reusing the chunk, the
+system memory use remains tightly controlled preventing excessive memory use.
+Additionally allocating new memory is an expensive operation. By reusing
+chunks, this expensive operation is eliminated.
 
 Receiver Chunk Internal Construction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A chunk contains both a buffer object and associated metadata. For the receiver
-chunk this metadata contains a ``present`` boolean array and a timestamp field.
+chunk this metadata contains a ``present`` boolean array and a chunk ID.
 
-This array will contains as many elements as heaps in the chunk. A true value at
-a specific index indicates that the corresponding heap is present. A false
-value indicates that the heap was either not received or was corrupted and has
-not been copied correctly into the chunk. It is expected that 99.999999% of
-heaps will be received over the receiver lifetime. Large numbers of missing
-heaps point to a system issue that must be resolved.
+The ``present`` array contains as many elements as heaps in the chunk. A true
+value at a specific index indicates that the corresponding heap is present. A
+false value indicates that the heap was either not received or was corrupted
+and has not been copied correctly into the chunk. It is expected that
+99.999999% of heaps will be received over the receiver lifetime. Large numbers
+of missing heaps point to a system issue that must be resolved.
 
 .. _data-layout:
 
@@ -299,7 +196,7 @@ The X-Engine receives data from each F-Engine. There is one F-Engine per antenna
 F-Engines that can be indexed as follows:
 ``chunk_buffer_temp[n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]``
 
-In order to make chunks larger to get the benefits described in 1.4 above, a
+In order to make chunks larger to get the benefits described above, a
 number of heaps from every F-Engine are combined into a single chunk. There are
 ``heaps_per_fengine_per_chunk`` heaps per F-Engine. The final chunk array looks
 like:
@@ -333,6 +230,10 @@ consecutive heaps from a particular F-Engine. The step in time between
 timestamps of two consecutive chunks can be calculated using the following:
 `timestamp_step_per_chunk = heaps_per_fengine_per_chunk * timestamp_step`.
 
+Chunks do not directly contain a timestamp, but the chunk ID is formed by
+dividing the first timestamp of the chunk by `timestamp_step_per_chunk`, and
+thus the timestamps can easily be reconstructed.
+
 .. todo::
 
   Update this section when the channel division for non-power-of-2 array sizes
@@ -342,9 +243,9 @@ Transport and readers
 ~~~~~~~~~~~~~~~~~~~~~
 
 As mentioned in :ref:`spead2-transports`, SPEAD2 defines a number of transports.
-This receiver only exposes three of these transports. The most important one is
-the udb_ibv transport for normal operation. Additionally, the PCAP and memory
-transports are also exposed for debugging and unit tests.
+The most important one is the udp_ibv transport for normal operation.
+Additionally, the PCAP and memory transports are also exposed for debugging
+and unit tests.
 
 Unit Tests
 ~~~~~~~~~~
@@ -356,7 +257,7 @@ Sender
 ------
 
 The X-Engine transmit code can be found in :mod:`.xsend`. Unlike the receiver
-logic, the sender logic just makes use of the normal SPEAD2 python code - no
+logic, the sender logic just makes use of the normal SPEAD2 Python code - no
 custom C++ bindings are required. The X-Engine implements accumulation and
 drastically reduces data rates. A heap is sent out on the order of seconds, not
 milliseconds, and as such no chunking is required to manage these rates.
