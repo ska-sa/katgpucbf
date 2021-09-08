@@ -68,23 +68,8 @@ pipeline {
       }
     } 
 
-    /* This stage is kept separate from the "Install katgpucbf package" stage below,
-     * as the stage one will fail when something external goes wrong while the next
-     * stage will fail if we have done something wrong in the katgpucbf package. 
-     * It seems best to split them to make it easier to pinpoint the source of the problem.
-     *
-     * NOTE: Numpy is installed first because if it is installed as part of the
-     * requirements.txt install, pycuda tries to install a later version of
-     * numpy which requires python 3.7 or greater. Pybind11 is also installed
-     * like this for a similar reason. It will not install when part of 
-     * requirements.txt. This has not been investigated.
-     *
-     * NOTE: Jinja2 and pycparser are used by SPEAD2 for generating some source 
-     * files. They are not used in the running program.
-     */
     stage('Install required python packages') {
       steps {
-        sh 'pip3 install pycparser'
         sh 'pip3 install -r requirements.txt -r requirements-dev.txt'
       }
     }
