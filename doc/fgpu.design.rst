@@ -52,8 +52,8 @@ windows.
 
 Chunking also helps reduce the impact of slow Python code. Digitiser heaps
 consist of only a single packet, and involving Python on a per-heap basis
-would be far too slow. The code for assembling chunks is all implemented in
-C++, with Python working mostly at chunk granularity.
+would be far too slow. We use :class:`spead2.recv.ChunkRingStream` to group
+heaps into chunks, which means Python code is only run per-chunk.
 
 Queues
 ------
@@ -77,11 +77,12 @@ polarisations are kept separate during chunking, and aligned afterwards (in
 Python). Large chunks also make it unlikely that the polarisations will be out
 of sync by more than one chunk, which makes the alignment code quite simple.
 
-To minimise the number of copies, a spead2 custom allocator is used to have
-spead2 copy the data directly into contiguous memory for the chunk. We use
-CUDA pinned memory so that it can be efficiently copied to the GPU. To avoid a
-compile-time dependency on CUDA, we have Python code allocate the memory (from
-PyCUDA) and pass pre-allocated chunks into the C++ code.
+To minimise the number of copies, chunks are initialised with CUDA pinned
+memory (host memory that can be efficiently copied to the GPU). When a GPU
+supporting `GPUDirect RDMA`_ is used, it is possible to instead provide GPU
+memory that has been mapped into the CPU's address space.
+
+.. _GPUDirect RDMA: https://github.com/NVIDIA/gdrcopy
 
 GPU Processing
 --------------
@@ -213,8 +214,8 @@ long as possible.
 Network transmit
 ----------------
 The current transmit system is quite simple and could use optimisations. A
-separate SPEAD stream is created for each X-engine, and C++ code splits each
-output chunk into heaps.
+single spead2 stream is created with one substream per multicast destination
+(X-engine), C++ code splits each output chunk into heaps.
 
 Challenges and lessons learnt
 -----------------------------
@@ -279,14 +280,3 @@ improved from about 4 GB/s to about 7 GB/s when removing the second CPU from
 the system. With better memcpy performance it may be possible to use fewer
 cores (and conversely, fewer cores on a die may reduce the latency to
 memory and hence the memcpy performance).
-
-Reordering
-^^^^^^^^^^
-The receive path contains code to place data into the correct positions in
-chunks based on the timestamp, managing a sliding window of chunks, flushing
-old chunks once new data arrives, etc. This is quite similar to existing code
-in katsdpbfingest_, and a similar problem is likely to occur for a software
-X-engine. It may be worth creating a higher-level library on top of spead2
-to implement these patterns.
-
-.. _katsdpbfingest: https://github.com/ska-sa/katsdpbfingest
