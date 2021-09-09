@@ -1,9 +1,11 @@
 -c requirements.txt
 coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 ipython
+jinja2
 numba
 pip-tools
 pre-commit
+pycparser
 pytest
 pytest-asyncio
 pytest-cov
