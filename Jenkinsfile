@@ -54,17 +54,17 @@ pipeline {
   }
 
   /* This stage should ideally be part of the initial Docker image, as it
-   * takes time and downloads multple Gigabytes from the internet. A new 
+   * takes time and downloads multiple Gigabytes from the internet. A new 
    * Dockerfile needs to be created that will extend the 
    * nvidia/cuda:11.4.1-devel-ubuntu20.04 image to include this install.
    */
   stages {
     stage('Configure Environment') {
       steps {
-	sh 'apt-get update'
+        sh 'apt-get update'
         sh 'apt-get install -y python3 python3-pip python3-dev' // Required for python
         sh 'apt-get install -y git build-essential automake pkg-config'
-        sh 'apt-get install -y autoconf libboost-dev libboost-program-options-dev libboost-system-dev libibverbs-dev librdmacm-dev libpcap-dev' // Required for installing SPEAD2. Much of this is installed when using MLNX_OFED, TODO: Clarify
+        sh 'apt-get install -y autoconf libboost-dev libboost-program-options-dev libboost-system-dev libibverbs-dev librdmacm-dev libpcap-dev' // Required for installing SPEAD2. Much of this is installed when using MLNX_OFED.
       }
     } 
 
@@ -110,7 +110,7 @@ pipeline {
         dir('3rdparty/spead2') {
           sh './bootstrap.sh'
           sh './configure'
-          sh 'make'
+          sh 'make -j'
           sh 'make install'
         }
         // Make and compile fsim.
@@ -158,8 +158,8 @@ pipeline {
           <i>Note: This is an Automated email notification.</i>""", 
           subject: '$PROJECT_NAME - $BUILD_STATUS!',
           to: 'ijassiem@ska.ac.za'
-		    
-	  cleanWs()
+          
+          cleanWs()
         }
       }
   
