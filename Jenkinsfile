@@ -44,7 +44,7 @@ pipeline {
        * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
        * 2 etc. The correct once needs to be specified.
        */
-      args '--gpus=all --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
+      args '--gpus=all'
     }
 
   }
@@ -62,8 +62,8 @@ pipeline {
     stage('Configure Environment') {
       steps {
 	sh 'apt-get update'
-        sh 'apt-get install -y python3 python3-pip python3-dev python3-pybind11' // Required for python
-        sh 'apt-get install -y git build-essential automake'
+        sh 'apt-get install -y python3 python3-pip python3-dev' // Required for python
+        sh 'apt-get install -y git build-essential automake pkg-config'
         sh 'apt-get install -y autoconf libboost-dev libboost-program-options-dev libboost-system-dev libibverbs-dev librdmacm-dev libpcap-dev' // Required for installing SPEAD2. Much of this is installed when using MLNX_OFED, TODO: Clarify
       }
     } 
