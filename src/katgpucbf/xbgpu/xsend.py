@@ -101,6 +101,9 @@ class XSend:
     ----------
     n_ants
         The number of antennas that have been correlated.
+    n_channels
+        The total number of channels across all X-Engines. Must be a multiple of
+        `n_channels_per_stream`.
     n_channels_per_stream
         The number of frequency channels contained per stream.
     n_pols
@@ -148,6 +151,7 @@ class XSend:
     def __init__(
         self,
         n_ants: int,
+        n_channels: int,
         n_channels_per_stream: int,
         n_pols: int,
         dump_interval_s: float,
@@ -164,6 +168,8 @@ class XSend:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
 
+        if n_channels % n_channels_per_stream != 0:
+            raise ValueError("n_channels must be an integer multiple of n_channels_per_stream")
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
@@ -242,6 +248,10 @@ class XSend:
         # This class is currently marked as _private in the spead2 stub files,
         # in a future revision it may be changed to public.
         self.source_stream = stream_factory(stream_config, self.buffers)
+        self.source_stream.set_cnt_sequence(
+            channel_offset // n_channels_per_stream,
+            n_channels // n_channels_per_stream,
+        )
 
         # 6. Create item group - This is the SPEAD2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(flavour=self.default_spead_flavour)

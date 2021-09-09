@@ -80,11 +80,11 @@ def test_send_simple(event_loop, num_ants, num_channels):
 
     # 1.2 Derived parameters
 
-    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
-    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
-    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
-    # The // 4 is here because in the MeerKAT case, there are 4*num_ants multicast streams.
-    n_channels_per_stream = num_channels // num_ants // 4
+    # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+    n_engines = 1
+    while n_engines < num_ants * 4:
+        n_engines *= 2
+    n_channels_per_stream = num_channels // n_engines
     n_baselines = (num_ants + 1) * (num_ants) * 2
 
     # 2. Create cuda context - all buffers created in the XSend object are created from this context.
@@ -98,6 +98,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
     # 3.2 Create katgpucbf.xbgpu.xsend.XSend that will wrap a SPEAD2 send stream.
     send_stream = katgpucbf.xbgpu.xsend.XSend(
         n_ants=num_ants,
+        n_channels=num_channels,
         n_channels_per_stream=n_channels_per_stream,
         n_pols=n_pols,
         dump_interval_s=dump_interval_s,
@@ -159,6 +160,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         # 5.1 Wait for the first packet to arrive - it is expected to be the SPEAD descriptor. Without the desciptor
         # the recv_stream cannot interpret the heaps correctly.
         heap = await recv_stream.get()
+        assert heap.cnt % n_engines == 4, "The heap IDs are not correctly strided"
         items = ig.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 

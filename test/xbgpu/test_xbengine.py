@@ -271,10 +271,11 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     adc_sample_rate = 1712000000.0  # L-Band, not important
     send_rate_factor = 1.1
 
-    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
-    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
-    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
-    n_channels_per_stream = num_channels // n_ants // 4
+    # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+    n_engines = 1
+    while n_engines < n_ants * 4:
+        n_engines *= 2
+    n_channels_per_stream = num_channels // n_engines
     n_samples_per_channel = num_samples_per_channel
     n_pols = 2
     sample_bits = 8

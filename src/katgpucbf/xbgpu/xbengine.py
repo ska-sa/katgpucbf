@@ -597,6 +597,7 @@ class XBEngine(DeviceServer):
 
         self.send_stream = katgpucbf.xbgpu.xsend.XSend(
             n_ants=self.n_ants,
+            n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
@@ -637,6 +638,7 @@ class XBEngine(DeviceServer):
 
         self.send_stream = katgpucbf.xbgpu.xsend.XSend(
             n_ants=self.n_ants,
+            n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
