@@ -110,7 +110,7 @@ pipeline {
         dir('3rdparty/spead2') {
           sh './bootstrap.sh'
           sh './configure'
-          sh 'make -j'
+          sh 'make'
           sh 'make install'
         }
         // Make and compile fsim.
