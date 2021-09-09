@@ -76,10 +76,10 @@ def parse_args() -> argparse.Namespace:
         "in the XB-Engine output heaps for spectrum reassembly by the downstream receiver. [%(default)s]",
     )
     parser.add_argument(
-        "--samples-per-channel",
+        "--spectra-per-heap-in",
         type=int,
         default=256,
-        help="Number of packed samples in every received channel. [%(default)s]",
+        help="Number of packed spectra in every received channel. [%(default)s]",
     )
     parser.add_argument("--pols", type=int, default=2, help="Number of polarisations per antenna. [%(default)s]")
     parser.add_argument(
@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
         help="Number of bits for each real and imaginary value in a sample. [%(default)s]",
     )
     parser.add_argument(
-        "--batches-per-chunk",
+        "--chunk-spectra",
         type=int,
         default=5,
         help="A batch is a collection of heaps from different F-Engines with the same timestamp. This parameter "
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         "--src-comp-vector",
         type=int,
         required=True,
-        help="Completion vectors for source streams, or -1 for polling.",
+        help="Completion vector for source streams, or -1 for polling.",
     )
     parser.add_argument(
         "--src-interface",
@@ -170,13 +170,13 @@ async def async_main(args: argparse.Namespace) -> None:
         n_ants=args.array_size,
         n_channels_total=args.channels,
         n_channels_per_stream=args.channels_per_substream,
-        n_samples_per_channel=args.samples_per_channel,
+        n_spectra_per_heap_in=args.spectra_per_heap_in,
         n_pols=args.pols,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         channel_offset_value=args.channel_offset_value,
         src_affinity=args.src_affinity,
-        batches_per_chunk=args.batches_per_chunk,
+        chunk_spectra=args.chunk_spectra,
         rx_reorder_tol=args.rx_reorder_tol,
     )
 

@@ -34,10 +34,10 @@ class ComputeTemplate:
         self.postproc = postproc.PostprocTemplate(context)
 
     def instantiate(
-        self, command_queue: AbstractCommandQueue, samples: int, spectra: int, acc_len: int, channels: int
+        self, command_queue: AbstractCommandQueue, samples: int, spectra: int, spectra_per_heap_out: int, channels: int
     ) -> "Compute":  # We have to put the return type in quotes because we haven't declared the `Compute` class yet.
         """Generate a :class:`Compute` object based on the template."""
-        return Compute(self, command_queue, samples, spectra, acc_len, channels)
+        return Compute(self, command_queue, samples, spectra, spectra_per_heap_out, channels)
 
 
 class Compute(accel.OperationSequence):
@@ -53,9 +53,9 @@ class Compute(accel.OperationSequence):
     performed. The following constraints are assumed, Bad Things(TM) may happen
     if they aren't followed:
 
-    - acc_len <= spectra - i.e. a chunk of data must be enough to send out at
+    - spectra_per_heap_out <= spectra - i.e. a chunk of data must be enough to send out at
       least one heap.
-    - spectra % acc_len == 0
+    - spectra % spectra_per_heap_out == 0
     - samples >= spectra*channels*2 + taps*channels*2 - 1. The factor of 2 is
       because the PFB input is real, 2*channels samples are needed for each
       output spectrum. The "extra samples" are to ensure continuity in the PFB-
@@ -75,7 +75,7 @@ class Compute(accel.OperationSequence):
         Number of samples that will be processed each time the operation is run.
     spectra
         Number of spectra that we will get from each chunk of samples.
-    acc_len
+    spectra_per_heap_out
         Number of spectra to send out per heap.
     channels
         Number of channels into which the input data will be decomposed.
@@ -87,7 +87,7 @@ class Compute(accel.OperationSequence):
         command_queue: AbstractCommandQueue,
         samples: int,
         spectra: int,
-        acc_len: int,
+        spectra_per_heap_out: int,
         channels: int,
     ) -> None:
         self.pols = 2
@@ -96,7 +96,7 @@ class Compute(accel.OperationSequence):
         self.channels = channels
         self.samples = samples
         self.spectra = spectra
-        self.acc_len = acc_len
+        self.spectra_per_heap_out = spectra_per_heap_out
 
         # PFB-FIR and FFT each happen for each polarisation.
         self.pfb_fir = [
@@ -106,7 +106,7 @@ class Compute(accel.OperationSequence):
 
         # Postproc is single though because it involves the corner turn which
         # combines the two pols.
-        self.postproc = template.postproc.instantiate(command_queue, spectra, acc_len, channels)
+        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap_out, channels)
 
         operations: List[Tuple[str, accel.Operation]] = []
         for pol in range(self.pols):

@@ -7,7 +7,7 @@ from .monitor import Monitor
 class Chunk:
     timestamp: int
     channels: int
-    acc_len: int
+    spectra_per_heap_out: int
     frames: int
     pols: int
     base: object  # Python buffer protocol

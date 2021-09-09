@@ -66,7 +66,7 @@ struct options
     int n_ants = 64;
     int n_chans_per_output_stream = 128;
     int n_chans_total = 32768;
-    int n_time_samples_per_channel = 256;
+    int n_spectra_per_heap_in = 256;
     bool bRunOnce = false;
 
     // The variables below are not command-line arguments, they are just calculated based on values provided by the
@@ -113,7 +113,7 @@ static options parse_options(int argc, const char **argv)
                        "Number of channels out of the FFT. (Normally half of FFT size)");
     desc.add_options()("channels-per-substream", make_opt(opts.n_chans_per_output_stream),
                        "Each F-Engine output substream transmits a subset of the FFT channels.");
-    desc.add_options()("samples-per-channel", make_opt(opts.n_time_samples_per_channel),
+    desc.add_options()("spectra-per-heap-in", make_opt(opts.n_spectra_per_heap_in),
                        "The F-Engine cornerturn groups a number of samples into each channel per packet.");
     desc.add_options()("run-once", make_opt(opts.bRunOnce), "Transmit a single collection of heaps before exiting.");
     hidden.add_options()(
@@ -151,11 +151,11 @@ static options parse_options(int argc, const char **argv)
      * larger than 1 KiB.
      */
     opts.heap_size_bytes =
-        opts.n_chans_per_output_stream * opts.n_time_samples_per_channel * n_pols * complexity * sample_bits / 8;
-    opts.packet_payload_size_bytes = opts.n_time_samples_per_channel * n_pols * complexity;
+        opts.n_chans_per_output_stream * opts.n_spectra_per_heap_in * n_pols * complexity * sample_bits / 8;
+    opts.packet_payload_size_bytes = opts.n_spectra_per_heap_in * n_pols * complexity;
     opts.packets_per_heap = opts.heap_size_bytes / opts.packet_payload_size_bytes;
     opts.timestamp_step =
-        opts.n_chans_total * 2 * opts.n_time_samples_per_channel; // The *2 is due to the spectrum being cut in half due
+        opts.n_chans_total * 2 * opts.n_spectra_per_heap_in; // The *2 is due to the spectrum being cut in half due
                                                                   // to symmetric properties of the fourier transform
     return opts;
 }
@@ -222,7 +222,7 @@ struct heap_data
         heap.add_item(0x4103, opts.n_chans_per_output_stream * 2); // frequency base - arbitrary offset at the moment
 
         /* This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
-         * [n_chans_total / n_xengs][n_time_samples_per_channel][n_pols][complexity] instead of a single long dimension.
+         * [n_chans_total / n_xengs][n_spectra_per_heap_in][n_pols][complexity] instead of a single long dimension.
          *
          * This function adds an ItemPointer to the header and will append the data in data.get() to the packet
          * payload.
@@ -257,12 +257,12 @@ struct heap_data
          * This current format is not fixed and it is likely that it will be adjusted to be suited for different
          * verification needs.
          */
-        int iInitialOffset = i64HeapIndex * opts.n_time_samples_per_channel;
+        int iInitialOffset = i64HeapIndex * opts.n_spectra_per_heap_in;
         double dSampleAnglePol0 = 2.0 * M_PI / ((double)(opts.n_ants * n_pols)) * (iFengId * n_pols + 0);
         double dSampleAnglePol1 = 2.0 * M_PI / ((double)(opts.n_ants * n_pols)) * (iFengId * n_pols + 1);
         for (int c = 0; c < opts.n_chans_per_output_stream; c++)
         {
-            for (int t = 0; t < opts.n_time_samples_per_channel; t++)
+            for (int t = 0; t < opts.n_spectra_per_heap_in; t++)
             {
                 double dSampleAmplitude = (iInitialOffset + c * 10 + t) % 127;
                 double dSampleValuePol0Real = dSampleAmplitude * std::cos(dSampleAnglePol0);
@@ -271,7 +271,7 @@ struct heap_data
                 double dSampleValuePol1Imag = dSampleAmplitude * std::sin(dSampleAnglePol1);
 
                 int iSampleIndexBase =
-                    c * opts.n_time_samples_per_channel * n_pols * complexity + t * n_pols * complexity;
+                    c * opts.n_spectra_per_heap_in * n_pols * complexity + t * n_pols * complexity;
                 pu8Data[iSampleIndexBase + 0] = static_cast<int8_t>(dSampleValuePol0Real);
                 pu8Data[iSampleIndexBase + 1] = static_cast<int8_t>(dSampleValuePol0Imag);
                 pu8Data[iSampleIndexBase + 2] = static_cast<int8_t>(dSampleValuePol1Real);

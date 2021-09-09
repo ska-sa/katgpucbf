@@ -54,7 +54,7 @@ namespace katxbgpu::recv
  *
  * The samples are stored as a 1 dimensional array contiguous array. If the array were indexed  as a multidimensional
  * array, the dimensions would be as follows:
- * [heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_samples_per_channel][n_pols]. It is left to the user
+ * [heaps_per_fengine_per_chunk][n_ants][n_channels_per_stream][n_spectra_per_heap_in][n_pols]. It is left to the user
  * to calculate the strides for multidimensional indexing in a 1 dimensional array.
  *
  * The heaps_per_fengine_per_chunk and n_ants correspond to different packets while the remaining indexes correspond to

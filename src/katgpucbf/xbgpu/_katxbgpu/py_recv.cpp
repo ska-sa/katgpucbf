@@ -54,11 +54,11 @@ class py_stream : public stream
   public:
     pybind11::object monitor;
 
-    py_stream(int n_ants, int n_channels, int n_samples_per_channel, int n_pols, int sample_bits, int timestamp_step,
+    py_stream(int n_ants, int n_channels, int n_spectra_per_heap_in, int n_pols, int sample_bits, int timestamp_step,
               std::size_t heaps_per_fengine_per_chunk, std::size_t max_active_chunks,
               ringbuffer_t &ringbuffer, int thread_affinity, bool use_gdrcopy,
               pybind11::object monitor)
-        : stream(n_ants, n_channels, n_samples_per_channel, n_pols, sample_bits, timestamp_step,
+        : stream(n_ants, n_channels, n_spectra_per_heap_in, n_pols, sample_bits, timestamp_step,
                  heaps_per_fengine_per_chunk, max_active_chunks, ringbuffer, thread_affinity, use_gdrcopy),
           monitor(std::move(monitor))
     {
@@ -128,7 +128,7 @@ pybind11::module register_module(pybind11::module &parent)
     pybind11::class_<py_stream>(m, "Stream", "SPEAD stream receiver")
         .def(pybind11::init<int, int, int, int, int, int, std::size_t, std::size_t, stream::ringbuffer_t &, int, bool,
                             pybind11::object>(),
-             "n_ants"_a, "n_channels"_a, "n_samples_per_channel"_a, "n_pols"_a, "sample_bits"_a, "timestamp_step"_a,
+             "n_ants"_a, "n_channels"_a, "n_spectra_per_heap_in"_a, "n_pols"_a, "sample_bits"_a, "timestamp_step"_a,
              "heaps_per_fengine_per_chunk"_a, "max_active_chunks"_a,
              "ringbuffer"_a, "thread_affinity"_a = -1, "use_gdrcopy"_a = false,
              "monitor"_a = pybind11::none(),
@@ -146,7 +146,7 @@ pybind11::module register_module(pybind11::module &parent)
              "    The total number of frequency channels out of the F-Engine.\n"
              "n_channels_per_stream: int\n"
              "    The number of frequency channels contained in the stream.\n"
-             "n_samples_per_channel: int\n"
+             "n_spectra_per_heap_in: int\n"
              "    The number of time samples received per frequency channel.\n"
              "n_pols: int\n"
              "    The number of pols per antenna. Expected to always be 2 at the moment.\n"
