@@ -595,7 +595,7 @@ class XBEngine(DeviceServer):
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
-        self.send_stream: katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend = katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend(
+        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
@@ -603,9 +603,17 @@ class XBEngine(DeviceServer):
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
-            endpoint=(dest_ip, dest_port),
-            interface_address=interface_ip,
-            thread_affinity=thread_affinity,
+            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.UdpIbvStream(
+                spead2.ThreadPool(),
+                stream_config,
+                spead2.send.UdpIbvConfig(
+                    endpoints=[(dest_ip, dest_port)],
+                    interface_address=interface_ip,
+                    ttl=4,
+                    comp_vector=thread_affinity,
+                    memory_regions=list(buffers),
+                ),
+            ),
         )
 
     def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
@@ -622,11 +630,12 @@ class XBEngine(DeviceServer):
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
         self.tx_transport_added = True
-        # For the inproc transport this value is set very low as the dump rate does affect performanc for an inproc
-        # queue and a high dump rate just makes the unit tests take very long to run.
+        # For the inproc transport this value is set very low as the dump rate
+        # does affect performance for an inproc queue and a high dump rate just
+        # makes the unit tests take very long to run.
         self.dump_interval_s = 0
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend(
+        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
@@ -634,7 +643,9 @@ class XBEngine(DeviceServer):
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
-            queue=queue,
+            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
+                spead2.ThreadPool(), [queue], stream_config
+            ),
         )
 
     async def _receiver_loop(self):
