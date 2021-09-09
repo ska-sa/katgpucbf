@@ -420,12 +420,12 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
             )
 
             assert (
-                ig_recv["channel offset"].value
+                ig_recv["frequency"].value
                 == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
             ), (
                 "Output channel offset not correct. "
                 f"Expected: {n_channels_per_stream * 4}, "
-                f"actual: {ig_recv['channel offset'].value}."
+                f"actual: {ig_recv['frequency'].value}."
             )
 
             # 8.2.4 Send the received data to the C verification function and assert that this function return is

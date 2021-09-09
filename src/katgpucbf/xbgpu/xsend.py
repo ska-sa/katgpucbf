@@ -298,7 +298,7 @@ class XSend:
             provided).
         """
         self.item_group["timestamp"].value = timestamp
-        self.item_group["channel offset"].value = self.channel_offset
+        self.item_group["frequency"].value = self.channel_offset
         self.item_group["xeng_raw"].value = buffer_wrapper.buffer
 
         heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
