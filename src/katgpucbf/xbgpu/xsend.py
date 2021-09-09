@@ -257,7 +257,7 @@ class XSend:
         self.item_group = spead2.send.ItemGroup(flavour=self.default_spead_flavour)
         self.item_group.add_item(
             XSend.CHANNEL_OFFSET,
-            "channel offset",
+            "frequency",  # Misleading name, but it's what the ICD specifies
             "Value of first channel in collections stored here.",
             shape=[],
             format=[("u", self.default_spead_flavour.heap_address_bits)],
