@@ -362,8 +362,8 @@ drastically reduces data rates. A heap is sent out on the order of seconds, not
 milliseconds, and as such no chunking is required to manage these rates.
 
 The :mod:`~katgpucbf.xbgpu.xsend` module defines a number of classes to deal
-with transmission. The main class for this classes is called the
-:class:`~katgpucbf.xbgpu.xsend.XSend` class.
+with transmission. The main class for this module is
+:class:`~katgpucbf.xbgpu.xsend.XSend`.
 
 The image below gives conceptual overview of how the katxbgpu sender code is
 implemented:

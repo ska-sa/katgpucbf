@@ -13,7 +13,7 @@ https://docs.google.com/drawings/d/1d3CMrMl8wTQfVlyX5NXztMGGHhak-37mt4IoK7Idc_I/
 
 The XSend class creates its own buffers and data in those buffers will be
 encapsulated into SPEAD heaps and sent onto the network. The user can request
-the buffers from the object, populate them and then give them back to the class
+the buffers from the object, populate them and then give them back to the object
 for transmission. The user must not give other buffers to the class as while
 this will work, it will be much slower. The memory regions of the
 XSend-generated buffers have been registered with ibverbs to enable zero copy
