@@ -81,6 +81,7 @@ pipeline {
     stage('Check pre-commit hooks have been applied') {
       steps {
         sh 'pre-commit install'
+        sh 'git checkout -b temp' // If we are on the main branch, pre-commit will fail the no-commit-to-branch check.
         sh 'pre-commit run --all-files'
       }
     }
