@@ -19,10 +19,10 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
+from ..monitor import Monitor
 from . import recv, ringbuffer, send
 from .compute import Compute
 from .delay import AbstractDelayModel
-from .monitor import Monitor
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +290,7 @@ class OutItem(EventItem):
 class Processor:
     """Controls the bulk of the moving of data around the computer.
 
-    The Processor creates input and output :class:`~katgpucbf.fgpu.monitor.Queue`
+    The Processor creates input and output :class:`~katgpucbf.monitor.Queue`
     objects as well as a few :class:`InItem` and :class:`OutItem` objects to use
     on them. The actual Items (and the memory associated) are then continuously
     re-used because the allocation of memory is expensive. The data buffers are

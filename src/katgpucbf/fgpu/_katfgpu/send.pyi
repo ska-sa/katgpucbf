@@ -2,7 +2,7 @@ from typing import Any, Optional, Sequence, Tuple
 
 from katsdpsigproc.accel import DeviceArray
 
-from .monitor import Monitor
+from ..monitor import Monitor
 
 class Chunk:
     timestamp: int

@@ -170,7 +170,7 @@ pybind11::module register_module(pybind11::module &parent)
              "use_gdrcopy: bool\n"
              "    Set to true when transferring data directly from the NIC to the GPU using gpudirect. See katxbgpu "
              "documentation for more information on how to do this.\n"
-             "monitor: katxbgpu.monitor.Monitor\n"
+             "monitor: katgpucbf.monitor.Monitor\n"
              "    Monitor object for collecting metrics.\n"
              "\n")
         .def_property_readonly("ringbuffer",
