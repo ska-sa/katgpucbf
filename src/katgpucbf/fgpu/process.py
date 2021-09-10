@@ -20,10 +20,10 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
+from ..monitor import Monitor
 from . import recv, ringbuffer, send
 from .compute import Compute
 from .delay import AbstractDelayModel
-from .monitor import Monitor
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +278,7 @@ class OutItem(EventItem):
     @property
     def capacity(self) -> int:  # noqa: D401
         """Number of spectra stored in memory for each polarisation."""
-        # PostProc's __init__ method gives this as (spectra // acc_len)*(acc_len), so
+        # PostProc's __init__ method gives this as (spectra // spectra_per_heap)*(spectra_per_heap), so
         # basically, the number of spectra.
         return self.spectra.shape[0] * self.spectra.shape[2]
 
@@ -291,7 +291,7 @@ class OutItem(EventItem):
 class Processor:
     """Controls the bulk of the moving of data around the computer.
 
-    The Processor creates input and output :class:`~katgpucbf.fgpu.monitor.Queue`
+    The Processor creates input and output :class:`~katgpucbf.monitor.Queue`
     objects as well as a few :class:`InItem` and :class:`OutItem` objects to use
     on them. The actual Items (and the memory associated) are then continuously
     re-used because the allocation of memory is expensive. The data buffers are
@@ -386,9 +386,9 @@ class Processor:
         return self.compute.template.taps
 
     @property
-    def acc_len(self) -> int:  # noqa: D401
+    def spectra_per_heap(self) -> int:  # noqa: D401
         """The number of spectra which will be transmitted per output heap."""
-        return self.compute.acc_len
+        return self.compute.spectra_per_heap
 
     @property
     def sample_bits(self) -> int:  # noqa: D401
@@ -452,8 +452,8 @@ class Processor:
         """
         # Round down to a multiple of accs (don't send heap with partial
         # data).
-        accs = self._out_item.n_spectra // self.acc_len
-        self._out_item.n_spectra = accs * self.acc_len
+        accs = self._out_item.n_spectra // self.spectra_per_heap
+        self._out_item.n_spectra = accs * self.spectra_per_heap
         if self._out_item.n_spectra > 0:
             # TODO: only need to copy the relevant region, and can limit
             # postprocessing to the relevant range (the FFT size is baked into
@@ -534,7 +534,7 @@ class Processor:
             timestamp = self._out_item.end_timestamp
             orig_timestamp, _fine_delay, _phase = self.delay_model.invert(timestamp)
             if orig_timestamp < self._in_items[0].timestamp:
-                align = self.acc_len * self.spectra_samples
+                align = self.spectra_per_heap * self.spectra_samples
                 timestamp = max(timestamp, self._in_items[0].timestamp)
                 timestamp = accel.roundup(timestamp, align)
                 # TODO: add a helper to the delay model to accelerate this?
@@ -715,9 +715,9 @@ class Processor:
                 out_item.spectra.get_async(self._download_queue, chunk.base)
                 events = [self._download_queue.enqueue_marker()]
             chunk.timestamp = out_item.timestamp
-            chunk.acc_len = self.acc_len
+            chunk.spectra_per_heap = self.spectra_per_heap
             chunk.channels = self.channels
-            chunk.frames = out_item.n_spectra // self.acc_len
+            chunk.frames = out_item.n_spectra // self.spectra_per_heap
             chunk.pols = self.pols
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)

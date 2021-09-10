@@ -15,7 +15,7 @@ from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .monitor import Monitor
+from ..monitor import Monitor
 
 logger = logging.getLogger(__name__)
 TIMESTAMP_ID = 0x1600

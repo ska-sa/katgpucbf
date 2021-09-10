@@ -18,8 +18,8 @@ from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import __version__
+from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
-from .monitor import FileMonitor, Monitor, NullMonitor
 
 _T = TypeVar("_T")
 N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
@@ -166,7 +166,11 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")
     parser.add_argument(
-        "--acc-len", type=int, default=256, metavar="SPECTRA", help="Spectra in each output heap [%(default)s]"
+        "--spectra-per-heap",
+        type=int,
+        default=256,
+        metavar="SPECTRA",
+        help="Spectra in each output heap [%(default)s]",
     )
     parser.add_argument(
         "--chunk-samples",
@@ -255,7 +259,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
     else:
         monitor = NullMonitor()
 
-    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.acc_len)
+    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.spectra_per_heap)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -279,7 +283,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         feng_id=args.feng_id,
         num_ants=args.array_size,
         spectra=chunk_samples // (2 * args.channels),
-        acc_len=args.acc_len,
+        spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
         taps=args.taps,
         quant_gain=args.quant_gain,

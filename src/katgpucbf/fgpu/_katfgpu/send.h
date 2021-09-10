@@ -31,9 +31,9 @@ struct chunk
 {
     std::int64_t timestamp;              ///< Timestamp of first frame
     int channels;
-    int acc_len;
+    int spectra_per_heap;
     int pols;
-    int frames;                          ///< Not ethernet frames, but n_spectra / acc_len, i.e. num of sets of heaps
+    int frames;                          ///< Not ethernet frames, but n_spectra / spectra_per_heap, i.e. num of sets of heaps
     boost::asio::const_buffer storage;   ///< Storage for data
     boost::system::error_code error;     ///< First error from sending the data
 

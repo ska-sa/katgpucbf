@@ -51,7 +51,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
-    parser.add_argument("--katgpucbf-image", help="Full path to katgpucbf image to use (overrides --image-tag)")
+    parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
     )
@@ -72,8 +72,12 @@ def generate_config(args: argparse.Namespace) -> dict:
     }
     if args.image_tag is not None:
         config["config"]["image_tag"] = args.image_tag
-    if args.katgpucbf_image is not None:
-        config["config"]["image_overrides"] = {"katgpucbf": args.katgpucbf_image}
+    image_overrides = {}
+    for override in args.image_override:
+        name, image = override.split(":", 1)
+        image_overrides[name] = image
+    if image_overrides:
+        config["config"]["image_overrides"] = image_overrides
     for ant_index in range(args.antennas):
         number = 800 + ant_index  # Avoid confusion with real antennas
         for pol in ["v", "h"]:

@@ -5,7 +5,7 @@ from katsdpsigproc import accel
 from katgpucbf.fgpu import postproc
 
 
-def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, fringe_phase, quant_gain):
+def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay, fringe_phase, quant_gain):
     """Calculate postproc steps on the host CPU for a single polarisation."""
     # Throw out last channel (Nyquist frequency)
     data = data[:, :channels]
@@ -23,14 +23,14 @@ def postproc_host_pol(data, spectra, acc_len, channels, fine_delay, fringe_phase
     corrected = np.minimum(np.maximum(corrected, -128), 127)
     corrected = corrected.astype(np.int8)
     # Partial transpose
-    reshaped = corrected.reshape(-1, acc_len, channels, 2)
+    reshaped = corrected.reshape(-1, spectra_per_heap_out, channels, 2)
     return reshaped.transpose(0, 2, 1, 3)
 
 
-def postproc_host(in0, in1, channels, acc_len, spectra, fine_delay, fringe_phase, quant_gain):
+def postproc_host(in0, in1, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain):
     """Aggregate both polarisation's postproc on the host CPU."""
-    out0 = postproc_host_pol(in0, channels, acc_len, spectra, fine_delay, fringe_phase, quant_gain)
-    out1 = postproc_host_pol(in1, channels, acc_len, spectra, fine_delay, fringe_phase, quant_gain)
+    out0 = postproc_host_pol(in0, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain)
+    out1 = postproc_host_pol(in1, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain)
     return np.stack([out0, out1], axis=3)
 
 
@@ -39,7 +39,7 @@ def test_postproc(repeat=1):
     ctx = accel.create_some_context(interactive=False)
     queue = ctx.create_command_queue()
     channels = 4096
-    acc_len = 256
+    spectra_per_heap_out = 256
     spectra = 512
     quant_gain = 0.1
     # TODO: make properly complex
@@ -47,10 +47,10 @@ def test_postproc(repeat=1):
     h_in1 = np.random.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
     h_fine_delay = np.random.uniform(0.0, 2.0, (spectra,)).astype(np.float32)
     h_phase = np.random.uniform(0.0, np.pi / 2, (spectra,)).astype(np.float32)
-    expected = postproc_host(h_in0, h_in1, spectra, acc_len, channels, h_fine_delay, h_phase, quant_gain)
+    expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, quant_gain)
 
     template = postproc.PostprocTemplate(ctx)
-    fn = template.instantiate(queue, spectra, acc_len, channels)
+    fn = template.instantiate(queue, spectra, spectra_per_heap_out, channels)
     fn.ensure_all_bound()
     fn.buffer("in0").set(queue, h_in0)
     fn.buffer("in1").set(queue, h_in1)

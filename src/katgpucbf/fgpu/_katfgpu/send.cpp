@@ -111,15 +111,15 @@ void sender::send_chunk(std::unique_ptr<chunk> &&c)
     const spead2::flavour flavour(spead2::maximum_version, 64, 48);
     const std::size_t n_heaps = n_substreams * c->frames;
     const int channels_per_substream = c->channels / n_substreams;
-    const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->acc_len * c->pols * 2; // TODO either a constexpr or #define to make 2 explicitly "complexity"
+    const std::size_t frame_bytes = sizeof(real_t) * c->channels * c->spectra_per_heap * c->pols * 2; // TODO either a constexpr or #define to make 2 explicitly "complexity"
     const std::size_t heap_bytes = frame_bytes / n_substreams;
-    const std::int64_t timestamp_step = c->acc_len * c->channels * 2;
+    const std::int64_t timestamp_step = c->spectra_per_heap * c->channels * 2;
 
     if (boost::asio::buffer_size(c->storage) < c->frames * frame_bytes)
         throw std::invalid_argument("send_chunk storage is too small");
 
     c->error = boost::system::error_code();
-    if (c->frames <= 0 || c->channels <= 0 || c->acc_len <= 0)
+    if (c->frames <= 0 || c->channels <= 0 || c->spectra_per_heap <= 0)
     {
         // Chunk contains no data, so send it directly to the free ring
         push_free_ring(std::move(c));

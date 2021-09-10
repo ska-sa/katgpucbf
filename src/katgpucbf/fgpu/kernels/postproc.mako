@@ -38,10 +38,10 @@ DEVICE_FN char quant(float value, float quant_gain)
  * - Each thread handles vtx channels from vty spectra.
  * - Thread-blocks are block x block x 1.
  * - A set of thread-blocks with the same z coordinate handles transposition of
- *   acc_len complete spectra.
+ *   spectra_per_heap complete spectra.
  *
  * A note on stride length:
- * `out` is a multi-dimensional array of shape (heaps x channels x acc_len). If
+ * `out` is a multi-dimensional array of shape (heaps x channels x spectra_per_heap). If
  * it's contiguous then the strides will coincide with these dimensions, but
  * katsdpsigproc may have added some padding to satisfy alignment requirements.
  * At the moment, this isn't the case, but this code aims for robustness against
@@ -56,9 +56,9 @@ KERNEL void postproc(
     int out_stride_z,                         // Output stride between heaps.
     int out_stride,                           // Output stride between channels within a heap.
     int in_stride,                            // Input stride between successive spectra.
-    int acc_len,                              // Number of spectra per output heap.
+    int spectra_per_heap,                     // Number of spectra per output heap.
     float delay_scale,                        // Scale factor for delay. 1/channels in magnitude.
-    float quant_gain)                        // Scale factor for quantiser.
+    float quant_gain)                         // Scale factor for quantiser.
 {
     LOCAL_DECL scratch_t scratch;
     transpose_coords coords;
@@ -69,7 +69,7 @@ KERNEL void postproc(
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
         // Which spectrum within the accumuation.
-        int spectrum = z * acc_len + ${r};
+        int spectrum = z * spectra_per_heap + ${r};
         // Which channel within the spectrum.
         int addr = spectrum * in_stride + ${c};
         // Load the data. `float2` type handles both real and imag.

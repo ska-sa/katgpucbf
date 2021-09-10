@@ -11,10 +11,10 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import __version__
+from ..monitor import Monitor
 from . import recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
-from .monitor import Monitor
 from .process import Processor
 
 
@@ -127,7 +127,7 @@ class Engine(aiokatcp.DeviceServer):
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
-    acc_len
+    spectra_per_heap
         Number of spectra in each output heap.
     channels
         Number of output channels to produce.
@@ -179,7 +179,7 @@ class Engine(aiokatcp.DeviceServer):
         feng_id: int,
         num_ants: int,
         spectra: int,
-        acc_len: int,
+        spectra_per_heap: int,
         channels: int,
         taps: int,
         quant_gain: float,
@@ -282,7 +282,7 @@ class Engine(aiokatcp.DeviceServer):
         template = ComputeTemplate(context, taps)
         chunk_samples = spectra * channels * 2
         extra_samples = taps * channels * 2
-        compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, acc_len, channels)
+        compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
         chunk_bytes = chunk_samples * compute.sample_bits // 8
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
@@ -333,7 +333,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
         send_chunks = []
-        send_shape = (spectra // acc_len, channels, acc_len, pols, 2)
+        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, pols, 2)
         send_dtype = np.dtype(np.int8)
         for _ in range(4):
             if use_peerdirect:
@@ -363,7 +363,7 @@ class Engine(aiokatcp.DeviceServer):
             dst_ibv,
             dst_packet_payload + 96,  # TODO make this into some kind of parameter. A naked 96 makes me nervous.
             rate,
-            len(send_chunks) * spectra // acc_len * len(dst),
+            len(send_chunks) * spectra // spectra_per_heap * len(dst),
             monitor,
         )
         monitor.event_qsize("send_free_ringbuffer", 0, len(send_chunks))

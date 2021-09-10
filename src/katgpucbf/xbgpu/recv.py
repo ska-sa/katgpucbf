@@ -23,7 +23,7 @@ class Chunk(spead2.recv.Chunk):
 def make_stream(
     n_ants: int,
     n_channels_per_stream: int,
-    n_samples_per_channel: int,
+    n_spectra_per_heap: int,
     n_pols: int,
     sample_bits: int,
     timestamp_step: int,
@@ -42,7 +42,7 @@ def make_stream(
         The total number of frequency channels out of the F-Engine.
     n_channels_per_stream
         The number of frequency channels contained in the stream.
-    n_samples_per_channel
+    n_spectra_per_heap
         The number of time samples received per frequency channel.
     n_pols
         The number of pols per antenna. Expected to always be 2 at the moment.
@@ -67,7 +67,7 @@ def make_stream(
         CPU Thread that this receiver will use for processing.
     """
     # * 2 because samples are complex
-    heap_bytes = n_channels_per_stream * n_samples_per_channel * n_pols * 2 * sample_bits // 8
+    heap_bytes = n_channels_per_stream * n_spectra_per_heap * n_pols * 2 * sample_bits // 8
 
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place_impl(data_ptr, data_size):
