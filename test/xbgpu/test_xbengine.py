@@ -34,7 +34,7 @@ def create_heaps(
     batch_index: int,
     n_ants: int,
     n_channels_per_stream: int,
-    n_samples_per_channel: int,
+    n_spectra_per_heap: int,
     n_pols: int,
     ig: spead2.send.ItemGroup,
 ):
@@ -72,7 +72,7 @@ def create_heaps(
         The number of antennas that data will be received from. A seperate heap will be generated per antenna.
     n_channels_per_stream: int
         The number of frequency channels contained in a heap.
-    n_samples_per_channel: int
+    n_spectra_per_heap: int
         The number of time samples per frequency channel.
     n_pols: int
         The number of pols per antenna. Expected to always be 2 at the moment.
@@ -89,7 +89,7 @@ def create_heaps(
     # 1. Define heap shapes that will be needed to generate simulated data.
     heap_shape = (
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols,
         complexity,
     )
@@ -98,7 +98,7 @@ def create_heaps(
     # the simulated data. We correct the shape before sending.
     modified_heap_shape = (
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols // 2,
         complexity // 2,
     )
@@ -209,7 +209,7 @@ def cmult_and_scale(a, b, c):
 
 
 @njit
-def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_samples_per_channel, n_pols=2):
+def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_spectra_per_heap, n_pols=2):
     """Calculate the expected correlator output.
 
     This doesn't do a full correlator. It calculates the results according to
@@ -233,21 +233,21 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
-                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_samples_per_channel)
-                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_samples_per_channel)
+                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
+                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
+                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
+                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
 
     return output_array
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_samples_per_channel",
+    "num_ants, num_channels, num_spectra_per_heap",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_samples_per_channel,
+    test_parameters.num_spectra_per_heap,
 )
-def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
+def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
     """
     Unit tests for the xbengine.py module.
 
@@ -276,7 +276,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     while n_engines < n_ants * 4:
         n_engines *= 2
     n_channels_per_stream = num_channels // n_engines
-    n_samples_per_channel = num_samples_per_channel
+    n_spectra_per_heap = num_spectra_per_heap
     n_pols = 2
     sample_bits = 8
     heaps_per_fengine_per_chunk = 2
@@ -285,10 +285,10 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
     n_accumulations = 3
 
     max_packet_size = (
-        n_samples_per_channel * n_pols * complexity * sample_bits // 8 + 96
+        n_spectra_per_heap * n_pols * complexity * sample_bits // 8 + 96
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
-    heap_shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
-    timestamp_step = n_channels_total * 2 * n_samples_per_channel
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, complexity)
+    timestamp_step = n_channels_total * 2 * n_spectra_per_heap
 
     # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
@@ -351,13 +351,13 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         n_ants=n_ants,
         n_channels_total=n_channels_total,
         n_channels_per_stream=n_channels_per_stream,
-        n_samples_per_channel=n_samples_per_channel,
+        n_spectra_per_heap=n_spectra_per_heap,
         n_pols=n_pols,
         sample_bits=sample_bits,
         heap_accumulation_threshold=heap_accumulation_threshold,
         channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
-        rx_thread_affinity=0,
-        batches_per_chunk=heaps_per_fengine_per_chunk,
+        src_affinity=0,
+        chunk_spectra=heaps_per_fengine_per_chunk,
         rx_reorder_tol=rx_reorder_tol,
         monitor=monitor,
     )
@@ -372,9 +372,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
         # as the accumulations are aligned to integer multiples of heap_accumulation_threshold * timestamp_step
         batch_index = i + (heap_accumulation_threshold - 1)
         timestamp = batch_index * timestamp_step
-        heaps = create_heaps(
-            timestamp, batch_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig_send
-        )
+        heaps = create_heaps(timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig_send)
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # 7. Add transports to xbengine.
@@ -436,7 +434,7 @@ def test_xbengine(event_loop, num_ants, num_samples_per_channel, num_channels):
                 num_batches_in_current_accumulation,
                 n_channels_per_stream,
                 n_ants,
-                n_samples_per_channel,
+                n_spectra_per_heap,
             )
 
             # We reshape this to match the current output of the X-engine. The

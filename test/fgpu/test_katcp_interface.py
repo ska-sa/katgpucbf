@@ -11,6 +11,7 @@ class TestKatcpRequests:
     """Unit tests for the Engine's KATCP requests."""
 
     engine_arglist = [
+        "--katcp-host=127.0.0.1",
         "--katcp-port=0",
         "--src-interface=lo",
         "--dst-interface=lo",
