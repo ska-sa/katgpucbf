@@ -329,11 +329,6 @@ class XBEngine(DeviceServer):
         self._tx_item_queue: asyncio.Queue[QueueItem]
         self._tx_free_item_queue: asyncio.Queue[QueueItem]
 
-        # 1.6 Objects for sending and receiving data
-        # Ringbuffer passed to stream where all completed chunks wait.
-        self.ringbuffer: spead2.recv.asyncio.ChunkRingbuffer
-        self.receiver_stream: spead2.recv.ChunkRingStream
-
         # 1.7 Command queues for syncing different operations on the GPU - a
         # command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
