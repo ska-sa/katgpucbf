@@ -51,7 +51,7 @@ complexity = 2
 def create_test_objects(
     n_ants: int,
     n_channels_per_stream: int,
-    n_samples_per_channel: int,
+    n_spectra_per_heap: int,
     n_pols: int,
     sample_bits: int,
     heaps_per_fengine_per_chunk: int,
@@ -69,7 +69,7 @@ def create_test_objects(
         The number of antennas that data will be received from
     n_channels_per_stream: int
         The number of frequency channels contained in the stream.
-    n_samples_per_channel: int
+    n_spectra_per_heap: int
         The number of time samples received per frequency channel.
     n_pols: int
         The number of pols per antenna. Expected to always be 2 at the moment.
@@ -105,9 +105,9 @@ def create_test_objects(
     """
     # 1. Calculate important parameters.
     max_packet_size = (
-        n_samples_per_channel * n_pols * complexity * sample_bits // 8 + 96
+        n_spectra_per_heap * n_pols * complexity * sample_bits // 8 + 96
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
-    heap_shape = (n_channels_per_stream, n_samples_per_channel, n_pols, complexity)
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, complexity)
 
     # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
@@ -164,7 +164,7 @@ def create_test_objects(
     receiver_stream = recv.Stream(
         n_ants,
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols,
         sample_bits,
         timestamp_step,
@@ -198,7 +198,7 @@ def create_heaps(
     id: int,
     n_ants: int,
     n_channels_per_stream: int,
-    n_samples_per_channel: int,
+    n_spectra_per_heap: int,
     n_pols: int,
     ig: spead2.send.ItemGroup,
 ):
@@ -223,7 +223,7 @@ def create_heaps(
         The number of antennas that data will be received from. A seperate heap will be generated per antenna.
     n_channels_per_stream: int
         The number of frequency channels contained in a heap.
-    n_samples_per_channel: int
+    n_spectra_per_heap: int
         The number of time samples per frequency channel.
     n_pols: int
         The number of pols per antenna. Expected to always be 2 at the moment.
@@ -241,7 +241,7 @@ def create_heaps(
     # the two 8-bit complex samples
     modified_heap_shape = (
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols,
         complexity // 2,
     )
@@ -278,12 +278,12 @@ def create_heaps(
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_samples_per_channel",
+    "num_ants, num_channels, num_spectra_per_heap",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_samples_per_channel,
+    test_parameters.num_spectra_per_heap,
 )
-def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels):
+def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
     """Tests the xbgpu SPEAD2 reciever.
 
     This test is run using simulated packets that are passed to xbgpu receiver as a ByteArray. This test is useful
@@ -311,7 +311,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         by the pytest-asyncio module.
     num_ants: int
         The number of antennas that data will be received from.
-    num_samples_per_channel: int
+    num_spectra_per_heap: int
         The number of time samples per frequency channel.
     num_channels: int
         The number of frequency channels out of the FFT. NB: This is not the number of FFT channels per stream. The
@@ -325,7 +325,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
     # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
     n_channels_per_stream = num_channels // n_ants // 4
-    n_samples_per_channel = num_samples_per_channel
+    n_spectra_per_heap = num_spectra_per_heap
     n_pols = 2
     sample_bits = 8
     heaps_per_fengine_per_chunk = 8
@@ -333,7 +333,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
 
     # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier
     # transform.
-    timestamp_step = n_channels_total * 2 * n_samples_per_channel
+    timestamp_step = n_channels_total * 2 * n_spectra_per_heap
 
     total_chunks = 10
     n_heaps_in_flight_per_antenna = heaps_per_fengine_per_chunk * total_chunks
@@ -342,7 +342,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     source_stream, ig, receiver_stream, async_ringbuffer = create_test_objects(
         n_ants,
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols,
         sample_bits,
         heaps_per_fengine_per_chunk,
@@ -358,7 +358,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     heap_index = 0
     for _ in range(5):
         heaps = create_heaps(
-            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
         )
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
@@ -372,7 +372,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         (heap_index + 1),
         n_ants,
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols,
         ig,
     )
@@ -380,7 +380,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
 
     # 3.2.2 Transmit the first heap second
     heaps = create_heaps(
-        timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
     )
     source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
@@ -389,7 +389,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 3.2.3 Transmit the rest of the heaps in chunk 6 in order
     for _ in range(heaps_per_fengine_per_chunk - 2):
         heaps = create_heaps(
-            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
         )
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
@@ -399,7 +399,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 3.3.1 Transmit all but the last collection of heaps of chunk 7
     for _ in range(heaps_per_fengine_per_chunk - 1):
         heaps = create_heaps(
-            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
         )
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
@@ -410,7 +410,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
         (heap_index + 1),
         n_ants,
         n_channels_per_stream,
-        n_samples_per_channel,
+        n_spectra_per_heap,
         n_pols,
         ig,
     )
@@ -418,7 +418,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
 
     # 3.3.3 Transmit the last collection of heaps of chunk 7
     heaps = create_heaps(
-        timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+        timestamp_step * (heap_index), (heap_index), n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
     )
     source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
@@ -427,7 +427,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 3.3.4 Transmit the rest of the heaps in chunk 8 in order
     for _ in range(heaps_per_fengine_per_chunk - 2):
         heaps = create_heaps(
-            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
         )
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
@@ -435,7 +435,7 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
     # 3.4 Transmit the remaining chunks
     for _ in range(heap_index, n_heaps_in_flight_per_antenna):
         heaps = create_heaps(
-            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_samples_per_channel, n_pols, ig
+            timestamp_step * heap_index, heap_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig
         )
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
@@ -483,9 +483,9 @@ def test_recv_simple(event_loop, num_ants, num_samples_per_channel, num_channels
                         np.uint8(chunk_index * heaps_per_fengine_per_chunk + heap_index) << 8
                     ) + np.uint8(ant_index)
                     fengine_start_index = (
-                        (heap_index * n_ants + ant_index) * n_channels_per_stream * n_samples_per_channel * n_pols
+                        (heap_index * n_ants + ant_index) * n_channels_per_stream * n_spectra_per_heap * n_pols
                     )
-                    fengine_stop_index = fengine_start_index + n_channels_per_stream * n_samples_per_channel * n_pols
+                    fengine_stop_index = fengine_start_index + n_channels_per_stream * n_spectra_per_heap * n_pols
                     assert np.all(chunk.base[fengine_start_index:fengine_stop_index] == expected_sample_value), (
                         f"Chunk {chunk_index}, heap {heap_index}, ant {ant_index}. "
                         f"Expected all values to equal: {hex(expected_sample_value)}"

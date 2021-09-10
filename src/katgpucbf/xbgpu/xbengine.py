@@ -166,7 +166,7 @@ class XBEngine(DeviceServer):
         The number of frequency channels contained per stream.
     n_pols
         The number of pols per antenna. Expected to always be 2.
-    n_samples_per_channel
+    n_spectra_per_heap
         The number of time samples received per frequency channel.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
@@ -175,9 +175,9 @@ class XBEngine(DeviceServer):
     channel_offset_value
         The index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value
         in the XB-Engine output heaps for spectrum reassembly by the downstream receiver.
-    rx_thread_affinity
+    src_affinity
         Specific CPU core to assign the RX stream processing thread to.
-    batches_per_chunk
+    chunk_spectra
         A batch is a collection of heaps from different antennas with the same timestamp. This parameter specifies
         the number of consecutive batches to store in the same chunk. The higher this value is, the more GPU and
         system RAM is allocated, the lower this value is, the more work the python processing thread is required to
@@ -204,13 +204,13 @@ class XBEngine(DeviceServer):
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
-        n_samples_per_channel: int,
+        n_spectra_per_heap: int,
         n_pols: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
-        rx_thread_affinity: int,
-        batches_per_chunk: int,  # Used for GPU memory tuning
+        src_affinity: int,
+        chunk_spectra: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
         monitor: Monitor,
     ):
@@ -296,7 +296,7 @@ class XBEngine(DeviceServer):
         self.n_ants: int
         self.n_channels_total: int
         self.n_channels_per_stream: int
-        self.n_samples_per_channel: int
+        self.n_spectra_per_heap: int
         self.n_pols: int
         self.sample_bits: int
 
@@ -307,7 +307,7 @@ class XBEngine(DeviceServer):
         self.dump_interval_s: float  # Number of seconds between output heaps.
 
         # 1.3 Engine Parameters - Parameters not used in the array but needed for this engine
-        self.batches_per_chunk: int  # Sets the number of batches of heaps to store per chunk.
+        self.chunk_spectra: int  # Sets the number of batches of heaps to store per chunk.
         self.max_active_chunks: int
         # Used in the heap to indicate the first channel in the sequence of channels in the stream
         self.channel_offset_value: int
@@ -359,7 +359,7 @@ class XBEngine(DeviceServer):
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
-        self.n_samples_per_channel = n_samples_per_channel
+        self.n_spectra_per_heap = n_spectra_per_heap
         self.n_pols = n_pols
         self.sample_bits = sample_bits
         complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
@@ -373,17 +373,17 @@ class XBEngine(DeviceServer):
         # pass it as a seperate argument to the reciever for cases where the
         # n_channels_per_stream changes across streams (likely for
         # non-power-of- two array sizes).
-        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_samples_per_channel
+        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
         # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_samples_per_channel * self.n_pols * complexity
+            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * self.n_pols * complexity
         )
         # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # 2.4 Assign engine configuration parameters
-        self.batches_per_chunk = batches_per_chunk
-        self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.batches_per_chunk) + 1
+        self.chunk_spectra = chunk_spectra
+        self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
         self.channel_offset_value = channel_offset_value
 
         # 2.5 Set runtime flags to their initial states
@@ -404,14 +404,14 @@ class XBEngine(DeviceServer):
         self.receiver_stream = recv.Stream(
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
-            n_samples_per_channel=self.n_samples_per_channel,
+            n_spectra_per_heap=self.n_spectra_per_heap,
             n_pols=self.n_pols,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
-            heaps_per_fengine_per_chunk=self.batches_per_chunk,
+            heaps_per_fengine_per_chunk=self.chunk_spectra,
             max_active_chunks=self.max_active_chunks,
             ringbuffer=self.ringbuffer,
-            thread_affinity=rx_thread_affinity,
+            thread_affinity=src_affinity,
             use_gdrcopy=False,
             monitor=self.monitor,
         )
@@ -430,7 +430,7 @@ class XBEngine(DeviceServer):
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
-            n_samples_per_channel=self.n_samples_per_channel,
+            n_spectra_per_heap=self.n_spectra_per_heap,
         )
         self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
 
@@ -438,8 +438,8 @@ class XBEngine(DeviceServer):
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
-            n_samples_per_channel=self.n_samples_per_channel,
-            n_batches=self.batches_per_chunk,
+            n_spectra_per_heap=self.n_spectra_per_heap,
+            n_batches=self.chunk_spectra,
         )
         self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorder = (
             reorder_template.instantiate(self._proc_command_queue)
@@ -502,7 +502,7 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(buf)
             self.receiver_stream.add_chunk(chunk)
 
-    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector_affinity: int):
+    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):
         """
         Add the ibv_udp transport to the receiver.
 
@@ -519,15 +519,15 @@ class XBEngine(DeviceServer):
             Port of source data
         interface_ip: str
             IP address of interface to listen for data on.
-        comp_vector_affinity: int
-            Received packets will generate interrupts from the NIC. These interrupts can be assigned to a specific CPU
-            core. This parameter determines which core to assign these interrupts to.
+        comp_vector: int
+            Received packets will generate interrupts from the NIC. This value selects an interrupt vector,
+            and the OS controls the mapping from interrupt vector to CPU core.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
         self.receiver_stream.add_udp_ibv_reader(
-            [(src_ip, src_port)], interface_ip, buffer_size=10000000, comp_vector=comp_vector_affinity
+            [(src_ip, src_port)], interface_ip, buffer_size=10000000, comp_vector=comp_vector
         )
 
     def add_buffer_receiver_transport(self, buffer: bytes):
@@ -752,7 +752,7 @@ class XBEngine(DeviceServer):
             # 3.2 Perform correlation on reordered data. The correlation kernel does not have the
             # concept of a batch at this stage, so the kernel needs to be run on each different
             # batch in the chunk.
-            for i in range(self.batches_per_chunk):
+            for i in range(self.chunk_spectra):
                 # 3.2.1 Slice the buffer of reordered data to only select a specific batch. Then run the kernel on this
                 # buffer.
                 buffer_slice = katsdpsigproc.accel.DeviceArray(

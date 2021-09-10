@@ -14,12 +14,12 @@ TPB = 16  # corresponding to times_per_block in the kernel.
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_samples_per_channel",
+    "num_ants, num_channels, num_spectra_per_heap",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_samples_per_channel,
+    test_parameters.num_spectra_per_heap,
 )
-def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_channel):
+def test_precorr_reorder_parametrised(num_ants, num_channels, num_spectra_per_heap):
     """
     Parametrised unit test of the Pre-correlation Reorder kernel.
 
@@ -36,7 +36,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
           total. The number of channels per stream is calculated from this
           value.
 
-    num_samples_per_channel: int
+    num_spectra_per_heap: int
         The number of time samples per frequency channel.
     """
     # This integer division is so that when num_ants % num_channels !=0 then the remainder will be dropped.
@@ -54,7 +54,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
         ctx,
         n_ants=num_ants,
         n_channels=n_channels_per_stream,
-        n_samples_per_channel=num_samples_per_channel,
+        n_spectra_per_heap=num_spectra_per_heap,
         n_batches=n_batches,
     )
     pre_correlation_reorder = template.instantiate(queue)
@@ -85,7 +85,7 @@ def test_precorr_reorder_parametrised(num_ants, num_channels, num_samples_per_ch
     # Numpy's reshape and transpose work together to move the data around the
     # same way as the GPU-reorder does.
     reordered_reference_array_host[:] = buf_samples_host.reshape(
-        n_batches, num_ants, n_channels_per_stream, num_samples_per_channel // TPB, TPB, POLS, CPLX
+        n_batches, num_ants, n_channels_per_stream, num_spectra_per_heap // TPB, TPB, POLS, CPLX
     ).transpose(0, 2, 3, 1, 5, 4, 6)
 
     np.testing.assert_equal(buf_reordered_host, reordered_reference_array_host)
