@@ -19,30 +19,12 @@ pipeline {
        */
       image 'nvidia/cuda:11.4.1-devel-ubuntu20.04'
 
-      /* A number of arguments need to be  specified in order for the container
+      /* The following argument needs to be specified in order for the container
        * to launch correctly.
        *
        * --gpus=all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be 
        * installed on the host.
-       * 
-       * --network=host: The docker container needs access to the internet to
-       * install packages and an interface to transmit test networking code.
-       * This command passes all the host interfaces to the container to be 
-       * used as required.
-       *
-       * -u=root: The container needs to be root when running the "apt-get
-       * install" commands. Additionally, programs running with ibverbs 
-       * generally need to be run as root unless the CAP_NET_RAW capability
-       * flag is set (Have not looked into how to do that). 
-       *
-       * -ulimit=memlock=-1: Not sure what this is for. The author of SPEAD2
-       * recommended that this flag be here.
-       *
-       * --device=/dev/infiniband/rdma_cm and --device=/dev/infiniband/uverbs0:
-       * These flags pass the drivers required for ibverbs to the container.
-       * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
-       * 2 etc. The correct once needs to be specified.
        */
       args '--gpus=all'
     }
@@ -92,18 +74,12 @@ pipeline {
       }
     }
 
-    /* This test verifies that the fsim can send a burst of traffic on the
-     * network. Currently no unit tests run on the network, so this stage
-     * serves to catch a few issues that could be missed by the unit tests when
-     * it comes to networking  This stage verifies two things:
-     * 1. SPEAD2 normally installs with ibverbs settings enabled but under some
-     *    conditions SPEAD2 will not install ibverbs functions. When running
-     *    make on the fsim, an error will be thrown if SPEAD2 does not install
-     *    correctly.
-     * 2. The commands required to to run a docker container that makes use of
-     *    ibverbs are not trivial to determine. Attempting to send a burst of
-     *    data out on the network with the fsim will quickly reveal if there are
-     *    any issues with mechanism.
+    /* This stage verifies the successful installation of SPEAD2.
+     * 
+     * SPEAD2 normally installs with ibverbs settings enabled but under some
+     * conditions SPEAD2 will not install ibverbs functions. When running
+     * make on the fsim, an error will be thrown if SPEAD2 does not install
+     * correctly.
      */
     stage('Test fsim compilation') {
       steps {
