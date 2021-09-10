@@ -1,7 +1,24 @@
+/*
+ *    Copyright 2021 ASTRON
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ */
+
 /* This code is based on the work done by John Romein at ASTRON to develop a correlator that uses NVIDIA's Tensor Cores.
  * This is almost an exact replica of version 0.5 of his TensorCoreCorrelator kernel. Slight modifications have been
  * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
- * of the macros.
+ * of the macros. We have also modified the storeVisibilities function to allow for integration over multiple calls
+ * of the kernel.
  *
  * The following links give a high-level overview:
  * - https://docs.google.com/document/d/1viAzRjnDh3D569JfNBiJjygZE8w0B8VHqO4QRjcdKsU/edit?usp=sharing
