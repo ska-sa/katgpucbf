@@ -166,7 +166,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")
     parser.add_argument(
-        "--spectra-per-heap-out",
+        "--spectra-per-heap",
         type=int,
         default=256,
         metavar="SPECTRA",
@@ -259,7 +259,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
     else:
         monitor = NullMonitor()
 
-    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.spectra_per_heap_out)
+    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.spectra_per_heap)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -283,7 +283,7 @@ def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
         feng_id=args.feng_id,
         num_ants=args.array_size,
         spectra=chunk_samples // (2 * args.channels),
-        spectra_per_heap_out=args.spectra_per_heap_out,
+        spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
         taps=args.taps,
         quant_gain=args.quant_gain,

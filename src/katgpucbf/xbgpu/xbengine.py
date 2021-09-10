@@ -168,7 +168,7 @@ class XBEngine(DeviceServer):
         The number of frequency channels contained per stream.
     n_pols
         The number of pols per antenna. Expected to always be 2.
-    n_spectra_per_heap_in
+    n_spectra_per_heap
         The number of time samples received per frequency channel.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
@@ -202,7 +202,7 @@ class XBEngine(DeviceServer):
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
-        n_spectra_per_heap_in: int,
+        n_spectra_per_heap: int,
         n_pols: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
@@ -293,7 +293,7 @@ class XBEngine(DeviceServer):
         self.n_ants: int
         self.n_channels_total: int
         self.n_channels_per_stream: int
-        self.n_spectra_per_heap_in: int
+        self.n_spectra_per_heap: int
         self.n_pols: int
         self.sample_bits: int
 
@@ -359,7 +359,7 @@ class XBEngine(DeviceServer):
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
-        self.n_spectra_per_heap_in = n_spectra_per_heap_in
+        self.n_spectra_per_heap = n_spectra_per_heap
         self.n_pols = n_pols
         self.sample_bits = sample_bits
         complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
@@ -373,10 +373,10 @@ class XBEngine(DeviceServer):
         # pass it as a seperate argument to the reciever for cases where the
         # n_channels_per_stream changes across streams (likely for
         # non-power-of- two array sizes).
-        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap_in
+        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
         # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap_in * self.n_pols * complexity
+            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * self.n_pols * complexity
         )
         # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
@@ -411,7 +411,7 @@ class XBEngine(DeviceServer):
         self.receiver_stream = recv.Stream(
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap_in=self.n_spectra_per_heap_in,
+            n_spectra_per_heap=self.n_spectra_per_heap,
             n_pols=self.n_pols,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
@@ -437,7 +437,7 @@ class XBEngine(DeviceServer):
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap_in=self.n_spectra_per_heap_in,
+            n_spectra_per_heap=self.n_spectra_per_heap,
         )
         self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
 
@@ -445,7 +445,7 @@ class XBEngine(DeviceServer):
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap_in=self.n_spectra_per_heap_in,
+            n_spectra_per_heap=self.n_spectra_per_heap,
             n_batches=self.chunk_spectra,
         )
         self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorder = (

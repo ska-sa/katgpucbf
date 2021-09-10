@@ -32,7 +32,7 @@ extern "C++" {
 #define NR_STATIONS_PER_BLOCK ${n_ants_per_block}
 #define NR_BITS ${sample_bitwidth}
 #define NR_CHANNELS ${n_channels}
-#define NR_SAMPLES_PER_CHANNEL ${n_spectra_per_heap_in}
+#define NR_SAMPLES_PER_CHANNEL ${n_spectra_per_heap}
 #define NR_POLARIZATIONS ${n_polarisations}
 
 #define NR_BASELINES ${n_baselines}

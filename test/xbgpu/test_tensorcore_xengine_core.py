@@ -25,21 +25,21 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     -------
     np.ndarray
         Correlation products or visibilities. Shape:
-        (n_chans, n_ants, n_pols, n_spectra_per_heap_in, complexity)
-        where n_spectra_per_heap_in is equal to n_blocks * n_spectra_per_block
+        (n_chans, n_ants, n_pols, n_spectra_per_heap, complexity)
+        where n_spectra_per_heap is equal to n_blocks * n_spectra_per_block
         in the input.
     """
     n_chans = input_array.shape[0]
     n_ants = input_array.shape[2]
     n_pols = input_array.shape[3]
-    n_spectra_per_heap_in = input_array.shape[1] * input_array.shape[4]
+    n_spectra_per_heap = input_array.shape[1] * input_array.shape[4]
     complexity = input_array.shape[5]
     # I think it's nicer to get the time-series all in one axis so that we can
     # just use np.sum() across that axis.
     # Numba can't work on non-contiguous arrays, so we have to copy this one in
     # order to be able to reshape it in the next step.
     ez_in = input_array.transpose(0, 2, 3, 1, 4, 5).copy()
-    ez_in = ez_in.reshape((n_chans, n_ants, n_pols, n_spectra_per_heap_in, complexity)).astype(np.int32)
+    ez_in = ez_in.reshape((n_chans, n_ants, n_pols, n_spectra_per_heap, complexity)).astype(np.int32)
     n_baselines = n_ants * (n_ants + 1) * 2
     output_array = np.empty(shape=(n_chans, n_baselines, complexity), dtype=np.int32)
     for c in prange(n_chans):
@@ -60,12 +60,12 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_spectra_per_heap_in",
+    "num_ants, num_channels, num_spectra_per_heap",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_spectra_per_heap_in,
+    test_parameters.num_spectra_per_heap,
 )
-def test_correlator(num_ants, num_spectra_per_heap_in, num_channels):
+def test_correlator(num_ants, num_spectra_per_heap, num_channels):
     """Parameterised unit test of the Tensor-Core correlation kernel."""
     # TODO: A lot of this is duplicated in other functions. It would be nice to
     # move it into a test fixture.
@@ -74,7 +74,7 @@ def test_correlator(num_ants, num_spectra_per_heap_in, num_channels):
     queue = ctx.create_command_queue()
 
     template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap_in=num_spectra_per_heap_in
+        ctx, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
     )
     tensor_core_x_engine_core = template.instantiate(queue)
     tensor_core_x_engine_core.ensure_all_bound()
@@ -117,7 +117,7 @@ def test_multikernel_accumulation(num_ants):
     # 1. Array parameters
     n_ants = num_ants
     n_channels = 16
-    n_spectra_per_heap_in = 16
+    n_spectra_per_heap = 16
     n_kernel_launches = 10
 
     # 2. Initialise GPU kernels and buffers.
@@ -125,7 +125,7 @@ def test_multikernel_accumulation(num_ants):
     queue = ctx.create_command_queue()
 
     template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=n_ants, n_channels=n_channels, n_spectra_per_heap_in=n_spectra_per_heap_in
+        ctx, n_ants=n_ants, n_channels=n_channels, n_spectra_per_heap=n_spectra_per_heap
     )
     tensor_core_x_engine_core = template.instantiate(queue)
     tensor_core_x_engine_core.ensure_all_bound()
@@ -149,12 +149,12 @@ def test_multikernel_accumulation(num_ants):
     #
     # For each multiplication, if each input real and imaginary value has the same value "x", then the result should be:
     # (x + jx)(x - jx) = x^2 + jx^2 - jx^2 + x^2 = 2x^2
-    # The real value is 2x^2 and the imaginary value is 0. A single kernel launch will accumulate n_spectra_per_heap_in
-    # times, giving an output real visibility value of n_spectra_per_heap_in * 2 * 2x^2.
+    # The real value is 2x^2 and the imaginary value is 0. A single kernel launch will accumulate n_spectra_per_heap
+    # times, giving an output real visibility value of n_spectra_per_heap * 2 * 2x^2.
     expected_output = np.zeros_like(buf_visibilities_host)
     expected_output[:, :, 0] = (
         sample_value_i8 * sample_value_i8 + sample_value_i8 * sample_value_i8
-    ) * n_spectra_per_heap_in
+    ) * n_spectra_per_heap
     np.testing.assert_equal(buf_visibilities_host, expected_output)
 
     # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is

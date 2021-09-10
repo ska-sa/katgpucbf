@@ -2,14 +2,14 @@
  *  This kernel aims to carry out the reorder functionality required by katxbgpu.
  *  This GPU-side reorder makes provision for batched operations (i.e. reordering batches of matrices),
  *  and transforms a 1D block of data in the following matrix format:
- *  - uint16_t [n_batches][n_antennas] [n_channels] [n_spectra_per_heap_in] [polarisations]
+ *  - uint16_t [n_batches][n_antennas] [n_channels] [n_spectra_per_heap] [polarisations]
  *    transposed to
- *    uint16_t [n_batches][n_channels] [n_spectra_per_heap_in//times_per_block]
+ *    uint16_t [n_batches][n_channels] [n_spectra_per_heap//times_per_block]
  *             [n_antennas] [polarisations] [times_per_block]
  *  - Typical values for the dimensions
  *      - n_antennas (a) = 64
  *      - n_channels (c) = 128
- *      - n_spectra_per_heap_in (t) = 256
+ *      - n_spectra_per_heap (t) = 256
  *      - polarisations (p) = 2, always
  *      - times_per_block = 16
  */
@@ -22,7 +22,7 @@
 // Defines, now using mako parametrisation
 #define NR_STATIONS ${n_ants}
 #define NR_CHANNELS ${n_channels}
-#define NR_SPECTRA_PER_HEAP_IN ${n_spectra_per_heap_in}
+#define NR_SPECTRA_PER_HEAP ${n_spectra_per_heap}
 #define NR_POLARISATIONS ${n_polarisations}
 #define NR_TIMES_PER_BLOCK ${n_times_per_block}
 
@@ -30,9 +30,9 @@
  *
  *  The following CUDA kernel implements a naive (i.e. unrefined) reorder of data ingested by the GPU X-Engine from the F-Engine.
  *  As mentioned at the top of this document, data is received as an array in the format of:
- *   - uint16_t [n_batches][n_antennas] [n_channels] [n_spectra_per_heap_in] [polarisations]
+ *   - uint16_t [n_batches][n_antennas] [n_channels] [n_spectra_per_heap] [polarisations]
  *   And is required to be reordered into an array of format:
- *   - uint16_t [n_batches][n_channels] [n_spectra_per_heap_in // times_per_block] [n_antennas] [polarisations] [times_per_block]
+ *   - uint16_t [n_batches][n_channels] [n_spectra_per_heap // times_per_block] [n_antennas] [polarisations] [times_per_block]
  *
  *   Currently, all dimension-strides are calculated within the kernel itself.
  *   - Granted, there are some redudancies/inefficiences in variable usage; however,
@@ -61,12 +61,12 @@ void precorrelation_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
     // 2. Calculate indices for reorder
     // 2.1. Calculate 'current'/original indices for each dimension
     //      - Matrix Stride should be the same value for Original and Reordered matrices
-    iMatrixStride_y = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SPECTRA_PER_HEAP_IN * NR_POLARISATIONS;
-    iAntIndex = iThreadIndex_x / (NR_CHANNELS * NR_SPECTRA_PER_HEAP_IN * NR_POLARISATIONS);
-    iRemIndex = iThreadIndex_x % (NR_CHANNELS * NR_SPECTRA_PER_HEAP_IN * NR_POLARISATIONS);
+    iMatrixStride_y = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS;
+    iAntIndex = iThreadIndex_x / (NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS);
+    iRemIndex = iThreadIndex_x % (NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS);
 
-    iChanIndex = iRemIndex / (NR_SPECTRA_PER_HEAP_IN * NR_POLARISATIONS);
-    iRemIndex = iRemIndex % (NR_SPECTRA_PER_HEAP_IN * NR_POLARISATIONS);
+    iChanIndex = iRemIndex / (NR_SPECTRA_PER_HEAP * NR_POLARISATIONS);
+    iRemIndex = iRemIndex % (NR_SPECTRA_PER_HEAP * NR_POLARISATIONS);
 
     iTimeIndex = iRemIndex / NR_POLARISATIONS;
     iRemIndex = iRemIndex % NR_POLARISATIONS;
@@ -74,7 +74,7 @@ void precorrelation_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
     iPolIndex = iRemIndex;
 
     // 2.2. Calculate reordered matrix's indices and stride accordingly
-    iNewChanOffset = iChanIndex * (NR_SPECTRA_PER_HEAP_IN/NR_TIMES_PER_BLOCK)*NR_STATIONS*NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
+    iNewChanOffset = iChanIndex * (NR_SPECTRA_PER_HEAP/NR_TIMES_PER_BLOCK)*NR_STATIONS*NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
     iTimeOuterIndex = iTimeIndex / NR_TIMES_PER_BLOCK;
     iTimeOuterOffset = iTimeOuterIndex * NR_STATIONS*NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
     iNewAntOffset = iAntIndex * NR_POLARISATIONS*NR_TIMES_PER_BLOCK;
@@ -85,7 +85,7 @@ void precorrelation_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
 
     // 3. Perform the reorder (where necessary)
     uint16_t u16InputSample;
-    if (iThreadIndex_x < (NR_STATIONS * NR_CHANNELS * NR_SPECTRA_PER_HEAP_IN * NR_POLARISATIONS))
+    if (iThreadIndex_x < (NR_STATIONS * NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS))
     {
         // 3.1. Read out from the original array
         u16InputSample = *(pu16Array + iThreadIndex_x + iMatrixStride_y);

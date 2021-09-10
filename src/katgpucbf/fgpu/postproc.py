@@ -41,10 +41,10 @@ class PostprocTemplate:
         self.kernel = program.get_kernel("postproc")
 
     def instantiate(
-        self, command_queue: AbstractCommandQueue, spectra: int, spectra_per_heap_out: int, channels: int
+        self, command_queue: AbstractCommandQueue, spectra: int, spectra_per_heap: int, channels: int
     ) -> "Postproc":
         """Generate a :class:`Postproc` object based on this template."""
-        return Postproc(self, command_queue, spectra, spectra_per_heap_out, channels)
+        return Postproc(self, command_queue, spectra, spectra_per_heap, channels)
 
 
 class Postproc(accel.Operation):
@@ -56,7 +56,7 @@ class Postproc(accel.Operation):
         Input channelised data, pol0.
     **in1** : spectra × channels+1, complex64
         Input channelised data, pol1.
-    **out** : (spectra // spectra_per_heap_out, channels, spectra_per_heap_out, 2, 2), int8
+    **out** : (spectra // spectra_per_heap, channels, spectra_per_heap, 2, 2), int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.
 
@@ -73,7 +73,7 @@ class Postproc(accel.Operation):
         actual processing operations are to be scheduled.
     spectra: int
         Number of spectra on which post-prodessing will be performed.
-    spectra_per_heap_out: int
+    spectra_per_heap: int
         Number of spectra to send out per heap.
     channels: int
         Number of channels in each spectrum.
@@ -84,22 +84,22 @@ class Postproc(accel.Operation):
         template: PostprocTemplate,
         command_queue: AbstractCommandQueue,
         spectra: int,
-        spectra_per_heap_out: int,
+        spectra_per_heap: int,
         channels: int,
     ) -> None:
         super().__init__(command_queue)
-        if spectra % spectra_per_heap_out != 0:
-            raise ValueError("spectra must be a multiple of spectra_per_heap_out")
+        if spectra % spectra_per_heap != 0:
+            raise ValueError("spectra must be a multiple of spectra_per_heap")
         block_x = template.block * template.vtx
         block_y = template.block * template.vty
         if channels % block_x != 0:
             raise ValueError(f"channels must be a multiple of {block_x}")
-        if spectra_per_heap_out % block_y != 0:
-            raise ValueError(f"spectra_per_heap_out must be a multiple of {block_y}")
+        if spectra_per_heap % block_y != 0:
+            raise ValueError(f"spectra_per_heap must be a multiple of {block_y}")
         self.template = template
         self.channels = channels
         self.spectra = spectra
-        self.spectra_per_heap_out = spectra_per_heap_out
+        self.spectra_per_heap = spectra_per_heap
         _2 = accel.Dimension(2, exact=True)
 
         in_shape = (accel.Dimension(spectra), accel.Dimension(channels + 1))
@@ -107,9 +107,7 @@ class Postproc(accel.Operation):
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
 
         # TODO: this needs to be more explicit. 2 pols, and complexity.
-        self.slots["out"] = accel.IOSlot(
-            (spectra // spectra_per_heap_out, channels, spectra_per_heap_out, _2, _2), np.int8
-        )
+        self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, _2, _2), np.int8)
 
         self.slots["fine_delay"] = accel.IOSlot((spectra,), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra,), np.float32)
@@ -119,8 +117,8 @@ class Postproc(accel.Operation):
         block_x = self.template.block * self.template.vtx
         block_y = self.template.block * self.template.vty
         groups_x = self.channels // block_x
-        groups_y = self.spectra_per_heap_out // block_y
-        groups_z = self.spectra // self.spectra_per_heap_out
+        groups_y = self.spectra_per_heap // block_y
+        groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
         in0 = self.buffer("in0")
         in1 = self.buffer("in1")
@@ -135,7 +133,7 @@ class Postproc(accel.Operation):
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(in0.padded_shape[1]),  # in_stride
-                np.int32(self.spectra_per_heap_out),  # spectra_per_heap_out
+                np.int32(self.spectra_per_heap),  # spectra_per_heap
                 np.float32(-1 / self.channels),  # delay_scale
                 np.float32(self.quant_gain),  # quant_gain
             ],

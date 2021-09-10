@@ -45,15 +45,15 @@ class TensorCoreXEngineCoreTemplate:
         expected to produce two polarisations.
     n_channels
         The number of frequency channels to be processed.
-    n_spectra_per_heap_in
+    n_spectra_per_heap
         The number of time samples to be processed per frequency channel.
     """
 
-    def __init__(self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap_in: int) -> None:
+    def __init__(self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int) -> None:
         # 1. Set accesible member functions that are used to calculate indices to the input and output buffers.
         self.n_ants = n_ants
         self.n_channels = n_channels
-        self.n_spectra_per_heap_in = n_spectra_per_heap_in
+        self.n_spectra_per_heap = n_spectra_per_heap
         self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
@@ -75,13 +75,13 @@ class TensorCoreXEngineCoreTemplate:
                 "will eventually be supported but has not yet been implemented."
             )
 
-        if self.n_spectra_per_heap_in % self.n_times_per_block != 0:
-            raise ValueError(f"spectra_per_heap_in must be divisible by {self.n_times_per_block}.")
+        if self.n_spectra_per_heap % self.n_times_per_block != 0:
+            raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
 
         # 3. Calculate the input and output data shape.
         self.input_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap_in // self.n_times_per_block, exact=True),
+            accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
@@ -126,7 +126,7 @@ class TensorCoreXEngineCoreTemplate:
                 "sample_bitwidth": self._sample_bitwidth,
                 "n_channels": self.n_channels,
                 "n_polarisations": self.n_polarisations,
-                "n_spectra_per_heap_in": self.n_spectra_per_heap_in,
+                "n_spectra_per_heap": self.n_spectra_per_heap,
                 "n_baselines": self.n_baselines,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
@@ -147,11 +147,11 @@ class TensorCoreXEngineCore(accel.Operation):
     shape of the buffers.
 
     The input sample buffer must have the shape:
-    ``[channels][spectra_per_heap_in//times_per_block][n_ants][polarisations][times_per_block]``
+    ``[channels][spectra_per_heap//times_per_block][n_ants][polarisations][times_per_block]``
 
     A complexity that is introduced by the Tensor-Core kernel is that the
-    ``spectra_per_heap_in`` index is split over two different indices. The first
-    index ranges from ``0`` to ``spectra_per_heap_in//times_per_block`` and the
+    ``spectra_per_heap`` index is split over two different indices. The first
+    index ranges from ``0`` to ``spectra_per_heap//times_per_block`` and the
     second index ranges from ``0`` to ``times_per_block``. Times per block is
     calculated by the :class:`TensorCoreXEngineCoreTemplate`. In 8-bit input mode,
     ``times_per_block`` is equal to 16.

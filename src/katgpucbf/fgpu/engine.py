@@ -126,7 +126,7 @@ class Engine(aiokatcp.DeviceServer):
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
-    spectra_per_heap_out
+    spectra_per_heap
         Number of spectra in each output heap.
     channels
         Number of output channels to produce.
@@ -178,7 +178,7 @@ class Engine(aiokatcp.DeviceServer):
         feng_id: int,
         num_ants: int,
         spectra: int,
-        spectra_per_heap_out: int,
+        spectra_per_heap: int,
         channels: int,
         taps: int,
         quant_gain: float,
@@ -281,7 +281,7 @@ class Engine(aiokatcp.DeviceServer):
         template = ComputeTemplate(context, taps)
         chunk_samples = spectra * channels * 2
         extra_samples = taps * channels * 2
-        compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap_out, channels)
+        compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_gain = quant_gain
@@ -332,7 +332,7 @@ class Engine(aiokatcp.DeviceServer):
                     chunk = recv.Chunk(buf)
                 stream.add_chunk(chunk)
         send_chunks = []
-        send_shape = (spectra // spectra_per_heap_out, channels, spectra_per_heap_out, pols, 2)
+        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, pols, 2)
         send_dtype = np.dtype(np.int8)
         for _ in range(4):
             if use_peerdirect:
@@ -362,7 +362,7 @@ class Engine(aiokatcp.DeviceServer):
             dst_ibv,
             dst_packet_payload + 96,  # TODO make this into some kind of parameter. A naked 96 makes me nervous.
             rate,
-            len(send_chunks) * spectra // spectra_per_heap_out * len(dst),
+            len(send_chunks) * spectra // spectra_per_heap * len(dst),
             monitor,
         )
         monitor.event_qsize("send_free_ringbuffer", 0, len(send_chunks))

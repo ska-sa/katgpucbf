@@ -37,7 +37,7 @@ class PrecorrelationReorderTemplate:
     """
 
     def __init__(
-        self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap_in: int, n_batches: int
+        self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int, n_batches: int
     ) -> None:
         """
         Initialise the PreCorrelationReorderTemplate class and compile the pre-correlation reorder kernel.
@@ -55,7 +55,7 @@ class PrecorrelationReorderTemplate:
             The number of antennas that will be correlated. Each antennas is expected to produce two polarisations.
         n_channels
             The number of frequency channels to be processed.
-        n_spectra_per_heap_in
+        n_spectra_per_heap
             The number of time samples to be processed per frequency channel.
         n_batches
             The number of matrices to be reordered, a single data matrix = one batch.
@@ -63,7 +63,7 @@ class PrecorrelationReorderTemplate:
         # 1. Set member variables that are used to calculate indices for the input and output buffers
         self.n_ants = n_ants
         self.n_channels = n_channels
-        self.n_spectra_per_heap_in = n_spectra_per_heap_in
+        self.n_spectra_per_heap = n_spectra_per_heap
         self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_batches = n_batches
 
@@ -75,15 +75,15 @@ class PrecorrelationReorderTemplate:
         # optimising the thread utilisation in Tensor Cores - 128 = 4 x warps, where one warp = 32 threads.
         self.n_times_per_block = 128 // self._sample_bitwidth
 
-        if self.n_spectra_per_heap_in % self.n_times_per_block != 0:
-            raise ValueError(f"spectra_per_heap_in must be divisible by {self.n_times_per_block}.")
+        if self.n_spectra_per_heap % self.n_times_per_block != 0:
+            raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
 
         # 3. Declare the input and output data shapes
         self.input_data_dimensions = (
             accel.Dimension(self.n_batches, exact=True),
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap_in, exact=True),
+            accel.Dimension(self.n_spectra_per_heap, exact=True),
             accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(complexity, exact=True),
         )
@@ -91,7 +91,7 @@ class PrecorrelationReorderTemplate:
         self.output_data_dimensions = (
             accel.Dimension(self.n_batches, exact=True),
             accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap_in // self.n_times_per_block, exact=True),
+            accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
@@ -99,7 +99,7 @@ class PrecorrelationReorderTemplate:
         )
 
         # The size of a data matrix required to be reordered is the same for Input or Output data shapes
-        self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap_in * self.n_polarisations
+        self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap * self.n_polarisations
         # Maximum number of threads per block, as per Section I of Nvidia's CUDA Programming Guide
         THREADS_PER_BLOCK: Final[int] = 1024  # noqa: N806
 
@@ -117,7 +117,7 @@ class PrecorrelationReorderTemplate:
             {
                 "n_ants": self.n_ants,
                 "n_channels": self.n_channels,
-                "n_spectra_per_heap_in": self.n_spectra_per_heap_in,
+                "n_spectra_per_heap": self.n_spectra_per_heap,
                 "n_polarisations": self.n_polarisations,
                 "n_times_per_block": self.n_times_per_block,
             },
@@ -140,14 +140,14 @@ class PrecorrelationReorder(accel.Operation):
     It is worth noting these matrices follow the C convention, with the
     fastest-changing dimension being the last on the list. The input sample
     buffer must have the shape:
-    [batch][antennas][channels][spectra_per_heap_in][polarisations]
+    [batch][antennas][channels][spectra_per_heap][polarisations]
 
     The output sample buffer must have the shape:
-    [batch][channels][spectra_per_heap_in//times_per_block][n_ants][polarisations][times_per_block]
+    [batch][channels][spectra_per_heap//times_per_block][n_ants][polarisations][times_per_block]
 
     A complexity that is introduced by the pre-correlation reorder kernel is
-    that the spectra_per_heap_in index is split over two different indices. The
-    first index ranges from 0 to spectra_per_heap_in//times_per_block and the
+    that the spectra_per_heap index is split over two different indices. The
+    first index ranges from 0 to spectra_per_heap//times_per_block and the
     second index ranges from 0 to times_per_block. Times per block is
     calculated by the PreCorrelationReorderTemplate object.  In 8-bit input
     mode times_per_block is equal to 16.

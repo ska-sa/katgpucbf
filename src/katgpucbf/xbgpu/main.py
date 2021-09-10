@@ -76,7 +76,7 @@ def parse_args() -> argparse.Namespace:
         "in the XB-Engine output heaps for spectrum reassembly by the downstream receiver. [%(default)s]",
     )
     parser.add_argument(
-        "--spectra-per-heap-in",
+        "--spectra-per-heap",
         type=int,
         default=256,
         help="Number of packed spectra in every received channel. [%(default)s]",
@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=5,
         help="A batch is a collection of heaps from different F-Engines with the same timestamp. This parameter "
-        "specifies the number of consecutive batches to store in the same chunk. The higher this value is, the "
+        "specifies the number of consecutive spectra to store in the same chunk. The higher this value is, the "
         "more GPU and system RAM is allocated, the lower this value is, the more work the python processing thread "
         "is required to do. [%(default)s]",
     )
@@ -170,7 +170,7 @@ async def async_main(args: argparse.Namespace) -> None:
         n_ants=args.array_size,
         n_channels_total=args.channels,
         n_channels_per_stream=args.channels_per_substream,
-        n_spectra_per_heap_in=args.spectra_per_heap_in,
+        n_spectra_per_heap=args.spectra_per_heap,
         n_pols=args.pols,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
