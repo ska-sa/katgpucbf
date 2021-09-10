@@ -461,7 +461,7 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
             )
             # Should not be dropping anything when just reading a buffer
             assert len(chunk.present) == sum(chunk.present), f"{sum(chunk.present)} dropped heaps in chunk"
-            chunk.data.dtype = np.uint16  # We read the real and imaginary samples together
+            chunk.data = chunk.data.view(np.uint16)  # We read the real and imaginary samples together
             # print(
             #     f"Chunk: {chunk_index:>5} "
             #     f"Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. "
