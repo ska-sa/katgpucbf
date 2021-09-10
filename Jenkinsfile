@@ -81,7 +81,8 @@ pipeline {
     stage('Check pre-commit hooks have been applied') {
       steps {
         sh 'pre-commit install'
-        sh 'pre-commit run --all-files'
+        # no-commit-to-branch complains if we are on the main branch
+        sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
       }
     }
 
