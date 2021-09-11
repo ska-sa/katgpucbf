@@ -95,7 +95,14 @@ pipeline {
      * 3. --junitxml=reports/result.xml' Writes the results to a file for later
      *    examination.
      */
-    stage('Run pytest') {
+    stage('Run pytest (quick)') {
+      when { not { changeRequest target: 'main' } }
+      steps {
+        sh 'pytest -v -rs --junitxml=reports/result.xml'
+      }
+    }
+    stage('Run pytest (full)') {
+      when { changeRequest target: 'main' }
       steps {
         sh 'pytest -v -rs --all-combinations --junitxml=reports/result.xml'
       }
