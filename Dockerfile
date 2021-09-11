@@ -1,7 +1,7 @@
 # Use the nvidia development image as a base. This gives access to all
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as build
+FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as build-base
 
 # Install system packages:
 # - git is needed for setuptools_scm
@@ -33,18 +33,14 @@ ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
 RUN pip install pip==21.1.3 setuptools==57.1.0 wheel==0.36.2
-# Install packages needed to bootstrap spead2
-RUN pip install jinja2==3.0.1 pycparser==2.20
 
-# Install spead2 (C++ bindings)
-WORKDIR /tmp/spead2
-COPY 3rdparty/spead2/ .
-RUN ./bootstrap.sh && \
-    mkdir build && \
-    cd build && \
-    ../configure && \
-    make -j && \
-    make install
+#######################################################################
+
+# The above image is independent of the contents of this package (except
+# for the requirements files), and is used to form the image for Jenkins
+# testing. We now install the package in a new build stage.
+
+FROM build-base as build-py
 
 # Install requirements, copying only requirements.txt so that changes to other
 # files do not bust the build cache.
@@ -58,10 +54,40 @@ RUN pip install -r requirements.txt
 COPY . .
 RUN pip install --no-deps . && pip check
 
+#######################################################################
+
+# Separate stage to build the C++ tools. This is in a separate build stage
+# because it installs requirements-dev.txt to get the tools needed for
+# bootstrapping spead2, but we do not need them in the production virtual
+# environment. Also, since it inherits from build-base rather than build-py,
+# it will not require rebuilding if the Python code changes.
+
+FROM build-base as build-cxx
+
+# Install requirements for bootstrap
+
+# Install requirements, copying only requirements-dev.txt so that changes to
+# other files do not bust the build cache.
+WORKDIR /tmp/katgpucbf
+COPY requirements-dev.txt ./
+RUN pip install -r requirements-dev.txt
+
+# Install spead2 (C++ bindings)
+WORKDIR /tmp/spead2
+COPY 3rdparty/spead2/ .
+RUN ./bootstrap.sh && \
+    mkdir build && \
+    cd build && \
+    ../configure && \
+    make -j && \
+    make install
+
 # Build simulation utilities.
 # We use make clean to ensure that an existing build from the build context
 # won't accidentally get used instead.
-RUN cd src/tools && make clean && make -j dsim fsim
+WORKDIR /tmp/tools
+COPY src/tools .
+RUN make clean && make -j dsim fsim
 
 #######################################################################
 
@@ -88,7 +114,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libpcap0.8 \
     libcap2
 
-COPY --from=build /venv /venv
-COPY --from=build /tmp/katgpucbf/src/tools/dsim /usr/local/bin
-COPY --from=build /tmp/katgpucbf/src/tools/fsim /usr/local/bin
+COPY --from=build-py /venv /venv
+COPY --from=build-cxx /tmp/tools/dsim /usr/local/bin
+COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
 ENV PATH=/venv/bin:$PATH
