@@ -41,44 +41,48 @@ pipeline {
       }
     }
 
-    /* This stage ensures that all the python style guidelines checks pass.
-     * This will catch if someone has commited to the repo without installing
-     * the required pre-commit hooks.
-     */
-    stage('Run pre-commit checks') {
-      steps {
-        sh 'pre-commit install'
-        // no-commit-to-branch complains if we are on the main branch
-        sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
-      }
-    }
-
-    stage('Install katgpucbf package') {
-      steps {
-        sh 'pip install --no-deps . && pip check'
-      }
-    }
-
-    /* This stage verifies the successful installation of SPEAD2.
-     *
-     * SPEAD2 normally installs with ibverbs settings enabled but under some
-     * conditions SPEAD2 will not install ibverbs functions. When running
-     * make, an error will be thrown if SPEAD2 does not install
-     * correctly.
-     */
-    stage('Compile C++ tools') {
-      steps {
-        // Install SPEAD2 C++ library required for installation of tools
-        dir('3rdparty/spead2') {
-          sh './bootstrap.sh'
-          sh './configure'
-          sh 'make -j'
-          sh 'make install'
+    stage('Parallel stage') {
+      parallel {
+        /* This stage ensures that all the python style guidelines checks pass.
+         * This will catch if someone has commited to the repo without installing
+         * the required pre-commit hooks.
+         */
+        stage('Run pre-commit checks') {
+          steps {
+            sh 'pre-commit install'
+            // no-commit-to-branch complains if we are on the main branch
+            sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
+          }
         }
-        // Make and compile tools.
-        dir('src/tools') {
-          sh 'make clean'
-          sh 'make -j'
+
+        stage('Install katgpucbf package') {
+          steps {
+            sh 'pip install --no-deps . && pip check'
+          }
+        }
+
+        /* This stage verifies the successful installation of SPEAD2.
+         *
+         * SPEAD2 normally installs with ibverbs settings enabled but under some
+         * conditions SPEAD2 will not install ibverbs functions. When running
+         * make, an error will be thrown if SPEAD2 does not install
+         * correctly.
+         */
+        stage('Compile C++ tools') {
+          steps {
+            // Install SPEAD2 C++ library required for installation of tools
+            dir('3rdparty/spead2') {
+              sh './bootstrap.sh'
+              sh './configure'
+              sh 'make -j'
+              sh 'make install'
+            }
+            // Make and compile tools.
+            dir('src/tools') {
+              sh 'make clean'
+              sh 'make -j'
+            }
+          }
         }
       }
     }
@@ -96,13 +100,13 @@ pipeline {
      *    examination.
      */
     stage('Run pytest (quick)') {
-      when { not { changeRequest target: 'main' } }
+      when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
       steps {
         sh 'pytest -v -rs --junitxml=reports/result.xml'
       }
     }
     stage('Run pytest (full)') {
-      when { changeRequest target: 'main' }
+      when { anyOf { changeRequest target: 'main'; branch 'main' } }
       steps {
         sh 'pytest -v -rs --all-combinations --junitxml=reports/result.xml'
       }
