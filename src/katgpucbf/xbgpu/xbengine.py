@@ -708,7 +708,9 @@ class XBEngine(DeviceServer):
             item.timestamp += chunk.timestamp
             item.chunk = chunk
 
-            # 2.3. Initiate transfer from recived chunk to rx_item buffer.
+            # 2.3. Initiate transfer from received chunk to rx_item buffer.
+            # First wait for asynchronous GPU work on the buffer.
+            self._upload_command_queue.enqueue_wait_for_events(item.events)
             item.buffer_device.set_async(self._upload_command_queue, chunk.base)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
@@ -740,6 +742,7 @@ class XBEngine(DeviceServer):
         """
         # 1. Set up initial conditions
         tx_item = await self._tx_free_item_queue.get()
+        await tx_item.async_wait_for_events()
         # The very first heap sent out the X-Engine will have a timestamp of zero which is meaningless, every other
         # heap will have the correct timestamp.
         tx_item.timestamp = 0
@@ -761,6 +764,14 @@ class XBEngine(DeviceServer):
             # 3.1 Reorder the entire chunk
             self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
             self.precorrelation_reorder()
+
+            # Finished with the rx item (precorrelation_reorder writes its outputs to a
+            # different buffer). Give it back to the receiver loop, with an event to make
+            # it wait for precorrelation_reorder to complete.
+            reorder_event = self._proc_command_queue.enqueue_marker()
+            rx_item.reset()
+            rx_item.add_event(reorder_event)
+            await self._rx_free_item_queue.put(rx_item)
 
             # 3.2 Perform correlation on reordered data. The correlation kernel does not have the
             # concept of a batch at this stage, so the kernel needs to be run on each different
@@ -791,16 +802,13 @@ class XBEngine(DeviceServer):
 
                     # 3.2.4 Get a new tx item, assign its buffer correctly and reset the buffer to zero.
                     tx_item = await self._tx_free_item_queue.get()
+                    await tx_item.async_wait_for_events()
                     tx_item.timestamp = next_heap_timestamp
                     self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
                     self.tensor_core_x_engine_core.zero_visibilities()
 
                 # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
-
-            # 5. Finished with the RX item - reset it and give it back to the receiver loop function.
-            rx_item.reset()
-            await self._rx_free_item_queue.put(rx_item)
 
         # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit. This function
         # puts the current tx_item on the queue. The sender_loop can then stop waiting upon receiving this and exit.
