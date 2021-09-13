@@ -586,17 +586,26 @@ class XBEngine(DeviceServer):
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
-        self.send_stream: katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend = katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend(
+        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
             n_ants=self.n_ants,
+            n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
-            endpoint=(dest_ip, dest_port),
-            interface_address=interface_ip,
-            thread_affinity=thread_affinity,
+            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.UdpIbvStream(
+                spead2.ThreadPool(),
+                stream_config,
+                spead2.send.UdpIbvConfig(
+                    endpoints=[(dest_ip, dest_port)],
+                    interface_address=interface_ip,
+                    ttl=4,
+                    comp_vector=thread_affinity,
+                    memory_regions=list(buffers),
+                ),
+            ),
         )
 
     def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
@@ -613,19 +622,23 @@ class XBEngine(DeviceServer):
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
         self.tx_transport_added = True
-        # For the inproc transport this value is set very low as the dump rate does affect performanc for an inproc
-        # queue and a high dump rate just makes the unit tests take very long to run.
+        # For the inproc transport this value is set very low as the dump rate
+        # does affect performance for an inproc queue and a high dump rate just
+        # makes the unit tests take very long to run.
         self.dump_interval_s = 0
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend(
+        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
             n_ants=self.n_ants,
+            n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
             n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
-            queue=queue,
+            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
+                spead2.ThreadPool(), [queue], stream_config
+            ),
         )
 
     async def _receiver_loop(self):
@@ -683,7 +696,9 @@ class XBEngine(DeviceServer):
             item.timestamp += timestamp
             item.chunk = chunk
 
-            # 2.3. Initiate transfer from recived chunk to rx_item buffer.
+            # 2.3. Initiate transfer from received chunk to rx_item buffer.
+            # First wait for asynchronous GPU work on the buffer.
+            self._upload_command_queue.enqueue_wait_for_events(item.events)
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
@@ -715,6 +730,7 @@ class XBEngine(DeviceServer):
         """
         # 1. Set up initial conditions
         tx_item = await self._tx_free_item_queue.get()
+        await tx_item.async_wait_for_events()
         # The very first heap sent out the X-Engine will have a timestamp of zero which is meaningless, every other
         # heap will have the correct timestamp.
         tx_item.timestamp = 0
@@ -736,6 +752,14 @@ class XBEngine(DeviceServer):
             # 3.1 Reorder the entire chunk
             self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
             self.precorrelation_reorder()
+
+            # Finished with the rx item (precorrelation_reorder writes its outputs to a
+            # different buffer). Give it back to the receiver loop, with an event to make
+            # it wait for precorrelation_reorder to complete.
+            reorder_event = self._proc_command_queue.enqueue_marker()
+            rx_item.reset()
+            rx_item.add_event(reorder_event)
+            await self._rx_free_item_queue.put(rx_item)
 
             # 3.2 Perform correlation on reordered data. The correlation kernel does not have the
             # concept of a batch at this stage, so the kernel needs to be run on each different
@@ -766,16 +790,13 @@ class XBEngine(DeviceServer):
 
                     # 3.2.4 Get a new tx item, assign its buffer correctly and reset the buffer to zero.
                     tx_item = await self._tx_free_item_queue.get()
+                    await tx_item.async_wait_for_events()
                     tx_item.timestamp = next_heap_timestamp
                     self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
                     self.tensor_core_x_engine_core.zero_visibilities()
 
                 # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
-
-            # 5. Finished with the RX item - reset it and give it back to the receiver loop function.
-            rx_item.reset()
-            await self._rx_free_item_queue.put(rx_item)
 
         # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit. This function
         # puts the current tx_item on the queue. The sender_loop can then stop waiting upon receiving this and exit.

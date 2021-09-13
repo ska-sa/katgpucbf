@@ -1,5 +1,5 @@
 """
-Module for performing unit tests on the XEngineSPEADAbstractSend class in the xsend.py module.
+Module for performing unit tests on the XSend class in the xsend.py module.
 
 Testing network code is difficult to do on a single thread. SPEAD2 has the concept of transports. A transport generally
 receives data from a network. SPEAD2 provides two other transports that can receive simulated network data - these can
@@ -44,15 +44,15 @@ from . import test_parameters
 )
 def test_send_simple(event_loop, num_ants, num_channels):
     """
-    Tests the XEngineSPEADAbstractSend class in the xsend.py module.
+    Tests the XSend class in the xsend.py module.
 
-    This test transmits a number of heaps from a XEngineSPEADAbstractSend object over a SPEAD2 inproc transport. A
+    This test transmits a number of heaps from a XSend object over a SPEAD2 inproc transport. A
     SPEAD2 receiver object then examines the transmitted heaps to ensure that the correct fields are transmitted with
     the correct values.
 
     This test does not generate random data as it will take much more compute to check that the random data is received
     correctly. I do not think that random data is necessary, as that would be checking that SPEAD2 is assembling heaps
-    correctly which is a function of SPEAD2 not the XEngineSPEADAbstractSend class. Mangled heaps should be picked up
+    correctly which is a function of SPEAD2 not the XSend class. Mangled heaps should be picked up
     in the SPEAD2 unit tests.
 
     Parameters
@@ -80,14 +80,14 @@ def test_send_simple(event_loop, num_ants, num_channels):
 
     # 1.2 Derived parameters
 
-    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
-    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
-    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
-    # The // 4 is here because in the MeerKAT case, there are 4*num_ants multicast streams.
-    n_channels_per_stream = num_channels // num_ants // 4
+    # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+    n_engines = 1
+    while n_engines < num_ants * 4:
+        n_engines *= 2
+    n_channels_per_stream = num_channels // n_engines
     n_baselines = (num_ants + 1) * (num_ants) * 2
 
-    # 2. Create cuda context - all buffers created in the XEngineSPEADInprocSend object are created from this context.
+    # 2. Create cuda context - all buffers created in the XSend object are created from this context.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
     # 3. Initialise SPEAD2 sender and receiver objects and link them together.
@@ -95,19 +95,22 @@ def test_send_simple(event_loop, num_ants, num_channels):
     # 3.1 Create the queue that will link the sender and receiver together.
     queue = spead2.InprocQueue()
 
-    # 3.2 Create katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend that will wrap a SPEAD2 send stream.
-    send_stream = katgpucbf.xbgpu.xsend.XEngineSPEADInprocSend(
+    # 3.2 Create katgpucbf.xbgpu.xsend.XSend that will wrap a SPEAD2 send stream.
+    send_stream = katgpucbf.xbgpu.xsend.XSend(
         n_ants=num_ants,
+        n_channels=num_channels,
         n_channels_per_stream=n_channels_per_stream,
         n_pols=n_pols,
         dump_interval_s=dump_interval_s,
         send_rate_factor=send_rate_factor,
         channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
         context=context,
-        queue=queue,
+        stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
+            spead2.ThreadPool(), [queue], stream_config
+        ),
     )
 
-    # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the XEngineSPEADInprocSend over the queue.
+    # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the XSend over the queue.
     thread_pool = spead2.ThreadPool()
     recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
     recv_stream.add_inproc_reader(queue)
@@ -157,6 +160,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
         # 5.1 Wait for the first packet to arrive - it is expected to be the SPEAD descriptor. Without the desciptor
         # the recv_stream cannot interpret the heaps correctly.
         heap = await recv_stream.get()
+        assert heap.cnt % n_engines == 4, "The heap IDs are not correctly strided"
         items = ig.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
@@ -202,16 +206,15 @@ def test_send_simple(event_loop, num_ants, num_channels):
                     assert np.all(item.value == num_received)
 
             assert has_timestamp, (
-                "Received heap is missing timestamp item with ID "
-                f"{hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.TIMESTAMP_ID)}"
+                "Received heap is missing timestamp item with ID " f"{hex(katgpucbf.xbgpu.xsend.XSend.TIMESTAMP_ID)}"
             )
             assert has_channel_offset, (
                 "Received heap is missing channel offset item with ID "
-                f"{hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.CHANNEL_OFFSET)}"
+                f"{hex(katgpucbf.xbgpu.xsend.XSend.CHANNEL_OFFSET)}"
             )
             assert has_xeng_raw, (
                 "Received heap is missing xeng_raw data buffer item with ID "
-                f"{hex(katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend.DATA_ID)}"
+                f"{hex(katgpucbf.xbgpu.xsend.XSend.DATA_ID)}"
             )
 
             num_received += 1

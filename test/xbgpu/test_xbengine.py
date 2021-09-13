@@ -270,10 +270,11 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
     adc_sample_rate = 1712000000.0  # L-Band, not important
     send_rate_factor = 1.1
 
-    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
-    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
-    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
-    n_channels_per_stream = num_channels // n_ants // 4
+    # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+    n_engines = 1
+    while n_engines < n_ants * 4:
+        n_engines *= 2
+    n_channels_per_stream = num_channels // n_engines
     n_spectra_per_heap = num_spectra_per_heap
     n_pols = 2
     sample_bits = 8
@@ -416,12 +417,12 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
             )
 
             assert (
-                ig_recv["channel offset"].value
+                ig_recv["frequency"].value
                 == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
             ), (
                 "Output channel offset not correct. "
                 f"Expected: {n_channels_per_stream * 4}, "
-                f"actual: {ig_recv['channel offset'].value}."
+                f"actual: {ig_recv['frequency'].value}."
             )
 
             # 8.2.4 Send the received data to the C verification function and assert that this function return is

@@ -263,8 +263,8 @@ drastically reduces data rates. A heap is sent out on the order of seconds, not
 milliseconds, and as such no chunking is required to manage these rates.
 
 The :mod:`~katgpucbf.xbgpu.xsend` module defines a number of classes to deal
-with transmission. The main parent class for these classes is called the
-:class:`~katgpucbf.xbgpu.xsend.XEngineSPEADAbstractSend` class.
+with transmission. The main class for this module is
+:class:`~katgpucbf.xbgpu.xsend.XSend`.
 
 The image below gives conceptual overview of how the katxbgpu sender code is
 implemented:
@@ -277,23 +277,22 @@ implemented:
 The above diagram shows how the sender module is broken up into three main
 layers:
 
-  1. XEngineSPEADAbstractSend class - This is the interface to the sender
+  1. XSend class - This is the interface to the sender
      module. Once the program is running, the main processing loop will request
      free buffers (:meth:`.get_free_heap`) from the xsend module, populate the
      buffers and then tell the module to send these buffers (:meth:`send_heap`).
-     The sending happens asynchronously but the xsend class ensures that buffers
+     The sending happens asynchronously but the XSend class ensures that buffers
      are not recycled until they are sent.
-  2. XEngineSPEADAbstractSend internal workings - This class manages a queue of
+  2. XSend internal workings - This class manages a queue of
      buffers being sent on the network in an asynchronous manner. Each buffer
      has an associated future. This class monitors the futures when more buffer
      resources are requested by the main processing loop and will only return a
      free buffer when the corresponding resource is marked as done.
-  3. SPEAD2 source_stream - The XEngineSPEADAbstractSend creates a SPEAD2 send
-     stream object. Every buffer passed to the XEngineSPEADAbstractSend object
-     is given to this source_stream. The source_stream object encapsulates the
-     buffer object into a SPEAD heap and sends it out onto the network (in the
-     normal case). It returns a future that will be marked as done once the
-     transmission is complete.
+  3. SPEAD2 source_stream - The XSend creates a SPEAD2 send stream object.
+     Every buffer passed to the XSend object is given to this source_stream.
+     The source_stream object encapsulates the buffer object into a SPEAD heap
+     and sends it out onto the network (in the normal case). It returns a
+     future that will be marked as done once the transmission is complete.
 
 Peerdirect Support
 ------------------
