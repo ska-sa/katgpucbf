@@ -44,8 +44,8 @@ pipeline {
     stage('Parallel stage') {
       parallel {
         /* This stage ensures that all the python style guidelines checks pass.
-         * This will catch if someone has commited to the repo without installing
-         * the required pre-commit hooks.
+         * This will catch if someone has committed to the repo without
+         * installing the required pre-commit hooks, or has bypassed them.
          */
         stage('Run pre-commit checks') {
           steps {
