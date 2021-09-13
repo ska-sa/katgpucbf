@@ -77,7 +77,7 @@ def generate_config(args: argparse.Namespace) -> dict:
         for override in args.image_override:
             name, image = override.split(":", 1)
             image_overrides[name] = image
-            config["config"]["image_overrides"] = image_overrides
+        config["config"]["image_overrides"] = image_overrides
     for ant_index in range(args.antennas):
         number = 800 + ant_index  # Avoid confusion with real antennas
         for pol in ["v", "h"]:
