@@ -26,18 +26,18 @@ import asyncio
 import logging
 import math
 import time
-from typing import List, Tuple, TypedDict
+from typing import List, Optional, Tuple, TypedDict
 
 import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
+import numpy as np
 import spead2
 from aiokatcp import DeviceServer, Sensor, SensorSampler
 
-import katgpucbf.xbgpu._katxbgpu.recv as recv
 import katgpucbf.xbgpu.precorrelation_reorder
-import katgpucbf.xbgpu.ringbuffer
+import katgpucbf.xbgpu.recv
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
 
@@ -88,7 +88,7 @@ class RxQueueItem(QueueItem):
     is complete to reuse resources.
     """
 
-    chunk: katgpucbf.xbgpu._katxbgpu.recv.Chunk
+    chunk: Optional[katgpucbf.xbgpu.recv.Chunk]
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
@@ -329,10 +329,6 @@ class XBEngine(DeviceServer):
         self._tx_item_queue: asyncio.Queue[QueueItem]
         self._tx_free_item_queue: asyncio.Queue[QueueItem]
 
-        # 1.6 Objects for sending and receiving data
-        self.ringbuffer: recv.Ringbuffer  # Ringbuffer passed to stream where all completed chunks wait.
-        self.receiver_stream: recv.Stream
-
         # 1.7 Command queues for syncing different operations on the GPU - a
         # command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
@@ -364,6 +360,15 @@ class XBEngine(DeviceServer):
         self.sample_bits = sample_bits
         complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
 
+        # Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
+        # setting these values too high results in too much GPU memory being consumed. There just need to be enough
+        # of them that the different processing functions do not get starved waiting for items. The low single digits is
+        # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
+        # RAM than GPU RAM. It should be higher than max_active_chunks.
+        # These values are not configurable as they have been acceptable for most tests cases up until now. If the
+        # pipeline starts bottlenecking, then maybe look at increasing these values.
+        n_rx_items = 3  # Too high means too much GPU memory gets allocated
+        n_tx_items = 2
         # 2.3 Calculate derived parameters.
         # This step represents the difference in timestamp between two
         # consecutive heaps received from the same F-Engine. We multiply step
@@ -384,6 +389,7 @@ class XBEngine(DeviceServer):
         # 2.4 Assign engine configuration parameters
         self.chunk_spectra = chunk_spectra
         self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
+        n_free_chunks = self.max_active_chunks + 8
         self.channel_offset_value = channel_offset_value
 
         # 2.5 Set runtime flags to their initial states
@@ -396,14 +402,10 @@ class XBEngine(DeviceServer):
 
         # 4. Create the receiver_stream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
-
-        # Ringbuffer capacity is not a command line argument as it is not expected that the user will gain much value
-        # by having control over this. It could just cause confusion. The developers should instead set this value once.
-        ringbuffer_capacity = 15
-        self.ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
-        self.receiver_stream = recv.Stream(
+        self.ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_free_chunks)
+        self.receiver_stream = katgpucbf.xbgpu.recv.make_stream(
             n_ants=self.n_ants,
-            n_channels=self.n_channels_per_stream,
+            n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_pols=self.n_pols,
             sample_bits=self.sample_bits,
@@ -412,8 +414,6 @@ class XBEngine(DeviceServer):
             max_active_chunks=self.max_active_chunks,
             ringbuffer=self.ringbuffer,
             thread_affinity=src_affinity,
-            use_gdrcopy=False,
-            monitor=self.monitor,
         )
 
         # 5. Create GPU specific objects.
@@ -453,16 +453,6 @@ class XBEngine(DeviceServer):
         self.precorrelation_reorder.bind(out_reordered=self.reordered_buffer_device)
 
         # 6. Create various buffers and assign them to the correct queues or objects.
-        # 6.1 Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
-        # setting these values too high results in too much GPU memory being consumed. There just need to be enough
-        # of them that the different processing functions do not get starved waiting for items. The low single digits is
-        # suitable. n_free_chunks wraps buffer in system ram. This can be set quite high as there is much more system
-        # RAM than GPU RAM. It should be higher than max_active_chunks.
-        # These values are not configurable as they have been acceptable for most tests cases up until now. If the
-        # pipeline starts bottlenecking, then maybe look at increasing these values.
-        n_rx_items = 3  # Too high means too much GPU memory gets allocated
-        n_tx_items = 2
-        n_free_chunks = self.max_active_chunks + 8
 
         # 6.2 Create various queues for communication between async funtions. These queues are extended in the monitor
         # class, allowing for the monitor to track the number of items on each queue.
@@ -499,8 +489,9 @@ class XBEngine(DeviceServer):
                 self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
                 context=self.context,
             )
-            chunk = recv.Chunk(buf)
-            self.receiver_stream.add_chunk(chunk)
+            present = np.zeros(n_ants * self.chunk_spectra, np.uint8)
+            chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
+            self.receiver_stream.add_free_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):
         """
@@ -666,9 +657,7 @@ class XBEngine(DeviceServer):
         the next chunk. Try find a way to exit cleanly without adding to much additional logic to this function.
         """
         # 1. Set up initial conditions
-        async_ringbuffer = katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer(
-            self.receiver_stream.ringbuffer, self.monitor, "recv_ringbuffer", "get_chunks"
-        )
+        async_ringbuffer = self.receiver_stream.data_ringbuffer
         chunk_index = 0
         expected_heaps_total = 0
         dropped_heaps_total = 0
@@ -676,17 +665,18 @@ class XBEngine(DeviceServer):
         async for chunk in async_ringbuffer:
             # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
             expected_heaps = len(chunk.present)
-            received_heaps = sum(chunk.present)
+            received_heaps = int(np.sum(chunk.present))
             dropped_heaps = expected_heaps - received_heaps
             expected_heaps_total += expected_heaps
             dropped_heaps_total += dropped_heaps
+            timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
 
             sensor_timestamp = time.time()
             # TODO: This must become a proper logging message; fstrings should
             # be replaced with old-fashioned format strings.
             if dropped_heaps != 0:
                 logger.warning(
-                    f"Chunk: {chunk_index:>5} Timestamp: {hex(chunk.timestamp)} "
+                    f"Chunk: {chunk_index:>5} Timestamp: {hex(timestamp)} "
                     f"Received: {received_heaps:>4} of {expected_heaps:>4} expected heaps. "
                     f"All time dropped heaps: {dropped_heaps_total}/{expected_heaps_total}."
                 )
@@ -697,21 +687,19 @@ class XBEngine(DeviceServer):
 
             increment(self.sensors["input-heaps-total"], expected_heaps)
             increment(self.sensors["input-chunks-total"], 1)
-            increment(
-                self.sensors["input-bytes-total"], self.receiver_stream.chunk_bytes * received_heaps // expected_heaps
-            )
+            increment(self.sensors["input-bytes-total"], chunk.data.nbytes * received_heaps // expected_heaps)
 
             chunk_index += 1
 
             # 2.2. Get a free rx_item that will contain the GPU buffer to transfer the received chunk to.
             item = await self._rx_free_item_queue.get()
-            item.timestamp += chunk.timestamp
+            item.timestamp += timestamp
             item.chunk = chunk
 
             # 2.3. Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
-            item.buffer_device.set_async(self._upload_command_queue, chunk.base)
+            item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
             # 2.4. Give the rx item to the _gpu_proc_loop function.
@@ -758,7 +746,7 @@ class XBEngine(DeviceServer):
 
             # 2.1 Give the chunk back to the receiver stream - if this is not done, eventually no more data will be
             # received as there will be no available chunks to store it in.
-            self.receiver_stream.add_chunk(rx_item.chunk)
+            self.receiver_stream.add_free_chunk(rx_item.chunk)
 
             # 3. Process the received data.
             # 3.1 Reorder the entire chunk

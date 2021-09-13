@@ -16,7 +16,6 @@ import spead2.recv.asyncio
 import spead2.send
 from numba import njit
 
-import katgpucbf.xbgpu.ringbuffer
 import katgpucbf.xbgpu.xbengine
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
