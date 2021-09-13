@@ -72,11 +72,11 @@ def generate_config(args: argparse.Namespace) -> dict:
     }
     if args.image_tag is not None:
         config["config"]["image_tag"] = args.image_tag
-    image_overrides = {}
-    for override in args.image_override:
-        name, image = override.split(":", 1)
-        image_overrides[name] = image
-    if image_overrides:
+    if args.image_override is not None:
+        image_overrides = {}
+        for override in args.image_override:
+            name, image = override.split(":", 1)
+            image_overrides[name] = image
         config["config"]["image_overrides"] = image_overrides
     for ant_index in range(args.antennas):
         number = 800 + ant_index  # Avoid confusion with real antennas
