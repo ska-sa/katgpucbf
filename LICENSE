@@ -25,3 +25,8 @@ OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The Tensor-Core Correlator Kernel
+(src/katgpucbf/xbgpu/kernels/tensor_core_correlation_kernel.mako)
+is licenced under the Apache License, Version 2.0, and is available (upstream) here:
+https://git.astron.nl/RD/tensor-core-correlator
