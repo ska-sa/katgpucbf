@@ -12,6 +12,7 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: no-commit-to-branch # without arguments, master/main will be protected.
+      - id: trailing-whitespace
   - repo: https://github.com/psf/black
     rev: 21.6b0
     hooks:
@@ -56,7 +57,7 @@ repos:
             'katsdpsigproc==1.2',
             'katsdptelstate==0.11',
             'numpy==1.21.0',
-            'spead2==3.3.2',
+            'spead2==3.4.0',
             'types-decorator==0.1.5',
             'types-redis==3.5.4',
             'types-setuptools==57.0.0',

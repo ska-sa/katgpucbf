@@ -18,7 +18,7 @@ Queue
   - This is a python Queue object that is designed for use in async programs.
     In katgpucbf.fgpu, we use EventItems on Queues.
 
-- CommandQueue.
+- CommandQueue
 
   - This is relevant to the GPU. Things placed in this queue are guaranteed to
     be executed in order.

@@ -27,9 +27,10 @@ import asyncio
 import logging
 import time
 from collections import deque
-from typing import Deque, List, Optional, Sequence, cast
+from typing import Deque, Iterable, List, Optional, Sequence, cast
 
 import numpy as np
+import spead2.recv
 from aiokatcp import Sensor, SensorSet
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
@@ -485,16 +486,18 @@ class Processor:
             self._out_item.timestamp = new_timestamp
 
     @staticmethod
-    async def _push_chunks(streams, chunks, event):
+    async def _push_chunks(
+        streams: Iterable[spead2.recv.ChunkRingStream], chunks: Iterable[recv.Chunk], event: AbstractEvent
+    ) -> None:
         """Return chunks to the streams once `event` has fired.
 
         This is only used when using gdrcopy.
         """
         await async_wait_for_events([event])
         for stream, chunk in zip(streams, chunks):
-            stream.add_chunk(chunk)
+            stream.add_free_chunk(chunk)
 
-    async def run_processing(self, streams: List[recv.Stream]) -> None:
+    async def run_processing(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
         """Do the hard work of the F-engine.
 
         This function takes place entirely on the GPU. First, a little bit of
@@ -506,7 +509,7 @@ class Processor:
 
         Parameters
         ----------
-        streams : List[recv.Stream]
+        streams
             These only seem to be used in the _use_gdrcopy case.
         """
         # TODO: add a final flush on CancelledError?
@@ -635,7 +638,7 @@ class Processor:
                     item.events.append(event)
                 self.in_free_queue.put_nowait(item)
 
-    async def run_receive(self, streams: List[recv.Stream]) -> None:
+    async def run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -
@@ -653,7 +656,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, self.monitor, self.sensors):
+        async for chunks in recv.chunk_sets(streams, layout, self.monitor, self.sensors):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
@@ -663,7 +666,7 @@ class Processor:
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].base.nbytes * 8 // self.sample_bits
+            in_item.n_samples = chunks[0].data.nbytes * 8 // self.sample_bits
 
             transfer_events = []
             if self._use_gdrcopy:
@@ -675,7 +678,7 @@ class Processor:
                 # Copy each pol chunk to the right place on the GPU.
                 for pol, chunk in enumerate(chunks):
                     in_item.samples[pol].set_region(
-                        self._upload_queue, chunk.base, np.s_[: chunk.base.nbytes], np.s_[:], blocking=False
+                        self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
 
@@ -689,7 +692,7 @@ class Processor:
                 for pol in range(len(chunks)):
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])
-                    streams[pol].add_chunk(chunks[pol])
+                    streams[pol].add_free_chunk(chunks[pol])
 
     async def run_transmit(self, sender: send.Sender) -> None:
         """Get the processed data from the GPU to the Network.

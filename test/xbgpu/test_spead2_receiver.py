@@ -44,8 +44,7 @@ import spead2
 import spead2.send
 
 import katgpucbf.monitor
-import katgpucbf.xbgpu._katxbgpu.recv as recv
-import katgpucbf.xbgpu.ringbuffer
+import katgpucbf.xbgpu.recv
 
 from . import test_parameters
 
@@ -113,9 +112,9 @@ def create_test_objects(
     ig: spead2.send.ItemGroup
         The ig is used to generate heaps that will  be passed to the source
         stream.
-    receiver_stream: katgpucbf.xbgpu._katxbgpu.recv.Stream
+    receiver_stream: spead2.recv.ChunkRingStream
         The receiver under test - will receive data from the source_stream.
-    async_ringbuffer: katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer
+    async_ringbuffer: spead2.recv.asyncio.Ringbuffer
         Wraps the receiver_stream ringbuffer so that it can be called using
         asyncio in python.
     """
@@ -168,16 +167,13 @@ def create_test_objects(
 
     # 4. Configure receiver
 
-    # 4.1 Create monitor - it is not used in these tests but it is required to be passed as an argument.
-    monitor = katgpucbf.monitor.NullMonitor()
-
     # 4.2 Create ringbuffer that all received chunks will be placed on.
     ringbuffer_capacity = 10
-    ringbuffer = recv.Ringbuffer(ringbuffer_capacity)
+    ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(ringbuffer_capacity)
 
     # 4.3 Create Receiver
     thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
-    receiver_stream = recv.Stream(
+    receiver_stream = katgpucbf.xbgpu.recv.make_stream(
         n_ants,
         n_channels_per_stream,
         n_spectra_per_heap,
@@ -188,25 +184,21 @@ def create_test_objects(
         max_active_chunks,
         ringbuffer,
         thread_affinity,
-        monitor=monitor,
-        use_gdrcopy=False,
     )
 
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
+    chunk_heaps = n_ants * heaps_per_fengine_per_chunk
+    chunk_bytes = chunk_heaps * n_channels_per_stream * n_spectra_per_heap * sample_bits * n_pols * complexity // 8
     for _ in range(src_chunks_per_stream):
-        buf = accel.HostArray((receiver_stream.chunk_bytes,), np.uint8, context=context)
-        chunk = recv.Chunk(buf)
-        receiver_stream.add_chunk(chunk)
-
-    # 5. Wrap ringbuffer in an Asycnringbuffer class for asyncio functionality.
-    async_ringbuffer = katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer(
-        receiver_stream.ringbuffer, monitor, "recv_ringbuffer", "get_chunks"
-    )
+        buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
+        present = np.zeros((chunk_heaps,), np.uint8)
+        chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
+        receiver_stream.add_free_chunk(chunk)
 
     # 6. Return relevant objects
-    return source_stream, ig, receiver_stream, async_ringbuffer
+    return source_stream, ig, receiver_stream, ringbuffer
 
 
 def create_heaps(
@@ -370,7 +362,7 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
     # decode. These heaps are tranmitted in such a way as to perform the different test mentioned in this function's
     # docstring.
 
-    # 3.1 Transmit first 5 chunks completly in order
+    # 3.1 Transmit first 5 chunks completely in order
     heap_index = 0
     for _ in range(5):
         heaps = create_heaps(
@@ -462,8 +454,8 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
 
     # 5. Define function that will test all received data.
     async def get_chunks(
-        async_ringbuffer: katgpucbf.xbgpu.ringbuffer.AsyncRingbuffer,
-        receiver_stream: katgpucbf.xbgpu._katxbgpu.recv.Stream,
+        async_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+        receiver_stream: spead2.recv.ChunkRingStream,
         total_chunks: int,
     ):
         """Iterate through chunks processed by the receiver.
@@ -476,20 +468,21 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
 
         # 5.1 Iterate through complete chunks in the ringbuffer asynchronously
         async for chunk in async_ringbuffer:
+            assert isinstance(chunk, katgpucbf.xbgpu.recv.Chunk)
             received += len(chunk.present)
-            dropped += len(chunk.present) - sum(chunk.present)
+            dropped += len(chunk.present) - int(np.sum(chunk.present))
             assert len(chunk.present) == n_ants * heaps_per_fengine_per_chunk, (
                 "Incorrect number of heaps in chunk. "
                 f"Expected: {n_ants*heaps_per_fengine_per_chunk}. actual: {len(chunk.present)}"
             )
             # Should not be dropping anything when just reading a buffer
             assert len(chunk.present) == sum(chunk.present), f"{sum(chunk.present)} dropped heaps in chunk"
-            chunk.base.dtype = np.uint16  # We read the real and imaginary samples together
+            chunk.data = chunk.data.view(np.uint16)  # We read the real and imaginary samples together
             # print(
             #     f"Chunk: {chunk_index:>5} "
             #     f"Received: {sum(chunk.present):>4} of {len(chunk.present):>4} expected heaps. "
             #     f"All time dropped/received heaps: {dropped}/{received}. "
-            #     f"Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.base.shape}"
+            #     f"Timestamp: {chunk.timestamp}, {chunk.timestamp/timestamp_step}, {chunk.data.shape}"
             # )
 
             # 5.2 Iterate through data in chunk to check that it contains the corrected data for each antenna and heap.
@@ -502,13 +495,13 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
                         (heap_index * n_ants + ant_index) * n_channels_per_stream * n_spectra_per_heap * n_pols
                     )
                     fengine_stop_index = fengine_start_index + n_channels_per_stream * n_spectra_per_heap * n_pols
-                    assert np.all(chunk.base[fengine_start_index:fengine_stop_index] == expected_sample_value), (
+                    assert np.all(chunk.data[fengine_start_index:fengine_stop_index] == expected_sample_value), (
                         f"Chunk {chunk_index}, heap {heap_index}, ant {ant_index}. "
                         f"Expected all values to equal: {hex(expected_sample_value)}"
                     )
 
             # 5.3 Give chunk back to receiver once we are done using it.
-            receiver_stream.add_chunk(chunk)
+            receiver_stream.add_free_chunk(chunk)
             chunk_index += 1
 
             # 5.4 Exit condition

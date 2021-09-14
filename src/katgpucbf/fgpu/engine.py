@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple, TypedDict, Union
 import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
+import spead2.recv
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
@@ -298,6 +299,7 @@ class Engine(aiokatcp.DeviceServer):
         chunk_samples = spectra * channels * 2
         extra_samples = taps * channels * 2
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
+        chunk_bytes = chunk_samples * compute.sample_bits // 8
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_gain = quant_gain
@@ -305,22 +307,20 @@ class Engine(aiokatcp.DeviceServer):
         self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
 
         ringbuffer_capacity = 2
-        ring = recv.Ringbuffer(ringbuffer_capacity)
+        ring = spead2.recv.asyncio.ChunkRingbuffer(ringbuffer_capacity)
         monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
+        self._src_layout = recv.Layout(compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_streams = [
-            recv.Stream(
+            recv.make_stream(
                 pol,
-                compute.sample_bits,
-                src_packet_samples,
-                chunk_samples,
+                self._src_layout,
                 ring,
                 src_affinity[pol],
-                mask_timestamp=mask_timestamp,
                 use_gdrcopy=use_gdrcopy,
                 monitor=monitor,
             )
@@ -338,15 +338,16 @@ class Engine(aiokatcp.DeviceServer):
                     # The device buffer contains extra space for copying the head
                     # of the following chunk, but we don't need that in the host
                     # mapping.
-                    buf = buf[: stream.chunk_bytes]
+                    buf = buf[:chunk_bytes]
                     # Hack to work around limitations in katsdpsigproc and pycuda
                     device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=int(device_raw))
                     device_array.buffer.base = device_raw
-                    chunk = recv.Chunk(buf, device_array)
+                    chunk = recv.Chunk(data=buf, device=device_array)
                 else:
-                    buf = accel.HostArray((stream.chunk_bytes,), np.uint8, context=context)
-                    chunk = recv.Chunk(buf)
-                stream.add_chunk(chunk)
+                    buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
+                    chunk = recv.Chunk(data=buf)
+                chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
+                stream.add_free_chunk(chunk)
         send_chunks = []
         send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, pols, 2)
         send_dtype = np.dtype(np.int8)
@@ -447,15 +448,28 @@ class Engine(aiokatcp.DeviceServer):
                 src = self._srcs[pol]
                 if isinstance(src, str):
                     stream.add_udp_pcap_file_reader(src)
-                else:
+                elif self._src_ibv:
                     if self._src_interface is None:
-                        raise ValueError("src_interface is required for UDP sources")
-                    stream.add_udp_reader(
-                        src, self._src_interface, self._src_buffer, self._src_ibv, self._src_comp_vector[pol]
+                        raise ValueError("--src-interface is required with --src-ibv")
+                    ibv_config = spead2.recv.UdpIbvConfig(
+                        endpoints=src,
+                        interface_address=self._src_interface,
+                        buffer_size=self._src_buffer,
+                        comp_vector=self._src_comp_vector[pol],
                     )
+                    stream.add_udp_ibv_reader(ibv_config)
+                else:
+                    buffer_size = self._src_buffer // len(src)  # split it across the endpoints
+                    for endpoint in src:
+                        stream.add_udp_reader(
+                            endpoint[0],
+                            endpoint[1],
+                            buffer_size=buffer_size,
+                            interface_address=self._src_interface or "",
+                        )
             tasks = [
                 loop.create_task(self._processor.run_processing(self._src_streams)),
-                loop.create_task(self._processor.run_receive(self._src_streams)),
+                loop.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
                 loop.create_task(self._processor.run_transmit(self._sender)),
             ]
             await asyncio.gather(*tasks)

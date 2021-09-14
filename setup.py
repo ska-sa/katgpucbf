@@ -67,7 +67,7 @@ for source in spead2_gen_sources:
 spead2_headers = glob("3rdparty/spead2/include/spead2/*.h")
 
 ext_modules = []
-for mod in ["fgpu", "xbgpu"]:
+for mod in ["fgpu"]:
     src_dir = f"src/katgpucbf/{mod}/_kat{mod}"
     ext_modules.append(
         Pybind11Extension(
