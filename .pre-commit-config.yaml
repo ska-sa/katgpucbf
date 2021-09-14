@@ -12,6 +12,7 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: no-commit-to-branch # without arguments, master/main will be protected.
+      - id: trailing-whitespace
   - repo: https://github.com/psf/black
     rev: 21.6b0
     hooks:
