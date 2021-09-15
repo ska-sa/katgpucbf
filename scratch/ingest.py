@@ -15,27 +15,21 @@ import spead2
 import spead2.recv
 import spead2.recv.asyncio
 from aiokatcp.core import Timestamp
-from katsdptelstate.endpoint import endpoint_list_parser, endpoint_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-# import matplotlib.pyplot as plt
-
 complexity = 2
 
 
-def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--interface",
-        type=str,
-        required=True,
-        help="IP address of ibverbs interface",
-    )
-    parser.add_argument("product_controller", type=endpoint_parser(7148), help="Product controller endpoint")
-    args = parser.parse_args(arglist)
-    return args
+async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str):
+    """Get the katcp address for a named product controller from the master."""
+    mc_host, mc_port = mc_endpoint
+    client = await aiokatcp.Client.connect(mc_host, mc_port)
+    _reply, informs = await client.request("sensor-value", f"{product_name}.katcp-address")
+    pc_host, pc_port = endpoint_parser(7148)(informs[0].arguments[4].decode("ascii"))
+    return pc_host, pc_port
 
 
 async def async_main(host: str, port: int):
@@ -164,6 +158,22 @@ async def async_main(host: str, port: int):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    host, port = args.product_controller
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--interface",
+        type=str,
+        required=True,
+        help="IP address of ibverbs interface",
+    )
+    parser.add_argument(
+        "--mc-address",
+        type=endpoint_parser(5001),
+        default="lab5.sdp.kat.ac.za:5001",
+        help="Master controller to query for details about the product. [%(default)s]",
+    )
+    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
+    args = parser.parse_args()
+
+    host, port = asyncio.run(get_product_controller_endpoint(args.mc_address, args.product_name))
     asyncio.run(async_main(host, int(port)))
