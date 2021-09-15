@@ -33,47 +33,50 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
 
 
 async def async_main(host: str, port: int):
+    """TODO: This functionality should be wrapped up in a class really."""
     client = await aiokatcp.Client.connect(host, port)
 
+    # Multicast endpoints so that we can pass these to the spead2 stream.
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-destination")
-    multicast_endpoints = endpoint_list_parser(7148)(informs[0].arguments[4].decode("ascii"))
+    multicast_endpoints = [
+        (str(host), int(port)) for host, port in endpoint_list_parser(7148)(informs[0].arguments[4].decode("ascii"))
+    ]  # spead2.recv.UdpIbvConfig doesn't accept the endpoint list directly. I'm not sure why.
 
+    # We need these parameters for various useful reasons.
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-bls")
     n_bls = int(informs[0].arguments[4])
-
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-chans")
     n_chans = int(informs[0].arguments[4])
-
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-chans-per-substream")
     n_chans_per_substream = int(informs[0].arguments[4])
-
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-xeng-out-bits-per-sample")
     n_bits_per_sample = int(informs[0].arguments[4])
-
+    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-accs")
+    n_spectra_per_acc = int(informs[0].arguments[4])
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-xengs")
     n_xengs = int(informs[0].arguments[4])
-
     _reply, informs = await client.request("sensor-value", "antenna_channelised_voltage-adc-sample-rate")
     adc_sample_rate = float(informs[0].arguments[4])
 
+    # The only reason for getting this info is to annotate the plot we make at the end.
     _reply, informs = await client.request("sensor-value", "baseline_correlation_products-bls-ordering")
+    # I quite like this trick. It gives us a list of tuples.
     bls_ordering = ast.literal_eval(informs[0].arguments[4].decode())
 
+    # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * complexity * n_bits_per_sample // 8
 
-    print(f"heap pl size: {HEAP_PAYLOAD_SIZE}")
-
+    # According to the ICD.
     TIMESTAMP = 0x1600
     FREQUENCY = 0x4103
 
+    # These are the spead items that we will need for placing the individual
+    # heaps within the chunk.
     items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
+    timestamp_step = 2 * n_chans * n_spectra_per_acc
 
-    max_chunks = 5
-    timestamp_step = (
-        2 * n_chans * (spectra_per_heap := 256) * (heaps_per_accum := 1)
-    )  # values from the low-speed correlator I created
-    print(f"timestamp_step {timestamp_step}")
-
+    # Heap placement function. Gets translated from Python to C so that spead2
+    # can use it.
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place(data_ptr, data_size):
         data = numba.carray(data_ptr, 1)
@@ -91,6 +94,8 @@ async def async_main(host: str, port: int):
         max_heaps=n_xengs * 10,
         allow_out_of_order=True,
     )  # just an arbitrary guess for now
+
+    max_chunks = 5  # Just a guess. No logic to this just yet.
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
         max_chunks=max_chunks,
@@ -106,7 +111,9 @@ async def async_main(host: str, port: int):
         free_ringbuffer,
     )
 
-    HEAPS_PER_CHUNK = n_xengs  # for now
+    # For the time being we'll make a chunk look like what katsdpingest calls
+    # a "frame".
+    HEAPS_PER_CHUNK = n_xengs
     CHUNK_PAYLOAD_SIZE = HEAPS_PER_CHUNK * HEAP_PAYLOAD_SIZE
 
     for _ in range(max_chunks):
@@ -115,41 +122,32 @@ async def async_main(host: str, port: int):
         )
         stream.add_free_chunk(chunk)
 
-    mc_ep = [(str(host), int(port)) for host, port in multicast_endpoints]
-    print(mc_ep)
     config = spead2.recv.UdpIbvConfig(
-        endpoints=mc_ep, interface_address=args.interface, buffer_size=1000000, comp_vector=-1
+        endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=1000000, comp_vector=-1
     )
     stream.add_udp_ibv_reader(config)
 
-    async_ringbuffer = stream.data_ringbuffer
+    # Preparation for the plot. Doing it outside the for-loop, no need to redo it lots.
+    frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]  # -1 because it goes all the way to n/2
 
-    expected_heaps_total = 0
-    dropped_heaps_total = 0
-
-    frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]  # Because it goes up to n/2 as well
-
-    async for chunk in async_ringbuffer:
-        expected_heaps = len(chunk.present)
+    async for chunk in stream.data_ringbuffer:
         received_heaps = int(np.sum(chunk.present))
-        dropped_heaps = expected_heaps - received_heaps
-        expected_heaps_total += expected_heaps
-        dropped_heaps_total += dropped_heaps
-
-        if dropped_heaps == 0:
-            # We have a full chunk. Discard the first few, they're likely to be messy.
+        if HEAPS_PER_CHUNK - received_heaps == 0:
+            # We have a full chunk.
             data = chunk.data.view(dtype=np.int32).reshape(n_chans, n_bls, 2)
 
-            fig = plt.figure(figsize=(8, 24))
-            # fig.suptitle(f"Baselines for frame with timestamp {chunk.chunk_id * timestamp_step}")
+            plt.figure(figsize=(8, 24))
             for i in range(n_bls):
-
                 ax = plt.subplot(n_bls, 1, i + 1)
+                # We're just plotting the magnitude for now. Phase is easy enough,
+                # and is left as an exercise to the reader.
                 plt.plot(frequency_axis, np.abs(data[:, i, 0] + 1j * data[:, i, 0]))
+                # This just makes the x-ticks only on the bottom graph, it makes
+                # the plot somewhat less cluttered.
                 plt.setp(ax.get_xticklabels(), visible=(True if i == n_bls - 1 else False))
                 ax.set_ylabel(bls_ordering[i])
 
-            ax.xaxis.set_major_formatter(lambda x, y: x / 1e6)
+            ax.xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Numbers are a bit large, let's display in MHz instead.
             ax.set_xlabel("Frequency [MHz]")
 
             plt.savefig(f"{chunk.chunk_id}.png")
@@ -158,7 +156,6 @@ async def async_main(host: str, port: int):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--interface",
@@ -169,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mc-address",
         type=endpoint_parser(5001),
-        default="lab5.sdp.kat.ac.za:5001",
+        default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
         help="Master controller to query for details about the product. [%(default)s]",
     )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
