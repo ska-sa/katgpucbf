@@ -3,8 +3,6 @@
 import argparse
 import ast
 import asyncio
-from math import frexp
-from typing import Optional, Sequence
 
 import aiokatcp
 import matplotlib.pyplot as plt
@@ -14,7 +12,6 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from aiokatcp.core import Timestamp
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 from numba import types
 from spead2.numba import intp_to_voidptr
