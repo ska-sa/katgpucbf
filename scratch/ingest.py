@@ -4,7 +4,7 @@ import argparse
 import ast
 import asyncio
 import logging
-from typing import Union as Onion
+from typing import Union
 
 import aiokatcp
 import matplotlib.pyplot as plt
@@ -23,7 +23,7 @@ from spead2.recv.numba import chunk_place_data
 complexity = 2
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Onion[int, float, str]:
+async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
     """Get the value of a katcp sensor.
 
     If the sensor value can't be cast as an int or a float (in that order), the
@@ -48,7 +48,6 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
 
 
 async def async_main():
-
     logger = logging.getLogger(__name__)
     logging.basicConfig(level=logging.INFO)
 
@@ -126,7 +125,7 @@ async def async_main():
 
     # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
     # May need to revisit that assumption for much larger array sizes.
-    max_chunks = int(1 // int_time) + 1
+    max_chunks = round(1 // int_time) + 1
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
         max_chunks=max_chunks,
