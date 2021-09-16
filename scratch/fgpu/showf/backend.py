@@ -8,9 +8,8 @@ from typing import Deque, List, Optional
 import bokeh.server.contexts
 import numpy as np
 import spead2.recv.asyncio
-import tornado.gen
 from katsdpservices import get_interface_address
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
+from katsdptelstate.endpoint import endpoint_list_parser
 
 TIMESTAMP_ID = 0x1600
 FREQUENCY_ID = 0x4103
