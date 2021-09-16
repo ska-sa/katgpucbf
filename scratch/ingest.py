@@ -4,8 +4,7 @@ import argparse
 import ast
 import asyncio
 import logging
-import sys
-from typing import Union
+from typing import Union as Onion
 
 import aiokatcp
 import matplotlib.pyplot as plt
@@ -15,24 +14,21 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
+from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-# I'll readily admit to not knowing what best practices are here.
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler(sys.stdout))
-
 complexity = 2
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float]:
-    """Get the relevant value from a katcp sensor.
+async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Onion[int, float, str]:
+    """Get the value of a katcp sensor.
 
-    If the sensor isn't either an int or a float, the value will get returned
-    as a string.
+    If the sensor value can't be cast as an int or a float (in that order), the
+    value will get returned as a string. This simple implementation ignores the
+    actual type advertised by the server.
     """
     _reply, informs = await client.request("sensor-value", sensor_name)
 
@@ -52,12 +48,16 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
 
 
 async def async_main():
+
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--interface",
-        type=str,
+        type=get_interface_address,
         required=True,
-        help="IP address of ibverbs interface",
+        help="Name of ibverbs interface.",
     )
     parser.add_argument(
         "--mc-address",
@@ -88,13 +88,15 @@ async def async_main():
         n_bits_per_sample = await get_sensor_val(client, "baseline_correlation_products-xeng-out-bits-per-sample")
         n_spectra_per_acc = await get_sensor_val(client, "baseline_correlation_products-n-accs")
         adc_sample_rate = await get_sensor_val(client, "antenna_channelised_voltage-adc-sample-rate")
+        int_time = await get_sensor_val(client, "baseline_correlation_products-int-time")
 
         # The only reason for getting this info is to annotate the plot we make at the end.
-        bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline_correlation_products-bls-ordering"))
         # I quite like this trick. It gives us a list of tuples.
+        bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline_correlation_products-bls-ordering"))
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * complexity * n_bits_per_sample // 8
+    HEAPS_PER_CHUNK = n_chans // n_chans_per_substream
 
     # According to the ICD.
     TIMESTAMP = 0x1600
@@ -120,14 +122,11 @@ async def async_main():
             data[0].heap_index = channel_offset // n_chans_per_substream
             data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
 
-    stream_config = spead2.recv.StreamConfig(
-        max_heaps=(HEAPS_PER_CHUNK := n_chans // n_chans_per_substream) * 3,
-        allow_out_of_order=True,  # Not 100% sure if this is necessary.
-    )
+    stream_config = spead2.recv.StreamConfig(max_heaps=HEAPS_PER_CHUNK * 3)
 
-    # Assuming X-engines are at most 1 second out of sync, with one extra for luck.
+    # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
     # May need to revisit that assumption for much larger array sizes.
-    max_chunks = 3
+    max_chunks = int(1 // int_time) + 1
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
         max_chunks=max_chunks,
