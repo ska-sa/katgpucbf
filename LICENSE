@@ -28,5 +28,5 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 The Tensor-Core Correlator Kernel
 (src/katgpucbf/xbgpu/kernels/tensor_core_correlation_kernel.mako)
-is licenced under the Apache License, Version 2.0, and is available (upstream) here:
+is licensed under the Apache License, Version 2.0, and is available (upstream) here:
 https://git.astron.nl/RD/tensor-core-correlator
