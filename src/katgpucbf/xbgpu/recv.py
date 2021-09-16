@@ -9,6 +9,8 @@ from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+from .. import CPLX
+
 TIMESTAMP_ID = 0x1600
 FENGINE_ID = 0x4101
 
@@ -66,8 +68,7 @@ def make_stream(
     thread_affinity
         CPU Thread that this receiver will use for processing.
     """
-    # * 2 because samples are complex
-    heap_bytes = n_channels_per_stream * n_spectra_per_heap * n_pols * 2 * sample_bits // 8
+    heap_bytes = n_channels_per_stream * n_spectra_per_heap * n_pols * CPLX * sample_bits // 8
 
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place_impl(data_ptr, data_size):

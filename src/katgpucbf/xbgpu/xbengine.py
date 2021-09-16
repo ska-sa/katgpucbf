@@ -41,7 +41,7 @@ import katgpucbf.xbgpu.recv
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
 
-from .. import __version__
+from .. import CPLX, __version__
 from ..monitor import Monitor
 
 logger = logging.getLogger(__name__)
@@ -358,7 +358,6 @@ class XBEngine(DeviceServer):
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_pols = n_pols
         self.sample_bits = sample_bits
-        complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
 
         # Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
         # setting these values too high results in too much GPU memory being consumed. There just need to be enough
@@ -381,7 +380,7 @@ class XBEngine(DeviceServer):
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
         # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * self.n_pols * complexity
+            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * self.n_pols * CPLX
         )
         # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step

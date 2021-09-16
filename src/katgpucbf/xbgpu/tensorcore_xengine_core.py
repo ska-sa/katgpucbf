@@ -15,7 +15,7 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
-complexity = 2
+from .. import CPLX
 
 
 class TensorCoreXEngineCoreTemplate:
@@ -85,12 +85,12 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
-            accel.Dimension(complexity, exact=True),
+            accel.Dimension(CPLX, exact=True),
         )
         self.output_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_baselines * 4, exact=True),
-            accel.Dimension(complexity, exact=True),
+            accel.Dimension(CPLX, exact=True),
         )
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
@@ -165,7 +165,7 @@ class TensorCoreXEngineCore(accel.Operation):
     ``-128i`` into the kernel will produce incorrect values at the output.
 
     The output visibility buffer must have the shape
-    ``[channels][baselines][complexity]``. In 8-bit mode, each element in this
+    ``[channels][baselines][CPLX]``. In 8-bit mode, each element in this
     visibility matrix is a 32-bit integer value.
 
     Currently only 8-bit input mode is supported.

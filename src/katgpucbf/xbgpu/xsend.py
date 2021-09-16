@@ -37,6 +37,8 @@ import spead2
 import spead2.send.asyncio
 from aiokatcp.sensor import Sensor, SensorSet
 
+from .. import CPLX
+
 
 class BufferWrapper:
     """
@@ -144,7 +146,6 @@ class XSend:
     max_payload_size: Final[int] = 2048
     header_size: Final[int] = 64
     max_packet_size: Final[int] = max_payload_size + header_size
-    complexity: Final[int] = 2
 
     # Initialise class including all variables
     # TODO: update spead2 to make spead2.send.asyncio._AsyncStream public.
@@ -186,12 +187,12 @@ class XSend:
         self.channel_offset: Final[int] = channel_offset
 
         self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * XSend.complexity * self._sample_bits // 8
+            self.n_channels_per_stream * self.n_baselines * CPLX * self._sample_bits // 8
         )
         self.heap_shape: Final[Tuple] = (
             self.n_channels_per_stream,
             self.n_baselines,
-            XSend.complexity,
+            CPLX,
         )
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 

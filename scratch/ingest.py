@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import argparse
 import ast
 import asyncio
@@ -20,7 +19,7 @@ from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-complexity = 2
+from katgpucbf import CPLX
 
 
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
@@ -33,9 +32,9 @@ async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int
     _reply, informs = await client.request("sensor-value", sensor_name)
 
     expected_types = [int, float, str]
-    for T in expected_types:
+    for t in expected_types:
         try:
-            return aiokatcp.decode(T, informs[0].arguments[4])
+            return aiokatcp.decode(t, informs[0].arguments[4])
         except ValueError:
             continue
 
@@ -94,12 +93,12 @@ async def async_main():
         bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline_correlation_products-bls-ordering"))
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
-    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * complexity * n_bits_per_sample // 8
-    HEAPS_PER_CHUNK = n_chans // n_chans_per_substream
+    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
+    HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
 
     # According to the ICD.
-    TIMESTAMP = 0x1600
-    FREQUENCY = 0x4103
+    TIMESTAMP = 0x1600  # noqa: N806
+    FREQUENCY = 0x4103  # noqa: N806
 
     # These are the spead items that we will need for placing the individual
     # heaps within the chunk.
@@ -144,7 +143,7 @@ async def async_main():
     for _ in range(max_chunks):
         chunk = spead2.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
-            data=np.empty((n_chans, n_bls, complexity), dtype=getattr(np, f"int{n_bits_per_sample}")),
+            data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
 
