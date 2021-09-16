@@ -17,13 +17,11 @@ import spead2.send
 from numba import njit
 
 import katgpucbf.xbgpu.xbengine
+from katgpucbf import CPLX, N_POLS
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
-
-# Define Constants
-complexity = 2
 
 get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
 
@@ -34,7 +32,6 @@ def create_heaps(
     n_ants: int,
     n_channels_per_stream: int,
     n_spectra_per_heap: int,
-    n_pols: int,
     ig: spead2.send.ItemGroup,
 ):
     """
@@ -73,8 +70,6 @@ def create_heaps(
         The number of frequency channels contained in a heap.
     n_spectra_per_heap: int
         The number of time samples per frequency channel.
-    n_pols: int
-        The number of pols per antenna. Expected to always be 2 at the moment.
     ig: spead2.send.ItemGroup
         The ig is used to generate heaps that will be passed to the source stream. This ig is expected to have been
         configured correctly using the create_test_objects function.
@@ -89,17 +84,17 @@ def create_heaps(
     heap_shape = (
         n_channels_per_stream,
         n_spectra_per_heap,
-        n_pols,
-        complexity,
+        N_POLS,
+        CPLX,
     )
-    # The heaps shape has been modified with the complexity dimension and n_pols dimension equal to 1 instead of 2.
+    # The heaps shape has been modified with the CPLX dimension and n_pols dimension equal to 1 instead of 2.
     # This is because we treat the two 8-bit complex samples for both pols as a single 32-bit value when generating the
     # the simulated data. We correct the shape before sending.
     modified_heap_shape = (
         n_channels_per_stream,
         n_spectra_per_heap,
-        n_pols // 2,
-        complexity // 2,
+        N_POLS // 2,
+        CPLX // 2,
     )
 
     # 2. Generate all the heaps for the different antennas.
@@ -208,14 +203,14 @@ def cmult_and_scale(a, b, c):
 
 
 @njit
-def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_spectra_per_heap, n_pols=2):
+def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_spectra_per_heap):
     """Calculate the expected correlator output.
 
     This doesn't do a full correlator. It calculates the results according to
     what is expected from the specific input generated in :func:`create_heaps`.
     """
     baselines = antennas * (antennas + 1) // 2
-    output_array = np.zeros((channels, baselines, n_pols, n_pols, complexity), dtype=np.int32)
+    output_array = np.zeros((channels, baselines, N_POLS, N_POLS, CPLX), dtype=np.int32)
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         sign = pow(-1, b)
         for c in range(channels):
@@ -276,7 +271,6 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
         n_engines *= 2
     n_channels_per_stream = num_channels // n_engines
     n_spectra_per_heap = num_spectra_per_heap
-    n_pols = 2
     sample_bits = 8
     heaps_per_fengine_per_chunk = 2
     rx_reorder_tol = 2 ** 26  # Increase if needed; this is small to keep memory usage manageable
@@ -284,9 +278,9 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
     n_accumulations = 3
 
     max_packet_size = (
-        n_spectra_per_heap * n_pols * complexity * sample_bits // 8 + 96
+        n_spectra_per_heap * N_POLS * CPLX * sample_bits // 8 + 96
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
-    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, complexity)
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, CPLX)
     timestamp_step = n_channels_total * 2 * n_spectra_per_heap
 
     # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
@@ -351,7 +345,6 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
         n_channels_total=n_channels_total,
         n_channels_per_stream=n_channels_per_stream,
         n_spectra_per_heap=n_spectra_per_heap,
-        n_pols=n_pols,
         sample_bits=sample_bits,
         heap_accumulation_threshold=heap_accumulation_threshold,
         channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
@@ -371,7 +364,7 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
         # as the accumulations are aligned to integer multiples of heap_accumulation_threshold * timestamp_step
         batch_index = i + (heap_accumulation_threshold - 1)
         timestamp = batch_index * timestamp_step
-        heaps = create_heaps(timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, n_pols, ig_send)
+        heaps = create_heaps(timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send)
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
     # 7. Add transports to xbengine.

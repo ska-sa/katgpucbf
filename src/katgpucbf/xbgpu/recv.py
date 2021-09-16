@@ -9,7 +9,7 @@ from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import CPLX
+from .. import CPLX, N_POLS
 
 TIMESTAMP_ID = 0x1600
 FENGINE_ID = 0x4101
@@ -26,7 +26,6 @@ def make_stream(
     n_ants: int,
     n_channels_per_stream: int,
     n_spectra_per_heap: int,
-    n_pols: int,
     sample_bits: int,
     timestamp_step: int,
     heaps_per_fengine_per_chunk: int,
@@ -46,8 +45,6 @@ def make_stream(
         The number of frequency channels contained in the stream.
     n_spectra_per_heap
         The number of time samples received per frequency channel.
-    n_pols
-        The number of pols per antenna. Expected to always be 2 at the moment.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
     timestamp_step
@@ -68,7 +65,7 @@ def make_stream(
     thread_affinity
         CPU Thread that this receiver will use for processing.
     """
-    heap_bytes = n_channels_per_stream * n_spectra_per_heap * n_pols * CPLX * sample_bits // 8
+    heap_bytes = n_channels_per_stream * n_spectra_per_heap * N_POLS * CPLX * sample_bits // 8
 
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place_impl(data_ptr, data_size):

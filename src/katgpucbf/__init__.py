@@ -12,3 +12,4 @@ except PackageNotFoundError:
 __all__ = ["__version__"]
 
 CPLX: Final[int] = 2
+N_POLS: Final[int] = 2
