@@ -6,8 +6,8 @@ channelised voltage stream
 
 It also shows how a chunk can be received asynchronously and how to pass a used chunk back to the katxbgpu receiver.
 
-TODO: When the katxbgpu repo has been ported to python version 3.7 and above, update the asyncio functionality to use the
-asyncio.gather() syntax.
+TODO: When the katxbgpu repo has been ported to python version 3.7 and above,
+update the asyncio functionality to use the asyncio.gather() syntax.
 """
 import argparse
 import asyncio
@@ -31,8 +31,8 @@ interface_ip = args.interface
 print(f"Transmitting to {dest_multicast_ip}:{dest_multicast_port} on the {interface_ip} interface.")
 
 # 2.2 Adjustable parameters - The description of these parameters can be found in the documentation for the
-# katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend object. These default values have been chosen to represent a typical correlator
-# configuration.
+# katgpucbf.xbgpu.xsend.XEngineSPEADIbvSend object. These default values have
+# been chosen to represent a typical correlator configuration.
 thread_affinity = 3
 n_ants = 64
 n_channels_total = 32768
@@ -86,7 +86,8 @@ async def send_process():
         # 5.3 Give the buffer back to the send_stream to transmit out onto the network.
         send_stream.send_heap(num_sent * 0x1000, buffer_wrapper)
         print(
-            f"Sent heap {num_sent-1}. Values: [{buffer_wrapper.buffer[0][0][0][0]}...{buffer_wrapper.buffer[-1][-1][-1][-1]}]"
+            f"Sent heap {num_sent-1}. "
+            f"Values: [{buffer_wrapper.buffer[0][0][0][0]}...{buffer_wrapper.buffer[-1][-1][-1][-1]}]"
         )
 
 

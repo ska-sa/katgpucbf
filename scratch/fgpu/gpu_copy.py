@@ -2,7 +2,6 @@
 
 import argparse
 import mmap
-import sys
 import time
 
 import numpy as np
@@ -36,7 +35,7 @@ device = GPUArray((size,), np.uint8)
 device.set(host)
 while True:
     start = time.time()
-    for i in range(rep):
+    for _ in range(rep):
         if args.direction == "htod":
             device.set(host)
         else:
