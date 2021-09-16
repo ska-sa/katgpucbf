@@ -3,6 +3,8 @@
 import argparse
 import ast
 import asyncio
+import logging
+import sys
 from typing import Union
 
 import aiokatcp
@@ -17,6 +19,11 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_par
 from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
+
+# I'll readily admit to not knowing what best practices are here.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 complexity = 2
 
@@ -62,7 +69,6 @@ async def async_main(host: str, port: int):
     n_chans_per_substream = await get_katcp_sensor_value(client, "baseline_correlation_products-n-chans-per-substream")
     n_bits_per_sample = await get_katcp_sensor_value(client, "baseline_correlation_products-xeng-out-bits-per-sample")
     n_spectra_per_acc = await get_katcp_sensor_value(client, "baseline_correlation_products-n-accs")
-    n_xengs = await get_katcp_sensor_value(client, "baseline_correlation_products-n-xengs")
     adc_sample_rate = await get_katcp_sensor_value(client, "antenna_channelised_voltage-adc-sample-rate")
 
     # The only reason for getting this info is to annotate the plot we make at the end.
@@ -81,8 +87,8 @@ async def async_main(host: str, port: int):
     items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
     timestamp_step = 2 * n_chans * n_spectra_per_acc
 
-    # Heap placement function. Gets translated from Python to C so that spead2
-    # can use it.
+    # Heap placement function. Gets compiled so that spead2's C code can call it.
+    # A chunk consists of all baselines and channels for a single point in time.
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place(data_ptr, data_size):
         data = numba.carray(data_ptr, 1)
@@ -91,17 +97,17 @@ async def async_main(host: str, port: int):
         timestamp = items[1]
         payload_size = items[2]
         # If the payload size doesn't match, discard the heap (could be descriptors etc).
-        if payload_size == HEAP_PAYLOAD_SIZE:  # This isn't working. Somehow payload size is wrong.
+        if payload_size == HEAP_PAYLOAD_SIZE:
             data[0].chunk_id = timestamp // timestamp_step
             data[0].heap_index = channel_offset // n_chans_per_substream
             data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
 
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=n_xengs * 10,
-        allow_out_of_order=True,
-    )  # just an arbitrary guess for now
+        max_heaps=(HEAPS_PER_CHUNK := n_chans // n_chans_per_substream) * 3,
+        allow_out_of_order=True,  # Not 100% sure if this is necessary.
+    )
 
-    max_chunks = 5  # Just a guess. No logic to this just yet.
+    max_chunks = 3  # Assuming X-engines are at most 1 second out of sync, with one extra for luck.
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
         max_chunks=max_chunks,
@@ -110,26 +116,22 @@ async def async_main(host: str, port: int):
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_chunks)
     stream = spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(1, []),
+        spead2.ThreadPool(),
         stream_config,
         chunk_stream_config,
         data_ringbuffer,
         free_ringbuffer,
     )
 
-    # For the time being we'll make a chunk look like what katsdpingest calls
-    # a "frame".
-    HEAPS_PER_CHUNK = n_xengs
-    CHUNK_PAYLOAD_SIZE = HEAPS_PER_CHUNK * HEAP_PAYLOAD_SIZE
-
     for _ in range(max_chunks):
         chunk = spead2.recv.Chunk(
-            present=np.empty(HEAPS_PER_CHUNK, np.uint8), data=np.empty(CHUNK_PAYLOAD_SIZE, np.uint8)
+            present=np.empty(HEAPS_PER_CHUNK, np.uint8),
+            data=np.empty((n_chans, n_bls, complexity), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
 
     config = spead2.recv.UdpIbvConfig(
-        endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=1000000, comp_vector=-1
+        endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
     )
     stream.add_udp_ibv_reader(config)
 
@@ -138,16 +140,14 @@ async def async_main(host: str, port: int):
 
     async for chunk in stream.data_ringbuffer:
         received_heaps = int(np.sum(chunk.present))
-        if HEAPS_PER_CHUNK - received_heaps == 0:
+        if received_heaps == HEAPS_PER_CHUNK:
             # We have a full chunk.
-            data = chunk.data.view(dtype=np.int32).reshape(n_chans, n_bls, 2)
-
             plt.figure(figsize=(8, 24))
             for i in range(n_bls):
                 ax = plt.subplot(n_bls, 1, i + 1)
                 # We're just plotting the magnitude for now. Phase is easy enough,
                 # and is left as an exercise to the reader.
-                plt.plot(frequency_axis, np.abs(data[:, i, 0] + 1j * data[:, i, 0]))
+                plt.plot(frequency_axis, np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
                 # This just makes the x-ticks only on the bottom graph, it makes
                 # the plot somewhat less cluttered.
                 plt.setp(ax.get_xticklabels(), visible=(True if i == n_bls - 1 else False))
@@ -157,6 +157,8 @@ async def async_main(host: str, port: int):
             ax.set_xlabel("Frequency [MHz]")
 
             plt.savefig(f"{chunk.chunk_id}.png")
+        else:
+            logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
 
         stream.add_free_chunk(chunk)
 
