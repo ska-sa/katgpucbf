@@ -34,7 +34,7 @@ class SensorConverter:
         full_sensor_name = f"{self.stream}-{sensor_name}"
         reply, informs = await self.client.request("sensor-value", full_sensor_name)
         if len(informs) != 1:
-            raise RuntimeError(f"Expected 1 sensor value for {full_sensor_name}, received {len(inform)}")
+            raise RuntimeError(f"Expected 1 sensor value for {full_sensor_name}, received {len(informs)}")
         value = aiokatcp.decode(katcp_type, informs[0].arguments[4])
         if convert is not None:
             value = convert(value)
