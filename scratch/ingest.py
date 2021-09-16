@@ -3,6 +3,7 @@
 import argparse
 import ast
 import asyncio
+from typing import Union
 
 import aiokatcp
 import matplotlib.pyplot as plt
@@ -20,45 +21,53 @@ from spead2.recv.numba import chunk_place_data
 complexity = 2
 
 
-async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str):
+async def get_katcp_sensor_value(client: aiokatcp.Client, sensor_name: str) -> Union[int, float]:
+    """Get the relevant value from a katcp sensor.
+
+    If the sensor isn't either an int or a float, the value will get returned
+    as a string.
+    """
+    _reply, informs = await client.request("sensor-value", sensor_name)
+
+    expected_types = [int, float, str]
+    for T in expected_types:
+        try:
+            return aiokatcp.decode(T, informs[0].arguments[4])
+        except ValueError:
+            continue
+
+
+async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
     """Get the katcp address for a named product controller from the master."""
-    mc_host, mc_port = mc_endpoint
-    client = await aiokatcp.Client.connect(mc_host, mc_port)
-    _reply, informs = await client.request("sensor-value", f"{product_name}.katcp-address")
-    pc_host, pc_port = endpoint_parser(7148)(informs[0].arguments[4].decode("ascii"))
-    return pc_host, pc_port
+    client = await aiokatcp.Client.connect(*mc_endpoint)
+    return endpoint_parser(None)(await get_katcp_sensor_value(client, f"{product_name}.katcp-address"))
 
 
 async def async_main(host: str, port: int):
     """TODO: This functionality should be wrapped up in a class really."""
     client = await aiokatcp.Client.connect(host, port)
 
-    # Multicast endpoints so that we can pass these to the spead2 stream.
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-destination")
+    # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
+    # But we can cast Endpoints to tuples, which it does know.
     multicast_endpoints = [
-        (str(host), int(port)) for host, port in endpoint_list_parser(7148)(informs[0].arguments[4].decode("ascii"))
-    ]  # spead2.recv.UdpIbvConfig doesn't accept the endpoint list directly. I'm not sure why.
+        tuple(endpoint)
+        for endpoint in endpoint_list_parser(7148)(
+            await get_katcp_sensor_value(client, "baseline_correlation_products-destination")
+        )
+    ]
 
     # We need these parameters for various useful reasons.
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-bls")
-    n_bls = int(informs[0].arguments[4])
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-chans")
-    n_chans = int(informs[0].arguments[4])
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-chans-per-substream")
-    n_chans_per_substream = int(informs[0].arguments[4])
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-xeng-out-bits-per-sample")
-    n_bits_per_sample = int(informs[0].arguments[4])
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-accs")
-    n_spectra_per_acc = int(informs[0].arguments[4])
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-n-xengs")
-    n_xengs = int(informs[0].arguments[4])
-    _reply, informs = await client.request("sensor-value", "antenna_channelised_voltage-adc-sample-rate")
-    adc_sample_rate = float(informs[0].arguments[4])
+    n_bls = await get_katcp_sensor_value(client, "baseline_correlation_products-n-bls")
+    n_chans = await get_katcp_sensor_value(client, "baseline_correlation_products-n-chans")
+    n_chans_per_substream = await get_katcp_sensor_value(client, "baseline_correlation_products-n-chans-per-substream")
+    n_bits_per_sample = await get_katcp_sensor_value(client, "baseline_correlation_products-xeng-out-bits-per-sample")
+    n_spectra_per_acc = await get_katcp_sensor_value(client, "baseline_correlation_products-n-accs")
+    n_xengs = await get_katcp_sensor_value(client, "baseline_correlation_products-n-xengs")
+    adc_sample_rate = await get_katcp_sensor_value(client, "antenna_channelised_voltage-adc-sample-rate")
 
     # The only reason for getting this info is to annotate the plot we make at the end.
-    _reply, informs = await client.request("sensor-value", "baseline_correlation_products-bls-ordering")
+    bls_ordering = ast.literal_eval(await get_katcp_sensor_value(client, "baseline_correlation_products-bls-ordering"))
     # I quite like this trick. It gives us a list of tuples.
-    bls_ordering = ast.literal_eval(informs[0].arguments[4].decode())
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * complexity * n_bits_per_sample // 8
