@@ -28,7 +28,7 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 complexity = 2
 
 
-async def get_katcp_sensor_value(client: aiokatcp.Client, sensor_name: str) -> Union[int, float]:
+async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float]:
     """Get the relevant value from a katcp sensor.
 
     If the sensor isn't either an int or a float, the value will get returned
@@ -47,33 +47,51 @@ async def get_katcp_sensor_value(client: aiokatcp.Client, sensor_name: str) -> U
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
     """Get the katcp address for a named product controller from the master."""
     client = await aiokatcp.Client.connect(*mc_endpoint)
-    return endpoint_parser(None)(await get_katcp_sensor_value(client, f"{product_name}.katcp-address"))
+    async with client:
+        return endpoint_parser(None)(await get_sensor_val(client, f"{product_name}.katcp-address"))
 
 
-async def async_main(host: str, port: int):
-    """TODO: This functionality should be wrapped up in a class really."""
+async def async_main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--interface",
+        type=str,
+        required=True,
+        help="IP address of ibverbs interface",
+    )
+    parser.add_argument(
+        "--mc-address",
+        type=endpoint_parser(5001),
+        default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
+        help="Master controller to query for details about the product. [%(default)s]",
+    )
+    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
+    args = parser.parse_args()
+
+    host, port = await get_product_controller_endpoint(args.mc_address, args.product_name)
     client = await aiokatcp.Client.connect(host, port)
 
-    # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
-    # But we can cast Endpoints to tuples, which it does know.
-    multicast_endpoints = [
-        tuple(endpoint)
-        for endpoint in endpoint_list_parser(7148)(
-            await get_katcp_sensor_value(client, "baseline_correlation_products-destination")
-        )
-    ]
+    async with client:
+        # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
+        # But we can cast Endpoints to tuples, which it does know.
+        multicast_endpoints = [
+            tuple(endpoint)
+            for endpoint in endpoint_list_parser(7148)(
+                await get_sensor_val(client, "baseline_correlation_products-destination")
+            )
+        ]
 
-    # We need these parameters for various useful reasons.
-    n_bls = await get_katcp_sensor_value(client, "baseline_correlation_products-n-bls")
-    n_chans = await get_katcp_sensor_value(client, "baseline_correlation_products-n-chans")
-    n_chans_per_substream = await get_katcp_sensor_value(client, "baseline_correlation_products-n-chans-per-substream")
-    n_bits_per_sample = await get_katcp_sensor_value(client, "baseline_correlation_products-xeng-out-bits-per-sample")
-    n_spectra_per_acc = await get_katcp_sensor_value(client, "baseline_correlation_products-n-accs")
-    adc_sample_rate = await get_katcp_sensor_value(client, "antenna_channelised_voltage-adc-sample-rate")
+        # We need these parameters for various useful reasons.
+        n_bls = await get_sensor_val(client, "baseline_correlation_products-n-bls")
+        n_chans = await get_sensor_val(client, "baseline_correlation_products-n-chans")
+        n_chans_per_substream = await get_sensor_val(client, "baseline_correlation_products-n-chans-per-substream")
+        n_bits_per_sample = await get_sensor_val(client, "baseline_correlation_products-xeng-out-bits-per-sample")
+        n_spectra_per_acc = await get_sensor_val(client, "baseline_correlation_products-n-accs")
+        adc_sample_rate = await get_sensor_val(client, "antenna_channelised_voltage-adc-sample-rate")
 
-    # The only reason for getting this info is to annotate the plot we make at the end.
-    bls_ordering = ast.literal_eval(await get_katcp_sensor_value(client, "baseline_correlation_products-bls-ordering"))
-    # I quite like this trick. It gives us a list of tuples.
+        # The only reason for getting this info is to annotate the plot we make at the end.
+        bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline_correlation_products-bls-ordering"))
+        # I quite like this trick. It gives us a list of tuples.
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * complexity * n_bits_per_sample // 8
@@ -107,7 +125,9 @@ async def async_main(host: str, port: int):
         allow_out_of_order=True,  # Not 100% sure if this is necessary.
     )
 
-    max_chunks = 3  # Assuming X-engines are at most 1 second out of sync, with one extra for luck.
+    # Assuming X-engines are at most 1 second out of sync, with one extra for luck.
+    # May need to revisit that assumption for much larger array sizes.
+    max_chunks = 3
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
         max_chunks=max_chunks,
@@ -160,21 +180,4 @@ async def async_main(host: str, port: int):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--interface",
-        type=str,
-        required=True,
-        help="IP address of ibverbs interface",
-    )
-    parser.add_argument(
-        "--mc-address",
-        type=endpoint_parser(5001),
-        default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
-        help="Master controller to query for details about the product. [%(default)s]",
-    )
-    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
-    args = parser.parse_args()
-
-    host, port = asyncio.run(get_product_controller_endpoint(args.mc_address, args.product_name))
-    asyncio.run(async_main(host, int(port)))
+    asyncio.run(async_main())
