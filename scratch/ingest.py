@@ -142,21 +142,17 @@ async def async_main(host: str, port: int):
         received_heaps = int(np.sum(chunk.present))
         if received_heaps == HEAPS_PER_CHUNK:
             # We have a full chunk.
-            plt.figure(figsize=(8, 24))
+            fig, ax = plt.subplots(n_bls, 1, sharex=True, figsize=(8, 24))
             for i in range(n_bls):
-                ax = plt.subplot(n_bls, 1, i + 1)
                 # We're just plotting the magnitude for now. Phase is easy enough,
                 # and is left as an exercise to the reader.
-                plt.plot(frequency_axis, np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
-                # This just makes the x-ticks only on the bottom graph, it makes
-                # the plot somewhat less cluttered.
-                plt.setp(ax.get_xticklabels(), visible=(True if i == n_bls - 1 else False))
-                ax.set_ylabel(bls_ordering[i])
-
-            ax.xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Numbers are a bit large, let's display in MHz instead.
-            ax.set_xlabel("Frequency [MHz]")
+                ax[i].plot(frequency_axis, np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
+                ax[i].set_ylabel(bls_ordering[i])
+            ax[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
+            ax[i].set_xlabel("Frequency [MHz]")
 
             plt.savefig(f"{chunk.chunk_id}.png")
+            plt.close(fig)
         else:
             logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
 
