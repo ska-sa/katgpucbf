@@ -49,6 +49,7 @@ import spead2
 import spead2.recv.asyncio
 
 import katgpucbf.xbgpu.xsend
+from katgpucbf import COMPLEX
 
 from . import test_parameters
 
@@ -90,8 +91,6 @@ def test_send_simple(event_loop, num_ants, num_channels):
     dump_interval_s = 0  # Normally 0.4 but we set it to as fast as possible so things run quickly.
     send_rate_factor = 1.1  # Factor required by the sender to make provision for any headroom in transmission.
 
-    n_pols = 2
-    complexity = 2
     sample_bits = 32
 
     # 1.2 Derived parameters
@@ -116,7 +115,6 @@ def test_send_simple(event_loop, num_ants, num_channels):
         n_ants=num_ants,
         n_channels=num_channels,
         n_channels_per_stream=n_channels_per_stream,
-        n_pols=n_pols,
         dump_interval_s=dump_interval_s,
         send_rate_factor=send_rate_factor,
         channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
@@ -211,7 +209,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
                 # correct size and that the values are all the expected value.
                 if item.id == 0x1800:
                     has_xeng_raw = True
-                    data_length_bytes = n_baselines * n_channels_per_stream * complexity * sample_bits // 8
+                    data_length_bytes = n_baselines * n_channels_per_stream * COMPLEX * sample_bits // 8
                     assert item.value.nbytes == data_length_bytes, (
                         "xeng_raw data not correct size. "
                         f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."

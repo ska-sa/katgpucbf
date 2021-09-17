@@ -177,7 +177,6 @@ def create_test_objects(
         n_ants,
         n_channels_per_stream,
         n_spectra_per_heap,
-        n_pols,
         sample_bits,
         timestamp_step,
         heaps_per_fengine_per_chunk,

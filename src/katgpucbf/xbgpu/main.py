@@ -98,7 +98,6 @@ def parse_args() -> argparse.Namespace:
         default=256,
         help="Number of packed spectra in every received channel. [%(default)s]",
     )
-    parser.add_argument("--pols", type=int, default=2, help="Number of polarisations per antenna. [%(default)s]")
     parser.add_argument(
         "--sample-bits",
         type=int,
@@ -158,9 +157,6 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
-    if args.pols != 2:
-        parser.error("Only 2 polarisations per antenna currently supported.")
-
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
 
@@ -195,7 +191,6 @@ async def async_main(args: argparse.Namespace) -> None:
         n_channels_total=args.channels,
         n_channels_per_stream=args.channels_per_substream,
         n_spectra_per_heap=args.spectra_per_heap,
-        n_pols=args.pols,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         channel_offset_value=args.channel_offset_value,

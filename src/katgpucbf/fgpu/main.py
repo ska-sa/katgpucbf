@@ -33,12 +33,11 @@ import katsdpsigproc.accel as accel
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import __version__
+from .. import N_POLS, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
 
 _T = TypeVar("_T")
-N_POL = 2  # TODO trace this. I'm fairly certain that number of pols comes up elsewhere. Does this change everything?
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
 logger = logging.getLogger(__name__)
@@ -109,16 +108,16 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
         "--src-affinity",
-        type=comma_split(int, N_POL),
+        type=comma_split(int, N_POLS),
         metavar="CORE,CORE",
-        default=[-1] * N_POL,
+        default=[-1] * N_POLS,
         help="Cores for input-handling threads (comma-separated) [not bound]",
     )
     parser.add_argument(
         "--src-comp-vector",
-        type=comma_split(int, N_POL),
+        type=comma_split(int, N_POLS),
         metavar="VECTOR,VECTOR",
-        default=[0] * N_POL,
+        default=[0] * N_POLS,
         help="Completion vectors for source streams, or -1 for polling [0]",
     )
     parser.add_argument(
@@ -219,7 +218,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("src", type=parse_source, nargs=N_POL, help="Source endpoints (or pcap file)")
+    parser.add_argument("src", type=parse_source, nargs=N_POLS, help="Source endpoints (or pcap file)")
     parser.add_argument("dst", type=endpoint_list_parser(7148), help="Destination endpoints")
     args = parser.parse_args(arglist)
 

@@ -36,6 +36,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
+from .. import N_POLS
 from ..monitor import Monitor
 from . import recv, ringbuffer, send
 from .compute import Compute
@@ -150,8 +151,6 @@ class InItem(EventItem):
         :attr:`samples`.
     sample_bits
         Bitwidth of the data in :attr:`samples`.
-    pols
-        Number of polarisations, i.e. the length of the :attr:`samples` list.
 
     Parameters
     ----------
@@ -169,11 +168,9 @@ class InItem(EventItem):
     chunks: List[recv.Chunk]  # Used with gdrcopy only.
     n_samples: int
     sample_bits: int
-    pols: int
 
     def __init__(self, compute: Compute, timestamp: int = 0, use_gdrcopy: bool = False) -> None:
         self.sample_bits = compute.sample_bits
-        self.pols = compute.pols
         if use_gdrcopy:
             # Memory belongs to the chunks, and we set samples when
             # initialising the item from the chunks.
@@ -181,7 +178,7 @@ class InItem(EventItem):
         else:
             self.samples = [
                 _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots[f"in{pol}"]))
-                for pol in range(compute.pols)
+                for pol in range(N_POLS)
             ]
         self.chunks = []
         super().__init__(timestamp)
@@ -419,7 +416,7 @@ class Processor:
     @property
     def pols(self) -> int:  # noqa: D401
         """Number of polarisations."""
-        return self.compute.pols
+        return N_POLS
 
     @property
     def peerdirect_memory_regions(self) -> Sequence[object]:  # noqa D102
@@ -734,7 +731,7 @@ class Processor:
             chunk.spectra_per_heap = self.spectra_per_heap
             chunk.channels = self.channels
             chunk.frames = out_item.n_spectra // self.spectra_per_heap
-            chunk.pols = self.pols
+            chunk.pols = N_POLS
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
             out_item.reset()

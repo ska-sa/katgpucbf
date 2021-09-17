@@ -26,7 +26,7 @@ import spead2.recv
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import __version__
+from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from . import recv, send
 from .compute import ComputeTemplate
@@ -303,7 +303,6 @@ class Engine(aiokatcp.DeviceServer):
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_gain = quant_gain
-        pols = compute.pols
         self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
 
         ringbuffer_capacity = 2
@@ -324,7 +323,7 @@ class Engine(aiokatcp.DeviceServer):
                 use_gdrcopy=use_gdrcopy,
                 monitor=monitor,
             )
-            for pol in range(pols)
+            for pol in range(N_POLS)
         ]
         src_chunks_per_stream = 4
         monitor.event_qsize("free_chunks", 0, src_chunks_per_stream * len(self._src_streams))
@@ -349,7 +348,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
         send_chunks = []
-        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, pols, 2)
+        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
         send_dtype = np.dtype(np.int8)
         for _ in range(4):
             if use_peerdirect:
@@ -363,7 +362,7 @@ class Engine(aiokatcp.DeviceServer):
         if use_peerdirect:
             memory_regions.extend(self._processor.peerdirect_memory_regions)
         # Send a bit faster than nominal rate to account for header overheads
-        rate = pols * adc_sample_rate * send_dtype.itemsize * send_rate_factor
+        rate = N_POLS * adc_sample_rate * send_dtype.itemsize * send_rate_factor
         # There is a SPEAD header, 8 item pointers, and 3 padding pointers for
         # a 96 byte header, matching the MeerKAT packet format.
         self._sender = send.Sender(

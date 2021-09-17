@@ -27,12 +27,13 @@
 
 """
 
+import importlib.resources
+
 import numpy as np
-import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
-complexity = 2
+from .. import COMPLEX, N_POLS
 
 
 class TensorCoreXEngineCoreTemplate:
@@ -71,7 +72,6 @@ class TensorCoreXEngineCoreTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
-        self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
@@ -100,14 +100,14 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(self.n_polarisations, exact=True),
+            accel.Dimension(N_POLS, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
-            accel.Dimension(complexity, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
         self.output_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_baselines * 4, exact=True),
-            accel.Dimension(complexity, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
@@ -134,19 +134,19 @@ class TensorCoreXEngineCoreTemplate:
             )
 
         # 5. Compile the kernel
-        program = accel.build(
-            context,
-            "kernels/tensor_core_correlation_kernel.mako",
-            {
-                "n_ants_per_block": self._n_ants_per_block,
-                "n_ants": self.n_ants,
-                "sample_bitwidth": self._sample_bitwidth,
-                "n_channels": self.n_channels,
-                "n_polarisations": self.n_polarisations,
-                "n_spectra_per_heap": self.n_spectra_per_heap,
-                "n_baselines": self.n_baselines,
-            },
-            extra_dirs=[pkg_resources.resource_filename(__name__, "")],
+
+        with importlib.resources.path("katgpucbf.xbgpu", "kernels") as kernels:
+            source = (kernels / "tensor_core_correlation_kernel.cu").read_text()
+        program = context.compile(
+            source,
+            [
+                f"-DNR_RECEIVERS={self.n_ants}",
+                f"-DNR_RECEIVERS_PER_BLOCK={self._n_ants_per_block}",
+                f"-DNR_BITS={self._sample_bitwidth}",
+                f"-DNR_CHANNELS={self.n_channels}",
+                f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
+                f"-DNR_POLARIZATIONS={N_POLS}",
+            ],
         )
         self.kernel = program.get_kernel("correlate")
 
@@ -182,7 +182,7 @@ class TensorCoreXEngineCore(accel.Operation):
     ``-128i`` into the kernel will produce incorrect values at the output.
 
     The output visibility buffer must have the shape
-    ``[channels][baselines][complexity]``. In 8-bit mode, each element in this
+    ``[channels][baselines][CPLX]``. In 8-bit mode, each element in this
     visibility matrix is a 32-bit integer value.
 
     Currently only 8-bit input mode is supported.

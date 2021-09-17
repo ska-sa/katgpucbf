@@ -34,6 +34,8 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
+from .. import COMPLEX, N_POLS
+
 
 class PostprocTemplate:
     """Template for the postproc operation.
@@ -116,15 +118,13 @@ class Postproc(accel.Operation):
         self.channels = channels
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
-        _2 = accel.Dimension(2, exact=True)
+        pols = accel.Dimension(N_POLS, exact=True)
+        cplx = accel.Dimension(COMPLEX, exact=True)
 
         in_shape = (accel.Dimension(spectra), accel.Dimension(channels + 1))
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
-
-        # TODO: this needs to be more explicit. 2 pols, and complexity.
-        self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, _2, _2), np.int8)
-
+        self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, pols, cplx), np.int8)
         self.slots["fine_delay"] = accel.IOSlot((spectra,), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra,), np.float32)
         self.quant_gain = 1.0

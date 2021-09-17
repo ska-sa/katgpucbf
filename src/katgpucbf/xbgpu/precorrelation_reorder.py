@@ -42,7 +42,7 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
-complexity = 2
+from .. import COMPLEX, N_POLS
 
 
 class PrecorrelationReorderTemplate:
@@ -80,7 +80,6 @@ class PrecorrelationReorderTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
-        self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_batches = n_batches
 
         # This is set to 8 for now, but must be updated to 4- and 16-bit
@@ -100,8 +99,8 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_spectra_per_heap, exact=True),
-            accel.Dimension(self.n_polarisations, exact=True),
-            accel.Dimension(complexity, exact=True),
+            accel.Dimension(N_POLS, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
 
         self.output_data_dimensions = (
@@ -109,13 +108,13 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(self.n_polarisations, exact=True),
+            accel.Dimension(N_POLS, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
-            accel.Dimension(complexity, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
 
         # The size of a data matrix required to be reordered is the same for Input or Output data shapes
-        self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap * self.n_polarisations
+        self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap * N_POLS
         # Maximum number of threads per block, as per Section I of Nvidia's CUDA Programming Guide
         THREADS_PER_BLOCK: Final[int] = 1024  # noqa: N806
 
@@ -134,7 +133,7 @@ class PrecorrelationReorderTemplate:
                 "n_ants": self.n_ants,
                 "n_channels": self.n_channels,
                 "n_spectra_per_heap": self.n_spectra_per_heap,
-                "n_polarisations": self.n_polarisations,
+                "n_polarisations": N_POLS,
                 "n_times_per_block": self.n_times_per_block,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],

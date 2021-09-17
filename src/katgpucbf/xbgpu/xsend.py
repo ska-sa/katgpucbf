@@ -53,6 +53,8 @@ import spead2
 import spead2.send.asyncio
 from aiokatcp.sensor import Sensor, SensorSet
 
+from .. import COMPLEX
+
 
 class BufferWrapper:
     """
@@ -122,8 +124,6 @@ class XSend:
         `n_channels_per_stream`.
     n_channels_per_stream
         The number of frequency channels contained per stream.
-    n_pols
-        The number of pols per antenna. Expected to always be 2.
     dump_interval_s
         A new heap is transmitted every `dump_interval_s` seconds. Set to zero to
         send as fast as possible.
@@ -160,7 +160,6 @@ class XSend:
     max_payload_size: Final[int] = 2048
     header_size: Final[int] = 64
     max_packet_size: Final[int] = max_payload_size + header_size
-    complexity: Final[int] = 2
 
     # Initialise class including all variables
     # TODO: update spead2 to make spead2.send.asyncio._AsyncStream public.
@@ -169,7 +168,6 @@ class XSend:
         n_ants: int,
         n_channels: int,
         n_channels_per_stream: int,
-        n_pols: int,
         dump_interval_s: float,
         send_rate_factor: float,
         channel_offset: int,
@@ -178,9 +176,6 @@ class XSend:
         n_send_heaps_in_flight: int = 5,
     ) -> None:
         # 1. Check that given arguments are sane.
-        if n_pols != 2:
-            raise ValueError("n_pols must equal 2 - no other modes supported at the moment.")
-
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
 
@@ -192,7 +187,6 @@ class XSend:
         # 2. Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
-        self.n_pols: Final[int] = n_pols
         self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
         self.dump_interval_s: Final[float] = dump_interval_s
         self.send_rate_factor: Final[float] = send_rate_factor
@@ -202,13 +196,9 @@ class XSend:
         self.channel_offset: Final[int] = channel_offset
 
         self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * XSend.complexity * self._sample_bits // 8
+            self.n_channels_per_stream * self.n_baselines * COMPLEX * self._sample_bits // 8
         )
-        self.heap_shape: Final[Tuple] = (
-            self.n_channels_per_stream,
-            self.n_baselines,
-            XSend.complexity,
-        )
+        self.heap_shape: Final[Tuple] = (self.n_channels_per_stream, self.n_baselines, COMPLEX)
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         # 4. Allocate memory buffers

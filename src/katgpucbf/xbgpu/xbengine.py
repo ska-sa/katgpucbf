@@ -57,7 +57,7 @@ import katgpucbf.xbgpu.recv
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
 
-from .. import __version__
+from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 
 logger = logging.getLogger(__name__)
@@ -180,8 +180,6 @@ class XBEngine(DeviceServer):
         The total number of frequency channels out of the F-Engine.
     n_channels_per_stream
         The number of frequency channels contained per stream.
-    n_pols
-        The number of pols per antenna. Expected to always be 2.
     n_spectra_per_heap
         The number of time samples received per frequency channel.
     sample_bits
@@ -221,7 +219,6 @@ class XBEngine(DeviceServer):
         n_channels_total: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        n_pols: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
@@ -313,7 +310,6 @@ class XBEngine(DeviceServer):
         self.n_channels_total: int
         self.n_channels_per_stream: int
         self.n_spectra_per_heap: int
-        self.n_pols: int
         self.sample_bits: int
 
         # 1.2 Derived Parameters - Parameters specific to the X-Engine derived from the array configuration parameters
@@ -355,9 +351,6 @@ class XBEngine(DeviceServer):
 
         # 2. Assign configuration variables.
         # 2.1 Ensure that constructor arguments are within the expected range.
-        if n_pols != 2:
-            raise ValueError("n_pols must equal 2 - no other values supported at the moment.")
-
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
@@ -372,9 +365,7 @@ class XBEngine(DeviceServer):
         self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
         self.n_spectra_per_heap = n_spectra_per_heap
-        self.n_pols = n_pols
         self.sample_bits = sample_bits
-        complexity = 2  # Used to explicitly indicate when a complex number is being allocated.
 
         # Define the number of items on each of these queues. The n_rx_items and n_tx_items each wrap a GPU buffer.
         # setting these values too high results in too much GPU memory being consumed. There just need to be enough
@@ -397,7 +388,7 @@ class XBEngine(DeviceServer):
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
         # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * self.n_pols * complexity
+            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
         )
         # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
@@ -423,7 +414,6 @@ class XBEngine(DeviceServer):
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
-            n_pols=self.n_pols,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.chunk_spectra,
@@ -606,7 +596,6 @@ class XBEngine(DeviceServer):
             n_ants=self.n_ants,
             n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
-            n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
@@ -647,7 +636,6 @@ class XBEngine(DeviceServer):
             n_ants=self.n_ants,
             n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
-            n_pols=self.n_pols,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
