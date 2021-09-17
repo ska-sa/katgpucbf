@@ -120,15 +120,15 @@ class TensorCoreXEngineCoreTemplate:
         program = accel.build(
             context,
             "kernels/tensor_core_correlation_kernel.mako",
-            {
-                "n_ants_per_block": self._n_ants_per_block,
-                "n_ants": self.n_ants,
-                "sample_bitwidth": self._sample_bitwidth,
-                "n_channels": self.n_channels,
-                "n_polarisations": self.n_polarisations,
-                "n_spectra_per_heap": self.n_spectra_per_heap,
-                "n_baselines": self.n_baselines,
-            },
+            {},
+            extra_flags=[
+                f"-DNR_RECEIVERS={self.n_ants}",
+                f"-DNR_RECEIVERS_PER_BLOCK={self._n_ants_per_block}",
+                f"-DNR_BITS={self._sample_bitwidth}",
+                f"-DNR_CHANNELS={self.n_channels}",
+                f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
+                f"-DNR_POLARIZATIONS={self.n_polarisations}",
+            ],
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("correlate")
