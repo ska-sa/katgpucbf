@@ -8,6 +8,7 @@ from typing import List, Sequence, Tuple
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
+from .. import N_POLS
 from . import pfb, postproc
 
 
@@ -90,7 +91,6 @@ class Compute(accel.OperationSequence):
         spectra_per_heap: int,
         channels: int,
     ) -> None:
-        self.pols = 2
         self.sample_bits = 10
         self.template = template
         self.channels = channels
@@ -100,18 +100,18 @@ class Compute(accel.OperationSequence):
 
         # PFB-FIR and FFT each happen for each polarisation.
         self.pfb_fir = [
-            template.pfb_fir.instantiate(command_queue, samples, spectra, channels) for pol in range(self.pols)
+            template.pfb_fir.instantiate(command_queue, samples, spectra, channels) for pol in range(N_POLS)
         ]
-        self.fft = [pfb.FFT(command_queue, spectra, channels) for pol in range(self.pols)]
+        self.fft = [pfb.FFT(command_queue, spectra, channels) for pol in range(N_POLS)]
 
         # Postproc is single though because it involves the corner turn which
         # combines the two pols.
         self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap, channels)
 
         operations: List[Tuple[str, accel.Operation]] = []
-        for pol in range(self.pols):
+        for pol in range(N_POLS):
             operations.append((f"pfb_fir{pol}", self.pfb_fir[pol]))
-        for pol in range(self.pols):
+        for pol in range(N_POLS):
             operations.append((f"fft{pol}", self.fft[pol]))
         operations.append(("postproc", self.postproc))
 
@@ -119,15 +119,15 @@ class Compute(accel.OperationSequence):
             # fft0:work and fft1:work are just scratchpad memory. Since the FFTs
             # are run sequentially they won't interfere with each other, fft0 is
             # finished by the time fft1 starts.
-            "fft_work": [f"fft{pol}:work" for pol in range(self.pols)],
+            "fft_work": [f"fft{pol}:work" for pol in range(N_POLS)],
             # We expect the weights on the PFB-FIR taps to be the same for both
             # pols so they can share memory.
-            "weights": [f"pfb_fir{pol}:weights" for pol in range(self.pols)],
+            "weights": [f"pfb_fir{pol}:weights" for pol in range(N_POLS)],
             "out": ["postproc:out"],
             "fine_delay": ["postproc:fine_delay"],
             "phase": ["postproc:phase"],
         }
-        for pol in range(self.pols):
+        for pol in range(N_POLS):
             compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
             compounds[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:in"]
             compounds[f"fft_out{pol}"] = [f"fft{pol}:out", f"postproc:in{pol}"]
@@ -149,13 +149,13 @@ class Compute(accel.OperationSequence):
         spectra
             How many spectra worth of samples to push through the PFB-FIR.
         """
-        if len(samples) != self.pols:
-            raise ValueError(f"samples must contain {self.pols} elements")
-        for pol in range(self.pols):
+        if len(samples) != N_POLS:
+            raise ValueError(f"samples must contain {N_POLS} elements")
+        for pol in range(N_POLS):
             self.bind(**{f"in{pol}": samples[pol]})
         # TODO: only bind relevant slots for frontend
         self.ensure_all_bound()
-        for pol in range(self.pols):
+        for pol in range(N_POLS):
             # TODO: could run these in parallel, but that would require two
             # command queues.
             self.pfb_fir[pol].in_offset = in_offset
