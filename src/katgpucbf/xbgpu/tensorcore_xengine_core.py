@@ -10,8 +10,9 @@
 
 """
 
+import importlib.resources
+
 import numpy as np
-import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
@@ -117,11 +118,11 @@ class TensorCoreXEngineCoreTemplate:
             )
 
         # 5. Compile the kernel
-        program = accel.build(
-            context,
-            "kernels/tensor_core_correlation_kernel.mako",
-            {},
-            extra_flags=[
+        with importlib.resources.path("katgpucbf.xbgpu", "kernels") as kernels:
+            source = (kernels / "tensor_core_correlation_kernel.cu").read_text()
+        program = context.compile(
+            source,
+            [
                 f"-DNR_RECEIVERS={self.n_ants}",
                 f"-DNR_RECEIVERS_PER_BLOCK={self._n_ants_per_block}",
                 f"-DNR_BITS={self._sample_bitwidth}",
@@ -129,7 +130,6 @@ class TensorCoreXEngineCoreTemplate:
                 f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
                 f"-DNR_POLARIZATIONS={self.n_polarisations}",
             ],
-            extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("correlate")
 
