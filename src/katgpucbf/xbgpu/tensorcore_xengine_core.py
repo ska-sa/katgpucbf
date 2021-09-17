@@ -15,7 +15,7 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
-from .. import COMPLEX
+from .. import COMPLEX, N_POLS
 
 
 class TensorCoreXEngineCoreTemplate:
@@ -54,7 +54,6 @@ class TensorCoreXEngineCoreTemplate:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
-        self.n_polarisations = 2  # Hardcoded to 2. No other values are supported
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         # 2. Determine kernel specific parameters
@@ -83,7 +82,7 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(self.n_polarisations, exact=True),
+            accel.Dimension(N_POLS, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
@@ -125,7 +124,7 @@ class TensorCoreXEngineCoreTemplate:
                 "n_ants": self.n_ants,
                 "sample_bitwidth": self._sample_bitwidth,
                 "n_channels": self.n_channels,
-                "n_polarisations": self.n_polarisations,
+                "n_polarisations": N_POLS,
                 "n_spectra_per_heap": self.n_spectra_per_heap,
                 "n_baselines": self.n_baselines,
             },
