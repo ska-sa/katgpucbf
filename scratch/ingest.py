@@ -19,7 +19,7 @@ from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from katgpucbf import CPLX
+CPLX = 2
 
 
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
