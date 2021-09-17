@@ -17,7 +17,7 @@ import spead2.send
 from numba import njit
 
 import katgpucbf.xbgpu.xbengine
-from katgpucbf import CPLX, N_POLS
+from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
@@ -81,21 +81,11 @@ def create_heaps(
         required by the SPEAD2 send_heaps() function.
     """
     # 1. Define heap shapes that will be needed to generate simulated data.
-    heap_shape = (
-        n_channels_per_stream,
-        n_spectra_per_heap,
-        N_POLS,
-        CPLX,
-    )
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
     # The heaps shape has been modified with the CPLX dimension and n_pols dimension equal to 1 instead of 2.
     # This is because we treat the two 8-bit complex samples for both pols as a single 32-bit value when generating the
     # the simulated data. We correct the shape before sending.
-    modified_heap_shape = (
-        n_channels_per_stream,
-        n_spectra_per_heap,
-        N_POLS // 2,
-        CPLX // 2,
-    )
+    modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
 
     # 2. Generate all the heaps for the different antennas.
     heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
@@ -210,7 +200,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     what is expected from the specific input generated in :func:`create_heaps`.
     """
     baselines = antennas * (antennas + 1) // 2
-    output_array = np.zeros((channels, baselines, N_POLS, N_POLS, CPLX), dtype=np.int32)
+    output_array = np.zeros((channels, baselines, N_POLS, N_POLS, COMPLEX), dtype=np.int32)
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         sign = pow(-1, b)
         for c in range(channels):
@@ -277,10 +267,9 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
     heap_accumulation_threshold = 4
     n_accumulations = 3
 
-    max_packet_size = (
-        n_spectra_per_heap * N_POLS * CPLX * sample_bits // 8 + 96
-    )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
-    heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, CPLX)
+    # Header is 12 fields of 8 bytes each: So 96 bytes of header
+    max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * sample_bits // 8 + 96
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
     timestamp_step = n_channels_total * 2 * n_spectra_per_heap
 
     # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.

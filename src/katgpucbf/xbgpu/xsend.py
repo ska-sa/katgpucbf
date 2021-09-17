@@ -37,7 +37,7 @@ import spead2
 import spead2.send.asyncio
 from aiokatcp.sensor import Sensor, SensorSet
 
-from .. import CPLX
+from .. import COMPLEX
 
 
 class BufferWrapper:
@@ -180,13 +180,9 @@ class XSend:
         self.channel_offset: Final[int] = channel_offset
 
         self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * CPLX * self._sample_bits // 8
+            self.n_channels_per_stream * self.n_baselines * COMPLEX * self._sample_bits // 8
         )
-        self.heap_shape: Final[Tuple] = (
-            self.n_channels_per_stream,
-            self.n_baselines,
-            CPLX,
-        )
+        self.heap_shape: Final[Tuple] = (self.n_channels_per_stream, self.n_baselines, COMPLEX)
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         # 4. Allocate memory buffers

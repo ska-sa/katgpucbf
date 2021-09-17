@@ -18,7 +18,7 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import CPLX, N_POLS
+from .. import COMPLEX, N_POLS
 
 
 class PostprocTemplate:
@@ -103,7 +103,7 @@ class Postproc(accel.Operation):
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
         pols = accel.Dimension(N_POLS, exact=True)
-        cplx = accel.Dimension(CPLX, exact=True)
+        cplx = accel.Dimension(COMPLEX, exact=True)
 
         in_shape = (accel.Dimension(spectra), accel.Dimension(channels + 1))
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)

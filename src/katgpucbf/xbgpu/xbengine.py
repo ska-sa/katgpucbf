@@ -41,7 +41,7 @@ import katgpucbf.xbgpu.recv
 import katgpucbf.xbgpu.tensorcore_xengine_core
 import katgpucbf.xbgpu.xsend
 
-from .. import CPLX, N_POLS, __version__
+from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 
 logger = logging.getLogger(__name__)
@@ -372,7 +372,7 @@ class XBEngine(DeviceServer):
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
         # This is the number of bytes for a single batch of F-Engines. A chunk consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * CPLX
+            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
         )
         # This is how much the timestamp increments by between successive accumulations
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step

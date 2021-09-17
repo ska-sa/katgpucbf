@@ -33,7 +33,7 @@ import spead2
 import spead2.recv.asyncio
 
 import katgpucbf.xbgpu.xsend
-from katgpucbf import CPLX
+from katgpucbf import COMPLEX
 
 from . import test_parameters
 
@@ -193,7 +193,7 @@ def test_send_simple(event_loop, num_ants, num_channels):
                 # correct size and that the values are all the expected value.
                 if item.id == 0x1800:
                     has_xeng_raw = True
-                    data_length_bytes = n_baselines * n_channels_per_stream * CPLX * sample_bits // 8
+                    data_length_bytes = n_baselines * n_channels_per_stream * COMPLEX * sample_bits // 8
                     assert item.value.nbytes == data_length_bytes, (
                         "xeng_raw data not correct size. "
                         f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."

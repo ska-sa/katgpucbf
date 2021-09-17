@@ -15,7 +15,7 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
-from .. import CPLX
+from .. import COMPLEX
 
 
 class TensorCoreXEngineCoreTemplate:
@@ -85,12 +85,12 @@ class TensorCoreXEngineCoreTemplate:
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(self.n_polarisations, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
-            accel.Dimension(CPLX, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
         self.output_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_baselines * 4, exact=True),
-            accel.Dimension(CPLX, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
 
         # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime

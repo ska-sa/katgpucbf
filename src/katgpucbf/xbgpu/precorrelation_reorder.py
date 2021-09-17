@@ -26,7 +26,7 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
-from .. import CPLX, N_POLS
+from .. import COMPLEX, N_POLS
 
 
 class PrecorrelationReorderTemplate:
@@ -84,7 +84,7 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_spectra_per_heap, exact=True),
             accel.Dimension(N_POLS, exact=True),
-            accel.Dimension(CPLX, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
 
         self.output_data_dimensions = (
@@ -94,7 +94,7 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(self.n_ants, exact=True),
             accel.Dimension(N_POLS, exact=True),
             accel.Dimension(self.n_times_per_block, exact=True),
-            accel.Dimension(CPLX, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
         )
 
         # The size of a data matrix required to be reordered is the same for Input or Output data shapes

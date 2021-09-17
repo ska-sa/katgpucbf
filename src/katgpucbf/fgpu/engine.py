@@ -10,7 +10,7 @@ import spead2.recv
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import CPLX, N_POLS, __version__
+from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from . import recv, send
 from .compute import ComputeTemplate
@@ -332,7 +332,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
         send_chunks = []
-        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, CPLX)
+        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
         send_dtype = np.dtype(np.int8)
         for _ in range(4):
             if use_peerdirect:
