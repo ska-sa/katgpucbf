@@ -1,20 +1,25 @@
-/* This code is based on the work done by John Romein at ASTRON to develop a correlator that uses NVIDIA's Tensor Cores.
- * This is almost an exact replica of version 0.5 of his TensorCoreCorrelator kernel. Slight modifications have been
- * made so that it uses mako templating, provided by the SARAO katsdpsigproc python package, to set the values of some
- * of the macros.
+/* This code is based on
+ * https://git.astron.nl/RD/tensor-core-correlator/-/blob/83abdcc/libtcc/TCCorrelator.cu
  *
- * The following links give a high-level overview:
- * - https://docs.google.com/document/d/1viAzRjnDh3D569JfNBiJjygZE8w0B8VHqO4QRjcdKsU/edit?usp=sharing
- * - https://developer.nvidia.com/gtc/2019/video/s9306
+ * It has been modified by SARAO:
+ * - Wrap the file in extern "C++" to make it work with PyCUDA (see below)
+ * - Add results to the output instead of overwriting, to allow accumulation
+ *   across multiple calls.
+ * - Conjugate the output, to provide the other triangle of the visibility
+ *   matrix.
+ * - Remove trailing whitespace.
+ *
+ * See https://developer.nvidia.com/gtc/2019/video/s9306 for a high-level overview.
  * Lower-level details are in the doc/xbgpu.tcc.rst (and built by Sphinx with
  * the rest of the documentation).
  */
 
-/* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects C++ linkage. So we wrap the whole original
- * file in 'extern "C++"' to cancel that out.
+/* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects
+ * C++ linkage. So we wrap the whole original file in 'extern "C++"' to cancel that out.
  *
- * When this code gets closer to production, the suggested fix is to modify the accel.build() and context.compile()
- * functions in katsdpsigproc to take a no_extern_c flag as these ones are the methods that will call the
+ * When this code gets closer to production, the suggested fix is to modify the
+ * accel.build() and context.compile() functions in katsdpsigproc to take a
+ * no_extern_c flag as these ones are the methods that will call the
  * pycuda.compiler.SourceModule(...) constructor.
  */
 extern "C++" {
