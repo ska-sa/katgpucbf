@@ -18,7 +18,7 @@
 import aiokatcp
 import pytest
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.cuda_only]
 
 SYNC_EPOCH = 1632561921
 

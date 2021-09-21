@@ -17,21 +17,13 @@
 """Fixtures for use in fgpu unit tests."""
 
 import aiokatcp
-import katsdpsigproc.accel as accel
 import pytest
 
 from katgpucbf.fgpu.main import make_engine
 
 
 @pytest.fixture
-async def device_context():
-    """Generate a GPU context."""
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda, interactive=False)
-    return ctx
-
-
-@pytest.fixture
-async def engine_server(request, device_context):
+async def engine_server(request, context):
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
     The arguments passed are based on the default arguments from
@@ -39,7 +31,7 @@ async def engine_server(request, device_context):
     get the :class:`~.fgpu.Engine` running so that the KATCP interface can be
     tested.
     """
-    server, _monitor = make_engine(device_context, arglist=request.cls.engine_arglist)
+    server, _monitor = make_engine(context, arglist=request.cls.engine_arglist)
 
     await server.start()
     yield server

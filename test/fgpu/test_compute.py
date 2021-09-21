@@ -15,20 +15,19 @@
 ################################################################################
 
 """Smoke test for Compute class."""
-from katsdpsigproc import accel
+import pytest
 
 from katgpucbf.fgpu import compute
 
+pytestmark = [pytest.mark.cuda_only]
 
-def test_compute():
+
+def test_compute(context, command_queue):
     """Test creation and running of :class:`Compute`.
 
     .. todo:: This isn't a proper test, just a smoke test.
     """
-    ctx = accel.create_some_context(interactive=False)
-    queue = ctx.create_command_queue()
-
-    template = compute.ComputeTemplate(ctx, 4)
-    fn = template.instantiate(queue, 100000000, 1280, 256, 32768)
+    template = compute.ComputeTemplate(context, 4)
+    fn = template.instantiate(command_queue, 100000000, 1280, 256, 32768)
     fn.ensure_all_bound()
     fn()

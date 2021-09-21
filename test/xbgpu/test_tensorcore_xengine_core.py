@@ -17,12 +17,13 @@
 """Module for performing unit tests on the Tensor core correlation kernel."""
 import numpy as np
 import pytest
-from katsdpsigproc import accel
 from numba import njit, prange
 
 from katgpucbf.xbgpu import tensorcore_xengine_core
 
 from . import test_parameters
+
+pytestmark = [pytest.mark.cuda_only(min_compute_capability=(7, 2))]
 
 get_baseline_index = njit(tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index)
 
@@ -81,18 +82,16 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     test_parameters.num_channels,
     test_parameters.num_spectra_per_heap,
 )
-def test_correlator(num_ants, num_spectra_per_heap, num_channels):
+def test_correlator(context, command_queue, num_ants, num_spectra_per_heap, num_channels):
     """Parameterised unit test of the Tensor-Core correlation kernel."""
     # TODO: A lot of this is duplicated in other functions. It would be nice to
     # move it into a test fixture.
     n_chans_per_stream = num_channels // num_ants // 4
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    queue = ctx.create_command_queue()
 
     template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
+        context, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
     )
-    tensor_core_x_engine_core = template.instantiate(queue)
+    tensor_core_x_engine_core = template.instantiate(command_queue)
     tensor_core_x_engine_core.ensure_all_bound()
 
     buf_samples_device = tensor_core_x_engine_core.buffer("in_samples")
@@ -113,16 +112,16 @@ def test_correlator(num_ants, num_spectra_per_heap, num_channels):
     buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
 
-    buf_samples_device.set(queue, buf_samples_host)
+    buf_samples_device.set(command_queue, buf_samples_host)
     tensor_core_x_engine_core()
-    buf_visibilities_device.get(queue, buf_visibilities_host)
+    buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
     calculated_visibilities_host = correlate_host(buf_samples_host)
     np.testing.assert_equal(buf_visibilities_host, calculated_visibilities_host)
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
-def test_multikernel_accumulation(num_ants):
+def test_multikernel_accumulation(context, command_queue, num_ants):
     """
     Unit test that checks that the Tensor correlation algorithm can accumulate over a number of kernel calls.
 
@@ -137,13 +136,10 @@ def test_multikernel_accumulation(num_ants):
     n_kernel_launches = 10
 
     # 2. Initialise GPU kernels and buffers.
-    ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
-    queue = ctx.create_command_queue()
-
     template = tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
-        ctx, n_ants=n_ants, n_channels=n_channels, n_spectra_per_heap=n_spectra_per_heap
+        context, n_ants=n_ants, n_channels=n_channels, n_spectra_per_heap=n_spectra_per_heap
     )
-    tensor_core_x_engine_core = template.instantiate(queue)
+    tensor_core_x_engine_core = template.instantiate(command_queue)
     tensor_core_x_engine_core.ensure_all_bound()
 
     buf_samples_device = tensor_core_x_engine_core.buffer("in_samples")
@@ -157,9 +153,9 @@ def test_multikernel_accumulation(num_ants):
     buf_samples_host[:] = sample_value_i8
 
     # 4. Transfer input sample array to the GPU, run kernel, transfer output visibilities array to the CPU.
-    buf_samples_device.set(queue, buf_samples_host)
+    buf_samples_device.set(command_queue, buf_samples_host)
     tensor_core_x_engine_core()
-    buf_visibilities_device.get(queue, buf_visibilities_host)
+    buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
     # 5. Test that the data on the output array is not zero, so that the next tests are meaningful.
     #
@@ -176,17 +172,17 @@ def test_multikernel_accumulation(num_ants):
     # 6. Zero the visibilities on the GPU, transfer the visibilities data back the host, and confirm that it is
     # actually zero.
     tensor_core_x_engine_core.zero_visibilities()
-    buf_visibilities_device.get(queue, buf_visibilities_host)
+    buf_visibilities_device.get(command_queue, buf_visibilities_host)
     np.testing.assert_equal(buf_visibilities_host, 0)
 
     # 7. Run kernel on the same input data, transfer output visibilities array to the CPU. Zeroing is not necessary,
     # as its done above - function is left in to make it clear that the matrix needs to be zeroed at the start of a new
     # accumulation.
     tensor_core_x_engine_core.zero_visibilities()
-    buf_samples_device.set(queue, buf_samples_host)
+    buf_samples_device.set(command_queue, buf_samples_host)
     for _ in range(n_kernel_launches):
         tensor_core_x_engine_core()
-    buf_visibilities_device.get(queue, buf_visibilities_host)
+    buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
     # 8. Check that multikernel accumulation produces the correct results
     expected_output *= n_kernel_launches

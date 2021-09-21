@@ -39,6 +39,8 @@ from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
 
 from . import test_parameters, test_spead2_receiver
 
+pytestmark = [pytest.mark.cuda_only(min_compute_capability=(7, 2))]
+
 get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
 
 

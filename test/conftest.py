@@ -38,6 +38,8 @@ run all 12 possible combinations.
 
 import pytest
 
+pytest_plugins = ["katsdpsigproc.pytest_plugin"]
+
 
 def pytest_configure(config) -> None:
     """Register custom markers."""
