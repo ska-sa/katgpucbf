@@ -21,9 +21,9 @@
 # run.
 array_size = [5, 23, 61, 19, 4, 8, 16, 32, 64, 84]
 
-# This is always set to 256 for the MeerKAT case and leads to packet sizes equal to 256 * 4 bytes per sample = 1 KiB.
-# There is a chance that for the MeerKAT extension this could be configured to allow for packet sizes equal to 2 or 4
-# KiB. All these cases need to be tested.
+# This is always set to 256 for the MeerKAT case. There is a chance that for
+# the MeerKAT extension this could be configured to other values. All these
+# cases need to be tested.
 num_spectra_per_heap = [256, 512, 1024]
 
 # Number of FFT channels out of the F-Engine
