@@ -1,5 +1,26 @@
+/*    Original license:
+ *
+ *    Copyright 2021 ASTRON
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ */
+
 /* This code is based on
  * https://git.astron.nl/RD/tensor-core-correlator/-/blob/83abdcc/libtcc/TCCorrelator.cu
+ *
+ * See https://developer.nvidia.com/gtc/2019/video/s9306 for a high-level overview.
+ * Lower-level details are in the doc/xbgpu.tcc.rst (and built by Sphinx with
+ * the rest of the documentation).
  *
  * It has been modified by SARAO:
  * - Wrap the file in extern "C++" to make it work with PyCUDA (see below)
@@ -9,10 +30,22 @@
  *   matrix.
  * - Remove trailing whitespace.
  *
- * See https://developer.nvidia.com/gtc/2019/video/s9306 for a high-level overview.
- * Lower-level details are in the doc/xbgpu.tcc.rst (and built by Sphinx with
- * the rest of the documentation).
- */
+ * SARAO's modification is licenced as follows:
+ *******************************************************************************
+ * Copyright (c) 2020-2021, National Research Foundation (SARAO)
+ *
+ * Licensed under the BSD 3-Clause License (the "License"); you may not use
+ * this file except in compliance with the License. You may obtain a copy
+ * of the License at
+ *
+ *   https://opensource.org/licenses/BSD-3-Clause
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
 
 /* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects
  * C++ linkage. So we wrap the whole original file in 'extern "C++"' to cancel that out.
