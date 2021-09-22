@@ -17,6 +17,7 @@
 """Module for performing unit tests on the Tensor core correlation kernel."""
 import numpy as np
 import pytest
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 from numba import njit, prange
 
 from katgpucbf.xbgpu import tensorcore_xengine_core
@@ -82,7 +83,13 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     test_parameters.num_channels,
     test_parameters.num_spectra_per_heap,
 )
-def test_correlator(context, command_queue, num_ants, num_spectra_per_heap, num_channels):
+def test_correlator(
+    context: AbstractContext,
+    command_queue: AbstractCommandQueue,
+    num_ants: int,
+    num_spectra_per_heap: int,
+    num_channels: int,
+) -> None:
     """Parameterised unit test of the Tensor-Core correlation kernel."""
     # TODO: A lot of this is duplicated in other functions. It would be nice to
     # move it into a test fixture.
