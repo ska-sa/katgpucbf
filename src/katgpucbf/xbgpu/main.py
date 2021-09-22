@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import logging
 
+import katsdpsigproc.accel
 from katsdpservices import get_interface_address, setup_logging
 from katsdptelstate.endpoint import endpoint_parser
 
@@ -182,6 +183,10 @@ async def async_main(args: argparse.Namespace) -> None:
         monitor = NullMonitor()
 
     logger.info("Initialising XB-Engine")
+    # We require a CUDA device of CC 7.2 or higher for the tensor core operations
+    context = katsdpsigproc.accel.create_some_context(
+        device_filter=lambda device: device.is_cuda and device.compute_capability >= (7, 2)  # type: ignore
+    )
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -198,6 +203,7 @@ async def async_main(args: argparse.Namespace) -> None:
         chunk_spectra=args.chunk_spectra,
         rx_reorder_tol=args.rx_reorder_tol,
         monitor=monitor,
+        context=context,
     )
 
     # Attach this transport to receive channelisation products from the network at high rates.
