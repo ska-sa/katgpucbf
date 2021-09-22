@@ -35,11 +35,11 @@ from numba import njit
 import katgpucbf.xbgpu.xbengine
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
-from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
+from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore, device_filter
 
 from . import test_parameters, test_spead2_receiver
 
-pytestmark = [pytest.mark.cuda_only(min_compute_capability=(7, 2))]
+pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
 get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
 

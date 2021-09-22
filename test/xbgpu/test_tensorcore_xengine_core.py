@@ -24,7 +24,7 @@ from katgpucbf.xbgpu import tensorcore_xengine_core
 
 from . import test_parameters
 
-pytestmark = [pytest.mark.cuda_only(min_compute_capability=(7, 2))]
+pytestmark = [pytest.mark.device_filter.with_args(tensorcore_xengine_core.device_filter)]
 
 get_baseline_index = njit(tensorcore_xengine_core.TensorCoreXEngineCore.get_baseline_index)
 

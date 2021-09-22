@@ -30,10 +30,18 @@
 import importlib.resources
 
 import numpy as np
-from katsdpsigproc import accel
-from katsdpsigproc.abc import AbstractContext
+from katsdpsigproc import accel, cuda
+from katsdpsigproc.abc import AbstractContext, AbstractDevice
 
 from .. import COMPLEX, N_POLS
+
+#: Minimum CUDA compute capability needed for the kernel (with 8-bit samples)
+MIN_COMPUTE_CAPABILITY = (7, 2)
+
+
+def device_filter(device: AbstractDevice) -> bool:
+    """Determine whether a device is suitable for running the kernel."""
+    return isinstance(device, cuda.Device) and device.compute_capability >= MIN_COMPUTE_CAPABILITY
 
 
 class TensorCoreXEngineCoreTemplate:

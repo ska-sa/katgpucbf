@@ -37,6 +37,7 @@ import katgpucbf.xbgpu.xbengine
 
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
+from ..tensor_core_xengine_core import device_filter
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
@@ -183,10 +184,7 @@ async def async_main(args: argparse.Namespace) -> None:
         monitor = NullMonitor()
 
     logger.info("Initialising XB-Engine")
-    # We require a CUDA device of CC 7.2 or higher for the tensor core operations
-    context = katsdpsigproc.accel.create_some_context(
-        device_filter=lambda device: device.is_cuda and device.compute_capability >= (7, 2)  # type: ignore
-    )
+    context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
