@@ -37,7 +37,7 @@ import katgpucbf.xbgpu.xbengine
 
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from ..tensor_core_xengine_core import device_filter
+from .tensorcore_xengine_core import device_filter
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
