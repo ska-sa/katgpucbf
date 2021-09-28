@@ -16,9 +16,12 @@
 
 """Unit tests for Postproc class."""
 import numpy as np
+import pytest
 from katsdpsigproc import accel
 
 from katgpucbf.fgpu import postproc
+
+pytestmark = [pytest.mark.cuda_only]
 
 
 def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay, fringe_phase, quant_gain):
@@ -50,10 +53,8 @@ def postproc_host(in0, in1, channels, spectra_per_heap_out, spectra, fine_delay,
     return np.stack([out0, out1], axis=3)
 
 
-def test_postproc(repeat=1):
+def test_postproc(context, command_queue, repeat=1):
     """Test GPU Postproc for numerical correctness."""
-    ctx = accel.create_some_context(interactive=False)
-    queue = ctx.create_command_queue()
     channels = 4096
     spectra_per_heap_out = 256
     spectra = 512
@@ -65,20 +66,22 @@ def test_postproc(repeat=1):
     h_phase = np.random.uniform(0.0, np.pi / 2, (spectra,)).astype(np.float32)
     expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, quant_gain)
 
-    template = postproc.PostprocTemplate(ctx)
-    fn = template.instantiate(queue, spectra, spectra_per_heap_out, channels)
+    template = postproc.PostprocTemplate(context)
+    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out, channels)
     fn.ensure_all_bound()
-    fn.buffer("in0").set(queue, h_in0)
-    fn.buffer("in1").set(queue, h_in1)
-    fn.buffer("fine_delay").set(queue, h_fine_delay)
-    fn.buffer("phase").set(queue, h_phase / np.pi)
+    fn.buffer("in0").set(command_queue, h_in0)
+    fn.buffer("in1").set(command_queue, h_in1)
+    fn.buffer("fine_delay").set(command_queue, h_fine_delay)
+    fn.buffer("phase").set(command_queue, h_phase / np.pi)
     fn.quant_gain = quant_gain
     for _ in range(repeat):
         fn()
-    h_out = fn.buffer("out").get(queue)
+    h_out = fn.buffer("out").get(command_queue)
 
     np.testing.assert_allclose(h_out, expected, atol=1)
 
 
 if __name__ == "__main__":
-    test_postproc(repeat=100)
+    ctx = accel.create_some_context(device_filter=lambda device: device.is_cuda)
+    queue = ctx.create_command_queue()
+    test_postproc(ctx, queue, repeat=100)

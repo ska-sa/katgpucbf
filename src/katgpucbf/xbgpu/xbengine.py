@@ -138,7 +138,7 @@ class XBEngine(DeviceServer):
     item stores a list of events that can be used to determine if a GPU
     operation is complete.
 
-    In order to reduce the load on the maim thread, received data is collected
+    In order to reduce the load on the main thread, received data is collected
     into chunks. A chunk consists of multiple batches of F-Engine heaps where a
     batch is a collection of heaps from all F-Engine with the same timestamp.
 
@@ -203,6 +203,8 @@ class XBEngine(DeviceServer):
         :class:`Monitor` to use for generating multiple :class:`~asyncio.Queue`
         objects needed to communicate between functions, and handling basic
         reporting for :class:`~asyncio.Queue` sizes and events.
+    context
+        Device context for katsdpsigproc. It must be a CUDA device.
     """
 
     VERSION = "katgpucbf-xbgpu-icd-0.1"
@@ -226,6 +228,7 @@ class XBEngine(DeviceServer):
         chunk_spectra: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
         monitor: Monitor,
+        context: katsdpsigproc.abc.AbstractContext,
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
 
@@ -423,8 +426,8 @@ class XBEngine(DeviceServer):
         )
 
         # 5. Create GPU specific objects.
-        # 5.1 Create a GPU context, the x.is_cuda flag forces CUDA to be used instead of OpenCL.
-        self.context = katsdpsigproc.accel.create_some_context(device_filter=lambda x: x.is_cuda)
+        # 5.1 Create a GPU context
+        self.context = context
 
         # 5.2 Create various command queues (or CUDA streams) to queue GPU functions on.
         self._upload_command_queue = self.context.create_command_queue()

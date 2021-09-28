@@ -42,7 +42,6 @@ TODO: Review the xsend.py class to see if some functionality has not been covere
 
 import asyncio
 
-import katsdpsigproc.accel as accel
 import numpy as np
 import pytest
 import spead2
@@ -59,7 +58,7 @@ from . import test_parameters
     test_parameters.array_size,
     test_parameters.num_channels,
 )
-def test_send_simple(event_loop, num_ants, num_channels):
+def test_send_simple(context, event_loop, num_ants, num_channels):
     """
     Tests the XSend class in the xsend.py module.
 
@@ -101,9 +100,6 @@ def test_send_simple(event_loop, num_ants, num_channels):
         n_engines *= 2
     n_channels_per_stream = num_channels // n_engines
     n_baselines = (num_ants + 1) * (num_ants) * 2
-
-    # 2. Create cuda context - all buffers created in the XSend object are created from this context.
-    context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
 
     # 3. Initialise SPEAD2 sender and receiver objects and link them together.
 

@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import logging
 
+import katsdpsigproc.accel
 from katsdpservices import get_interface_address, setup_logging
 from katsdptelstate.endpoint import endpoint_parser
 
@@ -36,6 +37,7 @@ import katgpucbf.xbgpu.xbengine
 
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
+from .tensorcore_xengine_core import device_filter
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
@@ -182,6 +184,7 @@ async def async_main(args: argparse.Namespace) -> None:
         monitor = NullMonitor()
 
     logger.info("Initialising XB-Engine")
+    context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -198,6 +201,7 @@ async def async_main(args: argparse.Namespace) -> None:
         chunk_spectra=args.chunk_spectra,
         rx_reorder_tol=args.rx_reorder_tol,
         monitor=monitor,
+        context=context,
     )
 
     # Attach this transport to receive channelisation products from the network at high rates.

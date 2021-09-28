@@ -17,9 +17,12 @@
 """Unit tests for PFB, for numerical correctness."""
 
 import numpy as np
+import pytest
 from katsdpsigproc import accel
 
 from katgpucbf.fgpu import pfb
+
+pytestmark = [pytest.mark.cuda_only]
 
 
 def decode_10bit_host(data):
@@ -46,7 +49,7 @@ def pfb_fir_host(data, channels, weights):
     return out
 
 
-def test_pfb_fir(repeat=1):
+def test_pfb_fir(context, command_queue, repeat=1):
     """Test the GPU PFB-FIR for numerical correctness.
 
     Parameters
@@ -55,9 +58,6 @@ def test_pfb_fir(repeat=1):
         Number of times to repeat the GPU operation, default 1. A larger value
         can be used for benchmarking purposes.
     """
-    ctx = accel.create_some_context(interactive=False)
-    queue = ctx.create_command_queue()
-
     taps = 16
     spectra = 3123
     channels = 4096
@@ -66,11 +66,11 @@ def test_pfb_fir(repeat=1):
     weights = np.random.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
     expected = pfb_fir_host(h_in, channels, weights)
 
-    template = pfb.PFBFIRTemplate(ctx, taps)
-    fn = template.instantiate(queue, samples, spectra, channels)
+    template = pfb.PFBFIRTemplate(context, taps)
+    fn = template.instantiate(command_queue, samples, spectra, channels)
     fn.ensure_all_bound()
-    fn.buffer("in").set(queue, h_in)
-    fn.buffer("weights").set(queue, weights)
+    fn.buffer("in").set(command_queue, h_in)
+    fn.buffer("weights").set(command_queue, weights)
     for _ in range(repeat):
         # Split into two parts to test the offsetting
         fn.in_offset = 0
@@ -81,27 +81,27 @@ def test_pfb_fir(repeat=1):
         fn.out_offset = fn.spectra
         fn.spectra = spectra - fn.spectra
         fn()
-    h_out = fn.buffer("out").get(queue)
+    h_out = fn.buffer("out").get(command_queue)
     np.testing.assert_allclose(h_out, expected, rtol=1e-5, atol=1e-3)
 
 
-def test_fft():
+def test_fft(context, command_queue):
     """Test the GPU FFT for numerical correctness."""
-    ctx = accel.create_some_context(interactive=False)
-    queue = ctx.create_command_queue()
     spectra = 37
     channels = 256
     rng = np.random.default_rng(seed=2021)
     h_data = rng.uniform(-5, 5, (spectra, 2 * channels)).astype(np.float32)
     expected = np.fft.rfft(h_data, axis=-1)
 
-    fn = pfb.FFT(queue, spectra, channels)
+    fn = pfb.FFT(command_queue, spectra, channels)
     fn.ensure_all_bound()
-    fn.buffer("in").set(queue, h_data)
+    fn.buffer("in").set(command_queue, h_data)
     fn()
-    h_out = fn.buffer("out").get(queue)
+    h_out = fn.buffer("out").get(command_queue)
     np.testing.assert_allclose(h_out, expected, rtol=1e-4, atol=1e-4)
 
 
 if __name__ == "__main__":
-    test_pfb_fir(repeat=100)
+    ctx = accel.create_some_context(device_filter=lambda device: device.is_cuda)
+    queue = ctx.create_command_queue()
+    test_pfb_fir(ctx, queue, repeat=100)

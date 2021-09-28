@@ -16,6 +16,10 @@
 
 """Unit tests for Engine functions."""
 
+import pytest
+
+pytestmark = [pytest.mark.cuda_only]
+
 
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""

@@ -37,7 +37,6 @@ TODO: Turn create_test_objects() into a pytest fixture.
 import asyncio
 import logging
 
-import katsdpsigproc.accel as accel
 import numpy as np
 import pytest
 import spead2
@@ -186,12 +185,11 @@ def create_test_objects(
     )
 
     # 4.4 Create empty chunks and add them to the receiver empty queue.
-    context = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
     chunk_heaps = n_ants * heaps_per_fengine_per_chunk
     chunk_bytes = chunk_heaps * n_channels_per_stream * n_spectra_per_heap * sample_bits * n_pols * complexity // 8
     for _ in range(src_chunks_per_stream):
-        buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
+        buf = np.empty((chunk_bytes,), np.uint8)
         present = np.zeros((chunk_heaps,), np.uint8)
         chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
         receiver_stream.add_free_chunk(chunk)

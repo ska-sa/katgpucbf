@@ -35,9 +35,11 @@ from numba import njit
 import katgpucbf.xbgpu.xbengine
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
-from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore
+from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore, device_filter
 
 from . import test_parameters, test_spead2_receiver
+
+pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
 get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
 
@@ -247,7 +249,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     test_parameters.num_channels,
     test_parameters.num_spectra_per_heap,
 )
-def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
+def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_channels):
     """
     Unit tests for the xbengine.py module.
 
@@ -357,6 +359,7 @@ def test_xbengine(event_loop, num_ants, num_spectra_per_heap, num_channels):
         chunk_spectra=heaps_per_fengine_per_chunk,
         rx_reorder_tol=rx_reorder_tol,
         monitor=monitor,
+        context=context,
     )
 
     # 6. Generate Data to be sent to the receiver. We are performing <n_accumulations> full accumulations. Each
