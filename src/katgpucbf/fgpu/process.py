@@ -38,7 +38,7 @@ from katsdpsigproc.resource import async_wait_for_events
 
 from .. import N_POLS
 from ..monitor import Monitor
-from . import recv, ringbuffer, send
+from . import recv, send
 from .compute import Compute
 from .delay import AbstractDelayModel
 
@@ -364,6 +364,7 @@ class Processor:
         self.delay_model = delay_model
         n_in = 3
         n_out = 2
+        n_send = 4
 
         # TODO test whether Python 3.8 allows for moving these type hints to the
         # normal place. asyncio.Queue doesn't support indexing, and this broke
@@ -372,6 +373,7 @@ class Processor:
         self.in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
         self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
+        self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
         self.sensors = sensors
         self.monitor = monitor
@@ -691,7 +693,7 @@ class Processor:
                         await async_wait_for_events([transfer_events[pol]])
                     streams[pol].add_free_chunk(chunks[pol])
 
-    async def run_transmit(self, sender: send.Sender) -> None:
+    async def run_transmit(self, stream: "spead2.send.asyncio._AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without GPUDirect. In the
@@ -709,48 +711,52 @@ class Processor:
             This object, written in C++, takes large chunks of data and packages
             it appropriately in SPEAD heaps for transmission on the network.
         """
-        free_ring = ringbuffer.AsyncRingbuffer(sender.free_ring, self.monitor, "send_free_ringbuffer", "run_transmit")
         while True:
             with self.monitor.with_state("run_transmit", "wait out_queue"):
                 out_item = await self.out_queue.get()
-            with self.monitor.with_state("run_transmit", "wait free_ring"):
-                chunk = await free_ring.async_pop()
+            with self.monitor.with_state("run_transmit", "wait send_free_queue"):
+                chunk = await self.send_free_queue.get()
             # TODO: use get_region since it might be partial
             if chunk.device:
                 old_spectra = chunk.device
                 chunk.device = out_item.spectra
-                chunk.base = chunk.device.buffer.gpudata.as_buffer(chunk.device.buffer.nbytes)
+                # TODO: this will need to be reworked after conversion of sending to Python
+                chunk.data = chunk.device.buffer.gpudata.as_buffer(chunk.device.buffer.nbytes)
                 out_item.spectra = old_spectra
                 events = out_item.events
             else:
                 self._download_queue.enqueue_wait_for_events(out_item.events)
-                assert isinstance(chunk.base, accel.HostArray)
-                out_item.spectra.get_async(self._download_queue, chunk.base)
+                assert isinstance(chunk.data, accel.HostArray)
+                out_item.spectra.get_async(self._download_queue, chunk.data)
                 events = [self._download_queue.enqueue_marker()]
             chunk.timestamp = out_item.timestamp
-            chunk.spectra_per_heap = self.spectra_per_heap
-            chunk.channels = self.channels
-            chunk.frames = out_item.n_spectra // self.spectra_per_heap
-            chunk.pols = N_POLS
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
+            n_frames = out_item.n_spectra // self.spectra_per_heap
+            n_bytes = n_frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
-            sender.send_chunk(chunk)
-            if self.sensors is not None:
-                # Note: it's not strictly true to say that the data has been
-                # sent at this point; it's only been queued for sending. But it
-                # should be close enough for monitoring data rates at the
-                # granularity that this is typically done.
-                # Get a common timestamp for all the updates
-                sensor_timestamp = time.time()
+            task = asyncio.get_event_loop().create_task(chunk.send(stream, n_frames))
 
-                def increment(sensor: Sensor, incr: int):
-                    sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+            def chunk_finished(future):
+                self.send_free_queue.put_nowait(chunk)
+                try:
+                    future.result()  # No result, but want the exception
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    logger.exception("Error sending chunk")
+                    return
 
-                increment(self.sensors["output-heaps-total"], chunk.frames * sender.num_substreams)
-                # out_item.spectra.shape[1:] is the shape of each frame
-                increment(
-                    self.sensors["output-bytes-total"],
-                    chunk.frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize,
-                )
+                if self.sensors is not None:
+                    # Get a common timestamp for all the updates
+                    sensor_timestamp = time.time()
+
+                    def increment(sensor: Sensor, incr: int):
+                        sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
+
+                    increment(self.sensors["output-heaps-total"], n_frames * stream.num_substreams)
+                    # out_item.spectra.shape[1:] is the shape of each frame
+                    increment(self.sensors["output-bytes-total"], n_bytes)
+
+            task.add_done_callback(chunk_finished)

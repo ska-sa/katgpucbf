@@ -347,43 +347,48 @@ class Engine(aiokatcp.DeviceServer):
                     chunk = recv.Chunk(data=buf)
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
+
         send_chunks = []
         send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
         send_dtype = np.dtype(np.int8)
-        for _ in range(4):
+        for _ in range(self._processor.send_free_queue.maxsize):
+            dev: Optional[accel.DeviceArray]
             if use_peerdirect:
                 dev = accel.DeviceArray(context, send_shape, send_dtype)
-                buf = dev.buffer.gpudata.as_buffer(int(np.product(send_shape) * send_dtype.itemsize))
-                send_chunks.append(send.Chunk(buf, dev))
+                dev_buffer = dev.buffer.gpudata.as_buffer(int(np.product(send_shape) * send_dtype.itemsize))
+                buf = np.frombuffer(dev_buffer, dtype=send_dtype).reshape(send_shape)
             else:
+                dev = None
                 buf = accel.HostArray(send_shape, send_dtype, context=context)
-                send_chunks.append(send.Chunk(buf))
-        memory_regions = [chunk.base for chunk in send_chunks]
-        if use_peerdirect:
-            memory_regions.extend(self._processor.peerdirect_memory_regions)
-        # Send a bit faster than nominal rate to account for header overheads
-        rate = N_POLS * adc_sample_rate * send_dtype.itemsize * send_rate_factor
-        # There is a SPEAD header, 8 item pointers, and 3 padding pointers for
-        # a 96 byte header, matching the MeerKAT packet format.
-        self._sender = send.Sender(
-            len(send_chunks),
-            memory_regions,
-            dst_affinity,
-            dst_comp_vector,
-            feng_id,
-            num_ants,
-            [(d.host, d.port) for d in dst],
-            dst_ttl,
-            dst_interface,
-            dst_ibv,
-            dst_packet_payload + 96,  # TODO make this into some kind of parameter. A naked 96 makes me nervous.
-            rate,
-            len(send_chunks) * spectra // spectra_per_heap * len(dst),
-            monitor,
+            send_chunks.append(
+                send.Chunk(
+                    buf,
+                    device=dev,
+                    substreams=len(dst),
+                    feng_id=feng_id,
+                )
+            )
+        extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
+        self._send_stream = send.make_stream(
+            endpoints=dst,
+            interface=dst_interface,
+            ttl=dst_ttl,
+            ibv=dst_ibv,
+            packet_payload=dst_packet_payload,
+            affinity=dst_affinity,
+            comp_vector=dst_comp_vector,
+            adc_sample_rate=adc_sample_rate,
+            send_rate_factor=send_rate_factor,
+            feng_id=feng_id,
+            num_ants=num_ants,
+            spectra=spectra,
+            spectra_per_heap=spectra_per_heap,
+            channels=channels,
+            chunks=send_chunks,
+            extra_memory_regions=extra_memory_regions,
         )
-        monitor.event_qsize("send_free_ringbuffer", 0, len(send_chunks))
         for schunk in send_chunks:
-            self._sender.push_free_ring(schunk)
+            self._processor.send_free_queue.put_nowait(schunk)
 
     async def request_quant_gain(self, ctx, quant_gain: float) -> None:
         """Set the quant gain."""
@@ -469,11 +474,11 @@ class Engine(aiokatcp.DeviceServer):
             tasks = [
                 loop.create_task(self._processor.run_processing(self._src_streams)),
                 loop.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
-                loop.create_task(self._processor.run_transmit(self._sender)),
+                loop.create_task(self._processor.run_transmit(self._send_stream)),
             ]
             await asyncio.gather(*tasks)
         finally:
             for stream in self._src_streams:
                 stream.stop()
-            self._sender.stop()
+            await self._send_stream.async_flush()
             await self.stop()
