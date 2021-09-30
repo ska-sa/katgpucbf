@@ -6,19 +6,11 @@ Guidelines for Development
 Getting Started
 ---------------
 
-First, clone the repo from Github. Don't forget to clone :option:`!--recursive`,
-so that the 3rd-party :mod:`.spead2` dependency gets pulled in.
+First, clone the repo from Github.
 
 .. code-block:: bash
 
-  git clone --recursive git@github.com:ska-sa/katgpucbf.git
-
-If you do forget the :option:`!--recursive`, then you can pull it in afterwards:
-
-.. code-block:: bash
-
-  cd katgpucbf
-  git submodule update --init
+  git clone git@github.com:ska-sa/katgpucbf.git
 
 A setup script (:program:`dev-setup.sh`) is included for your convenience to
 get going.
