@@ -1,11 +1,12 @@
 # Karoo Array Telescope GPU-Accelerated Correlator/Beamformer (katgpucbf)
 
 This repository implements both F- and X-engines for a GPU-based correlator,
-developed for the MeerKAT Extension Radio Telescope by the South African Radio Astronomy Observatory
-(SARAO).
+developed for the MeerKAT Extension Radio Telescope by the South African Radio
+Astronomy Observatory (SARAO). A B-engine for beamforming is planned, but not
+yet included.
 
-Detailed documentation can be found in the `doc/` folder, and can be built with
-Sphinx. See also the `Developing` section below.
+Detailed documentation can be found in the [`doc/`](doc/) folder, and can be
+built with Sphinx. Included is also a [guide for development](doc/dev-guide.rst).
 
 ## Requirements
 Apart from the Python dependencies, the following are requirements for running
@@ -24,11 +25,3 @@ at time of writing.
 adaptation. The X-engine relies on Nvidia's Tensor Cores and is not portable.
 The Tensor Core X-engine is adapted from
 [ASTRON's implementation](https://git.astron.nl/RD/tensor-core-correlator).
-
-## Developing
-Katgpucbf is under active development and may change drastically from one
-release to the next. A `dev-setup.sh` script is provided to get you going. This
-script will set up all the required Python packages, and build the module's
-documentation for reference.
-
-Unit testing for the module is done using `pytest`.
