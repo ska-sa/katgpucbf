@@ -1,7 +1,7 @@
-# Karoo Array Telescope GPU-Accellerated Correlator/Beamformer (katgpucbf)
+# Karoo Array Telescope GPU-Accelerated Correlator/Beamformer (katgpucbf)
 
 This repository implements both F- and X-engines for a GPU-based correlator,
-developed for MeerKAT Extension by the South African Radio Astronomy Observatory
+developed for the MeerKAT Extension Radio Telescope by the South African Radio Astronomy Observatory
 (SARAO).
 
 Detailed documentation can be found in the `doc/` folder, and can be built with
