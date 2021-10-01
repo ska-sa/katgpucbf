@@ -25,13 +25,13 @@ way to do it is with ``spead2_net_raw``.
 
 Where:
 
- - `<interface_address>` is the ip address of the network interface to transmit
-   the data out on.
- - `<multicast_address>` is the multicast address all packets are destined to.
-   The optional `[+y]` argument will create `y` additional multicast streams
-   with the same parameters each on a different multicast addresses
-   consecutivley after the base `<multicast_address>`.
- - `<port>` is the UDP port to transmit data to.
+- `<interface_address>` is the ip address of the network interface to transmit
+  the data out on.
+- `<multicast_address>` is the multicast address all packets are destined to.
+  The optional `[+y]` argument will create `y` additional multicast streams
+  with the same parameters each on a different multicast addresses
+  consecutivley after the base `<multicast_address>`.
+- `<port>` is the UDP port to transmit data to.
 
 The above command will transmit data at about `7.8 * (y+1)` Gbps by default.
 
