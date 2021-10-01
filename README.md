@@ -9,19 +9,24 @@ Detailed documentation can be found in the [`doc/`](doc/) folder, and can be
 built with Sphinx. Included is also a [guide for development](doc/dev-guide.rst).
 
 ## Requirements
-Apart from the Python dependencies, the following are requirements for running
-katgpucbf:
+The following requirements are what we consider to be the minimum for making use
+of this module. Listed are the tested / supported software versions and hardware
+generations. More recent platforms may well work, but have not been tested.
+### Hardware
+* Nvidia GPU of compute capability 7.2 or greater. One exception to this is the
+  GeForce TGX 1650 Ti which is listed as having a compute capability of 7.5, but
+  does not include Tensor Cores, which are a requirement for the XB-engine.
+* Mellanox OFED Drivers v5.3.1 for ibverbs functionality. (Any v5+ should work.)
+  For best performance, ibverbs is recommended. Currently `fgpu` can operate
+  without ibverbs, but the functionality is not available (yet) in `xgpu`.
 
-1. Python 3.8.
-2. Nvidia GPU of compute capability 7.5.
-3. CUDA version 11.4.
-4. Ubuntu 20.04
-5. Mellanox OFED Drivers v5.3.1 for ibverbs functionality.
+### Software
+* Ubuntu 20.04
+* Python 3.8.
+* CUDA version 11.4. (Most early development was done using 10.1, which may
+  still work but has not been tested for some time.)
 
-More recent versions of anything listed above may work, but this is untested
-at time of writing.
-
-**Note**: The F-engine should work on any CUDA or Open-CL GPU, with some minor
-adaptation. The X-engine relies on Nvidia's Tensor Cores and is not portable.
-The Tensor Core X-engine is adapted from
+**Note**: The F-engine should work on any recent-ish CUDA GPU. The X-engine
+relies on Nvidia's Tensor Cores and is not portable. The Tensor Core X-engine
+is adapted from
 [ASTRON's implementation](https://git.astron.nl/RD/tensor-core-correlator).
