@@ -11,12 +11,10 @@ Submodules
    katgpucbf.fgpu.delay
    katgpucbf.fgpu.engine
    katgpucbf.fgpu.main
-   katgpucbf.fgpu.monitor
    katgpucbf.fgpu.pfb
    katgpucbf.fgpu.postproc
    katgpucbf.fgpu.process
    katgpucbf.fgpu.recv
-   katgpucbf.fgpu.ringbuffer
    katgpucbf.fgpu.send
 
 Module contents

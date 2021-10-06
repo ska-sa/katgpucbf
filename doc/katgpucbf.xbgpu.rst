@@ -8,7 +8,6 @@ Submodules
    :maxdepth: 4
 
    katgpucbf.xbgpu.main
-   katgpucbf.xbgpu.monitor
    katgpucbf.xbgpu.precorrelation_reorder
    katgpucbf.xbgpu.recv
    katgpucbf.xbgpu.tensorcore_xengine_core

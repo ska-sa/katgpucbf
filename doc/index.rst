@@ -14,19 +14,22 @@ Welcome to katgpucbf's documentation!
    dev-guide
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: F engine
 
    fgpu.design
    fgpu.glossary
-   katgpucbf.fgpu
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: X and B engines
 
    xbgpu.theory
    xbgpu.networking
    xbgpu.tcc
 
-   katgpucbf.xbgpu
+.. toctree::
+   :maxdepth: 3
+   :caption: Module reference
+
+   katgpucbf
