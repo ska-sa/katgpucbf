@@ -17,7 +17,7 @@
 """Network transmission handling."""
 
 import asyncio
-from typing import Iterable, List, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Sequence
 
 import numpy as np
 import spead2.send.asyncio
@@ -36,31 +36,8 @@ FENG_RAW_ID = 0x4300
 PREAMBLE_SIZE = 96
 
 
-def make_immediate_ref(id: int, value: np.ndarray) -> spead2.Item:
-    """Synthesize an immediate item that references (not copies) some memory.
-
-    This is suitable for adding directly to a heap, but not for descriptors.
-
-    Parameters
-    ----------
-    id
-        The SPEAD identifier for the item
-    value
-        A single-element array with dtype ``>u8``
-    """
-    assert value.dtype == np.dtype(">u8")
-    assert value.shape == (1,)
-    # Access the raw bytes, so that we can select just the right number of LSBs.
-    n_bytes = FLAVOUR.heap_address_bits // 8
-    imm_value = value.view(np.uint8)[-n_bytes:]
-    return spead2.Item(id, "dummy_item", "", (n_bytes,), dtype=imm_value.dtype, value=imm_value)
-
-
-def make_immediate(id: int, value: int) -> spead2.Item:
+def make_immediate(id: int, value: Any) -> spead2.Item:
     """Synthesize an immediate item.
-
-    Unlike :meth:`make_immediate_ref`, the value is a plain Python int, and
-    will be copied rather than referenced when added to a heap.
 
     Parameters
     ----------
@@ -80,7 +57,7 @@ class Frame:
     Parameters
     ----------
     timestamp
-        Single-element array of dtype ``>u8`` holding the timestamp.
+        Zero-dimensional array of dtype ``>u8`` holding the timestamp.
     data
         Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS, COMPLEX).
     feng_id
@@ -98,7 +75,7 @@ class Frame:
             start_channel = i * channels_per_substream
             heap = spead2.send.Heap(FLAVOUR)
             heap.repeat_pointers = True
-            heap.add_item(make_immediate_ref(TIMESTAMP_ID, timestamp))
+            heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
             heap.add_item(make_immediate(FENG_ID_ID, feng_id))
             heap.add_item(make_immediate(FREQUENCY_ID, start_channel))
             heap_data = data[start_channel : start_channel + channels_per_substream]
@@ -132,8 +109,10 @@ class Chunk:
         timestamp_step = spectra_per_heap * channels * 2
         #: Storage for timestamps in the SPEAD heaps.
         self._timestamps = (np.arange(n_frames) * timestamp_step).astype(">u8")
+        # The ... in indexing causes numpy to give a 0d array view, rather than
+        # a scalar.
         self._frames = [
-            Frame(self._timestamps[i : i + 1], data[i], feng_id=feng_id, substreams=substreams) for i in range(n_frames)
+            Frame(self._timestamps[i, ...], data[i], feng_id=feng_id, substreams=substreams) for i in range(n_frames)
         ]
 
     @property
