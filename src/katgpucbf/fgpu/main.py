@@ -222,6 +222,9 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("dst", type=endpoint_list_parser(7148), help="Destination endpoints")
     args = parser.parse_args(arglist)
 
+    if args.use_peerdirect:
+        # TODO: make it work again
+        parser.error("--use-peerdirect is currently broken")
     if args.use_peerdirect and not args.dst_ibv:
         parser.error("--use-peerdirect requires --dst-ibv")
     for src in args.src:
