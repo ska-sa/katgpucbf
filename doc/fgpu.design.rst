@@ -58,7 +58,7 @@ heaps into chunks, which means Python code is only run per-chunk.
 Queues
 ------
 The system consists of several components which run independently of each
-other - either via threads (C++ code) or Python's asyncio framework. The
+other - either via threads (spead2's C++ code) or Python's asyncio framework. The
 general pattern is that adjacent components are connected by a pair of queues:
 one carrying full buckets of data forward, and one returning free data. This
 approach allows all memory to be allocated up front. Slow components thus
@@ -213,9 +213,12 @@ long as possible.
 
 Network transmit
 ----------------
-The current transmit system is quite simple and could use optimisations. A
-single spead2 stream is created with one substream per multicast destination
-(X-engine), C++ code splits each output chunk into heaps.
+The current transmit system is quite simple. A single spead2 stream is created,
+with one substream per multicast destination. For each output chunk, memory
+together with a set of heaps is created in advance. The heaps are carefully
+constructed so that they reference numpy arrays (including for the timestamps),
+rather than copying data into spead2. This allows heaps to be recycled for new
+data without having to create new heap objects.
 
 Challenges and lessons learnt
 -----------------------------
