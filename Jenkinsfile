@@ -32,6 +32,7 @@ pipeline {
 
   environment {
     DEBIAN_FRONTEND = 'noninteractive' // Required for zero interaction when installing or upgrading software packages
+    GIT_AUTHOR_EMAIL = sh(script: "git --no-pager show -s --format=\\\'%ae\\\'", returnStdout: true)
   }
 
   stages {
@@ -130,7 +131,7 @@ pipeline {
       <br>
       <i>Note: This is an Automated email notification.</i>""",
       subject: '$PROJECT_NAME - $BUILD_STATUS!',
-      to: 'ijassiem@ska.ac.za'
+      to: GIT_AUTHOR_EMAIL + ', $DEFAULT_RECIPIENTS'
 
       cleanWs()
     }
