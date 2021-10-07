@@ -20,9 +20,6 @@ The minimum command to run the fsim is:
 
     ./fsim --interface <interface_address> <multicast_address>[+y]:<port>
 
-The ``fsim`` executable needs ``CAP_NET_RAW`` capability to run. The easiest
-way to do it is with ``spead2_net_raw``.
-
 Where:
 
 - `<interface_address>` is the ip address of the network interface to transmit
@@ -34,6 +31,9 @@ Where:
 - `<port>` is the UDP port to transmit data to.
 
 The above command will transmit data at about `7.8 * (y+1)` Gbps by default.
+
+The ``fsim`` executable needs ``CAP_NET_RAW`` capability to run. The easiest
+way to do it is with ``spead2_net_raw``.
 
 See the fsim source code (in ``src/tools/``) for a  detailed description of how the
 F-Engine simulator works and the useful configuration arguments.

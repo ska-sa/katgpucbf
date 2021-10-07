@@ -12,10 +12,11 @@ built with Sphinx. Included is also a [guide for development](doc/dev-guide.rst)
 The following requirements are what we consider to be the minimum for making use
 of this module. Listed are the tested / supported software versions and hardware
 generations. More recent platforms may well work, but have not been tested.
+
 ### Hardware
 * Nvidia GPU of compute capability 7.2 or greater. One exception to this is the
-  GeForce GTX 1650 Ti which is listed as having a compute capability of 7.5, but
-  does not include Tensor Cores, which are a requirement for the XB-engine.
+  GeForce GTX 16XX series which is listed as having a compute capability of 7.5,
+  but does not include Tensor Cores, which are a requirement for the XB-engine.
 * Mellanox OFED Drivers v5.3.1 for ibverbs functionality. (Any v5+ should work.)
   For best performance, ibverbs is recommended. Currently `fgpu` can operate
   without ibverbs, but the functionality is not available (yet) in `xbgpu`.
@@ -27,6 +28,5 @@ generations. More recent platforms may well work, but have not been tested.
   still work but has not been tested for some time.)
 
 **Note**: The F-engine should work on any recent-ish CUDA GPU. The X-engine
-relies on Nvidia's Tensor Cores and is not portable. The Tensor Core X-engine
-is adapted from
-[ASTRON's implementation](https://git.astron.nl/RD/tensor-core-correlator).
+relies on Nvidia's Tensor Cores. (It is adapted from
+[ASTRON's implementation](https://git.astron.nl/RD/tensor-core-correlator).)
