@@ -130,8 +130,11 @@ pipeline {
       <b>Build URL:</b> ${env.BUILD_URL}<br>
       <br>
       <i>Note: This is an Automated email notification.</i>""",
+      recipientProviders: [developers(), requestor()],
       subject: '$PROJECT_NAME - $BUILD_STATUS!',
-      to: '$DEFAULT_RECIPIENTS, cc:' + GIT_AUTHOR_EMAIL
+      //to: '$DEFAULT_RECIPIENTS, cc:' + GIT_AUTHOR_EMAIL
+      to: '$DEFAULT_RECIPIENTS'
+
 
       cleanWs()
     }
