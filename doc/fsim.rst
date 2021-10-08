@@ -8,9 +8,7 @@ simulator has been created that simulates packets received at the X-Engine (i.e.
 packets from multiple F-Engines destined for the same X-Engine). This simulator
 requires a server with a Mellanox NIC and ibverbs to run. This fsim simulates
 the exact packet format from the SKARAB F-Engines. The SKARAB X-Engines ingest
-data from 4 different multicast streams. This simulator only simulates data from
-a single multicast stream - if more streams are required, more instances of this
-simulator need to be run in parallel.
+data from 4 different multicast streams.
 
 To build the fsim, navigate to the ``src/tools/`` directory and run ``make``.
 

@@ -31,4 +31,8 @@ Welcome to katgpucbf's documentation!
 
    katgpucbf.xbgpu
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Tools
+
    fsim
