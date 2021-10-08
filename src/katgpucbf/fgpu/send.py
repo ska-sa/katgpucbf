@@ -131,8 +131,7 @@ class Chunk:
         self._timestamps += delta
         self._timestamp = value
 
-    # TODO: make spead2.send.asyncio._AsyncStream public
-    async def send(self, stream: "spead2.send.asyncio._AsyncStream", frames: int) -> None:
+    async def send(self, stream: "spead2.send.asyncio.AsyncStream", frames: int) -> None:
         """Transmit heaps on a SPEAD stream.
 
         Frames from 0 to `frames` - 1 are sent asynchronously.
@@ -161,7 +160,7 @@ def make_stream(
     channels: int,
     chunks: Sequence[Chunk],
     extra_memory_regions: Optional[Iterable[object]],
-) -> "spead2.send.asyncio._AsyncStream":
+) -> "spead2.send.asyncio.AsyncStream":
     """Create an asynchronous SPEAD stream for transmission."""
     dtype = chunks[0].data.dtype
     rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor
@@ -176,7 +175,7 @@ def make_stream(
         max_packet_size=packet_payload + PREAMBLE_SIZE,
         max_heaps=len(chunks) * spectra // spectra_per_heap * len(endpoints),
     )
-    stream: "spead2.send.asyncio._AsyncStream"
+    stream: "spead2.send.asyncio.AsyncStream"
     if ibv:
         ibv_config = spead2.send.UdpIbvConfig(
             endpoints=[(ep.host, ep.port) for ep in endpoints],

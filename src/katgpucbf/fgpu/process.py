@@ -693,7 +693,7 @@ class Processor:
                         await async_wait_for_events([transfer_events[pol]])
                     streams[pol].add_free_chunk(chunks[pol])
 
-    async def run_transmit(self, stream: "spead2.send.asyncio._AsyncStream") -> None:
+    async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without GPUDirect. In the

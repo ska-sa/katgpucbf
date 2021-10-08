@@ -162,7 +162,6 @@ class XSend:
     max_packet_size: Final[int] = max_payload_size + header_size
 
     # Initialise class including all variables
-    # TODO: update spead2 to make spead2.send.asyncio._AsyncStream public.
     def __init__(
         self,
         n_ants: int,
@@ -172,7 +171,7 @@ class XSend:
         send_rate_factor: float,
         channel_offset: int,
         context: katsdpsigproc.abc.AbstractContext,
-        stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio._AsyncStream"],
+        stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
     ) -> None:
         # 1. Check that given arguments are sane.
