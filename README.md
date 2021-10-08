@@ -14,9 +14,8 @@ of this module. Listed are the tested / supported software versions and hardware
 generations. More recent platforms may well work, but have not been tested.
 
 ### Hardware
-* Nvidia GPU of compute capability 7.2 or greater. One exception to this is the
-  GeForce GTX 16XX series which is listed as having a compute capability of 7.5,
-  but does not include Tensor Cores, which are a requirement for the XB-engine.
+* Nvidia GPU of compute capability 7.2 or greater and Tensor Cores, which are a
+  requirement for the XB-engine.
 * Mellanox OFED Drivers v5.3.1 for ibverbs functionality. (Any v5+ should work.)
   For best performance, ibverbs is recommended. Currently `fgpu` can operate
   without ibverbs, but the functionality is not available (yet) in `xbgpu`.
@@ -27,6 +26,6 @@ generations. More recent platforms may well work, but have not been tested.
 * CUDA version 11.4. (Most early development was done using 10.1, which may
   still work but has not been tested for some time.)
 
-**Note**: The F-engine should work on any recent-ish CUDA GPU. The X-engine
-relies on Nvidia's Tensor Cores. (It is adapted from
+**Note**: The F-engine should work on any recent-ish CUDA GPU. Only the
+XB-engine requires Tensor Cores. (It is adapted from
 [ASTRON's implementation](https://git.astron.nl/RD/tensor-core-correlator).)
