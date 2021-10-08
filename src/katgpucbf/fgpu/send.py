@@ -101,7 +101,7 @@ class Chunk:
         channels = data.shape[1]
         spectra_per_heap = data.shape[2]
         if channels % substreams != 0:
-            raise ValueError("channels must be a multiple of substreams")
+            raise ValueError("substreams must divide into channels")
         self.data = data
         self.device = device
         #: Timestamp of the first heap
