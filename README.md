@@ -11,11 +11,11 @@ built with Sphinx. Included is also a [guide for development](doc/dev-guide.rst)
 ## Requirements
 The following requirements are what we consider to be the minimum for making use
 of this module. Listed are the tested / supported software versions and hardware
-generations. More recent platforms may well work, but have not been tested.
+generations. Other platforms may well work, but have not been tested.
 
 ### Hardware
-* Nvidia GPU of compute capability 7.2 or greater and Tensor Cores, which are a
-  requirement for the XB-engine.
+* An Nvidia GPU. For the XB-engine, it needs to be of compute capability 7.2 or greater
+  and have tensor cores.
 * Mellanox OFED Drivers v5.3.1 for ibverbs functionality. (Any v5+ should work.)
   For best performance, ibverbs is recommended. Currently `fgpu` can operate
   without ibverbs, but the functionality is not available (yet) in `xbgpu`.
