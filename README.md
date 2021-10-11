@@ -25,7 +25,3 @@ generations. Other platforms may well work, but have not been tested.
 * Python 3.8.
 * CUDA version 11.4. (Most early development was done using 10.1, which may
   still work but has not been tested for some time.)
-
-**Note**: The F-engine should work on any recent-ish CUDA GPU. Only the
-XB-engine requires Tensor Cores. (It is adapted from
-[ASTRON's implementation](https://git.astron.nl/RD/tensor-core-correlator).)
