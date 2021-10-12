@@ -222,9 +222,8 @@ async def async_main(args: argparse.Namespace) -> None:
 
     logger.info("Starting main processing loop")
 
-    loop = asyncio.get_event_loop()
-    main_task = loop.create_task(xbengine.run())
-    descriptor_task = loop.create_task(xbengine.run_descriptors_loop(5))
+    main_task = asyncio.create_task(xbengine.run())
+    descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(5))
     await main_task
     await descriptor_task
 

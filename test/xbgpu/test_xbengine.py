@@ -457,8 +457,8 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
         The recv_process() has an end point while the xbengine runs forever. Waits for the recv_process() finish and
         then stops the xbengine.
         """
-        task1 = event_loop.create_task(xbengine.run())
-        task2 = event_loop.create_task(recv_process())
+        task1 = asyncio.create_task(xbengine.run())
+        task2 = asyncio.create_task(recv_process())
         await task2
         task1.cancel()
 
