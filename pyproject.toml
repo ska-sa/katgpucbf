@@ -3,9 +3,6 @@ requires = [
 	"setuptools>=45",
 	"wheel",
 	"setuptools_scm[toml]>=6.0",
-	"jinja2==3.0.1",  # required to run bootstrap.sh when installing the spead2 submodule
-	"pycparser==2.20",  # required to run bootstrap.sh when installing the spead2 submodule
-	"pybind11==2.6.2",  # wrapping C++ functions in python
 ]
 
 [tool.setuptools_scm]
@@ -32,7 +29,6 @@ exclude ='''
 [tool.isort]
 profile = "black"
 line_length = 120
-skip_glob = ["3rdparty/*"]
 
 [tool.pytest.ini_options]
 testpaths = "test"

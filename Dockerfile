@@ -5,7 +5,8 @@ FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as build-base
 
 # Install system packages:
 # - git is needed for setuptools_scm
-# - autoconf, automake, pkg-config, and lib* are needed for spead2
+# - wget is used to download spead2
+# - pkg-config and lib* are needed for spead2
 # DEBIAN_FRONTEND=noninteractive prevents apt-get from asking configuration
 # questions.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -15,8 +16,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python3-venv \
     python-is-python3 \
     git \
-    autoconf \
-    automake \
     pkg-config \
     libboost-dev \
     libboost-program-options-dev \
@@ -24,7 +23,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libibverbs-dev \
     librdmacm-dev \
     libpcap-dev \
-    libcap-dev
+    libcap-dev \
+    wget
 
 # Create a virtual environment
 RUN python -m venv /venv
@@ -34,18 +34,32 @@ ENV PATH=/venv/bin:$PATH
 # packages not using PEP 517/518.
 RUN pip install pip==21.1.3 setuptools==57.1.0 wheel==0.36.2
 
+# Install spead2 C++ bindings. We use requirements.txt just to get the
+# version, so that we when we want to update we only have to do it in
+# one place.
+WORKDIR /tmp/katgpucbf
+COPY requirements.txt .
+WORKDIR /tmp
+RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) && \
+    wget "https://github.com/ska-sa/spead2/releases/download/v$SPEAD2_VERSION/spead2-$SPEAD2_VERSION.tar.gz" && \
+    tar -zxf "spead2-$SPEAD2_VERSION.tar.gz" && \
+    cd "spead2-$SPEAD2_VERSION" && \
+    mkdir build && \
+    cd build && \
+    ../configure && \
+    make -j && \
+    make install
+
 #######################################################################
 
 # The above image is independent of the contents of this package (except
-# for the requirements files), and is used to form the image for Jenkins
+# for requirement.txt), and is used to form the image for Jenkins
 # testing. We now install the package in a new build stage.
 
 FROM build-base as build-py
 
-# Install requirements, copying only requirements.txt so that changes to other
-# files do not bust the build cache.
+# Install requirements (already copied to build-base image)
 WORKDIR /tmp/katgpucbf
-COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Install the package itself. Using --no-deps ensures that if there are
@@ -57,30 +71,10 @@ RUN pip install --no-deps . && pip check
 #######################################################################
 
 # Separate stage to build the C++ tools. This is in a separate build stage
-# because it installs requirements-dev.txt to get the tools needed for
-# bootstrapping spead2, but we do not need them in the production virtual
-# environment. Also, since it inherits from build-base rather than build-py,
-# it will not require rebuilding if the Python code changes.
+# so that changes to do either the C++ code or the Python code don't
+# invalidate the build cache for the other.
 
 FROM build-base as build-cxx
-
-# Install requirements for bootstrap
-
-# Install requirements, copying only requirements-dev.txt so that changes to
-# other files do not bust the build cache.
-WORKDIR /tmp/katgpucbf
-COPY requirements-dev.txt ./
-RUN pip install -r requirements-dev.txt
-
-# Install spead2 (C++ bindings)
-WORKDIR /tmp/spead2
-COPY 3rdparty/spead2/ .
-RUN ./bootstrap.sh && \
-    mkdir build && \
-    cd build && \
-    ../configure && \
-    make -j && \
-    make install
 
 # Build simulation utilities.
 # We use make clean to ensure that an existing build from the build context

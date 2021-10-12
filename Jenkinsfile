@@ -61,22 +61,8 @@ pipeline {
           }
         }
 
-        /* This stage verifies the successful installation of SPEAD2.
-         *
-         * SPEAD2 normally installs with ibverbs settings enabled but under some
-         * conditions SPEAD2 will not install ibverbs functions. When running
-         * make, an error will be thrown if SPEAD2 does not install
-         * correctly.
-         */
         stage('Compile C++ tools') {
           steps {
-            // Install SPEAD2 C++ library required for installation of tools
-            dir('3rdparty/spead2') {
-              sh './bootstrap.sh'
-              sh './configure'
-              sh 'make -j'
-              sh 'make install'
-            }
             // Make and compile tools.
             dir('src/tools') {
               sh 'make clean'
