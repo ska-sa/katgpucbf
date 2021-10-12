@@ -16,14 +16,18 @@
 
 """Fixtures for use in fgpu unit tests."""
 
+from typing import AsyncGenerator
+
 import aiokatcp
 import pytest
+from katsdpsigproc.abc import AbstractContext
 
+from katgpucbf.fgpu.engine import Engine
 from katgpucbf.fgpu.main import make_engine
 
 
 @pytest.fixture
-async def engine_server(request, context):
+async def engine_server(request, context: AbstractContext) -> AsyncGenerator[Engine, None]:
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
     The arguments passed are based on the default arguments from
@@ -39,8 +43,10 @@ async def engine_server(request, context):
 
 
 @pytest.fixture
-async def engine_client(engine_server):
+async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
     """Create a KATCP client for communicating with the dummy server."""
+    assert engine_server.server is not None
+    assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
     client = await aiokatcp.Client.connect(host, port)
     yield client

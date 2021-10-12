@@ -18,6 +18,8 @@
 
 import pytest
 
+from katgpucbf.fgpu.engine import Engine
+
 pytestmark = [pytest.mark.cuda_only]
 
 
@@ -35,7 +37,7 @@ class TestEngine:
         "239.10.11.0+15:7149",  # dst
     ]
 
-    def test_engine_required_arguments(self, engine_server):
+    def test_engine_required_arguments(self, engine_server: Engine) -> None:
         """Test proper setting of required arguments.
 
         .. note::
