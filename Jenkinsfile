@@ -101,12 +101,14 @@ pipeline {
      */
     stage('Run pytest (quick)') {
       when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
+      options { timeout(time: 5, unit: 'MINUTES') }
       steps {
         sh 'pytest -v -rs --junitxml=reports/result.xml'
       }
     }
     stage('Run pytest (full)') {
       when { anyOf { changeRequest target: 'main'; branch 'main' } }
+      options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         sh 'pytest -v -rs --all-combinations --junitxml=reports/result.xml'
       }
