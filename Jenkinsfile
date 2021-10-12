@@ -33,6 +33,10 @@ pipeline {
   environment {
     DEBIAN_FRONTEND = 'noninteractive' // Required for zero interaction when installing or upgrading software packages
   }
+  
+  options {
+    timeout(time: 2, unit: 'HOURS')
+  }
 
   stages {
     stage('Install Python packages') {
@@ -87,12 +91,14 @@ pipeline {
      */
     stage('Run pytest (quick)') {
       when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
+      options { timeout(time: 10, unit: 'MINUTES') }
       steps {
         sh 'pytest -v -rs --junitxml=reports/result.xml'
       }
     }
     stage('Run pytest (full)') {
       when { anyOf { changeRequest target: 'main'; branch 'main' } }
+      options { timeout(time: 60, unit: 'MINUTES') }
       steps {
         sh 'pytest -v -rs --all-combinations --junitxml=reports/result.xml'
       }
