@@ -33,6 +33,8 @@ import skcuda.fft
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
+from . import BYTE_BITS, SAMPLE_BITS
+
 
 class PFBFIRTemplate:
     """Template for the PFB-FIR operation.
@@ -116,7 +118,7 @@ class PFBFIR(accel.Operation):
         self.samples = samples
         self.spectra = spectra  # Can be changed (TODO: documentation)
         self.channels = channels
-        self.slots["in"] = accel.IOSlot((samples * 10 // 8,), np.uint8)
+        self.slots["in"] = accel.IOSlot((samples * SAMPLE_BITS // BYTE_BITS,), np.uint8)
         self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(2 * channels, exact=True)), np.float32)
         self.slots["weights"] = accel.IOSlot((2 * channels * template.taps,), np.float32)
         self.in_offset = 0  # Number of samples to skip from the start of *in

@@ -25,7 +25,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS
-from . import pfb, postproc
+from . import SAMPLE_BITS, pfb, postproc
 
 
 class ComputeTemplate:
@@ -107,7 +107,7 @@ class Compute(accel.OperationSequence):
         spectra_per_heap: int,
         channels: int,
     ) -> None:
-        self.sample_bits = 10
+        self.sample_bits = SAMPLE_BITS
         self.template = template
         self.channels = channels
         self.samples = samples

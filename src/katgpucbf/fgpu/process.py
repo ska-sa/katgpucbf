@@ -738,7 +738,7 @@ class Processor:
             self.out_free_queue.put_nowait(out_item)
             task = asyncio.get_event_loop().create_task(chunk.send(stream, n_frames))
 
-            def chunk_finished(future):
+            def chunk_finished(future: asyncio.Future) -> None:
                 self.send_free_queue.put_nowait(chunk)
                 try:
                     future.result()  # No result, but want the exception
