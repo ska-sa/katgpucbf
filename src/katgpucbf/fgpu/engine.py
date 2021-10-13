@@ -448,28 +448,14 @@ class Engine(aiokatcp.DeviceServer):
         await self.start()
         try:
             for pol, stream in enumerate(self._src_streams):
-                src = self._srcs[pol]
-                if isinstance(src, str):
-                    stream.add_udp_pcap_file_reader(src)
-                elif self._src_ibv:
-                    if self._src_interface is None:
-                        raise ValueError("--src-interface is required with --src-ibv")
-                    ibv_config = spead2.recv.UdpIbvConfig(
-                        endpoints=src,
-                        interface_address=self._src_interface,
-                        buffer_size=self._src_buffer,
-                        comp_vector=self._src_comp_vector[pol],
-                    )
-                    stream.add_udp_ibv_reader(ibv_config)
-                else:
-                    buffer_size = self._src_buffer // len(src)  # split it across the endpoints
-                    for endpoint in src:
-                        stream.add_udp_reader(
-                            endpoint[0],
-                            endpoint[1],
-                            buffer_size=buffer_size,
-                            interface_address=self._src_interface or "",
-                        )
+                recv.add_reader(
+                    stream,
+                    src=self._srcs[pol],
+                    interface=self._src_interface,
+                    ibv=self._src_ibv,
+                    comp_vector=self._src_comp_vector[pol],
+                    buffer=self._src_buffer,
+                )
             tasks = [
                 asyncio.create_task(self._processor.run_processing(self._src_streams)),
                 asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),

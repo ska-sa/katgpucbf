@@ -31,6 +31,7 @@ from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 import katsdpservices
 import katsdpsigproc.accel as accel
 from katsdpservices import get_interface_address
+from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import N_POLS, __version__
@@ -259,7 +260,7 @@ def add_signal_handlers():
         loop.add_signal_handler(signum, handler)
 
 
-def make_engine(ctx, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
+def make_engine(ctx: AbstractContext, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
     """Make an :class:`Engine` object, given a GPU context.
 
     Parameters
