@@ -36,6 +36,10 @@ from . import BYTE_BITS
 
 logger = logging.getLogger(__name__)
 TIMESTAMP_ID = 0x1600
+#: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
+#: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
+#: are not delayed by a whole chunk.
+MAX_CHUNKS = 2
 
 
 class Chunk(spead2.recv.Chunk):
@@ -257,7 +261,7 @@ def make_stream(
         stream_id=pol,
     )
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=2, place=layout.chunk_place
+        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.
