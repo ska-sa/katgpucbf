@@ -232,8 +232,8 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
     # 6. Function that will launch the send_process() and recv_process() in a parallel on a single asyncio loop.
     async def run():
         """Launch the send_process() function and recv_process() function in parallel in a single asyncio loop."""
-        task1 = event_loop.create_task(send_process())
-        task2 = event_loop.create_task(recv_process())
+        task1 = asyncio.create_task(send_process())
+        task2 = asyncio.create_task(recv_process())
         await task1
         await task2
 

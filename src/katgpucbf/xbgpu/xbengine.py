@@ -915,12 +915,11 @@ class XBEngine(DeviceServer):
             raise AttributeError("Transport for sending data has not yet been set.")
 
         self.running = True
-        loop = asyncio.get_event_loop()
         await self.start()
         tasks = [
-            loop.create_task(self._receiver_loop()),
-            loop.create_task(self._gpu_proc_loop()),
-            loop.create_task(self._sender_loop()),
+            asyncio.create_task(self._receiver_loop()),
+            asyncio.create_task(self._gpu_proc_loop()),
+            asyncio.create_task(self._sender_loop()),
         ]
         self.task = asyncio.gather(*tasks)
 

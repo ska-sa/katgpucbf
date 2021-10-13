@@ -632,7 +632,7 @@ class Processor:
                     item.samples = []
                     chunks = item.chunks
                     item.chunks = []
-                    asyncio.get_event_loop().create_task(self._push_chunks(streams, chunks, event))
+                    asyncio.create_task(self._push_chunks(streams, chunks, event))
                 else:
                     item.events.append(event)
                 self.in_free_queue.put_nowait(item)
@@ -736,7 +736,7 @@ class Processor:
             n_bytes = n_frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
-            task = asyncio.get_event_loop().create_task(chunk.send(stream, n_frames))
+            task = asyncio.create_task(chunk.send(stream, n_frames))
 
             def chunk_finished(future):
                 self.send_free_queue.put_nowait(chunk)

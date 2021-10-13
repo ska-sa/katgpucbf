@@ -445,7 +445,6 @@ class Engine(aiokatcp.DeviceServer):
           doing cleanup from an exception then I think you lose one of the
           exceptions. Which is a problem.
         """
-        loop = asyncio.get_event_loop()
         await self.start()
         try:
             for pol, stream in enumerate(self._src_streams):
@@ -472,9 +471,9 @@ class Engine(aiokatcp.DeviceServer):
                             interface_address=self._src_interface or "",
                         )
             tasks = [
-                loop.create_task(self._processor.run_processing(self._src_streams)),
-                loop.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
-                loop.create_task(self._processor.run_transmit(self._send_stream)),
+                asyncio.create_task(self._processor.run_processing(self._src_streams)),
+                asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
+                asyncio.create_task(self._processor.run_transmit(self._send_stream)),
             ]
             await asyncio.gather(*tasks)
         finally:
