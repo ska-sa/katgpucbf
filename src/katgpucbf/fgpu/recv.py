@@ -32,6 +32,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from ..monitor import Monitor
+from . import BYTE_BITS
 
 logger = logging.getLogger(__name__)
 TIMESTAMP_ID = 0x1600
@@ -70,7 +71,7 @@ class Layout:
     @property
     def heap_bytes(self) -> int:  # noqa: D401
         """Number of payload bytes per heap."""
-        return self.heap_samples * self.sample_bits // 8
+        return self.heap_samples * self.sample_bits // BYTE_BITS
 
     @property
     def chunk_heaps(self) -> int:  # noqa: D401
