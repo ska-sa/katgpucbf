@@ -369,9 +369,9 @@ class Processor:
         # TODO test whether Python 3.8 allows for moving these type hints to the
         # normal place. asyncio.Queue doesn't support indexing, and this broke
         # things in 3.6, but 3.8 may have fixed it.
-        self.in_queue = monitor.make_queue("in_queue", n_in)  # type: asyncio.Queue[InItem]
+        self.in_queue = monitor.make_queue("in_queue", n_in)  # type: asyncio.Queue[Optional[InItem]]
         self.in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
-        self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[OutItem]
+        self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[Optional[OutItem]]
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
@@ -428,19 +428,29 @@ class Processor:
         to the network directly, without copying to the CPU."""
         return [spectra.buffer.gpudata.as_buffer(spectra.buffer.nbytes) for spectra in self._spectra]
 
-    async def _next_in(self) -> None:
+    async def _next_in(self) -> Optional[InItem]:
         """Load next InItem for processing.
 
         Move the next :class:`InItem` from the `in_queue` to `_in_items`, where
         it will be picked up by the processing.
         """
         with self.monitor.with_state("run_processing", "wait in_queue"):
-            self._in_items.append(await self.in_queue.get())
-        # print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
-        #       f'{self._in_items[-1].n_samples} samples')
+            item = await self.in_queue.get()
 
-        # Make sure that all events associated with the item are past.
-        self._in_items[-1].enqueue_wait(self.compute.command_queue)
+        if item is not None:
+            self._in_items.append(item)
+            # print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
+            #       f'{self._in_items[-1].n_samples} samples')
+
+            # Make sure that all events associated with the item are past.
+            self._in_items[-1].enqueue_wait(self.compute.command_queue)
+        else:
+            # To keep run_processing simple, it may make further calls to
+            # _next_in after receiving a None. To keep things simple, put
+            # a None back into the queue so that the next call also gets
+            # None rather than hanging.
+            self.in_queue.put_nowait(None)
+        return item
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
         """Grab the next free OutItem in the queue."""
@@ -515,9 +525,9 @@ class Processor:
         while True:
             # Get two (dual-pol) items (chunks) to work with.
             if len(self._in_items) == 0:
-                await self._next_in()
-            if len(self._in_items) == 1:
-                await self._next_in()
+                if not (await self._next_in()):
+                    break
+            if len(self._in_items) == 1 and (await self._next_in()):
                 # Copy the head of the new chunk to the tail of the older chunk
                 # to allow for PFB windows to fit and for some protection against
                 # sharp changes in delay.
@@ -636,6 +646,9 @@ class Processor:
                 else:
                     item.events.append(event)
                 self.in_free_queue.put_nowait(item)
+        await self._flush_out(0)  # Timestamp doesn't matter since we're finished
+        logger.debug("run_processing completed")
+        self.out_queue.put_nowait(None)
 
     async def run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
@@ -692,6 +705,8 @@ class Processor:
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])
                     streams[pol].add_free_chunk(chunks[pol])
+        logger.debug("run_receive completed")
+        self.in_queue.put_nowait(None)
 
     async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
@@ -711,9 +726,12 @@ class Processor:
             This object, written in C++, takes large chunks of data and packages
             it appropriately in SPEAD heaps for transmission on the network.
         """
+        task: Optional[asyncio.Future] = None
         while True:
             with self.monitor.with_state("run_transmit", "wait out_queue"):
                 out_item = await self.out_queue.get()
+            if not out_item:
+                break
             with self.monitor.with_state("run_transmit", "wait send_free_queue"):
                 chunk = await self.send_free_queue.get()
             # TODO: use get_region since it might be partial
@@ -738,7 +756,7 @@ class Processor:
             self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
 
-            def chunk_finished(future):
+            def chunk_finished(future: asyncio.Future) -> None:
                 self.send_free_queue.put_nowait(chunk)
                 try:
                     future.result()  # No result, but want the exception
@@ -760,3 +778,14 @@ class Processor:
                     increment(self.sensors["output-bytes-total"], n_bytes)
 
             task.add_done_callback(chunk_finished)
+
+        if task:
+            try:
+                await task
+            except Exception:
+                pass  # It's already logged by the chunk_finished callback
+        stop_heap = spead2.send.Heap(send.FLAVOUR)
+        stop_heap.add_end()
+        for substream_index in range(stream.num_substreams):
+            await stream.async_send_heap(stop_heap, substream_index=substream_index)
+        logger.debug("run_transmit completed")
