@@ -9,6 +9,7 @@ pycparser
 pytest
 pytest-asyncio
 pytest-cov
+pytest-mock
 pytest-xdist  # Allows for pytest to launch multiple threads
 sphinx
 sphinx-rtd-theme
