@@ -164,15 +164,14 @@ async def chunk_sets(
                 first_timestamp = chunk.timestamp
             good = np.sum(chunk.present)
             lost += layout.chunk_heaps - good
-            if good < layout.chunk_heaps:
-                logger.debug(
-                    "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
-                    chunk.timestamp,
-                    pol,
-                    good,
-                    layout.chunk_heaps,
-                    lost,
-                )
+            logger.debug(
+                "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
+                chunk.timestamp,
+                pol,
+                good,
+                layout.chunk_heaps,
+                lost,
+            )
 
             # Check whether we have a chunk already for this pol.
             old = buf[pol]
