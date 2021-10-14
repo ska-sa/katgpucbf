@@ -16,18 +16,72 @@
 
 """Fixtures for use in fgpu unit tests."""
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
 import pytest
+import spead2.recv
+import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
 
+import katgpucbf.fgpu.recv
+from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
 from katgpucbf.fgpu.main import make_engine
 
 
 @pytest.fixture
-async def engine_server(request, context: AbstractContext) -> AsyncGenerator[Engine, None]:
+def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
+    """Mock out :func:`katgpucbf.fgpu.recv.add_reader` to use in-process queues.
+
+    Returns
+    -------
+    queues
+        An in-process queue to use for sending to each polarisation.
+    """
+    queues = [spead2.InprocQueue() for _ in range(N_POLS)]
+    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
+
+    def add_reader(
+        stream: spead2.recv.ChunkRingStream,
+        *,
+        src: Union[str, List[Tuple[str, int]]],
+        interface: Optional[str],
+        ibv: bool,
+        comp_vector: int,
+        buffer: int,
+    ) -> None:
+        """Mock implementation of :func:`katgpucbf.fgpu.recv.add_reader`."""
+        queue = next(queue_iter)
+        stream.add_inproc_reader(queue)
+
+    mocker.patch("katgpucbf.fgpu.recv.add_reader", autospec=True, side_effect=add_reader)
+    return queues
+
+
+@pytest.fixture
+def mock_send_stream(mocker) -> List[spead2.InprocQueue]:
+    """Mock out creation of the send stream.
+
+    Each time a :class:`spead2.send.asyncio.UdpStream` is created, it instead
+    creates an in-process stream and appends an equivalent number of inproc
+    queues to the list returned by the fixture.
+    """
+    queues: List[spead2.InprocQueue] = []
+
+    def constructor(thread_pool, endpoints, config, *args, **kwargs):
+        stream_queues = [spead2.InprocQueue() for _ in endpoints]
+        queues.extend(stream_queues)
+        return spead2.send.asyncio.InprocStream(thread_pool, queues, config)
+
+    mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
+    return queues
+
+
+@pytest.fixture
+async def engine_server(
+    request, mock_recv_streams, mock_send_stream, context: AbstractContext
+) -> AsyncGenerator[Engine, None]:
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
     The arguments passed are based on the default arguments from
@@ -52,3 +106,12 @@ async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client
     yield client
     client.close()
     await client.wait_closed()
+
+
+@pytest.fixture
+def recv_max_chunks_one(monkeypatch) -> None:
+    """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
+
+    This simplifies the process of reliably injecting data.
+    """
+    monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
