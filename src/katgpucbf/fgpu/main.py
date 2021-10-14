@@ -234,7 +234,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
-def add_signal_handlers():
+def add_signal_handlers(engine: Engine) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
 
     .. todo::
@@ -252,10 +252,9 @@ def add_signal_handlers():
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
-        task.cancel()
+        engine.halt()
 
     loop = asyncio.get_event_loop()
-    task = asyncio.current_task()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
 
@@ -318,11 +317,12 @@ def make_engine(ctx: AbstractContext, *, arglist: List[str] = None) -> Tuple[Eng
 
 async def async_main() -> None:
     """Start the F-Engine asynchronously."""
-    add_signal_handlers()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     engine, monitor = make_engine(ctx)
+    add_signal_handlers(engine)
     with monitor:
-        await engine.run()
+        await engine.start()
+        await engine.join()
 
 
 def main() -> None:

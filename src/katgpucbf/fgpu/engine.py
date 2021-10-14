@@ -17,6 +17,7 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
+import logging
 from typing import List, Optional, Tuple, TypedDict, Union
 
 import aiokatcp
@@ -28,10 +29,12 @@ from katsdptelstate.endpoint import Endpoint
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
-from . import recv, send
+from . import BYTE_BITS, recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
+
+logger = logging.getLogger(__name__)
 
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:
@@ -299,7 +302,7 @@ class Engine(aiokatcp.DeviceServer):
         chunk_samples = spectra * channels * 2
         extra_samples = taps * channels * 2
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
-        chunk_bytes = chunk_samples * compute.sample_bits // 8
+        chunk_bytes = chunk_samples * compute.sample_bits // BYTE_BITS
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_gain = quant_gain
@@ -429,41 +432,47 @@ class Engine(aiokatcp.DeviceServer):
 
         self.delay_model.add(new_linear_model)
 
-    async def run(self) -> None:
-        """Run the engine.
+    async def start(self) -> None:
+        """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
         concurrently.
-
-        .. todo::
-
-          The shutdown process is something of a wild west at the moment. It
-          needs fairly serious cleaning up. One aspect of this will be the
-          `await self.stop()` in the `finally:` statement. If the task is
-          cancelled, it will raise an exception, and if the finally was already
-          doing cleanup from an exception then I think you lose one of the
-          exceptions. Which is a problem.
         """
-        await self.start()
+        for pol, stream in enumerate(self._src_streams):
+            recv.add_reader(
+                stream,
+                src=self._srcs[pol],
+                interface=self._src_interface,
+                ibv=self._src_ibv,
+                comp_vector=self._src_comp_vector[pol],
+                buffer=self._src_buffer,
+            )
+        self._processing_task = asyncio.gather(
+            asyncio.create_task(self._processor.run_processing(self._src_streams)),
+            asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
+            asyncio.create_task(self._processor.run_transmit(self._send_stream)),
+        )
+
+        def done_callback(future: asyncio.Future) -> None:
+            try:
+                future.result()  # Evaluate just for exceptions
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Processing failed with exception")
+
+        self._processing_task.add_done_callback(done_callback)
+        await super().start()
+
+    async def on_stop(self):
+        """Shut down processing when the device server is stopped.
+
+        This is called by aiokatcp after closing the listening socket.
+        """
+        for stream in self._src_streams:
+            stream.stop()
         try:
-            for pol, stream in enumerate(self._src_streams):
-                recv.add_reader(
-                    stream,
-                    src=self._srcs[pol],
-                    interface=self._src_interface,
-                    ibv=self._src_ibv,
-                    comp_vector=self._src_comp_vector[pol],
-                    buffer=self._src_buffer,
-                )
-            tasks = [
-                asyncio.create_task(self._processor.run_processing(self._src_streams)),
-                asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
-                asyncio.create_task(self._processor.run_transmit(self._send_stream)),
-            ]
-            await asyncio.gather(*tasks)
-        finally:
-            for stream in self._src_streams:
-                stream.stop()
-            await self._send_stream.async_flush()
-            await self.stop()
+            await self._processing_task
+        except Exception:
+            pass  # Errors get logged by the done_callback above

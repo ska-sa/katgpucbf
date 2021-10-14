@@ -33,6 +33,8 @@ import skcuda.fft
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
+from . import BYTE_BITS, SAMPLE_BITS
+
 
 class PFBFIRTemplate:
     """Template for the PFB-FIR operation.
@@ -75,7 +77,7 @@ class PFBFIR(accel.Operation):
 
     .. rubric:: Slots
 
-    **in**  : samples * 10 // 8, uint8
+    **in**  : samples * SAMPLE_BITS // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
@@ -108,15 +110,15 @@ class PFBFIR(accel.Operation):
         self, template: PFBFIRTemplate, command_queue: AbstractCommandQueue, samples: int, spectra: int, channels: int
     ) -> None:
         super().__init__(command_queue)
-        if samples % 8 != 0:
-            raise ValueError("samples must be a multiple of 8")
+        if samples % BYTE_BITS != 0:
+            raise ValueError(f"samples must be a multiple of {BYTE_BITS}")
         if (2 * channels) % template.wgs != 0:
             raise ValueError(f"2*channels must be a multiple of {template.wgs}")
         self.template = template
         self.samples = samples
         self.spectra = spectra  # Can be changed (TODO: documentation)
         self.channels = channels
-        self.slots["in"] = accel.IOSlot((samples * 10 // 8,), np.uint8)
+        self.slots["in"] = accel.IOSlot((samples * SAMPLE_BITS // BYTE_BITS,), np.uint8)
         self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(2 * channels, exact=True)), np.float32)
         self.slots["weights"] = accel.IOSlot((2 * channels * template.taps,), np.float32)
         self.in_offset = 0  # Number of samples to skip from the start of *in
