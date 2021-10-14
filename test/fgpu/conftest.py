@@ -39,6 +39,8 @@ def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
     queues
         An in-process queue to use for sending to each polarisation.
     """
+    queues = [spead2.InprocQueue() for _ in range(N_POLS)]
+    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
 
     def add_reader(
         stream: spead2.recv.ChunkRingStream,
@@ -53,8 +55,6 @@ def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
         queue = next(queue_iter)
         stream.add_inproc_reader(queue)
 
-    queues = [spead2.InprocQueue() for _ in range(N_POLS)]
-    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
     mocker.patch("katgpucbf.fgpu.recv.add_reader", autospec=True, side_effect=add_reader)
     return queues
 
@@ -67,13 +67,13 @@ def mock_send_stream(mocker) -> List[spead2.InprocQueue]:
     creates an in-process stream and appends an equivalent number of inproc
     queues to the list returned by the fixture.
     """
+    queues: List[spead2.InprocQueue] = []
 
     def constructor(thread_pool, endpoints, config, *args, **kwargs):
         stream_queues = [spead2.InprocQueue() for _ in endpoints]
         queues.extend(stream_queues)
         return spead2.send.asyncio.InprocStream(thread_pool, queues, config)
 
-    queues: List[spead2.InprocQueue] = []
     mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
     return queues
 

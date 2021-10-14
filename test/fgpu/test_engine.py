@@ -33,6 +33,7 @@ DIGITISER_ID_ID = 0x3101
 DIGITISER_STATUS_ID = 0x3102
 RAW_DATA_ID = 0x3300
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)  # Flavour for sending digitiser data
+CHUNK_SAMPLES = 1048576  # Lower than the default to make tests quicker
 
 
 class TestEngine:
@@ -44,7 +45,7 @@ class TestEngine:
         "--dst-interface=lo",
         "--channels=4096",
         "--sync-epoch=1632561921",
-        "--chunk-samples=1048576",  # Lower than default to make tests quicker
+        f"--chunk-samples={CHUNK_SAMPLES}",
         "--send-rate-factor=0",  # Infinitely fast
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
@@ -137,9 +138,8 @@ class TestEngine:
         engine_server: Engine,
     ) -> None:
         """Push data into the input streams and check results from the output streams."""
-        n_samples = 20971520  # Note: must be a whole number of chunks
+        n_samples = 20 * CHUNK_SAMPLES
         src_layout = engine_server._src_layout
-        assert n_samples % src_layout.heap_samples == 0
         dig_stream = self._make_digitiser(mock_recv_streams)
         dig_data = self._make_samples(n_samples)
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
