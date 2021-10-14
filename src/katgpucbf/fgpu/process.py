@@ -38,7 +38,7 @@ from katsdpsigproc.resource import async_wait_for_events
 
 from .. import N_POLS
 from ..monitor import Monitor
-from . import recv, send
+from . import BYTE_BITS, recv, send
 from .compute import Compute
 from .delay import AbstractDelayModel
 
@@ -199,7 +199,7 @@ class InItem(EventItem):
         The amount of space allocated to each polarisation stored in
         :attr:`samples`.
         """
-        return self.samples[0].shape[0] * 8 // self.sample_bits
+        return self.samples[0].shape[0] * BYTE_BITS // self.sample_bits
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -535,7 +535,7 @@ class Processor:
                     # ? And if it doesn't?
                     sample_bits = self._in_items[0].sample_bits
                     copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
-                    copy_bytes = copy_samples * sample_bits // 8
+                    copy_bytes = copy_samples * sample_bits // BYTE_BITS
                     for pol in range(len(self._in_items[0].samples)):
                         self._in_items[1].samples[pol].copy_region(
                             self.compute.command_queue,
@@ -678,7 +678,7 @@ class Processor:
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * 8 // self.sample_bits
+            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
 
             transfer_events = []
             if self._use_gdrcopy:

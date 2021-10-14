@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from katsdpsigproc import accel
 
-from katgpucbf.fgpu import pfb
+from katgpucbf.fgpu import BYTE_BITS, SAMPLE_BITS, pfb
 
 pytestmark = [pytest.mark.cuda_only]
 
@@ -62,7 +62,7 @@ def test_pfb_fir(context, command_queue, repeat=1):
     spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
-    h_in = np.random.randint(0, 256, samples * 10 // 8, np.uint8)
+    h_in = np.random.randint(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = np.random.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
     expected = pfb_fir_host(h_in, channels, weights)
 

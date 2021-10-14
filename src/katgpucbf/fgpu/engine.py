@@ -29,7 +29,7 @@ from katsdptelstate.endpoint import Endpoint
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
-from . import recv, send
+from . import BYTE_BITS, recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
@@ -302,7 +302,7 @@ class Engine(aiokatcp.DeviceServer):
         chunk_samples = spectra * channels * 2
         extra_samples = taps * channels * 2
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
-        chunk_bytes = chunk_samples * compute.sample_bits // 8
+        chunk_bytes = chunk_samples * compute.sample_bits // BYTE_BITS
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_gain = quant_gain
