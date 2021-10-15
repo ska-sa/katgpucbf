@@ -18,11 +18,13 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import List
 
 import numpy as np
 import pytest
 import spead2.send
+from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import SAMPLE_BITS, recv, send
@@ -35,10 +37,45 @@ RAW_DATA_ID = 0x3300
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)  # Flavour for sending digitiser data
 # Command-line arguments
 SYNC_EPOCH = 1632561921
-CHANNELS = 4096
+CHANNELS = 1024
 SPECTRA_PER_HEAP = 256
 CHUNK_SAMPLES = 1048576  # Lower than the default to make tests quicker
+TAPS = 16
 FENG_ID = 42
+
+
+@dataclass
+class CW:
+    r"""Specification of a cosine wave.
+
+    The value at sample :math:`t` is :math:`(A\cos(\pi f(t - d) + p)`, where
+    :math:`A`, :math:`f`, :math:`d` and :math:`p` are `magnitude`,
+    `frac_channel`, `delay` and `phase` respectively. Note that having both
+    `delay` and `phase` is redundant (they achieve equivalent effects), but
+    convenient for different tests.
+
+    Parameters
+    ----------
+    frac_channel
+        Frequency, as a channel number divided by the number of
+        channels (e.g., 0.5 means the centre frequency)
+    magnitude
+        Voltage magnitude
+    phase
+        Phase to add to the signal, in radians
+    delay
+        An amount by which to delay the signal, in samples
+    """
+
+    frac_channel: float
+    magnitude: float = 1.0
+    phase: float = 0.0
+    delay: float = 0.0
+
+    def __call__(self, t: ArrayLike) -> np.ndarray:
+        """Evaluate the cosine wave at given points in time (in units of samples)."""
+        t = np.asarray(t)
+        return self.magnitude * np.cos(np.pi * self.frac_channel * (t - self.delay) + self.phase)
 
 
 class TestEngine:
@@ -53,6 +90,7 @@ class TestEngine:
         f"--chunk-samples={CHUNK_SAMPLES}",
         f"--spectra-per-heap={SPECTRA_PER_HEAP}",
         f"--feng-id={FENG_ID}",
+        f"--taps={TAPS}",
         "--send-rate-factor=0",  # Infinitely fast
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
@@ -115,24 +153,36 @@ class TestEngine:
         heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=samples.shape, dtype=samples.dtype, value=samples))
         await stream.async_send_heap(heap, substream_index=pol)
 
-    def _make_samples(self, n_samples: int) -> np.ndarray:
-        """Synthesize some digitiser data with a tone.
+    def _make_tone(self, n_samples: int, tone: CW, pol: int) -> np.ndarray:
+        """Synthesize digitiser data containing a tone.
 
-        Each polarisation has a different tone frequency so that swaps can be
-        detected. Returns an array of bytes containing packed digitiser
-        samples.
+        Only one polarisation (`pol`) contains the tone; the other is all zeros.
+
+        The result includes random dithering, but with a fixed seed, so it will
+        be the same for all calls with the same number of samples.
+
+        Parameters
+        ----------
+        n_samples
+            Number of samples to generate per polarisation
+        tone
+            The cosine wave to synthesize
+        pol
+            The polarisation containing the tone
         """
         rng = np.random.default_rng(1)
-        data = np.zeros((N_POLS, n_samples), np.float32)
-        data[0] = np.cos(np.arange(n_samples) / 16) * 400
-        data[1] = np.cos(np.arange(n_samples) / 64) * 700
+        t = np.arange(n_samples).astype(float)
+        data = tone(t)
         # Dither the signal to reduce quantisation artifacts, then quantise
-        data += rng.random(size=data.shape, dtype=np.float32)
-        data = np.trunc(data).astype(">i2")  # Big endian
+        data += rng.random(size=data.shape)
+        data = np.floor(data).astype(">i2")  # Big endian
         # Unpack the bits, so that we can toss out the top 6
-        bits = np.unpackbits(data.view(np.uint8), axis=1).reshape(data.shape + (16,))
-        # Put all the bits back into bytes
-        return np.packbits(bits[..., -SAMPLE_BITS:].reshape(N_POLS, -1), axis=1)
+        bits = np.unpackbits(data.view(np.uint8)).reshape(n_samples, 16)
+        # Put all the bits back into bytes, and fill in zeros for the other pol
+        packed = np.packbits(bits[:, -SAMPLE_BITS:].ravel())
+        out = np.zeros((N_POLS, packed.size), np.uint8)
+        out[pol] = packed
+        return out
 
     async def _send_data(
         self,
@@ -203,18 +253,44 @@ class TestEngine:
             heaps.append(np.concatenate(row, axis=1))
         # Glue the parts of the band together along the channel axis. This
         # also ensures that there were the same number of heaps per channel.
-        return np.concatenate(heaps, axis=0)
+        data = np.concatenate(heaps, axis=0)
+        # Convert to complex for analysis
+        return data[..., 0] + 1j * data[..., 1]
 
-    async def test_end_to_end(
+    async def test_channel_centre_tones(
         self,
         recv_max_chunks_one,
         mock_recv_streams: List[spead2.InprocQueue],
         mock_send_stream: List[spead2.InprocQueue],
         engine_server: Engine,
     ) -> None:
-        """Push data into the input streams and check results from the output streams."""
+        """Put in tones at channel centre frequencies and check the result."""
+        tones = [
+            CW(frac_channel=64 / CHANNELS, magnitude=40.0),
+            CW(frac_channel=271 / CHANNELS, magnitude=70.0, phase=1.23),
+        ]
         src_layout = engine_server._src_layout
         n_samples = 20 * src_layout.chunk_samples
-        dig_data = self._make_samples(n_samples)
+        dig_data = self._make_tone(n_samples, tones[0], 0) + self._make_tone(n_samples, tones[1], 1)
         out_data = await self._send_data(mock_recv_streams, mock_send_stream, engine_server, dig_data)
-        assert out_data.size > 0
+        # There are no coarse delay changes, so the data should have as many
+        # samples as the input, minus a reduction from PFB windowing, rounded
+        # down to a full heap
+        expected_spectra = n_samples // (CHANNELS * 2) - (TAPS - 1)
+        expected_spectra = expected_spectra // SPECTRA_PER_HEAP * SPECTRA_PER_HEAP
+        assert out_data.shape[1] == expected_spectra
+
+        # Check for the tones
+        for pol in range(2):
+            tone_channel = round(tones[pol].frac_channel * CHANNELS)
+            tone_data = out_data[tone_channel, :, pol]
+            expected_mag = tones[pol].magnitude * CHANNELS * engine_server.sensors["quant-gain"].value
+            np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
+            # The frequency corresponds to an integer number of cycles per
+            # spectrum, so the phase will be consistent across spectra.
+            # The accuracy is limited by the quantisation.
+            np.testing.assert_equal(np.angle(tone_data), pytest.approx(tones[pol].phase, 0.01))
+            # Suppress the tone and check that everything is now zero (the
+            # spectral leakage should be below the quantisation threshold).
+            tone_data.fill(0)
+            np.testing.assert_equal(out_data[..., pol], 0)
