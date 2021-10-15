@@ -24,8 +24,8 @@ import numpy as np
 import pytest
 import spead2.send
 
-from katgpucbf import N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS, recv
+from katgpucbf import COMPLEX, N_POLS
+from katgpucbf.fgpu import SAMPLE_BITS, recv, send
 from katgpucbf.fgpu.engine import Engine
 
 pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
@@ -33,7 +33,12 @@ DIGITISER_ID_ID = 0x3101
 DIGITISER_STATUS_ID = 0x3102
 RAW_DATA_ID = 0x3300
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)  # Flavour for sending digitiser data
+# Command-line arguments
+SYNC_EPOCH = 1632561921
+CHANNELS = 4096
+SPECTRA_PER_HEAP = 256
 CHUNK_SAMPLES = 1048576  # Lower than the default to make tests quicker
+FENG_ID = 42
 
 
 class TestEngine:
@@ -43,9 +48,11 @@ class TestEngine:
         "--katcp-port=0",
         "--src-interface=lo",
         "--dst-interface=lo",
-        "--channels=4096",
-        "--sync-epoch=1632561921",
+        f"--channels={CHANNELS}",
+        f"--sync-epoch={SYNC_EPOCH}",
         f"--chunk-samples={CHUNK_SAMPLES}",
+        f"--spectra-per-heap={SPECTRA_PER_HEAP}",
+        f"--feng-id={FENG_ID}",
         "--send-rate-factor=0",  # Infinitely fast
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
@@ -64,8 +71,8 @@ class TestEngine:
         assert engine_server._port == 0
         assert engine_server._src_interface == "127.0.0.1"
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
-        assert engine_server._processor.channels == 4096
-        assert engine_server.sync_epoch == 1632561921.0
+        assert engine_server._processor.channels == CHANNELS
+        assert engine_server.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
                 ("239.10.10.0", 7149),
@@ -90,8 +97,7 @@ class TestEngine:
         ]
         # TODO: same problem for `dst` itself.
 
-    @staticmethod
-    def _make_digitiser(queues: List[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
+    def _make_digitiser(self, queues: List[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
         """Create send stream for a fake digitiser.
 
         The resulting stream has one sub-stream per polarisation.
@@ -99,9 +105,8 @@ class TestEngine:
         config = spead2.send.StreamConfig(max_packet_size=9000)  # Just needs to be bigger than the heaps
         return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
-    @staticmethod
     async def _send_digitiser_heap(
-        stream: "spead2.send.asyncio.AsyncStream", timestamp: int, pol: int, samples: np.ndarray
+        self, stream: "spead2.send.asyncio.AsyncStream", timestamp: int, pol: int, samples: np.ndarray
     ) -> None:
         heap = spead2.send.Heap(FLAVOUR)
         heap.add_item(spead2.Item(recv.TIMESTAMP_ID, "", "", shape=(), format=[("u", 48)], value=timestamp))
@@ -110,8 +115,7 @@ class TestEngine:
         heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=samples.shape, dtype=samples.dtype, value=samples))
         await stream.async_send_heap(heap, substream_index=pol)
 
-    @staticmethod
-    def _make_samples(n_samples: int) -> np.ndarray:
+    def _make_samples(self, n_samples: int) -> np.ndarray:
         """Synthesize some digitiser data with a tone.
 
         Each polarisation has a different tone frequency so that swaps can be
@@ -130,6 +134,77 @@ class TestEngine:
         # Put all the bits back into bytes
         return np.packbits(bits[..., -SAMPLE_BITS:].reshape(N_POLS, -1), axis=1)
 
+    async def _send_data(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine: Engine,
+        dig_data: np.ndarray,
+        first_timestamp: int = 0,
+    ) -> np.ndarray:
+        """Send a contiguous stream of data to the engine and retrieve results.
+
+        This is a little tricky because :func:`.chunk_sets` drops data
+        if the pols get more than a chunk out of sync, and if we just push
+        all the heaps in at once we have no control over the order in which
+        spead2 processes them. To avoid getting too far ahead, we watch the
+        sensor that indicates how many heaps have been received, and push
+        updates to a queue that we can block on. We must transmit data from
+        the next chunk to force spead2 to flush out a prior chunk.
+        """
+        # Reshape into heap-size pieces (now has indices pol, heap, offset)
+        src_layout = engine._src_layout
+        assert dig_data.shape[0] == N_POLS
+        assert dig_data.shape[1] % src_layout.heap_bytes == 0, "samples must be a whole number of heaps"
+        dig_data = dig_data.reshape(N_POLS, -1, src_layout.heap_bytes)
+        dig_stream = self._make_digitiser(mock_recv_streams)
+        heaps_received = 0
+        heaps_received_queue = asyncio.Queue()  # type: asyncio.Queue[int]
+        heaps_sensor = engine.sensors["input-heaps-total"]
+        heaps_sensor.attach(lambda sensor, reading: heaps_received_queue.put_nowait(reading.value))
+        for i in range(dig_data.shape[1]):
+            for pol in range(N_POLS):
+                await self._send_digitiser_heap(
+                    dig_stream, i * src_layout.heap_samples + first_timestamp, pol, dig_data[pol, i]
+                )
+            while i >= heaps_received // N_POLS + src_layout.chunk_heaps:
+                logging.debug("heaps_received = %d, waiting for more", heaps_received)
+                heaps_received = await heaps_received_queue.get()
+        for queue in mock_recv_streams:
+            queue.stop()
+
+        n_out_streams = len(mock_send_stream)
+        assert n_out_streams == 16, "Number of output streams does not match command line"
+        out_config = spead2.recv.StreamConfig()
+        out_tp = spead2.ThreadPool()
+        heaps = []
+        for i, queue in enumerate(mock_send_stream):
+            stream = spead2.recv.asyncio.Stream(out_tp, out_config)
+            stream.add_inproc_reader(queue)
+            ig = spead2.ItemGroup()
+            # We don't have descriptors yet, so we have to build the Items manually
+            imm_format = [("u", send.FLAVOUR.heap_address_bits)]
+            raw_shape = (CHANNELS // n_out_streams, SPECTRA_PER_HEAP, N_POLS, COMPLEX)
+            ig.add_item(send.TIMESTAMP_ID, "timestamp", "", shape=(), format=imm_format)
+            ig.add_item(send.FENG_ID_ID, "feng_id", "", shape=(), format=imm_format)
+            ig.add_item(send.FREQUENCY_ID, "frequency", "", shape=(), format=imm_format)
+            ig.add_item(send.FENG_RAW_ID, "feng_raw", "", shape=raw_shape, dtype=np.int8)
+            expected_timestamp = first_timestamp
+            timestamp_step = SPECTRA_PER_HEAP * CHANNELS * 2  # TODO not valid for narrowband
+            row = []
+            async for heap in stream:
+                assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
+                assert ig["feng_id"].value == FENG_ID
+                assert ig["timestamp"].value == expected_timestamp
+                assert ig["frequency"].value == i * raw_shape[0]
+                expected_timestamp += timestamp_step
+                row.append(ig["feng_raw"].value.copy())
+            # Glue all the heaps together along the time axis
+            heaps.append(np.concatenate(row, axis=1))
+        # Glue the parts of the band together along the channel axis. This
+        # also ensures that there were the same number of heaps per channel.
+        return np.concatenate(heaps, axis=0)
+
     async def test_end_to_end(
         self,
         recv_max_chunks_one,
@@ -138,45 +213,8 @@ class TestEngine:
         engine_server: Engine,
     ) -> None:
         """Push data into the input streams and check results from the output streams."""
-        n_samples = 20 * CHUNK_SAMPLES
         src_layout = engine_server._src_layout
-        dig_stream = self._make_digitiser(mock_recv_streams)
+        n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_samples(n_samples)
-        # Reshape into heap-size pieces (now has indices pol, heap, offset)
-        dig_data = dig_data.reshape(N_POLS, -1, src_layout.heap_bytes)
-
-        # Send the data. This is a little tricky because chunk_sets drops data
-        # if the pols get more than a chunk out of sync, and if we just push
-        # all the heaps in at once we have no control over the order in which
-        # spead2 processes them. To avoid getting too far ahead, we watch the
-        # sensor that indicates how many heaps have been received, and push
-        # updates to a queue that we can block on. We must transmit data from
-        # the next chunk to force spead to flush out a prior chunk.
-        heaps_received = 0
-        heaps_received_queue = asyncio.Queue()  # type: asyncio.Queue[int]
-        heaps_sensor = engine_server.sensors["input-heaps-total"]
-        heaps_sensor.attach(lambda sensor, reading: heaps_received_queue.put_nowait(reading.value))
-        for i in range(dig_data.shape[1]):
-            for pol in range(N_POLS):
-                await self._send_digitiser_heap(dig_stream, i * src_layout.heap_samples, pol, dig_data[pol, i])
-            while i >= heaps_received // N_POLS + src_layout.chunk_heaps:
-                logging.debug("heaps_received = %d, waiting for more", heaps_received)
-                heaps_received = await heaps_received_queue.get()
-        for queue in mock_recv_streams:
-            queue.stop()
-
-        # Grab the output data. Note: each stream needs its own ThreadPool,
-        # because we're not reading from all the streams concurrently and so
-        # if one we're not currently reading from fills up its ringbuffer,
-        # it will block the thread.
-        n_out_streams = len(mock_send_stream)
-        assert n_out_streams == 16, "Number of output streams does not match command line"
-        out_config = spead2.recv.StreamConfig()
-        out_streams = [spead2.recv.asyncio.Stream(spead2.ThreadPool(), out_config) for _ in range(n_out_streams)]
-        for stream, queue in zip(out_streams, mock_send_stream):
-            stream.add_inproc_reader(queue)
-
-        for stream in out_streams:
-            heaps = [heap async for heap in stream]
-            # TODO: need some real tests here
-            assert len(heaps) > 0
+        out_data = await self._send_data(mock_recv_streams, mock_send_stream, engine_server, dig_data)
+        assert out_data.size > 0
