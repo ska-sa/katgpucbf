@@ -599,9 +599,11 @@ class Processor:
             # Uses fact that argmax returns first maximum i.e. first true value
             delay_change = int(np.argmax(coarse_delays != coarse_delay))
             if coarse_delays[delay_change] != coarse_delay:
-                logger.info(
-                    f"Coarse delay changed from {coarse_delays[delay_change]} to "
-                    f"{coarse_delay} at {orig_timestamps[delay_change]}"
+                logger.debug(
+                    "Coarse delay changed from %d to %d at %d",
+                    coarse_delay,
+                    coarse_delays[delay_change],
+                    orig_timestamps[delay_change],
                 )
                 orig_timestamps = orig_timestamps[:delay_change]
                 fine_delays = fine_delays[:delay_change]
@@ -615,7 +617,7 @@ class Processor:
             # - Coarse delay
             # - The PFB-FIR.
             if batch_spectra > 0:
-                # print(f'Processing {batch_spectra} spectra')
+                logging.debug("Processing %d spectra", batch_spectra)
                 self._out_item.fine_delay[
                     self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra
                 ] = fine_delays
