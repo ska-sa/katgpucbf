@@ -349,3 +349,54 @@ class TestEngine:
             # spectral leakage should be below the quantisation threshold).
             tone_data.fill(0)
             np.testing.assert_equal(out_data[..., pol], 0)
+
+    async def test_spectral_leakage(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+    ) -> None:
+        """Test leakage from tones that are not in the frequency centre."""
+        # Rather than parametrize the test (which would be slow), send in
+        # lots of different tones at different times. Each tone is maintained
+        # for a full PFB window, and we just discard the outputs
+        # corresponding to times that mix the tones.
+        n_tones = 1024  # Note: must lead to sending a whole number of chunks
+        # Distribute tones throughout the bin for the centre channel
+        tones = [
+            CW(frac_channel=(CHANNELS // 2 - 0.5 + (i + 0.5) / n_tones) / CHANNELS, magnitude=500)
+            for i in range(n_tones)
+        ]
+        pfb_window = CHANNELS * 2 * TAPS
+        dig_data = np.concatenate([self._make_tone(pfb_window, tone, 0) for tone in tones], axis=1)
+        # Add some extra data to fill out the last output heap
+        padding = np.zeros((2, engine_server._src_layout.chunk_samples), dig_data.dtype)
+        dig_data = np.concatenate([dig_data, padding], axis=1)
+
+        # Crack up the gain so that leakage is measurable
+        gain = 100 / CHANNELS
+        await engine_client.request("quant-gain", gain)
+        # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
+        # attenuation is ≤ 2x (twice) the pass band width.
+        #
+        # The division by 2 is because we're dealing with voltage, not power.
+        tol = 10 ** (-5.3 / 2) * (tones[0].magnitude * CHANNELS) * gain
+
+        out_data = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            dig_data,
+        )
+        for i in range(n_tones):
+            # Get the data for the PFB window that holds the tone
+            data = out_data[:, i * TAPS, 0]
+            # Blank out the channel that is expected to have the tone, and
+            # the nearer adjacent one (with is within the 2x tolerance).
+            data[CHANNELS // 2] = 0
+            if i < n_tones // 2:
+                data[CHANNELS // 2 - 1] = 0
+            else:
+                data[CHANNELS // 2 + 1] = 0
+            np.testing.assert_equal(data, pytest.approx(0, abs=tol))
