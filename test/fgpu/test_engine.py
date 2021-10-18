@@ -157,13 +157,20 @@ class TestEngine:
         await stream.async_send_heap(heap, substream_index=pol)
 
     def _pack_samples(self, samples: ArrayLike) -> np.ndarray:
-        """Pack 16-bit digitiser sample data down to SAMPLE_BITS bits."""
+        """Pack 16-bit digitiser sample data down to SAMPLE_BITS bits.
+
+        Parameters
+        ----------
+        samples
+            A 2xN array of sample data
+        """
         # Force to int16, and big endian so the bits come out in the right order
         samples_int16 = np.asarray(samples, dtype=">i2")
-        # Unpack the bits, so that we can toss out the top 6
-        bits = np.unpackbits(samples_int16.view(np.uint8)).reshape(samples_int16.size, 16)
-        # Put all the bits back into bytes, and fill in zeros for the other pol
-        return np.packbits(bits[:, -SAMPLE_BITS:].ravel())
+        # Unpack the bits into a new axis, so that we can toss out the top 6
+        bits = np.unpackbits(samples_int16.view(np.uint8)).reshape(samples_int16.shape + (16,))
+        # Put all the bits back into bytes. packbits automatically flattens
+        # the array, so we have to restore the desired shape.
+        return np.packbits(bits[..., -SAMPLE_BITS:]).reshape(samples_int16.shape[0], -1)
 
     def _make_tone(self, n_samples: int, tone: CW, pol: int) -> np.ndarray:
         """Synthesize digitiser data containing a tone.
