@@ -163,7 +163,10 @@ class MultiDelayModel(AbstractDelayModel):
         while len(self._models) > 1 and time >= self._models[1].start:
             self._models.popleft()
         if time < self._models[0].start:
-            warnings.warn("Timestamp is before start of first linear model - possibly due to non-monotonic queries")
+            warnings.warn(
+                f"Timestamp {time} is before start of first linear model "
+                f"at {self._models[0].start} - possibly due to non-monotonic queries"
+            )
         return self._models[0](time)
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
@@ -173,7 +176,10 @@ class MultiDelayModel(AbstractDelayModel):
             return orig, fine_delay, phase
 
         if orig[0] < self._models[0].start:
-            warnings.warn("Timestamp is before start of first linear model - possibly due to non-monotonic queries")
+            warnings.warn(
+                f"Timestamp {orig[0]} is before start of first linear model "
+                f"at {self._models[0].start} - possibly due to non-monotonic queries"
+            )
 
         # Step through later models and overwrite the first one where later ones
         # are valid. This is not particularly optimal since we evaluate the full
