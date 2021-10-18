@@ -112,8 +112,6 @@ class LinearDelayModel(AbstractDelayModel):
     def __init__(self, start: int, delay: float, delay_rate: float, phase: float, phase_rate: float) -> None:
         if delay <= -1.0:
             raise ValueError("delay rate must be greater than -1")
-        if start < 0:
-            raise ValueError("start must be non-negative")
         self.start = start
         self.delay = float(delay)
         self.delay_rate = float(delay_rate)
@@ -158,7 +156,8 @@ class MultiDelayModel(AbstractDelayModel):
     """
 
     def __init__(self) -> None:
-        self._models = deque([LinearDelayModel(0, 0.0, 0.0, 0.0, 0.0)])
+        # Start in the distant past, so that it is always valid
+        self._models = deque([LinearDelayModel(-(10 ** 18), 0.0, 0.0, 0.0, 0.0)])
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:
