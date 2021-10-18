@@ -428,7 +428,9 @@ class Engine(aiokatcp.DeviceServer):
         # then we'd need to compensate for that here.
         start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
 
-        new_linear_model = LinearDelayModel(start_sample_count, delay, delay_rate, phase, phase_rate)
+        new_linear_model = LinearDelayModel(
+            start_sample_count, delay * self.adc_sample_rate, delay_rate, phase, phase_rate
+        )
 
         self.delay_model.add(new_linear_model)
 
