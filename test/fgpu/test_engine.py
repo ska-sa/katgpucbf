@@ -157,7 +157,7 @@ class TestEngine:
         await stream.async_send_heap(heap, substream_index=pol)
 
     def _pack_samples(self, samples: ArrayLike) -> np.ndarray:
-        """Pack 16-bit digitiser sample data down to 10 bits."""
+        """Pack 16-bit digitiser sample data down to SAMPLE_BITS bits."""
         # Force to int16, and big endian so the bits come out in the right order
         samples_int16 = np.asarray(samples, dtype=">i2")
         # Unpack the bits, so that we can toss out the top 6
