@@ -79,8 +79,17 @@ def mock_send_stream(mocker) -> List[spead2.InprocQueue]:
 
 
 @pytest.fixture
+def recv_max_chunks_one(monkeypatch) -> None:
+    """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
+
+    This simplifies the process of reliably injecting data.
+    """
+    monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
+
+
+@pytest.fixture
 async def engine_server(
-    request, mock_recv_streams, mock_send_stream, context: AbstractContext
+    request, mock_recv_streams, mock_send_stream, recv_max_chunks_one, context: AbstractContext
 ) -> AsyncGenerator[Engine, None]:
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
@@ -106,12 +115,3 @@ async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client
     yield client
     client.close()
     await client.wait_closed()
-
-
-@pytest.fixture
-def recv_max_chunks_one(monkeypatch) -> None:
-    """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
-
-    This simplifies the process of reliably injecting data.
-    """
-    monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)

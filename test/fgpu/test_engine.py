@@ -292,7 +292,6 @@ class TestEngine:
     @pytest.mark.parametrize("delay_samples", [0.0, 2048.0, 42.0, 42.4, 42.7])
     async def test_channel_centre_tones(
         self,
-        recv_max_chunks_one,
         mock_recv_streams: List[spead2.InprocQueue],
         mock_send_stream: List[spead2.InprocQueue],
         engine_server: Engine,
