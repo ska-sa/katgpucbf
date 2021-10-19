@@ -10,6 +10,10 @@ appdirs==1.4.4
     # via
     #   -c requirements.txt
     #   virtualenv
+async-timeout==3.0.1
+    # via
+    #   -c requirements.txt
+    #   -r requirements-dev.in
 attrs==21.2.0
     # via pytest
 babel==2.9.1

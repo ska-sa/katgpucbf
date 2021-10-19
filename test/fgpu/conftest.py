@@ -19,6 +19,7 @@
 from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
+import async_timeout
 import pytest
 import spead2.recv
 import spead2.send.asyncio
@@ -111,7 +112,8 @@ async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client
     assert engine_server.server is not None
     assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
-    client = await aiokatcp.Client.connect(host, port)
+    with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+        client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()
     await client.wait_closed()
