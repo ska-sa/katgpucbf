@@ -57,7 +57,7 @@ class TestKatcpRequests:
 
         # We expect the start time to be (10 seconds * 1.712e9 samples / second) i.e. 1.712e10.
         assert engine_server._processor.delay_model._models[-1].start == int(1.712e10)
-        assert engine_server._processor.delay_model._models[-1].delay == 3.76
+        assert engine_server._processor.delay_model._models[-1].delay == 3.76 * 1.712e9
         assert engine_server._processor.delay_model._models[-1].delay_rate == 0.12
         assert engine_server._processor.delay_model._models[-1].phase == 7.322
         assert engine_server._processor.delay_model._models[-1].phase_rate == 1.91

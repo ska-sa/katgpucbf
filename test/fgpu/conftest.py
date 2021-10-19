@@ -19,6 +19,7 @@
 from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
+import async_timeout
 import pytest
 import spead2.recv
 import spead2.send.asyncio
@@ -79,8 +80,17 @@ def mock_send_stream(mocker) -> List[spead2.InprocQueue]:
 
 
 @pytest.fixture
+def recv_max_chunks_one(monkeypatch) -> None:
+    """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
+
+    This simplifies the process of reliably injecting data.
+    """
+    monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
+
+
+@pytest.fixture
 async def engine_server(
-    request, mock_recv_streams, mock_send_stream, context: AbstractContext
+    request, mock_recv_streams, mock_send_stream, recv_max_chunks_one, context: AbstractContext
 ) -> AsyncGenerator[Engine, None]:
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
@@ -102,16 +112,8 @@ async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client
     assert engine_server.server is not None
     assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
-    client = await aiokatcp.Client.connect(host, port)
+    with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+        client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()
     await client.wait_closed()
-
-
-@pytest.fixture
-def recv_max_chunks_one(monkeypatch) -> None:
-    """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
-
-    This simplifies the process of reliably injecting data.
-    """
-    monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)

@@ -112,8 +112,6 @@ class LinearDelayModel(AbstractDelayModel):
     def __init__(self, start: int, delay: float, delay_rate: float, phase: float, phase_rate: float) -> None:
         if delay <= -1.0:
             raise ValueError("delay rate must be greater than -1")
-        if start < 0:
-            raise ValueError("start must be non-negative")
         self.start = start
         self.delay = float(delay)
         self.delay_rate = float(delay_rate)
@@ -158,13 +156,17 @@ class MultiDelayModel(AbstractDelayModel):
     """
 
     def __init__(self) -> None:
-        self._models = deque([LinearDelayModel(0, 0.0, 0.0, 0.0, 0.0)])
+        # Start in the distant past, so that it is always valid
+        self._models = deque([LinearDelayModel(-(10 ** 18), 0.0, 0.0, 0.0, 0.0)])
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:
             self._models.popleft()
         if time < self._models[0].start:
-            warnings.warn("Timestamp is before start of first linear model - possibly due to non-monotonic queries")
+            warnings.warn(
+                f"Timestamp {time} is before start of first linear model "
+                f"at {self._models[0].start} - possibly due to non-monotonic queries"
+            )
         return self._models[0](time)
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
@@ -174,7 +176,10 @@ class MultiDelayModel(AbstractDelayModel):
             return orig, fine_delay, phase
 
         if orig[0] < self._models[0].start:
-            warnings.warn("Timestamp is before start of first linear model - possibly due to non-monotonic queries")
+            warnings.warn(
+                f"Timestamp {orig[0]} is before start of first linear model "
+                f"at {self._models[0].start} - possibly due to non-monotonic queries"
+            )
 
         # Step through later models and overwrite the first one where later ones
         # are valid. This is not particularly optimal since we evaluate the full

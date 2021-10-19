@@ -1,4 +1,5 @@
 -c requirements.txt
+async-timeout
 coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 ipython
 jinja2
