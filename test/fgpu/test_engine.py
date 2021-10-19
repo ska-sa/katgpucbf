@@ -19,7 +19,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import aiokatcp
 import numpy as np
@@ -208,7 +208,7 @@ class TestEngine:
         engine: Engine,
         dig_data: np.ndarray,
         first_timestamp: int = 0,
-        expected_first_timestamp: int = 0,
+        expected_first_timestamp: Optional[int] = None,
     ) -> np.ndarray:
         """Send a contiguous stream of data to the engine and retrieve results.
 
@@ -232,7 +232,8 @@ class TestEngine:
         first_timestamp
             Timestamp to send with the first sample
         expected_first_timestamp
-            Timestamp expected for the first output heap
+            Timestamp expected for the first output heap; if none is provided
+            the first timestamp in the data is not checked.
         """
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
         src_layout = engine._src_layout
@@ -278,7 +279,10 @@ class TestEngine:
             async for heap in stream:
                 assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
                 assert ig["feng_id"].value == FENG_ID
-                assert ig["timestamp"].value == expected_timestamp
+                if expected_timestamp is not None:
+                    assert ig["timestamp"].value == expected_timestamp
+                else:
+                    expected_timestamp = expected_first_timestamp = ig["timestamp"].value
                 assert ig["frequency"].value == i * raw_shape[0]
                 expected_timestamp += timestamp_step
                 row.append(ig["feng_raw"].value.copy())
@@ -299,18 +303,30 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         delay_samples: float,
     ) -> None:
-        """Put in tones at channel centre frequencies and check the result."""
+        """Put in tones at channel centre frequencies, with delays, and check the result."""
         # Delay the tone by a negative amount, then compensate with a positive delay.
+        # (delay_samples and delay_s are correction terms).
+        # The tones are placed in the second Nyquist zone then down-converted
+        # to baseband, simulating what happens in MeerKAT L-band.
+        tone_channels = [64, 271]
         tones = [
-            CW(frac_channel=64 / CHANNELS, magnitude=40.0, delay=-delay_samples),
-            CW(frac_channel=271 / CHANNELS, magnitude=70.0, phase=1.23, delay=-delay_samples),
+            CW(frac_channel=1 + tone_channels[0] / CHANNELS, magnitude=80.0, delay=-delay_samples),
+            CW(frac_channel=1 + tone_channels[1] / CHANNELS, magnitude=110.0, phase=1.23, delay=-delay_samples),
         ]
         delay_s = delay_samples / ADC_SAMPLE_RATE
-        await engine_client.request("delays", SYNC_EPOCH, f"{delay_s},0.0:0.0,0.0")
+        sky_centre_frequency = 0.75 * ADC_SAMPLE_RATE
+        # Compute phase correction to compensate for the down-conversion.
+        # (delay_s is negated here because in the original it is the signal
+        # delay rather than the correction).
+        # Based on katpoint.delay.DelayCorrection.corrections
+        phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
+        phase_correction = -phase
+        await engine_client.request("delays", SYNC_EPOCH, f"{delay_s},0.0:{phase_correction},0.0")
 
         src_layout = engine_server._src_layout
         n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tones[0], 0) + self._make_tone(n_samples, tones[1], 1)
+        dig_data[:, 1::2] *= -1  # Down-covert to baseband
 
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_EPOCH.
@@ -337,9 +353,9 @@ class TestEngine:
 
         # Check for the tones
         for pol in range(2):
-            tone_channel = round(tones[pol].frac_channel * CHANNELS)
-            tone_data = out_data[tone_channel, :, pol]
+            tone_data = out_data[tone_channels[pol], :, pol]
             expected_mag = tones[pol].magnitude * CHANNELS * engine_server.sensors["quant-gain"].value
+            assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
             # The frequency corresponds to an integer number of cycles per
             # spectrum, so the phase will be consistent across spectra.

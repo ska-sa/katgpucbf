@@ -61,7 +61,7 @@ class TestKatcpRequests:
         assert engine_server._processor.delay_model._models[-1].delay == 3.76 * 1.712e9
         assert engine_server._processor.delay_model._models[-1].delay_rate == 0.12
         assert engine_server._processor.delay_model._models[-1].phase == pytest.approx(7.322 - 2 * np.pi)
-        assert engine_server._processor.delay_model._models[-1].phase_rate == 1.91
+        assert engine_server._processor.delay_model._models[-1].phase_rate == 1.91 / 1.712e9
 
     @pytest.mark.parametrize(
         "malformed_delay_string",
