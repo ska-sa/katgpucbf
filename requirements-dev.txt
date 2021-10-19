@@ -182,7 +182,7 @@ sphinxcontrib-qthelp==1.0.3
     # via sphinx
 sphinxcontrib-serializinghtml==1.1.5
     # via sphinx
-sphinxcontrib-tikz==0.4.13
+sphinxcontrib-tikz==0.4.15
     # via -r requirements-dev.in
 toml==0.10.2
     # via
