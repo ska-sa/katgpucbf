@@ -30,7 +30,7 @@ from typing import Tuple
 import numpy as np
 
 
-def _wrap_angle(angle):
+def wrap_angle(angle):
     """Restrict an angle to [-pi, pi].
 
     This works on both Python scalars and numpy arrays.
@@ -129,7 +129,7 @@ class LinearDelayModel(AbstractDelayModel):
         self.start = start
         self.delay = float(delay)
         self.delay_rate = float(delay_rate)
-        self.phase = _wrap_angle(float(phase))
+        self.phase = wrap_angle(float(phase))
         self.phase_rate = float(phase_rate)
 
     def __call__(self, time: float) -> float:  # noqa: D102
@@ -152,7 +152,7 @@ class LinearDelayModel(AbstractDelayModel):
         residual = rel_orig_rnd - rel_orig
 
         # Calculate the phase
-        phase = _wrap_angle(rel_orig * self.phase_rate + self.phase)
+        phase = wrap_angle(rel_orig * self.phase_rate + self.phase)
 
         # add self.start back again to return the timestamps in the original
         # epoch

@@ -29,7 +29,7 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import SAMPLE_BITS, recv, send
-from katgpucbf.fgpu.delay import _wrap_angle
+from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 
 pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
@@ -465,13 +465,13 @@ class TestEngine:
         # If t_i is the input timestamp and t_o is the output timestamp, then the
         # delay is t_i * delay_rate and hence t_o = t_i * (1 + delay_rate).
         timestamps = timestamps / (1 + delay_rate)
-        expected_phase = _wrap_angle(phase_rate_per_sample * timestamps)
+        expected_phase = wrap_angle(phase_rate_per_sample * timestamps)
         np.testing.assert_equal(
-            _wrap_angle(np.angle(out_data[tone_channels[0]]) - expected_phase), pytest.approx(0.0, abs=0.01)
+            wrap_angle(np.angle(out_data[tone_channels[0]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
 
         # Adjust expected phase from the centre frequency to the other channel
         expected_phase -= np.pi * (tone_channels[1] - CHANNELS // 2) / CHANNELS * delay_rate * timestamps
         np.testing.assert_equal(
-            _wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
+            wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
