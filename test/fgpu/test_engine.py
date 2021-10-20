@@ -475,3 +475,39 @@ class TestEngine:
         np.testing.assert_equal(
             wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
+
+    async def test_delay_changes(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+    ) -> None:
+        """Test loading several future delay models."""
+        # To keep things simple, we'll just use phase, not delay.
+        tone_channel = CHANNELS // 2
+        tone = CW(frac_channel=0.5, magnitude=110)
+        src_layout = engine_server._src_layout
+        n_samples = 10 * src_layout.chunk_samples
+        dig_data = self._make_tone(n_samples, tone, 0)
+
+        # Load some delay models for the future (the last one beyond the end of the data)
+        update_times = [0, 123456, 400000, 1234567, 1234567890]  # in samples
+        update_phases = [1.0, 0.2, -0.2, -2.0, 0.0]
+        for time, phase in zip(update_times, update_phases):
+            await engine_client.request("delays", SYNC_EPOCH + time / ADC_SAMPLE_RATE, f"0.0,0.0:{phase},0.0")
+
+        out_data, timestamps = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            dig_data,
+        )
+        out_data = out_data[tone_channel, :, 0]  # Only pol 0, centre channel matters
+
+        for i in range(len(update_times) - 1):
+            # Check which timestamps this delay model applies to
+            valid = (update_times[i] <= timestamps) & (timestamps < update_times[i + 1])
+            assert np.any(valid)
+            phases = np.angle(out_data[valid])
+            np.testing.assert_equal(wrap_angle(phases - update_phases[i]), pytest.approx(0, abs=0.01))
