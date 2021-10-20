@@ -436,8 +436,13 @@ class Engine(aiokatcp.DeviceServer):
         # phase by pi/2 radians.
         delay_phase_correction = 0.5 * np.pi * delay_samples
         phase += delay_phase_correction
+        phase_rate_correction = 0.5 * np.pi * delay_rate
         new_linear_model = LinearDelayModel(
-            start_sample_count, delay_samples, delay_rate, phase, phase_rate / self.adc_sample_rate
+            start_sample_count,
+            delay_samples,
+            delay_rate,
+            phase,
+            phase_rate / self.adc_sample_rate + phase_rate_correction,
         )
 
         self.delay_model.add(new_linear_model)

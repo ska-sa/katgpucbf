@@ -16,7 +16,6 @@
 
 """Collection of tests for the KATCP interface of katgpucbf.fgpu."""
 import aiokatcp
-import numpy as np
 import pytest
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cuda_only]
@@ -44,24 +43,6 @@ class TestKatcpRequests:
         """Test that the quant gain is correctly set."""
         _reply, _informs = await engine_client.request("quant-gain", 0.2)
         assert engine_server._processor.compute.quant_gain == 0.2
-
-    async def test_delay_model_update(self, engine_client, engine_server):
-        """Test that the delay model is correctly updated.
-
-        The new element is a piecewise-linear section, and it should go onto the
-        end of the :class:`.MultiDelayModel` list.
-        """
-        assert engine_server.adc_sample_rate == 1.712e9
-
-        start_time = SYNC_EPOCH + 10
-        _reply, _informs = await engine_client.request("delays", start_time, "3.76,0.12:7.322,1.91")
-
-        # We expect the start time to be (10 seconds * 1.712e9 samples / second) i.e. 1.712e10.
-        assert engine_server._processor.delay_model._models[-1].start == int(1.712e10)
-        assert engine_server._processor.delay_model._models[-1].delay == 3.76 * 1.712e9
-        assert engine_server._processor.delay_model._models[-1].delay_rate == 0.12
-        assert engine_server._processor.delay_model._models[-1].phase == pytest.approx(7.322 - 2 * np.pi)
-        assert engine_server._processor.delay_model._models[-1].phase_rate == 1.91 / 1.712e9
 
     @pytest.mark.parametrize(
         "malformed_delay_string",
