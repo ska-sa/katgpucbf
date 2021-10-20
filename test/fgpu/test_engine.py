@@ -291,7 +291,10 @@ class TestEngine:
         timestamps = np.arange(data.shape[1], dtype=np.int64) * (CHANNELS * 2) + expected_first_timestamp
         return data, timestamps
 
-    @pytest.mark.parametrize("delay_samples", [0.0, 2048.0, 42.0, 42.4, 42.7])
+    # One delay value is tested with gdrcopy
+    @pytest.mark.parametrize(
+        "delay_samples", [0.0, 2048.0, 42.0, 42.4, 42.7, pytest.param(42.8, marks=[pytest.mark.use_gdrcopy])]
+    )
     async def test_channel_centre_tones(
         self,
         mock_recv_streams: List[spead2.InprocQueue],
