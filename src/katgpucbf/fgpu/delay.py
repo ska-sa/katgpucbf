@@ -14,7 +14,13 @@
 # limitations under the License.
 ################################################################################
 
-"""A collection of classes and methods for delay-tracking."""
+"""A collection of classes and methods for delay-tracking.
+
+It should be noted that the classes in this module use a slightly different
+model than the public katcp interface. The reference channel for phase change
+is channel 0, rather than the centre channel. The difference is dealt with
+by the request handler for the ``?delays`` katcp request.
+"""
 
 import warnings
 from abc import ABC, abstractmethod
@@ -146,7 +152,7 @@ class LinearDelayModel(AbstractDelayModel):
         residual = rel_orig_rnd - rel_orig
 
         # Calculate the phase
-        phase = _wrap_angle(rel_time * self.phase_rate + self.phase)
+        phase = _wrap_angle(rel_orig * self.phase_rate + self.phase)
 
         # add self.start back again to return the timestamps in the original
         # epoch
