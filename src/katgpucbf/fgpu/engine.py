@@ -428,8 +428,16 @@ class Engine(aiokatcp.DeviceServer):
         # then we'd need to compensate for that here.
         start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
 
+        delay_samples = delay * self.adc_sample_rate
+        # For compatibility with MeerKAT, the phase given is the net change in
+        # phase for the centre frequency, including delay, and we need to
+        # compensate for the effect of the delay at that frequency. The centre
+        # frequency is 4 samples per cycle, so each sample of delay reduces
+        # phase by pi/2 radians.
+        delay_phase_correction = 0.5 * np.pi * delay_samples
+        phase += delay_phase_correction
         new_linear_model = LinearDelayModel(
-            start_sample_count, delay * self.adc_sample_rate, delay_rate, phase, phase_rate
+            start_sample_count, delay_samples, delay_rate, phase, phase_rate / self.adc_sample_rate
         )
 
         self.delay_model.add(new_linear_model)
