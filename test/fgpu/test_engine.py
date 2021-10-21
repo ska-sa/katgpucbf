@@ -471,7 +471,7 @@ class TestEngine:
         )
 
         # Adjust expected phase from the centre frequency to the other channel
-        expected_phase -= np.pi * (tone_channels[1] - CHANNELS // 2) / CHANNELS * delay_rate * timestamps
+        expected_phase -= np.pi * (tone_channels[1] - tone_channels[0]) / CHANNELS * delay_rate * timestamps
         np.testing.assert_equal(
             wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
