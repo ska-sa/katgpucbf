@@ -377,10 +377,11 @@ class TestEngine:
         """Test leakage from tones that are not in the frequency centre."""
         # Rather than parametrize the test (which would be slow), send in
         # lots of different tones at different times. Each tone is maintained
-        # for a full PFB window, and we just discard the outputs
-        # corresponding to times that mix the tones.
+        # for a full PFB window, and we just discard the outputs corresponding
+        # to times that mix the tones. The tones are all placed in the centre
+        # channel, but linearly spaced over the frequencies in that channel's
+        # frequency bin.
         n_tones = 1024  # Note: must lead to sending a whole number of chunks
-        # Distribute tones throughout the bin for the centre channel
         tones = [
             CW(frac_channel=(CHANNELS // 2 - 0.5 + (i + 0.5) / n_tones) / CHANNELS, magnitude=500)
             for i in range(n_tones)
