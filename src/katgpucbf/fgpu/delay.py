@@ -42,7 +42,6 @@ class AbstractDelayModel(ABC):
     """Abstract base class for delay models.
 
     All units are samples rather than SI units.
-
     """
 
     @abstractmethod
@@ -81,7 +80,7 @@ class AbstractDelayModel(ABC):
         """
 
     def invert(self, time: int) -> Tuple[int, float, float]:
-        """Find  input sample timestamp corresponding to a given output sample.
+        """Find input sample timestamp corresponding to a given output sample.
 
         Parameters
         ----------
