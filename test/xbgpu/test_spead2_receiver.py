@@ -44,19 +44,13 @@ import spead2.send
 
 import katgpucbf.monitor
 import katgpucbf.xbgpu.recv
+from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 
 from . import test_parameters
 
 logging.basicConfig(level=logging.INFO)
 
 # 3. Define Constants
-# 3.1 SPEAD IDs
-TIMESTAMP_ID = 0x1600
-FENGINE_ID = 0x4101
-CHANNEL_OFFSET = 0x4103
-DATA_ID = 0x4300
-
-default_spead_flavour = {"version": 4, "item_pointer_bits": 64, "heap_address_bits": 48, "bug_compat": 0}
 
 # 3.2 Explicit note a complex sample has real and imaginay samples.
 complexity = 2
@@ -131,37 +125,37 @@ def create_test_objects(
     )
 
     # 3. Create ItemGroup and add all the required fields.
-    ig = spead2.send.ItemGroup(flavour=spead2.Flavour(**default_spead_flavour))
+    ig = spead2.send.ItemGroup(flavour=FLAVOUR)
     ig.add_item(
         TIMESTAMP_ID,
         "timestamp",
         "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
         shape=[],
-        format=[("u", default_spead_flavour["heap_address_bits"])],
+        format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig.add_item(
-        FENGINE_ID,
+        FENG_ID_ID,
         "fengine id",
         "F-Engine heap is received from.",
         shape=[],
-        format=[("u", default_spead_flavour["heap_address_bits"])],
+        format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig.add_item(
-        CHANNEL_OFFSET,
+        FREQUENCY_ID,
         "channel offset",
         "Value of first channel in collections stored here.",
         shape=[],
-        format=[("u", default_spead_flavour["heap_address_bits"])],
+        format=[("u", FLAVOUR.heap_address_bits)],
     )
-    ig.add_item(DATA_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
+    ig.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
     # 3.1 Adding padding to header so it is the required width.
     for i in range(3):
         ig.add_item(
-            CHANNEL_OFFSET + 1 + i,
+            FREQUENCY_ID + 1 + i,
             f"padding {i}",
             "Padding field {i} to align header to 256-bit boundary.",
             shape=[],
-            format=[("u", default_spead_flavour["heap_address_bits"])],
+            format=[("u", FLAVOUR.heap_address_bits)],
         )
 
     # 4. Configure receiver

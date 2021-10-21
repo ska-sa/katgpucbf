@@ -28,15 +28,12 @@ import spead2.send
 from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS, recv, send
+from katgpucbf.fgpu import SAMPLE_BITS, send
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
+from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
 
 pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
-DIGITISER_ID_ID = 0x3101
-DIGITISER_STATUS_ID = 0x3102
-RAW_DATA_ID = 0x3300
-FLAVOUR = spead2.Flavour(4, 64, 48, 0)  # Flavour for sending digitiser data
 # Command-line arguments
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
@@ -152,7 +149,7 @@ class TestEngine:
         self, stream: "spead2.send.asyncio.AsyncStream", timestamp: int, pol: int, samples: np.ndarray
     ) -> None:
         heap = spead2.send.Heap(FLAVOUR)
-        heap.add_item(spead2.Item(recv.TIMESTAMP_ID, "", "", shape=(), format=[("u", 48)], value=timestamp))
+        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=[("u", 48)], value=timestamp))
         heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=[("u", 48)], value=pol))
         heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=[("u", 48)], value=0))
         heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=samples.shape, dtype=samples.dtype, value=samples))

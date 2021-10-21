@@ -54,6 +54,7 @@ import spead2.send.asyncio
 from aiokatcp.sensor import Sensor, SensorSet
 
 from .. import COMPLEX
+from ..spead import FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
 
 
 class BufferWrapper:
@@ -149,12 +150,6 @@ class XSend:
         data rates are likely too low for it to be an issue. I have put it here more to be explicit than anything
         else. This argument is optional.
     """
-
-    # SPEAD static constants
-    TIMESTAMP_ID: Final[int] = 0x1600
-    CHANNEL_OFFSET: Final[int] = 0x4103
-    DATA_ID: Final[int] = 0x1800
-    default_spead_flavour: Final[spead2.Flavour] = spead2.Flavour(4, 64, 48)
 
     # Class static constants
     max_payload_size: Final[int] = 2048
@@ -259,23 +254,23 @@ class XSend:
         )
 
         # 6. Create item group - This is the SPEAD2 object that stores all heap format information.
-        self.item_group = spead2.send.ItemGroup(flavour=self.default_spead_flavour)
+        self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         self.item_group.add_item(
-            XSend.CHANNEL_OFFSET,
+            FREQUENCY_ID,
             "frequency",  # Misleading name, but it's what the ICD specifies
             "Value of first channel in collections stored here.",
             shape=[],
-            format=[("u", self.default_spead_flavour.heap_address_bits)],
+            format=[("u", FLAVOUR.heap_address_bits)],
         )
         self.item_group.add_item(
-            XSend.TIMESTAMP_ID,
+            TIMESTAMP_ID,
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
             shape=[],
-            format=[("u", self.default_spead_flavour.heap_address_bits)],
+            format=[("u", FLAVOUR.heap_address_bits)],
         )
         self.item_group.add_item(
-            XSend.DATA_ID,
+            XENG_RAW_ID,
             "xeng_raw",
             "Integrated baseline correlation products.",
             shape=self.heap_shape,

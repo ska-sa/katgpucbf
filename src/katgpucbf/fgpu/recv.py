@@ -32,10 +32,10 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from ..monitor import Monitor
+from ..spead import TIMESTAMP_ID
 from . import BYTE_BITS
 
 logger = logging.getLogger(__name__)
-TIMESTAMP_ID = 0x1600
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.

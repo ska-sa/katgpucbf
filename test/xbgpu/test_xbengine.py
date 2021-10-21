@@ -35,9 +35,10 @@ from numba import njit
 import katgpucbf.xbgpu.xbengine
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
+from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore, device_filter
 
-from . import test_parameters, test_spead2_receiver
+from . import test_parameters
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
@@ -300,37 +301,37 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
     )
 
     # 2.1. Create ItemGroup and add all the required fields.
-    ig_send = spead2.send.ItemGroup(flavour=spead2.Flavour(**test_spead2_receiver.default_spead_flavour))
+    ig_send = spead2.send.ItemGroup(flavour=FLAVOUR)
     ig_send.add_item(
-        test_spead2_receiver.TIMESTAMP_ID,
+        TIMESTAMP_ID,
         "timestamp",
         "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
         shape=[],
-        format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
+        format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig_send.add_item(
-        test_spead2_receiver.FENGINE_ID,
+        FENG_ID_ID,
         "fengine id",
         "F-Engine heap is received from.",
         shape=[],
-        format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
+        format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig_send.add_item(
-        test_spead2_receiver.CHANNEL_OFFSET,
+        FREQUENCY_ID,
         "channel offset",
         "Value of first channel in collections stored here.",
         shape=[],
-        format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
+        format=[("u", FLAVOUR.heap_address_bits)],
     )
-    ig_send.add_item(test_spead2_receiver.DATA_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
+    ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
     # 2.1 Adding padding to header so it is the required width.
     for i in range(3):
         ig_send.add_item(
-            test_spead2_receiver.CHANNEL_OFFSET + 1 + i,
+            FREQUENCY_ID + 1 + i,
             f"padding {i}",
             "Padding field {i} to align header to 256-bit boundary.",
             shape=[],
-            format=[("u", test_spead2_receiver.default_spead_flavour["heap_address_bits"])],
+            format=[("u", FLAVOUR.heap_address_bits)],
         )
 
     # 3. Create receiver object to receive data from the xbengine.
