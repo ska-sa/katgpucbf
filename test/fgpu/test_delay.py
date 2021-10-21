@@ -66,3 +66,9 @@ def test_linear_invert_range(linear: LinearDelayModel) -> None:
     exact_time = time - residual
     forward = exact_time + np.apply_along_axis(linear, 0, exact_time)
     np.testing.assert_array_almost_equal(forward, np.arange(13000, 14000, 100))
+
+
+def test_bad_delay_rate() -> None:
+    """Delay rate can't be -1 or less."""
+    with pytest.raises(ValueError):
+        LinearDelayModel(1, 2.0, -1.0, 0.0, 0.0)
