@@ -38,6 +38,10 @@ def wrap_angle(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 
+class NonMonotonicQueryWarning(UserWarning):
+    """Delay model was queried non-monotonically."""
+
+
 class AbstractDelayModel(ABC):
     """Abstract base class for delay models.
 
@@ -169,8 +173,12 @@ class MultiDelayModel(AbstractDelayModel):
     """
 
     def __init__(self) -> None:
-        # Start in the distant past, so that it is always valid
-        self._models = deque([LinearDelayModel(-(10 ** 18), 0.0, 0.0, 0.0, 0.0)])
+        # The initial time is -1 rather than 0 so that it doesn't get removed
+        # if a model is added with start time 0, which can lead to some
+        # spurious warnings in unit tests about non-monotonic queries.
+        # Ideally it would use -infinity (or a large negative number), but
+        # that causes issues with numeric precision.
+        self._models = deque([LinearDelayModel(-1, 0.0, 0.0, 0.0, 0.0)])
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:
@@ -178,7 +186,8 @@ class MultiDelayModel(AbstractDelayModel):
         if time < self._models[0].start:
             warnings.warn(
                 f"Timestamp {time} is before start of first linear model "
-                f"at {self._models[0].start} - possibly due to non-monotonic queries"
+                f"at {self._models[0].start} - possibly due to non-monotonic queries",
+                NonMonotonicQueryWarning,
             )
         return self._models[0](time)
 
@@ -191,7 +200,8 @@ class MultiDelayModel(AbstractDelayModel):
         if orig[0] < self._models[0].start:
             warnings.warn(
                 f"Timestamp {orig[0]} is before start of first linear model "
-                f"at {self._models[0].start} - possibly due to non-monotonic queries"
+                f"at {self._models[0].start} - possibly due to non-monotonic queries",
+                NonMonotonicQueryWarning,
             )
 
         # Step through later models and overwrite the first one where later ones
