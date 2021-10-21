@@ -101,7 +101,7 @@ class Layout:
             types.void(types.CPointer(chunk_place_data), types.uintp),
             nopython=True,
         )
-        def chunk_place_impl(data_ptr, data_size):
+        def chunk_place_impl(data_ptr, data_size):  # pragma: nocover
             data = numba.carray(data_ptr, 1)
             items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
             timestamp = items[0]
