@@ -306,8 +306,9 @@ class TestEngine:
         """Put in tones at channel centre frequencies, with delays, and check the result."""
         # Delay the tone by a negative amount, then compensate with a positive delay.
         # (delay_samples and delay_s are correction terms).
-        # The tones are placed in the second Nyquist zone then down-converted
-        # to baseband, simulating what happens in MeerKAT L-band.
+        # The tones are placed in the second Nyquist zone (the "1 +" in
+        # frac_channel) then down-converted to baseband, simulating what
+        # happens in MeerKAT L-band.
         tone_channels = [64, 271]
         tones = [
             CW(frac_channel=1 + tone_channels[0] / CHANNELS, magnitude=80.0, delay=-delay_samples),
@@ -396,8 +397,9 @@ class TestEngine:
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
         # attenuation is ≤ 2x (twice) the pass band width.
         #
-        # The division by 2 is because we're dealing with voltage, not power.
-        tol = 10 ** (-5.3 / 2) * (tones[0].magnitude * CHANNELS) * gain
+        # The division by 20 (not 10) is because we're dealing with voltage,
+        # not power.
+        tol = 10 ** (-53 / 20) * (tones[0].magnitude * CHANNELS) * gain
 
         out_data = await self._send_data(
             mock_recv_streams,
