@@ -18,16 +18,16 @@
 import numpy as np
 import pytest
 
-from katgpucbf.fgpu.delay import LinearDelayModel, _wrap_angle
+from katgpucbf.fgpu.delay import LinearDelayModel, wrap_angle
 
 
 @pytest.mark.parametrize(
     "input,output", [(0.0, 0.0), (1.0, 1.0), (1.1, 1.1), (4.0, 4.0 - 2 * np.pi), (10.0, 10.0 - 4 * np.pi)]
 )
 def test_wrap_angle(input: float, output: float) -> None:
-    """Test :func:`._wrap_angle`."""
-    assert _wrap_angle(input) == pytest.approx(output)
-    assert _wrap_angle(-input) == pytest.approx(-output)
+    """Test :func:`.wrap_angle`."""
+    assert wrap_angle(input) == pytest.approx(output)
+    assert wrap_angle(-input) == pytest.approx(-output)
 
 
 @pytest.fixture
@@ -50,9 +50,9 @@ def test_linear_call(linear: LinearDelayModel) -> None:
 
 def test_linear_invert(linear: LinearDelayModel) -> None:
     """Test `invert()` against manually-calculated correct outputs."""
-    assert linear.invert(12445) == (12345, 0.0, _wrap_angle(10.1))
-    assert linear.invert(13001) == pytest.approx((12790, 0.2, _wrap_angle(65.7)))
-    assert linear.invert(12999) == pytest.approx((12788, -0.2, _wrap_angle(65.5)))
+    assert linear.invert(12445) == (12345, 0.0, wrap_angle(0.1))
+    assert linear.invert(13001) == pytest.approx((12790, 0.2, wrap_angle(44.58)))
+    assert linear.invert(12999) == pytest.approx((12788, -0.2, wrap_angle(44.42)))
 
 
 def test_linear_invert_range(linear: LinearDelayModel) -> None:
@@ -60,7 +60,7 @@ def test_linear_invert_range(linear: LinearDelayModel) -> None:
     time, residual, phase = linear.invert_range(12999, 13005, 1)
     np.testing.assert_array_equal(time, [12788, 12789, 12790, 12791, 12791, 12792])
     np.testing.assert_array_almost_equal(residual, [-0.2, 0.0, 0.2, 0.4, -0.4, -0.2])
-    np.testing.assert_array_almost_equal(phase, _wrap_angle(np.array([65.5, 65.6, 65.7, 65.8, 65.9, 66.0])))
+    np.testing.assert_array_almost_equal(phase, wrap_angle(np.array([44.42, 44.50, 44.58, 44.66, 44.74, 44.82])))
 
     time, residual, _phase = linear.invert_range(13000, 14000, 100)
     exact_time = time - residual

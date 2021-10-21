@@ -19,7 +19,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import aiokatcp
 import numpy as np
@@ -29,6 +29,7 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import SAMPLE_BITS, recv, send
+from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 
 pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
@@ -209,7 +210,7 @@ class TestEngine:
         dig_data: np.ndarray,
         first_timestamp: int = 0,
         expected_first_timestamp: Optional[int] = None,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve results.
 
         This is a little tricky because :func:`.chunk_sets` drops data
@@ -234,6 +235,13 @@ class TestEngine:
         expected_first_timestamp
             Timestamp expected for the first output heap; if none is provided
             the first timestamp in the data is not checked.
+
+        Returns
+        -------
+        data
+            Array of shape channels × times × pols
+        timestamps
+            Labels for the time axis of `data`
         """
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
         src_layout = engine._src_layout
@@ -292,7 +300,9 @@ class TestEngine:
         # also ensures that there were the same number of heaps per channel.
         data = np.concatenate(heaps, axis=0)
         # Convert to complex for analysis
-        return data[..., 0] + 1j * data[..., 1]
+        data = data[..., 0] + 1j * data[..., 1]
+        timestamps = np.arange(data.shape[1], dtype=np.int64) * (CHANNELS * 2) + expected_first_timestamp
+        return data, timestamps
 
     @pytest.mark.parametrize("delay_samples", [0.0, 2048.0, 42.0, 42.4, 42.7])
     async def test_channel_centre_tones(
@@ -342,7 +352,7 @@ class TestEngine:
             # timestamp, so it does not get produced
             expected_first_timestamp += CHANNELS * 2 * SPECTRA_PER_HEAP
             expected_spectra -= SPECTRA_PER_HEAP
-        out_data = await self._send_data(
+        out_data, _ = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
             engine_server,
@@ -392,7 +402,7 @@ class TestEngine:
         padding = np.zeros((2, engine_server._src_layout.chunk_samples), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
-        # Crack up the gain so that leakage is measurable
+        # Crank up the gain so that leakage is measurable
         gain = 100 / CHANNELS
         await engine_client.request("quant-gain", gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
@@ -402,7 +412,7 @@ class TestEngine:
         # not power.
         tol = 10 ** (-53 / 20) * (tones[0].magnitude * CHANNELS) * gain
 
-        out_data = await self._send_data(
+        out_data, _ = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
             engine_server,
@@ -419,3 +429,49 @@ class TestEngine:
             else:
                 data[CHANNELS // 2 + 1] = 0
             np.testing.assert_equal(data, pytest.approx(0, abs=tol))
+
+    async def test_delay_phase_rate(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+    ) -> None:
+        """Test that delay rate and phase rate setting works."""
+        # One tone at centre frequency to test the absolute phase, and one at another
+        # frequency to test the slope across the band.
+        tone_channels = [CHANNELS // 2, CHANNELS - 123]
+        tones = [CW(frac_channel=channel / CHANNELS, magnitude=110) for channel in tone_channels]
+        src_layout = engine_server._src_layout
+        n_samples = 10 * src_layout.chunk_samples
+        dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
+
+        delay_rate = 1e-5  # Should be high enough to cause multiple coarse delay changes per chunk
+        phase_rate_per_sample = 30 / n_samples  # Should wrap multiple times over the test
+        phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
+        await engine_client.request("delays", SYNC_EPOCH, f"0.0,{delay_rate}:0.0,{phase_rate}")
+
+        first_timestamp = 100 * src_layout.chunk_samples
+        out_data, timestamps = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            dig_data,
+            first_timestamp=first_timestamp,
+        )
+        out_data = out_data[..., 0]  # Only pol 0 has interesting data
+        # Invert the delay model to find the corresponding input timestamps,
+        # which in turn tells us the delay and phase rate applied at those times.
+        # If t_i is the input timestamp and t_o is the output timestamp, then the
+        # delay is t_i * delay_rate and hence t_o = t_i * (1 + delay_rate).
+        timestamps = timestamps / (1 + delay_rate)
+        expected_phase = wrap_angle(phase_rate_per_sample * timestamps)
+        np.testing.assert_equal(
+            wrap_angle(np.angle(out_data[tone_channels[0]]) - expected_phase), pytest.approx(0.0, abs=0.01)
+        )
+
+        # Adjust expected phase from the centre frequency to the other channel
+        expected_phase -= np.pi * (tone_channels[1] - tone_channels[0]) / CHANNELS * delay_rate * timestamps
+        np.testing.assert_equal(
+            wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
+        )
