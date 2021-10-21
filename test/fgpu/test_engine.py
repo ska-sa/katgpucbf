@@ -31,7 +31,9 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import SAMPLE_BITS, send
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
+from katgpucbf.spead import FLAVOUR
+
+from .test_recv import gen_heaps
 
 pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
 # Command-line arguments
@@ -145,16 +147,6 @@ class TestEngine:
         config = spead2.send.StreamConfig(max_packet_size=9000)  # Just needs to be bigger than the heaps
         return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
-    async def _send_digitiser_heap(
-        self, stream: "spead2.send.asyncio.AsyncStream", timestamp: int, pol: int, samples: np.ndarray
-    ) -> None:
-        heap = spead2.send.Heap(FLAVOUR)
-        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=[("u", 48)], value=timestamp))
-        heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=[("u", 48)], value=pol))
-        heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=[("u", 48)], value=0))
-        heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=samples.shape, dtype=samples.dtype, value=samples))
-        await stream.async_send_heap(heap, substream_index=pol)
-
     def _pack_samples(self, samples: ArrayLike) -> np.ndarray:
         """Pack 16-bit digitiser sample data down to SAMPLE_BITS bits.
 
@@ -245,17 +237,15 @@ class TestEngine:
         assert dig_data.shape[0] == N_POLS
         assert dig_data.shape[1] % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
         dig_data = self._pack_samples(dig_data)
-        dig_data = dig_data.reshape(N_POLS, -1, src_layout.heap_bytes)
         dig_stream = self._make_digitiser(mock_recv_streams)
         heaps_received = 0
         heaps_received_queue = asyncio.Queue()  # type: asyncio.Queue[int]
         heaps_sensor = engine.sensors["input-heaps-total"]
         heaps_sensor.attach(lambda sensor, reading: heaps_received_queue.put_nowait(reading.value))
-        for i in range(dig_data.shape[1]):
+        heap_gens = [gen_heaps(src_layout, pol_data, first_timestamp, pol) for pol, pol_data in enumerate(dig_data)]
+        for i, cur_heaps in enumerate(zip(*heap_gens)):
             for pol in range(N_POLS):
-                await self._send_digitiser_heap(
-                    dig_stream, i * src_layout.heap_samples + first_timestamp, pol, dig_data[pol, i]
-                )
+                await dig_stream.async_send_heap(cur_heaps[pol], substream_index=pol)
             while i >= heaps_received // N_POLS + src_layout.chunk_heaps:
                 logging.debug("heaps_received = %d, waiting for more", heaps_received)
                 heaps_received = await heaps_received_queue.get()
@@ -272,7 +262,7 @@ class TestEngine:
             stream.add_inproc_reader(queue)
             ig = spead2.ItemGroup()
             # We don't have descriptors yet, so we have to build the Items manually
-            imm_format = [("u", send.FLAVOUR.heap_address_bits)]
+            imm_format = [("u", FLAVOUR.heap_address_bits)]
             raw_shape = (CHANNELS // n_out_streams, SPECTRA_PER_HEAP, N_POLS, COMPLEX)
             ig.add_item(send.TIMESTAMP_ID, "timestamp", "", shape=(), format=imm_format)
             ig.add_item(send.FENG_ID_ID, "feng_id", "", shape=(), format=imm_format)
