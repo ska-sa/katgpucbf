@@ -195,7 +195,7 @@ async def chunk_sets(
 
             # If we have both chunks and they match up, then we can yield.
             if all(c is not None and c.chunk_id == chunk.chunk_id for c in buf):
-                if sensors:
+                if sensors is not None:
                     # Get explicit timestamp to ensure that all the updated sensors
                     # have the same timestamp.
                     sensor_timestamp = time.time()
@@ -215,7 +215,9 @@ async def chunk_sets(
                     # determine the number missing. This accounts for both
                     # heaps lost within chunks and lost chunks.
                     received_heaps = sensors["input-heaps-total"].value
-                    expected_heaps = (chunk.timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
+                    expected_heaps = (
+                        (chunk.timestamp - first_timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
+                    )
                     missing = expected_heaps - received_heaps
                     if missing > sensors["input-missing-heaps-total"].value:
                         sensors["input-missing-heaps-total"].set_value(missing, timestamp=sensor_timestamp)

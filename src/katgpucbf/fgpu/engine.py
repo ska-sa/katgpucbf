@@ -209,84 +209,8 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
-        # No more than once per second, at least once every 10 seconds.
-        # The TypedDict is necessary for mypy to believe the use as
-        # kwargs is valid.
-        AutoStrategy = TypedDict(  # noqa: N806
-            "AutoStrategy",
-            {
-                "auto_strategy": aiokatcp.SensorSampler.Strategy,
-                "auto_strategy_parameters": Tuple[float, float],
-            },
-        )
-        auto_strategy = AutoStrategy(
-            auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(1.0, 10.0),
-        )
-        sensors: List[aiokatcp.Sensor] = [
-            aiokatcp.Sensor(
-                int,
-                "input-heaps-total",
-                "number of heaps received (prometheus: counter)",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            aiokatcp.Sensor(
-                int,
-                "input-chunks-total",
-                "number of chunks received (prometheus: counter)",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            aiokatcp.Sensor(
-                int,
-                "input-bytes-total",
-                "number of bytes of digitiser samples received (prometheus: counter)",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            aiokatcp.Sensor(
-                int,
-                "input-missing-heaps-total",
-                "number of heaps dropped on the input (prometheus: counter)",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                # TODO: Think about what status_func should do for the status of the
-                # sensor. If it goes into "warning" as soon as a single packet is
-                # dropped, then it may not be too useful. Having the information
-                # necessary to implement this may involve shifting things between
-                # classes.
-                **auto_strategy,
-            ),
-            aiokatcp.Sensor(
-                int,
-                "output-heaps-total",
-                "number of heaps transmitted (prometheus: counter)",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            aiokatcp.Sensor(
-                int,
-                "output-bytes-total",
-                "number of payload bytes transmitted (prometheus: counter)",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            aiokatcp.Sensor(
-                float,
-                "quant-gain",
-                "rescaling factor to apply before 8-bit requantisation (prometheus: gauge)",
-                default=quant_gain,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            ),
-        ]
-        for sensor in sensors:
-            self.sensors.add(sensor)
+        self.populate_sensors(self.sensors)
+        self.sensors["quant-gain"].value = quant_gain
 
         if use_gdrcopy:
             import gdrcopy.pycuda
@@ -392,6 +316,87 @@ class Engine(aiokatcp.DeviceServer):
         )
         for schunk in send_chunks:
             self._processor.send_free_queue.put_nowait(schunk)
+
+    @staticmethod
+    def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
+        """Define the sensors for an engine."""
+        # No more than once per second, at least once every 10 seconds.
+        # The TypedDict is necessary for mypy to believe the use as
+        # kwargs is valid.
+        AutoStrategy = TypedDict(  # noqa: N806
+            "AutoStrategy",
+            {
+                "auto_strategy": aiokatcp.SensorSampler.Strategy,
+                "auto_strategy_parameters": Tuple[float, float],
+            },
+        )
+        auto_strategy = AutoStrategy(
+            auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(1.0, 10.0),
+        )
+        sensor_list: List[aiokatcp.Sensor] = [
+            aiokatcp.Sensor(
+                int,
+                "input-heaps-total",
+                "number of heaps received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-chunks-total",
+                "number of chunks received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-bytes-total",
+                "number of bytes of digitiser samples received (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "input-missing-heaps-total",
+                "number of heaps dropped on the input (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                # TODO: Think about what status_func should do for the status of the
+                # sensor. If it goes into "warning" as soon as a single packet is
+                # dropped, then it may not be too useful. Having the information
+                # necessary to implement this may involve shifting things between
+                # classes.
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "output-heaps-total",
+                "number of heaps transmitted (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                int,
+                "output-bytes-total",
+                "number of payload bytes transmitted (prometheus: counter)",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                **auto_strategy,
+            ),
+            aiokatcp.Sensor(
+                float,
+                "quant-gain",
+                "rescaling factor to apply before 8-bit requantisation (prometheus: gauge)",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            ),
+        ]
+        for sensor in sensor_list:
+            sensors.add(sensor)
 
     async def request_quant_gain(self, ctx, quant_gain: float) -> None:
         """Set the quant gain."""

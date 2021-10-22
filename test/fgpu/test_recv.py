@@ -18,15 +18,19 @@
 
 import dataclasses
 import itertools
-from typing import Generator, Iterable, List
+import logging
+from typing import Generator, Iterable, List, Optional, cast
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 import spead2.recv.asyncio
+from aiokatcp import SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import recv
+from katgpucbf.fgpu.engine import Engine
 from katgpucbf.fgpu.recv import Chunk, Layout
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
@@ -243,3 +247,70 @@ class TestStream:
         expected = np.ones_like(chunk.present)
         expected[missing] = 0
         np.testing.assert_equal(chunk.present, expected)
+
+
+class TestChunkSets:
+    """Test :func:`.chunk_sets`."""
+
+    @pytest.mark.parametrize("use_sensors", [True, False])
+    async def test(self, layout: Layout, use_sensors: bool, caplog) -> None:  # noqa: D102
+        streams = [Mock() for _ in range(N_POLS)]
+        ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)  # Big enough not to worry about
+        for stream in streams:
+            stream.data_ringbuffer = ringbuffer
+        monitor = NullMonitor()
+        sensors: Optional[SensorSet] = None
+        if use_sensors:
+            sensors = SensorSet()
+            Engine.populate_sensors(sensors)
+        rng = np.random.default_rng(1)
+
+        def add_chunk(chunk_id: int, pol: int, missing: int = 0) -> None:
+            data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
+            present = np.ones(layout.chunk_heaps, np.uint8)
+            present[:missing] = 0  # Mark some leading heaps as missing
+            chunk = Chunk(data=data, present=present, chunk_id=chunk_id, stream_id=pol)
+            ringbuffer.put_nowait(chunk)
+
+        add_chunk(10, 0)
+        add_chunk(10, 1)
+        add_chunk(11, 1)
+        add_chunk(12, 1, 1)
+        add_chunk(12, 0, 2)
+        add_chunk(20, 0)
+        add_chunk(20, 1)
+        add_chunk(21, 0)
+        ringbuffer.stop()
+
+        with caplog.at_level(logging.WARNING, logger="katgpucbf.fgpu.recv"):
+            sets = [
+                chunk_set
+                async for chunk_set in recv.chunk_sets(
+                    cast(List[spead2.recv.ChunkRingStream], streams), layout, monitor, sensors
+                )
+            ]
+        assert caplog.record_tuples == [
+            ("katgpucbf.fgpu.recv", logging.WARNING, "Chunk not matched: timestamp=0xb0000 pol=1")
+        ]
+        assert len(sets) == 3
+        # Check that all the pairs are consistent
+        for s in sets:
+            for pol in range(N_POLS):
+                assert s[pol].stream_id == pol
+                assert s[pol].chunk_id == s[0].chunk_id
+                assert s[pol].timestamp == s[0].chunk_id * layout.chunk_samples
+        assert sets[0][0].chunk_id == 10
+        assert sets[1][0].chunk_id == 12
+        assert sets[2][0].chunk_id == 20
+        # Check that the mismatched chunks were returned to the free ring
+        assert streams[0].add_free_chunk.call_count == 1
+        assert streams[0].add_free_chunk.call_args[0][0].chunk_id == 21
+        assert streams[1].add_free_chunk.call_count == 1
+        assert streams[1].add_free_chunk.call_args[0][0].chunk_id == 11
+
+        # Check sensor values
+        if sensors is not None:
+            assert sensors["input-heaps-total"].value == 93
+            assert sensors["input-chunks-total"].value == 6
+            assert sensors["input-bytes-total"].value == 93 * 5120
+            assert sensors["input-missing-heaps-total"].value == 11 * 32 - 93
