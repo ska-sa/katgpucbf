@@ -60,10 +60,11 @@ def test_postproc(context, command_queue, repeat=1):
     spectra = 512
     quant_gain = 0.1
     # TODO: make properly complex
-    h_in0 = np.random.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
-    h_in1 = np.random.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
-    h_fine_delay = np.random.uniform(0.0, 2.0, (spectra,)).astype(np.float32)
-    h_phase = np.random.uniform(0.0, np.pi / 2, (spectra,)).astype(np.float32)
+    rng = np.random.default_rng(seed=1)
+    h_in0 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
+    h_in1 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
+    h_fine_delay = rng.uniform(0.0, 2.0, (spectra,)).astype(np.float32)
+    h_phase = rng.uniform(0.0, np.pi / 2, (spectra,)).astype(np.float32)
     expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, quant_gain)
 
     template = postproc.PostprocTemplate(context)
