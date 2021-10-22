@@ -40,7 +40,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--name", default="sim_correlator", help="Subarray product name [%(default)s]")
     parser.add_argument("-a", "--antennas", type=int, required=True, help="Number of antennas")
     parser.add_argument("-c", "--channels", type=int, required=True, help="Number of channels")
-    parser.add_argument("-i", "--int-time", type=float, help="Integration time in seconds [%(default)s]")
+    parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
         "--last-stage",
         choices=["d", "f", "x"],
@@ -103,7 +103,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     config["outputs"]["baseline_correlation_products"] = {
         "type": "gpucbf.baseline_correlation_products",
         "src_streams": ["antenna_channelised_voltage"],
-        "int_time": 0.5,
+        "int_time": args.int_time,
     }
     return config
 
