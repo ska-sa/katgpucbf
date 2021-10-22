@@ -10,6 +10,7 @@ configuration can be written to file to be manually started later.
 import argparse
 import asyncio
 import contextlib
+import ipaddress
 import json
 import sys
 from dataclasses import dataclass
@@ -47,11 +48,18 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default="x",
         help="Do not run any stages past the given one [%(default)s]",
     )
+    parser.add_argument(
+        "--digitisers",
+        type=ipaddress.IPv4Address,
+        metavar="ADDRESS",
+        help="Starting IP address for external digitisers",
+    )
     parser.add_argument("--band", default="l", choices=["l", "u"], help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
+    parser.add_argument("--develop", action="store_true", help="Run without specialised hardware")
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
     )
@@ -68,6 +76,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     config: dict = {
         "version": "3.1",
         "config": {},
+        "inputs": {},
         "outputs": {},
     }
     if args.image_tag is not None:
@@ -78,23 +87,39 @@ def generate_config(args: argparse.Namespace) -> dict:
             name, image = override.split(":", 1)
             image_overrides[name] = image
         config["config"]["image_overrides"] = image_overrides
+    if args.develop:
+        config["config"]["develop"] = True
+    next_dig_ip = args.digitisers
+    dig_names = []
     for ant_index in range(args.antennas):
         number = 800 + ant_index  # Avoid confusion with real antennas
         for pol in ["v", "h"]:
             name = f"m{number}{pol}"
-            config["outputs"][name] = {
-                "type": "sim.dig.raw_antenna_voltage",
-                "band": args.band,
-                "adc_sample_rate": args.adc_sample_rate,
-                "centre_frequency": args.centre_frequency,
-                "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
-            }
+            dig_names.append(name)
+            if args.digitisers is None:
+                config["outputs"][name] = {
+                    "type": "sim.dig.raw_antenna_voltage",
+                    "band": args.band,
+                    "adc_sample_rate": args.adc_sample_rate,
+                    "centre_frequency": args.centre_frequency,
+                    "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
+                }
+            else:
+                config["inputs"][name] = {
+                    "type": "dig.raw_antenna_voltage",
+                    "band": args.band,
+                    "adc_sample_rate": args.adc_sample_rate,
+                    "centre_frequency": args.centre_frequency,
+                    "antenna": f"m{number}",
+                    "url": f"spead://{next_dig_ip}+7:7148",
+                }
+                next_dig_ip += 8
     if args.last_stage == "d":
         return config
 
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
-        "src_streams": list(config["outputs"]),
+        "src_streams": dig_names,
         "n_chans": args.channels,
     }
     if args.last_stage == "f":
