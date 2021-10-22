@@ -206,3 +206,40 @@ class TestStream:
             seen += 1
             expected_chunk_id += 1
         assert seen == 5
+
+    async def test_missing_heaps(
+        self,
+        layout: Layout,
+        send_stream: "spead2.send.asyncio.AsyncStream",
+        streams: List[spead2.recv.ChunkRingStream],
+        queues: List[spead2.InprocQueue],
+        ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    ) -> None:
+        """Test that the chunk placement sets heap indices correctly."""
+        POL = 1  # Only test one of the pols # noqa: N806
+        rng = np.random.default_rng(seed=1)
+        data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
+        expected_chunk_id = 123
+        first_timestamp = expected_chunk_id * layout.chunk_samples
+        heaps = list(gen_heaps(layout, data, first_timestamp, POL))
+        # Create some gaps in the heaps
+        missing = [0, 5, 7]
+        for idx in reversed(missing):  # Have to go backwards, otherwise indices shift up
+            del heaps[idx]
+
+        for heap in heaps:
+            await send_stream.async_send_heap(heap, substream_index=POL)
+        for queue in queues:
+            queue.stop()  # Flushes out the receive streams
+        # Get just the chunks that actually have some data. We needn't worry
+        # about returning chunks to the free ring as we don't expect to deplete
+        # it.
+        chunks = [chunk async for chunk in ringbuffer if np.any(chunk.present)]  # type: ignore
+        assert len(chunks) == 1
+        chunk = chunks[0]
+        assert isinstance(chunk, Chunk)
+        assert chunk.chunk_id == expected_chunk_id
+        assert chunk.stream_id == POL
+        expected = np.ones_like(chunk.present)
+        expected[missing] = 0
+        np.testing.assert_equal(chunk.present, expected)
