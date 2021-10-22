@@ -35,9 +35,14 @@ pytestmark = [pytest.mark.asyncio]
 
 
 @pytest.fixture
-def layout() -> Layout:
-    """Return an example layout."""
-    return Layout(sample_bits=10, heap_samples=4096, chunk_samples=65536, mask_timestamp=False)
+def layout(request) -> Layout:
+    """Return an example layout.
+
+    The test may be decorated with ``pytest.mark.mask_timestamp`` to request
+    timestamp masking.
+    """
+    mask_timestamp = request.node.get_closest_marker("mask_timestamp") is not None
+    return Layout(sample_bits=10, heap_samples=4096, chunk_samples=65536, mask_timestamp=mask_timestamp)
 
 
 class TestLayout:
@@ -127,7 +132,7 @@ class TestStream:
     """Test the stream built by :func:`katgpucbf.fgpu.recv.make_stream`."""
 
     @pytest.mark.parametrize("reorder", [True, False])
-    @pytest.mark.parametrize("bad_timestamps", [True, False])
+    @pytest.mark.parametrize("timestamps", ["good", "bad", pytest.param("mask", marks=[pytest.mark.mask_timestamp])])
     async def test_basic(
         self,
         layout: Layout,
@@ -136,7 +141,7 @@ class TestStream:
         queues: List[spead2.InprocQueue],
         ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
-        bad_timestamps: bool,
+        timestamps: bool,
     ) -> None:
         """Send heaps and check that they arrive.
 
@@ -146,14 +151,25 @@ class TestStream:
             Introduce a slight reordering into the heaps, to check that this
             is handled correctly.
 
-        bad_timestamps
-            Interleave some extra heaps with invalid timestamps.
+        timestamps
+            One of
+
+            good
+                All timestamps are valid.
+
+            bad
+                Valid heaps are interleaved with heaps with invalid timestamps.
+
+            mask
+                Like "good" but all timestamps have some garbage in the low-order bits.
         """
         POL = 1  # Only test one of the pols # noqa: N806
         rng = np.random.default_rng(seed=1)
         data = rng.integers(0, 255, size=5 * layout.chunk_bytes, dtype=np.uint8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.chunk_samples
+        if timestamps == "mask":
+            first_timestamp += 1234  # Invalid bits that will be masked off
         heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp, POL)
         if reorder:
             heap_list = list(heaps)
@@ -163,7 +179,7 @@ class TestStream:
             for i in range(11, len(heap_list), 12):
                 heap_list[i - 11], heap_list[i] = heap_list[i], heap_list[i - 11]
             heaps = heap_list
-        if bad_timestamps:
+        if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567, POL)
             # Interleave the sequences
             heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
