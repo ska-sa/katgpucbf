@@ -62,8 +62,9 @@ def test_pfb_fir(context, command_queue, repeat=1):
     spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
-    h_in = np.random.randint(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
-    weights = np.random.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
+    rng = np.random.default_rng(seed=1)
+    h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
+    weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
     expected = pfb_fir_host(h_in, channels, weights)
 
     template = pfb.PFBFIRTemplate(context, taps)
