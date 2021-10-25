@@ -145,7 +145,7 @@ class TestStream:
         queues: List[spead2.InprocQueue],
         ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
-        timestamps: bool,
+        timestamps: str,
     ) -> None:
         """Send heaps and check that they arrive.
 
