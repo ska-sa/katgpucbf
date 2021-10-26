@@ -40,6 +40,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=5001, help="TCP port of the SDP master controller [%(default)s]")
     parser.add_argument("--name", default="sim_correlator", help="Subarray product name [%(default)s]")
     parser.add_argument("-a", "--antennas", type=int, required=True, help="Number of antennas")
+    parser.add_argument("-d", "--digitisers", type=int, help="Number of digitisers [#antennas]")
     parser.add_argument("-c", "--channels", type=int, required=True, help="Number of channels")
     parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
@@ -49,7 +50,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Do not run any stages past the given one [%(default)s]",
     )
     parser.add_argument(
-        "--digitisers",
+        "--digitiser-address",
         type=ipaddress.IPv4Address,
         metavar="ADDRESS",
         help="Starting IP address for external digitisers",
@@ -68,6 +69,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         args.adc_sample_rate = BANDS[args.band].adc_sample_rate
     if args.centre_frequency is None:
         args.centre_frequency = BANDS[args.band].centre_frequency
+    if args.digitisers is None:
+        args.digitisers = args.antennas
     return args
 
 
@@ -89,14 +92,14 @@ def generate_config(args: argparse.Namespace) -> dict:
         config["config"]["image_overrides"] = image_overrides
     if args.develop:
         config["config"]["develop"] = True
-    next_dig_ip = args.digitisers
+    next_dig_ip = args.digitiser_address
     dig_names = []
-    for ant_index in range(args.antennas):
+    for ant_index in range(args.digitisers):
         number = 800 + ant_index  # Avoid confusion with real antennas
         for pol in ["v", "h"]:
             name = f"m{number}{pol}"
             dig_names.append(name)
-            if args.digitisers is None:
+            if args.digitiser_address is None:
                 config["outputs"][name] = {
                     "type": "sim.dig.raw_antenna_voltage",
                     "band": args.band,
@@ -119,7 +122,9 @@ def generate_config(args: argparse.Namespace) -> dict:
 
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
-        "src_streams": dig_names,
+        # Cycle through digitisers as necessary
+        "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * args.antennas)],
+        "input_labels": [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]],
         "n_chans": args.channels,
     }
     if args.last_stage == "f":
