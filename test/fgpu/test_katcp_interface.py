@@ -41,7 +41,7 @@ class TestKatcpRequests:
 
     async def test_quant_gain_set(self, engine_client, engine_server):
         """Test that the quant gain is correctly set."""
-        _reply, _informs = await engine_client.request("quant-gain", 0.2)
+        await engine_client.request("quant-gain", 0.2)
         assert engine_server._processor.compute.quant_gain == 0.2
 
     @pytest.mark.parametrize(
@@ -61,13 +61,22 @@ class TestKatcpRequests:
         """
         start_time = SYNC_EPOCH + 10
         with pytest.raises(aiokatcp.FailReply):
-            _reply, _informs = await engine_client.request("delays", start_time, malformed_delay_string)
+            await engine_client.request("delays", start_time, malformed_delay_string, malformed_delay_string)
 
     async def test_delay_model_update_missing_argument(self, engine_client):
         """Test that a delay request with a missing argument is rejected."""
         with pytest.raises(aiokatcp.FailReply):
             # Missing start time argument
-            _reply, _informs = await engine_client.request("delays", "3.76,0.12:7.322,1.91")
+            await engine_client.request("delays", "3.76,0.12:7.322,1.91")
+        with pytest.raises(aiokatcp.FailReply):
+            # Only one of the two models
+            await engine_client.request("delays", "123456789.0", "3.76,0.12:7.322,1.91")
+
+    async def test_delay_model_update_too_many_arguments(self, engine_client):
+        """Test that a delay request with too many arguments is rejected."""
+        coeffs = "3.76,0.12:7.322,1.91"
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("delays", "123456789.0", coeffs, coeffs, coeffs)
 
 
 class TestKatcpSensors:

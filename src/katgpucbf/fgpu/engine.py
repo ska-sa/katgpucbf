@@ -220,7 +220,7 @@ class Engine(aiokatcp.DeviceServer):
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
-        self.delay_model = MultiDelayModel()
+        self.delay_models = [MultiDelayModel() for _ in range(N_POLS)]
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
         chunk_samples = spectra * channels * 2
@@ -230,7 +230,7 @@ class Engine(aiokatcp.DeviceServer):
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
         compute.quant_gain = quant_gain
-        self._processor = Processor(compute, self.delay_model, use_gdrcopy, monitor, self.sensors)
+        self._processor = Processor(compute, self.delay_models, use_gdrcopy, monitor, self.sensors)
 
         ringbuffer_capacity = 2
         ring = spead2.recv.asyncio.ChunkRingbuffer(ringbuffer_capacity)
@@ -406,7 +406,7 @@ class Engine(aiokatcp.DeviceServer):
         # modify it in any way.
         self.sensors["quant-gain"].set_value(self._processor.compute.quant_gain)
 
-    async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, delays: str) -> None:
+    async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model.
 
         .. todo::
@@ -421,9 +421,8 @@ class Engine(aiokatcp.DeviceServer):
             b = float(b_str)
             return a, b
 
-        delay_str, phase_str = delays.split(":")
-        delay, delay_rate = comma_string_to_float(delay_str)
-        phase, phase_rate = comma_string_to_float(phase_str)
+        if len(delays) != len(self.delay_models):
+            raise aiokatcp.FailReply(f"wrong number of delay coefficient sets (expected {len(self.delay_models)})")
 
         # This will round the start time of the new delay model to the nearest
         # ADC sample. If the start time given doesn't coincide with an ADC sample,
@@ -433,24 +432,29 @@ class Engine(aiokatcp.DeviceServer):
         # then we'd need to compensate for that here.
         start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
 
-        delay_samples = delay * self.adc_sample_rate
-        # For compatibility with MeerKAT, the phase given is the net change in
-        # phase for the centre frequency, including delay, and we need to
-        # compensate for the effect of the delay at that frequency. The centre
-        # frequency is 4 samples per cycle, so each sample of delay reduces
-        # phase by pi/2 radians.
-        delay_phase_correction = 0.5 * np.pi * delay_samples
-        phase += delay_phase_correction
-        phase_rate_correction = 0.5 * np.pi * delay_rate
-        new_linear_model = LinearDelayModel(
-            start_sample_count,
-            delay_samples,
-            delay_rate,
-            phase,
-            phase_rate / self.adc_sample_rate + phase_rate_correction,
-        )
+        for coeffs, delay_model in zip(delays, self.delay_models):
+            delay_str, phase_str = coeffs.split(":")
+            delay, delay_rate = comma_string_to_float(delay_str)
+            phase, phase_rate = comma_string_to_float(phase_str)
 
-        self.delay_model.add(new_linear_model)
+            delay_samples = delay * self.adc_sample_rate
+            # For compatibility with MeerKAT, the phase given is the net change in
+            # phase for the centre frequency, including delay, and we need to
+            # compensate for the effect of the delay at that frequency. The centre
+            # frequency is 4 samples per cycle, so each sample of delay reduces
+            # phase by pi/2 radians.
+            delay_phase_correction = 0.5 * np.pi * delay_samples
+            phase += delay_phase_correction
+            phase_rate_correction = 0.5 * np.pi * delay_rate
+            new_linear_model = LinearDelayModel(
+                start_sample_count,
+                delay_samples,
+                delay_rate,
+                phase,
+                phase_rate / self.adc_sample_rate + phase_rate_correction,
+            )
+
+            delay_model.add(new_linear_model)
 
     async def start(self) -> None:
         """Start the engine.
