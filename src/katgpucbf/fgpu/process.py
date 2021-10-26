@@ -28,7 +28,7 @@ import functools
 import logging
 import time
 from collections import deque
-from typing import Deque, Iterable, List, Optional, Sequence, cast
+from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import spead2.recv
@@ -52,6 +52,16 @@ def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel
 
 def _host_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.HostArray:
     return accel.HostArray(slot.shape, slot.dtype, slot.required_padded_shape(), context=context)
+
+
+def _invert_models(
+    delay_models: Iterable[AbstractDelayModel], start: int, stop: int, step: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Call :meth:`.AbstractDelayModel.invert_range` on multiple delay models and stack results."""
+    # Each element of parts is a tuple of results from one delay model
+    parts = [model.invert_range(start, stop, step) for model in delay_models]
+    # Transpose so that each element of groups is one result from all delay models
+    return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
 
 
 class BaseItem:
@@ -576,61 +586,66 @@ class Processor:
             # If the input starts too late for the next expected timestamp,
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
-            timestamp = self._out_item.end_timestamp
-            orig_timestamp, _fine_delay, _phase = self.delay_models[0].invert(timestamp)
-            if orig_timestamp < self._in_items[0].timestamp:
+            start_timestamp = self._out_item.end_timestamp
+            orig_start_timestamps = [model.invert(start_timestamp)[0] for model in self.delay_models]
+            if min(orig_start_timestamps) < self._in_items[0].timestamp:
                 align = self.spectra_per_heap * self.spectra_samples
-                timestamp = max(timestamp, self._in_items[0].timestamp)
-                timestamp = accel.roundup(timestamp, align)
+                start_timestamp = max(start_timestamp, self._in_items[0].timestamp)
+                start_timestamp = accel.roundup(start_timestamp, align)
                 # TODO: add a helper to the delay model to accelerate this?
                 # Might not be needed, since max delay is not many multiples of
                 # align.
                 while True:
-                    orig_timestamp, _fine_delay, _phase = self.delay_models[0].invert(timestamp)
-                    if orig_timestamp >= self._in_items[0].timestamp:
+                    orig_start_timestamps = [model.invert(start_timestamp)[0] for model in self.delay_models]
+                    if min(orig_start_timestamps) >= self._in_items[0].timestamp:
                         break
-                    timestamp += align
-                await self._flush_out(timestamp)
-            assert timestamp == self._out_item.end_timestamp
+                    start_timestamp += align
+                await self._flush_out(start_timestamp)
+            # When we add new spectra they must follow contiguously for any
+            # that we've already buffered.
+            assert start_timestamp == self._out_item.end_timestamp
 
-            # This block does some basic coarse delay.
+            # Compute the coarse delay for the first sample.
             # `orig_timestamp` is the timestamp of first sample from the input
             # to process in the PFB to produce the output spectrum with
             # `timestamp`. `offset` is the sample index corresponding to
             # `orig_timestamp` within the InItem.
-            coarse_delay = timestamp - orig_timestamp
-            offset = orig_timestamp - self._in_items[0].timestamp
+            start_coarse_delays = [start_timestamp - orig_timestamp for orig_timestamp in orig_start_timestamps]
+            offsets = [orig_timestamp - self._in_items[0].timestamp for orig_timestamp in orig_start_timestamps]
 
             # Identify a block of frontend work. We can grow it until
             # - we run out of the current input array;
             # - we fill up the output array; or
-            # - the coarse delay changes;
+            # - the coarse delay changes.
             # We speculatively calculate delays until one of the first two is
             # met, then truncate if we observe a coarse delay change.
+            # TODO: max_end_in is overly conservative, because we can carry on until the
+            # *original* timestamp is this large
             max_end_in = self._in_items[0].end_timestamp - self.taps * self.spectra_samples + 1
             max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
-            timestamps = np.arange(timestamp, max_end, self.spectra_samples)
-            orig_timestamps, fine_delays, phase = self.delay_models[0].invert_range(
-                timestamp, max_end, self.spectra_samples
+            timestamps = np.arange(start_timestamp, max_end, self.spectra_samples)
+            orig_timestamps, fine_delays, phase = _invert_models(
+                self.delay_models, start_timestamp, max_end, self.spectra_samples
             )
-            coarse_delays = timestamps - orig_timestamps
-            # Uses fact that argmax returns first maximum i.e. first true value
-            delay_change = int(np.argmax(coarse_delays != coarse_delay))
-            if coarse_delays[delay_change] != coarse_delay:
-                logger.debug(
-                    "Coarse delay changed from %d to %d at %d",
-                    coarse_delay,
-                    coarse_delays[delay_change],
-                    orig_timestamps[delay_change],
-                )
-                orig_timestamps = orig_timestamps[:delay_change]
-                fine_delays = fine_delays[:delay_change]
-                phase = phase[:delay_change]
-                batch_spectra = delay_change
-            else:
-                batch_spectra = len(orig_timestamps)
+            for pol in range(len(orig_timestamps)):
+                coarse_delays = timestamps - orig_timestamps[pol]
+                # Uses fact that argmax returns first maximum i.e. first true value
+                delay_change = int(np.argmax(coarse_delays != start_coarse_delays[pol]))
+                if coarse_delays[delay_change] != start_coarse_delays[pol]:
+                    logger.debug(
+                        "Coarse delay on pol %d changed from %d to %d at %d",
+                        pol,
+                        start_coarse_delays[pol],
+                        coarse_delays[delay_change],
+                        orig_timestamps[pol, delay_change],
+                    )
+                    timestamps = timestamps[:delay_change]
+                    orig_timestamps = orig_timestamps[:, :delay_change]
+                    fine_delays = fine_delays[:, :delay_change]
+                    phase = phase[:, :delay_change]
+            batch_spectra = orig_timestamps.shape[1]
 
             # Here we run the "frontend" which handles:
             # - 10-bit to float conversion
@@ -641,15 +656,12 @@ class Processor:
                 # TODO: here we're just duplicating the fine delay and phase
                 # across the polarisations. We should actually use separate
                 # delay models.
-                self._out_item.fine_delay[
-                    self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra
-                ] = fine_delays[:, np.newaxis]
+                out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
+                self._out_item.fine_delay[out_slice] = fine_delays.T
                 # Divide by pi because the arguments of sincospif() used in the
                 # kernel are in radians/PI.
-                self._out_item.phase[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra] = (
-                    phase[:, np.newaxis] / np.pi
-                )
-                self.compute.run_frontend(self._in_items[0].samples, offset, self._out_item.n_spectra, batch_spectra)
+                self._out_item.phase[out_slice] = phase.T / np.pi
+                self.compute.run_frontend(self._in_items[0].samples, offsets, self._out_item.n_spectra, batch_spectra)
                 self._out_item.n_spectra += batch_spectra
 
             # The _flush_out method calls the "backend" which triggers the FFT
