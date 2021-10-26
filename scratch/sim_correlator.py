@@ -10,6 +10,7 @@ configuration can be written to file to be manually started later.
 import argparse
 import asyncio
 import contextlib
+import ipaddress
 import json
 import sys
 from dataclasses import dataclass
@@ -39,19 +40,27 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=5001, help="TCP port of the SDP master controller [%(default)s]")
     parser.add_argument("--name", default="sim_correlator", help="Subarray product name [%(default)s]")
     parser.add_argument("-a", "--antennas", type=int, required=True, help="Number of antennas")
+    parser.add_argument("-d", "--digitisers", type=int, help="Number of digitisers [#antennas]")
     parser.add_argument("-c", "--channels", type=int, required=True, help="Number of channels")
-    parser.add_argument("-i", "--int-time", type=float, help="Integration time in seconds [%(default)s]")
+    parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
         "--last-stage",
         choices=["d", "f", "x"],
         default="x",
         help="Do not run any stages past the given one [%(default)s]",
     )
+    parser.add_argument(
+        "--digitiser-address",
+        type=ipaddress.IPv4Address,
+        metavar="ADDRESS",
+        help="Starting IP address for external digitisers",
+    )
     parser.add_argument("--band", default="l", choices=["l", "u"], help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
+    parser.add_argument("--develop", action="store_true", help="Run without specialised hardware")
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
     )
@@ -60,6 +69,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         args.adc_sample_rate = BANDS[args.band].adc_sample_rate
     if args.centre_frequency is None:
         args.centre_frequency = BANDS[args.band].centre_frequency
+    if args.digitisers is None:
+        args.digitisers = args.antennas
     return args
 
 
@@ -68,6 +79,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     config: dict = {
         "version": "3.1",
         "config": {},
+        "inputs": {},
         "outputs": {},
     }
     if args.image_tag is not None:
@@ -78,23 +90,41 @@ def generate_config(args: argparse.Namespace) -> dict:
             name, image = override.split(":", 1)
             image_overrides[name] = image
         config["config"]["image_overrides"] = image_overrides
-    for ant_index in range(args.antennas):
+    if args.develop:
+        config["config"]["develop"] = True
+    next_dig_ip = args.digitiser_address
+    dig_names = []
+    for ant_index in range(args.digitisers):
         number = 800 + ant_index  # Avoid confusion with real antennas
         for pol in ["v", "h"]:
             name = f"m{number}{pol}"
-            config["outputs"][name] = {
-                "type": "sim.dig.raw_antenna_voltage",
-                "band": args.band,
-                "adc_sample_rate": args.adc_sample_rate,
-                "centre_frequency": args.centre_frequency,
-                "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
-            }
+            dig_names.append(name)
+            if args.digitiser_address is None:
+                config["outputs"][name] = {
+                    "type": "sim.dig.raw_antenna_voltage",
+                    "band": args.band,
+                    "adc_sample_rate": args.adc_sample_rate,
+                    "centre_frequency": args.centre_frequency,
+                    "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
+                }
+            else:
+                config["inputs"][name] = {
+                    "type": "dig.raw_antenna_voltage",
+                    "band": args.band,
+                    "adc_sample_rate": args.adc_sample_rate,
+                    "centre_frequency": args.centre_frequency,
+                    "antenna": f"m{number}",
+                    "url": f"spead://{next_dig_ip}+7:7148",
+                }
+                next_dig_ip += 8
     if args.last_stage == "d":
         return config
 
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
-        "src_streams": list(config["outputs"]),
+        # Cycle through digitisers as necessary
+        "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * args.antennas)],
+        "input_labels": [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]],
         "n_chans": args.channels,
     }
     if args.last_stage == "f":
@@ -103,7 +133,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     config["outputs"]["baseline_correlation_products"] = {
         "type": "gpucbf.baseline_correlation_products",
         "src_streams": ["antenna_channelised_voltage"],
-        "int_time": 0.5,
+        "int_time": args.int_time,
     }
     return config
 
