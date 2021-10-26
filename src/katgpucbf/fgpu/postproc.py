@@ -69,6 +69,10 @@ class Postproc(accel.Operation):
     **out** : (spectra // spectra_per_heap, channels, spectra_per_heap, 2, 2), int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.
+    **fine_delay** : spectra × 2, float32
+        Fine delay in samples (one value per pol).
+    **phase** : spectra × 2, float32
+        Fixed phase adjustment in radians (one value per pol).
 
     The inputs need to have dimension `channels+1` because cuFFT calculates
     N/2+1 output channels, i.e. the Nyquist frequency is included.  The kernel
@@ -117,8 +121,8 @@ class Postproc(accel.Operation):
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, pols, cplx), np.int8)
-        self.slots["fine_delay"] = accel.IOSlot((spectra,), np.float32)
-        self.slots["phase"] = accel.IOSlot((spectra,), np.float32)
+        self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
+        self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
         self.quant_gain = 1.0
 
     def _run(self) -> None:

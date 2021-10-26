@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from katsdpsigproc import accel
 
+from katgpucbf import N_POLS
 from katgpucbf.fgpu import postproc
 
 pytestmark = [pytest.mark.cuda_only]
@@ -48,8 +49,12 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay,
 
 def postproc_host(in0, in1, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain):
     """Aggregate both polarisation's postproc on the host CPU."""
-    out0 = postproc_host_pol(in0, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain)
-    out1 = postproc_host_pol(in1, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain)
+    out0 = postproc_host_pol(
+        in0, channels, spectra_per_heap_out, spectra, fine_delay[:, 0], fringe_phase[:, 0], quant_gain
+    )
+    out1 = postproc_host_pol(
+        in1, channels, spectra_per_heap_out, spectra, fine_delay[:, 1], fringe_phase[:, 1], quant_gain
+    )
     return np.stack([out0, out1], axis=3)
 
 
@@ -63,8 +68,8 @@ def test_postproc(context, command_queue, repeat=1):
     rng = np.random.default_rng(seed=1)
     h_in0 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
     h_in1 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
-    h_fine_delay = rng.uniform(0.0, 2.0, (spectra,)).astype(np.float32)
-    h_phase = rng.uniform(0.0, np.pi / 2, (spectra,)).astype(np.float32)
+    h_fine_delay = rng.uniform(0.0, 2.0, (spectra, N_POLS)).astype(np.float32)
+    h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
     expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, quant_gain)
 
     template = postproc.PostprocTemplate(context)
