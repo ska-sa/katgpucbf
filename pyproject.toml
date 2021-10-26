@@ -33,7 +33,7 @@ line_length = 120
 [tool.pytest.ini_options]
 testpaths = "test"
 addopts = "--cov-context=test --cov-report html --import-mode=prepend"
-markers = ["mask_timestamp"]
+markers = ["mask_timestamp", "use_gdrcopy"]
 filterwarnings = [
 	'ignore:`np\..*` is a deprecated alias::pycuda\.compyte\.dtypes',
 	'ignore:`np\..*` is a deprecated alias::skcuda\.misc',

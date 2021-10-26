@@ -20,6 +20,7 @@ from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
 import async_timeout
+import numpy as np
 import pytest
 import spead2.recv
 import spead2.send.asyncio
@@ -88,6 +89,17 @@ def recv_max_chunks_one(monkeypatch) -> None:
     monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
 
 
+def check_gdrcopy(context: AbstractContext) -> None:
+    """Check whether gdrcopy works on `context`, and skip the test if not."""
+    gdrcopy = pytest.importorskip("gdrcopy")
+    pytest.importorskip("gdrcopy.pycuda")
+    try:
+        gdr = gdrcopy.Gdr()
+        gdrcopy.pycuda.allocate(gdr, (32 * 1024 * 1024,), np.uint8)
+    except Exception as exc:
+        pytest.skip(f"gdrcopy not functional on this GPU: {exc}")
+
+
 @pytest.fixture
 async def engine_server(
     request, mock_recv_streams, mock_send_stream, recv_max_chunks_one, context: AbstractContext
@@ -99,7 +111,11 @@ async def engine_server(
     get the :class:`~.fgpu.Engine` running so that the KATCP interface can be
     tested.
     """
-    server, _monitor = make_engine(context, arglist=request.cls.engine_arglist)
+    arglist = list(request.cls.engine_arglist)
+    if request.node.get_closest_marker("use_gdrcopy"):
+        check_gdrcopy(context)
+        arglist.append("--use-gdrcopy")
+    server, _monitor = make_engine(context, arglist=arglist)
 
     await server.start()
     yield server
