@@ -619,11 +619,16 @@ class Processor:
             # - The PFB-FIR.
             if batch_spectra > 0:
                 logging.debug("Processing %d spectra", batch_spectra)
+                # TODO: here we're just duplicating the fine delay and phase
+                # across the polarisations. We should actually use separate
+                # delay models.
                 self._out_item.fine_delay[
                     self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra
-                ] = fine_delays
+                ] = fine_delays[:, np.newaxis]
+                # Divide by pi because the arguments of sincospif() used in the
+                # kernel are in radians/PI.
                 self._out_item.phase[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra] = (
-                    phase / np.pi  # because the arguments of sincospif() used in the kernel are in radians/PI
+                    phase[:, np.newaxis] / np.pi
                 )
                 self.compute.run_frontend(self._in_items[0].samples, offset, self._out_item.n_spectra, batch_spectra)
                 self._out_item.n_spectra += batch_spectra

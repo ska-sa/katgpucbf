@@ -67,8 +67,8 @@ KERNEL void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory.
     const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
     const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
-    const GLOBAL float * RESTRICT fine_delay, // Fine delay, in fraction of a sample.
-    const GLOBAL float * phase,               // Constant phase offset for fine delay [radians].
+    const GLOBAL float2 * RESTRICT fine_delay, // Fine delay, in fraction of a sample (per pol)
+    const GLOBAL float2 * RESTRICT phase,     // Constant phase offset for fine delay (per pol) [radians].
     int out_stride_z,                         // Output stride between heaps.
     int out_stride,                           // Output stride between channels within a heap.
     int in_stride,                            // Input stride between successive spectra.
@@ -94,17 +94,18 @@ KERNEL void postproc(
 
         // Apply fine delay.
         // TODO: load delays more efficiently (it's common across channels)
-        float delay = fine_delay[spectrum];
-        float ph = phase[spectrum];
-        float re, im;
+        float2 delay = fine_delay[spectrum];
+        float2 ph = phase[spectrum];
+        float re_x, im_x, re_y, im_y;
         /* Fine delay is in fractions of a sample. Gets multiplied by
          * delay_scale x ${c} to scale appropriately for the channel, and then
          * constant phase is added.
          */
         // Note: delay_scale incorporates the minus sign
-        sincospif(delay * delay_scale * ${c} + ph, &im, &re);
-        v0 = apply_delay(v0, re, im);
-        v1 = apply_delay(v1, re, im);
+        sincospif(delay.x * delay_scale * ${c} + ph.x, &im_x, &re_x);
+        sincospif(delay.y * delay_scale * ${c} + ph.y, &im_y, &re_y);
+        v0 = apply_delay(v0, re_x, im_x);
+        v1 = apply_delay(v1, re_y, im_y);
 
         // Interleave polarisations. Quantise at the same time.
         char4 packed;
