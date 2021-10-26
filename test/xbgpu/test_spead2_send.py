@@ -49,6 +49,7 @@ import spead2.recv.asyncio
 
 import katgpucbf.xbgpu.xsend
 from katgpucbf import COMPLEX
+from katgpucbf.spead import FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
 
 from . import test_parameters
 
@@ -215,17 +216,9 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
                     ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
                     assert np.all(item.value == num_received)
 
-            assert has_timestamp, (
-                "Received heap is missing timestamp item with ID " f"{hex(katgpucbf.xbgpu.xsend.XSend.TIMESTAMP_ID)}"
-            )
-            assert has_channel_offset, (
-                "Received heap is missing channel offset item with ID "
-                f"{hex(katgpucbf.xbgpu.xsend.XSend.CHANNEL_OFFSET)}"
-            )
-            assert has_xeng_raw, (
-                "Received heap is missing xeng_raw data buffer item with ID "
-                f"{hex(katgpucbf.xbgpu.xsend.XSend.DATA_ID)}"
-            )
+            assert has_timestamp, f"Received heap is missing timestamp item with ID {hex(TIMESTAMP_ID)}"
+            assert has_channel_offset, f"Received heap is missing channel offset item with ID {hex(FREQUENCY_ID)}"
+            assert has_xeng_raw, f"Received heap is missing xeng_raw data buffer item with ID {hex(XENG_RAW_ID)}"
 
             num_received += 1
 

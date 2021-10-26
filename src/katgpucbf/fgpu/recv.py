@@ -32,10 +32,10 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from ..monitor import Monitor
+from ..spead import TIMESTAMP_ID
 from . import BYTE_BITS
 
 logger = logging.getLogger(__name__)
-TIMESTAMP_ID = 0x1600
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
@@ -78,6 +78,11 @@ class Layout:
         return self.heap_samples * self.sample_bits // BYTE_BITS
 
     @property
+    def chunk_bytes(self) -> int:  # noqa: D401
+        """Number of bytes per chunk."""
+        return self.chunk_samples * self.sample_bits // BYTE_BITS
+
+    @property
     def chunk_heaps(self) -> int:  # noqa: D401
         """Number of heaps per chunk."""
         return self.chunk_samples // self.heap_samples
@@ -101,7 +106,7 @@ class Layout:
             types.void(types.CPointer(chunk_place_data), types.uintp),
             nopython=True,
         )
-        def chunk_place_impl(data_ptr, data_size):
+        def chunk_place_impl(data_ptr, data_size):  # pragma: nocover
             data = numba.carray(data_ptr, 1)
             items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
             timestamp = items[0]
@@ -190,7 +195,7 @@ async def chunk_sets(
 
             # If we have both chunks and they match up, then we can yield.
             if all(c is not None and c.chunk_id == chunk.chunk_id for c in buf):
-                if sensors:
+                if sensors is not None:
                     # Get explicit timestamp to ensure that all the updated sensors
                     # have the same timestamp.
                     sensor_timestamp = time.time()
@@ -210,7 +215,9 @@ async def chunk_sets(
                     # determine the number missing. This accounts for both
                     # heaps lost within chunks and lost chunks.
                     received_heaps = sensors["input-heaps-total"].value
-                    expected_heaps = (chunk.timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
+                    expected_heaps = (
+                        (chunk.timestamp - first_timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
+                    )
                     missing = expected_heaps - received_heaps
                     if missing > sensors["input-missing-heaps-total"].value:
                         sensors["input-missing-heaps-total"].set_value(missing, timestamp=sensor_timestamp)

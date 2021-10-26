@@ -26,9 +26,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import COMPLEX, N_POLS
-
-TIMESTAMP_ID = 0x1600
-FENGINE_ID = 0x4101
+from ..spead import FENG_ID_ID, TIMESTAMP_ID
 
 
 class Chunk(spead2.recv.Chunk):
@@ -114,7 +112,7 @@ def make_stream(
         max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 4,
     )
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, FENGINE_ID, spead2.HEAP_LENGTH_ID],
+        items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_chunks=max_active_chunks,
         place=scipy.LowLevelCallable(chunk_place_impl.ctypes, signature="void (void *, size_t)"),
     )

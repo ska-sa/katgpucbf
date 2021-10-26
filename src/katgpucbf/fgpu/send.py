@@ -25,13 +25,8 @@ from katsdpsigproc.accel import DeviceArray
 from katsdptelstate.endpoint import Endpoint
 
 from .. import N_POLS
+from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 
-#: SPEAD flavour to ues
-FLAVOUR = spead2.Flavour(4, 64, 48, 0)
-TIMESTAMP_ID = 0x1600
-FENG_ID_ID = 0x4101
-FREQUENCY_ID = 0x4103
-FENG_RAW_ID = 0x4300
 #: Number of non-payload bytes per packet (header, 8 items pointers, 3 padding pointers)
 PREAMBLE_SIZE = 96
 
