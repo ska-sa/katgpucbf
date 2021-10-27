@@ -295,7 +295,15 @@ class TestEngine:
 
     # One delay value is tested with gdrcopy
     @pytest.mark.parametrize(
-        "delay_samples", [0.0, 8192.0, 42.0, 42.4, 42.7, pytest.param(42.8, marks=[pytest.mark.use_gdrcopy])]
+        "delay_samples",
+        [
+            (0.0, 0.0),
+            (8192.0, 234.5),
+            (42.0, 58.0),
+            (42.4, 24.2),
+            (42.7, 24.9),
+            pytest.param((42.8, 24.5), marks=[pytest.mark.use_gdrcopy]),
+        ],
     )
     async def test_channel_centre_tones(
         self,
@@ -303,7 +311,7 @@ class TestEngine:
         mock_send_stream: List[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
-        delay_samples: float,
+        delay_samples: Tuple[float, float],
     ) -> None:
         """Put in tones at channel centre frequencies, with delays, and check the result."""
         # Delay the tone by a negative amount, then compensate with a positive delay.
@@ -313,10 +321,10 @@ class TestEngine:
         # happens in MeerKAT L-band.
         tone_channels = [64, 271]
         tones = [
-            CW(frac_channel=1 + tone_channels[0] / CHANNELS, magnitude=80.0, delay=-delay_samples),
-            CW(frac_channel=1 + tone_channels[1] / CHANNELS, magnitude=110.0, phase=1.23, delay=-delay_samples),
+            CW(frac_channel=1 + tone_channels[0] / CHANNELS, magnitude=80.0, delay=-delay_samples[0]),
+            CW(frac_channel=1 + tone_channels[1] / CHANNELS, magnitude=110.0, phase=1.23, delay=-delay_samples[1]),
         ]
-        delay_s = delay_samples / ADC_SAMPLE_RATE
+        delay_s = np.array(delay_samples) / ADC_SAMPLE_RATE
         sky_centre_frequency = 0.75 * ADC_SAMPLE_RATE
         # Compute phase correction to compensate for the down-conversion.
         # (delay_s is negated here because in the original it is the signal
@@ -324,8 +332,8 @@ class TestEngine:
         # Based on katpoint.delay.DelayCorrection.corrections
         phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
         phase_correction = -phase
-        coeffs = f"{delay_s},0.0:{phase_correction},0.0"
-        await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs)
+        coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
+        await engine_client.request("delays", SYNC_EPOCH, *coeffs)
 
         src_layout = engine_server._src_layout
         n_samples = 20 * src_layout.chunk_samples
@@ -338,9 +346,9 @@ class TestEngine:
         expected_first_timestamp = first_timestamp
         # The data should have as many samples as the input, minus a reduction
         # from PFB windowing, rounded down to a full heap.
-        expected_spectra = (n_samples + delay_samples) // (CHANNELS * 2) - (TAPS - 1)
+        expected_spectra = (n_samples + min(delay_samples)) // (CHANNELS * 2) - (TAPS - 1)
         expected_spectra = expected_spectra // SPECTRA_PER_HEAP * SPECTRA_PER_HEAP
-        if delay_samples > 0:
+        if max(delay_samples) > 0:
             # The first output heap would require data from before the first
             # timestamp, so it does not get produced
             expected_first_timestamp += CHANNELS * 2 * SPECTRA_PER_HEAP
@@ -438,12 +446,15 @@ class TestEngine:
         src_layout = engine_server._src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
+        dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
 
-        delay_rate = 1e-5  # Should be high enough to cause multiple coarse delay changes per chunk
-        phase_rate_per_sample = 30 / n_samples  # Should wrap multiple times over the test
+        # Should be high enough to cause multiple coarse delay changes per chunk
+        delay_rate = np.array([1e-5, 1.2e-5])
+        # Should wrap multiple times over the test
+        phase_rate_per_sample = np.array([30, 32.5]) / n_samples
         phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
-        coeffs = f"0.0,{delay_rate}:0.0,{phase_rate}"
-        await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs)
+        coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
+        await engine_client.request("delays", SYNC_EPOCH, *coeffs)
 
         first_timestamp = 100 * src_layout.chunk_samples
         out_data, timestamps = await self._send_data(
@@ -453,12 +464,14 @@ class TestEngine:
             dig_data,
             first_timestamp=first_timestamp,
         )
-        out_data = out_data[..., 0]  # Only pol 0 has interesting data
+        # Add a polarisation dimension to timestamps to simplify some
+        # broadcasting computations below.
+        timestamps = timestamps[:, np.newaxis]
         # Invert the delay model to find the corresponding input timestamps,
         # which in turn tells us the delay and phase rate applied at those times.
         # If t_i is the input timestamp and t_o is the output timestamp, then the
         # delay is t_i * delay_rate and hence t_o = t_i * (1 + delay_rate).
-        timestamps = timestamps / (1 + delay_rate)
+        timestamps = timestamps / (1 + delay_rate)  # shape Nx2
         expected_phase = wrap_angle(phase_rate_per_sample * timestamps)
         np.testing.assert_equal(
             wrap_angle(np.angle(out_data[tone_channels[0]]) - expected_phase), pytest.approx(0.0, abs=0.01)
