@@ -198,6 +198,12 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
     parser.add_argument(
+        "--max-delay-diff",
+        type=int,
+        default=1048576,
+        help="Maximum supported difference between delays across polarisations (in samples) [%(default)s]",
+    )
+    parser.add_argument(
         "--quant-gain", type=float, default=0.001, help="Rescaling factor before 8-bit requantisation [%(default)s]"
     )
     parser.add_argument(
@@ -304,6 +310,7 @@ def make_engine(ctx: AbstractContext, *, arglist: List[str] = None) -> Tuple[Eng
         spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
         taps=args.taps,
+        max_delay_diff=args.max_delay_diff,
         quant_gain=args.quant_gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
         mask_timestamp=args.mask_timestamp,

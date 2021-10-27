@@ -41,6 +41,7 @@ SYNC_EPOCH = 1632561921
 CHANNELS = 1024
 SPECTRA_PER_HEAP = 256
 CHUNK_SAMPLES = 1048576  # Lower than the default to make tests quicker
+MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
@@ -91,6 +92,7 @@ class TestEngine:
         f"--channels={CHANNELS}",
         f"--sync-epoch={SYNC_EPOCH}",
         f"--chunk-samples={CHUNK_SAMPLES}",
+        f"--max-delay-diff={MAX_DELAY_DIFF}",
         f"--spectra-per-heap={SPECTRA_PER_HEAP}",
         f"--feng-id={FENG_ID}",
         f"--taps={TAPS}",

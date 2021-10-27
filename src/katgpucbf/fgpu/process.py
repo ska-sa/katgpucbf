@@ -489,6 +489,7 @@ class Processor:
             if self._in_items[0].end_timestamp == self._in_items[1].timestamp:
                 sample_bits = self._in_items[0].sample_bits
                 copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
+                copy_samples = min(copy_samples, self._in_items[1].n_samples)
                 copy_bytes = copy_samples * sample_bits // BYTE_BITS
                 for pol in range(len(self._in_items[0].samples)):
                     self._in_items[1].samples[pol].copy_region(

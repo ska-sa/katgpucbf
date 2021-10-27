@@ -201,6 +201,7 @@ class Engine(aiokatcp.DeviceServer):
         spectra_per_heap: int,
         channels: int,
         taps: int,
+        max_delay_diff: int,
         quant_gain: float,
         sync_epoch: float,
         mask_timestamp: bool,
@@ -224,7 +225,9 @@ class Engine(aiokatcp.DeviceServer):
         queue = context.create_command_queue()
         template = ComputeTemplate(context, taps)
         chunk_samples = spectra * channels * 2
-        extra_samples = taps * channels * 2
+        extra_samples = max_delay_diff + taps * channels * 2
+        if extra_samples > chunk_samples:
+            raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
         chunk_bytes = chunk_samples * compute.sample_bits // BYTE_BITS
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
