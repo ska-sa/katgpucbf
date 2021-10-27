@@ -490,6 +490,19 @@ class Processor:
                 self._in_items[0].n_samples += copy_samples
         return True
 
+    def _pop_in(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
+        """Remove the oldest InItem."""
+        item = self._in_items.popleft()
+        event = self.compute.command_queue.enqueue_marker()
+        if self._use_gdrcopy:
+            item.samples = []
+            chunks = item.chunks
+            item.chunks = []
+            asyncio.create_task(self._push_chunks(streams, chunks, event))
+        else:
+            item.events.append(event)
+        self.in_free_queue.put_nowait(item)
+
     async def _next_out(self, new_timestamp: int) -> OutItem:
         """Grab the next free OutItem in the queue."""
         with self.monitor.with_state("run_processing", "wait out_free_queue"):
@@ -648,18 +661,9 @@ class Processor:
 
             if end_timestamp >= max_end_in:
                 # We've exhausted the input buffer.
-                # TODO: should also do this if _in_items[1] would work just as
-                # well and we've filled the output buffer.
-                item = self._in_items.popleft()
-                event = self.compute.command_queue.enqueue_marker()
-                if self._use_gdrcopy:
-                    item.samples = []
-                    chunks = item.chunks
-                    item.chunks = []
-                    asyncio.create_task(self._push_chunks(streams, chunks, event))
-                else:
-                    item.events.append(event)
-                self.in_free_queue.put_nowait(item)
+                # TODO: should maybe also do this if _in_items[1] would work
+                # just as well and we've filled the output buffer.
+                self._pop_in(streams)
         await self._flush_out(0)  # Timestamp doesn't matter since we're finished
         logger.debug("run_processing completed")
         self.out_queue.put_nowait(None)
