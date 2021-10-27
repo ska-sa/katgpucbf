@@ -618,10 +618,11 @@ class Processor:
             # - we fill up the output array; or
             # - the coarse delay changes.
             # We speculatively calculate delays until one of the first two is
-            # met, then truncate if we observe a coarse delay change.
-            # TODO: max_end_in is overly conservative, because we can carry on until the
-            # *original* timestamp is this large
-            max_end_in = self._in_items[0].end_timestamp - self.taps * self.spectra_samples + 1
+            # met, then truncate if we observe a coarse delay change. Note:
+            # max_end_in is computed assuming the coarse delay does not change.
+            max_end_in = (
+                self._in_items[0].end_timestamp + min(start_coarse_delays) - self.taps * self.spectra_samples + 1
+            )
             max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met

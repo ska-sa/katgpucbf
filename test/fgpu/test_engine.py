@@ -293,7 +293,7 @@ class TestEngine:
 
     # One delay value is tested with gdrcopy
     @pytest.mark.parametrize(
-        "delay_samples", [0.0, 2048.0, 42.0, 42.4, 42.7, pytest.param(42.8, marks=[pytest.mark.use_gdrcopy])]
+        "delay_samples", [0.0, 8192.0, 42.0, 42.4, 42.7, pytest.param(42.8, marks=[pytest.mark.use_gdrcopy])]
     )
     async def test_channel_centre_tones(
         self,
