@@ -11,6 +11,7 @@ dst_comp=$dst_affinity
 other_affinity="$((6*$1+4))"
 srcs="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
 dst="239.102.$((200+$1)).0+15:7148"
+port="$(($1+7140))"
 
 case "$1" in
     0|1)
@@ -28,7 +29,7 @@ case "$1" in
 esac
 
 set -x
-exec cap_net_raw taskset -c $other_affinity fgpu \
+exec spead2_net_raw taskset -c $other_affinity fgpu \
     --src-interface $iface --src-ibv \
     --dst-interface $iface --dst-ibv \
     --src-affinity $src_affinity --src-comp-vector=$src_comp \
@@ -37,6 +38,6 @@ exec cap_net_raw taskset -c $other_affinity fgpu \
     --channels 32768 \
     --quant-gain 0.0001 \
     --dst-packet-payload 8192 \
-    --katcp-port 0 \
+    --katcp-port $port \
     --sync-epoch 0 \
     $srcs $dst
