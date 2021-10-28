@@ -322,7 +322,8 @@ class TestEngine:
         # Based on katpoint.delay.DelayCorrection.corrections
         phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
         phase_correction = -phase
-        await engine_client.request("delays", SYNC_EPOCH, f"{delay_s},0.0:{phase_correction},0.0")
+        coeffs = f"{delay_s},0.0:{phase_correction},0.0"
+        await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs)
 
         src_layout = engine_server._src_layout
         n_samples = 20 * src_layout.chunk_samples
@@ -439,7 +440,8 @@ class TestEngine:
         delay_rate = 1e-5  # Should be high enough to cause multiple coarse delay changes per chunk
         phase_rate_per_sample = 30 / n_samples  # Should wrap multiple times over the test
         phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
-        await engine_client.request("delays", SYNC_EPOCH, f"0.0,{delay_rate}:0.0,{phase_rate}")
+        coeffs = f"0.0,{delay_rate}:0.0,{phase_rate}"
+        await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs)
 
         first_timestamp = 100 * src_layout.chunk_samples
         out_data, timestamps = await self._send_data(
@@ -485,7 +487,8 @@ class TestEngine:
         update_times = [0, 123456, 400000, 1234567, 1234567890]  # in samples
         update_phases = [1.0, 0.2, -0.2, -2.0, 0.0]
         for time, phase in zip(update_times, update_phases):
-            await engine_client.request("delays", SYNC_EPOCH + time / ADC_SAMPLE_RATE, f"0.0,0.0:{phase},0.0")
+            coeffs = f"0.0,0.0:{phase},0.0"
+            await engine_client.request("delays", SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
 
         out_data, timestamps = await self._send_data(
             mock_recv_streams,

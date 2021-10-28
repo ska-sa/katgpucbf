@@ -340,8 +340,8 @@ class Processor:
     compute
         :class:`OperationSequence` containing all the steps for carrying out the
         F-engine's processing.
-    delay_model
-        The delay model which should be applied to the data.
+    delay_models
+        The delay models which should be applied to the data.
     use_gdrcopy
         Assemble chunks directly in GPU memory (requires supported GPU).
     monitor
@@ -356,13 +356,13 @@ class Processor:
     def __init__(
         self,
         compute: Compute,
-        delay_model: AbstractDelayModel,
+        delay_models: Sequence[AbstractDelayModel],
         use_gdrcopy: bool,
         monitor: Monitor,
         sensors: Optional[SensorSet],
     ) -> None:
         self.compute = compute
-        self.delay_model = delay_model
+        self.delay_models = delay_models
         n_in = 3
         n_out = 2
         n_send = 4
@@ -558,7 +558,7 @@ class Processor:
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
             timestamp = self._out_item.end_timestamp
-            orig_timestamp, _fine_delay, _phase = self.delay_model.invert(timestamp)
+            orig_timestamp, _fine_delay, _phase = self.delay_models[0].invert(timestamp)
             if orig_timestamp < self._in_items[0].timestamp:
                 align = self.spectra_per_heap * self.spectra_samples
                 timestamp = max(timestamp, self._in_items[0].timestamp)
@@ -567,7 +567,7 @@ class Processor:
                 # Might not be needed, since max delay is not many multiples of
                 # align.
                 while True:
-                    orig_timestamp, _fine_delay, _phase = self.delay_model.invert(timestamp)
+                    orig_timestamp, _fine_delay, _phase = self.delay_models[0].invert(timestamp)
                     if orig_timestamp >= self._in_items[0].timestamp:
                         break
                     timestamp += align
@@ -593,7 +593,7 @@ class Processor:
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
             timestamps = np.arange(timestamp, max_end, self.spectra_samples)
-            orig_timestamps, fine_delays, phase = self.delay_model.invert_range(
+            orig_timestamps, fine_delays, phase = self.delay_models[0].invert_range(
                 timestamp, max_end, self.spectra_samples
             )
             coarse_delays = timestamps - orig_timestamps
