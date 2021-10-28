@@ -683,9 +683,13 @@ class XBEngine(DeviceServer):
             # be replaced with old-fashioned format strings.
             if dropped_heaps != 0:
                 logger.warning(
-                    f"Chunk: {chunk_index:>5} Timestamp: {hex(timestamp)} "
-                    f"Received: {received_heaps:>4} of {expected_heaps:>4} expected heaps. "
-                    f"All time dropped heaps: {dropped_heaps_total}/{expected_heaps_total}."
+                    "Chunk: %5d Timestamp: %#x Received: %4d of %4d expected heaps. All time dropped heaps: %d/%d.",
+                    chunk_index,
+                    timestamp,
+                    received_heaps,
+                    expected_heaps,
+                    dropped_heaps_total,
+                    expected_heaps_total,
                 )
                 self.sensors["input-missing-heaps-total"].set_value(dropped_heaps_total, timestamp=sensor_timestamp)
 
@@ -850,9 +854,11 @@ class XBEngine(DeviceServer):
             # TODO: change to an old-fashioned formatted string. fstrings aren't
             # great for logging.
             logger.info(
-                f"Current output heap timestamp: {hex(item.timestamp)}, difference between timestamps: "
-                f"{hex(item.timestamp - old_timestamp)}, wall time between dumps "
-                f"{round(time_difference_between_heaps_s, 2)} s"
+                "Current output heap timestamp: %#x, difference between timestamps: %#x, "
+                "wall time between dumps %.2f s",
+                item.timestamp,
+                item.timestamp - old_timestamp,
+                time_difference_between_heaps_s,
             )
 
             # 3.2. Ensure that the timestamp between output heaps is the value that is expected,
@@ -861,8 +867,9 @@ class XBEngine(DeviceServer):
             # This check is here pre-emptivly - this issue has not been detected yet.
             if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
                 logger.warning(
-                    f"Timestamp between heaps equal to {hex(item.timestamp - old_timestamp)}, expected "
-                    f"{hex(self.timestamp_increment_per_accumulation)}"
+                    "Timestamp between heaps equal to %#x, expected %#x",
+                    item.timestamp - old_timestamp,
+                    self.timestamp_increment_per_accumulation,
                 )
 
             # 3.3. Check that items are not being received faster than they are expected to be send.
@@ -871,10 +878,11 @@ class XBEngine(DeviceServer):
             # overflowing.
             if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
                 logger.warning(
-                    f"Time between output heaps: {round(time_difference_between_heaps_s,2)} "
-                    f"which is less the expected {round(self.dump_interval_s,2)}. "
+                    "Time between output heaps: %.2f which is less the expected %.2f. "
                     "If this warning occurs too often, the pipeline will stall "
-                    "because the rate limited sender will not keep up with the input rate."
+                    "because the rate limited sender will not keep up with the input rate.",
+                    time_difference_between_heaps_s,
+                    self.dump_interval_s,
                 )
 
             # 3.4 Update variables used for warning checks.
