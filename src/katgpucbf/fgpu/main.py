@@ -318,6 +318,7 @@ def make_engine(ctx: AbstractContext, *, arglist: List[str] = None) -> Tuple[Eng
 async def async_main() -> None:
     """Start the F-Engine asynchronously."""
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
+    logger.info("Initialising F-engine on %s", ctx.device.name)
     engine, monitor = make_engine(ctx)
     add_signal_handlers(engine)
     with monitor:
