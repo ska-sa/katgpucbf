@@ -453,6 +453,56 @@ class Processor:
             self.in_queue.put_nowait(None)
         return item
 
+    async def _fill_in(self) -> bool:
+        """Load sufficient InItems to continue processing.
+
+        Tries to get at least two items into ``self._in_items``, and if
+        loading a second item that is adjacent to the first, copies the overlap
+        region.
+
+        Returns true if processing can proceed, false if the stream is
+        exhausted.
+        """
+        if len(self._in_items) == 0:
+            if not (await self._next_in()):
+                return False
+        if len(self._in_items) == 1 and (await self._next_in()):
+            # Copy the head of the new chunk to the tail of the older chunk
+            # to allow for PFB windows to fit and for some protection against
+            # sharp changes in delay.
+            #
+            # This could only fail if we'd lost a whole input chunk of
+            # data from the digitiser. In that case the data we'd like
+            # to copy is missing so we can't do this step.
+            # TODO: Currently fgpu doesn't have much (really any)
+            # handling for missing data.
+            if self._in_items[0].end_timestamp == self._in_items[1].timestamp:
+                sample_bits = self._in_items[0].sample_bits
+                copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
+                copy_bytes = copy_samples * sample_bits // BYTE_BITS
+                for pol in range(len(self._in_items[0].samples)):
+                    self._in_items[1].samples[pol].copy_region(
+                        self.compute.command_queue,
+                        self._in_items[0].samples[pol],
+                        np.s_[:copy_bytes],
+                        np.s_[-copy_bytes:],
+                    )
+                self._in_items[0].n_samples += copy_samples
+        return True
+
+    def _pop_in(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
+        """Remove the oldest InItem."""
+        item = self._in_items.popleft()
+        event = self.compute.command_queue.enqueue_marker()
+        if self._use_gdrcopy:
+            item.samples = []
+            chunks = item.chunks
+            item.chunks = []
+            asyncio.create_task(self._push_chunks(streams, chunks, event))
+        else:
+            item.events.append(event)
+        self.in_free_queue.put_nowait(item)
+
     async def _next_out(self, new_timestamp: int) -> OutItem:
         """Grab the next free OutItem in the queue."""
         with self.monitor.with_state("run_processing", "wait out_free_queue"):
@@ -522,38 +572,7 @@ class Processor:
         streams
             These only seem to be used in the _use_gdrcopy case.
         """
-        # TODO: add a final flush on CancelledError?
-        while True:
-            # Get two (dual-pol) items (chunks) to work with.
-            if len(self._in_items) == 0:
-                if not (await self._next_in()):
-                    break
-            if len(self._in_items) == 1 and (await self._next_in()):
-                # Copy the head of the new chunk to the tail of the older chunk
-                # to allow for PFB windows to fit and for some protection against
-                # sharp changes in delay.
-                if self._in_items[0].end_timestamp == self._in_items[1].timestamp:
-                    # ? And if it doesn't?
-                    sample_bits = self._in_items[0].sample_bits
-                    copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
-                    copy_bytes = copy_samples * sample_bits // BYTE_BITS
-                    for pol in range(len(self._in_items[0].samples)):
-                        self._in_items[1].samples[pol].copy_region(
-                            self.compute.command_queue,
-                            self._in_items[0].samples[pol],
-                            np.s_[:copy_bytes],
-                            np.s_[-copy_bytes:],
-                        )
-                    self._in_items[0].n_samples += copy_samples
-                else:
-                    # BAD THINGS!
-                    # This could only happen if we'd lost a whole input chunk of
-                    # data from the digitiser. In that case the data we'd like
-                    # to copy is missing so we can't do this step.
-                    # TODO: Currently fgpu doesn't have much (really any)
-                    # handling for missing data.
-                    pass
-
+        while await self._fill_in():
             # If the input starts too late for the next expected timestamp,
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
@@ -642,18 +661,9 @@ class Processor:
 
             if end_timestamp >= max_end_in:
                 # We've exhausted the input buffer.
-                # TODO: should also do this if _in_items[1] would work just as
-                # well and we've filled the output buffer.
-                item = self._in_items.popleft()
-                event = self.compute.command_queue.enqueue_marker()
-                if self._use_gdrcopy:
-                    item.samples = []
-                    chunks = item.chunks
-                    item.chunks = []
-                    asyncio.create_task(self._push_chunks(streams, chunks, event))
-                else:
-                    item.events.append(event)
-                self.in_free_queue.put_nowait(item)
+                # TODO: should maybe also do this if _in_items[1] would work
+                # just as well and we've filled the output buffer.
+                self._pop_in(streams)
         await self._flush_out(0)  # Timestamp doesn't matter since we're finished
         logger.debug("run_processing completed")
         self.out_queue.put_nowait(None)
