@@ -367,9 +367,8 @@ class Processor:
         n_out = 2
         n_send = 4
 
-        # TODO test whether Python 3.8 allows for moving these type hints to the
-        # normal place. asyncio.Queue doesn't support indexing, and this broke
-        # things in 3.6, but 3.8 may have fixed it.
+        # The type annotations have to be in comments because Python 3.8
+        # doesn't support the syntax at runtime (Python 3.9 fixes that).
         self.in_queue = monitor.make_queue("in_queue", n_in)  # type: asyncio.Queue[Optional[InItem]]
         self.in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
         self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[Optional[OutItem]]
