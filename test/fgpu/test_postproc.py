@@ -40,7 +40,7 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay,
     # Convert to integer
     corrected = np.rint(corrected * quant_gain)
     # Cast to integer with saturation
-    corrected = np.minimum(np.maximum(corrected, -128), 127)
+    corrected = np.minimum(np.maximum(corrected, -127), 127)
     corrected = corrected.astype(np.int8)
     # Partial transpose
     reshaped = corrected.reshape(-1, spectra_per_heap_out, channels, 2)
@@ -58,12 +58,12 @@ def postproc_host(in0, in1, channels, spectra_per_heap_out, spectra, fine_delay,
     return np.stack([out0, out1], axis=3)
 
 
-def test_postproc(context, command_queue, repeat=1):
+@pytest.mark.parametrize("quant_gain", [0.1, 0.5])
+def test_postproc(context, command_queue, quant_gain, repeat=1):
     """Test GPU Postproc for numerical correctness."""
     channels = 4096
     spectra_per_heap_out = 256
     spectra = 512
-    quant_gain = 0.1
     # TODO: make properly complex
     rng = np.random.default_rng(seed=1)
     h_in0 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
@@ -85,6 +85,7 @@ def test_postproc(context, command_queue, repeat=1):
     h_out = fn.buffer("out").get(command_queue)
 
     np.testing.assert_allclose(h_out, expected, atol=1)
+    assert np.min(h_out) >= -127  # Ensure -128 gets clamped to -127
 
 
 if __name__ == "__main__":

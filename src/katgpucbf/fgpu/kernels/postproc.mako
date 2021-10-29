@@ -27,17 +27,19 @@ DEVICE_FN float2 apply_delay(float2 in, float re, float im)
 
 DEVICE_FN char quant(float value, float quant_gain)
 {
+    int out;
     value *= quant_gain;
 #ifdef __OPENCL_VERSION__
-    return convert_char_sat_rte(value);
+    out = convert_char_sat_rte(value);
 #else
-    int out;
     // Convert to s8, round to nearest integer, and saturate
     asm("cvt.rni.sat.s8.f32 %0, %1;" : "=r" (out) : "f"(value));
+#endif
+    // Clamp -128 to -127 to give symmetrical output
+    out = (out == -128) ? -127 : out;
     return out; // Returning an int as a char can lose values, but since we have
                 // just made sure it's s8 in the previous line, it's guaranteed
                 // not to.
-#endif
 }
 
 /* Kernel that handles:
