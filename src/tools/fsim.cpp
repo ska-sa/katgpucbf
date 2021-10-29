@@ -98,7 +98,6 @@ struct options
 
 static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
                                       // be consistent with the F-Engine packet simulator.
-static constexpr size_t n_multicast_streams_per_antenna = 4;
 static constexpr size_t n_pols = 2;                    // Dual polarisation antennas
 static constexpr size_t complexity = 2;                // real and imaginary components
 static constexpr size_t packet_header_size_bytes = 96; // Nine 8-byte header fields and three padding fields.
@@ -351,8 +350,9 @@ struct fengines
                  spead2::send::stream_config()
                      .set_max_packet_size(opts.packet_payload_size_bytes + packet_header_size_bytes)
                      .set_rate(opts.dAdcSampleRate * n_pols * sample_bits / 8.0 *
+                               opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
                                (opts.heap_size_bytes + opts.packets_per_heap * packet_header_size_bytes) /
-                               opts.heap_size_bytes / n_multicast_streams_per_antenna)
+                               opts.heap_size_bytes)
                      .set_max_heaps(opts.iMaxHeaps * opts.n_ants),
                  spead2::send::udp_ibv_config()
                      .set_endpoints(endpoints)
@@ -508,8 +508,9 @@ int main(int argc, const char **argv)
 
     // 4. Kick off packet transmission
     float dDataRate_Gbps = opts.dAdcSampleRate * n_pols * sample_bits *
+                           opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
                            (opts.heap_size_bytes + opts.packets_per_heap * packet_header_size_bytes) /
-                           opts.heap_size_bytes / n_multicast_streams_per_antenna / 1024 / 1024 / 1024;
+                           opts.heap_size_bytes / 1e9;
     std::cout << "Beginning fsim data transmission at " << dDataRate_Gbps << " Gbps..." << std::endl;
 
     for (size_t i = 0; i < endpoints.size(); i++)
