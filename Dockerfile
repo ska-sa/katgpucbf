@@ -32,7 +32,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==21.1.3 setuptools==57.1.0 wheel==0.36.2
+RUN pip install pip==21.3.1 setuptools==58.3.0 wheel==0.36.2
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that we when we want to update we only have to do it in
