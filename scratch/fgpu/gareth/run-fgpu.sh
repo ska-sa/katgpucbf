@@ -1,8 +1,15 @@
 #!/bin/bash
 set -e -u
 
-iface1=enp129s0f0np0
-iface2=enp129s0f1np1
+# This NIC seems to be dropping a lot of incoming packets
+# (maybe contending with GPU on the same host bridge?)
+# iface1=enp129s0f0np0
+# iface2=enp129s0f1np1
+
+iface1=enp130s0f0
+iface2=enp130s0f1
+cuda1=0
+cuda2=0
 
 src_affinity="$((6*$1)),$((6*$1+1))"
 src_comp=$src_affinity
@@ -16,11 +23,11 @@ port="$(($1+7140))"
 case "$1" in
     0|1)
         iface="$iface1"
-        export CUDA_VISIBLE_DEVICES=0
+        export CUDA_VISIBLE_DEVICES="$cuda1"
         ;;
     2|3)
         iface="$iface2"
-        export CUDA_VISIBLE_DEVICES=1
+        export CUDA_VISIBLE_DEVICES="$cuda2"
         ;;
     *)
         echo "Pass 0-3" 1>&2
