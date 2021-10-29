@@ -135,28 +135,19 @@ def create_test_objects(
     )
     ig.add_item(
         FENG_ID_ID,
-        "fengine id",
+        "feng_id",
         "F-Engine heap is received from.",
         shape=[],
         format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig.add_item(
         FREQUENCY_ID,
-        "channel offset",
+        "frequency",
         "Value of first channel in collections stored here.",
         shape=[],
         format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
-    # 3.1 Adding padding to header so it is the required width.
-    for i in range(3):
-        ig.add_item(
-            FREQUENCY_ID + 1 + i,
-            f"padding {i}",
-            "Padding field {i} to align header to 256-bit boundary.",
-            shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
-        )
 
     # 4. Configure receiver
 
@@ -253,12 +244,9 @@ def create_heaps(
         sample_array = sample_array.view(np.int8)
 
         ig["timestamp"].value = timestamp
-        ig["fengine id"].value = ant_index
-        ig["channel offset"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
+        ig["feng_id"].value = ant_index
+        ig["frequency"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
         ig["feng_raw"].value = sample_array
-        ig["padding 0"].value = 0
-        ig["padding 1"].value = 0
-        ig["padding 2"].value = 0
         heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
 
         # This function makes sure that the immediate values in each heap are transmitted per packet in the heap. By
