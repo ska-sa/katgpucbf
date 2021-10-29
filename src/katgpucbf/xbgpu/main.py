@@ -183,8 +183,8 @@ async def async_main(args: argparse.Namespace) -> None:
     else:
         monitor = NullMonitor()
 
-    logger.info("Initialising XB-Engine")
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
+    logger.info("Initialising XB-Engine on %s", context.device.name)
     xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
