@@ -154,12 +154,9 @@ def create_heaps(
 
         # 2.3 Assign all values to the heap fields.
         ig["timestamp"].value = timestamp
-        ig["fengine id"].value = ant_index
-        ig["channel offset"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
+        ig["feng_id"].value = ant_index
+        ig["frequency"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
         ig["feng_raw"].value = sample_array
-        ig["padding 0"].value = 0
-        ig["padding 1"].value = 0
-        ig["padding 2"].value = 0
 
         # 2.4 Create the heap, configure it to send pointers in each packet and create the heap reference object
         # required by the sender object.
@@ -311,28 +308,19 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
     )
     ig_send.add_item(
         FENG_ID_ID,
-        "fengine id",
+        "feng_id",
         "F-Engine heap is received from.",
         shape=[],
         format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig_send.add_item(
         FREQUENCY_ID,
-        "channel offset",
+        "frequency",
         "Value of first channel in collections stored here.",
         shape=[],
         format=[("u", FLAVOUR.heap_address_bits)],
     )
     ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
-    # 2.1 Adding padding to header so it is the required width.
-    for i in range(3):
-        ig_send.add_item(
-            FREQUENCY_ID + 1 + i,
-            f"padding {i}",
-            "Padding field {i} to align header to 256-bit boundary.",
-            shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
-        )
 
     # 3. Create receiver object to receive data from the xbengine.
     queue = spead2.InprocQueue()
