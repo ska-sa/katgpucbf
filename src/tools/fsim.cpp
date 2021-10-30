@@ -83,12 +83,12 @@ struct options
     int n_chans_per_output_stream = 128;
     int n_chans_total = 32768;
     int n_spectra_per_heap = 256;
+    size_t packet_payload_size_bytes = 8192;
     bool bRunOnce = false;
 
     // The variables below are not command-line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
     size_t heap_size_bytes;
-    size_t packet_payload_size_bytes;
     size_t packets_per_heap;
     size_t timestamp_step; // This is the amount the timestamp must increment between successive heaps of the same
                         // F-Engine.
@@ -130,6 +130,8 @@ static options parse_options(int argc, const char **argv)
                        "Each F-Engine output substream transmits a subset of the FFT channels.");
     desc.add_options()("spectra-per-heap", make_opt(opts.n_spectra_per_heap),
                        "The F-Engine cornerturn groups a number of samples into each channel per packet.");
+    desc.add_options()("packet-size", make_opt(opts.packet_payload_size_bytes),
+                       "The number of payload bytes per packet");
     desc.add_options()("run-once", make_opt(opts.bRunOnce), "Transmit a single collection of heaps before exiting.");
     hidden.add_options()(
         "address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
@@ -161,14 +163,13 @@ static options parse_options(int argc, const char **argv)
     }
 
     /*
-     * NOTE: For the F-Engine output case, each heap is quite large but contains many smaller packets. Each packet
-     * encapsualtes a single channel's worth of samples. Each packet also contains other SPEAD data and is thus slightly
-     * larger than 1 KiB.
+     * NOTE: For the F-Engine output case, each heap is quite large but
+     * contains many smaller packets. Each packet also contains other SPEAD
+     * data and is thus slightly larger than the payload size.
      */
     opts.heap_size_bytes =
         opts.n_chans_per_output_stream * opts.n_spectra_per_heap * n_pols * complexity * sample_bits / 8;
-    opts.packet_payload_size_bytes = opts.n_spectra_per_heap * n_pols * complexity;
-    opts.packets_per_heap = opts.heap_size_bytes / opts.packet_payload_size_bytes;
+    opts.packets_per_heap = (opts.heap_size_bytes + opts.packet_payload_size_bytes - 1) / opts.packet_payload_size_bytes;
     opts.timestamp_step =
         opts.n_chans_total * 2 * opts.n_spectra_per_heap; // The *2 is due to the spectrum being cut in half due
                                                           // to symmetric properties of the fourier transform
