@@ -238,7 +238,6 @@ def make_stream(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
-    use_gdrcopy: bool,
     monitor: Monitor,
 ) -> spead2.recv.ChunkRingStream:
     """Create a receive stream for one polarisation.
@@ -257,14 +256,12 @@ def make_stream(
         Output ringbuffer to which chunks will be sent
     affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
-    use_gdrcopy
-        If true, assume that the chunk payload memory is allocated from gdrcopy
     monitor
         Queue performance monitor
     """
     stream_config = spead2.recv.StreamConfig(
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
-        memcpy=spead2.MEMCPY_NONTEMPORAL if use_gdrcopy else spead2.MEMCPY_STD,
+        memcpy=spead2.MEMCPY_NONTEMPORAL,
         stream_id=pol,
     )
     chunk_stream_config = spead2.recv.ChunkStreamConfig(

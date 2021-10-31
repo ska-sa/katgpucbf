@@ -247,7 +247,6 @@ class Engine(aiokatcp.DeviceServer):
                 self._src_layout,
                 ring,
                 src_affinity[pol],
-                use_gdrcopy=use_gdrcopy,
                 monitor=monitor,
             )
             for pol in range(N_POLS)

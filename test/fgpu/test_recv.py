@@ -82,7 +82,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     :func:`ringbuffer` for output.
     """
     monitor = NullMonitor()
-    streams = [recv.make_stream(pol, layout, ringbuffer, -1, False, monitor) for pol in range(N_POLS)]
+    streams = [recv.make_stream(pol, layout, ringbuffer, -1, monitor) for pol in range(N_POLS)]
     for stream, queue in zip(streams, queues):
         for _ in range(4):
             data = np.empty(layout.chunk_bytes, np.uint8)
