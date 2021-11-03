@@ -125,7 +125,7 @@ static options parse_options(int argc, const char **argv)
                        "Each F-Engine output substream transmits a subset of the FFT channels");
     desc.add_options()("spectra-per-heap", make_opt(opts.n_spectra_per_heap),
                        "The F-Engine cornerturn groups a number of samples into each channel per packet");
-    desc.add_options()("packet-size", make_opt(opts.packet_payload_size_bytes),
+    desc.add_options()("dst-packet-payload", make_opt(opts.packet_payload_size_bytes),
                        "The number of payload bytes per packet");
     desc.add_options()("run-once", make_opt(opts.bRunOnce), "Transmit a single collection of heaps before exiting");
     hidden.add_options()(
