@@ -4,7 +4,7 @@ set -e -u
 
 iface1=enp130s0f0
 iface2=enp130s0f1
-channels_per_substream=256
+channels_per_substream=${channels_per_substream:-512}
 
 affinity="$(($1 * 3))"
 rx_affinity=$(($affinity+1))
@@ -39,10 +39,10 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --dst-affinity $tx_affinity \
     --dst-interface $iface \
     --src-interface $iface \
-    --adc-sample-rate 1712000000 \
-    --array-size 64 \
-    --spectra-per-heap 256 \
-    --channels 32768 \
+    --adc-sample-rate ${adc_sample_rate:-1712000000} \
+    --array-size ${array_size:-64} \
+    --spectra-per-heap ${spectra_per_heap:-256} \
+    --channels ${channels:-32768} \
     --channels-per-substream $channels_per_substream \
     --channel-offset-value $channel_offset \
     --katcp-port $port \
