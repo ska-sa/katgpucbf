@@ -139,7 +139,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dst-packet-payload",
         type=int,
-        default=1024,
+        default=8192,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
