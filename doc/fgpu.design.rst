@@ -179,7 +179,7 @@ One of the more challenging aspects of the processing design was the handling
 of delays. In the end we chose to exploit the fact that the expected delay
 rates are very small, typically leading to at most one coarse delay change per
 chunk. We thus break up each chunk into sections where the coarse delay is
-constant.
+constant for both polarisations.
 
 Our approach is based on inverting the delay model: output timestamps are
 regularly spaced, and for each output spectrum, determine the sample in the
@@ -189,6 +189,16 @@ the PFB. Unlike the MeerKAT FPGA F-engine, this means that every output
 spectrum has a common delay for all samples. There will also likely be
 differences from the MeerKAT F-engine when there are large discontinuities in
 the delay model, as the inversion becomes ambiguous.
+
+The polarisations are allowed to have independent delay models. To accommodate
+different coarse delays, the space at the end of each chunk (to which the start
+of the following chunk is copied to accommodate the PFB footprint) is expanded,
+to ensure that as long as one polarisation's input starts within the chunk
+proper, both can be serviced from the extended chunk. This involves a tradeoff
+where support for larger differential delays requires more memory and more
+bandwidth. The dominant terms of the delay are shared between polarisations,
+and the differential delay is expected to be extremely small (tens of
+nanoseconds), so this has minimal impact.
 
 The GPU processing is split into a front-end and a back-end: the front-end
 consists of just the PFB FIR, while the backend consists of FFT and
