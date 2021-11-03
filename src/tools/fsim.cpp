@@ -24,7 +24,7 @@
  * https://github.com/ska-sa/katfgpu/blob/master/scratch/dsim.cpp
  *
  * This simulator uses the spead2 library to transmit the F-Engine data. spead2 uses ibverbs to accelerate packet
- * transmission. Lossless transmit rates up to 34 Gbps have been tested, but it is expected that higher rates can be
+ * transmission. Lossless transmit rates up to 55 Gbps have been tested, but it is expected that higher rates can be
  * achieved. By default the cap_net_raw capability is required to use ibverbs.
  *
  * The minimum command to run the fsim is:
@@ -36,10 +36,10 @@
  * address.
  * <port> is the UDP port to transmit data to.
  *
- * By default the fsim transmits data at 6.8 Gbps + packet overhead. This depends on the sample rate of the antenna
+ * By default the fsim transmits data at 27.4 Gbps + packet overhead. This depends on the sample rate of the antenna
  * ADCs, the number of antennas, and the fraction of the band transmitted. The data rate is equal to
  * adc_rate * number_of_pols * sample_size_bits * antennas * (channels_per_substream / fft_channels)
- * = 1712000000 * 2 * 8 * 64 * (128/32768) = 6.8 Gbps.
+ * = 1712000000 * 2 * 8 * 64 * (512/32768) = 27.4 Gbps.
  * In this example if the [+y] argument is specified, the total rate out of the fsim is equal to
  * 6.8 * (y + 1) Gbps. To change the rate pass command-line arguments.
  *
@@ -75,7 +75,7 @@ struct options
     double dAdcSampleRate = 1712000000.0;
     int iTtl = 4;
     int n_ants = 64;
-    int n_chans_per_output_stream = 128;
+    int n_chans_per_output_stream = 512;
     int n_chans_total = 32768;
     int n_spectra_per_heap = 256;
     size_t packet_payload_size_bytes = 8192;
@@ -119,13 +119,13 @@ static options parse_options(int argc, const char **argv)
     desc.add_options()("adc-sample-rate", make_opt(opts.dAdcSampleRate), "Sampling rate of digitisers feeding the F-Engine");
     desc.add_options()("ttl", make_opt(opts.iTtl), "Output TTL (Time to live)");
     desc.add_options()("array-size", make_opt(opts.n_ants), "Number of antennas in the array");
-    desc.add_options()("fft-channels", make_opt(opts.n_chans_total),
+    desc.add_options()("channels", make_opt(opts.n_chans_total),
                        "Number of channels out of the FFT. (Normally half of FFT size)");
     desc.add_options()("channels-per-substream", make_opt(opts.n_chans_per_output_stream),
                        "Each F-Engine output substream transmits a subset of the FFT channels");
     desc.add_options()("spectra-per-heap", make_opt(opts.n_spectra_per_heap),
                        "The F-Engine cornerturn groups a number of samples into each channel per packet");
-    desc.add_options()("packet-size", make_opt(opts.packet_payload_size_bytes),
+    desc.add_options()("dst-packet-payload", make_opt(opts.packet_payload_size_bytes),
                        "The number of payload bytes per packet");
     desc.add_options()("run-once", make_opt(opts.bRunOnce), "Transmit a single collection of heaps before exiting");
     hidden.add_options()(

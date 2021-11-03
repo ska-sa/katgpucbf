@@ -41,10 +41,10 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --dst-interface $iface --dst-ibv \
     --src-affinity $src_affinity --src-comp-vector=$src_comp \
     --dst-affinity $dst_affinity --dst-comp-vector=$dst_comp \
-    --adc-sample-rate 1712000000 \
-    --channels 32768 \
+    --adc-sample-rate ${adc_sample_rate:-1712000000} \
+    --channels ${channels:-32768} \
+    --spectra-per-heap ${spectra_per_heap:-256} \
     --quant-gain 0.0001 \
-    --dst-packet-payload 8192 \
     --katcp-port $port \
     --sync-epoch 0 \
     $srcs $dst

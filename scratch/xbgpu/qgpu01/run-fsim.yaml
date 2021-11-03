@@ -5,5 +5,3 @@ windows:
       panes:
           - ./run-fsim.sh 0
           - ./run-fsim.sh 1
-          - ./run-fsim.sh 2
-          - ./run-fsim.sh 3

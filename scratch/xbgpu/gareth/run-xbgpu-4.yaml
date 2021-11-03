@@ -1,4 +1,4 @@
-session_name: xbgpu-8
+session_name: xbgpu-4
 windows:
     - window_name: window1
       layout: tiled
@@ -7,7 +7,3 @@ windows:
           - ./run-xbgpu.sh 1
           - ./run-xbgpu.sh 2
           - ./run-xbgpu.sh 3
-          - ./run-xbgpu.sh 4
-          - ./run-xbgpu.sh 5
-          - ./run-xbgpu.sh 6
-          - ./run-xbgpu.sh 7

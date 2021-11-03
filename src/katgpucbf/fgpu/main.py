@@ -139,7 +139,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dst-packet-payload",
         type=int,
-        default=1024,
+        default=8192,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
@@ -156,9 +156,9 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--adc-sample-rate",
         type=float,
-        default=0.0,
+        required=True,
         metavar="HZ",
-        help="Digitiser sampling rate, used to determine transmission rate [fast as possible]",
+        help="Digitiser sampling rate, used to determine transmission rate and calculate delays",
     )
     parser.add_argument(
         "--send-rate-factor",
