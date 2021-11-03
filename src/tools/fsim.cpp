@@ -119,7 +119,7 @@ static options parse_options(int argc, const char **argv)
     desc.add_options()("adc-sample-rate", make_opt(opts.dAdcSampleRate), "Sampling rate of digitisers feeding the F-Engine");
     desc.add_options()("ttl", make_opt(opts.iTtl), "Output TTL (Time to live)");
     desc.add_options()("array-size", make_opt(opts.n_ants), "Number of antennas in the array");
-    desc.add_options()("fft-channels", make_opt(opts.n_chans_total),
+    desc.add_options()("channels", make_opt(opts.n_chans_total),
                        "Number of channels out of the FFT. (Normally half of FFT size)");
     desc.add_options()("channels-per-substream", make_opt(opts.n_chans_per_output_stream),
                        "Each F-Engine output substream transmits a subset of the FFT channels");
