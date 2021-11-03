@@ -63,9 +63,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adc-sample-rate",
         type=float,
-        default=1712000000.0,
-        help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall."
-        "[%(default)s]",
+        required=True,
+        help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall.",
     )
     parser.add_argument(
         "--send-rate-factor",
@@ -78,14 +77,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--channels",
         type=int,
-        default=32768,
-        help="Total number of channels out of the F-Engine PFB. [%(default)s]",
+        required=True,
+        help="Total number of channels out of the F-Engine PFB.",
     )
     parser.add_argument(
         "--channels-per-substream",
         type=int,
-        default=128,
-        help="Number of channels in the multicast stream that this engine receives data from. [%(default)s]",
+        required=True,
+        help="Number of channels in the multicast stream that this engine receives data from.",
     )
     parser.add_argument(
         "--channel-offset-value",
