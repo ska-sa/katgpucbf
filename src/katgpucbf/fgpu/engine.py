@@ -152,6 +152,8 @@ class Engine(aiokatcp.DeviceServer):
         Number of output channels to produce.
     taps
         Number of taps in each branch of the PFB-FIR
+    max_delay_diff
+        Maximum supported difference between delays across polarisations (in samples).
     quant_gain
         Rescaling factor to apply before 8-bit requantisation.
     sync_epoch

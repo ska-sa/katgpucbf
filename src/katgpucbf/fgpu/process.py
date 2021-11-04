@@ -573,9 +573,8 @@ class Processor:
 
         This function takes place entirely on the GPU. First, a little bit of
         the next chunk is copied to the end of the previous one, to allow for
-        the overlap required by the PFB. Some coarse delay happens (though this
-        is incomplete) and the PFB-FIR is run. Then a batch FFT operation is
-        applied, and finally, fine-delay (currently just a place-holder),
+        the overlap required by the PFB. Coarse delay happens. Then a batch FFT
+        operation is applied, and finally, fine-delay, phase correction,
         quantisation and corner-turn are performed.
 
         Parameters
@@ -655,9 +654,6 @@ class Processor:
             # - The PFB-FIR.
             if batch_spectra > 0:
                 logging.debug("Processing %d spectra", batch_spectra)
-                # TODO: here we're just duplicating the fine delay and phase
-                # across the polarisations. We should actually use separate
-                # delay models.
                 out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
                 self._out_item.fine_delay[out_slice] = fine_delays.T
                 # Divide by pi because the arguments of sincospif() used in the
