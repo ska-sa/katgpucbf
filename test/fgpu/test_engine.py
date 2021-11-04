@@ -28,7 +28,7 @@ import pytest
 import spead2.send
 from numpy.typing import ArrayLike
 
-from katgpucbf import COMPLEX, N_POLS
+from katgpucbf import COMPLEX, METRIC_NAMESPACE, N_POLS
 from katgpucbf.fgpu import SAMPLE_BITS, send
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
@@ -246,7 +246,7 @@ class TestEngine:
         heap_gens = [gen_heaps(src_layout, pol_data, first_timestamp, pol) for pol, pol_data in enumerate(dig_data)]
 
         def counter_inc(counter, amount=1, exemplar=None):
-            if counter.describe()[0].name == "input_heaps":
+            if counter.describe()[0].name == f"{METRIC_NAMESPACE}_input_heaps":
                 heaps_received_queue.put_nowait(amount)
 
         with mock.patch("prometheus_client.Counter.inc", side_effect=counter_inc, autospec=True):

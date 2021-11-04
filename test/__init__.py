@@ -20,6 +20,8 @@ from typing import Dict, List, Optional
 
 import prometheus_client
 
+from katgpucbf import METRIC_NAMESPACE
+
 
 class PromDiff:
     """Collects Prometheus metrics before and after test code, and provides differences.
@@ -29,6 +31,8 @@ class PromDiff:
         with PromDiff() as diff:
             ...  # Do stuff that increments counters
         diff.get_sample_diff(name, labels)
+
+    The names should exclude the METRIC_NAMESPACE.
     """
 
     def __init__(self, registry: prometheus_client.CollectorRegistry = prometheus_client.REGISTRY) -> None:
@@ -48,7 +52,7 @@ class PromDiff:
         samples: List[prometheus_client.samples.Sample], name: str, labels: Dict[str, str]
     ) -> Optional[float]:
         for s in samples:
-            if s.name == name and s.labels == labels:
+            if s.name == f"{METRIC_NAMESPACE}_{name}" and s.labels == labels:
                 return s.value
         return None
 

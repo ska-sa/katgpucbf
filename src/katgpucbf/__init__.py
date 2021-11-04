@@ -30,3 +30,4 @@ __all__ = ["__version__"]
 
 COMPLEX: Final[int] = 2
 N_POLS: Final[int] = 2
+METRIC_NAMESPACE: Final[str] = "kat"

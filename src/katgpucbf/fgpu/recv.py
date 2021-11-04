@@ -30,6 +30,7 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+from .. import METRIC_NAMESPACE
 from ..monitor import Monitor
 from ..spead import TIMESTAMP_ID
 from . import BYTE_BITS
@@ -40,10 +41,14 @@ logger = logging.getLogger(__name__)
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
 
-heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"])
-chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"])
-bytes_counter = Counter("input_bytes", "number of bytes of digitiser samples received", ["pol"])
-missing_heaps_counter = Counter("input_missing_heaps_total", "number of heaps dropped on the input", ["pol"])
+heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
+chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
+bytes_counter = Counter(
+    "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
+)
+missing_heaps_counter = Counter(
+    "input_missing_heaps_total", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
+)
 
 
 class Chunk(spead2.recv.Chunk):
