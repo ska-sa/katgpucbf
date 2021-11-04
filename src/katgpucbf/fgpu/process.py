@@ -26,16 +26,15 @@ ultimately to the NIC is also handled.
 import asyncio
 import functools
 import logging
-import time
 from collections import deque
 from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import spead2.recv
-from aiokatcp import Sensor, SensorSet
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
+from prometheus_client import Counter
 
 from .. import N_POLS
 from ..monitor import Monitor
@@ -44,6 +43,8 @@ from .compute import Compute
 from .delay import AbstractDelayModel
 
 logger = logging.getLogger(__name__)
+output_heaps_counter = Counter("output_heaps", "number of heaps transmitted")
+output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted")
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -357,10 +358,6 @@ class Processor:
     monitor
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
         and reporting their events.
-    sensors
-        The set of sensors from the parent :class:`~katgpucbf.fgpu.Engine` object,
-        currently needed for passing the dropped packet sensor down to the
-        receiver for updating.
     """
 
     def __init__(
@@ -369,7 +366,6 @@ class Processor:
         delay_models: Sequence[AbstractDelayModel],
         use_gdrcopy: bool,
         monitor: Monitor,
-        sensors: Optional[SensorSet],
     ) -> None:
         self.compute = compute
         self.delay_models = delay_models
@@ -385,7 +381,6 @@ class Processor:
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
-        self.sensors = sensors
         self.monitor = monitor
         self._spectra = []
         for _ in range(n_in):
@@ -695,7 +690,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, layout, self.monitor, self.sensors):
+        async for chunks in recv.chunk_sets(streams, layout, self.monitor):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
@@ -749,16 +744,8 @@ class Processor:
             logger.exception("Error sending chunk")
             return
 
-        if self.sensors is not None:
-            # Get a common timestamp for all the updates
-            sensor_timestamp = time.time()
-
-            def increment(sensor: Sensor, incr: int):
-                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-            increment(self.sensors["output-heaps-total"], n_heaps)
-            # out_item.spectra.shape[1:] is the shape of each frame
-            increment(self.sensors["output-bytes-total"], n_bytes)
+        output_heaps_counter.inc(n_heaps)
+        output_bytes_counter.inc(n_bytes)
 
     async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
