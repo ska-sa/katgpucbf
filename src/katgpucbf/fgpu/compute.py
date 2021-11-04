@@ -149,7 +149,9 @@ class Compute(accel.OperationSequence):
             compounds[f"fft_out{pol}"] = [f"fft{pol}:out", f"postproc:in{pol}"]
         super().__init__(command_queue, operations, compounds)
 
-    def run_frontend(self, samples: Sequence[accel.DeviceArray], in_offset: int, out_offset: int, spectra: int) -> None:
+    def run_frontend(
+        self, samples: Sequence[accel.DeviceArray], in_offsets: Sequence[int], out_offset: int, spectra: int
+    ) -> None:
         """Run the PFB-FIR on the received samples.
 
         Coarse delay also seems to be involved.
@@ -158,8 +160,8 @@ class Compute(accel.OperationSequence):
         ----------
         samples
             A pair of device arrays containing the samples, one for each pol.
-        in_offset
-            TODO: Figure out what this is. Something to do with coarse delay I think.
+        in_offsets
+            Index of first sample in input array to process (one for each pol).
         out_offset
             TODO: Figure out what this is. Need to refer to the actual pfb_fir kernel.
         spectra
@@ -167,6 +169,8 @@ class Compute(accel.OperationSequence):
         """
         if len(samples) != N_POLS:
             raise ValueError(f"samples must contain {N_POLS} elements")
+        if len(in_offsets) != N_POLS:
+            raise ValueError(f"in_offsets must contain {N_POLS} elements")
         for pol in range(N_POLS):
             self.bind(**{f"in{pol}": samples[pol]})
         # TODO: only bind relevant slots for frontend
@@ -174,7 +178,7 @@ class Compute(accel.OperationSequence):
         for pol in range(N_POLS):
             # TODO: could run these in parallel, but that would require two
             # command queues.
-            self.pfb_fir[pol].in_offset = in_offset
+            self.pfb_fir[pol].in_offset = in_offsets[pol]
             self.pfb_fir[pol].out_offset = out_offset
             self.pfb_fir[pol].spectra = spectra
             self.pfb_fir[pol]()
