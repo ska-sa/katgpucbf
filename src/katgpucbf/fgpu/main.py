@@ -30,6 +30,7 @@ from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import katsdpservices
 import katsdpsigproc.accel as accel
+import prometheus_async
 from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
@@ -104,6 +105,11 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_KATCP_PORT,
         help="Network port on which to listen for KATCP C&M connections [%(default)s]",
+    )
+    parser.add_argument(
+        "--prometheus-port",
+        type=int,
+        help="Network port on which to serve Prometheus metrics [none]",
     )
     parser.add_argument("--src-interface", type=get_interface_address, help="Name of input network device")
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
@@ -265,18 +271,16 @@ def add_signal_handlers(engine: Engine) -> None:
         loop.add_signal_handler(signum, handler)
 
 
-def make_engine(ctx: AbstractContext, *, arglist: List[str] = None) -> Tuple[Engine, Monitor]:
+def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine, Monitor]:
     """Make an :class:`Engine` object, given a GPU context.
 
     Parameters
     ----------
     ctx
         The GPU context in which the :class:`.Engine` will operate.
-    arglist
-        [Optional] list of arguments. See :func:`parse_args` for more details.
+    args
+        Parsed arguments returned from :func:`parse_args`.
     """
-    args = parse_args(arglist)
-
     monitor: Monitor
     if args.monitor_log is not None:
         monitor = FileMonitor(args.monitor_log)
@@ -324,13 +328,19 @@ def make_engine(ctx: AbstractContext, *, arglist: List[str] = None) -> Tuple[Eng
 
 async def async_main() -> None:
     """Start the F-Engine asynchronously."""
+    args = parse_args()
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     logger.info("Initialising F-engine on %s", ctx.device.name)
-    engine, monitor = make_engine(ctx)
+    engine, monitor = make_engine(ctx, args)
     add_signal_handlers(engine)
+    prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
+    if args.prometheus_port is not None:
+        prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
     with monitor:
         await engine.start()
         await engine.join()
+        if prometheus_server:
+            await prometheus_server.close()
 
 
 def main() -> None:
