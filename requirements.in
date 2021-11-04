@@ -1,3 +1,4 @@
+aiohttp
 aiokatcp
 katsdpservices
 katsdpsigproc[CUDA]
