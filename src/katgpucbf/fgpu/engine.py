@@ -40,12 +40,6 @@ logger = logging.getLogger(__name__)
 def generate_weights(channels: int, taps: int) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
-    .. todo::
-
-      Check for off-by-one/off-by-half issues. Seems to produce a filter which
-      is not perfectly symmetrical, which could produce some phase response in
-      the frequency domain.
-
     Parameters
     ----------
     channels
@@ -63,7 +57,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     window_size = step * taps
     idx = np.arange(window_size)
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
-    sinc = np.sinc(idx / step - taps / 2)
+    sinc = np.sinc((idx + 0.5) / step - taps / 2)
     weights = hann * sinc
     return weights.astype(np.float32)
 
