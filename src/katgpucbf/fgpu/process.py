@@ -34,7 +34,6 @@ import spead2.recv
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
-from prometheus_client import Counter
 
 from .. import N_POLS
 from ..monitor import Monitor
@@ -43,8 +42,6 @@ from .compute import Compute
 from .delay import AbstractDelayModel
 
 logger = logging.getLogger(__name__)
-output_heaps_counter = Counter("output_heaps", "number of heaps transmitted")
-output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted")
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -730,7 +727,7 @@ class Processor:
         logger.debug("run_receive completed")
         self.in_queue.put_nowait(None)
 
-    def _chunk_finished(self, chunk: send.Chunk, n_heaps: int, n_bytes: int, future: asyncio.Future) -> None:
+    def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
         """Return a chunk to the free queue after it has completed transmission.
 
         This is intended to be used as a callback on an :class:`asyncio.Future`.
@@ -739,13 +736,9 @@ class Processor:
         try:
             future.result()  # No result, but want the exception
         except asyncio.CancelledError:
-            return
+            pass
         except Exception:
             logger.exception("Error sending chunk")
-            return
-
-        output_heaps_counter.inc(n_heaps)
-        output_bytes_counter.inc(n_bytes)
 
     async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
@@ -790,12 +783,10 @@ class Processor:
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
             n_frames = out_item.n_spectra // self.spectra_per_heap
-            n_bytes = n_frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize
-            n_heaps = n_frames * stream.num_substreams
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
-            task.add_done_callback(functools.partial(self._chunk_finished, chunk, n_heaps, n_bytes))
+            task.add_done_callback(functools.partial(self._chunk_finished, chunk))
 
         if task:
             try:
