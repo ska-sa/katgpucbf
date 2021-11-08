@@ -29,9 +29,12 @@ one or more UDP packets. A SPEAD transmitter will decompose a heap into packets
 and the receiver will collect all the packets and reassemble the heap.
 
 The heaps and corresponding packet formats received by katxbgpu have already
-been defined. This `drawing`_ explains these formats in detail.
+been defined. The following image explains these formats in detail.
 
-.. _drawing: https://docs.google.com/drawings/d/1lFDS_1yBFeerARnw3YAA0LNin_24F7AWQZTJje5-XPg
+.. figure:: images/channelised_voltage_data_packet_format.svg
+  :width: 1087px
+
+  Channelised Voltage Data Packet Format
 
 SPEAD2
 ~~~~~~
