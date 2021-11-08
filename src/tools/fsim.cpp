@@ -226,8 +226,8 @@ struct heap_data
         /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control Document for
          * Correlator Beamformer Visibilities and Tied Array Data" (Document ID: M1000-0001-020 rev 4)
          *
-         * A rough document has been put together showing the exact packet format and byte offsets produced by the
-         * F-Engine - available at doc/images/channelised_voltage_data_packet_format.svg
+         * A rough explanation has been put together showing the exact packet format and byte offsets produced by the
+         * F-Engine - available at doc/xbgpu.networking.rst (Channelised Voltage Data Packet Format).
          */
 
         heap.add_item(0x4101, iFengId);                            // The index of the F-Engine data is sent from
