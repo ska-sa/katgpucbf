@@ -687,7 +687,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, layout, self.monitor):
+        async for chunks in recv.chunk_sets(streams, layout):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
