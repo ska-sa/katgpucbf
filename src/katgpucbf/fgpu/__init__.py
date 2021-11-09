@@ -16,5 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-SAMPLE_BITS = 10
-BYTE_BITS = 8
+from typing import Final
+
+SAMPLE_BITS: Final = 10
+BYTE_BITS: Final = 8
+METRIC_NAMESPACE: Final = "fgpu"

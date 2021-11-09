@@ -26,8 +26,9 @@ from katsdpsigproc.accel import DeviceArray
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
-from .. import METRIC_NAMESPACE, N_POLS
+from .. import N_POLS
 from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers, 3 padding pointers)
 PREAMBLE_SIZE = 96

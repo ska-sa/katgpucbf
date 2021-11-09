@@ -28,7 +28,7 @@ import spead2.recv.asyncio
 from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
-from katgpucbf.fgpu import recv
+from katgpucbf.fgpu import METRIC_NAMESPACE, recv
 from katgpucbf.fgpu.recv import Chunk, Layout
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
@@ -277,7 +277,9 @@ class TestChunkSets:
         add_chunk(21, 0)
         ringbuffer.stop()
 
-        with caplog.at_level(logging.WARNING, logger="katgpucbf.fgpu.recv"), PromDiff() as prom_diff:
+        with caplog.at_level(logging.WARNING, logger="katgpucbf.fgpu.recv"), PromDiff(
+            namespace=METRIC_NAMESPACE
+        ) as prom_diff:
             sets = [
                 chunk_set
                 async for chunk_set in recv.chunk_sets(

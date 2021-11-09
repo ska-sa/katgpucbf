@@ -42,7 +42,7 @@ import asyncio
 import logging
 import math
 import time
-from typing import List, Optional, Tuple, TypedDict
+from typing import List, Optional
 
 import katsdpsigproc
 import katsdpsigproc.abc
@@ -50,7 +50,8 @@ import katsdpsigproc.accel
 import katsdpsigproc.resource
 import numpy as np
 import spead2
-from aiokatcp import DeviceServer, Sensor, SensorSampler
+from aiokatcp import DeviceServer
+from prometheus_client import Counter
 
 import katgpucbf.xbgpu.precorrelation_reorder
 import katgpucbf.xbgpu.recv
@@ -59,8 +60,16 @@ import katgpucbf.xbgpu.xsend
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
+from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
+
+input_heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
+input_chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
+input_bytes_counter = Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE)
+input_missing_heaps_counter = Counter(
+    "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
+)
 
 
 class QueueItem:
@@ -231,78 +240,6 @@ class XBEngine(DeviceServer):
         context: katsdpsigproc.abc.AbstractContext,
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
-
-        # No more than once per second, at least once every 10 seconds.
-        # The TypedDict is necessary for mypy to believe the use as
-        # kwargs is valid.
-        AutoStrategy = TypedDict(  # noqa: N806
-            "AutoStrategy",
-            {
-                "auto_strategy": SensorSampler.Strategy,
-                "auto_strategy_parameters": Tuple[float, float],
-            },
-        )
-        auto_strategy = AutoStrategy(
-            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(1.0, 10.0),
-        )
-        sensors: List[Sensor] = [
-            Sensor(
-                int,
-                "input-heaps-total",
-                "number of heaps received (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "input-chunks-total",
-                "number of chunks received (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "input-bytes-total",
-                "number of bytes of digitiser samples received (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "input-missing-heaps-total",
-                "number of heaps dropped on the input (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                # TODO: Think about what status_func should do for the status of the
-                # sensor. If it goes into "warning" as soon as a single packet is
-                # dropped, then it may not be too useful. Having the information
-                # necessary to implement this may involve shifting things between
-                # classes.
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "output-heaps-total",
-                "number of heaps transmitted (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "output-bytes-total",
-                "number of payload bytes transmitted (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-        ]
-        for sensor in sensors:
-            self.sensors.add(sensor)
 
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
@@ -666,39 +603,19 @@ class XBEngine(DeviceServer):
         # 1. Set up initial conditions
         async_ringbuffer = self.receiver_stream.data_ringbuffer
         chunk_index = 0
-        expected_heaps_total = 0
-        dropped_heaps_total = 0
         # 2. Get complete chunks from the ringbuffer.
         async for chunk in async_ringbuffer:
             # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
             expected_heaps = len(chunk.present)
             received_heaps = int(np.sum(chunk.present))
             dropped_heaps = expected_heaps - received_heaps
-            expected_heaps_total += expected_heaps
-            dropped_heaps_total += dropped_heaps
             timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
 
-            sensor_timestamp = time.time()
-            # TODO: This must become a proper logging message; fstrings should
-            # be replaced with old-fashioned format strings.
-            if dropped_heaps != 0:
-                logger.warning(
-                    "Chunk: %5d Timestamp: %#x Received: %4d of %4d expected heaps. All time dropped heaps: %d/%d.",
-                    chunk_index,
-                    timestamp,
-                    received_heaps,
-                    expected_heaps,
-                    dropped_heaps_total,
-                    expected_heaps_total,
-                )
-                self.sensors["input-missing-heaps-total"].set_value(dropped_heaps_total, timestamp=sensor_timestamp)
-
-            def increment(sensor: Sensor, incr: int):
-                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-            increment(self.sensors["input-heaps-total"], expected_heaps)
-            increment(self.sensors["input-chunks-total"], 1)
-            increment(self.sensors["input-bytes-total"], chunk.data.nbytes * received_heaps // expected_heaps)
+            # TODO: this doesn't account for entire chunks that went missing
+            input_missing_heaps_counter.inc(dropped_heaps)
+            input_heaps_counter.inc(expected_heaps)
+            input_chunks_counter.inc(1)
+            input_bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
 
             chunk_index += 1
 
