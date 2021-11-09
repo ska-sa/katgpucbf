@@ -32,10 +32,10 @@ import spead2.recv.asyncio
 import spead2.send
 from numba import njit
 
-import katgpucbf.xbgpu.xbengine
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.xbgpu.engine import XBEngine
 from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore, device_filter
 
 from . import test_parameters
@@ -249,7 +249,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
 )
 def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_channels):
     """
-    Unit tests for the xbengine.py module.
+    Unit tests for the xbgpu/engine.py module.
 
     Data is generated for a number of accumulations and then the ouput of these dumps is verified.
 
@@ -332,7 +332,7 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
     # 4.1. Create Monitor required by XBEngine
     monitor = NullMonitor()
 
-    xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+    xbengine = XBEngine(
         katcp_host="",
         katcp_port=0,
         adc_sample_rate_hz=adc_sample_rate,

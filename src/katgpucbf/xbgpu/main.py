@@ -33,7 +33,7 @@ import katsdpsigproc.accel
 from katsdpservices import get_interface_address, setup_logging
 from katsdptelstate.endpoint import endpoint_parser
 
-import katgpucbf.xbgpu.xbengine
+from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
@@ -184,7 +184,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     logger.info("Initialising XB-Engine on %s", context.device.name)
-    xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+    xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
