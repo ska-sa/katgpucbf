@@ -58,7 +58,7 @@ import katgpucbf.xbgpu.xsend
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
-from .correlation import TensorCoreXEngineCoreTemplate
+from .correlation import CorrelationTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -435,7 +435,7 @@ class XBEngine(DeviceServer):
         self._download_command_queue = self.context.create_command_queue()
 
         # 5.3 Create reorder and correlation operations and create buffer linking the two operations.
-        tensor_core_template = TensorCoreXEngineCoreTemplate(
+        tensor_core_template = CorrelationTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,

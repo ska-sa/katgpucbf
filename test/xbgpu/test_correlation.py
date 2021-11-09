@@ -26,7 +26,7 @@ from . import test_parameters
 
 pytestmark = [pytest.mark.device_filter.with_args(correlation.device_filter)]
 
-get_baseline_index = njit(correlation.TensorCoreXEngineCore.get_baseline_index)
+get_baseline_index = njit(correlation.CorrelationCore.get_baseline_index)
 
 
 @njit(parallel=True)
@@ -95,7 +95,7 @@ def test_correlator(
     # move it into a test fixture.
     n_chans_per_stream = num_channels // num_ants // 4
 
-    template = correlation.TensorCoreXEngineCoreTemplate(
+    template = correlation.CorrelationTemplate(
         context, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
     )
     tensor_core_x_engine_core = template.instantiate(command_queue)
@@ -143,7 +143,7 @@ def test_multikernel_accumulation(context, command_queue, num_ants):
     n_kernel_launches = 10
 
     # 2. Initialise GPU kernels and buffers.
-    template = correlation.TensorCoreXEngineCoreTemplate(
+    template = correlation.CorrelationTemplate(
         context, n_ants=n_ants, n_channels=n_channels, n_spectra_per_heap=n_spectra_per_heap
     )
     tensor_core_x_engine_core = template.instantiate(command_queue)
