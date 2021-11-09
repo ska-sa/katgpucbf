@@ -188,6 +188,9 @@ class TestStream:
             # Interleave the sequences
             heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
 
+        # Heap with no payload - representing any sort of metadata heap such as descriptors
+        heap = spead2.send.Heap(FLAVOUR)
+        await send_stream.async_send_heap(heap, substream_index=POL)
         for heap in heaps:
             await send_stream.async_send_heap(heap, substream_index=POL)
         for queue in queues:
@@ -210,6 +213,9 @@ class TestStream:
             seen += 1
             expected_chunk_id += 1
         assert seen == 5
+        expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
+        assert streams[POL].stats["katgpucbf.metadata_heaps"] == 1
+        assert streams[POL].stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
 
     async def test_missing_heaps(
         self,
@@ -254,6 +260,12 @@ class TestChunkSets:
 
     async def test(self, layout: Layout, caplog) -> None:  # noqa: D102
         streams = [Mock() for _ in range(N_POLS)]
+        # Fake up stream stats
+        for pol, stream in enumerate(streams):
+            stream.stats = {}
+            stream.stats["katgpucbf.bad_timestamp_heaps"] = 123 + 1000 * pol
+            stream.stats["katgpucbf.metadata_heaps"] = 321 + 1000 * pol
+
         ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)  # Big enough not to worry about
         for stream in streams:
             stream.data_ringbuffer = ringbuffer
@@ -311,3 +323,5 @@ class TestChunkSets:
         assert get_sample_diffs("input_chunks_total") == [3, 3]
         assert get_sample_diffs("input_bytes_total") == [46 * 5120, 47 * 5120]
         assert get_sample_diffs("input_missing_heaps_total") == [11 * 16 - 46, 11 * 16 - 47]
+        assert get_sample_diffs("input_bad_timestamp_heaps_total") == [123, 1123]
+        assert get_sample_diffs("input_metadata_heaps_total") == [321, 1321]
