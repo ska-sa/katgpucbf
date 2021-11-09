@@ -26,13 +26,11 @@ ultimately to the NIC is also handled.
 import asyncio
 import functools
 import logging
-import time
 from collections import deque
 from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import spead2.recv
-from aiokatcp import Sensor, SensorSet
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -357,10 +355,6 @@ class Processor:
     monitor
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
         and reporting their events.
-    sensors
-        The set of sensors from the parent :class:`~katgpucbf.fgpu.Engine` object,
-        currently needed for passing the dropped packet sensor down to the
-        receiver for updating.
     """
 
     def __init__(
@@ -369,7 +363,6 @@ class Processor:
         delay_models: Sequence[AbstractDelayModel],
         use_gdrcopy: bool,
         monitor: Monitor,
-        sensors: Optional[SensorSet],
     ) -> None:
         self.compute = compute
         self.delay_models = delay_models
@@ -385,7 +378,6 @@ class Processor:
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
-        self.sensors = sensors
         self.monitor = monitor
         self._spectra = []
         for _ in range(n_in):
@@ -695,7 +687,7 @@ class Processor:
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         """
-        async for chunks in recv.chunk_sets(streams, layout, self.monitor, self.sensors):
+        async for chunks in recv.chunk_sets(streams, layout, self.monitor):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
@@ -735,7 +727,7 @@ class Processor:
         logger.debug("run_receive completed")
         self.in_queue.put_nowait(None)
 
-    def _chunk_finished(self, chunk: send.Chunk, n_heaps: int, n_bytes: int, future: asyncio.Future) -> None:
+    def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
         """Return a chunk to the free queue after it has completed transmission.
 
         This is intended to be used as a callback on an :class:`asyncio.Future`.
@@ -744,21 +736,9 @@ class Processor:
         try:
             future.result()  # No result, but want the exception
         except asyncio.CancelledError:
-            return
+            pass
         except Exception:
             logger.exception("Error sending chunk")
-            return
-
-        if self.sensors is not None:
-            # Get a common timestamp for all the updates
-            sensor_timestamp = time.time()
-
-            def increment(sensor: Sensor, incr: int):
-                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-            increment(self.sensors["output-heaps-total"], n_heaps)
-            # out_item.spectra.shape[1:] is the shape of each frame
-            increment(self.sensors["output-bytes-total"], n_bytes)
 
     async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
@@ -803,12 +783,10 @@ class Processor:
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
             n_frames = out_item.n_spectra // self.spectra_per_heap
-            n_bytes = n_frames * np.product(out_item.spectra.shape[1:]) * out_item.spectra.dtype.itemsize
-            n_heaps = n_frames * stream.num_substreams
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
-            task.add_done_callback(functools.partial(self._chunk_finished, chunk, n_heaps, n_bytes))
+            task.add_done_callback(functools.partial(self._chunk_finished, chunk))
 
         if task:
             try:

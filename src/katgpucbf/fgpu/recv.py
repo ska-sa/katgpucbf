@@ -18,7 +18,6 @@
 
 import functools
 import logging
-import time
 from dataclasses import dataclass
 from typing import AsyncGenerator, List, Optional, Tuple, Union, cast
 
@@ -26,11 +25,12 @@ import numba
 import numpy as np
 import scipy
 import spead2.recv.asyncio
-from aiokatcp import Sensor, SensorSet
 from numba import types
+from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+from .. import METRIC_NAMESPACE
 from ..monitor import Monitor
 from ..spead import TIMESTAMP_ID
 from . import BYTE_BITS
@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
+
+heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
+chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
+bytes_counter = Counter(
+    "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
+)
+missing_heaps_counter = Counter(
+    "input_missing_heaps_total", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
+)
 
 
 class Chunk(spead2.recv.Chunk):
@@ -130,7 +139,6 @@ async def chunk_sets(
     streams: List[spead2.recv.ChunkRingStream],
     layout: Layout,
     monitor: Monitor,
-    sensors: Optional[SensorSet] = None,
 ) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
@@ -149,8 +157,6 @@ async def chunk_sets(
         each represents a polarisation.
     monitor
         Used for performance monitoring of the ringbuffer.
-    sensors
-        Sensors through which networking statistics will be reported (if provided).
     """
     n_pol = len(streams)
     # Working buffer to match up pairs of chunks from both pols.
@@ -159,6 +165,12 @@ async def chunk_sets(
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
+    # These duplicate the Prometheus counters, because prometheus_client
+    # doesn't provide an efficient way to get the current value
+    # (REGISTRY.get_sample_value is documented as being intended only for unit
+    # tests).
+    n_heaps = [0] * n_pol
+    n_missing_heaps = [0] * n_pol
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
@@ -195,32 +207,25 @@ async def chunk_sets(
 
             # If we have both chunks and they match up, then we can yield.
             if all(c is not None and c.chunk_id == chunk.chunk_id for c in buf):
-                if sensors is not None:
-                    # Get explicit timestamp to ensure that all the updated sensors
-                    # have the same timestamp.
-                    sensor_timestamp = time.time()
-
-                    def increment(sensor: Sensor, incr: int):
-                        sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-                    # mypy isn't smart enough to see that the list can't have Nones
-                    # in it at this point. The cast is to force numpy ints to
-                    # Python ints.
-                    buf_good = sum(int(np.sum(c.present)) for c in buf)  # type: ignore
-                    increment(sensors["input-heaps-total"], buf_good)
-                    increment(sensors["input-chunks-total"], n_pol)
-                    increment(sensors["input-bytes-total"], buf_good * layout.heap_bytes)
+                expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
+                # mypy isn't smart enough to see that the list can't have Nones
+                # in it at this point.
+                for c in cast(List[Chunk], buf):
+                    pol = c.stream_id
+                    # The cast is to force numpy ints to Python ints.
+                    buf_good = int(np.sum(c.present))
+                    heaps_counter.labels(pol).inc(buf_good)
+                    chunks_counter.labels(pol).inc()
+                    bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
                     # Determine how many heaps we expected to have seen by
                     # now, and subtract from it the number actually seen to
                     # determine the number missing. This accounts for both
                     # heaps lost within chunks and lost chunks.
-                    received_heaps = sensors["input-heaps-total"].value
-                    expected_heaps = (
-                        (chunk.timestamp - first_timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
-                    )
-                    missing = expected_heaps - received_heaps
-                    if missing > sensors["input-missing-heaps-total"].value:
-                        sensors["input-missing-heaps-total"].set_value(missing, timestamp=sensor_timestamp)
+                    n_heaps[c.stream_id] += buf_good
+                    new_missing = expected_heaps - n_heaps[pol]
+                    if new_missing > n_missing_heaps[pol]:
+                        missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
+                        n_missing_heaps[pol] = new_missing
 
                 # mypy isn't smart enough to see that the list can't have Nones
                 # in it at this point.
@@ -228,9 +233,9 @@ async def chunk_sets(
                 # Empty the buffer again for next use.
                 buf = [None] * n_pol
     finally:
-        for c in buf:
-            if c is not None:
-                streams[c.stream_id].add_free_chunk(c)
+        for c2 in buf:
+            if c2 is not None:
+                streams[c2.stream_id].add_free_chunk(c2)
 
 
 def make_stream(

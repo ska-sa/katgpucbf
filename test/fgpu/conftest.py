@@ -29,7 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 import katgpucbf.fgpu.recv
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.fgpu.main import make_engine
+from katgpucbf.fgpu.main import make_engine, parse_args
 
 
 @pytest.fixture
@@ -115,7 +115,8 @@ async def engine_server(
     if request.node.get_closest_marker("use_gdrcopy"):
         check_gdrcopy(context)
         arglist.append("--use-gdrcopy")
-    server, _monitor = make_engine(context, arglist=arglist)
+    args = parse_args(arglist)
+    server, _monitor = make_engine(context, args)
 
     await server.start()
     yield server
