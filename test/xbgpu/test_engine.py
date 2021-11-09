@@ -35,8 +35,8 @@ from numba import njit
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.xbgpu.correlation import TensorCoreXEngineCore, device_filter
 from katgpucbf.xbgpu.engine import XBEngine
-from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore, device_filter
 
 from . import test_parameters
 
