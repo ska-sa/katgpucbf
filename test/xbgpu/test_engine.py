@@ -247,7 +247,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     test_parameters.num_channels,
     test_parameters.num_spectra_per_heap,
 )
-def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_channels):
+def test_xengine_end_to_end(context, event_loop, num_ants, num_spectra_per_heap, num_channels):
     """
     Unit tests for the xbgpu/engine.py module.
 
@@ -460,9 +460,9 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
 if __name__ == "__main__":
     print("Running tests")
     loop = asyncio.get_event_loop()
-    test_xbengine(loop, 4, 1024, 32768)
-    test_xbengine(loop, 8, 1024, 32768)
-    test_xbengine(loop, 16, 1024, 32768)
-    test_xbengine(loop, 32, 1024, 32768)
-    test_xbengine(loop, 64, 1024, 32768)
+    test_xengine_end_to_end(loop, 4, 1024, 32768)
+    test_xengine_end_to_end(loop, 8, 1024, 32768)
+    test_xengine_end_to_end(loop, 16, 1024, 32768)
+    test_xengine_end_to_end(loop, 32, 1024, 32768)
+    test_xengine_end_to_end(loop, 64, 1024, 32768)
     print("Tests complete")
