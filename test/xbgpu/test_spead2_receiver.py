@@ -42,9 +42,8 @@ import pytest
 import spead2
 import spead2.send
 
-import katgpucbf.monitor
-import katgpucbf.xbgpu.recv
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.xbgpu.recv import Chunk, make_stream
 
 from . import test_parameters
 
@@ -157,7 +156,7 @@ def create_test_objects(
 
     # 4.3 Create Receiver
     thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
-    receiver_stream = katgpucbf.xbgpu.recv.make_stream(
+    receiver_stream = make_stream(
         n_ants,
         n_channels_per_stream,
         n_spectra_per_heap,
@@ -176,7 +175,7 @@ def create_test_objects(
     for _ in range(src_chunks_per_stream):
         buf = np.empty((chunk_bytes,), np.uint8)
         present = np.zeros((chunk_heaps,), np.uint8)
-        chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
+        chunk = Chunk(data=buf, present=present)
         receiver_stream.add_free_chunk(chunk)
 
     # 6. Return relevant objects
@@ -447,7 +446,7 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
 
         # 5.1 Iterate through complete chunks in the ringbuffer asynchronously
         async for chunk in async_ringbuffer:
-            assert isinstance(chunk, katgpucbf.xbgpu.recv.Chunk)
+            assert isinstance(chunk, Chunk)
             received += len(chunk.present)
             dropped += len(chunk.present) - int(np.sum(chunk.present))
             assert len(chunk.present) == n_ants * heaps_per_fengine_per_chunk, (
