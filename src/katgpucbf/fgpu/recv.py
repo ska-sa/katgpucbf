@@ -32,9 +32,8 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import METRIC_NAMESPACE
 from ..spead import TIMESTAMP_ID
-from . import BYTE_BITS
+from . import BYTE_BITS, METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order

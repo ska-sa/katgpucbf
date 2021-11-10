@@ -129,7 +129,7 @@ async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client
     assert engine_server.server is not None
     assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
-    with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+    async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
         client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()
