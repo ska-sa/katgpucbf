@@ -35,7 +35,6 @@ TODO: Turn create_test_objects() into a pytest fixture.
 """
 
 import asyncio
-import logging
 
 import numpy as np
 import pytest
@@ -47,8 +46,6 @@ from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIME
 from katgpucbf.xbgpu.recv import Chunk, make_stream
 
 from . import test_parameters
-
-logging.basicConfig(level=logging.INFO)
 
 
 def create_test_objects(
