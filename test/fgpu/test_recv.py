@@ -30,7 +30,6 @@ from numpy.typing import ArrayLike
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
 from katgpucbf.fgpu.recv import Chunk, Layout
-from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
 
 from .. import PromDiff
@@ -81,8 +80,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     They are connected to the :func:`queues` fixture for input and
     :func:`ringbuffer` for output.
     """
-    monitor = NullMonitor()
-    streams = [recv.make_stream(pol, layout, ringbuffer, -1, monitor) for pol in range(N_POLS)]
+    streams = [recv.make_stream(pol, layout, ringbuffer, -1) for pol in range(N_POLS)]
     for stream, queue in zip(streams, queues):
         for _ in range(4):
             data = np.empty(layout.chunk_bytes, np.uint8)
@@ -269,7 +267,6 @@ class TestChunkSets:
         ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)  # Big enough not to worry about
         for stream in streams:
             stream.data_ringbuffer = ringbuffer
-        monitor = NullMonitor()
         rng = np.random.default_rng(1)
 
         def add_chunk(chunk_id: int, pol: int, missing: int = 0) -> None:
@@ -294,9 +291,7 @@ class TestChunkSets:
         ) as prom_diff:
             sets = [
                 chunk_set
-                async for chunk_set in recv.chunk_sets(
-                    cast(List[spead2.recv.ChunkRingStream], streams), layout, monitor
-                )
+                async for chunk_set in recv.chunk_sets(cast(List[spead2.recv.ChunkRingStream], streams), layout)
             ]
         assert caplog.record_tuples == [
             ("katgpucbf.fgpu.recv", logging.WARNING, "Chunk not matched: timestamp=0xb0000 pol=1")

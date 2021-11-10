@@ -55,6 +55,7 @@ from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
+from ..ringbuffer import ChunkRingbuffer
 from . import METRIC_NAMESPACE, recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
@@ -347,7 +348,9 @@ class XBEngine(DeviceServer):
 
         # 4. Create the receiver_stream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
-        self.ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_free_chunks)
+        self.ringbuffer = ChunkRingbuffer(
+            n_free_chunks, name="recv_ringbuffer", task_name="receiver_loop", monitor=monitor
+        )
         self.receiver_stream = recv.make_stream(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
