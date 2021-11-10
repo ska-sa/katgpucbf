@@ -54,9 +54,9 @@ from aiokatcp import DeviceServer, Sensor, SensorSampler
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
+from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
-from .recv import Chunk, make_stream
 from .xsend import XSend
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ class RxQueueItem(QueueItem):
     is complete to reuse resources.
     """
 
-    chunk: Optional[Chunk]
+    chunk: Optional[recv.Chunk]
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
@@ -412,7 +412,7 @@ class XBEngine(DeviceServer):
         # 4. Create the receiver_stream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
         self.ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_free_chunks)
-        self.receiver_stream = make_stream(
+        self.receiver_stream = recv.make_stream(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
@@ -496,7 +496,7 @@ class XBEngine(DeviceServer):
                 context=self.context,
             )
             present = np.zeros(n_ants * self.chunk_spectra, np.uint8)
-            chunk = Chunk(data=buf, present=present)
+            chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):

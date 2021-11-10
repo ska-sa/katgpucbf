@@ -26,7 +26,7 @@ from . import test_parameters
 
 pytestmark = [pytest.mark.device_filter.with_args(correlation.device_filter)]
 
-get_baseline_index = njit(correlation.CorrelationCore.get_baseline_index)
+get_baseline_index = njit(correlation.Correlation.get_baseline_index)
 
 
 @njit(parallel=True)

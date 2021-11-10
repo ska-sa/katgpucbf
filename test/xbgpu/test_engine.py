@@ -35,14 +35,14 @@ from numba import njit
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
-from katgpucbf.xbgpu.correlation import CorrelationCore, device_filter
+from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import XBEngine
 
 from . import test_parameters
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
-get_baseline_index = njit(CorrelationCore.get_baseline_index)
+get_baseline_index = njit(Correlation.get_baseline_index)
 
 
 def create_heaps(

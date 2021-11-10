@@ -47,9 +47,9 @@ def device_filter(device: AbstractDevice) -> bool:
 class CorrelationTemplate:
     r"""Template class for the Tensor-Core correlation kernel.
 
-    The template creates a :class:`CorrelationCore` that will run the
+    The template creates a :class:`Correlation` that will run the
     compiled kernel. The parameters are used to compile the kernel and by the
-    :class:`CorrelationCore` to specify the shape of the memory buffers
+    :class:`Correlation` to specify the shape of the memory buffers
     connected to this kernel.
 
     The number of baselines calculated here is not the canonical way that it is
@@ -158,17 +158,17 @@ class CorrelationTemplate:
         )
         self.kernel = program.get_kernel("correlate")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "CorrelationCore":
-        """Create a :class:`CorrelationCore` using this template to build the kernel."""
-        return CorrelationCore(self, command_queue)
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "Correlation":
+        """Create a :class:`Correlation` using this template to build the kernel."""
+        return Correlation(self, command_queue)
 
 
-class CorrelationCore(accel.Operation):
+class Correlation(accel.Operation):
     """Tensor-Core correlation kernel.
 
     Specifies the shape of the input sample and output visibility buffers
     required by the kernel. The parameters specified in the
-    :class:`CorrelationCoreTemplate` object are used to determine the
+    :class:`CorrelationTemplate` object are used to determine the
     shape of the buffers.
 
     The input sample buffer must have the shape:
@@ -178,7 +178,7 @@ class CorrelationCore(accel.Operation):
     ``spectra_per_heap`` index is split over two different indices. The first
     index ranges from ``0`` to ``spectra_per_heap//times_per_block`` and the
     second index ranges from ``0`` to ``times_per_block``. Times per block is
-    calculated by the :class:`CorrelationCoreTemplate`. In 8-bit input mode,
+    calculated by the :class:`CorrelationTemplate`. In 8-bit input mode,
     ``times_per_block`` is equal to 16.
 
     Each input element is a complex 8-bit integer sample. :mod:`.numpy` does not
