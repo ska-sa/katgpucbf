@@ -182,6 +182,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
         "incomplete_heaps_evicted": incomplete_heaps_counter,
         "katgpucbf.metadata_heaps": metadata_heaps_counter,
         "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
+        "katgpucbf.bad_feng_id_heaps": bad_feng_id_heaps_counter,
     }
     stats_to_counters = StatsToCounters(counter_map, stream.config)
     ringbuffer = stream.data_ringbuffer
