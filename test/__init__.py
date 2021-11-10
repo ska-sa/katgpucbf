@@ -20,25 +20,34 @@ from typing import Dict, List, Optional
 
 import prometheus_client
 
-from katgpucbf import METRIC_NAMESPACE
-
 
 class PromDiff:
     """Collects Prometheus metrics before and after test code, and provides differences.
 
     Typical usage is::
 
-        with PromDiff() as diff:
+        with PromDiff(namespace=METRIC_NAMESPACE) as diff:
             ...  # Do stuff that increments counters
         diff.get_sample_diff(name, labels)
 
-    The names should exclude the METRIC_NAMESPACE.
+    Parameters
+    ----------
+    registry
+        Prometheus metric registry
+    namespace
+        Namespace to prepend to metric names
     """
 
-    def __init__(self, registry: prometheus_client.CollectorRegistry = prometheus_client.REGISTRY) -> None:
+    def __init__(
+        self,
+        *,
+        registry: prometheus_client.CollectorRegistry = prometheus_client.REGISTRY,
+        namespace: Optional[str] = None
+    ) -> None:
         self._registry = registry
         self._before: List[prometheus_client.samples.Sample] = []
         self._after: List[prometheus_client.samples.Sample] = []
+        self._prefix = namespace + "_" if namespace is not None else ""
 
     def __enter__(self) -> "PromDiff":
         self._before = [s for metric in self._registry.collect() for s in metric.samples]
@@ -47,12 +56,11 @@ class PromDiff:
     def __exit__(self, *args) -> None:
         self._after = [s for metric in self._registry.collect() for s in metric.samples]
 
-    @staticmethod
     def _get_value(
-        samples: List[prometheus_client.samples.Sample], name: str, labels: Dict[str, str]
+        self, samples: List[prometheus_client.samples.Sample], name: str, labels: Dict[str, str]
     ) -> Optional[float]:
         for s in samples:
-            if s.name == f"{METRIC_NAMESPACE}_{name}" and s.labels == labels:
+            if s.name == self._prefix + name and s.labels == labels:
                 return s.value
         return None
 

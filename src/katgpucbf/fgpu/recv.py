@@ -16,9 +16,11 @@
 
 """Recv module."""
 
+import ctypes
 import functools
 import logging
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import AsyncGenerator, List, Optional, Tuple, Union, cast
 
 import numba
@@ -30,10 +32,9 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import METRIC_NAMESPACE
 from ..monitor import Monitor
 from ..spead import TIMESTAMP_ID
-from . import BYTE_BITS
+from . import BYTE_BITS, METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -47,7 +48,13 @@ bytes_counter = Counter(
     "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
 )
 missing_heaps_counter = Counter(
-    "input_missing_heaps_total", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
+    "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
+)
+metadata_heaps_counter = Counter(
+    "input_metadata_heaps", "number of heaps not containing payload", ["pol"], namespace=METRIC_NAMESPACE
+)
+bad_timestamp_heaps_counter = Counter(
+    "input_bad_timestamp_heaps", "timestamp not a multiple of samples per packet", ["pol"], namespace=METRIC_NAMESPACE
 )
 
 
@@ -70,6 +77,22 @@ class Chunk(spead2.recv.Chunk):
         super().__init__(*args, **kwargs)
         self.device = device
         self.timestamp = 0  # Actual value filled in when chunk received
+
+
+class _Statistic(IntEnum):
+    """Custom statistics for the SPEAD receiver."""
+
+    # Note: the values are important and must match the registration order
+    # of the statistics.
+    METADATA_HEAPS = 0
+    BAD_TIMESTAMP_HEAPS = 1
+
+
+_user_data_type = types.Record.make_c_struct(
+    [
+        ("stats_base", types.uintp),  # Index for first custom statistic
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -102,37 +125,61 @@ class Layout:
         return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
 
     @functools.cached_property
-    def chunk_place(self) -> scipy.LowLevelCallable:  # noqa: D401
-        """Low level code for placing heaps in chunks."""
+    def _chunk_place(self) -> numba.core.ccallback.CFunc:
+        """Low-level code for placing heaps in chunks."""
         heap_samples = self.heap_samples
         heap_bytes = self.heap_bytes
         chunk_heaps = self.chunk_heaps
         chunk_samples = self.chunk_samples
         timestamp_mask = self.timestamp_mask
+        n_statistics = len(_Statistic)
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
         @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp),
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)),
             nopython=True,
         )
-        def chunk_place_impl(data_ptr, data_size):  # pragma: nocover
+        def chunk_place_impl(data_ptr, data_size, user_data_ptr):  # pragma: nocover
             data = numba.carray(data_ptr, 1)
             items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
             timestamp = items[0]
             payload_size = items[1]
+            user_data = numba.carray(user_data_ptr, 1)
+            batch_stats = numba.carray(
+                intp_to_voidptr(data[0].batch_stats),
+                user_data[0].stats_base + n_statistics,
+                dtype=np.uint64,
+            )
             if payload_size != heap_bytes or timestamp < 0:
                 # It's something unexpected - maybe it has descriptors or a stream
                 # control item. Ignore it.
+                batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
                 return
             timestamp &= timestamp_mask
             if timestamp % heap_samples != 0:
-                # TODO: log/count. The timestamp is broken.
+                batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
             data[0].chunk_id = timestamp // chunk_samples
             data[0].heap_index = timestamp // heap_samples % chunk_heaps
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
-        return scipy.LowLevelCallable(chunk_place_impl.ctypes, signature="void (void *, size_t)")
+        return chunk_place_impl
+
+    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
+        """Generate low-level code for placing heaps in chunks.
+
+        Parameters
+        ----------
+        stats_base
+            Index of first custom statistic
+        """
+        user_data = np.zeros(1, dtype=_user_data_type.dtype)
+        user_data["stats_base"] = stats_base
+        return scipy.LowLevelCallable(
+            self._chunk_place.ctypes,
+            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
+            signature="void (void *, size_t, void *)",
+        )
 
 
 async def chunk_sets(
@@ -164,6 +211,11 @@ async def chunk_sets(
     # TODO: bring back ringbuffer monitoring capabilities
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
+    stats_map = {
+        "katgpucbf.metadata_heaps": metadata_heaps_counter,
+        "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
+    }
+    prev_stats: List[Optional[spead2.recv.StreamStats]] = [None for _ in streams]
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
     # These duplicate the Prometheus counters, because prometheus_client
     # doesn't provide an efficient way to get the current value
@@ -193,6 +245,18 @@ async def chunk_sets(
                 layout.chunk_heaps,
                 lost,
             )
+
+            # Update stream statistics. Note that these are not necessarily
+            # synchronised with the chunk.
+            for i, stream in enumerate(streams):
+                stats = stream.stats
+                prev_stat = prev_stats[i]
+                for stats_name, counter in stats_map.items():
+                    inc = stats[stats_name]
+                    if prev_stat is not None:
+                        inc -= prev_stat[stats_name]
+                    counter.labels(i).inc(inc)
+                prev_stats[i] = stats
 
             # Check whether we have a chunk already for this pol.
             old = buf[pol]
@@ -269,8 +333,11 @@ def make_stream(
         memcpy=spead2.MEMCPY_NONTEMPORAL,
         stream_id=pol,
     )
+    stats_base = stream_config.next_stat_index()
+    stream_config.add_stat("katgpucbf.metadata_heaps")
+    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place
+        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place(stats_base)
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.

@@ -1,3 +1,5 @@
+# noqa: D104
+
 ################################################################################
 # Copyright (c) 2020-2021, National Research Foundation (SARAO)
 #
@@ -14,8 +16,6 @@
 # limitations under the License.
 ################################################################################
 
-"""
-The existence of this file tells setuptools to treat the directory this file is in as a package.
+from typing import Final
 
-Without this file the submodules will not install.
-"""
+METRIC_NAMESPACE: Final = "xbgpu"

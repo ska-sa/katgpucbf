@@ -28,8 +28,8 @@ import pytest
 import spead2.send
 from numpy.typing import ArrayLike
 
-from katgpucbf import COMPLEX, METRIC_NAMESPACE, N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS, send
+from katgpucbf import COMPLEX, N_POLS
+from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS, send
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 from katgpucbf.spead import FLAVOUR
