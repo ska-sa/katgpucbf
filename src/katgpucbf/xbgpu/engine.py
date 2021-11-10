@@ -53,15 +53,13 @@ import spead2
 from aiokatcp import DeviceServer
 from prometheus_client import Counter
 
-import katgpucbf.xbgpu.precorrelation_reorder
-import katgpucbf.xbgpu.recv
-import katgpucbf.xbgpu.tensorcore_xengine_core
-import katgpucbf.xbgpu.xsend
-
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
-from . import METRIC_NAMESPACE
+from . import METRIC_NAMESPACE, recv
+from .correlation import CorrelationTemplate
+from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
+from .xsend import XSend
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +112,7 @@ class RxQueueItem(QueueItem):
     is complete to reuse resources.
     """
 
-    chunk: Optional[katgpucbf.xbgpu.recv.Chunk]
+    chunk: Optional[recv.Chunk]
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
@@ -353,7 +351,7 @@ class XBEngine(DeviceServer):
         self.ringbuffer = ChunkRingbuffer(
             n_free_chunks, name="recv_ringbuffer", task_name="receiver_loop", monitor=monitor
         )
-        self.receiver_stream = katgpucbf.xbgpu.recv.make_stream(
+        self.receiver_stream = recv.make_stream(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
@@ -375,7 +373,7 @@ class XBEngine(DeviceServer):
         self._download_command_queue = self.context.create_command_queue()
 
         # 5.3 Create reorder and correlation operations and create buffer linking the two operations.
-        tensor_core_template = katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
+        tensor_core_template = CorrelationTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
@@ -383,16 +381,14 @@ class XBEngine(DeviceServer):
         )
         self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
 
-        reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorderTemplate(
+        reorder_template = PrecorrelationReorderTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_batches=self.chunk_spectra,
         )
-        self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorder = (
-            reorder_template.instantiate(self._proc_command_queue)
-        )
+        self.precorrelation_reorder: PrecorrelationReorder = reorder_template.instantiate(self._proc_command_queue)
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
             self.context,
@@ -439,7 +435,7 @@ class XBEngine(DeviceServer):
                 context=self.context,
             )
             present = np.zeros(n_ants * self.chunk_spectra, np.uint8)
-            chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
+            chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):
@@ -535,7 +531,7 @@ class XBEngine(DeviceServer):
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
+        self.send_stream = XSend(
             n_ants=self.n_ants,
             n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
@@ -575,7 +571,7 @@ class XBEngine(DeviceServer):
         # makes the unit tests take very long to run.
         self.dump_interval_s = 0
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
+        self.send_stream = XSend(
             n_ants=self.n_ants,
             n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,

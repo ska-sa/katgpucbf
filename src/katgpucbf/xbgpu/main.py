@@ -35,11 +35,11 @@ import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
 from katsdptelstate.endpoint import endpoint_parser
 
-import katgpucbf.xbgpu.xbengine
+from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from .tensorcore_xengine_core import device_filter
+from .correlation import device_filter
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
@@ -191,7 +191,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     logger.info("Initialising XB-Engine on %s", context.device.name)
-    xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+    xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,

@@ -47,9 +47,9 @@ import pytest
 import spead2
 import spead2.recv.asyncio
 
-import katgpucbf.xbgpu.xsend
 from katgpucbf import COMPLEX
 from katgpucbf.spead import FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
+from katgpucbf.xbgpu.xsend import XSend
 
 from . import test_parameters
 
@@ -107,8 +107,7 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
     # 3.1 Create the queue that will link the sender and receiver together.
     queue = spead2.InprocQueue()
 
-    # 3.2 Create katgpucbf.xbgpu.xsend.XSend that will wrap a SPEAD2 send stream.
-    send_stream = katgpucbf.xbgpu.xsend.XSend(
+    send_stream = XSend(
         n_ants=num_ants,
         n_channels=num_channels,
         n_channels_per_stream=n_channels_per_stream,
