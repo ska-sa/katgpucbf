@@ -42,17 +42,13 @@ import pytest
 import spead2
 import spead2.send
 
+from katgpucbf import COMPLEX
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu.recv import Chunk, make_stream
 
 from . import test_parameters
 
 logging.basicConfig(level=logging.INFO)
-
-# 3. Define Constants
-
-# 3.2 Explicit note a complex sample has real and imaginay samples.
-complexity = 2
 
 
 def create_test_objects(
@@ -112,9 +108,9 @@ def create_test_objects(
     """
     # 1. Calculate important parameters.
     max_packet_size = (
-        n_spectra_per_heap * n_pols * complexity * sample_bits // 8 + 96
+        n_spectra_per_heap * n_pols * COMPLEX * sample_bits // 8 + 96
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
-    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, complexity)
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, COMPLEX)
 
     # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
@@ -171,7 +167,7 @@ def create_test_objects(
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
     chunk_heaps = n_ants * heaps_per_fengine_per_chunk
-    chunk_bytes = chunk_heaps * n_channels_per_stream * n_spectra_per_heap * sample_bits * n_pols * complexity // 8
+    chunk_bytes = chunk_heaps * n_channels_per_stream * n_spectra_per_heap * sample_bits * n_pols * COMPLEX // 8
     for _ in range(src_chunks_per_stream):
         buf = np.empty((chunk_bytes,), np.uint8)
         present = np.zeros((chunk_heaps,), np.uint8)
@@ -232,7 +228,7 @@ def create_heaps(
         n_channels_per_stream,
         n_spectra_per_heap,
         n_pols,
-        complexity // 2,
+        COMPLEX // 2,
     )
     heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
     for ant_index in range(n_ants):
