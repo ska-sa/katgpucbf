@@ -16,17 +16,28 @@
 
 """SPEAD receiver utilities."""
 
+from typing import AsyncGenerator
+
 import numba
 import numpy as np
 import scipy
 import spead2.recv.asyncio
 import spead2.send
 from numba import types
+from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import COMPLEX, N_POLS
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
+from . import METRIC_NAMESPACE
+
+input_heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
+input_chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
+input_bytes_counter = Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE)
+input_missing_heaps_counter = Counter(
+    "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
+)
 
 
 class Chunk(spead2.recv.Chunk):
@@ -125,3 +136,25 @@ def make_stream(
         ringbuffer,
         free_ringbuffer,
     )
+
+
+async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chunk, None]:
+    """Retrieve chunks from the ringbuffer, updating metrics as they are received.
+
+    The returned chunks are yielded from this asynchronous generator.
+    """
+    ringbuffer = stream.data_ringbuffer
+    assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+    async for chunk in ringbuffer:
+        assert isinstance(chunk, Chunk)
+        # Update metrics
+        expected_heaps = len(chunk.present)
+        received_heaps = int(np.sum(chunk.present))
+        dropped_heaps = expected_heaps - received_heaps
+
+        input_missing_heaps_counter.inc(dropped_heaps)
+        input_heaps_counter.inc(expected_heaps)
+        input_chunks_counter.inc(1)
+        input_bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
+
+        yield chunk

@@ -28,8 +28,7 @@ passing information between different async processing loops within the object.
     - The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
       logic will need to go in the _gpu_proc_loop for the B-Engine processing
       and then a seperate sender loop would need to be created for sending B-Engine data.
-    - Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
-      pipeline.
+    - Implement control - There is no mechanism to interact with a running pipeline.
     - Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
       crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
       could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
@@ -51,24 +50,16 @@ import katsdpsigproc.resource
 import numpy as np
 import spead2
 from aiokatcp import DeviceServer
-from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
-from . import METRIC_NAMESPACE, recv
+from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
 from .xsend import XSend
 
 logger = logging.getLogger(__name__)
-
-input_heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
-input_chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
-input_bytes_counter = Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE)
-input_missing_heaps_counter = Counter(
-    "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
-)
 
 
 class QueueItem:
@@ -599,24 +590,9 @@ class XBEngine(DeviceServer):
         TODO: If no data is being streamed and the running flag is set to false, this function will be stuck waiting for
         the next chunk. Try find a way to exit cleanly without adding to much additional logic to this function.
         """
-        # 1. Set up initial conditions
-        async_ringbuffer = self.receiver_stream.data_ringbuffer
-        chunk_index = 0
         # 2. Get complete chunks from the ringbuffer.
-        async for chunk in async_ringbuffer:
-            # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
-            expected_heaps = len(chunk.present)
-            received_heaps = int(np.sum(chunk.present))
-            dropped_heaps = expected_heaps - received_heaps
+        async for chunk in recv.recv_chunks(self.receiver_stream):
             timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
-
-            # TODO: this doesn't account for entire chunks that went missing
-            input_missing_heaps_counter.inc(dropped_heaps)
-            input_heaps_counter.inc(expected_heaps)
-            input_chunks_counter.inc(1)
-            input_bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
-
-            chunk_index += 1
 
             # 2.2. Get a free rx_item that will contain the GPU buffer to transfer the received chunk to.
             item = await self._rx_free_item_queue.get()
