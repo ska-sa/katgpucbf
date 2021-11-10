@@ -259,10 +259,14 @@ class TestChunkSets:
     async def test(self, layout: Layout, caplog) -> None:  # noqa: D102
         streams = [Mock() for _ in range(N_POLS)]
         # Fake up stream stats
+        config = spead2.recv.StreamConfig()
+        config.add_stat("katgpucbf.bad_timestamp_heaps")
+        config.add_stat("katgpucbf.metadata_heaps")
         for pol, stream in enumerate(streams):
+            stream.config = config
             stream.stats = {}
-            stream.stats["katgpucbf.bad_timestamp_heaps"] = 123 + 1000 * pol
-            stream.stats["katgpucbf.metadata_heaps"] = 321 + 1000 * pol
+            stream.stats[config.get_stat_index("katgpucbf.bad_timestamp_heaps")] = 123 + 1000 * pol
+            stream.stats[config.get_stat_index("katgpucbf.metadata_heaps")] = 321 + 1000 * pol
 
         ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)  # Big enough not to worry about
         for stream in streams:
