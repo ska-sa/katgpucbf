@@ -23,12 +23,12 @@ from typing import List, Optional, Tuple, Union
 import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
-import spead2.recv
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
+from ..ringbuffer import ChunkRingbuffer
 from . import BYTE_BITS, recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
@@ -232,8 +232,7 @@ class Engine(aiokatcp.DeviceServer):
         self._processor = Processor(compute, self.delay_models, use_gdrcopy, monitor)
 
         ringbuffer_capacity = 2
-        ring = spead2.recv.asyncio.ChunkRingbuffer(ringbuffer_capacity)
-        monitor.event_qsize("recv_ringbuffer", 0, ringbuffer_capacity)
+        ring = ChunkRingbuffer(ringbuffer_capacity, name="recv_ringbuffer", task_name="run_receive", monitor=monitor)
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
@@ -246,12 +245,10 @@ class Engine(aiokatcp.DeviceServer):
                 self._src_layout,
                 ring,
                 src_affinity[pol],
-                monitor=monitor,
             )
             for pol in range(N_POLS)
         ]
         src_chunks_per_stream = 4
-        monitor.event_qsize("free_chunks", 0, src_chunks_per_stream * len(self._src_streams))
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_gdrcopy:

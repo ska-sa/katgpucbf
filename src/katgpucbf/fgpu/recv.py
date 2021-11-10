@@ -32,7 +32,6 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from ..monitor import Monitor
 from ..spead import TIMESTAMP_ID
 from . import BYTE_BITS, METRIC_NAMESPACE
 
@@ -185,7 +184,6 @@ class Layout:
 async def chunk_sets(
     streams: List[spead2.recv.ChunkRingStream],
     layout: Layout,
-    monitor: Monitor,
 ) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
@@ -202,13 +200,12 @@ async def chunk_sets(
     streams
         A list of stream objects - there should be only two of them, because
         each represents a polarisation.
-    monitor
-        Used for performance monitoring of the ringbuffer.
+    layout
+        Structure of the streams
     """
     n_pol = len(streams)
     # Working buffer to match up pairs of chunks from both pols.
     buf: List[Optional[Chunk]] = [None] * n_pol
-    # TODO: bring back ringbuffer monitoring capabilities
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
     stats_map = {
@@ -307,13 +304,8 @@ def make_stream(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
-    monitor: Monitor,
 ) -> spead2.recv.ChunkRingStream:
     """Create a receive stream for one polarisation.
-
-    .. todo::
-
-       The `monitor` is not currently used.
 
     Parameters
     ----------
@@ -325,8 +317,6 @@ def make_stream(
         Output ringbuffer to which chunks will be sent
     affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
-    monitor
-        Queue performance monitor
     """
     stream_config = spead2.recv.StreamConfig(
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
