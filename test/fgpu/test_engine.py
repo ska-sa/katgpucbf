@@ -20,6 +20,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from unittest import mock
 
 import aiokatcp
 import numpy as np
@@ -28,7 +29,7 @@ import spead2.send
 from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS, send
+from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS, send
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 from katgpucbf.spead import FLAVOUR
@@ -208,9 +209,9 @@ class TestEngine:
         if the pols get more than a chunk out of sync, and if we just push
         all the heaps in at once we have no control over the order in which
         spead2 processes them. To avoid getting too far ahead, we watch the
-        sensor that indicates how many heaps have been received, and push
-        updates to a queue that we can block on. We must transmit data from
-        the next chunk to force spead2 to flush out a prior chunk.
+        mock the counter that indicates how many heaps have been received, and
+        push updates to a queue that we can block on. We must transmit data
+        from the next chunk to force spead2 to flush out a prior chunk.
 
         `dig_data` must contain integer values rather than packed 10-bit samples.
 
@@ -242,15 +243,19 @@ class TestEngine:
         dig_stream = self._make_digitiser(mock_recv_streams)
         heaps_received = 0
         heaps_received_queue = asyncio.Queue()  # type: asyncio.Queue[int]
-        heaps_sensor = engine.sensors["input-heaps-total"]
-        heaps_sensor.attach(lambda sensor, reading: heaps_received_queue.put_nowait(reading.value))
         heap_gens = [gen_heaps(src_layout, pol_data, first_timestamp, pol) for pol, pol_data in enumerate(dig_data)]
-        for i, cur_heaps in enumerate(zip(*heap_gens)):
-            for pol in range(N_POLS):
-                await dig_stream.async_send_heap(cur_heaps[pol], substream_index=pol)
-            while i >= heaps_received // N_POLS + src_layout.chunk_heaps:
-                logging.debug("heaps_received = %d, waiting for more", heaps_received)
-                heaps_received = await heaps_received_queue.get()
+
+        def counter_inc(counter, amount=1, exemplar=None):
+            if counter.describe()[0].name == f"{METRIC_NAMESPACE}_input_heaps":
+                heaps_received_queue.put_nowait(amount)
+
+        with mock.patch("prometheus_client.Counter.inc", side_effect=counter_inc, autospec=True):
+            for i, cur_heaps in enumerate(zip(*heap_gens)):
+                for pol in range(N_POLS):
+                    await dig_stream.async_send_heap(cur_heaps[pol], substream_index=pol)
+                while i >= heaps_received // N_POLS + src_layout.chunk_heaps:
+                    logging.debug("heaps_received = %d, waiting for more", heaps_received)
+                    heaps_received += await heaps_received_queue.get()
         for queue in mock_recv_streams:
             queue.stop()
 

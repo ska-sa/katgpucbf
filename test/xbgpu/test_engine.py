@@ -32,17 +32,17 @@ import spead2.recv.asyncio
 import spead2.send
 from numba import njit
 
-import katgpucbf.xbgpu.xbengine
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
-from katgpucbf.xbgpu.tensorcore_xengine_core import TensorCoreXEngineCore, device_filter
+from katgpucbf.xbgpu.correlation import Correlation, device_filter
+from katgpucbf.xbgpu.engine import XBEngine
 
 from . import test_parameters
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
-get_baseline_index = njit(TensorCoreXEngineCore.get_baseline_index)
+get_baseline_index = njit(Correlation.get_baseline_index)
 
 
 def create_heaps(
@@ -247,9 +247,9 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     test_parameters.num_channels,
     test_parameters.num_spectra_per_heap,
 )
-def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_channels):
+def test_xengine_end_to_end(context, event_loop, num_ants, num_spectra_per_heap, num_channels):
     """
-    Unit tests for the xbengine.py module.
+    Unit tests for the xbgpu/engine.py module.
 
     Data is generated for a number of accumulations and then the ouput of these dumps is verified.
 
@@ -332,7 +332,7 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
     # 4.1. Create Monitor required by XBEngine
     monitor = NullMonitor()
 
-    xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+    xbengine = XBEngine(
         katcp_host="",
         katcp_port=0,
         adc_sample_rate_hz=adc_sample_rate,
@@ -460,9 +460,9 @@ def test_xbengine(context, event_loop, num_ants, num_spectra_per_heap, num_chann
 if __name__ == "__main__":
     print("Running tests")
     loop = asyncio.get_event_loop()
-    test_xbengine(loop, 4, 1024, 32768)
-    test_xbengine(loop, 8, 1024, 32768)
-    test_xbengine(loop, 16, 1024, 32768)
-    test_xbengine(loop, 32, 1024, 32768)
-    test_xbengine(loop, 64, 1024, 32768)
+    test_xengine_end_to_end(loop, 4, 1024, 32768)
+    test_xengine_end_to_end(loop, 8, 1024, 32768)
+    test_xengine_end_to_end(loop, 16, 1024, 32768)
+    test_xengine_end_to_end(loop, 32, 1024, 32768)
+    test_xengine_end_to_end(loop, 64, 1024, 32768)
     print("Tests complete")

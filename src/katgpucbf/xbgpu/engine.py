@@ -28,8 +28,7 @@ passing information between different async processing loops within the object.
     - The B-Engine logic has not been implemented yet - this needs to be added eventually. It is expected that this
       logic will need to go in the _gpu_proc_loop for the B-Engine processing
       and then a seperate sender loop would need to be created for sending B-Engine data.
-    - Implement monitoring and control - There is no mechanism to interact with or receive metrics from a running
-      pipeline.
+    - Implement control - There is no mechanism to interact with a running pipeline.
     - Catch asyncio exceptions - If one of the running asyncio loops has an exception, it will stop running without
       crashing the program or printing the error trace stack. This is not an issue when things are working, but if we
       could catch those exceptions and crash the program, it would make detecting and debugging heaps much simpler.
@@ -42,7 +41,7 @@ import asyncio
 import logging
 import math
 import time
-from typing import List, Optional, Tuple, TypedDict
+from typing import List, Optional
 
 import katsdpsigproc
 import katsdpsigproc.abc
@@ -50,15 +49,15 @@ import katsdpsigproc.accel
 import katsdpsigproc.resource
 import numpy as np
 import spead2
-from aiokatcp import DeviceServer, Sensor, SensorSampler
-
-import katgpucbf.xbgpu.precorrelation_reorder
-import katgpucbf.xbgpu.recv
-import katgpucbf.xbgpu.tensorcore_xengine_core
-import katgpucbf.xbgpu.xsend
+from aiokatcp import DeviceServer
 
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
+from ..ringbuffer import ChunkRingbuffer
+from . import recv
+from .correlation import CorrelationTemplate
+from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
+from .xsend import XSend
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ class RxQueueItem(QueueItem):
     is complete to reuse resources.
     """
 
-    chunk: Optional[katgpucbf.xbgpu.recv.Chunk]
+    chunk: Optional[recv.Chunk]
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
@@ -232,78 +231,6 @@ class XBEngine(DeviceServer):
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
 
-        # No more than once per second, at least once every 10 seconds.
-        # The TypedDict is necessary for mypy to believe the use as
-        # kwargs is valid.
-        AutoStrategy = TypedDict(  # noqa: N806
-            "AutoStrategy",
-            {
-                "auto_strategy": SensorSampler.Strategy,
-                "auto_strategy_parameters": Tuple[float, float],
-            },
-        )
-        auto_strategy = AutoStrategy(
-            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(1.0, 10.0),
-        )
-        sensors: List[Sensor] = [
-            Sensor(
-                int,
-                "input-heaps-total",
-                "number of heaps received (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "input-chunks-total",
-                "number of chunks received (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "input-bytes-total",
-                "number of bytes of digitiser samples received (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "input-missing-heaps-total",
-                "number of heaps dropped on the input (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                # TODO: Think about what status_func should do for the status of the
-                # sensor. If it goes into "warning" as soon as a single packet is
-                # dropped, then it may not be too useful. Having the information
-                # necessary to implement this may involve shifting things between
-                # classes.
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "output-heaps-total",
-                "number of heaps transmitted (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-            Sensor(
-                int,
-                "output-bytes-total",
-                "number of payload bytes transmitted (prometheus: counter)",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
-                **auto_strategy,
-            ),
-        ]
-        for sensor in sensors:
-            self.sensors.add(sensor)
-
         # 1. List object variables and provide type hints - This has no function other than to improve readability.
         # 1.1 Array Configuration Parameters - Parameters used to configure the entire array
         self.adc_sample_rate_hz: float
@@ -412,8 +339,10 @@ class XBEngine(DeviceServer):
 
         # 4. Create the receiver_stream object. This object has no attached transport yet and will not function until
         # one of the add_*_receiver_transport() functions has been called.
-        self.ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_free_chunks)
-        self.receiver_stream = katgpucbf.xbgpu.recv.make_stream(
+        self.ringbuffer = ChunkRingbuffer(
+            n_free_chunks, name="recv_ringbuffer", task_name="receiver_loop", monitor=monitor
+        )
+        self.receiver_stream = recv.make_stream(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
@@ -435,7 +364,7 @@ class XBEngine(DeviceServer):
         self._download_command_queue = self.context.create_command_queue()
 
         # 5.3 Create reorder and correlation operations and create buffer linking the two operations.
-        tensor_core_template = katgpucbf.xbgpu.tensorcore_xengine_core.TensorCoreXEngineCoreTemplate(
+        tensor_core_template = CorrelationTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
@@ -443,16 +372,14 @@ class XBEngine(DeviceServer):
         )
         self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
 
-        reorder_template = katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorderTemplate(
+        reorder_template = PrecorrelationReorderTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_batches=self.chunk_spectra,
         )
-        self.precorrelation_reorder: katgpucbf.xbgpu.precorrelation_reorder.PrecorrelationReorder = (
-            reorder_template.instantiate(self._proc_command_queue)
-        )
+        self.precorrelation_reorder: PrecorrelationReorder = reorder_template.instantiate(self._proc_command_queue)
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
             self.context,
@@ -499,7 +426,7 @@ class XBEngine(DeviceServer):
                 context=self.context,
             )
             present = np.zeros(n_ants * self.chunk_spectra, np.uint8)
-            chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
+            chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
 
     def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):
@@ -595,7 +522,7 @@ class XBEngine(DeviceServer):
         # too high, the entire pipeline will stall needlessly waiting for packets to be transmitted too slowly.
         self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
+        self.send_stream = XSend(
             n_ants=self.n_ants,
             n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
@@ -635,7 +562,7 @@ class XBEngine(DeviceServer):
         # makes the unit tests take very long to run.
         self.dump_interval_s = 0
 
-        self.send_stream = katgpucbf.xbgpu.xsend.XSend(
+        self.send_stream = XSend(
             n_ants=self.n_ants,
             n_channels=self.n_channels_total,
             n_channels_per_stream=self.n_channels_per_stream,
@@ -663,44 +590,9 @@ class XBEngine(DeviceServer):
         TODO: If no data is being streamed and the running flag is set to false, this function will be stuck waiting for
         the next chunk. Try find a way to exit cleanly without adding to much additional logic to this function.
         """
-        # 1. Set up initial conditions
-        async_ringbuffer = self.receiver_stream.data_ringbuffer
-        chunk_index = 0
-        expected_heaps_total = 0
-        dropped_heaps_total = 0
         # 2. Get complete chunks from the ringbuffer.
-        async for chunk in async_ringbuffer:
-            # 2.1 Update metrics and log warning if dropped heap is detected within the chunk.
-            expected_heaps = len(chunk.present)
-            received_heaps = int(np.sum(chunk.present))
-            dropped_heaps = expected_heaps - received_heaps
-            expected_heaps_total += expected_heaps
-            dropped_heaps_total += dropped_heaps
+        async for chunk in recv.recv_chunks(self.receiver_stream):
             timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
-
-            sensor_timestamp = time.time()
-            # TODO: This must become a proper logging message; fstrings should
-            # be replaced with old-fashioned format strings.
-            if dropped_heaps != 0:
-                logger.warning(
-                    "Chunk: %5d Timestamp: %#x Received: %4d of %4d expected heaps. All time dropped heaps: %d/%d.",
-                    chunk_index,
-                    timestamp,
-                    received_heaps,
-                    expected_heaps,
-                    dropped_heaps_total,
-                    expected_heaps_total,
-                )
-                self.sensors["input-missing-heaps-total"].set_value(dropped_heaps_total, timestamp=sensor_timestamp)
-
-            def increment(sensor: Sensor, incr: int):
-                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-            increment(self.sensors["input-heaps-total"], expected_heaps)
-            increment(self.sensors["input-chunks-total"], 1)
-            increment(self.sensors["input-bytes-total"], chunk.data.nbytes * received_heaps // expected_heaps)
-
-            chunk_index += 1
 
             # 2.2. Get a free rx_item that will contain the GPU buffer to transfer the received chunk to.
             item = await self._rx_free_item_queue.get()

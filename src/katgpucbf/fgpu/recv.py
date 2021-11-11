@@ -16,30 +16,46 @@
 
 """Recv module."""
 
+import ctypes
 import functools
 import logging
-import time
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import AsyncGenerator, List, Optional, Tuple, Union, cast
 
 import numba
 import numpy as np
 import scipy
 import spead2.recv.asyncio
-from aiokatcp import Sensor, SensorSet
 from numba import types
+from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from ..monitor import Monitor
+from ..recv import StatsToCounters
 from ..spead import TIMESTAMP_ID
-from . import BYTE_BITS
+from . import BYTE_BITS, METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
+
+heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
+chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
+bytes_counter = Counter(
+    "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
+)
+missing_heaps_counter = Counter(
+    "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
+)
+metadata_heaps_counter = Counter(
+    "input_metadata_heaps", "number of heaps not containing payload", ["pol"], namespace=METRIC_NAMESPACE
+)
+bad_timestamp_heaps_counter = Counter(
+    "input_bad_timestamp_heaps", "timestamp not a multiple of samples per packet", ["pol"], namespace=METRIC_NAMESPACE
+)
 
 
 class Chunk(spead2.recv.Chunk):
@@ -61,6 +77,22 @@ class Chunk(spead2.recv.Chunk):
         super().__init__(*args, **kwargs)
         self.device = device
         self.timestamp = 0  # Actual value filled in when chunk received
+
+
+class _Statistic(IntEnum):
+    """Custom statistics for the SPEAD receiver."""
+
+    # Note: the values are important and must match the registration order
+    # of the statistics.
+    METADATA_HEAPS = 0
+    BAD_TIMESTAMP_HEAPS = 1
+
+
+_user_data_type = types.Record.make_c_struct(
+    [
+        ("stats_base", types.uintp),  # Index for first custom statistic
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -93,44 +125,66 @@ class Layout:
         return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
 
     @functools.cached_property
-    def chunk_place(self) -> scipy.LowLevelCallable:  # noqa: D401
-        """Low level code for placing heaps in chunks."""
+    def _chunk_place(self) -> numba.core.ccallback.CFunc:
+        """Low-level code for placing heaps in chunks."""
         heap_samples = self.heap_samples
         heap_bytes = self.heap_bytes
         chunk_heaps = self.chunk_heaps
         chunk_samples = self.chunk_samples
         timestamp_mask = self.timestamp_mask
+        n_statistics = len(_Statistic)
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
         @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp),
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)),
             nopython=True,
         )
-        def chunk_place_impl(data_ptr, data_size):  # pragma: nocover
+        def chunk_place_impl(data_ptr, data_size, user_data_ptr):  # pragma: nocover
             data = numba.carray(data_ptr, 1)
             items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
             timestamp = items[0]
             payload_size = items[1]
+            user_data = numba.carray(user_data_ptr, 1)
+            batch_stats = numba.carray(
+                intp_to_voidptr(data[0].batch_stats),
+                user_data[0].stats_base + n_statistics,
+                dtype=np.uint64,
+            )
             if payload_size != heap_bytes or timestamp < 0:
                 # It's something unexpected - maybe it has descriptors or a stream
                 # control item. Ignore it.
+                batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
                 return
             timestamp &= timestamp_mask
             if timestamp % heap_samples != 0:
-                # TODO: log/count. The timestamp is broken.
+                batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
             data[0].chunk_id = timestamp // chunk_samples
             data[0].heap_index = timestamp // heap_samples % chunk_heaps
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
-        return scipy.LowLevelCallable(chunk_place_impl.ctypes, signature="void (void *, size_t)")
+        return chunk_place_impl
+
+    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
+        """Generate low-level code for placing heaps in chunks.
+
+        Parameters
+        ----------
+        stats_base
+            Index of first custom statistic
+        """
+        user_data = np.zeros(1, dtype=_user_data_type.dtype)
+        user_data["stats_base"] = stats_base
+        return scipy.LowLevelCallable(
+            self._chunk_place.ctypes,
+            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
+            signature="void (void *, size_t, void *)",
+        )
 
 
 async def chunk_sets(
     streams: List[spead2.recv.ChunkRingStream],
     layout: Layout,
-    monitor: Monitor,
-    sensors: Optional[SensorSet] = None,
 ) -> AsyncGenerator[List[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
@@ -147,18 +201,31 @@ async def chunk_sets(
     streams
         A list of stream objects - there should be only two of them, because
         each represents a polarisation.
-    monitor
-        Used for performance monitoring of the ringbuffer.
-    sensors
-        Sensors through which networking statistics will be reported (if provided).
+    layout
+        Structure of the streams
     """
     n_pol = len(streams)
     # Working buffer to match up pairs of chunks from both pols.
     buf: List[Optional[Chunk]] = [None] * n_pol
-    # TODO: bring back ringbuffer monitoring capabilities
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
+    stats_to_counters = [
+        StatsToCounters(
+            {
+                "katgpucbf.metadata_heaps": metadata_heaps_counter.labels(pol),
+                "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter.labels(pol),
+            },
+            stream.config,
+        )
+        for pol, stream in enumerate(streams)
+    ]
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
+    # These duplicate the Prometheus counters, because prometheus_client
+    # doesn't provide an efficient way to get the current value
+    # (REGISTRY.get_sample_value is documented as being intended only for unit
+    # tests).
+    n_heaps = [0] * n_pol
+    n_missing_heaps = [0] * n_pol
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
@@ -182,6 +249,11 @@ async def chunk_sets(
                 lost,
             )
 
+            # Update stream statistics. Note that these are not necessarily
+            # synchronised with the chunk.
+            for updater, stream in zip(stats_to_counters, streams):
+                updater.update(stream.stats)
+
             # Check whether we have a chunk already for this pol.
             old = buf[pol]
             if old is not None:
@@ -195,32 +267,25 @@ async def chunk_sets(
 
             # If we have both chunks and they match up, then we can yield.
             if all(c is not None and c.chunk_id == chunk.chunk_id for c in buf):
-                if sensors is not None:
-                    # Get explicit timestamp to ensure that all the updated sensors
-                    # have the same timestamp.
-                    sensor_timestamp = time.time()
-
-                    def increment(sensor: Sensor, incr: int):
-                        sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-                    # mypy isn't smart enough to see that the list can't have Nones
-                    # in it at this point. The cast is to force numpy ints to
-                    # Python ints.
-                    buf_good = sum(int(np.sum(c.present)) for c in buf)  # type: ignore
-                    increment(sensors["input-heaps-total"], buf_good)
-                    increment(sensors["input-chunks-total"], n_pol)
-                    increment(sensors["input-bytes-total"], buf_good * layout.heap_bytes)
+                expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
+                # mypy isn't smart enough to see that the list can't have Nones
+                # in it at this point.
+                for c in cast(List[Chunk], buf):
+                    pol = c.stream_id
+                    # The cast is to force numpy ints to Python ints.
+                    buf_good = int(np.sum(c.present))
+                    heaps_counter.labels(pol).inc(buf_good)
+                    chunks_counter.labels(pol).inc()
+                    bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
                     # Determine how many heaps we expected to have seen by
                     # now, and subtract from it the number actually seen to
                     # determine the number missing. This accounts for both
                     # heaps lost within chunks and lost chunks.
-                    received_heaps = sensors["input-heaps-total"].value
-                    expected_heaps = (
-                        (chunk.timestamp - first_timestamp + layout.chunk_samples) * n_pol // layout.heap_samples
-                    )
-                    missing = expected_heaps - received_heaps
-                    if missing > sensors["input-missing-heaps-total"].value:
-                        sensors["input-missing-heaps-total"].set_value(missing, timestamp=sensor_timestamp)
+                    n_heaps[c.stream_id] += buf_good
+                    new_missing = expected_heaps - n_heaps[pol]
+                    if new_missing > n_missing_heaps[pol]:
+                        missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
+                        n_missing_heaps[pol] = new_missing
 
                 # mypy isn't smart enough to see that the list can't have Nones
                 # in it at this point.
@@ -228,9 +293,9 @@ async def chunk_sets(
                 # Empty the buffer again for next use.
                 buf = [None] * n_pol
     finally:
-        for c in buf:
-            if c is not None:
-                streams[c.stream_id].add_free_chunk(c)
+        for c2 in buf:
+            if c2 is not None:
+                streams[c2.stream_id].add_free_chunk(c2)
 
 
 def make_stream(
@@ -238,13 +303,8 @@ def make_stream(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
-    monitor: Monitor,
 ) -> spead2.recv.ChunkRingStream:
     """Create a receive stream for one polarisation.
-
-    .. todo::
-
-       The `monitor` is not currently used.
 
     Parameters
     ----------
@@ -256,16 +316,17 @@ def make_stream(
         Output ringbuffer to which chunks will be sent
     affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
-    monitor
-        Queue performance monitor
     """
     stream_config = spead2.recv.StreamConfig(
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
         memcpy=spead2.MEMCPY_NONTEMPORAL,
         stream_id=pol,
     )
+    stats_base = stream_config.next_stat_index()
+    stream_config.add_stat("katgpucbf.metadata_heaps")
+    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place
+        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place(stats_base)
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.

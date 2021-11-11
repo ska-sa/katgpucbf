@@ -35,25 +35,21 @@ TODO: Turn create_test_objects() into a pytest fixture.
 """
 
 import asyncio
-import logging
 
 import numpy as np
 import pytest
 import spead2
 import spead2.send
 
-import katgpucbf.monitor
-import katgpucbf.xbgpu.recv
+from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.xbgpu import METRIC_NAMESPACE
+from katgpucbf.xbgpu.recv import Chunk, make_stream, recv_chunks
 
+from .. import PromDiff
 from . import test_parameters
 
-logging.basicConfig(level=logging.INFO)
-
-# 3. Define Constants
-
-# 3.2 Explicit note a complex sample has real and imaginay samples.
-complexity = 2
+pytestmark = [pytest.mark.asyncio]
 
 
 def create_test_objects(
@@ -113,9 +109,9 @@ def create_test_objects(
     """
     # 1. Calculate important parameters.
     max_packet_size = (
-        n_spectra_per_heap * n_pols * complexity * sample_bits // 8 + 96
+        n_spectra_per_heap * n_pols * COMPLEX * sample_bits // 8 + 96
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
-    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, complexity)
+    heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, COMPLEX)
 
     # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
@@ -157,7 +153,7 @@ def create_test_objects(
 
     # 4.3 Create Receiver
     thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
-    receiver_stream = katgpucbf.xbgpu.recv.make_stream(
+    receiver_stream = make_stream(
         n_ants,
         n_channels_per_stream,
         n_spectra_per_heap,
@@ -172,11 +168,11 @@ def create_test_objects(
     # 4.4 Create empty chunks and add them to the receiver empty queue.
     src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
     chunk_heaps = n_ants * heaps_per_fengine_per_chunk
-    chunk_bytes = chunk_heaps * n_channels_per_stream * n_spectra_per_heap * sample_bits * n_pols * complexity // 8
+    chunk_bytes = chunk_heaps * n_channels_per_stream * n_spectra_per_heap * sample_bits * n_pols * COMPLEX // 8
     for _ in range(src_chunks_per_stream):
         buf = np.empty((chunk_bytes,), np.uint8)
         present = np.zeros((chunk_heaps,), np.uint8)
-        chunk = katgpucbf.xbgpu.recv.Chunk(data=buf, present=present)
+        chunk = Chunk(data=buf, present=present)
         receiver_stream.add_free_chunk(chunk)
 
     # 6. Return relevant objects
@@ -233,7 +229,7 @@ def create_heaps(
         n_channels_per_stream,
         n_spectra_per_heap,
         n_pols,
-        complexity // 2,
+        COMPLEX // 2,
     )
     heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
     for ant_index in range(n_ants):
@@ -313,7 +309,7 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
     # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
     n_channels_per_stream = num_channels // n_ants // 4
     n_spectra_per_heap = num_spectra_per_heap
-    n_pols = 2
+    n_pols = N_POLS
     sample_bits = 8
     heaps_per_fengine_per_chunk = 8
     max_active_chunks = 8
@@ -447,7 +443,7 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
 
         # 5.1 Iterate through complete chunks in the ringbuffer asynchronously
         async for chunk in async_ringbuffer:
-            assert isinstance(chunk, katgpucbf.xbgpu.recv.Chunk)
+            assert isinstance(chunk, Chunk)
             received += len(chunk.present)
             dropped += len(chunk.present) - int(np.sum(chunk.present))
             assert len(chunk.present) == n_ants * heaps_per_fengine_per_chunk, (
@@ -497,6 +493,51 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
 
     # 6. Run get_chunks() function
     event_loop.run_until_complete(get_chunks(async_ringbuffer, receiver_stream, total_chunks))
+
+
+async def test_recv_bad_heaps():
+    """Test that counters for heaps with bad timestamps or fengine IDs work."""
+    n_ants = 4
+    n_channels = 1024
+    n_channels_per_stream = 8
+    n_spectra_per_heap = 256
+    sample_bits = 8
+    heaps_per_fengine_per_chunk = 8
+    max_active_chunks = 8
+    timestamp_step = n_channels * 2 * n_spectra_per_heap
+
+    source_stream, ig, receiver_stream, async_ringbuffer = create_test_objects(
+        n_ants,
+        n_channels_per_stream,
+        n_spectra_per_heap,
+        N_POLS,
+        sample_bits,
+        heaps_per_fengine_per_chunk,
+        max_active_chunks,
+        timestamp_step,
+    )
+
+    # Bad timestamp
+    heaps = create_heaps(1234567, 0, n_ants, n_channels_per_stream, n_spectra_per_heap, N_POLS, ig)
+    source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+    # Bad fengine ID: use more antennas than are valid
+    heaps = create_heaps(0, 0, n_ants + 2, n_channels_per_stream, n_spectra_per_heap, N_POLS, ig)
+    source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+    # Descriptor heap
+    heap = ig.get_heap(descriptors="all", data="none")
+    source_stream.send_heap(heap)
+
+    # Feed the heaps to the receiver
+    with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+        receiver_stream.add_buffer_reader(source_stream.getvalue())
+        async for chunk in recv_chunks(receiver_stream):
+            pass
+
+    assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == n_ants
+    assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 2
+    assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1
 
 
 # A manual run useful when debugging the unit tests.

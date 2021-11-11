@@ -28,5 +28,5 @@ except PackageNotFoundError:
 
 __all__ = ["__version__"]
 
-COMPLEX: Final[int] = 2
-N_POLS: Final[int] = 2
+COMPLEX: Final = 2
+N_POLS: Final = 2

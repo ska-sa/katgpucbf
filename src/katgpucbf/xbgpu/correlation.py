@@ -44,12 +44,12 @@ def device_filter(device: AbstractDevice) -> bool:
     return isinstance(device, cuda.Device) and device.compute_capability >= MIN_COMPUTE_CAPABILITY
 
 
-class TensorCoreXEngineCoreTemplate:
+class CorrelationTemplate:
     r"""Template class for the Tensor-Core correlation kernel.
 
-    The template creates a :class:`TensorCoreXEngineCore` that will run the
+    The template creates a :class:`Correlation` that will run the
     compiled kernel. The parameters are used to compile the kernel and by the
-    :class:`TensorCoreXEngineCore` to specify the shape of the memory buffers
+    :class:`Correlation` to specify the shape of the memory buffers
     connected to this kernel.
 
     The number of baselines calculated here is not the canonical way that it is
@@ -158,17 +158,17 @@ class TensorCoreXEngineCoreTemplate:
         )
         self.kernel = program.get_kernel("correlate")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "TensorCoreXEngineCore":
-        """Create a :class:`TensorCoreXEngineCore` using this template to build the kernel."""
-        return TensorCoreXEngineCore(self, command_queue)
+    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "Correlation":
+        """Create a :class:`Correlation` using this template to build the kernel."""
+        return Correlation(self, command_queue)
 
 
-class TensorCoreXEngineCore(accel.Operation):
+class Correlation(accel.Operation):
     """Tensor-Core correlation kernel.
 
     Specifies the shape of the input sample and output visibility buffers
     required by the kernel. The parameters specified in the
-    :class:`TensorCoreXEngineCoreTemplate` object are used to determine the
+    :class:`CorrelationTemplate` object are used to determine the
     shape of the buffers.
 
     The input sample buffer must have the shape:
@@ -178,7 +178,7 @@ class TensorCoreXEngineCore(accel.Operation):
     ``spectra_per_heap`` index is split over two different indices. The first
     index ranges from ``0`` to ``spectra_per_heap//times_per_block`` and the
     second index ranges from ``0`` to ``times_per_block``. Times per block is
-    calculated by the :class:`TensorCoreXEngineCoreTemplate`. In 8-bit input mode,
+    calculated by the :class:`CorrelationTemplate`. In 8-bit input mode,
     ``times_per_block`` is equal to 16.
 
     Each input element is a complex 8-bit integer sample. :mod:`.numpy` does not
@@ -196,7 +196,7 @@ class TensorCoreXEngineCore(accel.Operation):
     Currently only 8-bit input mode is supported.
     """
 
-    def __init__(self, template: TensorCoreXEngineCoreTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+    def __init__(self, template: CorrelationTemplate, command_queue: accel.AbstractCommandQueue) -> None:
         super().__init__(command_queue)
         self.template = template
         self.slots["in_samples"] = accel.IOSlot(

@@ -43,7 +43,6 @@ bandwidth required to send.
 import asyncio
 import math
 import queue
-import time
 from typing import Callable, Final, List, Sequence, Tuple
 
 import katsdpsigproc
@@ -51,10 +50,16 @@ import katsdpsigproc.accel as accel
 import numpy as np
 import spead2
 import spead2.send.asyncio
-from aiokatcp.sensor import Sensor, SensorSet
+from prometheus_client import Counter
 
 from .. import COMPLEX
 from ..spead import FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
+from . import METRIC_NAMESPACE
+
+output_heaps_counter = Counter("output_heaps_x", "number of X-engine heaps transmitted", namespace=METRIC_NAMESPACE)
+output_bytes_counter = Counter(
+    "output_bytes_x", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
+)
 
 
 class BufferWrapper:
@@ -280,7 +285,7 @@ class XSend:
         # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
-    def send_heap(self, timestamp: int, buffer_wrapper: BufferWrapper, sensors: SensorSet = None) -> None:
+    def send_heap(self, timestamp: int, buffer_wrapper: BufferWrapper) -> None:
         """Take in a :class:`BufferWrapper` and send it as a SPEAD heap.
 
         This function is non-blocking. There is no guarantee that a packet has
@@ -293,9 +298,6 @@ class XSend:
             encapsulated in a SPEAD heap.
         buffer_wrapper
             Wrapped buffer to sent as a SPEAD heap.
-        sensors
-            Sensors through which networking statistics will be reported (if
-            provided).
         """
         self.item_group["timestamp"].value = timestamp
         self.item_group["frequency"].value = self.channel_offset
@@ -309,19 +311,12 @@ class XSend:
 
         future = self.source_stream.async_send_heap(heap_to_send)
         self._heaps_queue.put((future, buffer_wrapper))
-        if sensors:
-            # Note: it's not strictly true to say that the data has been sent at
-            # this point; it's only been queued for sending. But it should be close
-            # enough for monitoring data rates at the granularity that this is
-            # typically done.
-
-            sensor_timestamp = time.time()
-
-            def increment(sensor: Sensor, incr: int):
-                sensor.set_value(sensor.value + incr, timestamp=sensor_timestamp)
-
-            increment(sensors["output-heaps-total"], 1)
-            increment(sensors["output-bytes-total"], buffer_wrapper.buffer.nbytes)
+        # Note: it's not strictly true to say that the data has been sent at
+        # this point; it's only been queued for sending. But it should be close
+        # enough for monitoring data rates at the granularity that this is
+        # typically done.
+        output_heaps_counter.inc(1)
+        output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
 
     async def get_free_heap(self) -> BufferWrapper:
         """

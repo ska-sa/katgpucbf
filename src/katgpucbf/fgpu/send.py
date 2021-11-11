@@ -17,18 +17,23 @@
 """Network transmission handling."""
 
 import asyncio
+import functools
 from typing import Any, Iterable, List, Optional, Sequence
 
 import numpy as np
 import spead2.send.asyncio
 from katsdpsigproc.accel import DeviceArray
 from katsdptelstate.endpoint import Endpoint
+from prometheus_client import Counter
 
 from .. import N_POLS
 from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers, 3 padding pointers)
 PREAMBLE_SIZE = 96
+output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
+output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 
 
 def make_immediate(id: int, value: Any) -> spead2.Item:
@@ -66,6 +71,7 @@ class Frame:
         assert channels % substreams == 0
         channels_per_substream = channels // substreams
         self.heaps = []
+        self.data = data
         for i in range(substreams):
             start_channel = i * channels_per_substream
             heap = spead2.send.Heap(FLAVOUR)
@@ -126,14 +132,21 @@ class Chunk:
         self._timestamps += delta
         self._timestamp = value
 
+    @staticmethod
+    def _inc_counters(frame: Frame, future: asyncio.Future) -> None:
+        if not future.cancelled() and future.exception() is None:
+            output_heaps_counter.inc(len(frame.heaps))
+            output_bytes_counter.inc(frame.data.nbytes)
+
     async def send(self, stream: "spead2.send.asyncio.AsyncStream", frames: int) -> None:
         """Transmit heaps on a SPEAD stream.
 
         Frames from 0 to `frames` - 1 are sent asynchronously.
         """
-        futures = [
-            stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN) for frame in self._frames[:frames]
-        ]
+        futures = []
+        for frame in self._frames[:frames]:
+            futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
+            futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
         await asyncio.gather(*futures)
 
 

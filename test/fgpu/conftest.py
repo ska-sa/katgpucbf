@@ -29,7 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 import katgpucbf.fgpu.recv
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.fgpu.main import make_engine
+from katgpucbf.fgpu.main import make_engine, parse_args
 
 
 @pytest.fixture
@@ -115,7 +115,8 @@ async def engine_server(
     if request.node.get_closest_marker("use_gdrcopy"):
         check_gdrcopy(context)
         arglist.append("--use-gdrcopy")
-    server, _monitor = make_engine(context, arglist=arglist)
+    args = parse_args(arglist)
+    server, _monitor = make_engine(context, args)
 
     await server.start()
     yield server
@@ -128,7 +129,7 @@ async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client
     assert engine_server.server is not None
     assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
-    with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+    async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
         client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()

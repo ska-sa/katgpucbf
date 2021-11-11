@@ -28,16 +28,18 @@ object. The XBEngine object then manages everything required to run the XB-Engin
 import argparse
 import asyncio
 import logging
+from typing import Optional
 
 import katsdpsigproc.accel
+import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
 from katsdptelstate.endpoint import endpoint_parser
 
-import katgpucbf.xbgpu.xbengine
+from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from .tensorcore_xengine_core import device_filter
+from .correlation import device_filter
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
@@ -59,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_KATCP_PORT,
         help="TCP port on which to listen for KATCP C&M connections [%(default)s]",
+    )
+    parser.add_argument(
+        "--prometheus-port",
+        type=int,
+        help="Network port on which to serve Prometheus metrics [none]",
     )
     parser.add_argument(
         "--adc-sample-rate",
@@ -184,7 +191,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     logger.info("Initialising XB-Engine on %s", context.device.name)
-    xbengine = katgpucbf.xbgpu.xbengine.XBEngine(
+    xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
@@ -219,12 +226,18 @@ async def async_main(args: argparse.Namespace) -> None:
         thread_affinity=args.dst_affinity,
     )
 
+    prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
+    if args.prometheus_port is not None:
+        prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
+
     logger.info("Starting main processing loop")
 
     main_task = asyncio.create_task(xbengine.run())
     descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(5))
     await main_task
     await descriptor_task
+    if prometheus_server:
+        await prometheus_server.close()
 
 
 def main() -> None:
