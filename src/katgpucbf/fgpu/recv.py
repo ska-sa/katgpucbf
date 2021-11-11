@@ -32,6 +32,7 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+from ..recv import StatsToCounters
 from ..spead import TIMESTAMP_ID
 from . import BYTE_BITS, METRIC_NAMESPACE
 
@@ -208,11 +209,16 @@ async def chunk_sets(
     buf: List[Optional[Chunk]] = [None] * n_pol
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
-    stats_map = {
-        "katgpucbf.metadata_heaps": metadata_heaps_counter,
-        "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
-    }
-    prev_stats: List[Optional[spead2.recv.StreamStats]] = [None for _ in streams]
+    stats_to_counters = [
+        StatsToCounters(
+            {
+                "katgpucbf.metadata_heaps": metadata_heaps_counter.labels(pol),
+                "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter.labels(pol),
+            },
+            stream.config,
+        )
+        for pol, stream in enumerate(streams)
+    ]
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
     # These duplicate the Prometheus counters, because prometheus_client
     # doesn't provide an efficient way to get the current value
@@ -245,15 +251,8 @@ async def chunk_sets(
 
             # Update stream statistics. Note that these are not necessarily
             # synchronised with the chunk.
-            for i, stream in enumerate(streams):
-                stats = stream.stats
-                prev_stat = prev_stats[i]
-                for stats_name, counter in stats_map.items():
-                    inc = stats[stats_name]
-                    if prev_stat is not None:
-                        inc -= prev_stat[stats_name]
-                    counter.labels(i).inc(inc)
-                prev_stats[i] = stats
+            for updater, stream in zip(stats_to_counters, streams):
+                updater.update(stream.stats)
 
             # Check whether we have a chunk already for this pol.
             old = buf[pol]

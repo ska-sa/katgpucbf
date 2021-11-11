@@ -16,17 +16,50 @@
 
 """SPEAD receiver utilities."""
 
+from enum import IntEnum
+from typing import AsyncGenerator
+
 import numba
 import numpy as np
 import scipy
 import spead2.recv.asyncio
 import spead2.send
 from numba import types
+from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import COMPLEX, N_POLS
+from ..recv import StatsToCounters
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
+from . import METRIC_NAMESPACE
+
+heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
+chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
+bytes_counter = Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE)
+incomplete_heaps_counter = Counter(
+    "input_incomplete_heaps", "number of heaps only partially received", namespace=METRIC_NAMESPACE
+)
+missing_heaps_counter = Counter(
+    "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
+)
+metadata_heaps_counter = Counter(
+    "input_metadata_heaps", "number of heaps not containing payload", namespace=METRIC_NAMESPACE
+)
+bad_timestamp_heaps_counter = Counter(
+    "input_bad_timestamp_heaps", "timestamp is not a multiple of expected step size", namespace=METRIC_NAMESPACE
+)
+bad_feng_id_heaps_counter = Counter("input_bad_feng_id_heaps", "fengine ID is out of range", namespace=METRIC_NAMESPACE)
+
+
+class _Statistic(IntEnum):
+    """Custom statistics for the SPEAD receiver."""
+
+    # Note: the values are important and must match the registration order
+    # of the statistics.
+    METADATA_HEAPS = 0
+    BAD_TIMESTAMP_HEAPS = 1
+    BAD_FENG_ID_HEAPS = 2
 
 
 class Chunk(spead2.recv.Chunk):
@@ -80,22 +113,42 @@ def make_stream(
         CPU Thread that this receiver will use for processing.
     """
     heap_bytes = n_channels_per_stream * n_spectra_per_heap * N_POLS * COMPLEX * sample_bits // 8
+    # max_heaps is set quite high because timing jitter/bursting means there could
+    # be multiple heaps from one F-engine during the time it takes another to
+    # transmit.
+    stream_config = spead2.recv.StreamConfig(
+        max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 4,
+        memcpy=spead2.MEMCPY_NONTEMPORAL,
+    )
+    stats_base = stream_config.next_stat_index()
+    n_statistics = len(_Statistic)
+    stream_config.add_stat("katgpucbf.metadata_heaps")
+    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
+    stream_config.add_stat("katgpucbf.bad_feng_id_heaps")
 
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place_impl(data_ptr, data_size):
         data = numba.carray(data_ptr, 1)
+        batch_stats = numba.carray(
+            intp_to_voidptr(data[0].batch_stats),
+            stats_base + n_statistics,
+            dtype=np.uint64,
+        )
         items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
         timestamp = items[0]
         fengine = items[1]
         payload_size = items[2]
         if payload_size != heap_bytes or timestamp < 0 or fengine < 0:
             # It's something unexpected - possibly descriptors. Ignore it.
+            batch_stats[stats_base + _Statistic.METADATA_HEAPS] += 1
             return
         if timestamp % timestamp_step != 0:
-            # Invalid timestamp. TODO: log/count it somehow
+            # Invalid timestamp
+            batch_stats[stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
             return
         if fengine >= n_ants:
-            # Invalid F-engine ID. TODO: log/count it somehow
+            # Invalid F-engine ID
+            batch_stats[stats_base + _Statistic.BAD_FENG_ID_HEAPS] += 1
             return
         # Compute position of this heap on the time axis, starting from timestamp 0
         heap_time_abs = timestamp // timestamp_step
@@ -105,13 +158,6 @@ def make_stream(
         data[0].heap_index = heap_time * n_ants + fengine
         data[0].heap_offset = data[0].heap_index * heap_bytes
 
-    # max_heaps is set quite high because timing jitter/bursting means there could
-    # be multiple heaps from one F-engine during the time it takes another to
-    # transmit.
-    stream_config = spead2.recv.StreamConfig(
-        max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 4,
-        memcpy=spead2.MEMCPY_NONTEMPORAL,
-    )
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_chunks=max_active_chunks,
@@ -125,3 +171,36 @@ def make_stream(
         ringbuffer,
         free_ringbuffer,
     )
+
+
+async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chunk, None]:
+    """Retrieve chunks from the ringbuffer, updating metrics as they are received.
+
+    The returned chunks are yielded from this asynchronous generator.
+    """
+    counter_map = {
+        "incomplete_heaps_evicted": incomplete_heaps_counter,
+        "katgpucbf.metadata_heaps": metadata_heaps_counter,
+        "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
+        "katgpucbf.bad_feng_id_heaps": bad_feng_id_heaps_counter,
+    }
+    stats_to_counters = StatsToCounters(counter_map, stream.config)
+    ringbuffer = stream.data_ringbuffer
+    assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+    async for chunk in ringbuffer:
+        assert isinstance(chunk, Chunk)
+        # Update metrics
+        expected_heaps = len(chunk.present)
+        received_heaps = int(np.sum(chunk.present))
+        dropped_heaps = expected_heaps - received_heaps
+
+        missing_heaps_counter.inc(dropped_heaps)
+        heaps_counter.inc(expected_heaps)
+        chunks_counter.inc(1)
+        bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
+        # Note: this won't be synchronised with the chunk, as more heaps may
+        # have arrived after the chunk was pushed to the ringbuffer. But on
+        # the time scales at which Prometheus scrapes it will be close.
+        stats_to_counters.update(stream.stats)
+
+        yield chunk
