@@ -142,6 +142,7 @@ class Compute(accel.OperationSequence):
             "out": ["postproc:out"],
             "fine_delay": ["postproc:fine_delay"],
             "phase": ["postproc:phase"],
+            "gains": ["postproc:gains"],
         }
         for pol in range(N_POLS):
             compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
@@ -199,12 +200,3 @@ class Compute(accel.OperationSequence):
         for fft in self.fft:
             fft()
         self.postproc()
-
-    @property
-    def quant_gain(self) -> float:  # noqa: D401
-        """Scaling factor used for requantisation."""
-        return self.postproc.quant_gain
-
-    @quant_gain.setter
-    def quant_gain(self, value: float) -> None:
-        self.postproc.quant_gain = value

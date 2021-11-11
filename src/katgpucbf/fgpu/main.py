@@ -209,9 +209,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=1048576,
         help="Maximum supported difference between delays across polarisations (in samples) [%(default)s]",
     )
-    parser.add_argument(
-        "--quant-gain", type=float, default=0.001, help="Rescaling factor before 8-bit requantisation [%(default)s]"
-    )
+    parser.add_argument("--gain", type=float, default=0.001, help="Initial eq gains [%(default)s]")
     parser.add_argument(
         "--sync-epoch",
         type=int,  # AFAIK, the digitisers sync on PPS signals, so it makes sense for this to be an int.
@@ -315,7 +313,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
         channels=args.channels,
         taps=args.taps,
         max_delay_diff=args.max_delay_diff,
-        quant_gain=args.quant_gain,
+        gain=args.gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
         mask_timestamp=args.mask_timestamp,
         use_gdrcopy=args.use_gdrcopy,

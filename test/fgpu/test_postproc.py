@@ -15,9 +15,13 @@
 ################################################################################
 
 """Unit tests for Postproc class."""
+
+from typing import Callable
+
 import numpy as np
 import pytest
 from katsdpsigproc import accel
+from numpy.typing import DTypeLike
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import postproc
@@ -25,7 +29,7 @@ from katgpucbf.fgpu import postproc
 pytestmark = [pytest.mark.cuda_only]
 
 
-def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay, fringe_phase, quant_gain):
+def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay, fringe_phase, gains):
     """Calculate postproc steps on the host CPU for a single polarisation."""
     # Throw out last channel (Nyquist frequency)
     data = data[:, :channels]
@@ -34,11 +38,12 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay,
     m2ipi = np.complex64(-2j * np.pi)
     phase = np.exp(m2ipi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
     assert phase.dtype == np.complex64
-    corrected = data * phase.astype(np.complex64)
+    # Apply delay, phase and gain
+    corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)
     # Split complex into real, imaginary
     corrected = corrected.view(np.float32).reshape(spectra, channels, 2)
     # Convert to integer
-    corrected = np.rint(corrected * quant_gain)
+    corrected = np.rint(corrected)
     # Cast to integer with saturation
     corrected = np.minimum(np.maximum(corrected, -127), 127)
     corrected = corrected.astype(np.int8)
@@ -47,30 +52,42 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay,
     return reshaped.transpose(0, 2, 1, 3)
 
 
-def postproc_host(in0, in1, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, quant_gain):
+def postproc_host(in0, in1, channels, spectra_per_heap_out, spectra, fine_delay, fringe_phase, gains):
     """Aggregate both polarisation's postproc on the host CPU."""
     out0 = postproc_host_pol(
-        in0, channels, spectra_per_heap_out, spectra, fine_delay[:, 0], fringe_phase[:, 0], quant_gain
+        in0, channels, spectra_per_heap_out, spectra, fine_delay[:, 0], fringe_phase[:, 0], gains[:, 0]
     )
     out1 = postproc_host_pol(
-        in1, channels, spectra_per_heap_out, spectra, fine_delay[:, 1], fringe_phase[:, 1], quant_gain
+        in1, channels, spectra_per_heap_out, spectra, fine_delay[:, 1], fringe_phase[:, 1], gains[:, 1]
     )
     return np.stack([out0, out1], axis=3)
 
 
-@pytest.mark.parametrize("quant_gain", [0.1, 0.5])
-def test_postproc(context, command_queue, quant_gain, repeat=1):
+def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex64) -> np.ndarray:
+    """Build an array of complex random numbers.
+
+    The `func` must return an array of real numbers. It is called twice: once
+    for the real component and once for the imaginary component. The calls
+    should return arrays of the same shape and dtype.
+
+    Note that by default it returns complex64 rather than complex128.
+    """
+    return (func() + func() * 1j).astype(dtype)
+
+
+def test_postproc(context, command_queue, repeat=1):
     """Test GPU Postproc for numerical correctness."""
     channels = 4096
     spectra_per_heap_out = 256
     spectra = 512
-    # TODO: make properly complex
     rng = np.random.default_rng(seed=1)
-    h_in0 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
-    h_in1 = rng.uniform(-512, 512, (spectra, channels + 1)).astype(np.complex64)
+    h_in0 = _make_complex(lambda: rng.uniform(-512, 512, (spectra, channels + 1)))
+    h_in1 = _make_complex(lambda: rng.uniform(-512, 512, (spectra, channels + 1)))
     h_fine_delay = rng.uniform(0.0, 2.0, (spectra, N_POLS)).astype(np.float32)
     h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
-    expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, quant_gain)
+    h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (channels, N_POLS)))
+
+    expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, h_gains)
 
     template = postproc.PostprocTemplate(context)
     fn = template.instantiate(command_queue, spectra, spectra_per_heap_out, channels)
@@ -79,13 +96,13 @@ def test_postproc(context, command_queue, quant_gain, repeat=1):
     fn.buffer("in1").set(command_queue, h_in1)
     fn.buffer("fine_delay").set(command_queue, h_fine_delay)
     fn.buffer("phase").set(command_queue, h_phase / np.pi)
-    fn.quant_gain = quant_gain
+    fn.buffer("gains").set(command_queue, h_gains)
     for _ in range(repeat):
         fn()
     h_out = fn.buffer("out").get(command_queue)
 
     np.testing.assert_allclose(h_out, expected, atol=1)
-    assert np.min(h_out) >= -127  # Ensure -128 gets clamped to -127
+    assert np.min(h_out) == -127  # Ensure -128 gets clamped to -127
 
 
 if __name__ == "__main__":

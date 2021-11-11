@@ -15,12 +15,64 @@
 ################################################################################
 
 """Collection of tests for the KATCP interface of katgpucbf.fgpu."""
+
+import re
+from typing import Any
+
 import aiokatcp
+import numpy as np
 import pytest
+from numpy import safe_eval
+
+from katgpucbf import N_POLS
+from katgpucbf.fgpu.engine import Engine
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cuda_only]
 
+CHANNELS = 4096
 SYNC_EPOCH = 1632561921
+GAIN = 0.125  # Exactly representable to avoid some rounding issues
+
+
+def assert_valid_complex(value: str) -> None:
+    """Check that `value` is a valid encoding of a complex number according to the ICD."""
+    # This check is actually somewhat stricter e.g. it doesn't allow scientific
+    # notation and requires the decimal point to the present.
+    assert re.fullmatch(r"-?[0-9]+\.[0-9]+[+-][0-9]+\.[0-9]+j", value)
+    complex(value)  # The regex should be sufficient, but this provides extra validation
+
+
+def assert_valid_complex_list(value: str) -> None:
+    """Check that `value` is a valid encoding of a list of complex numbers."""
+    assert value[0] == "["
+    assert value[-1] == "]"
+    for term in value[1:-1].split(","):
+        assert_valid_complex(term.strip(" "))
+
+
+async def get_sensor(client: aiokatcp.Client, name: str) -> Any:
+    """Get the value of a sensor.
+
+    .. todo:
+
+       This should probably be implemented in aiokatcp.
+    """
+    # This is not a complete list of sensor types. Extend as necessary.
+    sensor_types = {
+        b"integer": int,
+        b"float": float,
+        b"boolean": bool,
+        b"discrete": str,  # Gets the string name of the enum
+        b"string": str,  # Allows passing through arbitrary values even if not UTF-8
+    }
+
+    _reply, informs = await client.request("sensor-list", name)
+    assert len(informs) == 1
+    sensor_type = sensor_types.get(informs[0].arguments[3], bytes)
+    _reply, informs = await client.request("sensor-value", name)
+    assert len(informs) == 1
+    assert informs[0].arguments[3] in {b"nominal", b"warn", b"error"}
+    return aiokatcp.decode(sensor_type, informs[0].arguments[4])
 
 
 class TestKatcpRequests:
@@ -31,18 +83,75 @@ class TestKatcpRequests:
         "--katcp-port=0",
         "--src-interface=lo",
         "--dst-interface=lo",
-        "--channels=4096",
+        f"--channels={CHANNELS}",
         f"--sync-epoch={SYNC_EPOCH}",
+        f"--gain={GAIN}",
         "--adc-sample-rate=1.712e9",
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
         "239.10.11.0+15:7149",  # dst
     ]
 
-    async def test_quant_gain_set(self, engine_client, engine_server):
-        """Test that the quant gain is correctly set."""
-        await engine_client.request("quant-gain", 0.2)
-        assert engine_server._processor.compute.quant_gain == 0.2
+    @pytest.mark.parametrize("pol", range(N_POLS))
+    async def test_initial_gain(self, engine_client: aiokatcp.Client, pol: int) -> None:
+        """Test that the command-line gain is set correctly."""
+        reply, _informs = await engine_client.request("gain", pol)
+        assert reply == [b"0.125+0.0j"]
+        sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+        assert sensor_value == "[0.125+0.0j]"
+
+    @pytest.mark.parametrize("pol", range(N_POLS))
+    async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine, pol: int) -> None:
+        """Test that the eq gain is correctly set with a scalar value."""
+        reply, _informs = await engine_client.request("gain", pol, "0.2-3j")
+        assert len(reply) == 1
+        value = aiokatcp.decode(str, reply[0])
+        assert_valid_complex(value)
+        assert complex(value) == pytest.approx(0.2 - 3j)
+
+        sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+        assert_valid_complex_list(sensor_value)
+        assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
+        np.testing.assert_equal(engine_server._processor.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
+        # Other pol must not have been affected
+        np.testing.assert_equal(engine_server._processor.gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
+
+    async def test_gain_set_vector(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+        """Test that the eq gain is correctly set with a vector of values."""
+        # This test doesn't parametrize over pols. It's assumed that anything
+        # causing the wrong pol to be set would be picked up by the scalar
+        # test.
+        gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
+        reply, _informs = await engine_client.request("gain", 0, *(str(gain) for gain in gains))
+        np.testing.assert_equal(engine_server._processor.gains[:, 0], gains)
+        assert len(reply) == CHANNELS
+        for value in reply:
+            assert_valid_complex(aiokatcp.decode(str, value))
+        reply_array = np.array([complex(aiokatcp.decode(str, value)) for value in reply])
+        np.testing.assert_equal(reply_array, gains)
+
+        sensor_value = await get_sensor(engine_client, "input0-eq")
+        assert_valid_complex_list(sensor_value)
+        np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)
+
+    async def test_gain_not_complex(self, engine_client: aiokatcp.Client) -> None:
+        """Test that an error is raised if a value passed to ``?gain`` is not a finite complex number."""
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("gain", 0, "i am not a complex number")
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("gain", 0, "nan")
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("gain", 0, "inf+infj")
+
+    async def test_gain_bad_input(self, engine_client: aiokatcp.Client) -> None:
+        """Test that an error is raised if the input number passed to ``?gain`` is not a finite complex number."""
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("gain", 2)
+
+    async def test_gain_wrong_length(self, engine_client: aiokatcp.Client) -> None:
+        """Test that an error is raised if ``?gain`` is used with the wrong number of arguments."""
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("gain", 0, "1", "2")
 
     @pytest.mark.parametrize(
         "malformed_delay_string",
