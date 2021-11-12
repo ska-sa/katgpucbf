@@ -28,6 +28,7 @@ object. The XBEngine object then manages everything required to run the XB-Engin
 import argparse
 import asyncio
 import logging
+import signal
 from typing import Optional
 
 import katsdpsigproc.accel
@@ -40,6 +41,7 @@ from katgpucbf.xbgpu.engine import XBEngine
 from .. import __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .correlation import device_filter
+from .engine import done_callback
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
@@ -171,6 +173,33 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def add_signal_handlers(engine: XBEngine) -> None:
+    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
+
+    Lifted from fgpu/main.py.
+
+    .. todo::
+
+       This is still not particularly clean, sometimes hangs if digitiser data
+       is still flowing, and possibly exits in the middle of sending a heap.
+       However, it's still useful as it ensures CUDA is shut down properly,
+       which is necessary for NSight to operate correctly.
+    """
+    signums = [signal.SIGINT, signal.SIGTERM]
+
+    def handler():
+        # Remove the handlers so that if it fails to shut down, the next
+        # attempt will try harder.
+        logger.info("Received signal, shutting down")
+        for signum in signums:
+            loop.remove_signal_handler(signum)
+        engine.halt()
+
+    loop = asyncio.get_event_loop()
+    for signum in signums:
+        loop.add_signal_handler(signum, handler)
+
+
 async def async_main(args: argparse.Namespace) -> None:
     """
     Create and launch the XB-Engine.
@@ -232,10 +261,19 @@ async def async_main(args: argparse.Namespace) -> None:
 
     logger.info("Starting main processing loop")
 
-    main_task = asyncio.create_task(xbengine.run())
+    # TODO: There must be a better way to expose the done_callback from engine.py?
+    # - Perhaps move this into XBEngine.start()? Pass it Zero to not run during unit tests.
+    # - I'm sure we need to remove this 'naked' 5 anyway.
     descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(5))
-    await main_task
-    await descriptor_task
+    descriptor_task.add_done_callback(done_callback)
+
+    # Need to wait for this to complete before joining
+    await xbengine.start()
+
+    await asyncio.gather(
+        asyncio.create_task(xbengine.join()),
+        descriptor_task,
+    )
     if prometheus_server:
         await prometheus_server.close()
 

@@ -54,12 +54,27 @@ from aiokatcp import DeviceServer
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
+from ..spead import FLAVOUR as SPEAD_FLAVOUR
 from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
-from .xsend import XSend
+from .xsend import BufferWrapper, XSend
 
 logger = logging.getLogger(__name__)
+
+
+def done_callback(future: asyncio.Future) -> None:
+    """
+    Handle cancellation of Processing Loops as a callback.
+
+    Moved up here as the descriptors_loop also needs access to it.
+    """
+    try:
+        future.result()  # Evaluate just for exceptions
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Processing failed with exception")
 
 
 class QueueItem:
@@ -608,9 +623,9 @@ class XBEngine(DeviceServer):
             # 2.4. Give the rx item to the _gpu_proc_loop function.
             await self._rx_item_queue.put(item)
 
-            # 3. If the function must close, stop the stream.
-            if self.running is not True:
-                self.receiver_stream.stop()
+        # spead2 will (eventually) indicate that there are no chunks to async-for through
+        logger.debug("_receiver_loop completed")
+        self._rx_item_queue.put_nowait(None)
 
     async def _gpu_proc_loop(self):
         """
@@ -640,10 +655,14 @@ class XBEngine(DeviceServer):
         self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
         self.tensor_core_x_engine_core.zero_visibilities()
 
-        while self.running:
+        while True:
             # 2. Get item from receiver function - wait for the HtoD transfers to complete and then give the chunk back
             #  to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
+            # TODO: if rx_item is None?
+            if not rx_item:
+                # NoneType received, break and pass the message on
+                break
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
 
@@ -703,7 +722,9 @@ class XBEngine(DeviceServer):
 
         # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit. This function
         # puts the current tx_item on the queue. The sender_loop can then stop waiting upon receiving this and exit.
-        await self._tx_item_queue.put(tx_item)
+        # await self._tx_item_queue.put(tx_item)
+        logger.debug("_gpu_proc_loop completed")
+        self._tx_item_queue.put_nowait(None)
 
     async def _sender_loop(self):
         """
@@ -727,12 +748,19 @@ class XBEngine(DeviceServer):
         old_time_s = time.time()
         old_timestamp = 0
 
-        while self.running:
+        # Need to use this to send the stop_heap
+        buffer_wrapper: BufferWrapper = None
+        while True:
             # 1. Get the item to transfer and wait for all GPU events to finish before continuing
             item = await self._tx_item_queue.get()
+            # TODO: if rx_item is None?
+            if not item:
+                # NoneType received, break and pass the message on
+                break
             await item.async_wait_for_events()
 
             # 2. Get a free heap buffer to copy the GPU data to
+            # TODO: Perhaps move this outside the loop to access when sending the stop_heap
             buffer_wrapper = await self.send_stream.get_free_heap()
 
             # 3 Perform some basic logging.
@@ -793,45 +821,55 @@ class XBEngine(DeviceServer):
             item.reset()
             await self._tx_free_item_queue.put(item)
 
+        # No task to await, XSend.send_heap is blocking
+        stop_heap = spead2.send.Heap(SPEAD_FLAVOUR)
+        stop_heap.add_end()
+        # Perhaps send it directly via the send_stream.source_stream?
+        await self.send_stream.source_stream.async_send_heap(stop_heap)
+        # self.send_stream.send_heap(timestamp=0, buffer_wrapper=buffer_wrapper)
+        logger.debug("run_transmit completed")
+
     async def run_descriptors_loop(self, interval_s):
         """
         Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
 
         This function is not part of the main run function as we do not want it running during the unit tests.
         """
-        while self.running:
+        while True:
             self.send_stream.send_descriptor_heap()
             await asyncio.sleep(interval_s)
 
-    async def run(self):
+    async def start(self):
         """
         Launch all the different async functions required to run the X-Engine.
 
-        These functions will loop forever and only exit once an exit flag is set.
+        These functions will loop forever and only exit once the XBEngine receives a SIGINT or SIGTERM.
         """
         if self.rx_transport_added is not True:
             raise AttributeError("Transport for receiving data has not yet been set.")
         if self.tx_transport_added is not True:
             raise AttributeError("Transport for sending data has not yet been set.")
 
-        self.running = True
-        await self.start()
-        tasks = [
+        self.task = asyncio.gather(
             asyncio.create_task(self._receiver_loop()),
             asyncio.create_task(self._gpu_proc_loop()),
             asyncio.create_task(self._sender_loop()),
-        ]
-        self.task = asyncio.gather(*tasks)
+        )
 
-    def stop(self):
+        self.task.add_done_callback(done_callback)
+
+        await super().start()
+
+    async def on_stop(self):
         """
-        Stop all the different processing loops launched in the run() function and wind up the receiver stream.
+        Shut down processing when the device server is stopped.
 
-        NOTE 1: This function may not be working correctly. If you have trouble closing the tasks, it may be worth
-        re-evaluating this function.
-        NOTE 2: The descriptors loop function is not launched by the run() function. It is the user's responsibility to
-        stop that function.
+        This is called by aiokatcp after closing the listening socket.
         """
         self.receiver_stream.stop()
-        self.running = False
-        self.task.cancel()
+
+        try:
+            await self.task
+        except Exception:
+            # Errors get logged by the done_callback in start()
+            pass
