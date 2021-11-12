@@ -30,8 +30,8 @@ from .. import N_POLS
 from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
-#: Number of non-payload bytes per packet (header, 8 items pointers, 3 padding pointers)
-PREAMBLE_SIZE = 96
+#: Number of non-payload bytes per packet (header, 8 items pointers)
+PREAMBLE_SIZE = 72
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 
