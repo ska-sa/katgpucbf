@@ -342,7 +342,7 @@ class TestEngine:
         coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
         await engine_client.request("delays", SYNC_EPOCH, *coeffs)
 
-        # Use unit-magnitude gains to avoid throwing off the magnitudes
+        # Use constant-magnitude gains to avoid throwing off the magnitudes
         rng = np.random.default_rng(123)
         gain_phase = rng.uniform(0, 2 * np.pi, (CHANNELS, N_POLS))
         gains = GAIN * np.exp(1j * gain_phase).astype(np.complex64)
