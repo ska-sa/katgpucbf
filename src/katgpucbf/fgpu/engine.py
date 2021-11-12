@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import numbers
 from typing import List, Optional, Tuple, Union
 
 import aiokatcp
@@ -35,6 +36,18 @@ from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
 
 logger = logging.getLogger(__name__)
+
+
+def format_complex(value: numbers.Complex) -> str:
+    """Format a complex number for a katcp request.
+
+    The ICD specifies that complex numbers have the format real+imaginary j.
+    Python's default formatting contains parentheses if real is non-zero, and
+    omits the real part if it is zero. For a numpy value it also only includes
+    enough significant figures for the dtype, which means that reading it back
+    as a Python complex may not give exactly the same value.
+    """
+    return f"{value.real}{value.imag:+}j"
 
 
 def generate_weights(channels: int, taps: int) -> np.ndarray:
@@ -148,8 +161,8 @@ class Engine(aiokatcp.DeviceServer):
         Number of taps in each branch of the PFB-FIR
     max_delay_diff
         Maximum supported difference between delays across polarisations (in samples).
-    quant_gain
-        Rescaling factor to apply before 8-bit requantisation.
+    gain
+        Initial eq gain for all channels.
     sync_epoch
         UNIX time at which the digitisers were synced.
     mask_timestamp
@@ -198,7 +211,7 @@ class Engine(aiokatcp.DeviceServer):
         channels: int,
         taps: int,
         max_delay_diff: int,
-        quant_gain: float,
+        gain: complex,
         sync_epoch: float,
         mask_timestamp: bool,
         use_gdrcopy: bool,
@@ -207,7 +220,8 @@ class Engine(aiokatcp.DeviceServer):
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
-        self.sensors["quant-gain"].value = quant_gain
+        for pol in range(N_POLS):
+            self.sensors[f"input{pol}-eq"].value = str([gain])
 
         if use_gdrcopy:
             import gdrcopy.pycuda
@@ -228,8 +242,9 @@ class Engine(aiokatcp.DeviceServer):
         chunk_bytes = chunk_samples * compute.sample_bits // BYTE_BITS
         device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(queue, generate_weights(channels, taps))
-        compute.quant_gain = quant_gain
         self._processor = Processor(compute, self.delay_models, use_gdrcopy, monitor)
+        for pol in range(N_POLS):
+            self.set_gains(pol, np.full(channels, gain, dtype=np.complex64))
 
         ringbuffer_capacity = 2
         ring = ChunkRingbuffer(ringbuffer_capacity, name="recv_ringbuffer", task_name="run_receive", monitor=monitor)
@@ -315,24 +330,64 @@ class Engine(aiokatcp.DeviceServer):
     @staticmethod
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
         """Define the sensors for an engine."""
-        sensor_list: List[aiokatcp.Sensor] = [
-            aiokatcp.Sensor(
-                float,
-                "quant-gain",
-                "rescaling factor to apply before 8-bit requantisation (prometheus: gauge)",
+        for pol in range(N_POLS):
+            sensor = aiokatcp.Sensor(
+                str,
+                f"input{pol}-eq",
+                "For this input, the complex, unitless, per-channel digital scaling factors "
+                "implemented prior to requantisation",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            ),
-        ]
-        for sensor in sensor_list:
+            )
             sensors.add(sensor)
 
-    async def request_quant_gain(self, ctx, quant_gain: float) -> None:
-        """Set the quant gain."""
-        self._processor.compute.quant_gain = quant_gain
-        # We'll use the actual value of the property instead of the argument
-        # passed here, in case there's some kind of setter function which may
-        # modify it in any way.
-        self.sensors["quant-gain"].set_value(self._processor.compute.quant_gain)
+    def set_gains(self, input: int, gains: np.ndarray) -> None:
+        """Set the eq gains for one polarisation and update the sensor.
+
+        The `gains` must contain one entry per channel; the shortcut of
+        supplying a single value is handled by :meth:`request_gain`.
+        """
+        self._processor.gains[:, input] = gains
+        if np.all(gains == gains[0]):
+            # All the values are the same, so it can be reported as a single value
+            gains = gains[:1]
+        self.sensors[f"input{input}-eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
+
+    async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
+        """Set or query the eq gains.
+
+        If no values are provided, the gains are simply returned.
+
+        Parameters
+        ----------
+        input
+            Input number (0 or 1)
+        values
+            Complex values. There must either be a single value (used for all
+            channels), or a value per channel.
+        """
+        if not 0 <= input < N_POLS:
+            raise aiokatcp.FailReply("input is out of range")
+        channels = self._processor.channels
+        if len(values) not in {0, 1, channels}:
+            raise aiokatcp.FailReply(f"invalid number of values provided (must be 0, 1 or {channels})")
+        try:
+            gains = np.array([complex(v) for v in values], dtype=np.complex64)
+        except ValueError:
+            raise aiokatcp.FailReply("invalid formatting of complex number")
+        if not np.all(np.isfinite(gains)):
+            raise aiokatcp.FailReply("non-finite gains are not permitted")
+        if len(gains) == 1:
+            gains = gains.repeat(channels)
+        if len(gains) > 0:
+            self.set_gains(input, gains)
+        else:
+            gains = self._processor.gains[:, input]
+
+        # Return the current values.
+        # If they're all the same, we can return just a single value.
+        if np.all(gains == gains[0]):
+            gains = gains[:1]
+        return tuple(format_complex(gain) for gain in gains)
 
     async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model.

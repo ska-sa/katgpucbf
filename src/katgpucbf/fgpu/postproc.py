@@ -17,7 +17,8 @@
 """Postproc module.
 
 These classes handle the operation of the GPU in performing the fine-delay,
-requantisation and corner-turn through a mako-templated kernel.
+per-channel gains, requantisation and corner-turn through a mako-templated
+kernel.
 """
 
 
@@ -73,6 +74,8 @@ class Postproc(accel.Operation):
         Fine delay in samples (one value per pol).
     **phase** : spectra × 2, float32
         Fixed phase adjustment in radians (one value per pol).
+    **gains** : channels × 2, complex64
+        Per-channel gain (one value per pol).
 
     The inputs need to have dimension `channels+1` because cuFFT calculates
     N/2+1 output channels, i.e. the Nyquist frequency is included.  The kernel
@@ -123,7 +126,7 @@ class Postproc(accel.Operation):
         self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, pols, cplx), np.int8)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
-        self.quant_gain = 1.0
+        self.slots["gains"] = accel.IOSlot((channels, pols), np.complex64)
 
     def _run(self) -> None:
         block_x = self.template.block * self.template.vtx
@@ -142,12 +145,12 @@ class Postproc(accel.Operation):
                 in1.buffer,
                 self.buffer("fine_delay").buffer,
                 self.buffer("phase").buffer,
+                self.buffer("gains").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(in0.padded_shape[1]),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
                 np.float32(-1 / self.channels),  # delay_scale
-                np.float32(self.quant_gain),  # quant_gain
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
             local_size=(self.template.block, self.template.block, 1),

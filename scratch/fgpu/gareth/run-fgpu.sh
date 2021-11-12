@@ -44,7 +44,7 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --channels ${channels:-32768} \
     --spectra-per-heap ${spectra_per_heap:-256} \
-    --quant-gain 0.0001 \
+    --gain 0.0001 \
     --katcp-port $port \
     --sync-epoch 0 \
     $srcs $dst

@@ -252,6 +252,8 @@ class OutItem(EventItem):
     phase
         A similar scratch space for collecting per-spectrum phase offsets while
         the :class:`OutItem` is being prepared.
+    gains
+        Per-channel gains
     n_spectra
         Number of spectra contained in :attr:`spectra`.
 
@@ -267,12 +269,14 @@ class OutItem(EventItem):
     spectra: accel.DeviceArray
     fine_delay: accel.HostArray
     phase: accel.HostArray
+    gains: accel.HostArray
     n_spectra: int
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
         self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
         self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
+        self.gains = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["gains"]))
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -342,6 +346,12 @@ class Processor:
         Ready :class:`OutItem` objects for transmitting on the network.
     out_free_queue
         Available :class:`OutItem` objects for overwriting.
+    gains
+        Per-channel, per-pol gains. These can be freely updated, and are
+        copied into each OutItem as it is produced. It is thus not possible
+        to precisely control when the updated gains will be applied. A
+        sequence of changes made without any intervening asynchronous work
+        will be applied atomically.
 
     Parameters
     ----------
@@ -391,6 +401,8 @@ class Processor:
         self._upload_queue = compute.template.context.create_command_queue()
         self._download_queue = compute.template.context.create_command_queue()
         self._use_gdrcopy = use_gdrcopy
+
+        self.gains = np.zeros((self.channels, self.pols), np.complex64)
 
     @property
     def channels(self) -> int:  # noqa: D401
@@ -533,11 +545,16 @@ class Processor:
         accs = self._out_item.n_spectra // self.spectra_per_heap
         self._out_item.n_spectra = accs * self.spectra_per_heap
         if self._out_item.n_spectra > 0:
+            # Take a copy of the gains synchronously. This avoids race conditions
+            # with gains being updated at the same time as they're in the
+            # middle of being transferred.
+            self._out_item.gains[:] = self.gains
             # TODO: only need to copy the relevant region, and can limit
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
             self.compute.buffer("fine_delay").set_async(self.compute.command_queue, self._out_item.fine_delay)
             self.compute.buffer("phase").set_async(self.compute.command_queue, self._out_item.phase)
+            self.compute.buffer("gains").set_async(self.compute.command_queue, self._out_item.gains)
             self.compute.run_backend(self._out_item.spectra)
             self._out_item.events.append(self.compute.command_queue.enqueue_marker())
             self.out_queue.put_nowait(self._out_item)
