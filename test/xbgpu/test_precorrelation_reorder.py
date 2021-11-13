@@ -67,7 +67,8 @@ def test_precorr_reorder_parametrised(
     num_spectra_per_heap
         The number of time samples per frequency channel.
     """
-    # This integer division is so that when num_ants % num_channels !=0 then the remainder will be dropped.
+    # This integer division is so that when num_ants % num_channels !=0 then
+    # the remainder will be dropped.
     # - This will only occur in the MeerKAT Extension correlator.
     # TODO: Need to consider the case where we round up as some X-Engines will
     # need to do this to capture all the channels.
@@ -95,8 +96,8 @@ def test_precorr_reorder_parametrised(
     # run the same way every time. The number is selected arbitrarily.
     rng = np.random.default_rng(seed=2021)
 
-    # We use `np.iinfo` to determine dynamically the min and max values that the
-    # array can contain. If the dtype changes in the kernel, the unit test
+    # We use `np.iinfo` to determine dynamically the min and max values that
+    # the array can contain. If the dtype changes in the kernel, the unit test
     # should still work.
     buf_samples_host[:] = rng.uniform(
         np.iinfo(buf_samples_host.dtype).min, np.iinfo(buf_samples_host.dtype).max, buf_samples_host.shape

@@ -126,13 +126,13 @@ class XSend:
     n_ants
         The number of antennas that have been correlated.
     n_channels
-        The total number of channels across all X-Engines. Must be a multiple of
-        `n_channels_per_stream`.
+        The total number of channels across all X-Engines. Must be a multiple
+        of `n_channels_per_stream`.
     n_channels_per_stream
         The number of frequency channels contained per stream.
     dump_interval_s
-        A new heap is transmitted every `dump_interval_s` seconds. Set to zero to
-        send as fast as possible.
+        A new heap is transmitted every `dump_interval_s` seconds. Set to zero
+        to send as fast as possible.
     send_rate_factor
         Configure the SPEAD2 sender with a rate proportional to this factor.
         This value is intended to dictate a data transmission rate slightly
@@ -140,7 +140,8 @@ class XSend:
 
         .. note::
 
-           A factor of zero (0) tells the sender to transmit as fast as possible.
+           A factor of zero (0) tells the sender to transmit as fast as
+           possible.
     channel_offset
         Fixed value to be included in the SPEAD heap indicating the lowest
         channel value transmitted by this heap.  Must be a multiple of
@@ -148,11 +149,12 @@ class XSend:
     context
         All buffers to be transmitted will be created from this context.
     stream_factory
-        Callback function that will create the spead2 stream. It is passed the stream configuration and the
-        memory buffers.
+        Callback function that will create the spead2 stream. It is passed the
+        stream configuration and the memory buffers.
     n_send_heaps_in_flight
-        Number of buffers that will be queued at any one time. I don't see any need for this to be configurable, the
-        data rates are likely too low for it to be an issue. I have put it here more to be explicit than anything
+        Number of buffers that will be queued at any one time. I don't see any
+        need for this to be configurable, the data rates are likely too low for
+        it to be an issue. I have put it here more to be explicit than anything
         else. This argument is optional.
     """
 
@@ -304,9 +306,10 @@ class XSend:
         self.item_group["xeng_raw"].value = buffer_wrapper.buffer
 
         heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
-        # This flag forces the heap to include all item_group pointers in every packet belonging to a single heap
-        # instead of just in the first packet. This is done to duplicate the format of the packets out of the MeerKAT
-        # SKARABs.
+        # This flag forces the heap to include all item_group pointers in every
+        # packet belonging to a single heap instead of just in the first
+        # packet. This is done to duplicate the format of the packets out of
+        # the MeerKAT SKARABs.
         heap_to_send.repeat_pointers = True
 
         future = self.source_stream.async_send_heap(heap_to_send)

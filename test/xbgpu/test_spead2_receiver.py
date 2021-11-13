@@ -17,19 +17,25 @@
 """
 Module for performing unit tests on the xbgpu SPEAD2 receiver.
 
-Testing network code is difficult to do on a single thread. SPEAD2 has the concept of transports. A transport generally
-receives data from a network. SPEAD2 provides two other transports that can receive simulated network data - these can
-be used for testing the receiver in once process. The two transports are an inproc and a buffer transport. The
-inproc transport is more flexible but requires porting the inproc code to xbgpu. So we use the buffer one instead.
-It is more limited but easier to work with. One downside of the buffer transport is that it cannot interleave packets
-from different antennas. This functionality has not yet been added to the buffer transport but it is available in the
-inproc transport.
+Testing network code is difficult to do on a single thread. SPEAD2 has the
+concept of transports. A transport generally receives data from a network.
+SPEAD2 provides two other transports that can receive simulated network data -
+these can be used for testing the receiver in once process. The two transports
+are an inproc and a buffer transport. The inproc transport is more flexible but
+requires porting the inproc code to xbgpu. So we use the buffer one instead.
+It is more limited but easier to work with. One downside of the buffer
+transport is that it cannot interleave packets from different antennas. This
+functionality has not yet been added to the buffer transport but it is
+available in the inproc transport.
 
-NOTE: A downside of this test is that it does not check that the packet formats are exactly correct. This test will
-ensure that the packets are transmitted in a way that they are able to be assembled into a heap by any SPEAD2 receiver
-or a full implementation of the SPEAD protocol. However, the exact packet size and the presence of repeat pointers
-within the a packet are not checked. Some sort of external test should be done to check this. See the
-display_fsim_multicast_packets.py script in the scratch folder of this repo as a starting point to check packet formats.
+NOTE: A downside of this test is that it does not check that the packet formats
+are exactly correct. This test will ensure that the packets are transmitted in
+a way that they are able to be assembled into a heap by any SPEAD2 receiver or
+a full implementation of the SPEAD protocol. However, the exact packet size and
+the presence of repeat pointers within the a packet are not checked. Some sort
+of external test should be done to check this. See the
+display_fsim_multicast_packets.py script in the scratch folder of this repo as
+a starting point to check packet formats.
 
 TODO: Turn create_test_objects() into a pytest fixture.
 """
@@ -64,8 +70,9 @@ def create_test_objects(
 ):
     """Create all objects required to run a SPEAD receiver test.
 
-    This function exists so that it can be called in multiple different types of tests without having to duplicate code.
-    It could potentially be an asyncio fixture but I have not looked further into that.
+    This function exists so that it can be called in multiple different types
+    of tests without having to duplicate code.  It could potentially be an
+    asyncio fixture but I have not looked further into that.
 
     Parameters
     ----------
@@ -113,7 +120,8 @@ def create_test_objects(
     )  # Header is 12 fields of 8 bytes each: So 96 bytes of header
     heap_shape = (n_channels_per_stream, n_spectra_per_heap, n_pols, COMPLEX)
 
-    # 2. Create source_stream object - transforms "transmitted" heaps into a byte array to simulate received data.
+    # 2. Create source_stream object - transforms "transmitted" heaps into a
+    # byte array to simulate received data.
     thread_pool = spead2.ThreadPool()
     source_stream = spead2.send.BytesStream(
         thread_pool,
@@ -191,11 +199,14 @@ def create_heaps(
     """
     Generate a list of heaps to send via the source_stream.
 
-    One heap is generated per antenna in the array. All heaps will have the same timestamp. The 8-bit complex samples
-    are treated as a single 16-bit value. Per heap, all sample values are the same. This makes for faster verification
-    (The downside is that if the packets in a heap get mixed up, this will not be detected - however this is something
-    that is expected to be picked up in the SPEAD2 unit tests). The coded sample is a combination of the antenna index
-    and a unique 8-bit ID that can is passed to this function. The sample value is equal to the following:
+    One heap is generated per antenna in the array. All heaps will have the
+    same timestamp. The 8-bit complex samples are treated as a single 16-bit
+    value. Per heap, all sample values are the same. This makes for faster
+    verification (The downside is that if the packets in a heap get mixed up,
+    this will not be detected - however this is something that is expected to
+    be picked up in the SPEAD2 unit tests). The coded sample is a combination
+    of the antenna index and a unique 8-bit ID that can is passed to this
+    function. The sample value is equal to the following:
 
     coded_sample_value = (np.uint8(id) << 8) + np.uint8(ant_index)
 
@@ -204,9 +215,11 @@ def create_heaps(
     timestamp: int
         The timestamp that will be assigned to all heaps.
     id: int
-        8-bit value that will be encoded into all samples in this set of generated heaps.
+        8-bit value that will be encoded into all samples in this set of
+        generated heaps.
     n_ants: int
-        The number of antennas that data will be received from. A seperate heap will be generated per antenna.
+        The number of antennas that data will be received from. A seperate heap
+        will be generated per antenna.
     n_channels_per_stream: int
         The number of frequency channels contained in a heap.
     n_spectra_per_heap: int
@@ -214,17 +227,19 @@ def create_heaps(
     n_pols: int
         The number of pols per antenna. Expected to always be 2 at the moment.
     ig: spead2.send.ItemGroup
-        The ig is used to generate heaps that will be passed to the source stream. This ig is expected to have been
-        configured correctly using the create_test_objects function.
+        The ig is used to generate heaps that will be passed to the source
+        stream. This ig is expected to have been configured correctly using the
+        create_test_objects function.
 
     Returns
     -------
     heaps: [spead2.send.HeapReference]
-        The required heaps are stored in an array. EAch heap is wrapped in a HeapReference object is this is what is
-        required by the SPEAD2 send_heaps() function.
+        The required heaps are stored in an array. EAch heap is wrapped in a
+        HeapReference object is this is what is required by the SPEAD2
+        send_heaps() function.
     """
-    # The heaps shape has been modified with the complexity dimension equal to 1 instead of 2. This is because we treat
-    # the two 8-bit complex samples
+    # The heaps shape has been modified with the complexity dimension equal to
+    # 1 instead of 2. This is because we treat the two 8-bit complex samples
     modified_heap_shape = (
         n_channels_per_stream,
         n_spectra_per_heap,
@@ -235,8 +250,10 @@ def create_heaps(
     for ant_index in range(n_ants):
         coded_sample_value = (np.uint8(id) << 8) + np.uint8(ant_index)
         sample_array = np.full(modified_heap_shape, coded_sample_value, np.uint16)
-        # Here we change the dtype of the array from uint16 back to int8. This does not modify the actual data in the
-        # array. It just changes the shape back to what we expect. (The complexity dimension is now back to 2 from 1).
+        # Here we change the dtype of the array from uint16 back to int8. This
+        # does not modify the actual data in the array. It just changes the
+        # shape back to what we expect. (The complexity dimension is now back
+        # to 2 from 1).
         sample_array = sample_array.view(np.int8)
 
         ig["timestamp"].value = timestamp
@@ -245,17 +262,22 @@ def create_heaps(
         ig["feng_raw"].value = sample_array
         heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
 
-        # This function makes sure that the immediate values in each heap are transmitted per packet in the heap. By
-        # default these values are only transmitted once. These immediate values are required as this is how data is
-        # received from the MeerKAT SKARAB F-Engines.
+        # This function makes sure that the immediate values in each heap are
+        # transmitted per packet in the heap. By default these values are only
+        # transmitted once. These immediate values are required as this is how
+        # data is received from the MeerKAT SKARAB F-Engines.
         heap.repeat_pointers = True
 
-        # NOTE: The substream_index is set to zero as the SPEAD BytesStream transport has not had the concept of
-        # substreams introduced. It has not been updated along with the rest of the transports. As such the unit test
-        # cannot yet test that packet interleaving works correctly. I am not sure if this feature is planning to be
-        # added. If it is, then set `substream_index=ant_index`. If this starts becoming an issue, then we will need to
-        # look at using the inproc transport. The inproc transport would be much better, but requires porting a bunch
-        # of things from SPEAD2 python to xbgpu python. This will require much more work.
+        # NOTE: The substream_index is set to zero as the SPEAD BytesStream
+        # transport has not had the concept of substreams introduced. It has
+        # not been updated along with the rest of the transports. As such the
+        # unit test cannot yet test that packet interleaving works correctly. I
+        # am not sure if this feature is planning to be added. If it is, then
+        # set `substream_index=ant_index`. If this starts becoming an issue,
+        # then we will need to look at using the inproc transport. The inproc
+        # transport would be much better, but requires porting a bunch of
+        # things from SPEAD2 python to xbgpu python. This will require much
+        # more work.
         heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
     return heaps
 
@@ -269,44 +291,51 @@ def create_heaps(
 def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
     """Tests the xbgpu SPEAD2 reciever.
 
-    This test is run using simulated packets that are passed to xbgpu receiver as a ByteArray. This test is useful
-    for determining that the receiver is doing what is expected when receiving the correct data. It is not able to
+    This test is run using simulated packets that are passed to xbgpu receiver
+    as a ByteArray. This test is useful for determining that the receiver is
+    doing what is expected when receiving the correct data. It is not able to
     simulate real network conditions.
 
     This test checks a number of things:
-    1. Simple test - will heaps transmitted in order be received correctly. This is carried out on the first 5
-       chunks.
-    2. Out of order heaps in same chunk - heaps destined to the same chunk are sent out of order to verify that
-       they are placed correctly in the chunk at the receiver.
-    3. Out of order heaps in a different chunk - heaps destined to two different chunks are sent slightly out of
-       order to check that two chunks can assembled in parallel.
+    1. Simple test - will heaps transmitted in order be received correctly.
+       This is carried out on the first 5 chunks.
+    2. Out of order heaps in same chunk - heaps destined to the same chunk are
+       sent out of order to verify that they are placed correctly in the chunk
+       at the receiver.
+    3. Out of order heaps in a different chunk - heaps destined to two
+       different chunks are sent slightly out of order to check that two chunks
+       can assembled in parallel.
 
-    It may be better for clarity to have each of these tests run in a different test functions. However that would
-    require dupicating lots of code and the tests would take much longer to run. Also, I am lazy.
+    It may be better for clarity to have each of these tests run in a different
+    test functions. However that would require dupicating lots of code and the
+    tests would take much longer to run. Also, I am lazy.
 
-    This test does not generate random data as it will take a bit more effort to check that the random data is received
-    correctly. This
+    This test does not generate random data as it will take a bit more effort
+    to check that the random data is received correctly. This
 
     Parameters
     ----------
     event_loop: AsyncIO Event Loop
-        The event loop that the async events will be placed on. When running a unit test, this is a fixture provided
-        by the pytest-asyncio module.
+        The event loop that the async events will be placed on. When running a
+        unit test, this is a fixture provided by the pytest-asyncio module.
     num_ants: int
         The number of antennas that data will be received from.
     num_spectra_per_heap: int
         The number of time samples per frequency channel.
     num_channels: int
-        The number of frequency channels out of the FFT. NB: This is not the number of FFT channels per stream. The
-        number of channels per stream is calculated from this value.
+        The number of frequency channels out of the FFT. NB: This is not the
+        number of FFT channels per stream. The number of channels per stream is
+        calculated from this value.
     """
     # 1. Configuration parameters
     n_ants = num_ants
     n_channels_total = num_channels
 
-    # This integer division is so that when n_ants % num_channels !=0 then the remainder will be dropped. This will
-    # only occur in the MeerKAT Extension correlator. Technically we will also need to consider the case where we round
-    # up as some X-Engines will need to do this to capture all the channels, however that is not done in this test.
+    # This integer division is so that when n_ants % num_channels !=0 then the
+    # remainder will be dropped. This will only occur in the MeerKAT Extension
+    # correlator. Technically we will also need to consider the case where we
+    # round up as some X-Engines will need to do this to capture all the
+    # channels, however that is not done in this test.
     n_channels_per_stream = num_channels // n_ants // 4
     n_spectra_per_heap = num_spectra_per_heap
     n_pols = N_POLS
@@ -314,8 +343,8 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
     heaps_per_fengine_per_chunk = 8
     max_active_chunks = 8
 
-    # Multiply step by 2 to account for dropping half of the spectrum due to symmetric properties of the fourier
-    # transform.
+    # Multiply step by 2 to account for dropping half of the spectrum due to
+    # symmetric properties of the fourier transform.
     timestamp_step = n_channels_total * 2 * n_spectra_per_heap
 
     total_chunks = 10
@@ -333,9 +362,10 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
         timestamp_step,
     )
 
-    # 3. "Transmit" mutiple simulated heaps. These heaps will placed in a single ByteArray that SPEAD2 can understand
-    # decode. These heaps are tranmitted in such a way as to perform the different test mentioned in this function's
-    # docstring.
+    # 3. "Transmit" mutiple simulated heaps. These heaps will placed in a
+    # single ByteArray that SPEAD2 can understand decode. These heaps are
+    # tranmitted in such a way as to perform the different test mentioned in
+    # this function's docstring.
 
     # 3.1 Transmit first 5 chunks completely in order
     heap_index = 0
@@ -346,8 +376,9 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
-    # 3.2 For chunk 6, transmit the second collection of heaps in the chunk before the first to ensure that heaps
-    # received out of order are processed correctly
+    # 3.2 For chunk 6, transmit the second collection of heaps in the chunk
+    # before the first to ensure that heaps received out of order are processed
+    # correctly
 
     # 3.2.1 Transmit the second heap first
     heaps = create_heaps(
@@ -377,7 +408,8 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
         source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         heap_index += 1
 
-    # 3.3 For chunk 7 and 8 transmit the first set of heaps of chunk 8 before the last set of heaps of chunk 7.
+    # 3.3 For chunk 7 and 8 transmit the first set of heaps of chunk 8 before
+    # the last set of heaps of chunk 7.
 
     # 3.3.1 Transmit all but the last collection of heaps of chunk 7
     for _ in range(heaps_per_fengine_per_chunk - 1):
@@ -435,7 +467,8 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
     ):
         """Iterate through chunks processed by the receiver.
 
-        This function checks that all the data received is correct and contains all the assert statements in this test.
+        This function checks that all the data received is correct and contains
+        all the assert statements in this test.
         """
         chunk_index = 0
         dropped = 0
@@ -480,12 +513,15 @@ def test_recv_simple(event_loop, num_ants, num_spectra_per_heap, num_channels):
             chunk_index += 1
 
             # 5.4 Exit condition
-            # I am not sure if I am happy that this is here - some of my Jenkins unit tests fail when this is not here
-            # throwing a "spead2._spead2.Stopped: ring buffer has been stopped" error. I think its still trying to
-            # iterate through the async_ringbuffer once the buffer is "finished" but I dont know enough about the
-            # internal workings of asyncio to be sure. Just going to leave it for now and can revisit it later if we
-            # decide the coverage is not enough. It does make the assert (chunk_index == total_chunk) test below a
-            # bit less useful.
+            # I am not sure if I am happy that this is here - some of my
+            # Jenkins unit tests fail when this is not here throwing a
+            # "spead2._spead2.Stopped: ring buffer has been stopped" error. I
+            # think its still trying to iterate through the async_ringbuffer
+            # once the buffer is "finished" but I dont know enough about the
+            # internal workings of asyncio to be sure. Just going to leave it
+            # for now and can revisit it later if we decide the coverage is not
+            # enough. It does make the assert (chunk_index == total_chunk) test
+            # below a bit less useful.
             if chunk_index == total_chunks:
                 break
 

@@ -48,7 +48,8 @@
  ******************************************************************************/
 
 /* PyCUDA wraps the whole file in 'extern "C"', but most of the code expects
- * C++ linkage. So we wrap the whole original file in 'extern "C++"' to cancel that out.
+ * C++ linkage. So we wrap the whole original file in 'extern "C++"' to cancel
+ * that out.
  *
  * When this code gets closer to production, the suggested fix is to modify the
  * accel.build() and context.compile() functions in katsdpsigproc to take a
@@ -257,12 +258,14 @@ template <typename T> __device__ inline void storeVisibility(Visibilities visibi
 {
   if ((skipCheckX || recvX + tcX <= recvY + tcY) && (skipCheckY || recvY + tcY < NR_RECEIVERS))
   {
-    // This allows accumulation across subsequent kernel calls, instead of simply make_complex(sumR, sumI)
+    // This allows accumulation across subsequent kernel calls, instead of
+    // simply make_complex(sumR, sumI)
     visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX] =
       make_complex(visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR,
-                   /* There is a ``-`` on the following line because we want to use the complex
-                    * conjugate, i.e. the other half of the visibility matrix, to what John's
-                    * kernel actually calculates.
+                   /* There is a ``-`` on the following line because we want to
+                    * use the complex conjugate, i.e. the other half of the
+                    * visibility matrix, to what John's kernel actually
+                    * calculates.
                     */
                    visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y - sumI);
   }
@@ -314,8 +317,9 @@ __device__ inline void storeVisibilities(Visibilities visibilities, unsigned cha
       for (unsigned polX = 0; polX < NR_POLARIZATIONS; polX ++)
         visibilities[channel][baseline][polY][polX] =
             make_complex(visibilities[channel][baseline][polY][polX].x + scratchSpace[warp][_y][polY][_x][polX].x,
-                         /* There is a ``-`` on the following line because we want to use the complex
-                          * conjugate, i.e. the other half of the visibility matrix, to what John's
+                         /* There is a ``-`` on the following line because we
+                          * want to use the complex conjugate, i.e. the other
+                          * half of the visibility matrix, to what John's
                           * kernel actually calculates.
                           */
                          visibilities[channel][baseline][polY][polX].y - scratchSpace[warp][_y][polY][_x][polX].y);
