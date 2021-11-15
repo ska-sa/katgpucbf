@@ -254,20 +254,39 @@ __device__ inline float2 make_complex(float real, float imag)
 }
 
 
+// Compute x + y clamped to -INT_MAX .. INT_MAX
+__device__ inline int add_sat(int x, int y)
+{
+  int out;
+  asm("add.sat.s32 %0, %1, %2;" : "=r" (out) : "r" (x), "r" (y));
+  // add.sat.s32 clamps to INT_MIN..INT_MAX, but we want -INT_MAX..INT_MAX
+  // for symmetry.
+  return max(out, INT_MIN + 1);
+}
+
+
+template <typename T> __device__ inline void accumVisibility(T &out, T value)
+{
+  /* Store an output value. Unlike the original ASTRON code, for xbgpu this
+   * - conjugates the value because we want to store the other half
+   *   (triangle) of the visibility matrix; and
+   * - adds to the existing value (with saturation, if integer), to allow
+   *   accumulation across multiple calls to the kernel.
+   */
+#if NR_BITS == 16
+  out = make_complex(out.x + value.x, out.y - value.y);
+#else
+  out = make_complex(add_sat(out.x, value.x), add_sat(out.y, -value.y));
+#endif
+}
+
+
 template <typename T> __device__ inline void storeVisibility(Visibilities visibilities, unsigned channel, unsigned baseline, unsigned recvY, unsigned recvX, unsigned tcY, unsigned tcX, unsigned polY, unsigned polX, bool skipCheckY, bool skipCheckX, T sumR, T sumI)
 {
   if ((skipCheckX || recvX + tcX <= recvY + tcY) && (skipCheckY || recvY + tcY < NR_RECEIVERS))
   {
-    // This allows accumulation across subsequent kernel calls, instead of
-    // simply make_complex(sumR, sumI)
-    visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX] =
-      make_complex(visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX].x + sumR,
-                   /* There is a ``-`` on the following line because we want to
-                    * use the complex conjugate, i.e. the other half of the
-                    * visibility matrix, to what John's kernel actually
-                    * calculates.
-                    */
-                   visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX].y - sumI);
+    accumVisibility(visibilities[channel][baseline + tcY * recvY + tcY * (tcY + 1) / 2 + tcX][polY][polX],
+                    make_complex(sumR, sumI));
   }
 }
 
@@ -302,27 +321,13 @@ __device__ inline void storeVisibilities(Visibilities visibilities, unsigned cha
   unsigned recvX    = firstReceiverX + recvXoffset + NR_RECEIVERS_PER_TCM_X * x + _x;
   unsigned baseline = (recvY * (recvY + 1) / 2) + recvX;
 
-  /* In the storing of visibilities below:
-   * - make_complex(visibilities[..].x + scratchSpace[..].x, visibilities[..].y + scratchSpace[..].y)
-   *   allows for accumulation across subsequent kernel calls,
-   * - Instead of simply visibilities[..] = scratchSpace[..]
-   */
   if ((skipCheckX || recvX <= recvY) && (skipCheckY || recvY < NR_RECEIVERS))
 #if NR_BITS == 4
-    visibilities[channel][baseline][polY][polX] =
-            make_complex(visibilities[channel][baseline][polY][polX].x + scratchSpace[warp][_y][polY][_x][polX].x,
-                         visibilities[channel][baseline][polY][polX].y + scratchSpace[warp][_y][polY][_x][polX].y);
+    accumVisibility(visibilities[channel][baseline][polY][polX], scratchSpace[warp][_y][polY][_x][polX]);
 #elif NR_BITS == 8 || NR_BITS == 16
     for (unsigned polY = 0; polY < NR_POLARIZATIONS; polY ++)
       for (unsigned polX = 0; polX < NR_POLARIZATIONS; polX ++)
-        visibilities[channel][baseline][polY][polX] =
-            make_complex(visibilities[channel][baseline][polY][polX].x + scratchSpace[warp][_y][polY][_x][polX].x,
-                         /* There is a ``-`` on the following line because we
-                          * want to use the complex conjugate, i.e. the other
-                          * half of the visibility matrix, to what John's
-                          * kernel actually calculates.
-                          */
-                         visibilities[channel][baseline][polY][polX].y - scratchSpace[warp][_y][polY][_x][polX].y);
+        accumVisibility(visibilities[channel][baseline][polY][polX], scratchSpace[warp][_y][polY][_x][polX]);
 #endif
 #else
 #if __CUDA_ARCH__ == 700 || (__CUDA_ARCH__ == 720 && NR_BITS == 16)
