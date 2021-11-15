@@ -74,7 +74,7 @@ def parse_args() -> argparse.Namespace:
         "--adc-sample-rate",
         type=float,
         required=True,
-        help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, " "the pipeline will stall.",
+        help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall.",
     )
     parser.add_argument(
         "--send-rate-factor",
