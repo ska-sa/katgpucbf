@@ -446,14 +446,16 @@ def test_xengine_end_to_end(context, event_loop, num_ants, num_spectra_per_heap,
         The recv_process() has an end point while the xbengine runs forever. Waits for the recv_process() finish and
         then stops the xbengine.
         """
-        task1 = asyncio.create_task(xbengine.run())
-        task2 = asyncio.create_task(recv_process())
-        await task2
-        task1.cancel()
+        # TODO: Confirm that this is kosher
+        await xbengine.start()
+        asyncio.gather(
+            asyncio.create_task(xbengine.join()),
+            asyncio.create_task(recv_process()),
+        )
 
-    # 9. Launch asyn functions and wait until completion
+    # 9. Launch async functions and wait until completion
     event_loop.run_until_complete(run())
-    xbengine.stop()
+    event_loop.run_until_complete(xbengine.stop())
 
 
 # A manual run useful when debugging the unit tests.
