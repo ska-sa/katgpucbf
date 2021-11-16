@@ -239,6 +239,8 @@ async def async_main(args: argparse.Namespace) -> None:
         context=context,
     )
 
+    add_signal_handlers(xbengine)
+
     # Attach this transport to receive channelisation products from the network at high rates.
     xbengine.add_udp_ibv_receiver_transport(
         src_ip=args.src.host,
