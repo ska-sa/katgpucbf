@@ -227,7 +227,7 @@ struct heap_data
          * Correlator Beamformer Visibilities and Tied Array Data" (Document ID: M1000-0001-020 rev 4)
          *
          * A rough explanation has been put together showing the exact packet format and byte offsets produced by the
-         * F-Engine - available at doc/fgpu.packet_format.rst.
+         * F-Engine - available at :ref:`fgpu-packet-format`.
          */
 
         heap.add_item(0x4101, iFengId);                            // The index of the F-Engine data is sent from

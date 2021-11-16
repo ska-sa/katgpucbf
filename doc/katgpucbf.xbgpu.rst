@@ -10,8 +10,8 @@ Submodules
    katgpucbf.xbgpu.main
    katgpucbf.xbgpu.precorrelation_reorder
    katgpucbf.xbgpu.recv
-   katgpucbf.xbgpu.tensorcore_xengine_core
-   katgpucbf.xbgpu.xbengine
+   katgpucbf.xbgpu.correlation
+   katgpucbf.xbgpu.engine
    katgpucbf.xbgpu.xsend
 
 Module contents
