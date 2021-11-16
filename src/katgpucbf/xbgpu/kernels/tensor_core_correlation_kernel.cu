@@ -25,7 +25,7 @@
  * It has been modified by SARAO:
  * - Wrap the file in extern "C++" to make it work with PyCUDA (see below)
  * - Add results to the output instead of overwriting, to allow accumulation
- *   across multiple calls.
+ *   across multiple calls (with saturation rather than wrapping).
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
  * - Remove trailing whitespace.
