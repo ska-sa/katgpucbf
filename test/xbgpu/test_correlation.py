@@ -118,13 +118,29 @@ def test_correlator(
 
     buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
+    # Set pre-existing values, to check that the computed values are added to them.
+    buf_visibilities_host[:] = rng.integers(
+        low=np.iinfo(buf_visibilities_host.dtype).min + 1,
+        high=np.iinfo(buf_visibilities_host.dtype).max,
+        size=buf_visibilities_host.shape,
+        dtype=buf_visibilities_host.dtype,
+        endpoint=True,
+    )
+
+    calculated_visibilities_host = correlate_host(buf_samples_host)
+    # Add buf_visibilities_host with saturation
+    summed_visibilities_host = (
+        (calculated_visibilities_host.astype(np.int64) + buf_visibilities_host)
+        .clip(np.iinfo(buf_visibilities_host.dtype).min + 1, np.iinfo(buf_visibilities_host.dtype).max)
+        .astype(buf_visibilities_host.dtype)
+    )
 
     buf_samples_device.set(command_queue, buf_samples_host)
+    buf_visibilities_device.set(command_queue, buf_visibilities_host)
     tensor_core_x_engine_core()
     buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
-    calculated_visibilities_host = correlate_host(buf_samples_host)
-    np.testing.assert_equal(buf_visibilities_host, calculated_visibilities_host)
+    np.testing.assert_equal(buf_visibilities_host, summed_visibilities_host)
 
 
 @pytest.mark.parametrize("num_ants", test_parameters.array_size)
