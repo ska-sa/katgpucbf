@@ -1,4 +1,4 @@
-.. _fgpu-packet-format:
+.. _channelised-voltage-data-packet-format:
 
 Channelised Voltage Data Packet Format
 ======================================

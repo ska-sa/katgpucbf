@@ -1,4 +1,4 @@
-.. _xbgpu-packet-format:
+.. _baseline-correlation-products-data-packet-format:
 
 Baseline Correlation Products Data Packet Format
 ================================================
