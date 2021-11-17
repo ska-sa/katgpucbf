@@ -25,7 +25,7 @@ heap out onto the network using the spead2 Python module. The high-performance
 ibverbs implementation of spead2 will be used even though the data rates out
 are very low due to the ibverbs implementation using far fewer system
 resources. The format of the packets transmitted by SPEAD2 can be found here:
-https://docs.google.com/drawings/d/1d3CMrMl8wTQfVlyX5NXztMGGHhak-37mt4IoK7Idc_I/edit
+- :ref:`baseline-correlation-products-data-packet-format`.
 
 The XSend class creates its own buffers and data in those buffers will be
 encapsulated into SPEAD heaps and sent onto the network. The user can request
