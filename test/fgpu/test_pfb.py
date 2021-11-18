@@ -86,22 +86,6 @@ def test_pfb_fir(context, command_queue, repeat=1):
     np.testing.assert_allclose(h_out, expected, rtol=1e-5, atol=1e-3)
 
 
-def test_fft(context, command_queue):
-    """Test the GPU FFT for numerical correctness."""
-    spectra = 37
-    channels = 256
-    rng = np.random.default_rng(seed=2021)
-    h_data = rng.uniform(-5, 5, (spectra, 2 * channels)).astype(np.float32)
-    expected = np.fft.rfft(h_data, axis=-1)
-
-    fn = pfb.FFT(command_queue, spectra, channels)
-    fn.ensure_all_bound()
-    fn.buffer("in").set(command_queue, h_data)
-    fn()
-    h_out = fn.buffer("out").get(command_queue)
-    np.testing.assert_allclose(h_out, expected, rtol=1e-4, atol=1e-4)
-
-
 if __name__ == "__main__":
     ctx = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     queue = ctx.create_command_queue()

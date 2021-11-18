@@ -17,19 +17,12 @@
 """PFB module.
 
 These classes handle the operation of the GPU in performing the PFB-FIR part
-through a mako-templated kernel, and the cuFFT library for the FFT part.
-
-.. rubric:: TODO
-
-- The final coarse delay implementation should probably come somewhere in here.
-  Though it might be in the kernel itself.
+through a mako-templated kernel.
 """
 
 
 import numpy as np
 import pkg_resources
-import skcuda.cufft
-import skcuda.fft
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
@@ -161,67 +154,3 @@ class PFBFIR(accel.Operation):
             global_size=(groupsx * self.template.wgs, groupsy),
             local_size=(self.template.wgs, 1),
         )
-
-
-class FFT(accel.Operation):
-    """FFT operation using the cuFFT library.
-
-    The FFT portion of the PFB is implemented using CUDA's standard FFT. Nothing
-    really interesting to see here.
-
-    CUDA determines that it's a real-to-complex FFT and the plan it selects only
-    calculates the positive frequency channels, as shown in the
-    `relevant documentation`_.
-
-    .. _relevant documentation: https://docs.nvidia.com/cuda/cufft/index.html#data-layout
-
-    .. rubric:: Slots
-
-    **in**  : spectra × 2*channels, float32
-        Input FIR-filtered time data, for processing by the FFT.
-    **out** : spectra × channels+1, complex64
-        Output channelised data. The output needs to have dimension `channels+1`
-        because cuFFT calculates N/2+1 output channels (+1 because the Nyquist
-        frequency component is included). We just ignore this last channel
-        because we don't need it.
-    **work** : work_size, uint8
-        A scratch location for the cuFFT plan to use for intermediate steps in
-        its calculations.
-
-    Parameters
-    ----------
-    command_queue: AbstractCommandQueue
-        The GPU command queue (typically this will be a CUDA Stream) on which
-        actual processing operations are to be scheduled.
-    spectra: int
-        Number of spectra that we produce in each chunk.
-    channels: int
-        Number of channels into which the input data will be decomposed.
-    """
-
-    def __init__(self, command_queue: AbstractCommandQueue, spectra: int, channels: int) -> None:
-        super().__init__(command_queue)
-        self.spectra = spectra
-        self.channels = channels
-        with command_queue.context:
-            self.plan = skcuda.fft.Plan(
-                2 * channels,
-                np.float32,
-                np.complex64,
-                spectra,
-                stream=command_queue._pycuda_stream,  # type: ignore
-                inembed=np.array([2 * channels], np.int32),
-                idist=2 * channels,
-                onembed=np.array([channels + 1], np.int32),
-                odist=channels + 1,
-                auto_allocate=False,
-            )
-            work_size = skcuda.cufft.cufftGetSize(self.plan.handle)
-        self.slots["in"] = accel.IOSlot((spectra, accel.Dimension(2 * channels, exact=True)), np.float32)
-        self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(channels + 1, exact=True)), np.complex64)
-        self.slots["work"] = accel.IOSlot((work_size,), np.uint8)
-
-    def _run(self) -> None:
-        with self.command_queue.context:
-            self.plan.set_work_area(self.buffer("work").buffer)
-            skcuda.fft.fft(self.buffer("in").buffer, self.buffer("out").buffer, self.plan)
