@@ -29,7 +29,7 @@ import argparse
 import asyncio
 import logging
 import signal
-from typing import Optional
+from typing import List, Optional
 
 import katsdpsigproc.accel
 import prometheus_async
@@ -173,7 +173,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def add_signal_handlers(engine: XBEngine) -> None:
+def add_signal_handlers(engine: XBEngine, standalone_tasks: List[asyncio.Task]) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
 
     Lifted from fgpu/main.py.
@@ -184,6 +184,14 @@ def add_signal_handlers(engine: XBEngine) -> None:
        is still flowing, and possibly exits in the middle of sending a heap.
        However, it's still useful as it ensures CUDA is shut down properly,
        which is necessary for NSight to operate correctly.
+
+    Parameters
+    ----------
+    engine
+        The XBEngine instance launched to facilitate XBEngine operations.
+    standalone_tasks
+        A list of Tasks that are created/run outside the XBEngine's realm of operation,
+        e.g. Sending of Heap Descriptors.
     """
     signums = [signal.SIGINT, signal.SIGTERM]
 
@@ -193,6 +201,8 @@ def add_signal_handlers(engine: XBEngine) -> None:
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
+        for task in standalone_tasks:
+            task.cancel()
         engine.halt()
 
     loop = asyncio.get_event_loop()
@@ -239,8 +249,6 @@ async def async_main(args: argparse.Namespace) -> None:
         context=context,
     )
 
-    add_signal_handlers(xbengine)
-
     # Attach this transport to receive channelisation products from the network at high rates.
     xbengine.add_udp_ibv_receiver_transport(
         src_ip=args.src.host,
@@ -269,13 +277,16 @@ async def async_main(args: argparse.Namespace) -> None:
     descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(5))
     descriptor_task.add_done_callback(done_callback)
 
-    # Need to wait for this to complete before joining
+    add_signal_handlers(engine=xbengine, standalone_tasks=[descriptor_task])
+
     await xbengine.start()
 
     await asyncio.gather(
         asyncio.create_task(xbengine.join()),
         descriptor_task,
+        return_exceptions=True,
     )
+
     if prometheus_server:
         await prometheus_server.close()
 

@@ -61,6 +61,8 @@ from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorder
 from .xsend import BufferWrapper, XSend
 
 logger = logging.getLogger(__name__)
+# TODO: Remove this after others can confirm the loops exit cleanly
+logger.setLevel(logging.DEBUG)
 
 
 def done_callback(future: asyncio.Future) -> None:
@@ -827,7 +829,7 @@ class XBEngine(DeviceServer):
         # Perhaps send it directly via the send_stream.source_stream?
         await self.send_stream.source_stream.async_send_heap(stop_heap)
         # self.send_stream.send_heap(timestamp=0, buffer_wrapper=buffer_wrapper)
-        logger.debug("run_transmit completed")
+        logger.debug("_sender_loop completed")
 
     async def run_descriptors_loop(self, interval_s):
         """
