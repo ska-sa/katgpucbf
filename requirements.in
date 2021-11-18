@@ -6,5 +6,4 @@ katsdptelstate
 numpy
 prometheus-async
 pycuda
-scikit-cuda
 spead2

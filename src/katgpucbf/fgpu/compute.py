@@ -21,7 +21,8 @@ Allocations of memory for input, intermediate and output are also handled here.
 
 from typing import List, Sequence, Tuple
 
-from katsdpsigproc import accel
+import numpy as np
+from katsdpsigproc import accel, fft
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS
@@ -118,7 +119,16 @@ class Compute(accel.OperationSequence):
         self.pfb_fir = [
             template.pfb_fir.instantiate(command_queue, samples, spectra, channels) for pol in range(N_POLS)
         ]
-        self.fft = [pfb.FFT(command_queue, spectra, channels) for pol in range(N_POLS)]
+        fft_template = fft.FftTemplate(
+            template.context,
+            1,
+            (spectra, 2 * channels),
+            np.float32,
+            np.complex64,
+            (spectra, 2 * channels),
+            (spectra, channels + 1),
+        )
+        self.fft = [fft_template.instantiate(command_queue, fft.FftMode.FORWARD) for pol in range(N_POLS)]
 
         # Postproc is single though because it involves the corner turn which
         # combines the two pols.
@@ -132,10 +142,10 @@ class Compute(accel.OperationSequence):
         operations.append(("postproc", self.postproc))
 
         compounds = {
-            # fft0:work and fft1:work are just scratchpad memory. Since the FFTs
-            # are run sequentially they won't interfere with each other, fft0 is
-            # finished by the time fft1 starts.
-            "fft_work": [f"fft{pol}:work" for pol in range(N_POLS)],
+            # fft0:work_area and fft1:work_area are just scratchpad memory.
+            # Since the FFTs are run sequentially they won't interfere with
+            # each other, i.e., fft0 is finished by the time fft1 starts.
+            "fft_work": [f"fft{pol}:work_area" for pol in range(N_POLS)],
             # We expect the weights on the PFB-FIR taps to be the same for both
             # pols so they can share memory.
             "weights": [f"pfb_fir{pol}:weights" for pol in range(N_POLS)],
@@ -146,8 +156,8 @@ class Compute(accel.OperationSequence):
         }
         for pol in range(N_POLS):
             compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
-            compounds[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:in"]
-            compounds[f"fft_out{pol}"] = [f"fft{pol}:out", f"postproc:in{pol}"]
+            compounds[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
+            compounds[f"fft_out{pol}"] = [f"fft{pol}:dest", f"postproc:in{pol}"]
         super().__init__(command_queue, operations, compounds)
 
     def run_frontend(
@@ -197,6 +207,6 @@ class Compute(accel.OperationSequence):
         self.bind(out=out)
         # TODO: only bind relevant slots for backend
         self.ensure_all_bound()
-        for fft in self.fft:
-            fft()
+        for fft_op in self.fft:
+            fft_op()
         self.postproc()
