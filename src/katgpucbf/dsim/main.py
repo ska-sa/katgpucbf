@@ -28,14 +28,18 @@ from typing import Deque, List, Optional, Sequence, Tuple
 
 import katsdpservices
 import numpy as np
+import prometheus_async
 import spead2.send
 import toolz
 from katsdptelstate.endpoint import endpoint_list_parser
+from prometheus_client import Counter
 
 from .. import BYTE_BITS, DEFAULT_TTL
-from . import send, signal
+from . import METRIC_NAMESPACE, send, signal
 
 logger = logging.getLogger(__name__)
+output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
+output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 
 
 def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -54,6 +58,11 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
     parser.add_argument(
         "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
+    )
+    parser.add_argument(
+        "--prometheus-port",
+        type=int,
+        help="Network port on which to serve Prometheus metrics [none]",
     )
     parser.add_argument(
         "dest",
@@ -92,6 +101,11 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, heap_s
 async def async_main() -> None:
     """Asynchronous main entry point."""
     args = parse_args()
+    heap_set_samples = args.signal_heaps * args.heap_samples
+    heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
+
+    if args.prometheus_port is not None:
+        await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
     timestamp = 0
     if args.sync_time is not None:
@@ -102,7 +116,6 @@ async def async_main() -> None:
     sig_data = signal.packbits(sig_data, args.sample_bits)
 
     substream_offset = 0
-    heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
     heap_sets: List[send.HeapSet] = []
     endpoints: List[Tuple[str, int]] = []
     for i, pol_dest in enumerate(args.dest):
@@ -132,7 +145,6 @@ async def async_main() -> None:
     chunks = [list(chunk) for chunk in toolz.partition_all(args.max_heaps // 2, heaps)]
     futures: Deque[asyncio.Future] = deque()
     logger.info("Starting transmission")
-    heap_set_samples = args.signal_heaps * args.heap_samples
     # TODO: might be more efficient to share timestamps between the heap sets
     for heap_set in heap_sets:
         heap_set.timestamps[:] = np.arange(0, args.signal_heaps, dtype=">u8") * args.heap_samples + timestamp
@@ -141,6 +153,9 @@ async def async_main() -> None:
             # Each heap is a single packet, so despite ROUND_ROBIN they will be
             # sent sequentially.
             futures.append(stream.async_send_heaps(chunk, spead2.send.GroupMode.ROUND_ROBIN))
+            # Not actually sent yet, but close enough for monitoring the transmission speed
+            output_heaps_counter.inc(len(chunk))
+            output_bytes_counter.inc(len(chunk) * heap_size)
             while len(futures) > 1:
                 await futures.popleft()
         for heap_set in heap_sets:
