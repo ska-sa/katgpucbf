@@ -38,7 +38,7 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
-from .. import __version__
+from .. import SPEAD_DESCRIPTOR_INTERVAL_S, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .correlation import device_filter
 from .engine import done_callback
@@ -176,15 +176,6 @@ def parse_args() -> argparse.Namespace:
 def add_signal_handlers(engine: XBEngine, standalone_tasks: List[asyncio.Task]) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
 
-    Lifted from fgpu/main.py.
-
-    .. todo::
-
-       This is still not particularly clean, sometimes hangs if digitiser data
-       is still flowing, and possibly exits in the middle of sending a heap.
-       However, it's still useful as it ensures CUDA is shut down properly,
-       which is necessary for NSight to operate correctly.
-
     Parameters
     ----------
     engine
@@ -271,10 +262,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     logger.info("Starting main processing loop")
 
-    # TODO: There must be a better way to expose the done_callback from engine.py?
-    # - Perhaps move this into XBEngine.start()? Pass it Zero to not run during unit tests.
-    # - I'm sure we need to remove this 'naked' 5 anyway.
-    descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(5))
+    descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S))
     descriptor_task.add_done_callback(done_callback)
 
     add_signal_handlers(engine=xbengine, standalone_tasks=[descriptor_task])

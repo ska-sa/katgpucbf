@@ -54,22 +54,19 @@ from aiokatcp import DeviceServer
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
-from ..spead import FLAVOUR as SPEAD_FLAVOUR
 from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
-from .xsend import BufferWrapper, XSend
+from .xsend import XSend
 
 logger = logging.getLogger(__name__)
-# TODO: Remove this after others can confirm the loops exit cleanly
-logger.setLevel(logging.DEBUG)
 
 
 def done_callback(future: asyncio.Future) -> None:
     """
     Handle cancellation of Processing Loops as a callback.
 
-    Moved up here as the descriptors_loop also needs access to it.
+    Log exceptions as soon as they occur.
     """
     try:
         future.result()  # Evaluate just for exceptions
@@ -602,10 +599,7 @@ class XBEngine(DeviceServer):
         3. Initiate the transfer of the chunk from system memory to the buffer in GPU RAM that belongs to the rx_item.
         4. Place the rx_item on _rx_item_queue so that it can be processed downstream.
 
-        The above steps are performed in a loop until the running flag is set to false.
-
-        TODO: If no data is being streamed and the running flag is set to false, this function will be stuck waiting for
-        the next chunk. Try find a way to exit cleanly without adding to much additional logic to this function.
+        The above steps are performed in a loop until there are no more chunks to assembled.
         """
         # 2. Get complete chunks from the ringbuffer.
         async for chunk in recv.recv_chunks(self.receiver_stream):
@@ -661,9 +655,7 @@ class XBEngine(DeviceServer):
             # 2. Get item from receiver function - wait for the HtoD transfers to complete and then give the chunk back
             #  to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
-            # TODO: if rx_item is None?
-            if not rx_item:
-                # NoneType received, break and pass the message on
+            if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
@@ -722,9 +714,8 @@ class XBEngine(DeviceServer):
                 # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
 
-        # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit. This function
-        # puts the current tx_item on the queue. The sender_loop can then stop waiting upon receiving this and exit.
-        # await self._tx_item_queue.put(tx_item)
+        # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit.
+        #    Upon receiving this NoneType, the sender_loop can stop waiting and exit.
         logger.debug("_gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
@@ -750,19 +741,14 @@ class XBEngine(DeviceServer):
         old_time_s = time.time()
         old_timestamp = 0
 
-        # Need to use this to send the stop_heap
-        buffer_wrapper: BufferWrapper = None
         while True:
             # 1. Get the item to transfer and wait for all GPU events to finish before continuing
             item = await self._tx_item_queue.get()
-            # TODO: if rx_item is None?
-            if not item:
-                # NoneType received, break and pass the message on
+            if item is None:
                 break
             await item.async_wait_for_events()
 
             # 2. Get a free heap buffer to copy the GPU data to
-            # TODO: Perhaps move this outside the loop to access when sending the stop_heap
             buffer_wrapper = await self.send_stream.get_free_heap()
 
             # 3 Perform some basic logging.
@@ -823,12 +809,7 @@ class XBEngine(DeviceServer):
             item.reset()
             await self._tx_free_item_queue.put(item)
 
-        # No task to await, XSend.send_heap is blocking
-        stop_heap = spead2.send.Heap(SPEAD_FLAVOUR)
-        stop_heap.add_end()
-        # Perhaps send it directly via the send_stream.source_stream?
-        await self.send_stream.source_stream.async_send_heap(stop_heap)
-        # self.send_stream.send_heap(timestamp=0, buffer_wrapper=buffer_wrapper)
+        await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
     async def run_descriptors_loop(self, interval_s):
@@ -845,7 +826,8 @@ class XBEngine(DeviceServer):
         """
         Launch all the different async functions required to run the X-Engine.
 
-        These functions will loop forever and only exit once the XBEngine receives a SIGINT or SIGTERM.
+        These functions will loop forever and only exit once the XBEngine receives
+        a SIGINT or SIGTERM.
         """
         if self.rx_transport_added is not True:
             raise AttributeError("Transport for receiving data has not yet been set.")

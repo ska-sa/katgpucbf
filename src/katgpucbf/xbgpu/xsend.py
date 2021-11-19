@@ -24,7 +24,7 @@ takes the baseline data, turns it into a SPEAD heap and then transmits that
 heap out onto the network using the spead2 Python module. The high-performance
 ibverbs implementation of spead2 will be used even though the data rates out
 are very low due to the ibverbs implementation using far fewer system
-resources. The format of the packets transmitted by SPEAD2 can be found here:
+resources. The format of the packets transmitted by spead2 can be found here:
 https://docs.google.com/drawings/d/1d3CMrMl8wTQfVlyX5NXztMGGHhak-37mt4IoK7Idc_I/edit
 
 The XSend class creates its own buffers and data in those buffers will be
@@ -134,7 +134,7 @@ class XSend:
         A new heap is transmitted every `dump_interval_s` seconds. Set to zero to
         send as fast as possible.
     send_rate_factor
-        Configure the SPEAD2 sender with a rate proportional to this factor.
+        Configure the spead2 sender with a rate proportional to this factor.
         This value is intended to dictate a data transmission rate slightly
         higher/faster than the ADC rate.
 
@@ -258,7 +258,7 @@ class XSend:
             n_channels // n_channels_per_stream,
         )
 
-        # 6. Create item group - This is the SPEAD2 object that stores all heap format information.
+        # 6. Create item group - This is the spead2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         self.item_group.add_item(
             FREQUENCY_ID,
@@ -341,7 +341,7 @@ class XSend:
 
     def send_descriptor_heap(self) -> None:
         """
-        Send the SPEAD descriptor over the SPEAD2 transport.
+        Send the SPEAD descriptor over the spead2 transport.
 
         This function transmits the descriptor heap created at the start of
         transmission. I am unsure if this is the correct or best way to do
@@ -350,5 +350,14 @@ class XSend:
 
         This function has no associated unit test - it will likely need to be
         revisited later as its need and function become clear.
+
+        .. todo::
+            This async_send_heap should really be await'ed.
         """
         self.source_stream.async_send_heap(self.descriptor_heap)
+
+    async def send_stop_heap(self) -> None:
+        """Send a Stop Heap over the spead2 transport."""
+        stop_heap = spead2.send.Heap(FLAVOUR)
+        stop_heap.add_end()
+        await self.source_stream.async_send_heap(stop_heap)
