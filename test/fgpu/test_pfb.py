@@ -20,7 +20,8 @@ import numpy as np
 import pytest
 from katsdpsigproc import accel
 
-from katgpucbf.fgpu import BYTE_BITS, SAMPLE_BITS, pfb
+from katgpucbf import BYTE_BITS
+from katgpucbf.fgpu import SAMPLE_BITS, pfb
 
 pytestmark = [pytest.mark.cuda_only]
 

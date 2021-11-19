@@ -27,10 +27,10 @@ import numpy as np
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import COMPLEX, N_POLS, __version__
+from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
-from . import BYTE_BITS, recv, send
+from . import recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor

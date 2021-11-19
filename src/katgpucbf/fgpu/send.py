@@ -18,7 +18,7 @@
 
 import asyncio
 import functools
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
 import spead2.send.asyncio
@@ -27,26 +27,13 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import N_POLS
-from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, make_immediate
 from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
 PREAMBLE_SIZE = 72
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
-
-
-def make_immediate(id: int, value: Any) -> spead2.Item:
-    """Synthesize an immediate item.
-
-    Parameters
-    ----------
-    id
-        The SPEAD identifier for the item
-    value
-        The value of the item
-    """
-    return spead2.Item(id, "dummy_item", "", (), format=[("u", FLAVOUR.heap_address_bits)], value=value)
 
 
 class Frame:

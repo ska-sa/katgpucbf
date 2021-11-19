@@ -57,7 +57,7 @@ import numpy as np
 import spead2
 from aiokatcp import DeviceServer
 
-from .. import COMPLEX, N_POLS, __version__
+from .. import COMPLEX, DEFAULT_TTL, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
@@ -576,7 +576,7 @@ class XBEngine(DeviceServer):
                 spead2.send.UdpIbvConfig(
                     endpoints=[(dest_ip, dest_port)],
                     interface_address=interface_ip,
-                    ttl=4,
+                    ttl=DEFAULT_TTL,
                     comp_vector=thread_affinity,
                     memory_regions=list(buffers),
                 ),

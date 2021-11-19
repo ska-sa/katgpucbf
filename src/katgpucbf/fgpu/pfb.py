@@ -26,7 +26,8 @@ import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from . import BYTE_BITS, SAMPLE_BITS
+from .. import BYTE_BITS
+from . import SAMPLE_BITS
 
 
 class PFBFIRTemplate:

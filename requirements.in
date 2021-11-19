@@ -7,3 +7,4 @@ numpy
 prometheus-async
 pycuda
 spead2
+toolz
