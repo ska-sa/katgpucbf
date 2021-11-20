@@ -51,7 +51,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
-    parser.add_argument("--max-heaps", type=int, default=128, help="Depth of send queue (per interface) [%(default)s]")
+    parser.add_argument("--max-heaps", type=int, default=256, help="Depth of send queue [%(default)s]")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
