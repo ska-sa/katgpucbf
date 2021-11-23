@@ -30,3 +30,4 @@ __all__ = ["__version__"]
 
 COMPLEX: Final = 2
 N_POLS: Final = 2
+SPEAD_DESCRIPTOR_INTERVAL_S: Final = 5

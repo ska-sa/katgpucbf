@@ -475,19 +475,17 @@ def test_xengine_end_to_end(context, event_loop, num_ants, num_spectra_per_heap,
     @pytest.mark.asyncio
     async def run():
         """
-        Run the xbengine and run the recv_process() function.
+        Start the xbengine and run the recv_process() function.
 
         The recv_process() has an end point while the xbengine runs forever. Waits for the recv_process() finish and
         then stops the xbengine.
         """
-        task1 = asyncio.create_task(xbengine.run())
-        task2 = asyncio.create_task(recv_process())
-        await task2
-        task1.cancel()
+        await xbengine.start()
+        await recv_process()
+        await xbengine.stop()
 
-    # 9. Launch asyn functions and wait until completion
+    # 9. Launch async functions and wait until completion
     event_loop.run_until_complete(run())
-    xbengine.stop()
 
 
 # A manual run useful when debugging the unit tests.

@@ -31,7 +31,8 @@ everything required to run the XB-Engine.
 import argparse
 import asyncio
 import logging
-from typing import Optional
+import signal
+from typing import List, Optional
 
 import katsdpsigproc.accel
 import prometheus_async
@@ -40,9 +41,10 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
-from .. import __version__
+from .. import SPEAD_DESCRIPTOR_INTERVAL_S, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .correlation import device_filter
+from .engine import done_callback
 
 DEFAULT_KATCP_PORT = 7147
 DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
@@ -178,6 +180,34 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def add_signal_handlers(engine: XBEngine, standalone_tasks: List[asyncio.Task]) -> None:
+    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
+
+    Parameters
+    ----------
+    engine
+        The XBEngine instance launched to facilitate XBEngine operations.
+    standalone_tasks
+        A list of Tasks that are created/run outside the XBEngine's realm of operation,
+        e.g. Sending of Heap Descriptors.
+    """
+    signums = [signal.SIGINT, signal.SIGTERM]
+
+    def handler():
+        # Remove the handlers so that if it fails to shut down, the next
+        # attempt will try harder.
+        logger.info("Received signal, shutting down")
+        for signum in signums:
+            loop.remove_signal_handler(signum)
+        for task in standalone_tasks:
+            task.cancel()
+        engine.halt()
+
+    loop = asyncio.get_event_loop()
+    for signum in signums:
+        loop.add_signal_handler(signum, handler)
+
+
 async def async_main(args: argparse.Namespace) -> None:
     """
     Create and launch the XB-Engine.
@@ -242,10 +272,19 @@ async def async_main(args: argparse.Namespace) -> None:
 
     logger.info("Starting main processing loop")
 
-    main_task = asyncio.create_task(xbengine.run())
-    descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(5))
-    await main_task
-    await descriptor_task
+    descriptor_task = asyncio.create_task(xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S))
+    descriptor_task.add_done_callback(done_callback)
+
+    add_signal_handlers(engine=xbengine, standalone_tasks=[descriptor_task])
+
+    await xbengine.start()
+
+    await asyncio.gather(
+        asyncio.create_task(xbengine.join()),
+        descriptor_task,
+        return_exceptions=True,
+    )
+
     if prometheus_server:
         await prometheus_server.close()
 

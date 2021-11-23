@@ -245,15 +245,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def add_signal_handlers(engine: Engine) -> None:
-    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
-
-    .. todo::
-
-       This is still not particularly clean, sometimes hangs if digitiser data
-       is still flowing, and possibly exits in the middle of sending a heap.
-       However, it's still useful as it ensures CUDA is shut down properly,
-       which is necessary for NSight to operate correctly.
-    """
+    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [signal.SIGINT, signal.SIGTERM]
 
     def handler():
