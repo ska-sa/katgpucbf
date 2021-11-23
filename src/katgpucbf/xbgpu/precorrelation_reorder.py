@@ -49,7 +49,8 @@ class PrecorrelationReorderTemplate:
     """
     Template class for compiling different variations of the pre-correlation reorder kernel.
 
-    This object will be used to create a PreCorrelationReorder object that will be able to run the created kernel.
+    This object will be used to create a PreCorrelationReorder object that will
+    be able to run the created kernel.
     """
 
     def __init__(
@@ -58,17 +59,20 @@ class PrecorrelationReorderTemplate:
         """
         Initialise the PreCorrelationReorderTemplate class and compile the pre-correlation reorder kernel.
 
-        The parameters given to this function are used by this class to compile the kernel and by the
-        PreCorrelationReorder to specify the shape of the memory buffers connected to this kernel.
+        The parameters given to this function are used by this class to compile
+        the kernel and by the PreCorrelationReorder to specify the shape of the
+        memory buffers connected to this kernel.
 
         Parameters
         ----------
         context
-            The GPU device's context provided by katsdpsigproc's abstraction of PyCUDA.
-            A context is associated with a single device and 'owns' all memory allocations.
-            For the purposes of this python module, and its Tensor Core usage, the CUDA context is required.
+            The GPU device's context provided by katsdpsigproc's abstraction of
+            PyCUDA.  A context is associated with a single device and 'owns'
+            all memory allocations.  For the purposes of this python module,
+            and its Tensor Core usage, the CUDA context is required.
         n_ants
-            The number of antennas that will be correlated. Each antennas is expected to produce two polarisations.
+            The number of antennas that will be correlated. Each antennas is
+            expected to produce two polarisations.
         n_channels
             The number of frequency channels to be processed.
         n_spectra_per_heap
@@ -76,7 +80,8 @@ class PrecorrelationReorderTemplate:
         n_batches
             The number of matrices to be reordered, a single data matrix = one batch.
         """
-        # 1. Set member variables that are used to calculate indices for the input and output buffers
+        # 1. Set member variables that are used to calculate indices for the
+        # input and output buffers
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
@@ -86,8 +91,9 @@ class PrecorrelationReorderTemplate:
         # as and when the TensorCoreXEngine requires it.
         self._sample_bitwidth = 8
 
-        # This 128 is hardcoded in the original Tensor Core kernel and (probably) has to do with
-        # optimising the thread utilisation in Tensor Cores - 128 = 4 x warps, where one warp = 32 threads.
+        # This 128 is hardcoded in the original Tensor Core kernel and
+        # (probably) has to do with optimising the thread utilisation in Tensor
+        # Cores - 128 = 4 x warps, where one warp = 32 threads.
         self.n_times_per_block = 128 // self._sample_bitwidth
 
         if self.n_spectra_per_heap % self.n_times_per_block != 0:
@@ -113,13 +119,15 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        # The size of a data matrix required to be reordered is the same for Input or Output data shapes
+        # The size of a data matrix required to be reordered is the same for
+        # Input or Output data shapes
         self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap * N_POLS
         # Maximum number of threads per block, as per Section I of Nvidia's CUDA Programming Guide
         THREADS_PER_BLOCK: Final[int] = 1024  # noqa: N806
 
         # 4. Calculate the number of thread blocks to launch per kernel call
-        # - This is in the x-dimension and remains constant for the lifetime of the object.
+        # - This is in the x-dimension and remains constant for the lifetime of
+        #   the object.
         # - TODO: Error-check these values (As in, bounds/values, not method).
         self.n_blocks_x = (self.matrix_size + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
 
@@ -149,8 +157,10 @@ class PrecorrelationReorder(accel.Operation):
     """
     Class containing a pre-correlation reorder kernel compiled from a PreCorrelationReorderTemplate.
 
-    This class specifies the shape of the input sample and output reordered buffers required by the kernel. The
-    parameters specified in the PreCorrelationReorderTemplate object are used to determine the shape of the buffers.
+    This class specifies the shape of the input sample and output reordered
+    buffers required by the kernel. The parameters specified in the
+    PreCorrelationReorderTemplate object are used to determine the shape of the
+    buffers.
 
     It is worth noting these matrices follow the C convention, with the
     fastest-changing dimension being the last on the list. The input sample
@@ -192,7 +202,8 @@ class PrecorrelationReorder(accel.Operation):
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
-            # - Global size is across the x- and y-dimensions (for this application).
+            # - Global size is across the x- and y-dimensions (for this
+            #   application).
             global_size=(1024 * self.template.n_blocks_x, self.template.n_batches),
             local_size=(1024, 1),
         )

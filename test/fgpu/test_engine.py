@@ -46,6 +46,7 @@ MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
+GAIN = np.float32(0.001)
 
 
 @dataclass
@@ -98,6 +99,7 @@ class TestEngine:
         f"--feng-id={FENG_ID}",
         f"--taps={TAPS}",
         f"--adc-sample-rate={ADC_SAMPLE_RATE}",
+        f"--gain={GAIN}",
         "--send-rate-factor=0",  # Infinitely fast
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
@@ -318,7 +320,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         delay_samples: Tuple[float, float],
     ) -> None:
-        """Put in tones at channel centre frequencies, with delays, and check the result."""
+        """Put in tones at channel centre frequencies, with delays and gains, and check the result."""
         # Delay the tone by a negative amount, then compensate with a positive delay.
         # (delay_samples and delay_s are correction terms).
         # The tones are placed in the second Nyquist zone (the "1 +" in
@@ -340,10 +342,17 @@ class TestEngine:
         coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
         await engine_client.request("delays", SYNC_EPOCH, *coeffs)
 
+        # Use constant-magnitude gains to avoid throwing off the magnitudes
+        rng = np.random.default_rng(123)
+        gain_phase = rng.uniform(0, 2 * np.pi, (CHANNELS, N_POLS))
+        gains = GAIN * np.exp(1j * gain_phase).astype(np.complex64)
+        for pol in range(N_POLS):
+            await engine_client.request("gain", pol, *(str(gain) for gain in gains[:, pol]))
+
         src_layout = engine_server._src_layout
         n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tones[0], 0) + self._make_tone(n_samples, tones[1], 1)
-        dig_data[:, 1::2] *= -1  # Down-covert to baseband
+        dig_data[:, 1::2] *= -1  # Down-convert to baseband
 
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_EPOCH.
@@ -371,13 +380,14 @@ class TestEngine:
         # Check for the tones
         for pol in range(2):
             tone_data = out_data[tone_channels[pol], :, pol]
-            expected_mag = tones[pol].magnitude * CHANNELS * engine_server.sensors["quant-gain"].value
+            expected_mag = tones[pol].magnitude * CHANNELS * GAIN
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
             # The frequency corresponds to an integer number of cycles per
             # spectrum, so the phase will be consistent across spectra.
             # The accuracy is limited by the quantisation.
-            np.testing.assert_equal(np.angle(tone_data), pytest.approx(tones[pol].phase, abs=0.01))
+            expected_phase = wrap_angle(tones[pol].phase + gain_phase[tone_channels[pol], pol])
+            np.testing.assert_equal(np.angle(tone_data), pytest.approx(expected_phase, abs=0.01))
             # Suppress the tone and check that everything is now zero (the
             # spectral leakage should be below the quantisation threshold).
             tone_data.fill(0)
@@ -410,7 +420,8 @@ class TestEngine:
 
         # Crank up the gain so that leakage is measurable
         gain = 100 / CHANNELS
-        await engine_client.request("quant-gain", gain)
+        for pol in range(N_POLS):
+            await engine_client.request("gain", pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
         # attenuation is ≤ 2x (twice) the pass band width.
         #

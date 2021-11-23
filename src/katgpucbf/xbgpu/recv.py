@@ -113,9 +113,9 @@ def make_stream(
         CPU Thread that this receiver will use for processing.
     """
     heap_bytes = n_channels_per_stream * n_spectra_per_heap * N_POLS * COMPLEX * sample_bits // 8
-    # max_heaps is set quite high because timing jitter/bursting means there could
-    # be multiple heaps from one F-engine during the time it takes another to
-    # transmit.
+    # max_heaps is set quite high because timing jitter/bursting means there
+    # could be multiple heaps from one F-engine during the time it takes
+    # another to transmit.
     stream_config = spead2.recv.StreamConfig(
         max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 4,
         memcpy=spead2.MEMCPY_NONTEMPORAL,
@@ -150,7 +150,8 @@ def make_stream(
             # Invalid F-engine ID
             batch_stats[stats_base + _Statistic.BAD_FENG_ID_HEAPS] += 1
             return
-        # Compute position of this heap on the time axis, starting from timestamp 0
+        # Compute position of this heap on the time axis, starting from
+        # timestamp 0
         heap_time_abs = timestamp // timestamp_step
         data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
         # Position of this heap on the time axis, from the start of the chunk

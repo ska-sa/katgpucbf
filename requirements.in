@@ -1,10 +1,9 @@
 aiohttp
 aiokatcp
 katsdpservices
-katsdpsigproc[CUDA]
+katsdpsigproc[CUDA]>=1.4
 katsdptelstate
 numpy
 prometheus-async
 pycuda
-scikit-cuda
 spead2

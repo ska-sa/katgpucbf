@@ -25,10 +25,14 @@ DEVICE_FN float2 apply_delay(float2 in, float re, float im)
     return make_float2(in.x * re - in.y * im, in.y * re + in.x * im);
 }
 
-DEVICE_FN char quant(float value, float quant_gain)
+DEVICE_FN float2 cmul(float2 a, float2 b)
+{
+    return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+DEVICE_FN char quant(float value)
 {
     int out;
-    value *= quant_gain;
 #ifdef __OPENCL_VERSION__
     out = convert_char_sat_rte(value);
 #else
@@ -66,17 +70,18 @@ DEVICE_FN char quant(float value, float quant_gain)
  * possible changes.
  */
 KERNEL void postproc(
-    GLOBAL char4 * RESTRICT out,              // Output memory.
+    GLOBAL char4 * RESTRICT out,              // Output memory
     const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
     const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
     const GLOBAL float2 * RESTRICT fine_delay, // Fine delay, in fraction of a sample (per pol)
-    const GLOBAL float2 * RESTRICT phase,     // Constant phase offset for fine delay (per pol) [radians].
-    int out_stride_z,                         // Output stride between heaps.
-    int out_stride,                           // Output stride between channels within a heap.
-    int in_stride,                            // Input stride between successive spectra.
-    int spectra_per_heap,                     // Number of spectra per output heap.
-    float delay_scale,                        // Scale factor for delay. 1/channels in magnitude.
-    float quant_gain)                         // Scale factor for quantiser.
+    const GLOBAL float2 * RESTRICT phase,     // Constant phase offset for fine delay (per pol) [radians]
+    // Pre-quantisation scale factor per channel (.xy for pol0, .zw for pol1)
+    const GLOBAL float4 * RESTRICT gains,
+    int out_stride_z,                         // Output stride between heaps
+    int out_stride,                           // Output stride between channels within a heap
+    int in_stride,                            // Input stride between successive spectra
+    int spectra_per_heap,                     // Number of spectra per output heap
+    float delay_scale)                        // Scale factor for delay. 1/channels in magnitude.
 {
     LOCAL_DECL scratch_t scratch;
     transpose_coords coords;
@@ -86,35 +91,40 @@ KERNEL void postproc(
     // Load a block of data
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
-        // Which spectrum within the accumuation.
+        // Which spectrum within the accumulation.
         int spectrum = z * spectra_per_heap + ${r};
         // Which channel within the spectrum.
         int addr = spectrum * in_stride + ${c};
         // Load the data. `float2` type handles both real and imag.
-        float2 v0 = in0[addr];
-        float2 v1 = in1[addr];
+        float2 v[2];
+        v[0] = in0[addr];
+        v[1] = in1[addr];
 
-        // Apply fine delay.
-        // TODO: load delays more efficiently (it's common across channels)
+        // Apply fine delay and gain
+        // TODO: fine_delay is common across channels and gain is common across
+        // spectra, so could possibly be loaded more efficiently.
         float2 delay = fine_delay[spectrum];
         float2 ph = phase[spectrum];
-        float re_x, im_x, re_y, im_y;
+        float4 g = gains[${c}];
+        float re[2], im[2];
         /* Fine delay is in fractions of a sample. Gets multiplied by
          * delay_scale x ${c} to scale appropriately for the channel, and then
          * constant phase is added.
          */
         // Note: delay_scale incorporates the minus sign
-        sincospif(delay.x * delay_scale * ${c} + ph.x, &im_x, &re_x);
-        sincospif(delay.y * delay_scale * ${c} + ph.y, &im_y, &re_y);
-        v0 = apply_delay(v0, re_x, im_x);
-        v1 = apply_delay(v1, re_y, im_y);
+        sincospif(delay.x * delay_scale * ${c} + ph.x, &im[0], &re[0]);
+        sincospif(delay.y * delay_scale * ${c} + ph.y, &im[1], &re[1]);
+        for (int pol = 0; pol < 2; pol++)
+            v[pol] = apply_delay(v[pol], re[pol], im[pol]);
+        v[0] = cmul(make_float2(g.x, g.y), v[0]);
+        v[1] = cmul(make_float2(g.z, g.w), v[1]);
 
         // Interleave polarisations. Quantise at the same time.
         char4 packed;
-        packed.x = quant(v0.x, quant_gain);
-        packed.y = quant(v0.y, quant_gain);
-        packed.z = quant(v1.x, quant_gain);
-        packed.w = quant(v1.y, quant_gain);
+        packed.x = quant(v[0].x);
+        packed.y = quant(v[0].y);
+        packed.z = quant(v[1].x);
+        packed.w = quant(v[1].y);
         scratch.arr[${lr}][${lc}] = packed;
     </%transpose:transpose_load>
 

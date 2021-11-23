@@ -16,8 +16,9 @@
 
 /*
  *  This kernel aims to carry out the reorder functionality required by katxbgpu.
- *  This GPU-side reorder makes provision for batched operations (i.e. reordering batches of matrices),
- *  and transforms a 1D block of data in the following matrix format:
+ *  This GPU-side reorder makes provision for batched operations (i.e.
+ *  reordering batches of matrices), and transforms a 1D block of data in the
+ *  following matrix format:
  *  - uint16_t [n_batches][n_antennas] [n_channels] [n_spectra_per_heap] [polarisations]
  *    transposed to
  *    uint16_t [n_batches][n_channels] [n_spectra_per_heap//times_per_block]
@@ -44,8 +45,9 @@
 
 /*  \brief Kernel that implements a naive reorder of F-Engine data.
  *
- *  The following CUDA kernel implements a naive (i.e. unrefined) reorder of data ingested by the GPU X-Engine from the F-Engine.
- *  As mentioned at the top of this document, data is received as an array in the format of:
+ *  The following CUDA kernel implements a naive (i.e. unrefined) reorder of
+ *  data ingested by the GPU X-Engine from the F-Engine.  As mentioned at the
+ *  top of this document, data is received as an array in the format of:
  *   - uint16_t [n_batches][n_antennas] [n_channels] [n_spectra_per_heap] [polarisations]
  *   And is required to be reordered into an array of format:
  *   - uint16_t [n_batches][n_channels] [n_spectra_per_heap // times_per_block] [n_antennas] [polarisations] [times_per_block]
@@ -54,10 +56,14 @@
  *   - Granted, there are some redudancies/inefficiences in variable usage; however,
  *   - The kernel itself is operating as required.
  *
- *   \param[in]  pu16Array           Pointer to a pre-populated input data array. The input array is one-dimensional but stores
- *                                   multidimensional data according to the format described above.
- *   \param[out] pu16ArrayReordered  Pointer to the memory allocated for the reordered output data. Once more, this 1D output array
- *                                   represents multidimensional data in the format described above.
+ *   \param[in]  pu16Array           Pointer to a pre-populated input data
+ *                                   array. The input array is one-dimensional
+ *                                   but stores multidimensional data according
+ *                                   to the format described above.
+ *   \param[out] pu16ArrayReordered  Pointer to the memory allocated for the
+ *                                   reordered output data. Once more, this 1D
+ *                                   output array represents multidimensional
+ *                                   data in the format described above.
  */
 
 __global__
@@ -76,7 +82,8 @@ void precorrelation_reorder(uint16_t *pu16Array, uint16_t *pu16ArrayReordered)
 
     // 2. Calculate indices for reorder
     // 2.1. Calculate 'current'/original indices for each dimension
-    //      - Matrix Stride should be the same value for Original and Reordered matrices
+    //      - Matrix Stride should be the same value for Original and Reordered
+    //        matrices
     iMatrixStride_y = iBatchCounter * NR_STATIONS * NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS;
     iAntIndex = iThreadIndex_x / (NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS);
     iRemIndex = iThreadIndex_x % (NR_CHANNELS * NR_SPECTRA_PER_HEAP * NR_POLARISATIONS);

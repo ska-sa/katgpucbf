@@ -76,7 +76,8 @@ class CorrelationTemplate:
     """
 
     def __init__(self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int) -> None:
-        # 1. Set accesible member functions that are used to calculate indices to the input and output buffers.
+        # 1. Set accesible member functions that are used to calculate indices
+        # to the input and output buffers.
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
@@ -86,7 +87,8 @@ class CorrelationTemplate:
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
 
-        # This 128 is hardcoded in the original Tensor-Core kernel. The reason it is set to this needs to be determined.
+        # This 128 is hardcoded in the original Tensor-Core kernel. The reason
+        # it is set to this needs to be determined.
         self.n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
@@ -118,8 +120,8 @@ class CorrelationTemplate:
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        # 4. Calculate the number of thread blocks to launch per kernel call - this remains constant for the lifetime
-        # of the object.
+        # 4. Calculate the number of thread blocks to launch per kernel call -
+        # this remains constant for the lifetime of the object.
         if self._n_ants_per_block == 32:
             raise NotImplementedError(
                 "32 antennas per thread-block is not supported yet - \

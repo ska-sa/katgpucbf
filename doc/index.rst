@@ -18,6 +18,7 @@ Welcome to katgpucbf's documentation!
    :caption: F engine
 
    fgpu.design
+   fgpu.packet_format
    fgpu.glossary
 
 .. toctree::
@@ -26,6 +27,7 @@ Welcome to katgpucbf's documentation!
 
    xbgpu.theory
    xbgpu.networking
+   xbgpu.packet_format
    xbgpu.tcc
 
 .. toctree::

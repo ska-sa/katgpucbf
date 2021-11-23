@@ -17,12 +17,15 @@
 """
 Module to launch the XB-Engine.
 
-This module parses all command line arguments required to configure the XB-Engine and creates an XBEngine
-object. The XBEngine object then manages everything required to run the XB-Engine.
+This module parses all command line arguments required to configure the
+XB-Engine and creates an XBEngine object. The XBEngine object then manages
+everything required to run the XB-Engine.
 
 .. todo::
-    - Checks need to be put in place to ensure the command line parameters are correct:
-        - Is the port number valid, is the IP address a multicast address, is the array size >0, etc.
+    - Checks need to be put in place to ensure the command line parameters are
+      correct:
+        - Is the port number valid, is the IP address a multicast address, is
+          the array size >0, etc.
 """
 
 import argparse
@@ -79,8 +82,8 @@ def parse_args() -> argparse.Namespace:
         "--send-rate-factor",
         type=float,
         default=1.1,
-        help="Target transmission rate faster than ADC sample rate by this factor.\
-            Set to zero to send as fast as possible. [%(default)s]",
+        help="Target transmission rate faster than ADC sample rate by this factor. "
+        "Set to zero to send as fast as possible. [%(default)s]",
     )
     parser.add_argument("--array-size", type=int, help="Number of antennas in the array.")
     parser.add_argument(
@@ -99,8 +102,10 @@ def parse_args() -> argparse.Namespace:
         "--channel-offset-value",
         type=int,
         default=0,
-        help="Index of the first channel in the subset of channels processed by this XB-Engine. Used to set the value "
-        "in the XB-Engine output heaps for spectrum reassembly by the downstream receiver. [%(default)s]",
+        help="Index of the first channel in the subset of channels processed "
+        "by this XB-Engine. Used to set the value in the XB-Engine "
+        "output heaps for spectrum reassembly by the downstream receiver. "
+        "[%(default)s]",
     )
     parser.add_argument(
         "--spectra-per-heap",
@@ -118,9 +123,11 @@ def parse_args() -> argparse.Namespace:
         "--chunk-spectra",
         type=int,
         default=5,
-        help="A batch is a collection of heaps from different F-Engines with the same timestamp. This parameter "
-        "specifies the number of consecutive spectra to store in the same chunk. The higher this value is, the "
-        "more GPU and system RAM is allocated, the lower this value is, the more work the python processing thread "
+        help="A batch is a collection of heaps from different F-Engines with "
+        "the same timestamp. This parameter specifies the number of "
+        "consecutive spectra to store in the same chunk. The higher this "
+        "value is, the more GPU and system RAM is allocated, the lower "
+        "this value is, the more work the python processing thread "
         "is required to do. [%(default)s]",
     )
     parser.add_argument(
@@ -205,8 +212,9 @@ async def async_main(args: argparse.Namespace) -> None:
     """
     Create and launch the XB-Engine.
 
-    This function creates the XBEngine object. It attaches the ibverbs sender and receiver transports to
-    the XBEngine object and then tells the object to launch all its internal asyncio functions.
+    This function creates the XBEngine object. It attaches the ibverbs sender
+    and receiver transports to the XBEngine object and then tells the object to
+    launch all its internal asyncio functions.
 
     Parameters
     ----------
@@ -240,7 +248,8 @@ async def async_main(args: argparse.Namespace) -> None:
         context=context,
     )
 
-    # Attach this transport to receive channelisation products from the network at high rates.
+    # Attach this transport to receive channelisation products from the network
+    # at high rates.
     xbengine.add_udp_ibv_receiver_transport(
         src_ip=args.src.host,
         src_port=args.src.port,
@@ -248,7 +257,8 @@ async def async_main(args: argparse.Namespace) -> None:
         comp_vector=args.src_comp_vector,
     )
 
-    # Attach this transport to send the baseline correlation products to the network.
+    # Attach this transport to send the baseline correlation products to the
+    # network.
     xbengine.add_udp_ibv_sender_transport(
         dest_ip=args.dst.host,
         dest_port=args.dst.port,
@@ -283,7 +293,8 @@ def main() -> None:
     """
     Launch the XB-Engine pipeline.
 
-    This method only sets up the asyncio loop and calls the async_main() method which is where the real work is done.
+    This method only sets up the asyncio loop and calls the async_main() method
+    which is where the real work is done.
     """
     args = parse_args()
     setup_logging()
