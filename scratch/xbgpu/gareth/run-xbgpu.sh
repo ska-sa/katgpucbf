@@ -39,6 +39,7 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --dst-affinity $tx_affinity \
     --dst-interface $iface \
     --src-interface $iface \
+    --src-ibv --dst-ibv \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --array-size ${array_size:-64} \
     --spectra-per-heap ${spectra_per_heap:-256} \
