@@ -60,34 +60,36 @@ output_bytes_counter = Counter(
 )
 
 
-def udp_stream_factory(
+def make_stream(
     *,
     dest_ip: str,
     dest_port: int,
     interface_ip: str,
     ttl: int,
     use_ibv: bool,
-    thread_affinity: int,
+    affinity: int,
+    comp_vector: int,
     stream_config: spead2.send.StreamConfig,
     buffers: Sequence[np.ndarray],
 ) -> "spead2.send.asyncio.AsyncStream":
     """Produce a UDP spead2 stream used for transmission."""
+    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     if use_ibv:
         return spead2.send.asyncio.UdpIbvStream(
-            spead2.ThreadPool(),
+            thread_pool,
             stream_config,
             spead2.send.UdpIbvConfig(
                 endpoints=[(dest_ip, dest_port)],
                 interface_address=interface_ip,
                 ttl=ttl,
-                comp_vector=thread_affinity,
+                comp_vector=comp_vector,
                 memory_regions=list(buffers),
             ),
         )
 
     else:
         return spead2.send.asyncio.UdpStream(
-            spead2.ThreadPool(),
+            thread_pool,
             [(dest_ip, dest_port)],
             stream_config,
             interface_address=interface_ip,

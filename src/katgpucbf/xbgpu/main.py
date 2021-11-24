@@ -147,8 +147,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--src-comp-vector",
         type=int,
-        required=True,
-        help="Completion vector for source streams, or -1 for polling.",
+        default=0,
+        help="Completion vector for source streams, or -1 for polling [0].",
     )
     parser.add_argument(
         "--src-interface",
@@ -166,6 +166,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dst-affinity", type=int, required=True, help="Core to which the sender thread will be bound."
+    )
+    parser.add_argument(
+        "--dst-comp-vector",
+        type=int,
+        default=1,
+        help="Completion vector for transmission, or -1 for polling [1].",
     )
     parser.add_argument(
         "--dst-interface",
@@ -254,8 +260,9 @@ async def async_main(args: argparse.Namespace) -> None:
         dest_port=args.dst.port,
         interface_ip=args.dst_interface,
         ttl=args.dst_ttl,
+        thread_affinity=args.dst_affinity,
+        comp_vector=args.dst_comp_vector,
         use_ibv=args.dst_ibv,
-        thread_affinity=args.dst_affinity if args.dst_ibv else None,
     )
 
     prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None

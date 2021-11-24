@@ -59,7 +59,7 @@ from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
-from .xsend import XSend, udp_stream_factory
+from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
 
@@ -473,13 +473,13 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        src_ip: str
+        src_ip
             multicast IP address of source data.
-        src_port: int
+        src_port
             Port of source data
-        interface_ip: str
+        interface_ip
             IP address of interface to listen for data on.
-        comp_vector: int
+        comp_vector
             Received packets will generate interrupts from the NIC. This value
             selects an interrupt vector, and the OS controls the mapping from
             interrupt vector to CPU core.
@@ -501,11 +501,11 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        src_ip: str
+        src_ip
             multicast IP address of source data.
-        src_port: int
+        src_port
             Port of source data
-        interface_ip: str
+        interface_ip
             IP address of interface to listen for data on.
         buffer_size
             The size of the network receive buffer.
@@ -534,7 +534,7 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        buffer: bytes
+        buffer
             Buffer containing simulated packet data.
         """
         if self.rx_transport_added is True:
@@ -542,7 +542,7 @@ class XBEngine(DeviceServer):
         self.receiver_stream.add_buffer_reader(buffer)
         self.rx_transport_added = True
 
-    def add_pcap_receiver_transport(self, pcap_file_name: str):
+    def add_pcap_receiver_transport(self, pcap_filename: str):
         """
         Add the pcap transport to the receiver.
 
@@ -551,16 +551,23 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        filename: string
+        pcap_filename
             Name of PCAP file to open.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
-        self.receiver_stream.add_udp_pcap_file_reader(pcap_file_name)
+        self.receiver_stream.add_udp_pcap_file_reader(pcap_filename)
 
     def add_udp_sender_transport(
-        self, dest_ip: str, dest_port: int, interface_ip: str, ttl: int, use_ibv: bool = True, thread_affinity: int = 0
+        self,
+        dest_ip: str,
+        dest_port: int,
+        interface_ip: str,
+        ttl: int,
+        thread_affinity: int,
+        comp_vector: int,
+        use_ibv: bool = True,
     ):
         """
         Add a UDP transport to the sender.
@@ -574,19 +581,22 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        dest_ip: str
+        dest_ip
             multicast IP address of destination data
-        dest_port: int
+        dest_port
             Port of transmitted data
-        interface_ip: str
+        interface_ip
             IP address of interface to trasnmit data on.
         ttl
-            Time to live for the output multicast packets.
+            Time to live for the output multicast packetsp.
+        thread_affinity
+            The sender creates its own thread to run in the background
+            transmitting data. It is bound to the CPU core specified here.
+        comp_vector
+            Completion vector for transmission, or -1 for polling.
+            See :class:`spead2.send.UdpIbvConfig` for further information.
         use_ibv
             Use spead2's ibverbs transport for data transmission.
-        thread_affinity: int
-            The receiver creates its own thread to run in the background
-            transmitting data. It is bound to the CPU core specified here.
         """
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
@@ -606,13 +616,14 @@ class XBEngine(DeviceServer):
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
-            stream_factory=lambda stream_config, buffers: udp_stream_factory(
+            stream_factory=lambda stream_config, buffers: make_stream(
                 dest_ip=dest_ip,
                 dest_port=dest_port,
                 interface_ip=interface_ip,
                 ttl=ttl,
                 use_ibv=use_ibv,
-                thread_affinity=thread_affinity,
+                affinity=thread_affinity,
+                comp_vector=comp_vector,
                 stream_config=stream_config,
                 buffers=buffers,
             ),
@@ -629,7 +640,7 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        queue: spead2.InprocQueue
+        queue
             SPEAD2 inproc queue to send heaps to.
         """
         if self.tx_transport_added is True:

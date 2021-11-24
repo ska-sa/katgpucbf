@@ -10,6 +10,7 @@ affinity="$(($1 * 6))"
 rx_affinity=$affinity
 rx_comp=$rx_affinity
 tx_affinity=$(($affinity + 1))
+tx_comp=$tx_affinity
 other_affinity=$tx_affinity
 src_mcast="239.10.10.$((10 + $1)):7148"
 dst_mcast="239.10.11.$((10 + $1)):7148"
@@ -37,8 +38,9 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --src-affinity $rx_affinity \
     --src-comp-vector $rx_comp \
     --dst-affinity $tx_affinity \
-    --dst-interface $iface \
+    --dst-comp-vector $tx_comp \
     --src-interface $iface \
+    --dst-interface $iface \
     --src-ibv --dst-ibv \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --array-size ${array_size:-64} \
