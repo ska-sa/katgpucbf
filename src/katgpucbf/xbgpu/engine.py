@@ -581,6 +581,7 @@ class XBEngine(DeviceServer):
         ttl: int,
         thread_affinity: int,
         comp_vector: int,
+        packet_payload: int,
         use_ibv: bool = True,
     ):
         """
@@ -611,6 +612,9 @@ class XBEngine(DeviceServer):
             See :class:`spead2.send.UdpIbvConfig` for further information.
         use_ibv
             Use spead2's ibverbs transport for data transmission.
+        packet_payload
+            Size in bytes for output packets (baseline correlation products
+            payload only, headers and padding are then added to this).
         """
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
@@ -630,6 +634,7 @@ class XBEngine(DeviceServer):
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
+            packet_payload=packet_payload,
             stream_factory=lambda stream_config, buffers: make_stream(
                 dest_ip=dest_ip,
                 dest_port=dest_port,

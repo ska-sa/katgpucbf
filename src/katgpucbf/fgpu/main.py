@@ -35,7 +35,7 @@ from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import N_POLS, __version__
+from .. import N_POLS, PACKET_PAYLOAD_BYTES, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
 
@@ -145,7 +145,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dst-packet-payload",
         type=int,
-        default=8192,
+        default=PACKET_PAYLOAD_BYTES,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
