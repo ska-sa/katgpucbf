@@ -47,39 +47,34 @@ from .. import COMPLEX, N_POLS
 
 class PrecorrelationReorderTemplate:
     """
-    Template class for compiling different variations of the pre-correlation reorder kernel.
+    Template class to compile the pre-correlation reorder kernel.
 
-    This object will be used to create a PreCorrelationReorder object that will
-    be able to run the created kernel.
+    This template creates a :class:`PrecorrelationReorder` that will
+    run the compiled kernel. The parameters are used to compile the
+    kernel and by the :class:`PrecorrelationReorder` to specify the
+    shape of the memory buffers connected to this kernel.
+
+    Parameters
+    ----------
+    context
+        The GPU device's context provided by katsdpsigproc's abstraction of
+        PyCUDA.  A context is associated with a single device and 'owns'
+        all memory allocations.  For the purposes of this python module,
+        and its Tensor Core usage, the CUDA context is required.
+    n_ants
+        The number of antennas that will be correlated. Each antennas is
+        expected to produce two polarisations.
+    n_channels
+        The number of frequency channels to be processed.
+    n_spectra_per_heap
+        The number of time samples to be processed per frequency channel.
+    n_batches
+        The number of matrices to be reordered, a single data matrix = one batch.
     """
 
     def __init__(
         self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int, n_batches: int
     ) -> None:
-        """
-        Initialise the PreCorrelationReorderTemplate class and compile the pre-correlation reorder kernel.
-
-        The parameters given to this function are used by this class to compile
-        the kernel and by the PreCorrelationReorder to specify the shape of the
-        memory buffers connected to this kernel.
-
-        Parameters
-        ----------
-        context
-            The GPU device's context provided by katsdpsigproc's abstraction of
-            PyCUDA.  A context is associated with a single device and 'owns'
-            all memory allocations.  For the purposes of this python module,
-            and its Tensor Core usage, the CUDA context is required.
-        n_ants
-            The number of antennas that will be correlated. Each antennas is
-            expected to produce two polarisations.
-        n_channels
-            The number of frequency channels to be processed.
-        n_spectra_per_heap
-            The number of time samples to be processed per frequency channel.
-        n_batches
-            The number of matrices to be reordered, a single data matrix = one batch.
-        """
         # 1. Set member variables that are used to calculate indices for the
         # input and output buffers
         self.n_ants = n_ants
