@@ -106,7 +106,7 @@ def make_stream(
             endpoints=list(endpoints),
             interface_address=interface_address,
             ttl=ttl,
-            memory_regions=[heap_set["payload"] for heap_set in heap_sets],
+            memory_regions=[heap_set["payload"].data for heap_set in heap_sets],
         )
         return spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config)
     else:
