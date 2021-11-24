@@ -588,7 +588,7 @@ class XBEngine(DeviceServer):
         interface_ip
             IP address of interface to trasnmit data on.
         ttl
-            Time to live for the output multicast packetsp.
+            Time to live for the output multicast packets.
         thread_affinity
             The sender creates its own thread to run in the background
             transmitting data. It is bound to the CPU core specified here.

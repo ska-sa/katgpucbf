@@ -142,13 +142,13 @@ def parse_args() -> argparse.Namespace:
         help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
     )
     parser.add_argument(
-        "--src-affinity", type=int, required=True, help="Core to which the receiver thread will be bound."
+        "--src-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
     )
     parser.add_argument(
         "--src-comp-vector",
         type=int,
         default=0,
-        help="Completion vector for source streams, or -1 for polling [0].",
+        help="Completion vector for source streams, or -1 for polling [%(default)s].",
     )
     parser.add_argument(
         "--src-interface",
@@ -165,13 +165,13 @@ def parse_args() -> argparse.Namespace:
         help="Size of network receive buffer [32MiB]",
     )
     parser.add_argument(
-        "--dst-affinity", type=int, required=True, help="Core to which the sender thread will be bound."
+        "--dst-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
     )
     parser.add_argument(
         "--dst-comp-vector",
         type=int,
         default=1,
-        help="Completion vector for transmission, or -1 for polling [1].",
+        help="Completion vector for transmission, or -1 for polling [%(default)s].",
     )
     parser.add_argument(
         "--dst-interface",
