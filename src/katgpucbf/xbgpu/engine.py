@@ -23,10 +23,6 @@ loops within the object.
 
 .. todo::
 
-    - Close _receiver_loop properly - The receiver loop can potentially hang
-      when trying to close. See the function docstring for more information. At
-      the moment, there is no clean way to close the pipeline. The stop()
-      function attempts this but needs some work.
     - The B-Engine logic has not been implemented yet - this needs to be added
       eventually. It is expected that this logic will need to go in the
       _gpu_proc_loop for the B-Engine processing and then a seperate sender
@@ -63,7 +59,7 @@ from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
-from .xsend import XSend
+from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
 
@@ -478,7 +474,9 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
 
-    def add_udp_ibv_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int):
+    def add_udp_ibv_receiver_transport(
+        self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int, buffer_size: int
+    ):
         """
         Add the ibv_udp transport to the receiver.
 
@@ -489,23 +487,54 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        src_ip: str
+        src_ip
             multicast IP address of source data.
-        src_port: int
+        src_port
             Port of source data
-        interface_ip: str
+        interface_ip
             IP address of interface to listen for data on.
-        comp_vector: int
+        comp_vector
             Received packets will generate interrupts from the NIC. This value
             selects an interrupt vector, and the OS controls the mapping from
             interrupt vector to CPU core.
+        buffer_size
+            The size of the network receive buffer.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
-        self.rx_transport_added = True
         self.receiver_stream.add_udp_ibv_reader(
-            [(src_ip, src_port)], interface_ip, buffer_size=10000000, comp_vector=comp_vector
+            [(src_ip, src_port)], interface_ip, buffer_size=buffer_size, comp_vector=comp_vector
         )
+        self.rx_transport_added = True
+
+    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int):
+        """
+        Add the 'regular' UDP transport to the receiver.
+
+        Allow the user to run the XBEngine without the use of IBVerbs.
+
+        Parameters
+        ----------
+        src_ip
+            multicast IP address of source data.
+        src_port
+            Port of source data
+        interface_ip
+            IP address of interface to listen for data on.
+        buffer_size
+            The size of the network receive buffer.
+        """
+        if self.rx_transport_added is True:
+            raise AttributeError("Transport for receiving data has already been set.")
+
+        self.receiver_stream.add_udp_reader(
+            src_ip,
+            src_port,
+            buffer_size=buffer_size,
+            interface_address=interface_ip or "",
+        )
+
+        self.rx_transport_added = True
 
     def add_buffer_receiver_transport(self, buffer: bytes):
         """
@@ -519,15 +548,15 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        buffer: bytes
+        buffer
             Buffer containing simulated packet data.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
-        self.rx_transport_added = True
         self.receiver_stream.add_buffer_reader(buffer)
+        self.rx_transport_added = True
 
-    def add_pcap_receiver_transport(self, pcap_file_name: str):
+    def add_pcap_receiver_transport(self, pcap_filename: str):
         """
         Add the pcap transport to the receiver.
 
@@ -536,38 +565,55 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        filename: string
+        pcap_filename
             Name of PCAP file to open.
         """
         if self.rx_transport_added is True:
             raise AttributeError("Transport for receiving data has already been set.")
         self.rx_transport_added = True
-        self.receiver_stream.add_udp_pcap_file_reader(pcap_file_name)
+        self.receiver_stream.add_udp_pcap_file_reader(pcap_filename)
 
-    def add_udp_ibv_sender_transport(self, dest_ip: str, dest_port: int, interface_ip: str, thread_affinity: int):
+    def add_udp_sender_transport(
+        self,
+        dest_ip: str,
+        dest_port: int,
+        interface_ip: str,
+        ttl: int,
+        thread_affinity: int,
+        comp_vector: int,
+        use_ibv: bool = True,
+    ):
         """
-        Add the ibv_udp transport to the sender.
+        Add a UDP transport to the sender.
 
-        The sender will transmit udp packets out of the specified interface
-        using the ibverbs library to offload processing from the CPU.
+        If indicated (use_ibv), the sender will transmit UDP packets out of the
+        specified interface using the ibverbs library to offload processing
+        from the CPU.
 
-        This transport is intended to be the transport used in production.
+        The UdpIbvStream is intended for use in production, and the UdpStream
+        for local testing on a suitable machine.
 
         Parameters
         ----------
-        dest_ip: str
+        dest_ip
             multicast IP address of destination data
-        dest_port: int
+        dest_port
             Port of transmitted data
-        interface_ip: str
+        interface_ip
             IP address of interface to trasnmit data on.
-        thread_affinity: int
-            The receiver creates its own thread to run in the background
+        ttl
+            Time to live for the output multicast packets.
+        thread_affinity
+            The sender creates its own thread to run in the background
             transmitting data. It is bound to the CPU core specified here.
+        comp_vector
+            Completion vector for transmission, or -1 for polling.
+            See :class:`spead2.send.UdpIbvConfig` for further information.
+        use_ibv
+            Use spead2's ibverbs transport for data transmission.
         """
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
-        self.tx_transport_added = True
 
         # This value staggers the send so that packets within a heap are
         # transmitted onto the network across the entire time between dumps.
@@ -584,18 +630,20 @@ class XBEngine(DeviceServer):
             send_rate_factor=self.send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
-            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.UdpIbvStream(
-                spead2.ThreadPool(),
-                stream_config,
-                spead2.send.UdpIbvConfig(
-                    endpoints=[(dest_ip, dest_port)],
-                    interface_address=interface_ip,
-                    ttl=4,
-                    comp_vector=thread_affinity,
-                    memory_regions=list(buffers),
-                ),
+            stream_factory=lambda stream_config, buffers: make_stream(
+                dest_ip=dest_ip,
+                dest_port=dest_port,
+                interface_ip=interface_ip,
+                ttl=ttl,
+                use_ibv=use_ibv,
+                affinity=thread_affinity,
+                comp_vector=comp_vector,
+                stream_config=stream_config,
+                buffers=buffers,
             ),
         )
+
+        self.tx_transport_added = True
 
     def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
         """
@@ -606,7 +654,7 @@ class XBEngine(DeviceServer):
 
         Parameters
         ----------
-        queue: spead2.InprocQueue
+        queue
             SPEAD2 inproc queue to send heaps to.
         """
         if self.tx_transport_added is True:

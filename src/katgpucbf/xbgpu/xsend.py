@@ -22,22 +22,20 @@ This module has been designed to work with asyncio.
 The data sent onto the network conforms to the SPEAD protocol. This module
 takes the baseline data, turns it into a SPEAD heap and then transmits that
 heap out onto the network using the spead2 Python module. The high-performance
-ibverbs implementation of spead2 will be used even though the data rates out
-are very low due to the ibverbs implementation using far fewer system
+ibverbs implementation of spead2 is recommended even though the data rates out
+are very low. This is due to the ibverbs implementation using far fewer system
 resources. The format of the packets transmitted by SPEAD2 can be found here:
 - :ref:`baseline-correlation-products-data-packet-format`.
 
 The XSend class creates its own buffers and data in those buffers will be
 encapsulated into SPEAD heaps and sent onto the network. The user can request
 the buffers from the object, populate them and then give them back to the object
-for transmission. The user must not give other buffers to the class as while
-this will work, it will be much slower. The memory regions of the
-XSend-generated buffers have been registered with ibverbs to enable zero copy
-transmission - using other buffers will force an extra copy.  Zero copy
-transmission means that the data to be transmitted can sent from its current
-memory location directly to the NIC without having to be copied to an
-intermediary memory location in the process, thereby halving the memory
-bandwidth required to send.
+for transmission. In using ibverbs, the memory regions of the XSend-generated
+buffers have been registered with ibverbs to enable zero copy transmission -
+using other buffers will force an extra copy.  Zero copy transmission means
+that the data to be transmitted can sent from its current memory location
+directly to the NIC without having to be copied to an intermediary memory
+location in the process, thereby halving the memory bandwidth required to send.
 """
 
 import asyncio
@@ -60,6 +58,43 @@ output_heaps_counter = Counter("output_heaps_x", "number of X-engine heaps trans
 output_bytes_counter = Counter(
     "output_bytes_x", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
+
+
+def make_stream(
+    *,
+    dest_ip: str,
+    dest_port: int,
+    interface_ip: str,
+    ttl: int,
+    use_ibv: bool,
+    affinity: int,
+    comp_vector: int,
+    stream_config: spead2.send.StreamConfig,
+    buffers: Sequence[np.ndarray],
+) -> "spead2.send.asyncio.AsyncStream":
+    """Produce a UDP spead2 stream used for transmission."""
+    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
+    if use_ibv:
+        return spead2.send.asyncio.UdpIbvStream(
+            thread_pool,
+            stream_config,
+            spead2.send.UdpIbvConfig(
+                endpoints=[(dest_ip, dest_port)],
+                interface_address=interface_ip,
+                ttl=ttl,
+                comp_vector=comp_vector,
+                memory_regions=list(buffers),
+            ),
+        )
+
+    else:
+        return spead2.send.asyncio.UdpStream(
+            thread_pool,
+            [(dest_ip, dest_port)],
+            stream_config,
+            interface_address=interface_ip,
+            ttl=ttl,
+        )
 
 
 class BufferWrapper:

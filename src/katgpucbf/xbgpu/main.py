@@ -144,13 +144,13 @@ def parse_args() -> argparse.Namespace:
         help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
     )
     parser.add_argument(
-        "--src-affinity", type=int, required=True, help="Core to which the receiver thread will be bound."
+        "--src-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
     )
     parser.add_argument(
         "--src-comp-vector",
         type=int,
-        required=True,
-        help="Completion vector for source streams, or -1 for polling.",
+        default=0,
+        help="Completion vector for source streams, or -1 for polling [%(default)s].",
     )
     parser.add_argument(
         "--src-interface",
@@ -158,8 +158,22 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Name of the interface receiving data from the F-Engines, e.g. eth0.",
     )
+    parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no].")
     parser.add_argument(
-        "--dst-affinity", type=int, required=True, help="Core to which the sender thread will be bound."
+        "--src-buffer",
+        type=int,
+        default=32 * 1024 * 1024,
+        metavar="BYTES",
+        help="Size of network receive buffer [32MiB]",
+    )
+    parser.add_argument(
+        "--dst-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
+    )
+    parser.add_argument(
+        "--dst-comp-vector",
+        type=int,
+        default=1,
+        help="Completion vector for transmission, or -1 for polling [%(default)s].",
     )
     parser.add_argument(
         "--dst-interface",
@@ -167,6 +181,8 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Name of the interface that this engine will transmit data on, e.g. eth1.",
     )
+    parser.add_argument("--dst-ttl", type=int, default=4, help="TTL for outgoing packets [%(default)s]")
+    parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=endpoint_parser(7148), help="Multicast address data is received from.")
@@ -248,22 +264,35 @@ async def async_main(args: argparse.Namespace) -> None:
         context=context,
     )
 
-    # Attach this transport to receive channelisation products from the network
-    # at high rates.
-    xbengine.add_udp_ibv_receiver_transport(
-        src_ip=args.src.host,
-        src_port=args.src.port,
-        interface_ip=args.src_interface,
-        comp_vector=args.src_comp_vector,
-    )
+    if args.src_ibv:
+        # Attach this transport to receive channelisation products from the network
+        # at high rates.
+        xbengine.add_udp_ibv_receiver_transport(
+            src_ip=args.src.host,
+            src_port=args.src.port,
+            interface_ip=args.src_interface,
+            comp_vector=args.src_comp_vector,
+            buffer_size=args.src_buffer,
+        )
+    else:
+        # Attach a plain-old UDP Receiver
+        xbengine.add_udp_receiver_transport(
+            src_ip=args.src.host,
+            src_port=args.src.port,
+            interface_ip=args.src_interface,
+            buffer_size=args.src_buffer,
+        )
 
     # Attach this transport to send the baseline correlation products to the
     # network.
-    xbengine.add_udp_ibv_sender_transport(
+    xbengine.add_udp_sender_transport(
         dest_ip=args.dst.host,
         dest_port=args.dst.port,
         interface_ip=args.dst_interface,
+        ttl=args.dst_ttl,
         thread_affinity=args.dst_affinity,
+        comp_vector=args.dst_comp_vector,
+        use_ibv=args.dst_ibv,
     )
 
     prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
