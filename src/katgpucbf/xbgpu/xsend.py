@@ -50,7 +50,7 @@ import spead2
 import spead2.send.asyncio
 from prometheus_client import Counter
 
-from .. import COMPLEX, PACKET_PAYLOAD_BYTES
+from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
 from ..spead import FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
 
@@ -211,7 +211,7 @@ class XSend:
         context: katsdpsigproc.abc.AbstractContext,
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
-        packet_payload: int = PACKET_PAYLOAD_BYTES,
+        packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
     ) -> None:
         # 1. Check that given arguments are sane.
         if dump_interval_s < 0:
