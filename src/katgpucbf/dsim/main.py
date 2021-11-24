@@ -23,14 +23,12 @@ import argparse
 import asyncio
 import logging
 import time
-from collections import deque
-from typing import Deque, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import katsdpservices
 import numpy as np
 import prometheus_async
 import spead2.send
-import toolz
 from katsdptelstate.endpoint import endpoint_list_parser
 from prometheus_client import Counter
 
@@ -51,7 +49,6 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
-    parser.add_argument("--max-heaps", type=int, default=256, help="Depth of send queue [%(default)s]")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
@@ -73,10 +70,8 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
 
     args = parser.parse_args()
-    if args.max_heaps <= 0:
-        parser.error("--max-heaps must be positive")
-    if args.signal_heaps <= 0:
-        parser.error("--signal-heaps must be positive")
+    if args.signal_heaps < 2:
+        parser.error("--signal-heaps must be at least 2")
     for dest in args.dest:
         for ep in dest:
             if ep.port is None:
@@ -115,51 +110,56 @@ async def async_main() -> None:
     sig_data = signal.quantise(sig_data, args.sample_bits)
     sig_data = signal.packbits(sig_data, args.sample_bits)
 
-    substream_offset = 0
-    heap_sets: List[send.HeapSet] = []
+    data = send.make_heap_set(
+        args.signal_heaps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest))
+    )
+    data.timestamps[:] = np.arange(0, args.signal_heaps, dtype=">u8") * args.heap_samples + timestamp
     endpoints: List[Tuple[str, int]] = []
     for i, pol_dest in enumerate(args.dest):
-        heap_set = send.HeapSet(args.signal_heaps, len(pol_dest), substream_offset, heap_size, i)
-        heap_set.payload[:] = sig_data
-        heap_sets.append(heap_set)
-        substream_offset += len(pol_dest)
+        data.payload.isel(pol=i).data.ravel()[:] = sig_data
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
 
+    # Split the data into two. One half is transmitted while the other
+    # half is updated.
+    middle = data.dims["time"] // 2
+    heap_sets = [data.isel(time=np.s_[:middle]), data.isel(time=np.s_[middle:])]
+    for heap_set in heap_sets:
+        heap_set.attrs["future"] = None
+        # TODO: enable after spead2 release
+        # heap_set.attrs["heap_reference_list"] = spead2.send.HeapReferenceList(heap_set["heaps"].data.ravel().tolist())
+        heap_set.attrs["heap_reference_list"] = heap_set["heaps"].data.ravel().tolist()
+
     stream = send.make_stream(
         endpoints=endpoints,
-        heap_sets=heap_sets,
+        heap_sets=[data],
         n_pols=len(args.dest),
         adc_sample_rate=args.adc_sample_rate,
         heap_samples=args.heap_samples,
         sample_bits=args.sample_bits,
-        max_heaps=args.max_heaps,
+        max_heaps=data["heaps"].size,
         ttl=args.ttl,
         interface_address=katsdpservices.get_interface_address(args.interface),
         ibv=args.ibv,
     )
-    # Interleave the heaps from the different polarisations
-    heaps = toolz.interleave(heap_set.heaps for heap_set in heap_sets)
-    # Group them into chunks for bulk transmission
-    # partition_all produces tuples, but spead2 wants lists
-    chunks = [list(chunk) for chunk in toolz.partition_all(args.max_heaps // 2, heaps)]
-    futures: Deque[asyncio.Future] = deque()
+
     logger.info("Starting transmission")
-    # TODO: might be more efficient to share timestamps between the heap sets
-    for heap_set in heap_sets:
-        heap_set.timestamps[:] = np.arange(0, args.signal_heaps, dtype=">u8") * args.heap_samples + timestamp
     while True:
-        for chunk in chunks:
-            # Each heap is a single packet, so despite ROUND_ROBIN they will be
-            # sent sequentially.
-            futures.append(stream.async_send_heaps(chunk, spead2.send.GroupMode.ROUND_ROBIN))
-            # Not actually sent yet, but close enough for monitoring the transmission speed
-            output_heaps_counter.inc(len(chunk))
-            output_bytes_counter.inc(len(chunk) * heap_size)
-            while len(futures) > 1:
-                await futures.popleft()
         for heap_set in heap_sets:
-            heap_set.timestamps += heap_set_samples
+            if heap_set.attrs["future"] is not None:
+                await heap_set.attrs["future"]
+                heap_set["timestamps"] += heap_set_samples
+            # TODO: change to GroupMode.SERIAL after spead2 release
+            # (ROUND_ROBIN is safe because the heaps are all one packet, but
+            # has higher overhead).
+            heap_set.attrs["future"] = stream.async_send_heaps(
+                heap_set.attrs["heap_reference_list"], spead2.send.GroupMode.ROUND_ROBIN
+            )
+            # Not actually sent yet, but close enough for monitoring the transmission speed
+            output_heaps_counter.inc(heap_set.dims["time"])
+            output_bytes_counter.inc(heap_set["payload"].nbytes)
+
+    await stream.async_flush()
 
 
 def main() -> None:
