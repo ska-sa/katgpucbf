@@ -50,7 +50,7 @@ import spead2
 import spead2.send.asyncio
 from prometheus_client import Counter
 
-from .. import COMPLEX
+from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
 from ..spead import FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
 
@@ -191,12 +191,13 @@ class XSend:
         need for this to be configurable, the data rates are likely too low for
         it to be an issue. I have put it here more to be explicit than anything
         else. This argument is optional.
+    packet_payload
+        Size in bytes for output packets (baseline correlation products
+        payload only, headers and padding are then added to this).
     """
 
     # Class static constants
-    max_payload_size: Final[int] = 2048
     header_size: Final[int] = 64
-    max_packet_size: Final[int] = max_payload_size + header_size
 
     # Initialise class including all variables
     def __init__(
@@ -210,6 +211,7 @@ class XSend:
         context: katsdpsigproc.abc.AbstractContext,
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
+        packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
     ) -> None:
         # 1. Check that given arguments are sane.
         if dump_interval_s < 0:
@@ -268,7 +270,7 @@ class XSend:
             self.buffers.append(buffer)
 
         # 5. Generate all required stream information that is not specific to transports defined in the child classes
-        packets_per_heap = math.ceil(self.heap_payload_size_bytes / XSend.max_payload_size)
+        packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
         packet_header_overhead_bytes = packets_per_heap * XSend.header_size
 
         # 5.1 If the dump_interval is set to zero, pass zero to stream_config to send as fast as possible.
@@ -282,7 +284,7 @@ class XSend:
             send_rate_bytes_per_second = 0
 
         stream_config = spead2.send.StreamConfig(
-            max_packet_size=self.max_packet_size,
+            max_packet_size=packet_payload + XSend.header_size,
             max_heaps=self._n_send_heaps_in_flight,
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,

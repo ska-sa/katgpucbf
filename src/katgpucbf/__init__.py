@@ -31,3 +31,4 @@ __all__ = ["__version__"]
 COMPLEX: Final = 2
 N_POLS: Final = 2
 SPEAD_DESCRIPTOR_INTERVAL_S: Final = 5
+DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
