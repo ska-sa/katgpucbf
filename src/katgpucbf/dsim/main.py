@@ -53,6 +53,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
     parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
+    parser.add_argument("--affinity", type=int, default=-1, help="Core affinity for the sending thread [not bound]")
     parser.add_argument(
         "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
     )
@@ -141,6 +142,7 @@ async def async_main() -> None:
         ttl=args.ttl,
         interface_address=katsdpservices.get_interface_address(args.interface),
         ibv=args.ibv,
+        affinity=args.affinity,
     )
 
     logger.info("Starting transmission")

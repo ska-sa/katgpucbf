@@ -87,6 +87,7 @@ def make_stream(
     ttl: int,
     interface_address: str,
     ibv: bool,
+    affinity: int,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
 
@@ -100,7 +101,7 @@ def make_stream(
         max_packet_size=heap_size + preamble,
         max_heaps=max_heaps,
     )
-    thread_pool = spead2.ThreadPool()
+    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     if ibv:
         ibv_config = spead2.send.UdpIbvConfig(
             endpoints=list(endpoints),
