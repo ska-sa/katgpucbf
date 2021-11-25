@@ -47,11 +47,11 @@ def make_heap_set(n: int, n_substreams: Sequence[int], heap_size: int, digitiser
     heaps = []
     substream_offset = list(itertools.accumulate(n_substreams, initial=0))
     for i in range(n):
+        # The ... in indexing causes numpy to give a 0d array view, rather than
+        # a scalar.
         heap_timestamp = timestamps[i, ...]
         cur_heaps = []
         for j in range(n_pols):
-            # The ... in indexing causes numpy to give a 0d array view, rather than
-            # a scalar.
             heap_payload = payload[j, i]
             heap = spead2.send.Heap(spead.FLAVOUR)
             heap.add_item(spead.make_immediate(spead.TIMESTAMP_ID, heap_timestamp))
