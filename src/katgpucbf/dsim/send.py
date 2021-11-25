@@ -91,7 +91,28 @@ def make_stream(
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
 
-    TODO: document parameters
+    Parameters
+    ----------
+    endpoints
+        Destinations (host and port) for all substreams
+    n_pols
+        Number of single-pol streams to send
+    adc_sample_rate
+        Sample rate for each single-pol stream, in Hz
+    heap_samples
+        Number of samples to send in each heap (each heap will be sent as a single packet)
+    sample_bits
+        Number of bits per sample
+    max_heaps
+        Maximum number of heaps that may be in flight at once
+    ttl
+        IP TTL field
+    interface_address
+        IP address of the interface from which to send the data
+    ibv
+        If true, use ibverbs for acceleration
+    affinity
+        If non-negative, bind the sending thread to this CPU core
     """
     preamble = 72  # SPEAD header, 4 standard item pointers, 4 application-specific item pointers
     heap_size = heap_samples * sample_bits // BYTE_BITS
