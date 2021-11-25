@@ -127,9 +127,7 @@ async def async_main() -> None:
     heap_sets = [data.isel(time=np.s_[:middle]), data.isel(time=np.s_[middle:])]
     for heap_set in heap_sets:
         heap_set.attrs["future"] = None
-        # TODO: enable after spead2 release
-        # heap_set.attrs["heap_reference_list"] = spead2.send.HeapReferenceList(heap_set["heaps"].data.ravel().tolist())
-        heap_set.attrs["heap_reference_list"] = heap_set["heaps"].data.ravel().tolist()
+        heap_set.attrs["heap_reference_list"] = spead2.send.HeapReferenceList(heap_set["heaps"].data.ravel().tolist())
 
     stream = send.make_stream(
         endpoints=endpoints,
@@ -151,11 +149,8 @@ async def async_main() -> None:
             if heap_set.attrs["future"] is not None:
                 await heap_set.attrs["future"]
                 heap_set["timestamps"] += heap_set_samples
-            # TODO: change to GroupMode.SERIAL after spead2 release
-            # (ROUND_ROBIN is safe because the heaps are all one packet, but
-            # has higher overhead).
             heap_set.attrs["future"] = stream.async_send_heaps(
-                heap_set.attrs["heap_reference_list"], spead2.send.GroupMode.ROUND_ROBIN
+                heap_set.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
             )
             # Not actually sent yet, but close enough for monitoring the transmission speed
             output_heaps_counter.inc(heap_set.dims["time"])

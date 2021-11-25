@@ -100,7 +100,7 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==3.6.0
+spead2==3.7.0
     # via -r requirements.in
 typing-extensions==3.10.0.0
     # via
