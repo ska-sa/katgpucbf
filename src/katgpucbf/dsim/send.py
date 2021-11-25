@@ -46,17 +46,20 @@ def make_heap_set(n: int, n_substreams: Sequence[int], heap_size: int, digitiser
     timestamps = np.zeros(n, ">u8")
     heaps = []
     substream_offset = list(itertools.accumulate(n_substreams, initial=0))
+    digitiser_id_items = [spead.make_immediate(spead.DIGITISER_ID_ID, dig_id) for dig_id in digitiser_id]
+    digitiser_status_item = spead.make_immediate(spead.DIGITISER_STATUS_ID, 0)
     for i in range(n):
         # The ... in indexing causes numpy to give a 0d array view, rather than
         # a scalar.
         heap_timestamp = timestamps[i, ...]
         cur_heaps = []
+        timestamp_item = spead.make_immediate(spead.TIMESTAMP_ID, heap_timestamp)
         for j in range(n_pols):
             heap_payload = payload[j, i]
             heap = spead2.send.Heap(spead.FLAVOUR)
-            heap.add_item(spead.make_immediate(spead.TIMESTAMP_ID, heap_timestamp))
-            heap.add_item(spead.make_immediate(spead.DIGITISER_ID_ID, digitiser_id[j]))
-            heap.add_item(spead.make_immediate(spead.DIGITISER_STATUS_ID, 0))
+            heap.add_item(timestamp_item)
+            heap.add_item(digitiser_id_items[j])
+            heap.add_item(digitiser_status_item)
             heap.add_item(
                 spead2.Item(
                     spead.RAW_DATA_ID, "", "", shape=heap_payload.shape, dtype=heap_payload.dtype, value=heap_payload
