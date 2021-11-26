@@ -91,18 +91,18 @@ def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:
         range are clamped).
     bits
         Total number of bits per output sample (including the sign bit). The
-        input values are scaled by :math:`2^{bits-1}`.
+        input values are scaled by :math:`2^{bits-1} - 1`.
     dither
         If true, add uniform random values in the range [-0.5, 0.5) after
         scaling to reduce artefacts.
     """
-    scale = 2 ** (bits - 1)
+    scale = 2 ** (bits - 1) - 1
     scaled = np.asarray(data) * scale
     if dither:
         # TODO: should it be seeded in some way?
         rng = np.random.default_rng()
         scaled += rng.uniform(low=-0.5, high=0.5, size=scaled.size)
-    return np.rint(np.clip(scaled, -scale, scale - 1)).astype(np.int32)
+    return np.rint(np.clip(scaled, -scale, scale)).astype(np.int32)
 
 
 @numba.njit
