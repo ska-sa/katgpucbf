@@ -23,21 +23,18 @@ import argparse
 import asyncio
 import logging
 import time
+from signal import SIGINT, SIGTERM
 from typing import List, Optional, Sequence, Tuple
 
 import katsdpservices
 import numpy as np
 import prometheus_async
-import spead2.send
 from katsdptelstate.endpoint import endpoint_list_parser
-from prometheus_client import Counter
 
 from .. import BYTE_BITS, DEFAULT_TTL
-from . import METRIC_NAMESPACE, send, signal
+from . import send, signal
 
 logger = logging.getLogger(__name__)
-output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
-output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 
 
 def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -94,10 +91,26 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, heap_s
     return first_heap * heap_samples
 
 
+def add_signal_handlers(sender: send.Sender) -> None:
+    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
+    signums = [SIGINT, SIGTERM]
+
+    def handler():
+        # Remove the handlers so that if it fails to shut down, the next
+        # attempt will try harder.
+        logger.info("Received signal, shutting down")
+        for signum in signums:
+            loop.remove_signal_handler(signum)
+        sender.halt()
+
+    loop = asyncio.get_event_loop()
+    for signum in signums:
+        loop.add_signal_handler(signum, handler)
+
+
 async def async_main() -> None:
     """Asynchronous main entry point."""
     args = parse_args()
-    heap_set_samples = args.signal_heaps * args.heap_samples
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
 
     if args.prometheus_port is not None:
@@ -111,52 +124,34 @@ async def async_main() -> None:
     sig_data = signal.quantise(sig_data, args.sample_bits)
     sig_data = signal.packbits(sig_data, args.sample_bits)
 
-    data = send.make_heap_set(
-        args.signal_heaps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest))
+    timestamps = np.zeros(args.signal_heaps, dtype=">u8")
+    heap_set = send.HeapSet.create(
+        timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest))
     )
-    data.timestamps[:] = np.arange(0, args.signal_heaps, dtype=">u8") * args.heap_samples + timestamp
+
     endpoints: List[Tuple[str, int]] = []
     for i, pol_dest in enumerate(args.dest):
-        data.payload.isel(pol=i).data.ravel()[:] = sig_data
+        heap_set.data.payload.isel(pol=i).data.ravel()[:] = sig_data
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
-
-    # Split the data into two. One half is transmitted while the other
-    # half is updated.
-    middle = data.dims["time"] // 2
-    heap_sets = [data.isel(time=np.s_[:middle]), data.isel(time=np.s_[middle:])]
-    for heap_set in heap_sets:
-        heap_set.attrs["future"] = None
-        heap_set.attrs["heap_reference_list"] = spead2.send.HeapReferenceList(heap_set["heaps"].data.ravel().tolist())
-
     stream = send.make_stream(
         endpoints=endpoints,
-        heap_sets=[data],
+        heap_sets=[heap_set],
         n_pols=len(args.dest),
         adc_sample_rate=args.adc_sample_rate,
         heap_samples=args.heap_samples,
         sample_bits=args.sample_bits,
-        max_heaps=data["heaps"].size,
+        max_heaps=heap_set.data["heaps"].size,
         ttl=args.ttl,
         interface_address=katsdpservices.get_interface_address(args.interface),
         ibv=args.ibv,
         affinity=args.affinity,
     )
+    sender = send.Sender(stream, heap_set, timestamp, args.heap_samples)
+    add_signal_handlers(sender)
 
     logger.info("Starting transmission")
-    while True:
-        for heap_set in heap_sets:
-            if heap_set.attrs["future"] is not None:
-                await heap_set.attrs["future"]
-                heap_set["timestamps"] += heap_set_samples
-            heap_set.attrs["future"] = stream.async_send_heaps(
-                heap_set.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
-            )
-            # Not actually sent yet, but close enough for monitoring the transmission speed
-            output_heaps_counter.inc(heap_set.dims["time"])
-            output_bytes_counter.inc(heap_set["payload"].nbytes)
-
-    await stream.async_flush()
+    await sender.run()
 
 
 def main() -> None:
