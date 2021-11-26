@@ -238,7 +238,7 @@ class Sender:
                     part.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
                 )
                 # Not actually sent yet, but close enough for monitoring the transmission speed
-                output_heaps_counter.inc(part.dims["time"])
+                output_heaps_counter.inc(part["heaps"].size)
                 output_bytes_counter.inc(part["payload"].nbytes)
 
         for future in self._futures:

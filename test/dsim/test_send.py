@@ -28,6 +28,8 @@ import spead2.send.asyncio
 from katgpucbf import BYTE_BITS, spead
 from katgpucbf.dsim import send
 
+from .. import PromDiff
+
 N_POLS = 2
 N_ENDPOINTS_PER_POL = 4
 SIGNAL_HEAPS = 1024
@@ -115,8 +117,8 @@ async def test_sender(
     # Tweak the sending so that we can interrupt the sender after sending a
     # certain number of heaps
     orig_send_heaps = spead2.send.asyncio.InprocStream.async_send_heaps
-    send_calls = 10
-    remaining_calls = send_calls
+    repeats = 5
+    remaining_calls = repeats * 2  # Each repetition sends a HeapSet in two halves
 
     def wrapped_send_heaps(*args, **kwargs):
         nonlocal remaining_calls
@@ -130,7 +132,8 @@ async def test_sender(
         spead2.send.asyncio.InprocStream, "async_send_heaps", side_effect=wrapped_send_heaps, autospec=True
     )
 
-    await sender.run()
+    with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
+        await sender.run()
     for queue in inproc_queues:
         queue.stop()
 
@@ -156,4 +159,8 @@ async def test_sender(
             assert updated["digitiser_status"].value == 0
             expected = sender.heap_set.data["payload"].isel(time=i % SIGNAL_HEAPS, pol=pol)
             np.testing.assert_equal(updated["raw_data"].value, expected)
-        assert i == SIGNAL_HEAPS * (send_calls // 2)  # Check that all the data arrived
+        assert i == SIGNAL_HEAPS * repeats  # Check that all the data arrived
+
+    # Check the Prometheus counters
+    assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
+    assert prom_diff.get_sample_diff("output_bytes_total") == sender.heap_set.data["payload"].nbytes * repeats
