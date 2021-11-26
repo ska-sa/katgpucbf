@@ -35,7 +35,7 @@ from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import DEFAULT_TTL, N_POLS, __version__
+from .. import DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
 
@@ -145,7 +145,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dst-packet-payload",
         type=int,
-        default=8192,
+        default=DEFAULT_PACKET_PAYLOAD_BYTES,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
@@ -245,15 +245,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def add_signal_handlers(engine: Engine) -> None:
-    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
-
-    .. todo::
-
-       This is still not particularly clean, sometimes hangs if digitiser data
-       is still flowing, and possibly exits in the middle of sending a heap.
-       However, it's still useful as it ensures CUDA is shut down properly,
-       which is necessary for NSight to operate correctly.
-    """
+    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [signal.SIGINT, signal.SIGTERM]
 
     def handler():

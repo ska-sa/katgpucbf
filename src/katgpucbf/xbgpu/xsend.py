@@ -22,22 +22,20 @@ This module has been designed to work with asyncio.
 The data sent onto the network conforms to the SPEAD protocol. This module
 takes the baseline data, turns it into a SPEAD heap and then transmits that
 heap out onto the network using the spead2 Python module. The high-performance
-ibverbs implementation of spead2 will be used even though the data rates out
-are very low due to the ibverbs implementation using far fewer system
+ibverbs implementation of spead2 is recommended even though the data rates out
+are very low. This is due to the ibverbs implementation using far fewer system
 resources. The format of the packets transmitted by SPEAD2 can be found here:
 - :ref:`baseline-correlation-products-data-packet-format`.
 
 The XSend class creates its own buffers and data in those buffers will be
 encapsulated into SPEAD heaps and sent onto the network. The user can request
 the buffers from the object, populate them and then give them back to the object
-for transmission. The user must not give other buffers to the class as while
-this will work, it will be much slower. The memory regions of the
-XSend-generated buffers have been registered with ibverbs to enable zero copy
-transmission - using other buffers will force an extra copy.  Zero copy
-transmission means that the data to be transmitted can sent from its current
-memory location directly to the NIC without having to be copied to an
-intermediary memory location in the process, thereby halving the memory
-bandwidth required to send.
+for transmission. In using ibverbs, the memory regions of the XSend-generated
+buffers have been registered with ibverbs to enable zero copy transmission -
+using other buffers will force an extra copy.  Zero copy transmission means
+that the data to be transmitted can sent from its current memory location
+directly to the NIC without having to be copied to an intermediary memory
+location in the process, thereby halving the memory bandwidth required to send.
 """
 
 import asyncio
@@ -52,7 +50,7 @@ import spead2
 import spead2.send.asyncio
 from prometheus_client import Counter
 
-from .. import COMPLEX
+from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
 from ..spead import FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
 
@@ -60,6 +58,43 @@ output_heaps_counter = Counter("output_heaps_x", "number of X-engine heaps trans
 output_bytes_counter = Counter(
     "output_bytes_x", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
+
+
+def make_stream(
+    *,
+    dest_ip: str,
+    dest_port: int,
+    interface_ip: str,
+    ttl: int,
+    use_ibv: bool,
+    affinity: int,
+    comp_vector: int,
+    stream_config: spead2.send.StreamConfig,
+    buffers: Sequence[np.ndarray],
+) -> "spead2.send.asyncio.AsyncStream":
+    """Produce a UDP spead2 stream used for transmission."""
+    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
+    if use_ibv:
+        return spead2.send.asyncio.UdpIbvStream(
+            thread_pool,
+            stream_config,
+            spead2.send.UdpIbvConfig(
+                endpoints=[(dest_ip, dest_port)],
+                interface_address=interface_ip,
+                ttl=ttl,
+                comp_vector=comp_vector,
+                memory_regions=list(buffers),
+            ),
+        )
+
+    else:
+        return spead2.send.asyncio.UdpStream(
+            thread_pool,
+            [(dest_ip, dest_port)],
+            stream_config,
+            interface_address=interface_ip,
+            ttl=ttl,
+        )
 
 
 class BufferWrapper:
@@ -134,7 +169,7 @@ class XSend:
         A new heap is transmitted every `dump_interval_s` seconds. Set to zero
         to send as fast as possible.
     send_rate_factor
-        Configure the SPEAD2 sender with a rate proportional to this factor.
+        Configure the spead2 sender with a rate proportional to this factor.
         This value is intended to dictate a data transmission rate slightly
         higher/faster than the ADC rate.
 
@@ -156,12 +191,13 @@ class XSend:
         need for this to be configurable, the data rates are likely too low for
         it to be an issue. I have put it here more to be explicit than anything
         else. This argument is optional.
+    packet_payload
+        Size in bytes for output packets (baseline correlation products
+        payload only, headers and padding are then added to this).
     """
 
     # Class static constants
-    max_payload_size: Final[int] = 2048
     header_size: Final[int] = 64
-    max_packet_size: Final[int] = max_payload_size + header_size
 
     # Initialise class including all variables
     def __init__(
@@ -175,6 +211,7 @@ class XSend:
         context: katsdpsigproc.abc.AbstractContext,
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
+        packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
     ) -> None:
         # 1. Check that given arguments are sane.
         if dump_interval_s < 0:
@@ -233,7 +270,7 @@ class XSend:
             self.buffers.append(buffer)
 
         # 5. Generate all required stream information that is not specific to transports defined in the child classes
-        packets_per_heap = math.ceil(self.heap_payload_size_bytes / XSend.max_payload_size)
+        packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
         packet_header_overhead_bytes = packets_per_heap * XSend.header_size
 
         # 5.1 If the dump_interval is set to zero, pass zero to stream_config to send as fast as possible.
@@ -247,7 +284,7 @@ class XSend:
             send_rate_bytes_per_second = 0
 
         stream_config = spead2.send.StreamConfig(
-            max_packet_size=self.max_packet_size,
+            max_packet_size=packet_payload + XSend.header_size,
             max_heaps=self._n_send_heaps_in_flight,
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
@@ -260,7 +297,7 @@ class XSend:
             n_channels // n_channels_per_stream,
         )
 
-        # 6. Create item group - This is the SPEAD2 object that stores all heap format information.
+        # 6. Create item group - This is the spead2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         self.item_group.add_item(
             FREQUENCY_ID,
@@ -344,7 +381,7 @@ class XSend:
 
     def send_descriptor_heap(self) -> None:
         """
-        Send the SPEAD descriptor over the SPEAD2 transport.
+        Send the SPEAD descriptor over the spead2 transport.
 
         This function transmits the descriptor heap created at the start of
         transmission. I am unsure if this is the correct or best way to do
@@ -353,5 +390,14 @@ class XSend:
 
         This function has no associated unit test - it will likely need to be
         revisited later as its need and function become clear.
+
+        .. todo::
+            This async_send_heap should really be await'ed.
         """
         self.source_stream.async_send_heap(self.descriptor_heap)
+
+    async def send_stop_heap(self) -> None:
+        """Send a Stop Heap over the spead2 transport."""
+        stop_heap = spead2.send.Heap(FLAVOUR)
+        stop_heap.add_end()
+        await self.source_stream.async_send_heap(stop_heap)

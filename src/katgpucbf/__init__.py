@@ -31,4 +31,6 @@ __all__ = ["__version__"]
 BYTE_BITS: Final = 8
 COMPLEX: Final = 2
 N_POLS: Final = 2
+SPEAD_DESCRIPTOR_INTERVAL_S: Final = 5
+DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
