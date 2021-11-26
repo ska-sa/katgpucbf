@@ -125,7 +125,7 @@ def _packbits(input: np.ndarray, output: np.ndarray, bits: int) -> None:
 def packbits(data: ArrayLike, bits: int) -> np.ndarray:
     """Pack integers into bytes.
 
-    The least significant `bits` bits of each integer in `data` is collected
+    The least-significant `bits` bits of each integer in `data` is collected
     together in big-endian order, and returned as a sequence of bytes. The
     total number of bits must form a whole number of bytes.
 
