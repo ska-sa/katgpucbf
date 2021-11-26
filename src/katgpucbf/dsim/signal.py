@@ -106,7 +106,7 @@ def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:
 
 
 @numba.njit
-def _packbits(input: np.ndarray, output: np.ndarray, bits: int) -> None:
+def _packbits(input: np.ndarray, output: np.ndarray, bits: int) -> None:  # pragma: nocover
     # Note: needs lots of explicit casting to np.uint64, as otherwise
     # numba seems to want to infer double precision.
     buf = np.uint64(0)
