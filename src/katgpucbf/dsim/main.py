@@ -32,8 +32,9 @@ import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_TTL
+from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
 from . import send, signal
+from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,18 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--affinity", type=int, default=-1, help="Core affinity for the sending thread [not bound]")
     parser.add_argument(
         "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
+    )
+    parser.add_argument(
+        "--katcp-host",
+        type=str,
+        default=DEFAULT_KATCP_HOST,
+        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
+    )
+    parser.add_argument(
+        "--katcp-port",
+        type=int,
+        default=DEFAULT_KATCP_PORT,
+        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
     )
     parser.add_argument(
         "--prometheus-port",
@@ -105,7 +118,7 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, heap_s
     return first_heap * heap_samples
 
 
-def add_signal_handlers(sender: send.Sender) -> None:
+def add_signal_handlers(server: DeviceServer) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [SIGINT, SIGTERM]
 
@@ -115,7 +128,7 @@ def add_signal_handlers(sender: send.Sender) -> None:
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
-        sender.halt()
+        server.halt()
 
     loop = asyncio.get_event_loop()
     for signum in signums:
@@ -165,10 +178,13 @@ async def async_main() -> None:
         affinity=args.affinity,
     )
     sender = send.Sender(stream, heap_set, timestamp, args.heap_samples)
-    add_signal_handlers(sender)
+    server = DeviceServer(sender, args.katcp_host, args.katcp_port)
+    await server.start()
+    add_signal_handlers(server)
 
     logger.info("Starting transmission")
     await sender.run()
+    await server.join()
 
 
 def main() -> None:

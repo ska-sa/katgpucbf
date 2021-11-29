@@ -34,3 +34,5 @@ N_POLS: Final = 2
 SPEAD_DESCRIPTOR_INTERVAL_S: Final = 5
 DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
+DEFAULT_KATCP_HOST = ""  # All interfaces
+DEFAULT_KATCP_PORT = 7147
