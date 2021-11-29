@@ -40,9 +40,11 @@ logger = logging.getLogger(__name__)
 def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(prog="dsim")
-    parser.add_argument("--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate [%(default)s]")
     parser.add_argument(
-        "--signal-freq", type=float, default=232101234.0, help="Frequency of simulated tone [%(default)s]"
+        "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
+    )
+    parser.add_argument(
+        "--signal-freq", type=float, default=232101234.0, help="Frequency of simulated tone (Hz) [%(default)s]"
     )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
