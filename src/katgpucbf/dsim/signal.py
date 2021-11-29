@@ -97,7 +97,6 @@ class CW(Signal):
             valid += add
         # The result is copied to make it compact (otherwise the imaginary
         # parts don't get freed).
-        print(timestamp, n, frequency, self.amplitude, self.frequency, cplex[0])
         return cplex.real.copy()
 
 
