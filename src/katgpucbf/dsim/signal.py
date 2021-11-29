@@ -2,10 +2,12 @@
 
 import operator
 from abc import ABC, abstractmethod
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Sequence
 
 import numba
 import numpy as np
+import pyparsing as pp
 from numpy.typing import ArrayLike
 
 from .. import BYTE_BITS
@@ -42,14 +44,20 @@ class Signal(ABC):
     def __add__(self, other) -> "Signal":
         if not isinstance(other, Signal):
             return NotImplemented
-        return CombinedSignal(self, other, operator.add)
+        return CombinedSignal(self, other, operator.add, "+")
+
+    def __sub__(self, other) -> "Signal":
+        if not isinstance(other, Signal):
+            return NotImplemented
+        return CombinedSignal(self, other, operator.sub, "-")
 
     def __mul__(self, other) -> "Signal":
         if not isinstance(other, Signal):
             return NotImplemented
-        return CombinedSignal(self, other, operator.mul)
+        return CombinedSignal(self, other, operator.mul, "*")
 
 
+@dataclass(frozen=True)
 class CombinedSignal(Signal):
     """Signal built by combining two other signals.
 
@@ -59,23 +67,31 @@ class CombinedSignal(Signal):
         Input signals
     combine
         Operator to combine two arrays
+    op_name
+        Symbol for the operator
     """
 
-    def __init__(self, a: Signal, b: Signal, combine: Callable[[np.ndarray, np.ndarray], np.ndarray]) -> None:
-        self.a = a
-        self.b = b
-        self.combine = combine
+    a: Signal
+    b: Signal
+    combine: Callable[[np.ndarray, np.ndarray], np.ndarray]
+    op_name: str
 
     def sample(self, timestamp: int, n: int, frequency: float) -> np.ndarray:  # noqa: D102
-        return self.combine(self.a.sample(timestamp, n, frequency), self.b.sample(timestamp, n, frequency))
+        # The ignore is due to https://github.com/python/mypy/issues/10711
+        return self.combine(  # type: ignore
+            self.a.sample(timestamp, n, frequency), self.b.sample(timestamp, n, frequency)
+        )
+
+    def __str__(self) -> str:
+        return f"({self.a} {self.op_name} {self.b})"
 
 
+@dataclass(frozen=True)
 class CW(Signal):
     """Continuous wave."""
 
-    def __init__(self, amplitude: float, frequency: float) -> None:
-        self.amplitude = amplitude
-        self.frequency = frequency
+    amplitude: float
+    frequency: float
 
     def sample(self, timestamp: int, n: int, frequency: float) -> np.ndarray:  # noqa: D102
         # Compute the complex exponential. Because it is being regularly
@@ -98,6 +114,78 @@ class CW(Signal):
         # The result is copied to make it compact (otherwise the imaginary
         # parts don't get freed).
         return cplex.real.copy()
+
+    def __str__(self) -> str:
+        return f"cw({self.amplitude}, {self.frequency})"
+
+
+def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
+    assert len(tokens) == 1
+    tokens = tokens[0]  # infix_operator passes the expression with an extra nesting level
+    op_map = {"*": operator.mul, "+": operator.add, "-": operator.sub}
+    result = tokens[0]
+    for i in range(1, len(tokens), 2):
+        result = op_map[tokens[i]](result, tokens[i + 1])
+    return result
+
+
+def parse_signals(prog: str) -> Sequence[Signal]:
+    """Generate a set of signals from a domain-specific language.
+
+    The domain-specific language consists of statements terminated by
+    semi-colons. Two types of statements are available:
+
+    1. Assignments have the form :samp:`{var} = {expr}`. The :samp:`{var}`
+       must be a valid ASCII Python identifier. Expressions are described
+       later.
+
+    2. Return values consist solely of an expression.
+
+    An expression may consist of function calls, parentheses, the operators
+    ``+``, ``-`` and ``*``, and previously-defined variables. The following
+    functions are available (parameters must be floating-point literals).
+
+    cw(amplitude, frequency)
+        See :class:`CW`.
+    """
+    var_table = {}
+    output = []
+
+    def assign(s: str, loc: int, tokens: pp.ParseResults) -> None:
+        var_table[tokens[0]] = tokens[1]
+
+    def get_variable(s: str, loc: int, tokens: pp.ParseResults) -> None:
+        try:
+            return var_table[tokens[0]]
+        except KeyError:
+            raise pp.ParseFatalException("", loc, f"Unknown variable {tokens[0]!r}")
+
+    lpar = pp.Suppress("(")
+    rpar = pp.Suppress(")")
+    comma = pp.Suppress(",")
+    eq = pp.Suppress("=")
+    semicolon = pp.Suppress(";")
+
+    variable = pp.pyparsing_common.identifier("variable")
+    real = pp.pyparsing_common.number
+    cw = pp.Keyword("cw") + lpar - real + comma - real + rpar
+    cw.set_parse_action(lambda s, loc, tokens: CW(tokens[1], tokens[2]))
+    variable_expr = variable.copy()
+    variable_expr.set_parse_action(get_variable)
+
+    atom = cw | variable_expr
+    expr = pp.infix_notation(
+        atom, [("*", 2, pp.OpAssoc.LEFT, _apply_operator), (pp.one_of("+ -"), 2, pp.OpAssoc.LEFT, _apply_operator)]
+    )
+    assignment = variable + eq - expr
+    assignment.set_parse_action(assign)
+    expr_statement = expr.copy()
+    expr_statement.add_parse_action(lambda s, loc, tokens: output.append(tokens[0]))
+    statement = (assignment | expr_statement) - semicolon
+    program = statement[...]
+
+    program.parse_string(prog, parse_all=True)
+    return output
 
 
 def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:

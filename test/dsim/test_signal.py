@@ -17,9 +17,11 @@
 """Unit tests for signal generation functions."""
 
 import numpy as np
+import pyparsing as pp
 import pytest
 
 from katgpucbf.dsim import signal
+from katgpucbf.dsim.signal import CW, Signal
 
 
 class TestCW:
@@ -32,11 +34,45 @@ class TestCW:
     def test_sample(self, frequency: float, amplitude: float, timestamp: int, n: int) -> None:
         """Test accuracy of basic functionality."""
         adc_sample_rate = 1e9
-        cw = signal.CW(amplitude, frequency)
+        cw = CW(amplitude, frequency)
         out = cw.sample(timestamp, n, adc_sample_rate)
         timestamps = np.arange(timestamp, timestamp + n)
         expected = np.cos(timestamps * (frequency / adc_sample_rate * 2 * np.pi)) * amplitude
         np.testing.assert_allclose(out, expected, atol=1e-6 * amplitude)
+
+
+class TestParseSignals:
+    """Tests for :func:`katgpucbf.dsim.signal.parse_signals`."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("cw(1, 2.0);", [CW(1.0, 2.0)]),
+            ("cw(1.5, 2.5); cw(3.0, 2.0);", [CW(1.5, 2.5), CW(3.0, 2.0)]),
+            ("c = cw(1.5, 2.5); c; c;", [CW(1.5, 2.5), CW(1.5, 2.5)]),
+            ("c = cw(1.5, +2.5e0); c + cw(1, 2);", [CW(1.5, 2.5) + CW(1, 2)]),
+            ("cw(1, 2) - cw(3, 4) * cw(5, 6);", [CW(1, 2) - CW(3, 4) * CW(5, 6)]),
+        ],
+    )
+    def test_success(self, text: str, expected: Signal) -> None:
+        """Test result when parsing succeeds."""
+        assert signal.parse_signals(text) == expected
+
+    @pytest.mark.parametrize("text", ["cw(1, 2) +", "a = cw(1, 2)"])
+    def test_truncated_expression(self, text: str) -> None:
+        """Test error when an expression is cut off part-way through."""
+        with pytest.raises(pp.ParseSyntaxException, match="Expected ';'"):
+            signal.parse_signals(text)
+
+    def test_unknown_variable(self) -> None:
+        """Test error when using an unknown variable."""
+        with pytest.raises(pp.ParseFatalException, match="Unknown variable 'foo'"):
+            signal.parse_signals("foo;")
+
+    def test_bad_real(self) -> None:
+        """Test error when expecting a number but something else is found."""
+        with pytest.raises(pp.ParseSyntaxException, match="Expected number"):
+            signal.parse_signals("cw(1, foo);")
 
 
 class TestQuantise:
