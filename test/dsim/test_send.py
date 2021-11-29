@@ -25,7 +25,7 @@ import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, spead
+from katgpucbf import BYTE_BITS, DEFAULT_TTL, spead
 from katgpucbf.dsim import send
 
 from .. import PromDiff
@@ -78,7 +78,7 @@ def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asy
             heap_samples=HEAP_SAMPLES,
             sample_bits=SAMPLE_BITS,
             max_heaps=SIGNAL_HEAPS * N_POLS,
-            ttl=4,
+            ttl=DEFAULT_TTL,
             interface_address="",
             ibv=False,
             affinity=-1,
