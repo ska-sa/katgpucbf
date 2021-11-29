@@ -36,7 +36,7 @@ class Signal(ABC):
         Returns
         -------
         samples
-            Array of samples, float64.
+            Array of samples, float32.
         """
 
     def __add__(self, other) -> "Signal":
@@ -78,7 +78,27 @@ class CW(Signal):
         self.frequency = frequency
 
     def sample(self, timestamp: int, n: int, frequency: float) -> np.ndarray:  # noqa: D102
-        return np.cos(np.arange(timestamp, timestamp + n) * (self.frequency / frequency * 2 * np.pi)) * self.amplitude
+        # Compute the complex exponential. Because it is being regularly
+        # sampled, it is possible to do this efficiently by repeated
+        # doubling. This also makes it possible to keep most of the
+        # computation in single precision without losing much precision
+        # (experimentally the results seem to be off by less than 1e-6).
+        scale = self.frequency / frequency * 2 * np.pi
+        cplex = np.empty(n, np.complex64)
+        cplex[0] = np.exp(timestamp * scale * 1j) * self.amplitude
+        valid = 1
+        while valid < n:
+            # Rotate the segment [0, valid) by valid steps, giving the segment
+            # [valid, 2 * value). It's slightly complicated to handle the case
+            # where we have to truncate to n.
+            add = min(valid, n - valid)
+            rot = np.exp(valid * scale * 1j).astype(np.complex64)
+            np.multiply(cplex[0:add], rot, cplex[valid : valid + add])
+            valid += add
+        # The result is copied to make it compact (otherwise the imaginary
+        # parts don't get freed).
+        print(timestamp, n, frequency, self.amplitude, self.frequency, cplex[0])
+        return cplex.real.copy()
 
 
 def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:
