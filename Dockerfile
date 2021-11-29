@@ -81,7 +81,7 @@ FROM build-base as build-cxx
 # won't accidentally get used instead.
 WORKDIR /tmp/tools
 COPY src/tools .
-RUN make clean && make -j dsim fsim
+RUN make clean && make -j fsim
 
 #######################################################################
 
@@ -109,6 +109,5 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libcap2
 
 COPY --from=build-py /venv /venv
-COPY --from=build-cxx /tmp/tools/dsim /usr/local/bin
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
 ENV PATH=/venv/bin:$PATH

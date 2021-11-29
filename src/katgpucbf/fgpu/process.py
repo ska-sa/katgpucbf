@@ -35,9 +35,9 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
-from .. import N_POLS
+from .. import BYTE_BITS, N_POLS
 from ..monitor import Monitor
-from . import BYTE_BITS, recv, send
+from . import recv, send
 from .compute import Compute
 from .delay import AbstractDelayModel
 

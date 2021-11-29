@@ -41,7 +41,7 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
-from .. import DEFAULT_PACKET_PAYLOAD_BYTES, SPEAD_DESCRIPTOR_INTERVAL_S, __version__
+from .. import DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .correlation import device_filter
 from .engine import done_callback
@@ -187,7 +187,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         help="Size in bytes for output packets (baseline correlation products payload only) [%(default)s]",
     )
-    parser.add_argument("--dst-ttl", type=int, default=4, help="TTL for outgoing packets [%(default)s]")
+    parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)

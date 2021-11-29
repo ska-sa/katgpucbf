@@ -7,6 +7,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.dsim
    katgpucbf.fgpu
    katgpucbf.xbgpu
 
@@ -17,6 +18,9 @@ Submodules
    :maxdepth: 4
 
    katgpucbf.monitor
+   katgpucbf.recv
+   katgpucbf.ringbuffer
+   katgpucbf.spead
 
 Module contents
 ---------------

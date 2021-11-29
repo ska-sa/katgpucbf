@@ -14,7 +14,9 @@
 # limitations under the License.
 ################################################################################
 
-"""Common SPEAD-related constants."""
+"""Common SPEAD-related constants and helper function."""
+
+from typing import Any
 
 import spead2
 
@@ -29,3 +31,16 @@ TIMESTAMP_ID = 0x1600
 
 #: SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
+
+
+def make_immediate(id: int, value: Any) -> spead2.Item:
+    """Synthesize an immediate item.
+
+    Parameters
+    ----------
+    id
+        The SPEAD identifier for the item
+    value
+        The value of the item
+    """
+    return spead2.Item(id, "dummy_item", "", (), format=[("u", FLAVOUR.heap_address_bits)], value=value)

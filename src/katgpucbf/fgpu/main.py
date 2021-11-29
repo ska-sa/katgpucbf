@@ -35,7 +35,7 @@ from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import DEFAULT_PACKET_PAYLOAD_BYTES, N_POLS, __version__
+from .. import DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
 
@@ -140,7 +140,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dst-interface", type=get_interface_address, required=True, help="Name of output network device"
     )
-    parser.add_argument("--dst-ttl", type=int, default=4, help="TTL for outgoing packets [%(default)s]")
+    parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no]")
     parser.add_argument(
         "--dst-packet-payload",

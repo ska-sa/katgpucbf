@@ -6,4 +6,5 @@ katsdptelstate
 numpy
 prometheus-async
 pycuda
-spead2
+spead2>=3.7.0
+xarray
