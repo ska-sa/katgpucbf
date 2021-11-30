@@ -22,6 +22,23 @@ import pytest
 from katgpucbf.dsim import signal
 
 
+class TestCW:
+    """Tests for :class:`katgpucbf.dsim.signal.CW`."""
+
+    @pytest.mark.parametrize(
+        "amplitude, frequency, timestamp, n",
+        [(1.0, 200e6, 0, 4096), (0.1, 500e6, 123456789, 65535), (234.5, 123456789.1, 9876543210, 654321)],
+    )
+    def test_sample(self, frequency: float, amplitude: float, timestamp: int, n: int) -> None:
+        """Test accuracy of basic functionality."""
+        adc_sample_rate = 1e9
+        cw = signal.CW(amplitude, frequency)
+        out = cw.sample(timestamp, n, adc_sample_rate)
+        timestamps = np.arange(timestamp, timestamp + n)
+        expected = np.cos(timestamps * (frequency / adc_sample_rate * 2 * np.pi)) * amplitude
+        np.testing.assert_allclose(out, expected, atol=1e-6 * amplitude)
+
+
 class TestQuantise:
     """Tests for :func:`katgpucbf.dsim.signal.quantise`."""
 
