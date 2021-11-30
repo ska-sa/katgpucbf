@@ -16,6 +16,9 @@
 
 """Unit tests for signal generation functions."""
 
+import operator
+from typing import Any, Callable
+
 import numpy as np
 import pyparsing as pp
 import pytest
@@ -39,6 +42,22 @@ class TestCW:
         timestamps = np.arange(timestamp, timestamp + n)
         expected = np.cos(timestamps * (frequency / adc_sample_rate * 2 * np.pi)) * amplitude
         np.testing.assert_allclose(out, expected, atol=1e-6 * amplitude)
+
+
+@pytest.mark.parametrize("op, name", [(operator.add, "+"), (operator.sub, "-"), (operator.mul, "*")])
+def test_combine(op: Callable[[Any, Any], Any], name: str) -> None:  # noqa: D
+    """Test :class:`katgpucbf.dsim.signal.CombinedSignal`."""
+    timestamp = 100
+    n = 200
+    frequency = 1000.0
+    sig1 = CW(1.0, 200.0)
+    sig2 = CW(0.5, 300.0)
+    combined = op(sig1, sig2)
+    sig1_sample = sig1.sample(timestamp, n, frequency)
+    sig2_sample = sig2.sample(timestamp, n, frequency)
+    combined_sample = combined.sample(timestamp, n, frequency)
+    np.testing.assert_equal(combined_sample, op(sig1_sample, sig2_sample))
+    assert str(combined) == f"(cw(1.0, 200.0) {name} cw(0.5, 300.0))"
 
 
 class TestParseSignals:
