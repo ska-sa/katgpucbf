@@ -1,9 +1,10 @@
 """Synthesis of simulated signals."""
 
+import logging
 import operator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, List
 
 import numba
 import numpy as np
@@ -11,6 +12,8 @@ import pyparsing as pp
 from numpy.typing import ArrayLike
 
 from .. import BYTE_BITS
+
+logger = logging.getLogger(__name__)
 
 
 class Signal(ABC):
@@ -21,7 +24,7 @@ class Signal(ABC):
     """
 
     @abstractmethod
-    def sample(self, timestamp: int, n: int, frequency: float) -> np.ndarray:
+    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:
         """Sample the signal at regular intervals.
 
         The returned values should be scaled to the range (-1, 1).
@@ -32,7 +35,7 @@ class Signal(ABC):
             Time (in samples since the sync epoch) of the first returned sample.
         n
             Number of samples to generate
-        frequency
+        sample_rate
             Frequency of samples (Hz)
 
         Returns
@@ -76,10 +79,10 @@ class CombinedSignal(Signal):
     combine: Callable[[np.ndarray, np.ndarray], np.ndarray]
     op_name: str
 
-    def sample(self, timestamp: int, n: int, frequency: float) -> np.ndarray:  # noqa: D102
+    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:  # noqa: D102
         # The ignore is due to https://github.com/python/mypy/issues/10711
         return self.combine(  # type: ignore
-            self.a.sample(timestamp, n, frequency), self.b.sample(timestamp, n, frequency)
+            self.a.sample(timestamp, n, sample_rate), self.b.sample(timestamp, n, sample_rate)
         )
 
     def __str__(self) -> str:
@@ -93,13 +96,17 @@ class CW(Signal):
     amplitude: float
     frequency: float
 
-    def sample(self, timestamp: int, n: int, frequency: float) -> np.ndarray:  # noqa: D102
+    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:  # noqa: D102
+        # Round target frequency to fit an integer number of waves into signal_heaps
+        waves = max(1, round(n * self.frequency / sample_rate))
+        frequency = waves * sample_rate / n
+        logger.info(f"Rounded tone frequency to {frequency} Hz")
         # Compute the complex exponential. Because it is being regularly
         # sampled, it is possible to do this efficiently by repeated
         # doubling. This also makes it possible to keep most of the
         # computation in single precision without losing much precision
         # (experimentally the results seem to be off by less than 1e-6).
-        scale = self.frequency / frequency * 2 * np.pi
+        scale = self.frequency / sample_rate * 2 * np.pi
         cplex = np.empty(n, np.complex64)
         cplex[0] = np.exp(timestamp * scale * 1j) * self.amplitude
         valid = 1
@@ -129,7 +136,7 @@ def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
     return result
 
 
-def parse_signals(prog: str) -> Sequence[Signal]:
+def parse_signals(prog: str) -> List[Signal]:
     """Generate a set of signals from a domain-specific language.
 
     The domain-specific language consists of statements terminated by
