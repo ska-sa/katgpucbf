@@ -16,8 +16,9 @@
 
 """Test data transmission."""
 
+import asyncio
 import itertools
-from typing import Generator, Sequence
+from typing import Generator, Optional, Sequence
 from unittest import mock
 
 import numpy as np
@@ -92,25 +93,33 @@ def timestamps() -> np.ndarray:
 
 
 @pytest.fixture
-def heap_set(timestamps: np.ndarray) -> send.HeapSet:  # noqa: D401
-    """A :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes."""
-    heap_set = send.HeapSet.create(
-        timestamps, [N_ENDPOINTS_PER_POL] * N_POLS, HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS, range(N_POLS)
-    )
+def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:  # noqa: D401
+    """Two instances of :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes."""
+    heap_sets = [
+        send.HeapSet.create(
+            timestamps, [N_ENDPOINTS_PER_POL] * N_POLS, HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS, range(N_POLS)
+        )
+        for _ in range(2)
+    ]
     rng = np.random.default_rng(1)
-    heap_set.data["payload"][:] = rng.integers(0, 256, size=heap_set.data["payload"].shape, dtype=np.uint8)
-    return heap_set
+    for heap_set in heap_sets:
+        heap_set.data["payload"][:] = rng.integers(0, 256, size=heap_set.data["payload"].shape, dtype=np.uint8)
+    return heap_sets
 
 
 @pytest.fixture
-def sender(send_stream: "spead2.send.asyncio.AsyncStream", heap_set: send.HeapSet):  # noqa: D103
-    return send.Sender(send_stream, heap_set, 0, HEAP_SAMPLES)
+def sender(
+    send_stream: "spead2.send.asyncio.AsyncStream", heap_sets: Sequence[send.HeapSet]
+) -> send.Sender:  # noqa: D401
+    """A :class:`~katgpucbf.dsim.Sender` using the first of :func:`heaps_sets`."""
+    return send.Sender(send_stream, heap_sets[0], 0, HEAP_SAMPLES)
 
 
 async def test_sender(
     recv_streams: Sequence[spead2.recv.asyncio.Stream],
     inproc_queues: Sequence[spead2.InprocQueue],
     sender: send.Sender,
+    heap_sets: Sequence[send.HeapSet],
     mocker,
 ) -> None:
     """Send random data via a :class:`~katgpucbf.dsim.send.Sender` and check it."""
@@ -119,11 +128,24 @@ async def test_sender(
     orig_send_heaps = spead2.send.asyncio.InprocStream.async_send_heaps
     repeats = 5
     remaining_calls = repeats * 2  # Each repetition sends a HeapSet in two halves
+    # The last 3 half-heapsets are from after the switch
+    switch_heap = SIGNAL_HEAPS * repeats - 3 * (SIGNAL_HEAPS // 2)
+    switch_task: Optional[asyncio.Future[int]] = None
+    orig_payload = [heap_set.data["payload"].copy() for heap_set in heap_sets]
+
+    async def switch_heap_sets() -> int:
+        timestamp = await sender.set_heaps(heap_sets[1])
+        # The above is supposed to wait until the original heap set is no
+        # longer in use. Fill it with zeros to verify.
+        heap_sets[0].data["payload"].data.fill(0)
+        return timestamp
 
     def wrapped_send_heaps(*args, **kwargs):
-        nonlocal remaining_calls
+        nonlocal remaining_calls, switch_task
         ret = orig_send_heaps(*args, **kwargs)
         remaining_calls -= 1
+        if remaining_calls == 3:
+            switch_task = asyncio.create_task(switch_heap_sets())
         if remaining_calls == 0:
             sender.halt()
         return ret
@@ -157,10 +179,13 @@ async def test_sender(
             assert updated["timestamp"].value == i * HEAP_SAMPLES
             assert updated["digitiser_id"].value == pol
             assert updated["digitiser_status"].value == 0
-            expected = sender.heap_set.data["payload"].isel(time=i % SIGNAL_HEAPS, pol=pol)
+            side = int(i >= switch_heap)
+            expected = orig_payload[side].isel(time=i % SIGNAL_HEAPS, pol=pol)
             np.testing.assert_equal(updated["raw_data"].value, expected)
         assert i == SIGNAL_HEAPS * repeats  # Check that all the data arrived
+    assert switch_task is not None
+    assert (await switch_task) == switch_heap * HEAP_SAMPLES
 
     # Check the Prometheus counters
     assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
-    assert prom_diff.get_sample_diff("output_bytes_total") == sender.heap_set.data["payload"].nbytes * repeats
+    assert prom_diff.get_sample_diff("output_bytes_total") == orig_payload[0].nbytes * repeats
