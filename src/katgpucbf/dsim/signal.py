@@ -4,7 +4,7 @@ import logging
 import operator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 import numba
 import numpy as np
@@ -28,6 +28,11 @@ class Signal(ABC):
         """Sample the signal at regular intervals.
 
         The returned values should be scaled to the range (-1, 1).
+
+        .. note::
+
+           Calling this method with two different values of `n` may
+           yield results that are not consistent with each other.
 
         Parameters
         ----------
@@ -91,7 +96,11 @@ class CombinedSignal(Signal):
 
 @dataclass(frozen=True)
 class CW(Signal):
-    """Continuous wave."""
+    """Continuous wave.
+
+    To make the resulting signal periodic, the frequency is adjusted during
+    sampling so that the sampled result can be looped.
+    """
 
     amplitude: float
     frequency: float
@@ -124,6 +133,45 @@ class CW(Signal):
 
     def __str__(self) -> str:
         return f"cw({self.amplitude}, {self.frequency})"
+
+
+@dataclass(frozen=True)
+class WGN(Signal):
+    """White Gaussian Noise signal.
+
+    Each sample in time is an independent Gaussian random variable with zero
+    mean and a given standard deviation.
+
+    In practice, the signal has a period equal to the value of `n` given to
+    :meth:`sample`, which could lead to undesirable correlations.
+    """
+
+    std: float  #: standard deviation
+    entropy: int  #: entropy used to populate a :class:`np.random.SeedSequence`
+
+    def _generate_entropy(self) -> int:
+        """Generate a random seed.
+
+        This is split into a separate method so that it can be easily mocked.
+        """
+        # In general SeedSequence.entropy is not always an int, but it is for
+        # this usage.
+        return np.random.SeedSequence().entropy  # type: ignore
+
+    def __init__(self, std: float, entropy: Optional[int] = None) -> None:
+        # It's a frozen dataclass, so we need to use object.__setattr__ to set the attributes
+        object.__setattr__(self, "std", std)
+        object.__setattr__(self, "entropy", entropy if entropy is not None else self._generate_entropy())
+
+    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:  # noqa: D102
+        # The RNG is initialised every time sample is called so that it will
+        # produce the same results.
+        rng = np.random.default_rng(np.random.SeedSequence(self.entropy))
+        data = rng.standard_normal(size=n, dtype=np.float32) * self.std
+        return np.roll(data, -timestamp)
+
+    def __str__(self) -> str:
+        return f"wgn({self.std}, {self.entropy})"
 
 
 def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
@@ -175,12 +223,15 @@ def parse_signals(prog: str) -> List[Signal]:
 
     variable = pp.pyparsing_common.identifier("variable")
     real = pp.pyparsing_common.number
+    integer = pp.pyparsing_common.integer
     cw = pp.Keyword("cw") + lpar - real + comma - real + rpar
     cw.set_parse_action(lambda s, loc, tokens: CW(tokens[1], tokens[2]))
+    wgn = pp.Keyword("wgn") + lpar - real + pp.Opt(comma - integer("entropy")) + rpar
+    wgn.set_parse_action(lambda s, loc, tokens: WGN(tokens[1], tokens.get("entropy")))
     variable_expr = variable.copy()
     variable_expr.set_parse_action(get_variable)
 
-    atom = cw | variable_expr
+    atom = cw | wgn | variable_expr
     expr = pp.infix_notation(
         atom, [("*", 2, pp.OpAssoc.LEFT, _apply_operator), (pp.one_of("+ -"), 2, pp.OpAssoc.LEFT, _apply_operator)]
     )
