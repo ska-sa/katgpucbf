@@ -9,6 +9,7 @@ Submodules
 
    katgpucbf.dsim.main
    katgpucbf.dsim.send
+   katgpucbf.dsim.server
    katgpucbf.dsim.signal
 
 Module contents
