@@ -146,39 +146,42 @@ async def async_main() -> None:
     timestamp = 0
     if args.sync_time is not None:
         timestamp = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.heap_samples)
-    sig_data = []
-    for sig in args.signals:
-        # TODO: cache shared signals to reduce computation time
-        data = sig.sample(timestamp, args.heap_samples * args.signal_heaps, args.adc_sample_rate)
-        data = signal.quantise(data, args.sample_bits)
-        data = signal.packbits(data, args.sample_bits)
-        sig_data.append(data)
-
     timestamps = np.zeros(args.signal_heaps, dtype=">u8")
-    heap_set = send.HeapSet.create(
-        timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest))
+    heap_sets = [
+        send.HeapSet.create(timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest)))
+        for _ in range(2)
+    ]
+    await signal.sample_async(
+        args.signals, timestamp, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"]
     )
 
     endpoints: List[Tuple[str, int]] = []
-    for i, pol_dest in enumerate(args.dest):
-        heap_set.data.payload.isel(pol=i).data.ravel()[:] = sig_data[i]
+    for pol_dest in args.dest:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
     stream = send.make_stream(
         endpoints=endpoints,
-        heap_sets=[heap_set],
+        heap_sets=heap_sets,
         n_pols=len(args.dest),
         adc_sample_rate=args.adc_sample_rate,
         heap_samples=args.heap_samples,
         sample_bits=args.sample_bits,
-        max_heaps=heap_set.data["heaps"].size,
+        max_heaps=heap_sets[0].data["heaps"].size,
         ttl=args.ttl,
         interface_address=katsdpservices.get_interface_address(args.interface),
         ibv=args.ibv,
         affinity=args.affinity,
     )
-    sender = send.Sender(stream, heap_set, timestamp, args.heap_samples)
-    server = DeviceServer(sender, args.katcp_host, args.katcp_port)
+    sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples)
+    server = DeviceServer(
+        sender=sender,
+        spare=heap_sets[1],
+        adc_sample_rate=args.adc_sample_rate,
+        first_timestamp=timestamp,
+        sample_bits=args.sample_bits,
+        host=args.katcp_host,
+        port=args.katcp_port,
+    )
     await server.start()
     add_signal_handlers(server)
 

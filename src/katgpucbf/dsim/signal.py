@@ -1,14 +1,16 @@
 """Synthesis of simulated signals."""
 
+import asyncio
 import logging
 import operator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 import numba
 import numpy as np
 import pyparsing as pp
+import xarray as xr
 from numpy.typing import ArrayLike
 
 from .. import BYTE_BITS
@@ -302,3 +304,37 @@ def packbits(data: ArrayLike, bits: int) -> np.ndarray:
     out = np.empty(bits * array.size // BYTE_BITS, np.uint8)
     _packbits(array, out, bits)
     return out
+
+
+def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray) -> None:
+    """Sample, quantise and pack a set of signals.
+
+    The number of samples to generate is determined from the output array.
+
+    Parameters
+    ----------
+    signals
+        Signals to sample, one per polarisation
+    timestamp, sample_rate
+        Passed to :meth:`Signal.sample`
+    sample_bits
+        Passed to :func:`quantise` and :func:`packbits`
+    out
+        Output array, with a dimension called ``pol`` (which must match the
+        number of signals). The other dimensions are flattened.
+    """
+    if len(signals) != out.sizes["pol"]:
+        raise ValueError(f"Expected {out.sizes['pol']} signals, received {len(signals)}")
+    n = out.isel(pol=0).data.size * BYTE_BITS // sample_bits
+    for i, sig in enumerate(signals):
+        # TODO: cache shared signals to reduce computation time (or use Dask)
+        data = sig.sample(timestamp, n, sample_rate)
+        data = quantise(data, sample_bits)
+        out.isel(pol=i).data.ravel()[:] = packbits(data, sample_bits)
+
+
+async def sample_async(
+    signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray
+) -> None:
+    """Call :func:`sample` using a helper thread (to avoid blocking the event loop)."""
+    await asyncio.get_running_loop().run_in_executor(None, sample, signals, timestamp, sample_rate, sample_bits, out)
