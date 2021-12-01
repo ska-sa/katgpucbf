@@ -29,13 +29,6 @@ from .signal import parse_signals, sample_async
 logger = logging.getLogger(__name__)
 
 
-def _done_callback(future: asyncio.Future) -> None:
-    try:
-        future.result()  # Evaluate just for exceptions
-    except Exception:
-        logger.exception("Sending failed with exception")
-
-
 class DeviceServer(aiokatcp.DeviceServer):
     """katcp server.
 
