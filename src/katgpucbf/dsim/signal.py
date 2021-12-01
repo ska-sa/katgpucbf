@@ -248,6 +248,16 @@ def parse_signals(prog: str) -> List[Signal]:
     return output
 
 
+def format_signals(signals: Sequence[Signal]) -> str:
+    """Inverse of :func:`parse_signals`.
+
+    Currently object identity is not preserved, so if a simple signal is
+    re-used multiple times (e.g., shared across output signals), it will
+    be repeated in the output. This is subject to change.
+    """
+    return "; ".join(str(s) for s in signals) + ";"
+
+
 def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:
     """Convert floating-point data to fixed-point.
 

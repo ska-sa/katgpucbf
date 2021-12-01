@@ -25,8 +25,10 @@ import pytest
 
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
+from katgpucbf.dsim.signal import parse_signals
 
-from .conftest import SAMPLE_BITS
+from .. import get_sensor
+from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, SAMPLE_BITS, SIGNAL_HEAPS
 
 pytestmark = [pytest.mark.asyncio]
 
@@ -36,12 +38,16 @@ async def katcp_server(
     sender: Sender, heap_sets: Sequence[HeapSet]
 ) -> AsyncGenerator[DeviceServer, None]:  # noqa: D401
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
+    # Make up a bogus signal. It's not actually populated in heap_sets
+    signals_str = "cw(0.2, 123); cw(0.3, 456);"
     server = DeviceServer(
         sender=sender,
         spare=heap_sets[1],
-        adc_sample_rate=1e9,
+        adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=SAMPLE_BITS,
         first_timestamp=0,
+        signals_str=signals_str,
+        signals=parse_signals(signals_str),
         host="127.0.0.1",
         port=0,
     )
@@ -63,17 +69,30 @@ async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Cl
     await client.wait_closed()
 
 
+async def test_sensors(katcp_server: DeviceServer, katcp_client: aiokatcp.Client) -> None:
+    """Test the initial sensor values."""
+    assert await get_sensor(katcp_client, "signals-orig") == "cw(0.2, 123); cw(0.3, 456);"
+    assert await get_sensor(katcp_client, "signals") == "cw(0.2, 123); cw(0.3, 456);"
+    assert await get_sensor(katcp_client, "adc-sample-rate") == ADC_SAMPLE_RATE
+    assert await get_sensor(katcp_client, "sample-bits") == SAMPLE_BITS
+    assert await get_sensor(katcp_client, "period") == HEAP_SAMPLES * SIGNAL_HEAPS
+
+
 async def test_signals(
     katcp_server: DeviceServer, katcp_client: aiokatcp.Client, sender: Sender, heap_sets: Sequence[HeapSet], mocker
 ) -> None:
     """Test the ``?signals`` katcp command."""
+    signals_str = "cw(0.0, 1000.0); cw(1.0, 1000.0);"
     set_heaps = mocker.patch.object(sender, "set_heaps", autospec=True, return_value=1234567)
-    reply, _ = await katcp_client.request("signals", "cw(0.0, 1000.0); cw(1.0, 1000.0);")
+    reply, _ = await katcp_client.request("signals", signals_str)
     assert reply == [b"1234567"]
     set_heaps.assert_called_once_with(heap_sets[1])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
     np.testing.assert_equal(heap_sets[1].data["payload"].isel(pol=0).data, 0)
     assert not np.all(heap_sets[1].data["payload"].isel(pol=1).data == 0)
+    # Check that sensors were updated
+    assert await get_sensor(katcp_client, "signals-orig") == signals_str
+    assert parse_signals(await get_sensor(katcp_client, "signals")) == parse_signals(signals_str)
 
 
 async def test_signals_unparsable(katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker) -> None:

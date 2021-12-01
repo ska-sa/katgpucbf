@@ -32,6 +32,7 @@ N_ENDPOINTS_PER_POL = 4
 SIGNAL_HEAPS = 1024
 HEAP_SAMPLES = 4096
 SAMPLE_BITS = 10
+ADC_SAMPLE_RATE = 1712e6
 
 
 @pytest.fixture
@@ -69,7 +70,7 @@ def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asy
             endpoints=[("invalid", -1) for _ in inproc_queues],
             heap_sets=[],  # Only needed for UdpIbvStream, which we're not using
             n_pols=N_POLS,
-            adc_sample_rate=1712e6,
+            adc_sample_rate=ADC_SAMPLE_RATE,
             heap_samples=HEAP_SAMPLES,
             sample_bits=SAMPLE_BITS,
             max_heaps=SIGNAL_HEAPS * N_POLS,

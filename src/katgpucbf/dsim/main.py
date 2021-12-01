@@ -104,6 +104,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         signals *= len(args.dest)
     if len(signals) != len(args.dest):
         parser.error(f"expected 1 or {len(args.dest)} signals, found {len(signals)}")
+    args.signals_orig = args.signals
     args.signals = signals
     return args
 
@@ -179,6 +180,8 @@ async def async_main() -> None:
         adc_sample_rate=args.adc_sample_rate,
         first_timestamp=timestamp,
         sample_bits=args.sample_bits,
+        signals_str=args.signals_orig,
+        signals=args.signals,
         host=args.katcp_host,
         port=args.katcp_port,
     )

@@ -18,13 +18,14 @@
 
 import asyncio
 import logging
+from typing import Sequence
 
 import aiokatcp
 import pyparsing as pp
 
-from .. import __version__
+from .. import BYTE_BITS, __version__
 from .send import HeapSet, Sender
-from .signal import parse_signals, sample_async
+from .signal import Signal, format_signals, parse_signals, sample_async
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         Number of bits per output sample
     first_timestamp
         The timestamp associated with the first output sample
+    signals_str
+        String that was parsed to produce `signals`.
+    signals
+        User-requested signals. Note that these must have already been loaded
+        into the sender; it is provided here purely to populate sensors.
     *args, **kwargs
         Passed to base class
     """
@@ -60,6 +66,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         adc_sample_rate: float,
         sample_bits: int,
         first_timestamp: int,
+        signals_str: str,
+        signals: Sequence[Signal],
         *args,
         **kwargs,
     ) -> None:
@@ -70,6 +78,52 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sample_bits = sample_bits
         self.first_timestamp = first_timestamp
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
+
+        self._signals_orig_sensor = aiokatcp.Sensor(
+            str,
+            "signals-orig",
+            "User-provided string used to define the signals",
+            initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            default=signals_str,
+        )
+        # TODO: it's not reproducible because the random dither is not captured
+        self._signals_sensor = aiokatcp.Sensor(
+            str,
+            "signals",
+            "String reproducibly describing how the signals are generated",
+            initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            default=format_signals(signals),
+        )
+        self.sensors.add(self._signals_orig_sensor)
+        self.sensors.add(self._signals_sensor)
+        self.sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "period",
+                "Number of samples after which the signals will be repeated",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                default=spare.data["payload"].isel(pol=0).size * BYTE_BITS // sample_bits,
+            )
+        )
+        self.sensors.add(
+            aiokatcp.Sensor(
+                float,
+                "adc-sample-rate",
+                "Rate at which samples are generated",
+                units="Hz",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                default=adc_sample_rate,
+            )
+        )
+        self.sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "sample-bits",
+                "Number of bits in each output sample",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                default=sample_bits,
+            )
+        )
 
     async def on_stop(self) -> None:  # noqa: D102
         self.sender.halt()
@@ -104,4 +158,6 @@ class DeviceServer(aiokatcp.DeviceServer):
             spare = self.sender.heap_set
             timestamp = await self.sender.set_heaps(self.spare)
             self.spare = spare
+            self._signals_orig_sensor.value = signals_str
+            self._signals_sensor.value = format_signals(signals)
             return timestamp
