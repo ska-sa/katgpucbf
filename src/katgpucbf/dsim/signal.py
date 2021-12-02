@@ -27,6 +27,40 @@ class Signal(ABC):
     polarisation.
     """
 
+    def _sample_helper(self, n: int, chunk_data: da.Array, sample_chunk: Callable, **kwargs) -> da.Array:
+        """Help implement :meth:`sample` in subclasses.
+
+        This can be used when each chunk can be generated from a single value
+        per chunk (plus some chunk-independent state).
+
+        Currently the call to `sample_chunk` for the final chunk will use the
+        full chunk size, unless `n` is less than CHUNK_SIZE. In future it may
+        take care of truncating the final chunk.
+
+        Parameters
+        ----------
+        n
+            Number of samples to generate
+        chunk_data
+            Array holding per-chunk data. It must have the same number of
+            chunks as the output.
+        sample_chunk
+            Callback to generate a single chunk. It is passed a chunk from
+            `chunk_data` as a positional argument, and `chunk_size` as a
+            keyword argument.
+        kwargs
+            Additional keyword arguments forwarded to `sample_chunk`.
+        """
+        chunk_size = min(n, CHUNK_SIZE)
+        n_chunks = (n + chunk_size - 1) // chunk_size
+        return da.map_blocks(
+            sample_chunk,
+            chunk_data,
+            chunks=((chunk_size,) * n_chunks,),
+            chunk_size=chunk_size,
+            **kwargs,
+        )[:n]
+
     @abstractmethod
     def sample(self, n: int, sample_rate: float) -> da.Array:
         """Sample the signal at regular intervals.
@@ -106,7 +140,7 @@ class CW(Signal):
     frequency: float
 
     @staticmethod
-    def _sample_chunk(offset: np.int64, *, amplitude: np.float32, n: int, scale: float) -> np.ndarray:
+    def _sample_chunk(offset: np.int64, *, amplitude: np.float32, chunk_size: int, scale: float) -> np.ndarray:
         """Compute :math:`np.cos(np.arange(offset, n + offset) * scale) * amplitude` efficiently.
 
         The return value is single precision.
@@ -116,14 +150,14 @@ class CW(Signal):
         # doubling. This also makes it possible to keep most of the
         # computation in single precision without losing much precision
         # (experimentally the results seem to be off by less than 1e-6).
-        out = np.empty(n, np.complex64)
+        out = np.empty(chunk_size, np.complex64)
         out[0] = np.exp(offset * scale * 1j) * amplitude
         valid = 1
-        while valid < n:
+        while valid < chunk_size:
             # Rotate the segment [0, valid) by valid steps, giving the segment
             # [valid, 2 * value). It's slightly complicated to handle the case
-            # where we have to truncate to n.
-            add = min(valid, n - valid)
+            # where we have to truncate to chunk_size.
+            add = min(valid, chunk_size - valid)
             rot = np.exp(valid * scale * 1j).astype(np.complex64)
             np.multiply(out[0:add], rot, out[valid : valid + add])
             valid += add
@@ -136,17 +170,15 @@ class CW(Signal):
         logger.info(f"Rounded tone frequency to {frequency} Hz")
         scale = self.frequency / sample_rate * 2 * np.pi
 
-        chunk_size = min(n, CHUNK_SIZE)
         # Index of the first element of each chunk
-        offsets = da.arange(0, n, chunk_size, chunks=1, dtype=np.int64)
-        return da.map_blocks(
-            self._sample_chunk,
+        offsets = da.arange(0, n, CHUNK_SIZE, chunks=1, dtype=np.int64)
+        return self._sample_helper(
+            n,
             offsets,
-            chunks=((chunk_size,) * offsets.size,),
+            self._sample_chunk,
             amplitude=np.float32(self.amplitude),
             scale=scale,
-            n=chunk_size,
-        )[:n]
+        )
 
     def __str__(self) -> str:
         return f"cw({self.amplitude}, {self.frequency})"
@@ -190,18 +222,11 @@ class Random(Signal):
         """
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
-        chunk_size = min(n, CHUNK_SIZE)
-        n_chunks = (n + chunk_size - 1) // chunk_size
+        n_chunks = (n + CHUNK_SIZE - 1) // CHUNK_SIZE
         seed_seqs = np.random.SeedSequence(self.entropy).spawn(n_chunks)
         # Chunk size of 1 so that we can map each SeedSequence to an output chunk
         seed_seqs_dask = da.from_array(np.array(seed_seqs, dtype=object), 1)
-        return da.map_blocks(
-            self._sample_chunk,
-            seed_seqs_dask,
-            dtype=np.float32,
-            chunks=((chunk_size,) * n_chunks,),
-            chunk_size=chunk_size,  # This is passed to _sample_chunk
-        )[:n]
+        return self._sample_helper(n, seed_seqs_dask, self._sample_chunk)
 
 
 @dataclass(frozen=True)
