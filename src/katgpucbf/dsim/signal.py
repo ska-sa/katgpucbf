@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 
-import dask
 import dask.array as da
 import numba
 import numpy as np
@@ -107,17 +106,18 @@ class CW(Signal):
     frequency: float
 
     @staticmethod
-    def _complex_exp(n: int, scale: float) -> np.ndarray:
-        """Compute :math:`np.exp(np.arange(n) * scale * 1j)` efficiently.
+    def _sample_chunk(offset: np.int64, *, amplitude: np.float32, n: int, scale: float) -> np.ndarray:
+        """Compute :math:`np.cos(np.arange(offset, n + offset) * scale) * amplitude` efficiently.
 
         The return value is single precision.
         """
-        # The implementation exploits the regular sampling using repeated
-        # doubling. This also makes it possible to keep most of the computation
-        # in single precision without losing much precision (experimentally the
-        # results seem to be off by less than 1e-6).
+        # Compute the complex exponential. Because it is being regularly
+        # sampled, it is possible to do this efficiently by repeated
+        # doubling. This also makes it possible to keep most of the
+        # computation in single precision without losing much precision
+        # (experimentally the results seem to be off by less than 1e-6).
         out = np.empty(n, np.complex64)
-        out[0] = 1
+        out[0] = np.exp(offset * scale * 1j) * amplitude
         valid = 1
         while valid < n:
             # Rotate the segment [0, valid) by valid steps, giving the segment
@@ -127,46 +127,26 @@ class CW(Signal):
             rot = np.exp(valid * scale * 1j).astype(np.complex64)
             np.multiply(out[0:add], rot, out[valid : valid + add])
             valid += add
-        return out
-
-    @staticmethod
-    def _complex_exp_dask(n: int, scale: float) -> da.Array:
-        """Wrap :meth:`_complex_exp` to return a dask array."""
-        return da.from_delayed(dask.delayed(CW._complex_exp)(n, scale), (n,), np.complex64)
+        return out.real
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
-        # This is effectively computing A * cos(s * arange(n)), where A is
-        # amplitude and s is the scale factor computed below. To allow for
-        # some optimisations we actually start by computing
-        # A * exp(1j * s * arange(n)). Each index i can be written as
-        # i = q * c + r, where c is CHUNK_SIZE. Then the ith element is
-        # A * exp(1j * s * (q*c + r)) = A * exp(1j * (s*c) * q) * exp(1j * s * r).
-        # We can compute the two exp expressions separately for each q and r,
-        # then take their outer product to get all combinations, and reshape
-        # to flatten things back to 1D.
-
         # Round target frequency to fit an integer number of waves into signal_heaps
         waves = max(1, round(n * self.frequency / sample_rate))
         frequency = waves * sample_rate / n
         logger.info(f"Rounded tone frequency to {frequency} Hz")
         scale = self.frequency / sample_rate * 2 * np.pi
 
-        # Compute exp(1j * s * r) over all r
         chunk_size = min(n, CHUNK_SIZE)
-        exp_r = self._complex_exp_dask(chunk_size, scale)
-
-        # Compute A * exp(1j * (s*c) * q) over all q
-        n_chunks = (n + chunk_size - 1) // chunk_size
-        exp_q = self._complex_exp_dask(n_chunks, scale * chunk_size)
-        a_exp_q = exp_q * self.amplitude
-        # Force a_exp_q to have 1 element per chunk, so that when we take the
-        # outer product we get the chunk size we want.
-        a_exp_q = da.rechunk(a_exp_q, 1)
-        # Take outer product to produce all output values (possibly with some
-        # extra padding, because it will be a whole number of chunks).
-        full = da.outer(a_exp_q, exp_r)
-        # Flatten to 1D, truncate to n elements, and take the real part
-        return full.reshape(full.size)[:n].real
+        # Index of the first element of each chunk
+        offsets = da.arange(0, n, chunk_size, chunks=1, dtype=np.int64)
+        return da.map_blocks(
+            self._sample_chunk,
+            offsets,
+            chunks=((chunk_size,) * offsets.size,),
+            amplitude=np.float32(self.amplitude),
+            scale=scale,
+            n=chunk_size,
+        )[:n]
 
     def __str__(self) -> str:
         return f"cw({self.amplitude}, {self.frequency})"
