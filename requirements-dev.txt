@@ -132,8 +132,10 @@ pygments==2.9.0
     # via
     #   ipython
     #   sphinx
-pyparsing==2.4.7
-    # via packaging
+pyparsing==3.0.6
+    # via
+    #   -c requirements.txt
+    #   packaging
 pytest==6.2.4
     # via
     #   -r requirements-dev.in

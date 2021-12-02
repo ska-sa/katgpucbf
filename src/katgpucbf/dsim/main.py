@@ -29,6 +29,7 @@ from typing import List, Optional, Sequence, Tuple
 import katsdpservices
 import numpy as np
 import prometheus_async
+import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_TTL
@@ -42,6 +43,12 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="dsim")
     parser.add_argument(
         "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
+    )
+    parser.add_argument(
+        "--signals",
+        default="cw(1.0, 232101234.0);",
+        help="Specification for the signals to generate (see the docstring for parse_signals). "
+        "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
     parser.add_argument(
         "--signal-freq", type=float, default=232101234.0, help="Frequency of simulated tone (Hz) [%(default)s]"
@@ -76,10 +83,15 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         for ep in dest:
             if ep.port is None:
                 parser.error("port must be specified on destinations")
-    # Round target frequency to fit an integer number of waves into signal_heaps
-    waves = max(1, round(args.signal_heaps * args.heap_samples * args.signal_freq / args.adc_sample_rate))
-    args.signal_freq = waves * args.adc_sample_rate / args.signal_heaps / args.heap_samples
-    logger.info(f"Rounded tone frequency to {args.signal_freq} Hz")
+    try:
+        signals = signal.parse_signals(args.signals)
+    except pp.ParseBaseException as exc:
+        parser.error(f"invalid --signals: {exc}")
+    if len(signals) == 1:
+        signals *= len(args.dest)
+    if len(signals) != len(args.dest):
+        parser.error(f"expected 1 or {len(args.dest)} signals, found {len(signals)}")
+    args.signals = signals
     return args
 
 
@@ -121,10 +133,13 @@ async def async_main() -> None:
     timestamp = 0
     if args.sync_time is not None:
         timestamp = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.heap_samples)
-    sig = signal.CW(amplitude=1.0, frequency=args.signal_freq)
-    sig_data = sig.sample(timestamp, args.heap_samples * args.signal_heaps, args.adc_sample_rate)
-    sig_data = signal.quantise(sig_data, args.sample_bits)
-    sig_data = signal.packbits(sig_data, args.sample_bits)
+    sig_data = []
+    for sig in args.signals:
+        # TODO: cache shared signals to reduce computation time
+        data = sig.sample(timestamp, args.heap_samples * args.signal_heaps, args.adc_sample_rate)
+        data = signal.quantise(data, args.sample_bits)
+        data = signal.packbits(data, args.sample_bits)
+        sig_data.append(data)
 
     timestamps = np.zeros(args.signal_heaps, dtype=">u8")
     heap_set = send.HeapSet.create(
@@ -133,7 +148,7 @@ async def async_main() -> None:
 
     endpoints: List[Tuple[str, int]] = []
     for i, pol_dest in enumerate(args.dest):
-        heap_set.data.payload.isel(pol=i).data.ravel()[:] = sig_data
+        heap_set.data.payload.isel(pol=i).data.ravel()[:] = sig_data[i]
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
     stream = send.make_stream(
