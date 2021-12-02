@@ -75,14 +75,12 @@ class PrecorrelationReorderTemplate:
     def __init__(
         self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int, n_batches: int
     ) -> None:
-        # 1. Set member variables that are used to calculate indices for the
-        # input and output buffers
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_batches = n_batches
 
-        # This is set to 8 for now, but must be updated to 4- and 16-bit
+        # TODO: This is set to 8 for now, but must be updated to 4- and 16-bit
         # as and when the TensorCoreXEngine requires it.
         self._sample_bitwidth = 8
 
@@ -94,7 +92,6 @@ class PrecorrelationReorderTemplate:
         if self.n_spectra_per_heap % self.n_times_per_block != 0:
             raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
 
-        # 3. Declare the input and output data shapes
         self.input_data_dimensions = (
             accel.Dimension(self.n_batches, exact=True),
             accel.Dimension(self.n_ants, exact=True),
@@ -114,21 +111,13 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        # The size of a data matrix required to be reordered is the same for
-        # Input or Output data shapes
         self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap * N_POLS
         # Maximum number of threads per block, as per Section I of Nvidia's CUDA Programming Guide
         THREADS_PER_BLOCK: Final[int] = 1024  # noqa: N806
 
-        # 4. Calculate the number of thread blocks to launch per kernel call
-        # - This is in the x-dimension and remains constant for the lifetime of
-        #   the object.
-        # - TODO: Error-check these values (As in, bounds/values, not method).
+        # TODO: Error-check these values (As in, bounds/values, not method).
         self.n_blocks_x = (self.matrix_size + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
 
-        # 5. Compile the kernel
-        #   - The size of this kernel simply depends on the individual matrix size and the
-        #     number of batches required to be reordered.
         program = accel.build(
             context,
             "kernels/precorrelation_reorder_kernel.mako",
@@ -193,7 +182,7 @@ class PrecorrelationReorder(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [in_samples_buffer.buffer, out_reordered_buffer.buffer],
-            # Even though we are using CUDA, we follow OpenCLs grid/block
+            # NOTE: Even though we are using CUDA, we follow OpenCLs grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
