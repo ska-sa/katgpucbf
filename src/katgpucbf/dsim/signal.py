@@ -7,15 +7,18 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 
+import dask
+import dask.array as da
 import numba
 import numpy as np
 import pyparsing as pp
 import xarray as xr
-from numpy.typing import ArrayLike
 
 from .. import BYTE_BITS
 
 logger = logging.getLogger(__name__)
+#: Dask chunk size for sampling signals (must be a multiple of 8)
+CHUNK_SIZE = 2 ** 20
 
 
 class Signal(ABC):
@@ -26,7 +29,7 @@ class Signal(ABC):
     """
 
     @abstractmethod
-    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:
+    def sample(self, n: int, sample_rate: float) -> da.Array:
         """Sample the signal at regular intervals.
 
         The returned values should be scaled to the range (-1, 1).
@@ -38,8 +41,6 @@ class Signal(ABC):
 
         Parameters
         ----------
-        timestamp
-            Time (in samples since the sync epoch) of the first returned sample.
         n
             Number of samples to generate
         sample_rate
@@ -48,7 +49,7 @@ class Signal(ABC):
         Returns
         -------
         samples
-            Array of samples, float32.
+            Dask array of samples, float32. The chunk size must be CHUNK_SIZE.
         """
 
     def __add__(self, other) -> "Signal":
@@ -83,14 +84,12 @@ class CombinedSignal(Signal):
 
     a: Signal
     b: Signal
-    combine: Callable[[np.ndarray, np.ndarray], np.ndarray]
+    combine: Callable[[da.Array, da.Array], da.Array]
     op_name: str
 
-    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:  # noqa: D102
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
         # The ignore is due to https://github.com/python/mypy/issues/10711
-        return self.combine(  # type: ignore
-            self.a.sample(timestamp, n, sample_rate), self.b.sample(timestamp, n, sample_rate)
-        )
+        return self.combine(self.a.sample(n, sample_rate), self.b.sample(n, sample_rate))  # type: ignore
 
     def __str__(self) -> str:
         return f"({self.a} {self.op_name} {self.b})"
@@ -107,19 +106,18 @@ class CW(Signal):
     amplitude: float
     frequency: float
 
-    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:  # noqa: D102
-        # Round target frequency to fit an integer number of waves into signal_heaps
-        waves = max(1, round(n * self.frequency / sample_rate))
-        frequency = waves * sample_rate / n
-        logger.info(f"Rounded tone frequency to {frequency} Hz")
-        # Compute the complex exponential. Because it is being regularly
-        # sampled, it is possible to do this efficiently by repeated
-        # doubling. This also makes it possible to keep most of the
-        # computation in single precision without losing much precision
-        # (experimentally the results seem to be off by less than 1e-6).
-        scale = self.frequency / sample_rate * 2 * np.pi
-        cplex = np.empty(n, np.complex64)
-        cplex[0] = np.exp(timestamp * scale * 1j) * self.amplitude
+    @staticmethod
+    def _complex_exp(n: int, scale: float) -> np.ndarray:
+        """Compute :math:`np.exp(np.arange(n) * scale * 1j)` efficiently.
+
+        The return value is single precision.
+        """
+        # The implementation exploits the regular sampling using repeated
+        # doubling. This also makes it possible to keep most of the computation
+        # in single precision without losing much precision (experimentally the
+        # results seem to be off by less than 1e-6).
+        out = np.empty(n, np.complex64)
+        out[0] = 1
         valid = 1
         while valid < n:
             # Rotate the segment [0, valid) by valid steps, giving the segment
@@ -127,29 +125,68 @@ class CW(Signal):
             # where we have to truncate to n.
             add = min(valid, n - valid)
             rot = np.exp(valid * scale * 1j).astype(np.complex64)
-            np.multiply(cplex[0:add], rot, cplex[valid : valid + add])
+            np.multiply(out[0:add], rot, out[valid : valid + add])
             valid += add
-        # The result is copied to make it compact (otherwise the imaginary
-        # parts don't get freed).
-        return cplex.real.copy()
+        return out
+
+    @staticmethod
+    def _complex_exp_dask(n: int, scale: float) -> da.Array:
+        """Wrap :meth:`_complex_exp` to return a dask array."""
+        return da.from_delayed(dask.delayed(CW._complex_exp)(n, scale), (n,), np.complex64)
+
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
+        # This is effectively computing A * cos(s * arange(n)), where A is
+        # amplitude and s is the scale factor computed below. To allow for
+        # some optimisations we actually start by computing
+        # A * exp(1j * s * arange(n)). Each index i can be written as
+        # i = q * c + r, where c is CHUNK_SIZE. Then the ith element is
+        # A * exp(1j * s * (q*c + r)) = A * exp(1j * (s*c) * q) * exp(1j * s * r).
+        # We can compute the two exp expressions separately for each q and r,
+        # then take their outer product to get all combinations, and reshape
+        # to flatten things back to 1D.
+
+        # Round target frequency to fit an integer number of waves into signal_heaps
+        waves = max(1, round(n * self.frequency / sample_rate))
+        frequency = waves * sample_rate / n
+        logger.info(f"Rounded tone frequency to {frequency} Hz")
+        scale = self.frequency / sample_rate * 2 * np.pi
+
+        # Compute exp(1j * s * r) over all r
+        chunk_size = min(n, CHUNK_SIZE)
+        exp_r = self._complex_exp_dask(chunk_size, scale)
+
+        # Compute A * exp(1j * (s*c) * q) over all q
+        n_chunks = (n + chunk_size - 1) // chunk_size
+        exp_q = self._complex_exp_dask(n_chunks, scale * chunk_size)
+        a_exp_q = exp_q * self.amplitude
+        # Force a_exp_q to have 1 element per chunk, so that when we take the
+        # outer product we get the chunk size we want.
+        a_exp_q = da.rechunk(a_exp_q, 1)
+        # Take outer product to produce all output values (possibly with some
+        # extra padding, because it will be a whole number of chunks).
+        full = da.outer(a_exp_q, exp_r)
+        # Flatten to 1D, truncate to n elements, and take the real part
+        return full.reshape(full.size)[:n].real
 
     def __str__(self) -> str:
         return f"cw({self.amplitude}, {self.frequency})"
 
 
-@dataclass(frozen=True)
-class WGN(Signal):
-    """White Gaussian Noise signal.
+# mypy override is due to https://github.com/python/mypy/issues/5374
+@dataclass(frozen=True)  # type: ignore
+class Random(Signal):
+    """Base class for randomly-generated signals.
 
-    Each sample in time is an independent Gaussian random variable with zero
-    mean and a given standard deviation.
-
-    In practice, the signal has a period equal to the value of `n` given to
-    :meth:`sample`, which could lead to undesirable correlations.
+    This base class is only suitable when the samples at different times
+    are independent. The derived class must implement :meth:`_sample_chunk`.
     """
 
-    std: float  #: standard deviation
     entropy: int  #: entropy used to populate a :class:`np.random.SeedSequence`
+
+    def __init__(self, entropy: Optional[int] = None) -> None:
+        # This is a frozen dataclass, so we need to use object.__setattr__ to
+        # set the attribute.
+        object.__setattr__(self, "entropy", entropy if entropy is not None else self._generate_entropy())
 
     def _generate_entropy(self) -> int:
         """Generate a random seed.
@@ -160,20 +197,77 @@ class WGN(Signal):
         # this usage.
         return np.random.SeedSequence().entropy  # type: ignore
 
+    @abstractmethod
+    def _sample_chunk(self, seed_seq: Sequence[np.random.SeedSequence], *, chunk_size: int) -> np.ndarray:
+        """Sample random values from a single chunk.
+
+        Parameters
+        ----------
+        seed_seq
+            A single-element list with the entropy to use to initialise a random generator
+        chunk_size
+            The number of elements to generate
+        """
+
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
+        chunk_size = min(n, CHUNK_SIZE)
+        n_chunks = (n + chunk_size - 1) // chunk_size
+        seed_seqs = np.random.SeedSequence(self.entropy).spawn(n_chunks)
+        # Chunk size of 1 so that we can map each SeedSequence to an output chunk
+        seed_seqs_dask = da.from_array(np.array(seed_seqs, dtype=object), 1)
+        return da.map_blocks(
+            self._sample_chunk,
+            seed_seqs_dask,
+            dtype=np.float32,
+            chunks=((chunk_size,) * n_chunks,),
+            chunk_size=chunk_size,  # This is passed to _sample_chunk
+        )[:n]
+
+
+@dataclass(frozen=True)
+class WGN(Random):
+    """White Gaussian Noise signal.
+
+    Each sample in time is an independent Gaussian random variable with zero
+    mean and a given standard deviation.
+
+    In practice, the signal has a period equal to the value of `n` given to
+    :meth:`sample`, which could lead to undesirable correlations.
+    """
+
+    std: float  #: standard deviation
+
     def __init__(self, std: float, entropy: Optional[int] = None) -> None:
+        # __init__ is overridden to change the argument order
+        super().__init__(entropy)
         # It's a frozen dataclass, so we need to use object.__setattr__ to set the attributes
         object.__setattr__(self, "std", std)
-        object.__setattr__(self, "entropy", entropy if entropy is not None else self._generate_entropy())
 
-    def sample(self, timestamp: int, n: int, sample_rate: float) -> np.ndarray:  # noqa: D102
-        # The RNG is initialised every time sample is called so that it will
+    def _sample_chunk(self, seed_seq: Sequence[np.random.SeedSequence], *, chunk_size: int) -> np.ndarray:
+        # The RNG is initialised every time this is called so that it will
         # produce the same results.
-        rng = np.random.default_rng(np.random.SeedSequence(self.entropy))
-        data = rng.standard_normal(size=n, dtype=np.float32) * self.std
-        return np.roll(data, -timestamp)
+        rng = np.random.default_rng(seed_seq[0])
+        return rng.standard_normal(size=chunk_size, dtype=np.float32) * self.std
 
     def __str__(self) -> str:
         return f"wgn({self.std}, {self.entropy})"
+
+
+class Dither(Random):
+    """Random signal to add as part of quantisation, for dithering.
+
+    Unlike other signals, this is scaled such that the quantisation bin size is
+    1.0.
+
+    The implementation currently uses a uniform distribution, but that is
+    subject to change.
+    """
+
+    def _sample_chunk(self, seed_seq: Sequence[np.random.SeedSequence], *, chunk_size: int) -> np.ndarray:
+        # The RNG is initialised every time this is called so that it will
+        # produce the same results.
+        rng = np.random.default_rng(seed_seq[0])
+        return rng.random(size=chunk_size, dtype=np.float32) - np.float32(0.5)
 
 
 def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
@@ -258,7 +352,7 @@ def format_signals(signals: Sequence[Signal]) -> str:
     return "; ".join(str(s) for s in signals) + ";"
 
 
-def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:
+def quantise(data: da.Array, bits: int, dither: bool = True) -> da.Array:
     """Convert floating-point data to fixed-point.
 
     Parameters
@@ -274,46 +368,46 @@ def quantise(data: ArrayLike, bits: int, dither: bool = True) -> np.ndarray:
         scaling to reduce artefacts.
     """
     scale = 2 ** (bits - 1) - 1
-    scaled = np.asarray(data) * scale
+    scaled = data * scale
     if dither:
-        # TODO: should it be seeded in some way?
-        rng = np.random.default_rng()
-        scaled += rng.uniform(low=-0.5, high=0.5, size=scaled.size)
-    return np.rint(np.clip(scaled, -scale, scale)).astype(np.int32)
+        # TODO: should it be seeded in some controllable way?
+        scaled += Dither().sample(scaled.size, 0)
+    return da.rint(da.clip(scaled, -scale, scale)).astype(np.int32)
 
 
 @numba.njit
-def _packbits(input: np.ndarray, output: np.ndarray, bits: int) -> None:  # pragma: nocover
+def _packbits(data: np.ndarray, bits: int) -> np.ndarray:  # pragma: nocover
     # Note: needs lots of explicit casting to np.uint64, as otherwise
     # numba seems to want to infer double precision.
+    out = np.zeros(data.size * bits // BYTE_BITS, np.uint8)
     buf = np.uint64(0)
     buf_size = 0
     mask = (np.uint64(1) << bits) - np.uint64(1)
     out_pos = 0
-    for v in input:
+    for v in data:
         buf = (buf << bits) | (np.uint64(v) & mask)
         buf_size += bits
         while buf_size >= BYTE_BITS:
-            output[out_pos] = buf >> (buf_size - BYTE_BITS)
+            out[out_pos] = buf >> (buf_size - BYTE_BITS)
             out_pos += 1
             buf_size -= BYTE_BITS
+    return out
 
 
-def packbits(data: ArrayLike, bits: int) -> np.ndarray:
+def packbits(data: da.Array, bits: int) -> da.Array:
     """Pack integers into bytes.
 
     The least-significant `bits` bits of each integer in `data` is collected
     together in big-endian order, and returned as a sequence of bytes. The
     total number of bits must form a whole number of bytes.
 
-    If `data` is multi-dimensional it is flattened.
+    The chunks in `data` must be aligned to multiples of 8.
     """
-    array = np.asarray(data).ravel()
-    if bits * array.size % BYTE_BITS:
-        raise ValueError("Bits do not form a whole number of bytes")
-    out = np.empty(bits * array.size // BYTE_BITS, np.uint8)
-    _packbits(array, out, bits)
-    return out
+    assert data.ndim == 1
+    if not all(c % BYTE_BITS == 0 for c in data.chunks[0]):
+        raise ValueError("Chunks are not aligned to byte boundaries")
+    out_chunks = (tuple(c * bits // BYTE_BITS for c in data.chunks[0]),)
+    return da.map_blocks(_packbits, data, dtype=np.uint8, chunks=out_chunks, bits=bits)
 
 
 def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray) -> None:
@@ -325,7 +419,10 @@ def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample
     ----------
     signals
         Signals to sample, one per polarisation
-    timestamp, sample_rate
+    timestamp
+        Timestamp for the first element to return. The signal is rotated by
+        this amount.
+    sample_rate
         Passed to :meth:`Signal.sample`
     sample_bits
         Passed to :func:`quantise` and :func:`packbits`
@@ -336,11 +433,16 @@ def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample
     if len(signals) != out.sizes["pol"]:
         raise ValueError(f"Expected {out.sizes['pol']} signals, received {len(signals)}")
     n = out.isel(pol=0).data.size * BYTE_BITS // sample_bits
-    for i, sig in enumerate(signals):
-        # TODO: cache shared signals to reduce computation time (or use Dask)
-        data = sig.sample(timestamp, n, sample_rate)
+    sampled = []
+    for sig in signals:
+        data = sig.sample(n, sample_rate)
         data = quantise(data, sample_bits)
-        out.isel(pol=i).data.ravel()[:] = packbits(data, sample_bits)
+        data = da.roll(data, -timestamp)
+        data = packbits(data, sample_bits)
+        sampled.append(data)
+    # Compute all the pols together, so that common signals are only computed
+    # once.
+    da.store(sampled, [out.isel(pol=i).data.ravel() for i in range(len(signals))], lock=False)
 
 
 async def sample_async(

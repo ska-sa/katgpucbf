@@ -1,5 +1,6 @@
 aiohttp
 aiokatcp
+dask
 katsdpservices
 katsdpsigproc[CUDA]>=1.4.1
 katsdptelstate

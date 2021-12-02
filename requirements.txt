@@ -23,6 +23,10 @@ attrs==21.2.0
     # via aiohttp
 charset-normalizer==2.0.7
     # via aiohttp
+cloudpickle==2.0.0
+    # via dask
+dask==2021.11.2
+    # via -r requirements.in
 decorator==5.0.9
     # via
     #   aiokatcp
@@ -31,6 +35,8 @@ frozenlist==1.2.0
     # via
     #   aiohttp
     #   aiosignal
+fsspec==2021.11.1
+    # via dask
 hiredis==2.0.0
     # via katsdptelstate
 idna==3.3
@@ -43,6 +49,8 @@ katsdptelstate==0.11
     # via -r requirements.in
 llvmlite==0.36.0
     # via numba
+locket==0.2.1
+    # via partd
 mako==1.1.4
     # via
     #   katsdpsigproc
@@ -72,10 +80,14 @@ numpy==1.21.0
     #   scipy
     #   spead2
     #   xarray
+packaging==21.3
+    # via dask
 pandas==1.3.0
     # via
     #   katsdpsigproc
     #   xarray
+partd==1.2.0
+    # via dask
 prometheus-async==19.2.0
     # via -r requirements.in
 prometheus-client==0.12.0
@@ -87,13 +99,17 @@ pycuda==2021.1
 pygelf==0.4.0
     # via katsdpservices
 pyparsing==3.0.6
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   packaging
 python-dateutil==2.8.1
     # via pandas
 pytools==2021.2.7
     # via pycuda
 pytz==2021.1
     # via pandas
+pyyaml==6.0
+    # via dask
 redis==3.5.3
     # via katsdptelstate
 scipy==1.7.0
@@ -104,6 +120,10 @@ six==1.16.0
     #   python-dateutil
 spead2==3.7.0
     # via -r requirements.in
+toolz==0.11.2
+    # via
+    #   dask
+    #   partd
 typing-extensions==3.10.0.0
     # via
     #   async-timeout
