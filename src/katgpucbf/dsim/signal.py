@@ -175,6 +175,10 @@ def parse_signals(prog: str) -> List[Signal]:
 
     variable = pp.pyparsing_common.identifier("variable")
     real = pp.pyparsing_common.number
+    # See https://pyparsing-docs.readthedocs.io/en/latest/HowToUsePyparsing.html#expression-subclasses
+    # for an explanation of + versus - in these rules (it helps give more
+    # useful errors). I've been conservative with the use of - i.e., there
+    # may be some +'s that can still be changed to -'s.
     cw = pp.Keyword("cw") + lpar - real + comma - real + rpar
     cw.set_parse_action(lambda s, loc, tokens: CW(tokens[1], tokens[2]))
     variable_expr = variable.copy()
