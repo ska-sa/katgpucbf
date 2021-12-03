@@ -94,7 +94,6 @@ class QueueItem:
     buffer_device: katsdpsigproc.accel.DeviceArray
 
     def __init__(self, timestamp: int = 0) -> None:
-        """Initialise the queue item."""
         self.reset(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -256,58 +255,13 @@ class XBEngine(DeviceServer):
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
 
-        # Array Configuration Parameters
-        self.adc_sample_rate_hz: float
-        self.send_rate_factor: float
-        self.heap_accumulation_threshold: int  # Specify a number of heaps per accumulation.
-        self.n_ants: int
-        self.n_channels_total: int
-        self.n_channels_per_stream: int
-        self.n_spectra_per_heap: int
-        self.sample_bits: int
-
-        # Derived Parameters
-        self.rx_heap_timestamp_step: int
-        self.timestamp_increment_per_accumulation: int
-        self.rx_bytes_per_heap_batch: int
-        self.dump_interval_s: float  # Number of seconds between output heaps.
-
-        # Engine Parameters
-        self.chunk_spectra: int  # Sets the number of batches of heaps to store per chunk.
-        self.max_active_chunks: int
-        # Used in the heap to indicate the first channel in the sequence of channels in the stream
-        self.channel_offset_value: int
-
-        # Flags used at some point in this class.
-        # - False if no transport has been added, true otherwise.
-        self.rx_transport_added: bool
-        self.tx_transport_added: bool
-
-        # * The _rx_item_queue passes items from the _receiver_loop function to
-        #   the _gpu_proc_loop function.
-        # * The _tx_item_queue passes items from the _gpu_proc_loop to the
-        #   _sender_loop function.
-        # Once the destination function is finished with an item, it will pass
-        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
-        # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem]
-        self._rx_free_item_queue: asyncio.Queue[RxQueueItem]
-        self._tx_item_queue: asyncio.Queue[QueueItem]
-        self._tx_free_item_queue: asyncio.Queue[QueueItem]
-
-        # A command queue is the OpenCL name for a CUDA stream. An abstract
-        # command queue can either be implemented as an OpenCL command queue or
-        # a CUDA stream depending on the context.
-        self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-        self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-        self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         if channel_offset_value % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
+        # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
@@ -336,23 +290,25 @@ class XBEngine(DeviceServer):
         # configure the receiver, we pass it as a seperate argument to the
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
-        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
+        self.rx_heap_timestamp_step: int = self.n_channels_total * 2 * self.n_spectra_per_heap
 
         # The number of bytes for a single batch of F-Engines. A chunk
         # consists of multiple batches.
-        self.rx_bytes_per_heap_batch = (
+        self.rx_bytes_per_heap_batch: int = (
             self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
         )
 
-        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
+        self.timestamp_increment_per_accumulation: int = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
+        # Sets the number of batches of heaps to store per chunk
         self.chunk_spectra = chunk_spectra
-        self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
-        n_free_chunks = self.max_active_chunks + 8
+        self.max_active_chunks: int = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
+        n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
         self.channel_offset_value = channel_offset_value
 
-        self.tx_transport_added = False
-        self.rx_transport_added = False
+        # False if no transport has been added, true otherwise.
+        self.tx_transport_added: bool = False
+        self.rx_transport_added: bool = False
 
         self.monitor = monitor
 
@@ -376,9 +332,12 @@ class XBEngine(DeviceServer):
 
         self.context = context
 
-        self._upload_command_queue = self.context.create_command_queue()
-        self._proc_command_queue = self.context.create_command_queue()
-        self._download_command_queue = self.context.create_command_queue()
+        # A command queue is the OpenCL name for a CUDA stream. An abstract
+        # command queue can either be implemented as an OpenCL command queue or
+        # a CUDA stream depending on the context.
+        self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
+        self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
+        self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
 
         tensor_core_template = CorrelationTemplate(
             self.context,
@@ -406,10 +365,17 @@ class XBEngine(DeviceServer):
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
-        self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)
-        self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
-        self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
+        # * The _rx_item_queue passes items from the _receiver_loop function to
+        #   the _gpu_proc_loop function.
+        # * The _tx_item_queue passes items from the _gpu_proc_loop to the
+        #   _sender_loop function.
+        # Once the destination function is finished with an item, it will pass
+        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
+        # all allocated buffers are in continuous circulation.
+        self._rx_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._tx_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
             rx_item = RxQueueItem()
@@ -589,7 +555,7 @@ class XBEngine(DeviceServer):
         # Care needs to be taken to ensure that this rate is not set too high.
         # If it is too high, the entire pipeline will stall needlessly waiting
         # for packets to be transmitted too slowly.
-        self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
+        self.dump_interval_s: float = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
         self.send_stream = XSend(
             n_ants=self.n_ants,
@@ -808,8 +774,6 @@ class XBEngine(DeviceServer):
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            # TODO: Change to an old-fashioned formatted string.
-            # - fstrings aren't great for logging.
             logger.info(
                 "Current output heap timestamp: %#x, difference between timestamps: %#x, "
                 "wall time between dumps %.2f s",

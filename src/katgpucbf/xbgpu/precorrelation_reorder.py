@@ -167,7 +167,6 @@ class PrecorrelationReorder(accel.Operation):
     """
 
     def __init__(self, template: PrecorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
-        """Initialise the PreCorrelationReorder object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
         self.slots["in_samples"] = accel.IOSlot(
