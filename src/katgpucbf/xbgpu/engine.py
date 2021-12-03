@@ -58,7 +58,7 @@ from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import CorrelationTemplate
-from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
+from .precorrelation_reorder import PrecorrelationReorderTemplate
 from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
@@ -290,15 +290,15 @@ class XBEngine(DeviceServer):
         # configure the receiver, we pass it as a seperate argument to the
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
-        self.rx_heap_timestamp_step: int = self.n_channels_total * 2 * self.n_spectra_per_heap
+        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
 
         # The number of bytes for a single batch of F-Engines. A chunk
         # consists of multiple batches.
-        self.rx_bytes_per_heap_batch: int = (
+        self.rx_bytes_per_heap_batch = (
             self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
         )
 
-        self.timestamp_increment_per_accumulation: int = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
+        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # Sets the number of batches of heaps to store per chunk
         self.chunk_spectra = chunk_spectra
@@ -307,8 +307,8 @@ class XBEngine(DeviceServer):
         self.channel_offset_value = channel_offset_value
 
         # False if no transport has been added, true otherwise.
-        self.tx_transport_added: bool = False
-        self.rx_transport_added: bool = False
+        self.tx_transport_added = False
+        self.rx_transport_added = False
 
         self.monitor = monitor
 
@@ -354,7 +354,7 @@ class XBEngine(DeviceServer):
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_batches=self.chunk_spectra,
         )
-        self.precorrelation_reorder: PrecorrelationReorder = reorder_template.instantiate(self._proc_command_queue)
+        self.precorrelation_reorder = reorder_template.instantiate(self._proc_command_queue)
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
             self.context,
@@ -631,14 +631,19 @@ class XBEngine(DeviceServer):
         async for chunk in recv.recv_chunks(self.receiver_stream):
             timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
 
+            # Get a free rx_item that will contain the GPU buffer to which the
+            # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
             item.timestamp += timestamp
             item.chunk = chunk
 
+            # Initiate transfer from received chunk to rx_item buffer.
+            # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
+            # Give the received item to the _gpu_proc_loop function.
             await self._rx_item_queue.put(item)
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
@@ -679,6 +684,9 @@ class XBEngine(DeviceServer):
         self.tensor_core_x_engine_core.zero_visibilities()
 
         while True:
+            # Get item from the receiver function.
+            # - Wait for the HtoD transfers to complete, then
+            # - Give the chunk back to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
             if rx_item is None:
                 break
@@ -714,7 +722,7 @@ class XBEngine(DeviceServer):
                 # accumulation does not necessarily line up with the chunk
                 # timestamp. It will line up with a specific batch within a
                 # chunk though, this is why this check has to happen for each
-                # batch. This check is the equivilant of the MeerKAT SKARAB
+                # batch. This check is the equivalent of the MeerKAT SKARAB
                 # X-Engine auto-resync logic.
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:

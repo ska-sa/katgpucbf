@@ -264,7 +264,6 @@ class XSend:
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
         packet_header_overhead_bytes = packets_per_heap * XSend.header_size
 
-        # Pass zero to stream_config to send as fast as possible.
         if self.dump_interval_s != 0:
             send_rate_bytes_per_second = (
                 (self.heap_payload_size_bytes + packet_header_overhead_bytes)
@@ -272,6 +271,7 @@ class XSend:
                 * self.send_rate_factor
             )  # * send_rate_factor adds a buffer to the rate to compensate for any unexpected jitter
         else:
+            # Pass zero to stream_config to send as fast as possible.
             send_rate_bytes_per_second = 0
 
         stream_config = spead2.send.StreamConfig(
@@ -280,8 +280,6 @@ class XSend:
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )
-        # NOTE: This class is currently marked as _private in the spead2 stub files,
-        # in a future revision it may be changed to public.
         self.source_stream = stream_factory(stream_config, self.buffers)
         self.source_stream.set_cnt_sequence(
             channel_offset // n_channels_per_stream,
