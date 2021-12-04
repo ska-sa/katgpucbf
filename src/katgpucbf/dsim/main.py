@@ -21,11 +21,16 @@ Simulates the packet structure of MeerKAT digitisers.
 
 import argparse
 import asyncio
+import atexit
 import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, SIGTERM
 from typing import List, Optional, Sequence, Tuple
 
+import dask.config
+import dask.system
 import katsdpservices
 import numpy as np
 import prometheus_async
@@ -140,6 +145,19 @@ async def async_main() -> None:
     """Asynchronous main entry point."""
     args = parse_args()
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
+
+    # Override dask's default thread pool with one that runs with SCHED_IDLE
+    # priority. This ensures that when the networking code needs a CPU core,
+    # it gets priority over dask.
+    # The type: ignore is because typeshed is currently missing os.sched_param
+    # (it is fixed in https://github.com/python/typeshed/pull/6442).
+    pool = ThreadPoolExecutor(
+        dask.config.get("num_workers", dask.system.CPU_COUNT),
+        initializer=os.sched_setscheduler,
+        initargs=(0, os.SCHED_IDLE, os.sched_param(0)),  # type: ignore
+    )
+    atexit.register(pool.shutdown)
+    dask.config.set(pool=pool)
 
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
