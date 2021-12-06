@@ -233,7 +233,7 @@ class Sender:
         """Send heaps continuously."""
         while self._running:
             for i, part in enumerate(self.heap_set.parts):
-                await asyncio.sleep(0)
+                await asyncio.sleep(0)  # ensure other tasks get time to run
                 if self._futures[i] is not None:
                     await asyncio.shield(self._futures[i])  # type: ignore
                     # set_heaps may have swapped heap_set out from under us during

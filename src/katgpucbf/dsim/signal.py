@@ -101,7 +101,7 @@ class Signal(ABC):
         return CombinedSignal(self, other, operator.mul, "*")
 
 
-@dataclass(frozen=True)
+@dataclass
 class CombinedSignal(Signal):
     """Signal built by combining two other signals.
 
@@ -128,7 +128,7 @@ class CombinedSignal(Signal):
         return f"({self.a} {self.op_name} {self.b})"
 
 
-@dataclass(frozen=True)
+@dataclass
 class CW(Signal):
     """Continuous wave.
 
@@ -185,7 +185,7 @@ class CW(Signal):
 
 
 # mypy override is due to https://github.com/python/mypy/issues/5374
-@dataclass(frozen=True)  # type: ignore
+@dataclass  # type: ignore
 class Random(Signal):
     """Base class for randomly-generated signals.
 
@@ -196,9 +196,7 @@ class Random(Signal):
     entropy: int  #: entropy used to populate a :class:`np.random.SeedSequence`
 
     def __init__(self, entropy: Optional[int] = None) -> None:
-        # This is a frozen dataclass, so we need to use object.__setattr__ to
-        # set the attribute.
-        object.__setattr__(self, "entropy", entropy if entropy is not None else self._generate_entropy())
+        self.entropy = entropy if entropy is not None else self._generate_entropy()
 
     def _generate_entropy(self) -> int:
         """Generate a random seed.
@@ -229,7 +227,7 @@ class Random(Signal):
         return self._sample_helper(n, seed_seqs_dask, self._sample_chunk)
 
 
-@dataclass(frozen=True)
+@dataclass
 class WGN(Random):
     """White Gaussian Noise signal.
 
@@ -245,8 +243,7 @@ class WGN(Random):
     def __init__(self, std: float, entropy: Optional[int] = None) -> None:
         # __init__ is overridden to change the argument order
         super().__init__(entropy)
-        # It's a frozen dataclass, so we need to use object.__setattr__ to set the attributes
-        object.__setattr__(self, "std", std)
+        self.std = std
 
     def _sample_chunk(self, seed_seq: Sequence[np.random.SeedSequence], *, chunk_size: int) -> np.ndarray:
         # The RNG is initialised every time this is called so that it will
