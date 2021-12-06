@@ -271,8 +271,8 @@ async def async_main(args: argparse.Namespace) -> None:
     )
 
     if args.src_ibv:
-        # Attach this transport to receive channelisation products from the network
-        # at high rates.
+        # Attach this transport to receive channelisation products from the
+        # network at high data rates.
         xbengine.add_udp_ibv_receiver_transport(
             src_ip=args.src.host,
             src_port=args.src.port,

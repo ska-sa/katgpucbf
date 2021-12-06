@@ -55,7 +55,7 @@ bad_feng_id_heaps_counter = Counter("input_bad_feng_id_heaps", "fengine ID is ou
 class _Statistic(IntEnum):
     """Custom statistics for the SPEAD receiver."""
 
-    # Note: the values are important and must match the registration order
+    # NOTE: the values are important and must match the registration order
     # of the statistics.
     METADATA_HEAPS = 0
     BAD_TIMESTAMP_HEAPS = 1
@@ -114,7 +114,7 @@ def make_stream(
     """
     heap_bytes = n_channels_per_stream * n_spectra_per_heap * N_POLS * COMPLEX * sample_bits // 8
     # max_heaps is set quite high because timing jitter/bursting means there
-    # could be multiple heaps from one F-engine during the time it takes
+    # could be multiple heaps from one F-Engine during the time it takes
     # another to transmit.
     stream_config = spead2.recv.StreamConfig(
         max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 4,
@@ -199,7 +199,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
         heaps_counter.inc(expected_heaps)
         chunks_counter.inc(1)
         bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
-        # Note: this won't be synchronised with the chunk, as more heaps may
+        # NOTE: this won't be synchronised with the chunk, as more heaps may
         # have arrived after the chunk was pushed to the ringbuffer. But on
         # the time scales at which Prometheus scrapes it will be close.
         stats_to_counters.update(stream.stats)
