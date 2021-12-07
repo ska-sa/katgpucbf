@@ -40,6 +40,9 @@ bytes_counter = Counter("input_bytes", "number of bytes of input data received",
 incomplete_heaps_counter = Counter(
     "input_incomplete_heaps", "number of heaps only partially received", namespace=METRIC_NAMESPACE
 )
+too_old_heaps_counter = Counter(
+    "input_too_old_heaps", "number of heaps that arrived too late to be processed", namespace=METRIC_NAMESPACE
+)
 missing_heaps_counter = Counter(
     "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
 )
@@ -181,6 +184,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
     """
     counter_map = {
         "incomplete_heaps_evicted": incomplete_heaps_counter,
+        "too_old_heaps": too_old_heaps_counter,
         "katgpucbf.metadata_heaps": metadata_heaps_counter,
         "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
         "katgpucbf.bad_feng_id_heaps": bad_feng_id_heaps_counter,

@@ -48,6 +48,9 @@ chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], n
 bytes_counter = Counter(
     "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
 )
+too_old_heaps_counter = Counter(
+    "input_too_old_heaps", "number of heaps that arrived too late to be processed", ["pol"], namespace=METRIC_NAMESPACE
+)
 missing_heaps_counter = Counter(
     "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
 )
@@ -213,6 +216,7 @@ async def chunk_sets(
     stats_to_counters = [
         StatsToCounters(
             {
+                "too_old_heaps": too_old_heaps_counter.labels(pol),
                 "katgpucbf.metadata_heaps": metadata_heaps_counter.labels(pol),
                 "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter.labels(pol),
             },
