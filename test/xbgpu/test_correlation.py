@@ -20,13 +20,13 @@ import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 from numba import njit, prange
 
-from katgpucbf.xbgpu import correlation
+from katgpucbf.xbgpu.correlation import Correlation, CorrelationTemplate, device_filter
 
 from . import test_parameters
 
-pytestmark = [pytest.mark.device_filter.with_args(correlation.device_filter)]
+pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
-get_baseline_index = njit(correlation.Correlation.get_baseline_index)
+get_baseline_index = njit(Correlation.get_baseline_index)
 
 
 @njit(parallel=True)
@@ -95,13 +95,13 @@ def test_correlator(
     # move it into a test fixture.
     n_chans_per_stream = num_channels // num_ants // 4
 
-    template = correlation.CorrelationTemplate(
+    template = CorrelationTemplate(
         context, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
     )
-    tensor_core_x_engine_core = template.instantiate(command_queue)
-    tensor_core_x_engine_core.ensure_all_bound()
+    correlation = template.instantiate(command_queue)
+    correlation.ensure_all_bound()
 
-    buf_samples_device = tensor_core_x_engine_core.buffer("in_samples")
+    buf_samples_device = correlation.buffer("in_samples")
     buf_samples_host = buf_samples_device.empty_like()
 
     rng = np.random.default_rng(seed=2021)
@@ -116,7 +116,7 @@ def test_correlator(
         endpoint=True,  # We don't need to exclude the maximum positive value though.
     )
 
-    buf_visibilities_device = tensor_core_x_engine_core.buffer("out_visibilities")
+    buf_visibilities_device = correlation.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
     # Set pre-existing values, to check that the computed values are added to them.
     buf_visibilities_host[:] = rng.integers(
@@ -137,7 +137,7 @@ def test_correlator(
 
     buf_samples_device.set(command_queue, buf_samples_host)
     buf_visibilities_device.set(command_queue, buf_visibilities_host)
-    tensor_core_x_engine_core()
+    correlation()
     buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
     np.testing.assert_equal(buf_visibilities_host, summed_visibilities_host)
