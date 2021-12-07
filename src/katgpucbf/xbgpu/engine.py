@@ -339,13 +339,13 @@ class XBEngine(DeviceServer):
         self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
         self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
 
-        tensor_core_template = CorrelationTemplate(
+        correlation_template = CorrelationTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
         )
-        self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
+        self.correlation = correlation_template.instantiate(self._proc_command_queue)
 
         reorder_template = PrecorrelationReorderTemplate(
             self.context,
@@ -390,8 +390,8 @@ class XBEngine(DeviceServer):
             tx_item = QueueItem()
             tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
-                self.tensor_core_x_engine_core.slots["out_visibilities"].shape,  # type: ignore
-                self.tensor_core_x_engine_core.slots["out_visibilities"].dtype,  # type: ignore
+                self.correlation.slots["out_visibilities"].shape,  # type: ignore
+                self.correlation.slots["out_visibilities"].dtype,  # type: ignore
             )
             self._tx_free_item_queue.put_nowait(tx_item)
 
@@ -680,8 +680,8 @@ class XBEngine(DeviceServer):
         # of zero which is meaningless, every other heap will have the correct
         # timestamp.
         tx_item.timestamp = 0
-        self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
-        self.tensor_core_x_engine_core.zero_visibilities()
+        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.zero_visibilities()
 
         while True:
             # Get item from the receiver function.
@@ -711,12 +711,12 @@ class XBEngine(DeviceServer):
             for i in range(self.chunk_spectra):
                 buffer_slice = katsdpsigproc.accel.DeviceArray(
                     self.context,
-                    self.tensor_core_x_engine_core.slots["in_samples"].shape,  # type: ignore
-                    self.tensor_core_x_engine_core.slots["in_samples"].dtype,  # type: ignore
+                    self.correlation.slots["in_samples"].shape,  # type: ignore
+                    self.correlation.slots["in_samples"].dtype,  # type: ignore
                     raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
                 )
-                self.tensor_core_x_engine_core.bind(in_samples=buffer_slice)
-                self.tensor_core_x_engine_core()
+                self.correlation.bind(in_samples=buffer_slice)
+                self.correlation()
 
                 # NOTE: The timestamp representing the end of an
                 # accumulation does not necessarily line up with the chunk
@@ -733,8 +733,8 @@ class XBEngine(DeviceServer):
                     tx_item = await self._tx_free_item_queue.get()
                     await tx_item.async_wait_for_events()
                     tx_item.timestamp = next_heap_timestamp
-                    self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
-                    self.tensor_core_x_engine_core.zero_visibilities()
+                    self.correlation.bind(out_visibilities=tx_item.buffer_device)
+                    self.correlation.zero_visibilities()
 
                 current_timestamp += self.rx_heap_timestamp_step
 
