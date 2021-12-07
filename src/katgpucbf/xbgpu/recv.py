@@ -120,7 +120,7 @@ def make_stream(
     # could be multiple heaps from one F-Engine during the time it takes
     # another to transmit.
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 4,
+        max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 16,
         memcpy=spead2.MEMCPY_NONTEMPORAL,
     )
     stats_base = stream_config.next_stat_index()
