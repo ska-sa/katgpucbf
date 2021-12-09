@@ -25,7 +25,7 @@ by the request handler for the ``?delays`` katcp request.
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Tuple
+from typing import Callable, Deque, Optional, Tuple
 
 import numpy as np
 
@@ -170,15 +170,22 @@ class MultiDelayModel(AbstractDelayModel):
     the first piece it is discarded.
 
     In the initial state it has a model with zero delay.
+
+    It accepts an optional callback function that takes in the
+    LinearDelayModels attached to this MultiDelayModel.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, callback_func: Optional[Callable[[Deque[LinearDelayModel]], "None"]] = None) -> None:
         # The initial time is -1 rather than 0 so that it doesn't get removed
         # if a model is added with start time 0, which can lead to some
         # spurious warnings in unit tests about non-monotonic queries.
         # Ideally it would use -infinity (or a large negative number), but
         # that causes issues with numeric precision.
         self._models = deque([LinearDelayModel(-1, 0.0, 0.0, 0.0, 0.0)])
+        self.callback_func = None
+        if callback_func is not None:
+            self.callback_func = callback_func
+            self.callback_func(self._models)
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:
@@ -189,12 +196,17 @@ class MultiDelayModel(AbstractDelayModel):
                 f"at {self._models[0].start} - possibly due to non-monotonic queries",
                 NonMonotonicQueryWarning,
             )
+
+        if self.callback_func is not None:
+            self.callback_func(self._models)
+
         return self._models[0](time)
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         orig, fine_delay, phase = self._models[0].invert_range(start, stop, step)
 
         if len(orig) == 0:  # Defence against corner case breaking things.
+            # TODO: Check if we need to update the sensor for this case
             return orig, fine_delay, phase
 
         if orig[0] < self._models[0].start:
@@ -226,6 +238,8 @@ class MultiDelayModel(AbstractDelayModel):
                 cull = i
         for _ in range(cull):
             self._models.popleft()
+        if self.callback_func is not None:
+            self.callback_func(self._models)
         return orig, fine_delay, phase
 
     def add(self, model: LinearDelayModel) -> None:
@@ -238,3 +252,5 @@ class MultiDelayModel(AbstractDelayModel):
         while self._models and model.start <= self._models[-1].start:
             self._models.pop()
         self._models.append(model)
+        if self.callback_func is not None:
+            self.callback_func(self._models)
