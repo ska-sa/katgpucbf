@@ -231,7 +231,6 @@ class Engine(aiokatcp.DeviceServer):
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
         self.delay_models = []
-        # self.delay_models = [MultiDelayModel() for _ in range(N_POLS)]
 
         for pol in range(N_POLS):
             self.sensors[f"input{pol}-eq"].value = str([gain])
@@ -356,7 +355,7 @@ class Engine(aiokatcp.DeviceServer):
                 "count when model was loaded>, delay <in seconds>, "
                 "delay-rate <unit-less or, seconds-per-second>, "
                 "phase <radians>, phase-rate <radians per second>).",
-                default="(-1, 0.0, 0.0, 0.0, 0.0)",  # TODO: Or initialise the value manually elsewhere?
+                default="(-1, 0.0, 0.0, 0.0, 0.0)",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
             sensors.add(sensor)
