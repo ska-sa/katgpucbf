@@ -33,10 +33,6 @@ loops within the object.
       the error trace stack. This is not an issue when things are working, but
       if we could catch those exceptions and crash the program, it would make
       detecting and debugging heaps much simpler.
-    - The asyncio syntax in the run() function uses old syntax, once this repo
-      has been updated to python 3.8, update this to use the new asyncio
-      syntax.
-
 """
 
 import asyncio
