@@ -213,12 +213,12 @@ class Correlation(accel.Operation):
             local_size=(32, 2, 2),
         )
 
-    def zero_visibilities(self):
+    def zero_visibilities(self) -> None:
         """Zero all the values in the out_visibilities buffer."""
         self.buffer("out_visibilities").zero(self.command_queue)
 
     @staticmethod
-    def get_baseline_index(ant1, ant2):
+    def get_baseline_index(ant1, ant2) -> int:
         r"""Get index in the visibilities matrix for baseline (ant1, ant2).
 
         The visibilities matrix indexing is as follows:

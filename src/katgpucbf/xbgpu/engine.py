@@ -102,11 +102,11 @@ class QueueItem:
         self.events = []
         # Need to reset chunk
 
-    def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
+    def add_event(self, event: katsdpsigproc.abc.AbstractEvent) -> None:
         """Add an event to the list of events in the QueueItem."""
         self.events.append(event)
 
-    async def async_wait_for_events(self):
+    async def async_wait_for_events(self) -> None:
         """Wait for all events on the list of events to be comlete."""
         await katsdpsigproc.resource.async_wait_for_events(self.events)
 
@@ -407,7 +407,7 @@ class XBEngine(DeviceServer):
 
     def add_udp_ibv_receiver_transport(
         self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int, buffer_size: int
-    ):
+    ) -> None:
         """
         Add the ibv_udp transport to the receiver.
 
@@ -438,7 +438,7 @@ class XBEngine(DeviceServer):
         )
         self.rx_transport_added = True
 
-    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int):
+    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int) -> None:
         """
         Add the 'regular' UDP transport to the receiver.
 
@@ -467,7 +467,7 @@ class XBEngine(DeviceServer):
 
         self.rx_transport_added = True
 
-    def add_buffer_receiver_transport(self, buffer: bytes):
+    def add_buffer_receiver_transport(self, buffer: bytes) -> None:
         """
         Add the buffer transport to the receiver.
 
@@ -487,7 +487,7 @@ class XBEngine(DeviceServer):
         self.receiver_stream.add_buffer_reader(buffer)
         self.rx_transport_added = True
 
-    def add_pcap_receiver_transport(self, pcap_filename: str):
+    def add_pcap_receiver_transport(self, pcap_filename: str) -> None:
         """
         Add the pcap transport to the receiver.
 
@@ -514,7 +514,7 @@ class XBEngine(DeviceServer):
         comp_vector: int,
         packet_payload: int,
         use_ibv: bool = True,
-    ):
+    ) -> None:
         """
         Add a UDP transport to the sender.
 
@@ -581,7 +581,7 @@ class XBEngine(DeviceServer):
 
         self.tx_transport_added = True
 
-    def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
+    def add_inproc_sender_transport(self, queue: spead2.InprocQueue) -> None:
         """
         Add the inproc transport to the sender.
 
@@ -615,7 +615,7 @@ class XBEngine(DeviceServer):
             ),
         )
 
-    async def _receiver_loop(self):
+    async def _receiver_loop(self) -> None:
         """
         Receive heaps off of the network in a continuous loop.
 
@@ -648,9 +648,9 @@ class XBEngine(DeviceServer):
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")
-        self._rx_item_queue.put_nowait(None)
+        self._rx_item_queue.put_nowait(None)  # type: ignore
 
-    async def _gpu_proc_loop(self):
+    async def _gpu_proc_loop(self) -> None:
         """
         Perform all GPU processing of received data in a continuous loop.
 
@@ -693,8 +693,9 @@ class XBEngine(DeviceServer):
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
 
-            # NOTE: If this is not done, eventually no more data will be
-            # received as there will be no available chunks to store it in.
+            # If we don't return the chunk to the stream, eventually no more
+            # data can be received.
+            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
             self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
@@ -744,7 +745,7 @@ class XBEngine(DeviceServer):
         logger.debug("_gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def _sender_loop(self):
+    async def _sender_loop(self) -> None:
         """
         Send heaps to the network in a continuous loop.
 
@@ -829,7 +830,7 @@ class XBEngine(DeviceServer):
         await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
-    async def run_descriptors_loop(self, interval_s):
+    async def run_descriptors_loop(self, interval_s) -> None:
         """
         Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
 
@@ -840,7 +841,7 @@ class XBEngine(DeviceServer):
             self.send_stream.send_descriptor_heap()
             await asyncio.sleep(interval_s)
 
-    async def start(self):
+    async def start(self) -> None:
         """
         Launch all the different async functions required to run the X-Engine.
 
@@ -862,7 +863,7 @@ class XBEngine(DeviceServer):
 
         await super().start()
 
-    async def on_stop(self):
+    async def on_stop(self) -> None:
         """
         Shut down processing when the device server is stopped.
 
