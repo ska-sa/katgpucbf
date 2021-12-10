@@ -82,7 +82,7 @@ def make_stream(
     max_active_chunks: int,
     ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     thread_affinity: int,
-):
+) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
     Parameters

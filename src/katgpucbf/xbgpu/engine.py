@@ -33,10 +33,6 @@ loops within the object.
       the error trace stack. This is not an issue when things are working, but
       if we could catch those exceptions and crash the program, it would make
       detecting and debugging heaps much simpler.
-    - The asyncio syntax in the run() function uses old syntax, once this repo
-      has been updated to python 3.8, update this to use the new asyncio
-      syntax.
-
 """
 
 import asyncio
@@ -89,24 +85,21 @@ class QueueItem:
     completed.
     """
 
-    timestamp: int
-    events: List[katsdpsigproc.abc.AbstractEvent]
-    buffer_device: katsdpsigproc.accel.DeviceArray
-
-    def __init__(self, timestamp: int = 0) -> None:
+    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, timestamp: int = 0) -> None:
         self.reset(timestamp)
+        self.buffer_device = buffer_device
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp and events."""
         self.timestamp = timestamp
-        self.events = []
+        self.events: List[katsdpsigproc.abc.AbstractEvent] = []
         # Need to reset chunk
 
-    def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
+    def add_event(self, event: katsdpsigproc.abc.AbstractEvent) -> None:
         """Add an event to the list of events in the QueueItem."""
         self.events.append(event)
 
-    async def async_wait_for_events(self):
+    async def async_wait_for_events(self) -> None:
         """Wait for all events on the list of events to be comlete."""
         await katsdpsigproc.resource.async_wait_for_events(self.events)
 
@@ -121,12 +114,10 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
-    chunk: Optional[recv.Chunk]
-
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
-        self.chunk = None
+        self.chunk: Optional[recv.Chunk] = None
 
 
 class XBEngine(DeviceServer):
@@ -335,9 +326,9 @@ class XBEngine(DeviceServer):
         # A command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
         # a CUDA stream depending on the context.
-        self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
-        self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
-        self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
+        self._upload_command_queue = self.context.create_command_queue()
+        self._proc_command_queue = self.context.create_command_queue()
+        self._download_command_queue = self.context.create_command_queue()
 
         correlation_template = CorrelationTemplate(
             self.context,
@@ -372,27 +363,27 @@ class XBEngine(DeviceServer):
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_item_queue: asyncio.Queue[Optional[RxQueueItem]] = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_item_queue: asyncio.Queue[Optional[QueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
-            rx_item = RxQueueItem()
-            rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
                 self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
             )
+            rx_item = RxQueueItem(buffer_device)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
-            tx_item = QueueItem()
-            tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.correlation.slots["out_visibilities"].shape,  # type: ignore
                 self.correlation.slots["out_visibilities"].dtype,  # type: ignore
             )
+            tx_item = QueueItem(buffer_device)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
@@ -407,7 +398,7 @@ class XBEngine(DeviceServer):
 
     def add_udp_ibv_receiver_transport(
         self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int, buffer_size: int
-    ):
+    ) -> None:
         """
         Add the ibv_udp transport to the receiver.
 
@@ -438,7 +429,7 @@ class XBEngine(DeviceServer):
         )
         self.rx_transport_added = True
 
-    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int):
+    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int) -> None:
         """
         Add the 'regular' UDP transport to the receiver.
 
@@ -467,7 +458,7 @@ class XBEngine(DeviceServer):
 
         self.rx_transport_added = True
 
-    def add_buffer_receiver_transport(self, buffer: bytes):
+    def add_buffer_receiver_transport(self, buffer: bytes) -> None:
         """
         Add the buffer transport to the receiver.
 
@@ -487,7 +478,7 @@ class XBEngine(DeviceServer):
         self.receiver_stream.add_buffer_reader(buffer)
         self.rx_transport_added = True
 
-    def add_pcap_receiver_transport(self, pcap_filename: str):
+    def add_pcap_receiver_transport(self, pcap_filename: str) -> None:
         """
         Add the pcap transport to the receiver.
 
@@ -514,7 +505,7 @@ class XBEngine(DeviceServer):
         comp_vector: int,
         packet_payload: int,
         use_ibv: bool = True,
-    ):
+    ) -> None:
         """
         Add a UDP transport to the sender.
 
@@ -581,7 +572,7 @@ class XBEngine(DeviceServer):
 
         self.tx_transport_added = True
 
-    def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
+    def add_inproc_sender_transport(self, queue: spead2.InprocQueue) -> None:
         """
         Add the inproc transport to the sender.
 
@@ -615,7 +606,7 @@ class XBEngine(DeviceServer):
             ),
         )
 
-    async def _receiver_loop(self):
+    async def _receiver_loop(self) -> None:
         """
         Receive heaps off of the network in a continuous loop.
 
@@ -650,7 +641,7 @@ class XBEngine(DeviceServer):
         logger.debug("_receiver_loop completed")
         self._rx_item_queue.put_nowait(None)
 
-    async def _gpu_proc_loop(self):
+    async def _gpu_proc_loop(self) -> None:
         """
         Perform all GPU processing of received data in a continuous loop.
 
@@ -671,7 +662,9 @@ class XBEngine(DeviceServer):
         The above steps are performed in a loop until the running flag is set
         to false.
 
-        TODO: Add B-Engine processing in this function.
+        .. todo::
+
+            Add B-Engine processing in this function.
         """
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
@@ -693,8 +686,9 @@ class XBEngine(DeviceServer):
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
 
-            # NOTE: If this is not done, eventually no more data will be
-            # received as there will be no available chunks to store it in.
+            # If we don't return the chunk to the stream, eventually no more
+            # data can be received.
+            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
             self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
@@ -744,7 +738,7 @@ class XBEngine(DeviceServer):
         logger.debug("_gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def _sender_loop(self):
+    async def _sender_loop(self) -> None:
         """
         Send heaps to the network in a continuous loop.
 
@@ -829,7 +823,7 @@ class XBEngine(DeviceServer):
         await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
-    async def run_descriptors_loop(self, interval_s):
+    async def run_descriptors_loop(self, interval_s: float) -> None:
         """
         Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
 
@@ -840,7 +834,7 @@ class XBEngine(DeviceServer):
             self.send_stream.send_descriptor_heap()
             await asyncio.sleep(interval_s)
 
-    async def start(self):
+    async def start(self) -> None:
         """
         Launch all the different async functions required to run the X-Engine.
 
@@ -862,7 +856,7 @@ class XBEngine(DeviceServer):
 
         await super().start()
 
-    async def on_stop(self):
+    async def on_stop(self) -> None:
         """
         Shut down processing when the device server is stopped.
 
