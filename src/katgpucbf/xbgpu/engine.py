@@ -368,9 +368,9 @@ class XBEngine(DeviceServer):
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_item_queue: asyncio.Queue[Optional[RxQueueItem]] = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_item_queue: asyncio.Queue[Optional[QueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
@@ -644,7 +644,7 @@ class XBEngine(DeviceServer):
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")
-        self._rx_item_queue.put_nowait(None)  # type: ignore
+        self._rx_item_queue.put_nowait(None)
 
     async def _gpu_proc_loop(self) -> None:
         """
