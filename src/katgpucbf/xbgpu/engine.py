@@ -85,17 +85,14 @@ class QueueItem:
     completed.
     """
 
-    timestamp: int
-    events: List[katsdpsigproc.abc.AbstractEvent]
-    buffer_device: katsdpsigproc.accel.DeviceArray
-
-    def __init__(self, timestamp: int = 0) -> None:
+    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, timestamp: int = 0) -> None:
         self.reset(timestamp)
+        self.buffer_device = buffer_device
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp and events."""
         self.timestamp = timestamp
-        self.events = []
+        self.events: List[katsdpsigproc.abc.AbstractEvent] = []
         # Need to reset chunk
 
     def add_event(self, event: katsdpsigproc.abc.AbstractEvent) -> None:
@@ -117,12 +114,10 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
-    chunk: Optional[recv.Chunk]
-
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
-        self.chunk = None
+        self.chunk: Optional[recv.Chunk] = None
 
 
 class XBEngine(DeviceServer):
@@ -374,21 +369,21 @@ class XBEngine(DeviceServer):
         self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
-            rx_item = RxQueueItem()
-            rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
                 self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
             )
+            rx_item = RxQueueItem(buffer_device)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
-            tx_item = QueueItem()
-            tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.correlation.slots["out_visibilities"].shape,  # type: ignore
                 self.correlation.slots["out_visibilities"].dtype,  # type: ignore
             )
+            tx_item = QueueItem(buffer_device)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
@@ -667,7 +662,9 @@ class XBEngine(DeviceServer):
         The above steps are performed in a loop until the running flag is set
         to false.
 
-        TODO: Add B-Engine processing in this function.
+        .. todo::
+
+            Add B-Engine processing in this function.
         """
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
@@ -826,7 +823,7 @@ class XBEngine(DeviceServer):
         await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
-    async def run_descriptors_loop(self, interval_s) -> None:
+    async def run_descriptors_loop(self, interval_s: float) -> None:
         """
         Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
 
