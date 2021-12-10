@@ -326,9 +326,9 @@ class XBEngine(DeviceServer):
         # A command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
         # a CUDA stream depending on the context.
-        self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
-        self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
-        self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue = self.context.create_command_queue()
+        self._upload_command_queue = self.context.create_command_queue()
+        self._proc_command_queue = self.context.create_command_queue()
+        self._download_command_queue = self.context.create_command_queue()
 
         correlation_template = CorrelationTemplate(
             self.context,
