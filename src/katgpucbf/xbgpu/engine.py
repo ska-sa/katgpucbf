@@ -85,6 +85,9 @@ class QueueItem:
     completed.
     """
 
+    timestamp: int
+    events: List[katsdpsigproc.abc.AbstractEvent]
+
     def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, timestamp: int = 0) -> None:
         self.reset(timestamp)
         self.buffer_device = buffer_device
@@ -92,7 +95,7 @@ class QueueItem:
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp and events."""
         self.timestamp = timestamp
-        self.events: List[katsdpsigproc.abc.AbstractEvent] = []
+        self.events = []
         # Need to reset chunk
 
     def add_event(self, event: katsdpsigproc.abc.AbstractEvent) -> None:
@@ -114,10 +117,12 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
+    chunk: Optional[recv.Chunk]
+
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
-        self.chunk: Optional[recv.Chunk] = None
+        self.chunk = None
 
 
 class XBEngine(DeviceServer):
