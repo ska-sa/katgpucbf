@@ -19,7 +19,8 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from functools import partial
+from typing import Dict, List, Optional, Tuple
 from unittest import mock
 
 import aiokatcp
@@ -34,6 +35,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 from katgpucbf.spead import FLAVOUR
 
+from .test_katcp_interface import get_sensor
 from .test_recv import gen_heaps
 
 pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
@@ -455,6 +457,10 @@ class TestEngine:
         engine_client: aiokatcp.Client,
     ) -> None:
         """Test that delay rate and phase rate setting works."""
+        import logging
+
+        logger = logging.getLogger()
+        logging.basicConfig()
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
@@ -483,6 +489,10 @@ class TestEngine:
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
         timestamps = timestamps[:, np.newaxis]
+        # TODO: Check delay sensors here?
+        for pol in range(N_POLS):
+            sensor_value = await get_sensor(engine_client, f"input{pol}-delay")
+            logger.info(sensor_value)
         # Invert the delay model to find the corresponding input timestamps,
         # which in turn tells us the delay and phase rate applied at those times.
         # If t_i is the input timestamp and t_o is the output timestamp, then the
@@ -507,6 +517,29 @@ class TestEngine:
         engine_client: aiokatcp.Client,
     ) -> None:
         """Test loading several future delay models."""
+        # TODO: Attach observer to the delay sensors
+        # - Observer itself is callable
+        # - Needs to accept an aiokatcp.Sensor and the aiokatcp.Reading
+
+        delay_sensors = [engine_server.sensors[f"input{pol}-delay"] for pol in range(N_POLS)]
+        sensor_updates_dict: Dict[str, List] = {delay_sensor.name: [] for delay_sensor in delay_sensors}
+
+        def sensor_observer(
+            delay_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List
+        ) -> None:
+            """Needs to at least populate a list to compare at the end of this unit-test."""
+            # TODO: Could even pass it the dict and use the delay_sensor to key it
+            # updates_dict[delay_sensor.name].append(sensor_reading.value)
+            updates_list.append(sensor_reading.value)
+
+        for delay_sensor in delay_sensors:
+            # delay_sensor.attach(sensor_observer)
+            delay_sensor.attach(partial(sensor_observer, updates_list=sensor_updates_dict[delay_sensor.name]))
+
+        import logging
+
+        logger = logging.getLogger()
+        logging.basicConfig()
         # To keep things simple, we'll just use phase, not delay.
         tone_channel = CHANNELS // 2
         tone = CW(frac_channel=0.5, magnitude=110)
@@ -535,3 +568,8 @@ class TestEngine:
             assert np.any(valid)
             phases = np.angle(out_data[valid])
             np.testing.assert_equal(wrap_angle(phases - update_phases[i]), pytest.approx(0, abs=0.01))
+
+        for delay_sensor in delay_sensors:
+            for sensor_update in sensor_updates_dict[delay_sensor.name]:
+                logger.info(sensor_update)
+            logger.info("============")

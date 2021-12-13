@@ -25,7 +25,7 @@ by the request handler for the ``?delays`` katcp request.
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Callable, Deque, Optional, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -172,10 +172,11 @@ class MultiDelayModel(AbstractDelayModel):
     In the initial state it has a model with zero delay.
 
     It accepts an optional callback function that takes in the
-    LinearDelayModels attached to this MultiDelayModel.
+    LinearDelayModels attached to this MultiDelayModel. This
+    callback is invoked immediately by the constructor.
     """
 
-    def __init__(self, callback_func: Optional[Callable[[Deque[LinearDelayModel]], "None"]] = None) -> None:
+    def __init__(self, callback_func: Optional[Callable[[Sequence[LinearDelayModel]], None]] = None) -> None:
         # The initial time is -1 rather than 0 so that it doesn't get removed
         # if a model is added with start time 0, which can lead to some
         # spurious warnings in unit tests about non-monotonic queries.
@@ -197,16 +198,12 @@ class MultiDelayModel(AbstractDelayModel):
                 NonMonotonicQueryWarning,
             )
 
-        if self.callback_func is not None:
-            self.callback_func(self._models)
-
         return self._models[0](time)
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         orig, fine_delay, phase = self._models[0].invert_range(start, stop, step)
 
         if len(orig) == 0:  # Defence against corner case breaking things.
-            # TODO: Check if we need to update the sensor for this case
             return orig, fine_delay, phase
 
         if orig[0] < self._models[0].start:
@@ -238,7 +235,7 @@ class MultiDelayModel(AbstractDelayModel):
                 cull = i
         for _ in range(cull):
             self._models.popleft()
-        if self.callback_func is not None:
+        if cull > 0 and self.callback_func is not None:
             self.callback_func(self._models)
         return orig, fine_delay, phase
 

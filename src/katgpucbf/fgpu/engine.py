@@ -20,7 +20,7 @@ import asyncio
 import logging
 import numbers
 from functools import partial
-from typing import Deque, List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -355,27 +355,31 @@ class Engine(aiokatcp.DeviceServer):
                 "count when model was loaded>, delay <in seconds>, "
                 "delay-rate <unit-less or, seconds-per-second>, "
                 "phase <radians>, phase-rate <radians per second>).",
-                default="(-1, 0.0, 0.0, 0.0, 0.0)",
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
             sensors.add(sensor)
 
-    @staticmethod
-    def update_delay_sensor(delay_models: Deque[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
+    # @staticmethod
+    def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
         """Update the delay sensor upon loading of a new model.
 
         Accepting the delay_models as a Deque as that is the type it is
         declared as in the MultiDelayModel, even though we only need the
         first one to update the sensor.
+
+        The delay and phase-rate values need to be scaled back to their
+        original values (delay (s), phase-rate (rad/s)).
         """
         logger.debug(f"Updating delay sensor: {delay_sensor.name}")
 
+        orig_delay = delay_models[0].delay / self.adc_sample_rate
+        phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
+        orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.adc_sample_rate
         delay_sensor.value = (
             f"({delay_models[0].start}, "
-            f"{delay_models[0].delay}, "
+            f"{orig_delay}, "
             f"{delay_models[0].delay_rate}, "
-            f"{delay_models[0].phase}, "
-            f"{delay_models[0].phase_rate})"
+            f"{delay_models[0].phase_rate}, "
+            f"{orig_phase_rate})"
         )
 
     def set_gains(self, input: int, gains: np.ndarray) -> None:

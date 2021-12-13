@@ -15,6 +15,8 @@
 ################################################################################
 
 """Unit tests for DelayModel functions."""
+from collections import Sequence
+
 import numpy as np
 import pytest
 
@@ -30,6 +32,11 @@ def test_wrap_angle(input: float, output: float) -> None:
     assert wrap_angle(-input) == pytest.approx(-output)
 
 
+def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel]) -> None:
+    """Test functionality in MultiDelayModel."""
+    pass
+
+
 @pytest.fixture
 def linear() -> LinearDelayModel:
     """Create a LinearDelayModel with a fixed set of parameters for testing."""
@@ -39,7 +46,7 @@ def linear() -> LinearDelayModel:
 @pytest.fixture
 def multi(linear) -> MultiDelayModel:
     """Create a MultiDelayModel with a fixed set of parameters for testing."""
-    out = MultiDelayModel()
+    out = MultiDelayModel(callback_func=mdelay_model_callback)
     # First model is the same as the linear fixture
     out.add(linear)
     out.add(LinearDelayModel(30000, 50.5, -0.0025, 0.5, 0.01))
