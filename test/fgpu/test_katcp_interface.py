@@ -160,30 +160,6 @@ class TestKatcpRequests:
     # region ?delay requests
 
     @pytest.mark.parametrize(
-        "correct_delay_string",
-        [
-            "3.76,0.12:7.322,1.91",
-        ],
-    )
-    async def test_delay_model_update_correct(self, engine_client, correct_delay_string):
-        """Test that a correctly-formed delay model is accepted.
-
-        This also includes testing that the delay sensors update accordingly.
-        """
-        import logging
-
-        logger = logging.getLogger()
-
-        logging.basicConfig()
-        start_time = SYNC_EPOCH + 0
-        logging.info(correct_delay_string)
-        await engine_client.request("delays", start_time, correct_delay_string, correct_delay_string)
-
-        for pol in range(N_POLS):
-            sensor_value = await get_sensor(engine_client, f"input{pol}-delay")
-            logger.info(sensor_value)
-
-    @pytest.mark.parametrize(
         "malformed_delay_string",
         [
             "3.76,0.12;7.322,1.91",  # Missing colon
