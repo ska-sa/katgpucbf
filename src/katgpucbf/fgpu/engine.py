@@ -371,6 +371,8 @@ class Engine(aiokatcp.DeviceServer):
         """
         logger.debug(f"Updating delay sensor: {delay_sensor.name}")
 
+        # start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
+
         orig_delay = delay_models[0].delay / self.adc_sample_rate
         phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
         orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.adc_sample_rate
@@ -378,7 +380,7 @@ class Engine(aiokatcp.DeviceServer):
             f"({delay_models[0].start}, "
             f"{orig_delay}, "
             f"{delay_models[0].delay_rate}, "
-            f"{delay_models[0].phase_rate}, "
+            f"{delay_models[0].phase}, "
             f"{orig_phase_rate})"
         )
 

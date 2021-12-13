@@ -235,8 +235,8 @@ class MultiDelayModel(AbstractDelayModel):
                 cull = i
         for _ in range(cull):
             self._models.popleft()
-        if cull > 0 and self.callback_func is not None:
-            self.callback_func(self._models)
+            if self.callback_func is not None:
+                self.callback_func(self._models)
         return orig, fine_delay, phase
 
     def add(self, model: LinearDelayModel) -> None:
@@ -249,5 +249,3 @@ class MultiDelayModel(AbstractDelayModel):
         while self._models and model.start <= self._models[-1].start:
             self._models.pop()
         self._models.append(model)
-        if self.callback_func is not None:
-            self.callback_func(self._models)

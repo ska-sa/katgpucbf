@@ -15,12 +15,16 @@
 ################################################################################
 
 """Unit tests for DelayModel functions."""
-from collections import Sequence
+import logging
+from typing import Sequence
 
 import numpy as np
 import pytest
 
 from katgpucbf.fgpu.delay import LinearDelayModel, MultiDelayModel, NonMonotonicQueryWarning, wrap_angle
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
 @pytest.mark.parametrize(
@@ -34,6 +38,13 @@ def test_wrap_angle(input: float, output: float) -> None:
 
 def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel]) -> None:
     """Test functionality in MultiDelayModel."""
+    logger.info(
+        f"Updating delay model to: "
+        f"({linear_delay_models[0].delay}, "
+        f"{linear_delay_models[0].delay_rate}, "
+        f"{linear_delay_models[0].phase}, "
+        f"{linear_delay_models[0].phase_rate})"
+    )
     pass
 
 
@@ -114,8 +125,13 @@ def test_multi_call(multi) -> None:
 
 
 def test_multi_invert_range(multi) -> None:
-    """Test :func:`katgpucbf.fgpu.delay.MultiDelayModel.invert_range`."""
+    """Test :func:`katgpucbf.fgpu.delay.MultiDelayModel.invert_range`.
+
+    This also incorporates the usage of the callback_func specified in the
+    `multi` test fixture. Granted, pytest log_cli does need to enabled.
+    """
     time, residual, phase = multi.invert_range(0, 60000, 11000)
+
     np.testing.assert_array_equal(time, [0, 11000, 19989, 32957, 43984, 52400])
     np.testing.assert_allclose(residual, [0.0, 0.0, 0.0, 0.11, -0.46, 0.0], atol=0.01)
     np.testing.assert_allclose(phase, [0.0, 0.0, -2.05, -1.35, 2.11, -1.74], atol=0.01)
