@@ -358,20 +358,17 @@ class Engine(aiokatcp.DeviceServer):
             )
             sensors.add(sensor)
 
-    # @staticmethod
     def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
         """Update the delay sensor upon loading of a new model.
 
-        Accepting the delay_models as a Deque as that is the type it is
-        declared as in the MultiDelayModel, even though we only need the
-        first one to update the sensor.
+        Accepting the delay_models as a read-only Sequence from the
+        MultiDelayModel, even though we only need the first one to update
+        the sensor.
 
         The delay and phase-rate values need to be scaled back to their
         original values (delay (s), phase-rate (rad/s)).
         """
-        logger.debug(f"Updating delay sensor: {delay_sensor.name}")
-
-        # start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
+        logger.debug("Updating delay sensor: %s", delay_sensor.name)
 
         orig_delay = delay_models[0].delay / self.adc_sample_rate
         phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate

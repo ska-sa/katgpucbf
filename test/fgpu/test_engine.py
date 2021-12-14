@@ -515,7 +515,7 @@ class TestEngine:
         def sensor_observer(
             delay_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List
         ) -> None:
-            """Needs to at least populate a list to compare at the end of this unit-test."""
+            """Populate a list to compare at the end of this unit-test."""
             updates_list.append(sensor_reading.value)
 
         for delay_sensor in delay_sensors:
@@ -551,15 +551,14 @@ class TestEngine:
             np.testing.assert_equal(wrap_angle(phases - update_phases[i]), pytest.approx(0, abs=0.01))
 
         for delay_sensor in delay_sensors:
-            for sensor_update in sensor_updates_dict[delay_sensor.name]:
+            for expected_time, expected_phase, sensor_update in zip(
+                update_times, update_phases, sensor_updates_dict[delay_sensor.name]
+            ):
                 sensor_values = sensor_update[1:-1].split(",")  # (timestamp, delay, delay_rate, phase, phase_rate)
                 sensor_values = [float(field.strip()) for field in sensor_values]
-                # TODO: A better way to iterate over these sensor_updates in accordance with update_{times, phases}
-                valid_timestamp = [
-                    (int(sensor_values[0]), update_times.index(update_time))
-                    for update_time in update_times
-                    if abs(int(sensor_values[0]) - update_time) < 200
-                ]  # pytest.approx wasn't working
-                assert len(valid_timestamp) > 0, f"No valid timestamps found in setting {delay_sensor.name}"
-                # Find the corresponding update_phase
-                np.testing.assert_almost_equal(sensor_values[3], update_phases[valid_timestamp[0][1]], decimal=2)
+                # NOTE: This tolerance is in place as the ADC timestamp gets
+                # converted to a UNIX time and back again, losing some precision
+                # during the conversion process.
+                np.testing.assert_allclose(int(sensor_values[0]), expected_time, atol=200)
+                # NOTE: The decimal-point is arbitrarily chosen as 2
+                np.testing.assert_almost_equal(sensor_values[3], expected_phase, decimal=2)

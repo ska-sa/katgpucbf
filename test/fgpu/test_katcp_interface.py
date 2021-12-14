@@ -92,8 +92,6 @@ class TestKatcpRequests:
         "239.10.11.0+15:7149",  # dst
     ]
 
-    # region ?gain requests
-
     @pytest.mark.parametrize("pol", range(N_POLS))
     async def test_initial_gain(self, engine_client: aiokatcp.Client, pol: int) -> None:
         """Test that the command-line gain is set correctly."""
@@ -139,7 +137,7 @@ class TestKatcpRequests:
     async def test_gain_not_complex(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if a value passed to ``?gain`` is not a finite complex number."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain", 0, "I am not a complex number")
+            await engine_client.request("gain", 0, "i am not a complex number")
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain", 0, "nan")
         with pytest.raises(aiokatcp.FailReply):
@@ -154,10 +152,6 @@ class TestKatcpRequests:
         """Test that an error is raised if ``?gain`` is used with the wrong number of arguments."""
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain", 0, "1", "2")
-
-    # endregion
-
-    # region ?delay requests
 
     @pytest.mark.parametrize(
         "malformed_delay_string",
@@ -192,5 +186,3 @@ class TestKatcpRequests:
         coeffs = "3.76,0.12:7.322,1.91"
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("delays", "123456789.0", coeffs, coeffs, coeffs)
-
-    # endregion

@@ -45,7 +45,6 @@ def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel]) -> No
         f"{linear_delay_models[0].phase}, "
         f"{linear_delay_models[0].phase_rate})"
     )
-    pass
 
 
 @pytest.fixture
