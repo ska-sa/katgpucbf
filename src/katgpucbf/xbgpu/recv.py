@@ -15,7 +15,9 @@
 ################################################################################
 
 """SPEAD receiver utilities."""
-
+import ctypes
+import functools
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import AsyncGenerator
 
@@ -29,7 +31,7 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import COMPLEX, N_POLS
+from .. import BYTE_BITS, COMPLEX, N_POLS
 from ..recv import StatsToCounters
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
@@ -72,13 +74,94 @@ class Chunk(spead2.recv.Chunk):
     present: np.ndarray
 
 
+_user_data_type = types.Record.make_c_struct(
+    [
+        ("stats_base", types.uintp),  # Index for first custom statistic
+    ]
+)
+
+
+@dataclass(frozen=True)
+class Layout:
+    """Parameters controlling the sizes of heaps and chunks."""
+
+    n_ants: int
+    n_channels_per_stream: int
+    n_spectra_per_heap: int
+    timestamp_step: int
+    sample_bits: int
+    heaps_per_fengine_per_chunk: int
+
+    @property
+    def heap_bytes(self):
+        """Calculate number of bytes in a heap based on layout parameters."""
+        return self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX * self.sample_bits // BYTE_BITS
+
+    @functools.cached_property
+    def _chunk_place(self) -> numba.core.ccallback.CFunc:
+        n_ants = self.n_ants
+        timestamp_step = self.timestamp_step
+        heaps_per_fengine_per_chunk = self.heaps_per_fengine_per_chunk
+        heap_bytes = self.heap_bytes
+        n_statistics = len(_Statistic)
+
+        @numba.cfunc(
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)), nopython=True
+        )
+        def chunk_place_impl(data_ptr, data_size, user_data_ptr):
+            data = numba.carray(data_ptr, 1)
+            user_data = numba.carray(user_data_ptr, 1)
+            batch_stats = numba.carray(
+                intp_to_voidptr(data[0].batch_stats),
+                user_data[0].stats_base + n_statistics,
+                dtype=np.uint64,
+            )
+            items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
+            timestamp = items[0]
+            fengine = items[1]
+            payload_size = items[2]
+            if payload_size != heap_bytes or timestamp < 0 or fengine < 0:
+                # It's something unexpected - possibly descriptors. Ignore it.
+                batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
+                return
+            if timestamp % timestamp_step != 0:
+                # Invalid timestamp
+                batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
+                return
+            if fengine >= n_ants:
+                # Invalid F-engine ID
+                batch_stats[user_data[0].stats_base + _Statistic.BAD_FENG_ID_HEAPS] += 1
+                return
+            # Compute position of this heap on the time axis, starting from
+            # timestamp 0
+            heap_time_abs = timestamp // timestamp_step
+            data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
+            # Position of this heap on the time axis, from the start of the chunk
+            heap_time = heap_time_abs % heaps_per_fengine_per_chunk
+            data[0].heap_index = heap_time * n_ants + fengine
+            data[0].heap_offset = data[0].heap_index * heap_bytes
+
+        return chunk_place_impl
+
+    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
+        """Generate low-level code for placing heaps in chunks.
+
+        Parameters
+        ----------
+        stats_base
+            Index of first custom statistic
+        """
+        user_data = np.zeros(1, dtype=_user_data_type.dtype)
+        user_data["stats_base"] = stats_base
+        return scipy.LowLevelCallable(
+            self._chunk_place.ctypes,
+            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
+            signature="void (void *, size_t, void *)",
+        )
+
+
 def make_stream(
-    n_ants: int,
-    n_channels_per_stream: int,
-    n_spectra_per_heap: int,
-    sample_bits: int,
-    timestamp_step: int,
-    heaps_per_fengine_per_chunk: int,
+    layout: Layout,
     max_active_chunks: int,
     ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     thread_affinity: int,
@@ -115,57 +198,22 @@ def make_stream(
     thread_affinity
         CPU Thread that this receiver will use for processing.
     """
-    heap_bytes = n_channels_per_stream * n_spectra_per_heap * N_POLS * COMPLEX * sample_bits // 8
     # max_heaps is set quite high because timing jitter/bursting means there
     # could be multiple heaps from one F-Engine during the time it takes
     # another to transmit.
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // heap_bytes + 1) * 16,
+        max_heaps=(layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 16),
         memcpy=spead2.MEMCPY_NONTEMPORAL,
     )
     stats_base = stream_config.next_stat_index()
-    n_statistics = len(_Statistic)
     stream_config.add_stat("katgpucbf.metadata_heaps")
     stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
     stream_config.add_stat("katgpucbf.bad_feng_id_heaps")
 
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
-    def chunk_place_impl(data_ptr, data_size):
-        data = numba.carray(data_ptr, 1)
-        batch_stats = numba.carray(
-            intp_to_voidptr(data[0].batch_stats),
-            stats_base + n_statistics,
-            dtype=np.uint64,
-        )
-        items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
-        timestamp = items[0]
-        fengine = items[1]
-        payload_size = items[2]
-        if payload_size != heap_bytes or timestamp < 0 or fengine < 0:
-            # It's something unexpected - possibly descriptors. Ignore it.
-            batch_stats[stats_base + _Statistic.METADATA_HEAPS] += 1
-            return
-        if timestamp % timestamp_step != 0:
-            # Invalid timestamp
-            batch_stats[stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
-            return
-        if fengine >= n_ants:
-            # Invalid F-engine ID
-            batch_stats[stats_base + _Statistic.BAD_FENG_ID_HEAPS] += 1
-            return
-        # Compute position of this heap on the time axis, starting from
-        # timestamp 0
-        heap_time_abs = timestamp // timestamp_step
-        data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
-        # Position of this heap on the time axis, from the start of the chunk
-        heap_time = heap_time_abs % heaps_per_fengine_per_chunk
-        data[0].heap_index = heap_time * n_ants + fengine
-        data[0].heap_offset = data[0].heap_index * heap_bytes
-
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_chunks=max_active_chunks,
-        place=scipy.LowLevelCallable(chunk_place_impl.ctypes, signature="void (void *, size_t)"),
+        place=layout.chunk_place(stats_base),
     )
     free_ringbuffer = spead2.recv.ChunkRingbuffer(ringbuffer.maxsize)
     return spead2.recv.ChunkRingStream(

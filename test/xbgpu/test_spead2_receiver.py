@@ -50,7 +50,7 @@ import spead2.send
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu import METRIC_NAMESPACE
-from katgpucbf.xbgpu.recv import Chunk, make_stream, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, make_stream, recv_chunks
 
 from .. import PromDiff
 from . import test_parameters
@@ -161,13 +161,17 @@ def create_test_objects(
 
     # 4.3 Create Receiver
     thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
-    receiver_stream = make_stream(
+    layout = Layout(
         n_ants,
         n_channels_per_stream,
         n_spectra_per_heap,
-        sample_bits,
         timestamp_step,
+        sample_bits,
         heaps_per_fengine_per_chunk,
+    )
+
+    receiver_stream = make_stream(
+        layout,
         max_active_chunks,
         ringbuffer,
         thread_affinity,

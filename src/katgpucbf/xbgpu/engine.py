@@ -309,13 +309,17 @@ class XBEngine(DeviceServer):
         self.ringbuffer = ChunkRingbuffer(
             n_free_chunks, name="recv_ringbuffer", task_name="receiver_loop", monitor=monitor
         )
-        self.receiver_stream = recv.make_stream(
+
+        layout = recv.Layout(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.chunk_spectra,
+        )
+        self.receiver_stream = recv.make_stream(
+            layout=layout,
             max_active_chunks=self.max_active_chunks,
             ringbuffer=self.ringbuffer,
             thread_affinity=src_affinity,
