@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import atexit
 import logging
+import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -114,14 +115,18 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
-def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, heap_samples: int) -> int:
-    """Determine ADC timestamp for first sample."""
-    # Convert to heap count (rounding)
-    first_heap = round((now - sync_time) * adc_sample_rate / heap_samples)
-    if first_heap < 0:
+def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> Tuple[int, float]:
+    """Determine ADC timestamp for first sample and the time at which to start sending.
+
+    The resulting value will be a multiple of `align`.
+    """
+    # Convert to repeat count (rounding)
+    first_block = math.ceil((now - sync_time) * adc_sample_rate / align)
+    if first_block < 0:
         raise ValueError("sync time is in the future")
     # Convert to a sample count
-    return first_heap * heap_samples
+    samples = first_block * align
+    return samples, sync_time + samples / adc_sample_rate
 
 
 def add_signal_handlers(server: DeviceServer) -> None:
@@ -162,17 +167,12 @@ async def async_main() -> None:
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
-    timestamp = 0
-    if args.sync_time is not None:
-        timestamp = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.heap_samples)
     timestamps = np.zeros(args.signal_heaps, dtype=">u8")
     heap_sets = [
         send.HeapSet.create(timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest)))
         for _ in range(2)
     ]
-    await signal.sample_async(
-        args.signals, timestamp, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"]
-    )
+    await signal.sample_async(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])
 
     endpoints: List[Tuple[str, int]] = []
     for pol_dest in args.dest:
@@ -191,6 +191,19 @@ async def async_main() -> None:
         ibv=args.ibv,
         affinity=args.affinity,
     )
+
+    timestamp = 0
+    if args.sync_time is not None:
+        timestamp, start_time = first_timestamp(
+            args.sync_time, time.time(), args.adc_sample_rate, args.signal_heaps * args.heap_samples
+        )
+        # Sleep until start_time. Python doesn't seem to have an interface
+        # for sleeping until an absolute time, so this will be wrong by the
+        # time that elapsed from calling time.time until calling time.sleep,
+        # but that's small change.
+        time.sleep(max(0, start_time - time.time()))
+    logger.info("First timestamp will be %#x", timestamp)
+
     sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples)
     server = DeviceServer(
         sender=sender,

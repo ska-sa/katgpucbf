@@ -200,9 +200,10 @@ def make_stream(
     """
     # max_heaps is set quite high because timing jitter/bursting means there
     # could be multiple heaps from one F-Engine during the time it takes
-    # another to transmit.
+    # another to transmit (NGC-471).
+    # TODO: find a cleaner solution.
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=(layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 16),
+        max_heaps=(layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128),
         memcpy=spead2.MEMCPY_NONTEMPORAL,
     )
     stats_base = stream_config.next_stat_index()
