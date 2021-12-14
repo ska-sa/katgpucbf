@@ -2,8 +2,8 @@
 
 set -e -u
 
-iface1=enp130s0f0
-iface2=enp130s0f1
+iface1=enp193s0f0
+iface2=enp193s0f1
 channels_per_substream=${channels_per_substream:-512}
 
 affinity="$(($1 * 6))"
