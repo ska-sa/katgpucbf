@@ -26,6 +26,7 @@ import spead2.recv
 import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
 
+import katgpucbf.fgpu.engine
 import katgpucbf.fgpu.recv
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
@@ -82,11 +83,11 @@ def mock_send_stream(mocker) -> List[spead2.InprocQueue]:
 
 @pytest.fixture
 def recv_max_chunks_one(monkeypatch) -> None:
-    """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
+    """Change :data:`.engine.MAX_CHUNKS` to 1 for the test.
 
     This simplifies the process of reliably injecting data.
     """
-    monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
+    monkeypatch.setattr(katgpucbf.fgpu.engine, "MAX_CHUNKS", 1)
 
 
 def check_gdrcopy(context: AbstractContext) -> None:

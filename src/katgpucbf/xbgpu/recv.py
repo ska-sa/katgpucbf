@@ -69,7 +69,32 @@ class _Statistic(IntEnum):
 
 @dataclass(frozen=True)
 class Layout:
-    """Parameters controlling the sizes of heaps and chunks."""
+    """Parameters controlling the sizes of heaps and chunks.
+
+    Parameters
+    ----------
+    n_ants
+        The number of antennas that data will be received from
+    n_channels
+        The total number of frequency channels out of the F-Engine.
+    n_channels_per_stream
+        The number of frequency channels contained in the stream.
+    n_spectra_per_heap
+        The number of time samples received per frequency channel.
+    timestamp_step
+        Each heap contains a timestamp. The timestamp between consecutive heaps
+        changes depending on the FFT size and the number of time samples per
+        channel. This parameter defines the difference in timestamp values
+        between consecutive heaps. This parameter can be calculated from the
+        array configuration parameters for power-of-two array sizes, but is
+        configurable to allow for greater flexibility during testing.
+    sample_bits
+        The number of bits per sample. Only 8 bits is supported at the moment.
+    heaps_per_fengine_per_chunk
+        Each chunk out of the SPEAD2 receiver will contain multiple heaps from
+        each antenna. This parameter specifies the number of heaps per antenna
+        that each chunk will contain.
+    """
 
     n_ants: int
     n_channels_per_stream: int
@@ -149,40 +174,21 @@ class Layout:
 def make_stream(
     layout: Layout,
     max_active_chunks: int,
-    ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     thread_affinity: int,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
     Parameters
     ----------
-    n_ants
-        The number of antennas that data will be received from
-    n_channels
-        The total number of frequency channels out of the F-Engine.
-    n_channels_per_stream
-        The number of frequency channels contained in the stream.
-    n_spectra_per_heap
-        The number of time samples received per frequency channel.
-    sample_bits
-        The number of bits per sample. Only 8 bits is supported at the moment.
-    timestamp_step
-        Each heap contains a timestamp. The timestamp between consecutive heaps
-        changes depending on the FFT size and the number of time samples per
-        channel. This parameter defines the difference in timestamp values
-        between consecutive heaps. This parameter can be calculated from the
-        array configuration parameters for power-of-two array sizes, but is
-        configurable to allow for greater flexibility during testing.
-    heaps_per_fengine_per_chunk
-        Each chunk out of the SPEAD2 receiver will contain multiple heaps from
-        each antenna. This parameter specifies the number of heaps per antenna
-        that each chunk will contain.
+    layout
+        Heap size and chunking parameters
     max_active_chunks
         Maximum number of chunks under construction.
-    ringbuffer
-        All completed heaps will be queued on this ringbuffer object.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent
     thread_affinity
-        CPU Thread that this receiver will use for processing.
+        CPU core affinity for the worker thread (negative to not set an affinity)
     """
     # max_heaps is set quite high because timing jitter/bursting means there
     # could be multiple heaps from one F-Engine during the time it takes
@@ -202,12 +208,12 @@ def make_stream(
         max_chunks=max_active_chunks,
         place=layout.chunk_place(stats_base),
     )
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(ringbuffer.maxsize)
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(data_ringbuffer.maxsize)
     return spead2.recv.ChunkRingStream(
         spead2.ThreadPool(1, [] if thread_affinity < 0 else [thread_affinity]),
         stream_config,
         chunk_stream_config,
-        ringbuffer,
+        data_ringbuffer,
         free_ringbuffer,
     )
 

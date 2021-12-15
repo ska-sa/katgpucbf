@@ -38,10 +38,6 @@ from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
-#: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
-#: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
-#: are not delayed by a whole chunk.
-MAX_CHUNKS = 2
 
 heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
@@ -278,6 +274,7 @@ async def chunk_sets(
 def make_stream(
     pol: int,
     layout: Layout,
+    max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
 ) -> spead2.recv.ChunkRingStream:
@@ -289,6 +286,8 @@ def make_stream(
         Polarisation index
     layout
         Heap size and chunking parameters
+    max_active_chunks
+        Maximum number of chunks to accommodate
     data_ringbuffer
         Output ringbuffer to which chunks will be sent
     affinity
@@ -303,7 +302,7 @@ def make_stream(
     stream_config.add_stat("katgpucbf.metadata_heaps")
     stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place(stats_base)
+        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=max_active_chunks, place=layout.chunk_place(stats_base)
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.

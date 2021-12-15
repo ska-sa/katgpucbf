@@ -75,6 +75,12 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     return weights.astype(np.float32)
 
 
+#: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
+#: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
+#: are not delayed by a whole chunk.
+MAX_CHUNKS = 2
+
+
 class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
@@ -258,6 +264,7 @@ class Engine(aiokatcp.DeviceServer):
             recv.make_stream(
                 pol,
                 self._src_layout,
+                MAX_CHUNKS,
                 ring,
                 src_affinity[pol],
             )

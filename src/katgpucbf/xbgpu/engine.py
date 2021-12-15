@@ -321,7 +321,7 @@ class XBEngine(DeviceServer):
         self.receiver_stream = recv.make_stream(
             layout=layout,
             max_active_chunks=self.max_active_chunks,
-            ringbuffer=self.ringbuffer,
+            data_ringbuffer=self.ringbuffer,
             thread_affinity=src_affinity,
         )
 

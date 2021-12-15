@@ -80,7 +80,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     They are connected to the :func:`queues` fixture for input and
     :func:`ringbuffer` for output.
     """
-    streams = [recv.make_stream(pol, layout, ringbuffer, -1) for pol in range(N_POLS)]
+    streams = [recv.make_stream(pol, layout, 2, ringbuffer, -1) for pol in range(N_POLS)]
     for stream, queue in zip(streams, queues):
         for _ in range(4):
             data = np.empty(layout.chunk_bytes, np.uint8)
