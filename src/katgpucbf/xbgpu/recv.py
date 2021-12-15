@@ -32,7 +32,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import StatsToCounters, user_data_type
+from ..recv import Chunk, StatsToCounters, user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
@@ -65,13 +65,6 @@ class _Statistic(IntEnum):
     METADATA_HEAPS = 0
     BAD_TIMESTAMP_HEAPS = 1
     BAD_FENG_ID_HEAPS = 2
-
-
-class Chunk(spead2.recv.Chunk):
-    """Extend :class:`spead2.recv.Chunk` to refine the types."""
-
-    data: np.ndarray
-    present: np.ndarray
 
 
 @dataclass(frozen=True)

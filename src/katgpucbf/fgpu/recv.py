@@ -33,7 +33,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS
-from ..recv import StatsToCounters, user_data_type
+from ..recv import Chunk, StatsToCounters, user_data_type
 from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
@@ -60,27 +60,6 @@ metadata_heaps_counter = Counter(
 bad_timestamp_heaps_counter = Counter(
     "input_bad_timestamp_heaps", "timestamp not a multiple of samples per packet", ["pol"], namespace=METRIC_NAMESPACE
 )
-
-
-class Chunk(spead2.recv.Chunk):
-    """Collection of heaps passed to the GPU at one time.
-
-    It extends the spead2 base class to store a timestamp (computed from
-    the chunk ID when the chunk is received), and optionally store a
-    gdrcopy device array.
-    """
-
-    # Refine the types used in the base class
-    present: np.ndarray
-    data: np.ndarray
-    # New fields
-    device: object
-    timestamp: int
-
-    def __init__(self, *args, device: object = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.device = device
-        self.timestamp = 0  # Actual value filled in when chunk received
 
 
 class _Statistic(IntEnum):

@@ -18,6 +18,7 @@
 
 from typing import Mapping
 
+import numpy as np
 import spead2.recv
 from numba import types
 from prometheus_client import Counter
@@ -27,6 +28,27 @@ user_data_type = types.Record.make_c_struct(
         ("stats_base", types.uintp),  # Index for first custom statistic
     ]
 )
+
+
+class Chunk(spead2.recv.Chunk):
+    """Collection of heaps passed to the GPU at one time.
+
+    It extends the spead2 base class to store a timestamp (computed from
+    the chunk ID when the chunk is received), and optionally store a
+    gdrcopy device array.
+    """
+
+    # Refine the types used in the base class
+    present: np.ndarray
+    data: np.ndarray
+    # New fields
+    device: object
+    timestamp: int
+
+    def __init__(self, *args, device: object = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.device = device
+        self.timestamp = 0  # Actual value filled in when chunk received
 
 
 class StatsToCounters:
