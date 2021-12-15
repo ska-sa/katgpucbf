@@ -1,15 +1,9 @@
 #!/bin/bash
+
 set -e -u
 
-# This NIC seems to be dropping a lot of incoming packets
-# (maybe contending with GPU on the same host bridge?)
-# iface1=enp129s0f0
-# iface2=enp129s0f1
-
-iface1=enp193s0f0
-iface2=enp193s0f1
-cuda1=0
-cuda2=0
+# Load variables for machine-specific config
+. config/$(hostname -s).sh
 
 src_affinity="$((6*$1)),$((6*$1+1))"
 src_comp=$src_affinity
@@ -18,7 +12,8 @@ dst_comp=$dst_affinity
 other_affinity="$((6*$1+4))"
 srcs="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
 dst="239.102.$((200+$1)).0+15:7148"
-port="$(($1+7140))"
+katcp_port="$(($1+7140))"
+prom_port="$(($1+7150))"
 
 case "$1" in
     0|1)
@@ -45,6 +40,7 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --channels ${channels:-32768} \
     --spectra-per-heap ${spectra_per_heap:-256} \
     --gain 0.0001 \
-    --katcp-port $port \
+    --katcp-port $katcp_port \
+    --prometheus-port $prom_port \
     --sync-epoch 0 \
     $srcs $dst
