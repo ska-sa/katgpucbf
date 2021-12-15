@@ -172,17 +172,9 @@ class MultiDelayModel(AbstractDelayModel):
     In the initial state it has a model with zero delay.
 
     It accepts an optional callback function that takes in the
-    LinearDelayModels attached to this MultiDelayModel. This callback
-    is invoked in the following scenarios:
-    - Immediately by the constructor,
-    - When the instance is __call__'d with a start time later than the
-      current delay model.
-    - When the addition of a new delay model results in the removal of
-      all later delay models.
-
-    .. todo::
-
-        Reword the above callback scenarios.
+    LinearDelayModels attached to this MultiDelayModel. This callback is
+    called whenever the first linear piece changes. It is also called
+    immediately by the constructor.
     """
 
     def __init__(self, callback_func: Optional[Callable[[Sequence[LinearDelayModel]], None]] = None) -> None:

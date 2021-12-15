@@ -560,5 +560,5 @@ class TestEngine:
                 # converted to a UNIX time and back again, losing some precision
                 # during the conversion process.
                 np.testing.assert_allclose(int(sensor_values[0]), expected_time, atol=200)
-                # NOTE: The decimal-point is arbitrarily chosen as 2
-                np.testing.assert_almost_equal(sensor_values[3], expected_phase, decimal=2)
+                # NOTE: Using the default relative tolerance of 1e-07
+                np.testing.assert_allclose(sensor_values[3], expected_phase)
