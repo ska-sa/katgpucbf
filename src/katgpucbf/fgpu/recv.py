@@ -33,7 +33,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS
-from ..recv import StatsToCounters
+from ..recv import StatsToCounters, user_data_type
 from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
@@ -92,13 +92,6 @@ class _Statistic(IntEnum):
     BAD_TIMESTAMP_HEAPS = 1
 
 
-_user_data_type = types.Record.make_c_struct(
-    [
-        ("stats_base", types.uintp),  # Index for first custom statistic
-    ]
-)
-
-
 @dataclass(frozen=True)
 class Layout:
     """Parameters controlling the sizes of heaps and chunks."""
@@ -140,7 +133,7 @@ class Layout:
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
         @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)),
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)),
             nopython=True,
         )
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):  # pragma: nocover
@@ -177,7 +170,7 @@ class Layout:
         stats_base
             Index of first custom statistic
         """
-        user_data = np.zeros(1, dtype=_user_data_type.dtype)
+        user_data = np.zeros(1, dtype=user_data_type.dtype)
         user_data["stats_base"] = stats_base
         return scipy.LowLevelCallable(
             self._chunk_place.ctypes,

@@ -19,7 +19,14 @@
 from typing import Mapping
 
 import spead2.recv
+from numba import types
 from prometheus_client import Counter
+
+user_data_type = types.Record.make_c_struct(
+    [
+        ("stats_base", types.uintp),  # Index for first custom statistic
+    ]
+)
 
 
 class StatsToCounters:

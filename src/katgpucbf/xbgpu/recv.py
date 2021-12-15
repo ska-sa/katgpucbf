@@ -32,7 +32,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import StatsToCounters
+from ..recv import StatsToCounters, user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
@@ -74,13 +74,6 @@ class Chunk(spead2.recv.Chunk):
     present: np.ndarray
 
 
-_user_data_type = types.Record.make_c_struct(
-    [
-        ("stats_base", types.uintp),  # Index for first custom statistic
-    ]
-)
-
-
 @dataclass(frozen=True)
 class Layout:
     """Parameters controlling the sizes of heaps and chunks."""
@@ -106,7 +99,7 @@ class Layout:
         n_statistics = len(_Statistic)
 
         @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)), nopython=True
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)), nopython=True
         )
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):
             data = numba.carray(data_ptr, 1)
@@ -151,7 +144,7 @@ class Layout:
         stats_base
             Index of first custom statistic
         """
-        user_data = np.zeros(1, dtype=_user_data_type.dtype)
+        user_data = np.zeros(1, dtype=user_data_type.dtype)
         user_data["stats_base"] = stats_base
         return scipy.LowLevelCallable(
             self._chunk_place.ctypes,
