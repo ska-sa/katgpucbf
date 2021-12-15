@@ -23,8 +23,6 @@ import pytest
 
 from katgpucbf.fgpu.delay import LinearDelayModel, MultiDelayModel, NonMonotonicQueryWarning, wrap_angle
 
-# LINEAR_DELAY_MODELS: Final[List[str]] = []
-
 
 @pytest.mark.parametrize(
     "input,output", [(0.0, 0.0), (1.0, 1.0), (1.1, 1.1), (4.0, 4.0 - 2 * np.pi), (10.0, 10.0 - 4 * np.pi)]
@@ -48,7 +46,7 @@ def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel], *, up
     )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def mdelay_callback_list() -> List:
     """Create an empty list to populate with delay model values via callback."""
     return []
