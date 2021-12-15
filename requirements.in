@@ -1,7 +1,8 @@
 aiohttp
 aiokatcp
+dask
 katsdpservices
-katsdpsigproc[CUDA]>=1.4.1
+katsdpsigproc[CUDA]>=1.4.2
 katsdptelstate
 numpy
 prometheus-async

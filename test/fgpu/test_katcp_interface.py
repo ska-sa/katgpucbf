@@ -17,7 +17,7 @@
 """Collection of tests for the KATCP interface of katgpucbf.fgpu."""
 
 import re
-from typing import Any, Tuple
+from typing import Tuple
 
 import aiokatcp
 import numpy as np
@@ -27,6 +27,8 @@ from numpy import safe_eval
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
+
+from .. import get_sensor
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cuda_only]
 
@@ -49,31 +51,6 @@ def assert_valid_complex_list(value: str) -> None:
     assert value[-1] == "]"
     for term in value[1:-1].split(","):
         assert_valid_complex(term.strip(" "))
-
-
-async def get_sensor(client: aiokatcp.Client, name: str) -> Any:
-    """Get the value of a sensor.
-
-    .. todo:
-
-       This should probably be implemented in aiokatcp.
-    """
-    # This is not a complete list of sensor types. Extend as necessary.
-    sensor_types = {
-        b"integer": int,
-        b"float": float,
-        b"boolean": bool,
-        b"discrete": str,  # Gets the string name of the enum
-        b"string": str,  # Allows passing through arbitrary values even if not UTF-8
-    }
-
-    _reply, informs = await client.request("sensor-list", name)
-    assert len(informs) == 1
-    sensor_type = sensor_types.get(informs[0].arguments[3], bytes)
-    _reply, informs = await client.request("sensor-value", name)
-    assert len(informs) == 1
-    assert informs[0].arguments[3] in {b"nominal", b"warn", b"error"}
-    return aiokatcp.decode(sensor_type, informs[0].arguments[4])
 
 
 class TestKatcpRequests:

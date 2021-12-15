@@ -76,14 +76,11 @@ class CorrelationTemplate:
     """
 
     def __init__(self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int) -> None:
-        # 1. Set accesible member functions that are used to calculate indices
-        # to the input and output buffers.
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
-        # 2. Determine kernel specific parameters
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
         self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
 
@@ -105,7 +102,6 @@ class CorrelationTemplate:
         if self.n_spectra_per_heap % self.n_times_per_block != 0:
             raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
 
-        # 3. Calculate the input and output data shape.
         self.input_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
@@ -120,8 +116,6 @@ class CorrelationTemplate:
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        # 4. Calculate the number of thread blocks to launch per kernel call -
-        # this remains constant for the lifetime of the object.
         if self._n_ants_per_block == 32:
             raise NotImplementedError(
                 "32 antennas per thread-block is not supported yet - \
@@ -142,8 +136,6 @@ class CorrelationTemplate:
             raise ValueError(
                 "ants_per_block must equal either 64 or 48, currently equal to {0}.".format(self._n_ants_per_block)
             )
-
-        # 5. Compile the kernel
 
         with importlib.resources.path("katgpucbf.xbgpu", "kernels") as kernels:
             source = (kernels / "tensor_core_correlation_kernel.cu").read_text()
@@ -213,7 +205,7 @@ class Correlation(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [out_visibilities_buffer.buffer, in_samples_buffer.buffer],
-            # Even though we are using CUDA, we follow OpenCL's grid/block
+            # NOTE: Even though we are using CUDA, we follow OpenCL's grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
@@ -221,12 +213,12 @@ class Correlation(accel.Operation):
             local_size=(32, 2, 2),
         )
 
-    def zero_visibilities(self):
+    def zero_visibilities(self) -> None:
         """Zero all the values in the out_visibilities buffer."""
         self.buffer("out_visibilities").zero(self.command_queue)
 
     @staticmethod
-    def get_baseline_index(ant1, ant2):
+    def get_baseline_index(ant1, ant2) -> int:
         r"""Get index in the visibilities matrix for baseline (ant1, ant2).
 
         The visibilities matrix indexing is as follows:

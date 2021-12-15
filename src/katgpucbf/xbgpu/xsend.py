@@ -199,7 +199,6 @@ class XSend:
     # Class static constants
     header_size: Final[int] = 64
 
-    # Initialise class including all variables
     def __init__(
         self,
         n_ants: int,
@@ -213,7 +212,6 @@ class XSend:
         n_send_heaps_in_flight: int = 5,
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
     ) -> None:
-        # 1. Check that given arguments are sane.
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
 
@@ -222,7 +220,7 @@ class XSend:
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
-        # 2. Array Configuration Parameters
+        # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
         self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
@@ -230,7 +228,7 @@ class XSend:
         self.send_rate_factor: Final[float] = send_rate_factor
         self._sample_bits: Final[int] = 32
 
-        # 3. Multicast Stream Parameters
+        # Multicast Stream Parameters
         self.channel_offset: Final[int] = channel_offset
 
         self.heap_payload_size_bytes: Final[int] = (
@@ -239,41 +237,33 @@ class XSend:
         self.heap_shape: Final[Tuple] = (self.n_channels_per_stream, self.n_baselines, COMPLEX)
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
-        # 4. Allocate memory buffers
         self.context: Final[katsdpsigproc.abc.AbstractContext] = context
 
-        # 4.1 There may be scope to use asyncio queues here instead - need to figure it out
+        # TODO: There may be scope to use asyncio queues here instead - need to figure it out
         self._heaps_queue: queue.Queue[Tuple[asyncio.Future, BufferWrapper]] = queue.Queue(
             maxsize=self._n_send_heaps_in_flight
         )
         self.buffers: List[accel.HostArray] = []
 
-        # 4.2 Create buffers once-off to be reused for sending data.
         for _ in range(self._n_send_heaps_in_flight):
-            # 4.2.1 Create a buffer from the accel context.
             # TODO: I'm not too happy about this hardcoded int32 here, but I don't
             # have an object close by that I can get the dtype from.
             buffer = accel.HostArray(self.heap_shape, np.int32, context=self.context)
 
-            # 4.2.2 Create a dummy future object that is already marked as
-            # "done" Each buffer is paired with a future so these dummy onces
+            # Create a dummy future object that is already marked as
+            # "done" Each buffer is paired with a future so these dummy ones
             # are necessary for initial start up.
             dummy_future: asyncio.Future = asyncio.Future()
             dummy_future.set_result("")
 
-            # 4.2.3. Wrap buffer in BufferWrapper, join it together
-            # with its future as a tuple and put it on the heaps queue
             self._heaps_queue.put((dummy_future, BufferWrapper(buffer)))
 
-            # 4.2.4 Store buffer in array so that it can be assigned to ibverbs.
-            # memory regions by the stream_factory.
             self.buffers.append(buffer)
 
-        # 5. Generate all required stream information that is not specific to transports defined in the child classes
+        # Transport-agnostic stream information
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
         packet_header_overhead_bytes = packets_per_heap * XSend.header_size
 
-        # 5.1 If the dump_interval is set to zero, pass zero to stream_config to send as fast as possible.
         if self.dump_interval_s != 0:
             send_rate_bytes_per_second = (
                 (self.heap_payload_size_bytes + packet_header_overhead_bytes)
@@ -281,6 +271,7 @@ class XSend:
                 * self.send_rate_factor
             )  # * send_rate_factor adds a buffer to the rate to compensate for any unexpected jitter
         else:
+            # Pass zero to stream_config to send as fast as possible.
             send_rate_bytes_per_second = 0
 
         stream_config = spead2.send.StreamConfig(
@@ -289,15 +280,12 @@ class XSend:
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )
-        # This class is currently marked as _private in the spead2 stub files,
-        # in a future revision it may be changed to public.
         self.source_stream = stream_factory(stream_config, self.buffers)
         self.source_stream.set_cnt_sequence(
             channel_offset // n_channels_per_stream,
             n_channels // n_channels_per_stream,
         )
 
-        # 6. Create item group - This is the spead2 object that stores all heap format information.
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         self.item_group.add_item(
             FREQUENCY_ID,
@@ -321,7 +309,7 @@ class XSend:
             dtype=np.int32,
         )
 
-        # 6.1 The first heap is the SPEAD descriptor - store it for transmission when required
+        # The first heap is the SPEAD descriptor - store it for transmission when required
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, timestamp: int, buffer_wrapper: BufferWrapper) -> None:
@@ -351,7 +339,7 @@ class XSend:
 
         future = self.source_stream.async_send_heap(heap_to_send)
         self._heaps_queue.put((future, buffer_wrapper))
-        # Note: it's not strictly true to say that the data has been sent at
+        # NOTE: It's not strictly true to say that the data has been sent at
         # this point; it's only been queued for sending. But it should be close
         # enough for monitoring data rates at the granularity that this is
         # typically done.

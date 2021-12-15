@@ -207,6 +207,8 @@ class Sender:
         self._futures: List[Optional[asyncio.Future[int]]] = [None] * len(heap_set.parts)
         self._running = True  # Set to false to start shutdown
         self._finished = asyncio.Event()
+        # First timestamp that we haven't yet submitted to async_send_heaps
+        self._next_timestamp = first_timestamp
         # Prepare initial timestamps
         first_end_timestamp = first_timestamp + self.heap_set.data.dims["time"] * self.heap_samples
         heap_set.data["timestamps"][:] = np.arange(first_timestamp, first_end_timestamp, heap_samples, dtype=">u8")
@@ -231,12 +233,17 @@ class Sender:
         """Send heaps continuously."""
         while self._running:
             for i, part in enumerate(self.heap_set.parts):
+                await asyncio.sleep(0)  # ensure other tasks get time to run
                 if self._futures[i] is not None:
                     await asyncio.shield(self._futures[i])  # type: ignore
+                    # set_heaps may have swapped heap_set out from under us during
+                    # the await, so re-initialise part.
+                    part = self.heap_set.parts[i]
                     part["timestamps"] += self.heap_set.data.dims["time"] * self.heap_samples
                 self._futures[i] = self.stream.async_send_heaps(
                     part.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
                 )
+                self._next_timestamp += part.dims["time"] * self.heap_samples
                 # Not actually sent yet, but close enough for monitoring the transmission speed
                 output_heaps_counter.inc(part["heaps"].size)
                 output_bytes_counter.inc(part["payload"].nbytes)
@@ -245,3 +252,27 @@ class Sender:
             if future is not None:
                 await future
         self._finished.set()  # Wake up join()
+
+    async def set_heaps(self, heap_set: HeapSet) -> int:
+        """Switch out the heap set for a different one.
+
+        This does not return until the payload of the previous :class:`HeapSet`
+        is no longer in use (the timestamps may still be in use).
+
+        The new heap_set must share timestamps with the old one.
+
+        Returns
+        -------
+        timestamp
+            First timestamp which will use the new heap set
+        """
+        if heap_set.data["timestamps"].data is not self.heap_set.data["timestamps"].data:
+            raise ValueError("new heap set does not share timestamps with the old")
+        old_futures = []
+        for future in self._futures:
+            if future is not None:
+                old_futures.append(future)
+        self.heap_set = heap_set
+        timestamp = self._next_timestamp
+        await asyncio.wait(old_futures)
+        return timestamp

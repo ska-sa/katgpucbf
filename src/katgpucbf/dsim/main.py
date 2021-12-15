@@ -21,19 +21,26 @@ Simulates the packet structure of MeerKAT digitisers.
 
 import argparse
 import asyncio
+import atexit
 import logging
+import math
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, SIGTERM
 from typing import List, Optional, Sequence, Tuple
 
+import dask.config
+import dask.system
 import katsdpservices
 import numpy as np
 import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_TTL
+from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
 from . import send, signal
+from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +71,18 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
     )
     parser.add_argument(
+        "--katcp-host",
+        type=str,
+        default=DEFAULT_KATCP_HOST,
+        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
+    )
+    parser.add_argument(
+        "--katcp-port",
+        type=int,
+        default=DEFAULT_KATCP_PORT,
+        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
+    )
+    parser.add_argument(
         "--prometheus-port",
         type=int,
         help="Network port on which to serve Prometheus metrics [none]",
@@ -91,21 +110,26 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         signals *= len(args.dest)
     if len(signals) != len(args.dest):
         parser.error(f"expected 1 or {len(args.dest)} signals, found {len(signals)}")
+    args.signals_orig = args.signals
     args.signals = signals
     return args
 
 
-def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, heap_samples: int) -> int:
-    """Determine ADC timestamp for first sample."""
-    # Convert to heap count (rounding)
-    first_heap = round((now - sync_time) * adc_sample_rate / heap_samples)
-    if first_heap < 0:
+def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> Tuple[int, float]:
+    """Determine ADC timestamp for first sample and the time at which to start sending.
+
+    The resulting value will be a multiple of `align`.
+    """
+    # Convert to repeat count (rounding)
+    first_block = math.ceil((now - sync_time) * adc_sample_rate / align)
+    if first_block < 0:
         raise ValueError("sync time is in the future")
     # Convert to a sample count
-    return first_heap * heap_samples
+    samples = first_block * align
+    return samples, sync_time + samples / adc_sample_rate
 
 
-def add_signal_handlers(sender: send.Sender) -> None:
+def add_signal_handlers(server: DeviceServer) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [SIGINT, SIGTERM]
 
@@ -115,7 +139,7 @@ def add_signal_handlers(sender: send.Sender) -> None:
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
-        sender.halt()
+        server.halt()
 
     loop = asyncio.get_event_loop()
     for signum in signums:
@@ -127,48 +151,77 @@ async def async_main() -> None:
     args = parse_args()
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
 
+    # Override dask's default thread pool with one that runs with SCHED_IDLE
+    # priority. This ensures that when the networking code needs a CPU core,
+    # it gets priority over dask.
+    # The type: ignore is because typeshed is currently missing os.sched_param
+    # (it is fixed in https://github.com/python/typeshed/pull/6442).
+    pool = ThreadPoolExecutor(
+        dask.config.get("num_workers", dask.system.CPU_COUNT),
+        initializer=os.sched_setscheduler,
+        initargs=(0, os.SCHED_IDLE, os.sched_param(0)),  # type: ignore
+    )
+    atexit.register(pool.shutdown)
+    dask.config.set(pool=pool)
+
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
-    timestamp = 0
-    if args.sync_time is not None:
-        timestamp = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.heap_samples)
-    sig_data = []
-    for sig in args.signals:
-        # TODO: cache shared signals to reduce computation time
-        data = sig.sample(timestamp, args.heap_samples * args.signal_heaps, args.adc_sample_rate)
-        data = signal.quantise(data, args.sample_bits)
-        data = signal.packbits(data, args.sample_bits)
-        sig_data.append(data)
-
     timestamps = np.zeros(args.signal_heaps, dtype=">u8")
-    heap_set = send.HeapSet.create(
-        timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest))
-    )
+    heap_sets = [
+        send.HeapSet.create(timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest)))
+        for _ in range(2)
+    ]
+    await signal.sample_async(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])
 
     endpoints: List[Tuple[str, int]] = []
-    for i, pol_dest in enumerate(args.dest):
-        heap_set.data.payload.isel(pol=i).data.ravel()[:] = sig_data[i]
+    for pol_dest in args.dest:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
     stream = send.make_stream(
         endpoints=endpoints,
-        heap_sets=[heap_set],
+        heap_sets=heap_sets,
         n_pols=len(args.dest),
         adc_sample_rate=args.adc_sample_rate,
         heap_samples=args.heap_samples,
         sample_bits=args.sample_bits,
-        max_heaps=heap_set.data["heaps"].size,
+        max_heaps=heap_sets[0].data["heaps"].size,
         ttl=args.ttl,
         interface_address=katsdpservices.get_interface_address(args.interface),
         ibv=args.ibv,
         affinity=args.affinity,
     )
-    sender = send.Sender(stream, heap_set, timestamp, args.heap_samples)
-    add_signal_handlers(sender)
+
+    timestamp = 0
+    if args.sync_time is not None:
+        timestamp, start_time = first_timestamp(
+            args.sync_time, time.time(), args.adc_sample_rate, args.signal_heaps * args.heap_samples
+        )
+        # Sleep until start_time. Python doesn't seem to have an interface
+        # for sleeping until an absolute time, so this will be wrong by the
+        # time that elapsed from calling time.time until calling time.sleep,
+        # but that's small change.
+        time.sleep(max(0, start_time - time.time()))
+    logger.info("First timestamp will be %#x", timestamp)
+
+    sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples)
+    server = DeviceServer(
+        sender=sender,
+        spare=heap_sets[1],
+        adc_sample_rate=args.adc_sample_rate,
+        first_timestamp=timestamp,
+        sample_bits=args.sample_bits,
+        signals_str=args.signals_orig,
+        signals=args.signals,
+        host=args.katcp_host,
+        port=args.katcp_port,
+    )
+    await server.start()
+    add_signal_handlers(server)
 
     logger.info("Starting transmission")
     await sender.run()
+    await server.join()
 
 
 def main() -> None:

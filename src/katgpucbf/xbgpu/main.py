@@ -41,13 +41,17 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
-from .. import DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S, __version__
+from .. import (
+    DEFAULT_KATCP_HOST,
+    DEFAULT_KATCP_PORT,
+    DEFAULT_PACKET_PAYLOAD_BYTES,
+    DEFAULT_TTL,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    __version__,
+)
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .correlation import device_filter
 from .engine import done_callback
-
-DEFAULT_KATCP_PORT = 7147
-DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
 
 logger = logging.getLogger(__name__)
 
@@ -271,8 +275,8 @@ async def async_main(args: argparse.Namespace) -> None:
     )
 
     if args.src_ibv:
-        # Attach this transport to receive channelisation products from the network
-        # at high rates.
+        # Attach this transport to receive channelisation products from the
+        # network at high data rates.
         xbengine.add_udp_ibv_receiver_transport(
             src_ip=args.src.host,
             src_port=args.src.port,

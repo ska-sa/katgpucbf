@@ -35,13 +35,11 @@ from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
+from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import Engine
 
 _T = TypeVar("_T")
-DEFAULT_KATCP_PORT = 7147
-DEFAULT_KATCP_HOST = ""  # Default to all interfaces, but user can override with a specific one.
 logger = logging.getLogger(__name__)
 
 

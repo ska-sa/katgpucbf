@@ -47,47 +47,40 @@ from .. import COMPLEX, N_POLS
 
 class PrecorrelationReorderTemplate:
     """
-    Template class for compiling different variations of the pre-correlation reorder kernel.
+    Template class to compile the pre-correlation reorder kernel.
 
-    This object will be used to create a PreCorrelationReorder object that will
-    be able to run the created kernel.
+    This template creates a :class:`PrecorrelationReorder` that will
+    run the compiled kernel. The parameters are used to compile the
+    kernel and by the :class:`PrecorrelationReorder` to specify the
+    shape of the memory buffers connected to this kernel.
+
+    Parameters
+    ----------
+    context
+        The GPU device's context provided by katsdpsigproc's abstraction of
+        PyCUDA.  A context is associated with a single device and 'owns'
+        all memory allocations.  For the purposes of this python module,
+        and its Tensor Core usage, the CUDA context is required.
+    n_ants
+        The number of antennas that will be correlated. Each antennas is
+        expected to produce two polarisations.
+    n_channels
+        The number of frequency channels to be processed.
+    n_spectra_per_heap
+        The number of time samples to be processed per frequency channel.
+    n_batches
+        The number of matrices to be reordered, a single data matrix = one batch.
     """
 
     def __init__(
         self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int, n_batches: int
     ) -> None:
-        """
-        Initialise the PreCorrelationReorderTemplate class and compile the pre-correlation reorder kernel.
-
-        The parameters given to this function are used by this class to compile
-        the kernel and by the PreCorrelationReorder to specify the shape of the
-        memory buffers connected to this kernel.
-
-        Parameters
-        ----------
-        context
-            The GPU device's context provided by katsdpsigproc's abstraction of
-            PyCUDA.  A context is associated with a single device and 'owns'
-            all memory allocations.  For the purposes of this python module,
-            and its Tensor Core usage, the CUDA context is required.
-        n_ants
-            The number of antennas that will be correlated. Each antennas is
-            expected to produce two polarisations.
-        n_channels
-            The number of frequency channels to be processed.
-        n_spectra_per_heap
-            The number of time samples to be processed per frequency channel.
-        n_batches
-            The number of matrices to be reordered, a single data matrix = one batch.
-        """
-        # 1. Set member variables that are used to calculate indices for the
-        # input and output buffers
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_batches = n_batches
 
-        # This is set to 8 for now, but must be updated to 4- and 16-bit
+        # TODO: This is set to 8 for now, but must be updated to 4- and 16-bit
         # as and when the TensorCoreXEngine requires it.
         self._sample_bitwidth = 8
 
@@ -99,7 +92,6 @@ class PrecorrelationReorderTemplate:
         if self.n_spectra_per_heap % self.n_times_per_block != 0:
             raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
 
-        # 3. Declare the input and output data shapes
         self.input_data_dimensions = (
             accel.Dimension(self.n_batches, exact=True),
             accel.Dimension(self.n_ants, exact=True),
@@ -119,21 +111,13 @@ class PrecorrelationReorderTemplate:
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        # The size of a data matrix required to be reordered is the same for
-        # Input or Output data shapes
         self.matrix_size = self.n_ants * self.n_channels * self.n_spectra_per_heap * N_POLS
         # Maximum number of threads per block, as per Section I of Nvidia's CUDA Programming Guide
         THREADS_PER_BLOCK: Final[int] = 1024  # noqa: N806
 
-        # 4. Calculate the number of thread blocks to launch per kernel call
-        # - This is in the x-dimension and remains constant for the lifetime of
-        #   the object.
-        # - TODO: Error-check these values (As in, bounds/values, not method).
+        # TODO: Error-check these values (As in, bounds/values, not method).
         self.n_blocks_x = (self.matrix_size + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
 
-        # 5. Compile the kernel
-        #   - The size of this kernel simply depends on the individual matrix size and the
-        #     number of batches required to be reordered.
         program = accel.build(
             context,
             "kernels/precorrelation_reorder_kernel.mako",
@@ -183,7 +167,6 @@ class PrecorrelationReorder(accel.Operation):
     """
 
     def __init__(self, template: PrecorrelationReorderTemplate, command_queue: accel.AbstractCommandQueue) -> None:
-        """Initialise the PreCorrelationReorder object and specify the size of the memory buffers."""
         super().__init__(command_queue)
         self.template = template
         self.slots["in_samples"] = accel.IOSlot(
@@ -198,7 +181,7 @@ class PrecorrelationReorder(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [in_samples_buffer.buffer, out_reordered_buffer.buffer],
-            # Even though we are using CUDA, we follow OpenCLs grid/block
+            # NOTE: Even though we are using CUDA, we follow OpenCLs grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.

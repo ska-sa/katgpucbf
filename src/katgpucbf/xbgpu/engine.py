@@ -33,10 +33,6 @@ loops within the object.
       the error trace stack. This is not an issue when things are working, but
       if we could catch those exceptions and crash the program, it would make
       detecting and debugging heaps much simpler.
-    - The asyncio syntax in the run() function uses old syntax, once this repo
-      has been updated to python 3.8, update this to use the new asyncio
-      syntax.
-
 """
 
 import asyncio
@@ -58,7 +54,7 @@ from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import CorrelationTemplate
-from .precorrelation_reorder import PrecorrelationReorder, PrecorrelationReorderTemplate
+from .precorrelation_reorder import PrecorrelationReorderTemplate
 from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
@@ -89,25 +85,21 @@ class QueueItem:
     completed.
     """
 
-    timestamp: int
-    events: List[katsdpsigproc.abc.AbstractEvent]
-    buffer_device: katsdpsigproc.accel.DeviceArray
-
-    def __init__(self, timestamp: int = 0) -> None:
-        """Initialise the queue item."""
+    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, timestamp: int = 0) -> None:
         self.reset(timestamp)
+        self.buffer_device = buffer_device
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp and events."""
         self.timestamp = timestamp
-        self.events = []
+        self.events: List[katsdpsigproc.abc.AbstractEvent] = []
         # Need to reset chunk
 
-    def add_event(self, event: katsdpsigproc.abc.AbstractEvent):
+    def add_event(self, event: katsdpsigproc.abc.AbstractEvent) -> None:
         """Add an event to the list of events in the QueueItem."""
         self.events.append(event)
 
-    async def async_wait_for_events(self):
+    async def async_wait_for_events(self) -> None:
         """Wait for all events on the list of events to be comlete."""
         await katsdpsigproc.resource.async_wait_for_events(self.events)
 
@@ -122,12 +114,10 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
-    chunk: Optional[recv.Chunk]
-
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
-        self.chunk = None
+        self.chunk: Optional[recv.Chunk] = None
 
 
 class XBEngine(DeviceServer):
@@ -256,69 +246,13 @@ class XBEngine(DeviceServer):
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
 
-        # 1. List object variables and provide type hints - This has no
-        # function other than to improve readability.
-        # 1.1 Array Configuration Parameters - Parameters used to configure the
-        # entire array
-        self.adc_sample_rate_hz: float
-        self.send_rate_factor: float
-        self.heap_accumulation_threshold: int  # Specify a number of heaps to accumulate per accumulation.
-        self.n_ants: int
-        self.n_channels_total: int
-        self.n_channels_per_stream: int
-        self.n_spectra_per_heap: int
-        self.sample_bits: int
-
-        # 1.2 Derived Parameters - Parameters specific to the X-Engine derived
-        # from the array configuration parameters
-        self.rx_heap_timestamp_step: int  # Change in timestamp between consecutive received heaps.
-        self.timestamp_increment_per_accumulation: int  # Time difference between two consecutive accumulations.
-        self.rx_bytes_per_heap_batch: int  # Number of bytes in a batch of received heaps with a specific timestamp.
-        self.dump_interval_s: float  # Number of seconds between output heaps.
-
-        # 1.3 Engine Parameters - Parameters not used in the array but needed for this engine
-        self.chunk_spectra: int  # Sets the number of batches of heaps to store per chunk.
-        self.max_active_chunks: int
-        # Used in the heap to indicate the first channel in the sequence of channels in the stream
-        self.channel_offset_value: int
-
-        # 1.4 Flags used at some point in this class.
-        self.rx_transport_added: bool  # False if no rx transport has been added, true otherwise
-        self.tx_transport_added: bool  # False if no tx transport has been added, true otherwise
-        # Remains true until the user tells the process to stop - then set to
-        # false and close the asyncio functions.
-        self.running: bool
-
-        # 1.5 Queues for passing items between different asyncio functions.
-        # * The _rx_item_queue passes items from the _receiver_loop function to
-        #   the _gpu_proc_loop function.
-        # * The _tx_item_queue passes items from the _gpu_proc_loop to the
-        #   _sender_loop function.
-        # Once the destination function is finished with an item, it will pass
-        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
-        # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem]
-        self._rx_free_item_queue: asyncio.Queue[RxQueueItem]
-        self._tx_item_queue: asyncio.Queue[QueueItem]
-        self._tx_free_item_queue: asyncio.Queue[QueueItem]
-
-        # 1.7 Command queues for syncing different operations on the GPU - a
-        # command queue is the OpenCL name for a CUDA stream. An abstract
-        # command queue can either be implemented as an OpenCL command queue or
-        # a CUDA stream depending on the context.
-        self._upload_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-        self._proc_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-        self._download_command_queue: katsdpsigproc.abc.AbstractCommandQueue
-
-        # 2. Assign configuration variables.
-        # 2.1 Ensure that constructor arguments are within the expected range.
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         if channel_offset_value % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
-        # 2.2 Assign array configuration variables
+        # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
@@ -328,54 +262,48 @@ class XBEngine(DeviceServer):
         self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
 
-        # Define the number of items on each of these queues. The n_rx_items
-        # and n_tx_items each wrap a GPU buffer.  setting these values too high
-        # results in too much GPU memory being consumed. There just need to be
-        # enough of them that the different processing functions do not get
-        # starved waiting for items. The low single digits is suitable.
-        # n_free_chunks wraps buffer in system ram. This can be set quite high
-        # as there is much more system RAM than GPU RAM. It should be higher
-        # than max_active_chunks.
+        # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
+        # these values too high results in too much GPU memory being consumed.
+        # There needs to be enough of them that the different processing
+        # functions do not get starved waiting for items. The low single digits
+        # is suitable. n_free_chunks wraps buffer in system RAM. This can be
+        # set quite high as there is much more system RAM than GPU RAM. It
+        # should be higher than max_active_chunks.
         # These values are not configurable as they have been acceptable for
         # most tests cases up until now. If the pipeline starts bottlenecking,
         # then maybe look at increasing these values.
         n_rx_items = 3  # Too high means too much GPU memory gets allocated
         n_tx_items = 2
-        # 2.3 Calculate derived parameters.
-        # This step represents the difference in timestamp between two
-        # consecutive heaps received from the same F-Engine. We multiply step
-        # by 2 to account for dropping half of the spectrum due to symmetric
-        # properties of the Fourier Transform.  While we can workout the
-        # timestamp_step from other parameters that configure the receiver, we
-        # pass it as a seperate argument to the reciever for cases where the
-        # n_channels_per_stream changes across streams (likely for
-        # non-power-of- two array sizes).
+
+        # Multiply this _step by 2 to account for dropping half of the
+        # spectrum due to symmetric properties of the Fourier Transform. While
+        # we can workout the timestamp_step from other parameters that
+        # configure the receiver, we pass it as a seperate argument to the
+        # reciever for cases where the n_channels_per_stream changes across
+        # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
-        # This is the number of bytes for a single batch of F-Engines. A chunk
+
+        # The number of bytes for a single batch of F-Engines. A chunk
         # consists of multiple batches.
         self.rx_bytes_per_heap_batch = (
             self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
         )
-        # This is how much the timestamp increments by between successive
-        # accumulations
+
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
-        # 2.4 Assign engine configuration parameters
+        # Sets the number of batches of heaps to store per chunk
         self.chunk_spectra = chunk_spectra
-        self.max_active_chunks = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
-        n_free_chunks = self.max_active_chunks + 8
+        self.max_active_chunks: int = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
+        n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
         self.channel_offset_value = channel_offset_value
 
-        # 2.5 Set runtime flags to their initial states
+        # False if no transport has been added, true otherwise.
         self.tx_transport_added = False
         self.rx_transport_added = False
-        self.running = False
 
-        # 3. Declare the Monitor for tracking the state of the reciever chunks
-        # and the queues.
         self.monitor = monitor
 
-        # 4. Create the receiver_stream object. This object has no attached
+        # The receiver_stream object has no attached
         # transport yet and will not function until one of the
         # add_*_receiver_transport() functions has been called.
         self.ringbuffer = ChunkRingbuffer(
@@ -393,24 +321,22 @@ class XBEngine(DeviceServer):
             thread_affinity=src_affinity,
         )
 
-        # 5. Create GPU specific objects.
-        # 5.1 Create a GPU context
         self.context = context
 
-        # 5.2 Create various command queues (or CUDA streams) to queue GPU functions on.
+        # A command queue is the OpenCL name for a CUDA stream. An abstract
+        # command queue can either be implemented as an OpenCL command queue or
+        # a CUDA stream depending on the context.
         self._upload_command_queue = self.context.create_command_queue()
         self._proc_command_queue = self.context.create_command_queue()
         self._download_command_queue = self.context.create_command_queue()
 
-        # 5.3 Create reorder and correlation operations and create buffer
-        # linking the two operations.
-        tensor_core_template = CorrelationTemplate(
+        correlation_template = CorrelationTemplate(
             self.context,
             n_ants=self.n_ants,
             n_channels=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
         )
-        self.tensor_core_x_engine_core = tensor_core_template.instantiate(self._proc_command_queue)
+        self.correlation = correlation_template.instantiate(self._proc_command_queue)
 
         reorder_template = PrecorrelationReorderTemplate(
             self.context,
@@ -419,7 +345,7 @@ class XBEngine(DeviceServer):
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_batches=self.chunk_spectra,
         )
-        self.precorrelation_reorder: PrecorrelationReorder = reorder_template.instantiate(self._proc_command_queue)
+        self.precorrelation_reorder = reorder_template.instantiate(self._proc_command_queue)
 
         self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
             self.context,
@@ -428,42 +354,38 @@ class XBEngine(DeviceServer):
         )
         self.precorrelation_reorder.bind(out_reordered=self.reordered_buffer_device)
 
-        # 6. Create various buffers and assign them to the correct queues or
-        # objects.
-
-        # 6.2 Create various queues for communication between async funtions.
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
-        self._rx_item_queue = self.monitor.make_queue("rx_item_queue", n_rx_items)
-        self._rx_free_item_queue = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue = self.monitor.make_queue("tx_item_queue", n_tx_items)
-        self._tx_free_item_queue = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
+        # * The _rx_item_queue passes items from the _receiver_loop function to
+        #   the _gpu_proc_loop function.
+        # * The _tx_item_queue passes items from the _gpu_proc_loop to the
+        #   _sender_loop function.
+        # Once the destination function is finished with an item, it will pass
+        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
+        # all allocated buffers are in continuous circulation.
+        self._rx_item_queue: asyncio.Queue[Optional[RxQueueItem]] = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._tx_item_queue: asyncio.Queue[Optional[QueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
-        # 6.3 Create buffers and assign them correctly.
-        # 6.3.1 Create items that will store received chunks that have been
-        # transferred to the GPU.
         for _ in range(n_rx_items):
-            rx_item = RxQueueItem()
-            rx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
                 self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
             )
+            rx_item = RxQueueItem(buffer_device)
             self._rx_free_item_queue.put_nowait(rx_item)
 
-        # 6.3.2 Create items that will store correlated data in GPU memory,
-        # ready for transferring back to system RAM.
         for _ in range(n_tx_items):
-            tx_item = QueueItem()
-            tx_item.buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
-                self.tensor_core_x_engine_core.slots["out_visibilities"].shape,  # type: ignore
-                self.tensor_core_x_engine_core.slots["out_visibilities"].dtype,  # type: ignore
+                self.correlation.slots["out_visibilities"].shape,  # type: ignore
+                self.correlation.slots["out_visibilities"].dtype,  # type: ignore
             )
+            tx_item = QueueItem(buffer_device)
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        # 6.3.3 Create empty chunks and give them to the receiver to use to
-        # assemble heaps.
         for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
                 self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
@@ -476,7 +398,7 @@ class XBEngine(DeviceServer):
 
     def add_udp_ibv_receiver_transport(
         self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int, buffer_size: int
-    ):
+    ) -> None:
         """
         Add the ibv_udp transport to the receiver.
 
@@ -507,7 +429,7 @@ class XBEngine(DeviceServer):
         )
         self.rx_transport_added = True
 
-    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int):
+    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int) -> None:
         """
         Add the 'regular' UDP transport to the receiver.
 
@@ -536,7 +458,7 @@ class XBEngine(DeviceServer):
 
         self.rx_transport_added = True
 
-    def add_buffer_receiver_transport(self, buffer: bytes):
+    def add_buffer_receiver_transport(self, buffer: bytes) -> None:
         """
         Add the buffer transport to the receiver.
 
@@ -556,7 +478,7 @@ class XBEngine(DeviceServer):
         self.receiver_stream.add_buffer_reader(buffer)
         self.rx_transport_added = True
 
-    def add_pcap_receiver_transport(self, pcap_filename: str):
+    def add_pcap_receiver_transport(self, pcap_filename: str) -> None:
         """
         Add the pcap transport to the receiver.
 
@@ -583,7 +505,7 @@ class XBEngine(DeviceServer):
         comp_vector: int,
         packet_payload: int,
         use_ibv: bool = True,
-    ):
+    ) -> None:
         """
         Add a UDP transport to the sender.
 
@@ -619,12 +541,12 @@ class XBEngine(DeviceServer):
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
 
-        # This value staggers the send so that packets within a heap are
+        # NOTE: This value staggers the send so that packets within a heap are
         # transmitted onto the network across the entire time between dumps.
         # Care needs to be taken to ensure that this rate is not set too high.
         # If it is too high, the entire pipeline will stall needlessly waiting
         # for packets to be transmitted too slowly.
-        self.dump_interval_s = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
+        self.dump_interval_s: float = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
 
         self.send_stream = XSend(
             n_ants=self.n_ants,
@@ -650,7 +572,7 @@ class XBEngine(DeviceServer):
 
         self.tx_transport_added = True
 
-    def add_inproc_sender_transport(self, queue: spead2.InprocQueue):
+    def add_inproc_sender_transport(self, queue: spead2.InprocQueue) -> None:
         """
         Add the inproc transport to the sender.
 
@@ -665,6 +587,7 @@ class XBEngine(DeviceServer):
         if self.tx_transport_added is True:
             raise AttributeError("Transport for sending data has already been set.")
         self.tx_transport_added = True
+
         # For the inproc transport this value is set very low as the dump rate
         # does affect performance for an inproc queue and a high dump rate just
         # makes the unit tests take very long to run.
@@ -683,7 +606,7 @@ class XBEngine(DeviceServer):
             ),
         )
 
-    async def _receiver_loop(self):
+    async def _receiver_loop(self) -> None:
         """
         Receive heaps off of the network in a continuous loop.
 
@@ -696,29 +619,29 @@ class XBEngine(DeviceServer):
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
-        # 2. Get complete chunks from the ringbuffer.
         async for chunk in recv.recv_chunks(self.receiver_stream):
             timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
 
-            # 2.2. Get a free rx_item that will contain the GPU buffer to transfer the received chunk to.
+            # Get a free rx_item that will contain the GPU buffer to which the
+            # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
             item.timestamp += timestamp
             item.chunk = chunk
 
-            # 2.3. Initiate transfer from received chunk to rx_item buffer.
+            # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_event(self._upload_command_queue.enqueue_marker())
 
-            # 2.4. Give the rx item to the _gpu_proc_loop function.
+            # Give the received item to the _gpu_proc_loop function.
             await self._rx_item_queue.put(item)
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")
         self._rx_item_queue.put_nowait(None)
 
-    async def _gpu_proc_loop(self):
+    async def _gpu_proc_loop(self) -> None:
         """
         Perform all GPU processing of received data in a continuous loop.
 
@@ -739,94 +662,83 @@ class XBEngine(DeviceServer):
         The above steps are performed in a loop until the running flag is set
         to false.
 
-        TODO: Add B-Engine processing in this function.
+        .. todo::
+
+            Add B-Engine processing in this function.
         """
-        # 1. Set up initial conditions
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
-        # The very first heap sent out the X-Engine will have a timestamp of
-        # zero which is meaningless, every other heap will have the correct
+
+        # NOTE: The very first heap sent out the X-Engine will have a timestamp
+        # of zero which is meaningless, every other heap will have the correct
         # timestamp.
         tx_item.timestamp = 0
-        self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
-        self.tensor_core_x_engine_core.zero_visibilities()
+        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.zero_visibilities()
 
         while True:
-            # 2. Get item from receiver function - wait for the HtoD transfers to complete and then give the chunk back
-            #  to the receiver for reuse.
+            # Get item from the receiver function.
+            # - Wait for the HtoD transfers to complete, then
+            # - Give the chunk back to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
             if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
 
-            # 2.1 Give the chunk back to the receiver stream - if this is not
-            # done, eventually no more data will be
-            # received as there will be no available chunks to store it in.
+            # If we don't return the chunk to the stream, eventually no more
+            # data can be received.
+            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
-            # 3. Process the received data.
-            # 3.1 Reorder the entire chunk
             self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
             self.precorrelation_reorder()
 
-            # Finished with the rx item (precorrelation_reorder writes its
-            # outputs to a different buffer). Give it back to the receiver
-            # loop, with an event to make it wait for precorrelation_reorder to
-            # complete.
             reorder_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
             rx_item.add_event(reorder_event)
             await self._rx_free_item_queue.put(rx_item)
 
-            # 3.2 Perform correlation on reordered data. The correlation kernel
-            # does not have the concept of a batch at this stage, so the kernel
-            # needs to be run on each different batch in the chunk.
+            # The correlation kernel does not have the concept of a batch at
+            # this stage, so the kernel needs to be run on each different batch
+            # in the chunk.
             for i in range(self.chunk_spectra):
-                # 3.2.1 Slice the buffer of reordered data to only select a
-                # specific batch. Then run the kernel on this buffer.
                 buffer_slice = katsdpsigproc.accel.DeviceArray(
                     self.context,
-                    self.tensor_core_x_engine_core.slots["in_samples"].shape,  # type: ignore
-                    self.tensor_core_x_engine_core.slots["in_samples"].dtype,  # type: ignore
+                    self.correlation.slots["in_samples"].shape,  # type: ignore
+                    self.correlation.slots["in_samples"].dtype,  # type: ignore
                     raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
                 )
-                self.tensor_core_x_engine_core.bind(in_samples=buffer_slice)
-                self.tensor_core_x_engine_core()
+                self.correlation.bind(in_samples=buffer_slice)
+                self.correlation()
 
-                # 3.2.2 If the batch timestamp corresponds to the accumulation
-                # interval, transfer the correlated data to the sender
-                # function. NOTE: The timestamp representing the end of an
+                # NOTE: The timestamp representing the end of an
                 # accumulation does not necessarily line up with the chunk
                 # timestamp. It will line up with a specific batch within a
                 # chunk though, this is why this check has to happen for each
-                # batch.
-                # This check is the equivilant of the MeerKAT SKARAB X-Engine
-                # auto-resync logic.
+                # batch. This check is the equivalent of the MeerKAT SKARAB
+                # X-Engine auto-resync logic.
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
 
-                    # 3.2.3 Transfer the TX item to the sender function
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
 
-                    # 3.2.4 Get a new tx item, assign its buffer correctly and
-                    # reset the buffer to zero.
                     tx_item = await self._tx_free_item_queue.get()
                     await tx_item.async_wait_for_events()
                     tx_item.timestamp = next_heap_timestamp
-                    self.tensor_core_x_engine_core.bind(out_visibilities=tx_item.buffer_device)
-                    self.tensor_core_x_engine_core.zero_visibilities()
+                    self.correlation.bind(out_visibilities=tx_item.buffer_device)
+                    self.correlation.zero_visibilities()
 
-                # 4. Increment batch timestamp.
                 current_timestamp += self.rx_heap_timestamp_step
 
-        # 6. When the stream is closed, if the sender loop is waiting for a tx item, it will never exit.
-        #    Upon receiving this NoneType, the sender_loop can stop waiting and exit.
+        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # it will never exit. Upon receiving this NoneType, the sender_loop can
+        # stop waiting and exit.
         logger.debug("_gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def _sender_loop(self):
+    async def _sender_loop(self) -> None:
         """
         Send heaps to the network in a continuous loop.
 
@@ -850,25 +762,20 @@ class XBEngine(DeviceServer):
         old_timestamp = 0
 
         while True:
-            # 1. Get the item to transfer and wait for all GPU events to finish before continuing
             item = await self._tx_item_queue.get()
             if item is None:
                 break
             await item.async_wait_for_events()
 
-            # 2. Get a free heap buffer to copy the GPU data to
             buffer_wrapper = await self.send_stream.get_free_heap()
 
-            # 3 Perform some basic logging. We do not expect the time between
-            # dumps to be the same each time as the time.time() function checks
-            # the wall time now, not the actual time between timestamps. The
-            # difference between dump timestamps is expected to be constant
+            # NOTE: We do not expect the time between dumps to be the same each
+            # time as the time.time() function checks the wall time now, not
+            # the actual time between timestamps. The difference between dump
+            # timestamps is expected to be constant.
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            # 3.1 Log that a heap is about to be sent.
-            # TODO: change to an old-fashioned formatted string. fstrings
-            # aren't great for logging.
             logger.info(
                 "Current output heap timestamp: %#x, difference between timestamps: %#x, "
                 "wall time between dumps %.2f s",
@@ -877,11 +784,10 @@ class XBEngine(DeviceServer):
                 time_difference_between_heaps_s,
             )
 
-            # 3.2. Ensure that the timestamp between output heaps is the value
-            # that is expected, Not sure under which conditions that this would
+            # NOTE: Not sure under which conditions that this would fail to
             # occur. Something funny would have to happen at the receiver.
-            # This check is here pre-emptivly - this issue has not been
-            # detected yet.
+            # This check is here pre-emptively - this issue has not been
+            # detected (yet).
             if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
                 logger.warning(
                     "Timestamp between heaps equal to %#x, expected %#x",
@@ -889,8 +795,7 @@ class XBEngine(DeviceServer):
                     self.timestamp_increment_per_accumulation,
                 )
 
-            # 3.3. Check that items are not being received faster than they are
-            # expected to be send.  As the output packets are rate limited in
+            # NOTE: As the output packets are rate limited in
             # such a way to match the dump rate, receiving data too quickly
             # will result in data bottlenecking at the sender, the pipeline
             # eventually stalling and the input buffer overflowing.
@@ -903,26 +808,22 @@ class XBEngine(DeviceServer):
                     self.dump_interval_s,
                 )
 
-            # 3.4 Update variables used for warning checks.
             old_time_s = new_time_s
             old_timestamp = item.timestamp
 
-            # 4. Transfer GPU buffer in item to free buffer.
             item.buffer_device.get_async(self._download_command_queue, buffer_wrapper.buffer)
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            # 5. Tell sender to transmit heap buffer on network.
             self.send_stream.send_heap(item.timestamp, buffer_wrapper)
 
-            # 6. Reset item and put it back on the the _tx_free_item_queue for resue
             item.reset()
             await self._tx_free_item_queue.put(item)
 
         await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
-    async def run_descriptors_loop(self, interval_s):
+    async def run_descriptors_loop(self, interval_s: float) -> None:
         """
         Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
 
@@ -933,7 +834,7 @@ class XBEngine(DeviceServer):
             self.send_stream.send_descriptor_heap()
             await asyncio.sleep(interval_s)
 
-    async def start(self):
+    async def start(self) -> None:
         """
         Launch all the different async functions required to run the X-Engine.
 
@@ -955,7 +856,7 @@ class XBEngine(DeviceServer):
 
         await super().start()
 
-    async def on_stop(self):
+    async def on_stop(self) -> None:
         """
         Shut down processing when the device server is stopped.
 

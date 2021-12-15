@@ -6,6 +6,7 @@ import logging
 from typing import Union
 
 import aiokatcp
+import matplotlib
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
@@ -46,8 +47,7 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
         return endpoint_parser(None)(await get_sensor_val(client, f"{product_name}.katcp-address"))
 
 
-async def async_main():
-    logger = logging.getLogger(__name__)
+def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser()
@@ -55,7 +55,12 @@ async def async_main():
         "--interface",
         type=get_interface_address,
         required=True,
-        help="Name of ibverbs interface.",
+        help="Name of network interface.",
+    )
+    parser.add_argument(
+        "--ibv",
+        action="store_true",
+        help="Use ibverbs",
     )
     parser.add_argument(
         "--mc-address",
@@ -63,9 +68,26 @@ async def async_main():
         default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
         help="Master controller to query for details about the product. [%(default)s]",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Show dumps as they are received",
+    )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
+    if args.interactive:
+        matplotlib.use("WebAgg")
+        # plt.show will run a Tornado event loop, which in turn runs an asyncio
+        # event loop. So we can't directly run an event loop ourselves, but
+        # must instead schedule async_main onto the one run by matplotlib.
+        asyncio.get_event_loop().create_task(async_main(args))
+        plt.show()
+    else:
+        asyncio.run(async_main(args))
 
+
+async def async_main(args: argparse.Namespace) -> None:
+    logger = logging.getLogger(__name__)
     host, port = await get_product_controller_endpoint(args.mc_address, args.product_name)
     client = await aiokatcp.Client.connect(host, port)
 
@@ -150,26 +172,42 @@ async def async_main():
     config = spead2.recv.UdpIbvConfig(
         endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
     )
-    stream.add_udp_ibv_reader(config)
+    if args.ibv:
+        stream.add_udp_ibv_reader(config)
+    else:
+        for ep in multicast_endpoints:
+            stream.add_udp_reader(*ep, interface_address=args.interface)
 
     # Preparation for the plot. Doing it outside the for-loop, no need to redo it lots.
     frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]  # -1 because it goes all the way to n/2
 
+    fig, ax = plt.subplots(
+        n_bls // 4, 4, sharex=True, figsize=(12, 8) if args.interactive else (24, 16), constrained_layout=True
+    )
+    lines = []
+    for i in range(len(ax)):
+        lines.append(ax[i].plot(frequency_axis, [0.0] * len(frequency_axis))[0])
+        ax[i].set_ylabel(bls_ordering[i])
+        ax[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
+        ax[i].set_xlabel("Frequency [MHz]")
+    if args.interactive:
+        fig.canvas.mpl_connect("close_event", lambda event: stream.stop())
+        plt.ion()
+        plt.show()
     async for chunk in stream.data_ringbuffer:
         received_heaps = int(np.sum(chunk.present))
         if received_heaps == HEAPS_PER_CHUNK:
             # We have a full chunk.
-            fig, ax = plt.subplots(n_bls, 1, sharex=True, figsize=(8, 24))
             for i in range(n_bls):
                 # We're just plotting the magnitude for now. Phase is easy enough,
                 # and is left as an exercise to the reader.
-                ax[i].plot(frequency_axis, np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
-                ax[i].set_ylabel(bls_ordering[i])
-            ax[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
-            ax[i].set_xlabel("Frequency [MHz]")
-
-            plt.savefig(f"{chunk.chunk_id}.png")
-            plt.close(fig)
+                lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
+                ax[i].relim()
+                ax[i].autoscale_view()
+            plt.title(f"Chunk {chunk.chunk_id}")
+            if not args.interactive:
+                plt.savefig(f"{chunk.chunk_id}.png")
+                logger.info("Wrote chunk %d", chunk.chunk_id)
         else:
             logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
 
@@ -177,4 +215,4 @@ async def async_main():
 
 
 if __name__ == "__main__":
-    asyncio.run(async_main())
+    main()

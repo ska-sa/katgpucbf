@@ -260,11 +260,13 @@ class TestChunkSets:
         streams = [Mock() for _ in range(N_POLS)]
         # Fake up stream stats
         config = spead2.recv.StreamConfig()
+        config.add_stat("too_old_heaps")
         config.add_stat("katgpucbf.bad_timestamp_heaps")
         config.add_stat("katgpucbf.metadata_heaps")
         for pol, stream in enumerate(streams):
             stream.config = config
             stream.stats = {}
+            stream.stats[config.get_stat_index("too_old_heaps")] = 111 + 1000 * pol
             stream.stats[config.get_stat_index("katgpucbf.bad_timestamp_heaps")] = 123 + 1000 * pol
             stream.stats[config.get_stat_index("katgpucbf.metadata_heaps")] = 321 + 1000 * pol
 
@@ -323,6 +325,7 @@ class TestChunkSets:
         assert get_sample_diffs("input_heaps_total") == [46, 47]
         assert get_sample_diffs("input_chunks_total") == [3, 3]
         assert get_sample_diffs("input_bytes_total") == [46 * 5120, 47 * 5120]
+        assert get_sample_diffs("input_too_old_heaps_total") == [111, 1111]
         assert get_sample_diffs("input_missing_heaps_total") == [11 * 16 - 46, 11 * 16 - 47]
         assert get_sample_diffs("input_bad_timestamp_heaps_total") == [123, 1123]
         assert get_sample_diffs("input_metadata_heaps_total") == [321, 1321]
