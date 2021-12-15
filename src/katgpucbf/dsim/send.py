@@ -18,18 +18,20 @@
 
 import asyncio
 import itertools
+import time
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import spead2.send.asyncio
 import xarray as xr
-from prometheus_client import Counter
+from prometheus_client import Counter, Gauge
 
 from .. import BYTE_BITS, spead
 from . import METRIC_NAMESPACE
 
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
+time_error_gauge = Gauge("time_error_s", "elapsed time minus expected elapsed time", namespace=METRIC_NAMESPACE)
 
 
 class HeapSet:
@@ -196,11 +198,19 @@ class Sender:
     """Manage sending packets."""
 
     def __init__(
-        self, stream: "spead2.send.asyncio.AsyncStream", heap_set: HeapSet, first_timestamp: int, heap_samples: int
+        self,
+        stream: "spead2.send.asyncio.AsyncStream",
+        heap_set: HeapSet,
+        first_timestamp: int,
+        heap_samples: int,
+        sync_time: float,
+        adc_sample_rate: float,
     ) -> None:
         self.stream = stream
         self.heap_set = heap_set
         self.heap_samples = heap_samples
+        self.sync_time = sync_time
+        self.adc_sample_rate = adc_sample_rate
         # The futures serve two functions:
         # - prevent concurrent access to the timestamps while they're being sent
         # - limiting the amount of data in flight
@@ -240,6 +250,9 @@ class Sender:
                     # the await, so re-initialise part.
                     part = self.heap_set.parts[i]
                     part["timestamps"] += self.heap_set.data.dims["time"] * self.heap_samples
+                elapsed = time.time() - self.sync_time
+                expected_elapsed = self._next_timestamp / self.adc_sample_rate
+                time_error_gauge.set(elapsed - expected_elapsed)
                 self._futures[i] = self.stream.async_send_heaps(
                     part.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
                 )
