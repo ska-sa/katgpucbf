@@ -15,6 +15,9 @@
 ################################################################################
 
 """Unit tests for DelayModel functions."""
+from functools import partial
+from typing import List, Sequence
+
 import numpy as np
 import pytest
 
@@ -30,6 +33,25 @@ def test_wrap_angle(input: float, output: float) -> None:
     assert wrap_angle(-input) == pytest.approx(-output)
 
 
+def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel], *, update_list: List) -> None:
+    """Test functionality in MultiDelayModel."""
+    update_list.append(
+        (
+            linear_delay_models[0].start,
+            linear_delay_models[0].delay,
+            linear_delay_models[0].delay_rate,
+            linear_delay_models[0].phase,
+            linear_delay_models[0].phase_rate,
+        )
+    )
+
+
+@pytest.fixture
+def mdelay_callback_list() -> List:
+    """Create an empty list to populate with delay model values via callback."""
+    return []
+
+
 @pytest.fixture
 def linear() -> LinearDelayModel:
     """Create a LinearDelayModel with a fixed set of parameters for testing."""
@@ -37,9 +59,9 @@ def linear() -> LinearDelayModel:
 
 
 @pytest.fixture
-def multi(linear) -> MultiDelayModel:
+def multi(linear, mdelay_callback_list) -> MultiDelayModel:
     """Create a MultiDelayModel with a fixed set of parameters for testing."""
-    out = MultiDelayModel()
+    out = MultiDelayModel(callback_func=partial(mdelay_model_callback, update_list=mdelay_callback_list))
     # First model is the same as the linear fixture
     out.add(linear)
     out.add(LinearDelayModel(30000, 50.5, -0.0025, 0.5, 0.01))
@@ -94,12 +116,26 @@ def test_multi_add_older(multi) -> None:
     assert list(multi._models) == [old_models[0], old_models[1], new_linear]
 
 
-def test_multi_call(multi) -> None:
-    """Test :func:`katgpucbf.fgpu.delay.MultiDelayModel.__call__`."""
+def test_multi_call(multi, mdelay_callback_list) -> None:
+    """Test :func:`katgpucbf.fgpu.delay.MultiDelayModel.__call__`.
+
+    This also incorporates the usage of the callback_func specified in the
+    `multi` test fixture.
+    """
+    orig_models = list(multi._models)
+
     assert multi(100.0) == 0.0
     assert multi(12345.0) == 100.0
     assert multi(12945.75) == 250.1875
     assert multi(50001.0) == 2000.25
+
+    for callback_update, orig_model in zip(mdelay_callback_list, orig_models):
+        assert callback_update[0] == orig_model.start
+        assert callback_update[1] == orig_model.delay
+        assert callback_update[2] == orig_model.delay_rate
+        assert callback_update[3] == orig_model.phase
+        assert callback_update[4] == orig_model.phase_rate
+
     assert len(multi._models) == 1  # Should have popped the older models
     # Going backwards returns unspecified result
     with pytest.warns(NonMonotonicQueryWarning):

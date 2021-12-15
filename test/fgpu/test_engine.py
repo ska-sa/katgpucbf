@@ -19,7 +19,8 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from functools import partial
+from typing import Dict, List, Optional, Tuple
 from unittest import mock
 
 import aiokatcp
@@ -507,6 +508,19 @@ class TestEngine:
         engine_client: aiokatcp.Client,
     ) -> None:
         """Test loading several future delay models."""
+        # Set up infrastructure for testing delay sensor updates
+        delay_sensors = [engine_server.sensors[f"input{pol}-delay"] for pol in range(N_POLS)]
+        sensor_updates_dict: Dict[str, List] = {delay_sensor.name: [] for delay_sensor in delay_sensors}
+
+        def sensor_observer(
+            delay_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List
+        ) -> None:
+            """Populate a list to compare at the end of this unit-test."""
+            updates_list.append(sensor_reading.value)
+
+        for delay_sensor in delay_sensors:
+            delay_sensor.attach(partial(sensor_observer, updates_list=sensor_updates_dict[delay_sensor.name]))
+
         # To keep things simple, we'll just use phase, not delay.
         tone_channel = CHANNELS // 2
         tone = CW(frac_channel=0.5, magnitude=110)
@@ -535,3 +549,16 @@ class TestEngine:
             assert np.any(valid)
             phases = np.angle(out_data[valid])
             np.testing.assert_equal(wrap_angle(phases - update_phases[i]), pytest.approx(0, abs=0.01))
+
+        for delay_sensor in delay_sensors:
+            for expected_time, expected_phase, sensor_update in zip(
+                update_times, update_phases, sensor_updates_dict[delay_sensor.name]
+            ):
+                sensor_values = sensor_update[1:-1].split(",")  # (timestamp, delay, delay_rate, phase, phase_rate)
+                sensor_values = [float(field.strip()) for field in sensor_values]
+                # NOTE: This tolerance is in place as the ADC timestamp gets
+                # converted to a UNIX time and back again, losing some precision
+                # during the conversion process.
+                np.testing.assert_allclose(int(sensor_values[0]), expected_time, atol=200)
+                # NOTE: Using the default relative tolerance of 1e-07
+                np.testing.assert_allclose(sensor_values[3], expected_phase)
