@@ -202,9 +202,11 @@ async def async_main() -> None:
         # time that elapsed from calling time.time until calling time.sleep,
         # but that's small change.
         time.sleep(max(0, start_time - time.time()))
+    else:
+        args.sync_time = time.time()
     logger.info("First timestamp will be %#x", timestamp)
 
-    sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples)
+    sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples, args.sync_time, args.adc_sample_rate)
     server = DeviceServer(
         sender=sender,
         spare=heap_sets[1],
