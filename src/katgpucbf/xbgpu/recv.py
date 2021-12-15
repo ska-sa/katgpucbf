@@ -176,6 +176,7 @@ def make_stream(
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     thread_affinity: int,
+    max_heaps: int,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
@@ -189,13 +190,17 @@ def make_stream(
         Output ringbuffer to which chunks will be sent
     thread_affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
+    max_heaps
+        Maximum number of heaps to have open at once, increase to account for
+        packets from multiple heaps arriving in a disorderly fashion (likely due
+        to multiple senders sending to the multicast endpoint being received).
     """
     # max_heaps is set quite high because timing jitter/bursting means there
     # could be multiple heaps from one F-Engine during the time it takes
     # another to transmit (NGC-471).
     # TODO: find a cleaner solution.
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=(layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128),
+        max_heaps=max_heaps,
         memcpy=spead2.MEMCPY_NONTEMPORAL,
     )
     stats_base = stream_config.next_stat_index()

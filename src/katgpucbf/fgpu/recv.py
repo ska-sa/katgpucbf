@@ -277,6 +277,7 @@ def make_stream(
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
+    max_heaps: int = 1,  # Digitiser heaps are single-packet, so no need for more
 ) -> spead2.recv.ChunkRingStream:
     """Create a receive stream for one polarisation.
 
@@ -292,9 +293,13 @@ def make_stream(
         Output ringbuffer to which chunks will be sent
     affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
+    max_heaps
+        Maximum number of heaps to have open at once, increase to account for
+        packets from multiple heaps arriving in a disorderly fashion (likely due
+        to multiple senders sending to the multicast endpoint being received).
     """
     stream_config = spead2.recv.StreamConfig(
-        max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
+        max_heaps=max_heaps,
         memcpy=spead2.MEMCPY_NONTEMPORAL,
         stream_id=pol,
     )

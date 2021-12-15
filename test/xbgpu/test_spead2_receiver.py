@@ -175,6 +175,7 @@ def create_test_objects(
         max_active_chunks,
         ringbuffer,
         thread_affinity,
+        (layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128),
     )
 
     # 4.4 Create empty chunks and add them to the receiver empty queue.

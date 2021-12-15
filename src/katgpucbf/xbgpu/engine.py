@@ -318,11 +318,13 @@ class XBEngine(DeviceServer):
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.chunk_spectra,
         )
+        max_heaps = self.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128
         self.receiver_stream = recv.make_stream(
             layout=layout,
             max_active_chunks=self.max_active_chunks,
             data_ringbuffer=self.ringbuffer,
             thread_affinity=src_affinity,
+            max_heaps=max_heaps,
         )
 
         self.context = context
