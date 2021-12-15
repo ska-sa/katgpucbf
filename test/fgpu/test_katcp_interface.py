@@ -25,6 +25,7 @@ import pytest
 from numpy import safe_eval
 
 from katgpucbf import N_POLS
+from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cuda_only]
@@ -152,6 +153,38 @@ class TestKatcpRequests:
         """Test that an error is raised if ``?gain`` is used with the wrong number of arguments."""
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain", 0, "1", "2")
+
+    @pytest.mark.parametrize(
+        "correct_delay_string",
+        [
+            "3.76,0.12:7.322,1.91",
+        ],
+    )
+    async def test_delay_model_update_correct(self, engine_client, correct_delay_string):
+        """Test a correctly-formed delay string and validate the update.
+
+        The validation is done by comparing it against the delay sensor readings.
+        """
+        start_time = 0  # Arbitrary, tested up to 1e9 to trigger update
+        await engine_client.request("delays", start_time, correct_delay_string, correct_delay_string)
+
+        delay_str, phase_str = correct_delay_string.split(":")
+        delay, delay_rate = [float(value) for value in delay_str.split(",")]
+        phase, phase_rate = [float(value) for value in phase_str.split(",")]
+        delay_updates_list = []
+
+        for pol in range(N_POLS):
+            sensor_reading = await get_sensor(engine_client, f"input{pol}-delay")
+            delay_updates_list.append(sensor_reading)
+
+        for sensor_update in delay_updates_list:
+            sensor_values = sensor_update[1:-1].split(",")  # (timestamp, delay, delay_rate, phase, phase_rate)
+            sensor_values = [float(field.strip()) for field in sensor_values]
+            # TODO: Could probably neaten this up, but this is nice and explicit
+            np.testing.assert_almost_equal(sensor_values[1], delay, decimal=2)
+            np.testing.assert_almost_equal(sensor_values[2], delay_rate, decimal=2)
+            np.testing.assert_almost_equal(sensor_values[3], wrap_angle(phase), decimal=2)
+            np.testing.assert_almost_equal(sensor_values[4], phase_rate, decimal=2)
 
     @pytest.mark.parametrize(
         "malformed_delay_string",
