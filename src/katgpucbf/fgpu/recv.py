@@ -16,7 +16,6 @@
 
 """Recv module."""
 
-import ctypes
 import functools
 import logging
 from dataclasses import dataclass
@@ -25,7 +24,6 @@ from typing import AsyncGenerator, List, Optional, Tuple, Union, cast
 
 import numba
 import numpy as np
-import scipy
 import spead2.recv.asyncio
 from numba import types
 from prometheus_client import Counter
@@ -135,22 +133,6 @@ class Layout(BaseLayout):
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
         return chunk_place_impl
-
-    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
-        """Generate low-level code for placing heaps in chunks.
-
-        Parameters
-        ----------
-        stats_base
-            Index of first custom statistic
-        """
-        user_data = np.zeros(1, dtype=user_data_type.dtype)
-        user_data["stats_base"] = stats_base
-        return scipy.LowLevelCallable(
-            self._chunk_place.ctypes,
-            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
-            signature="void (void *, size_t, void *)",
-        )
 
 
 async def chunk_sets(

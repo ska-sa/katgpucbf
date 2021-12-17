@@ -16,9 +16,12 @@
 
 """Shared utilities for receiving SPEAD data."""
 
+import ctypes
+import functools
 from abc import ABC, abstractmethod
 from typing import List, Mapping
 
+import numba
 import numpy as np
 import scipy
 import spead2.recv
@@ -84,6 +87,10 @@ class BaseLayout(ABC):
     """Abstract base class for chunk layouts to derive from."""
 
     @abstractmethod
+    @functools.cached_property
+    def _chunk_place(self) -> numba.core.ccallback.CFunc:
+        ...
+
     def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
         """Generate low-level code for placing heaps in chunks.
 
@@ -92,6 +99,13 @@ class BaseLayout(ABC):
         stats_base
             Index of first custom statistic
         """
+        user_data = np.zeros(1, dtype=user_data_type.dtype)
+        user_data["stats_base"] = stats_base
+        return scipy.LowLevelCallable(
+            self._chunk_place.ctypes,
+            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
+            signature="void (void *, size_t, void *)",
+        )
 
 
 def make_stream(
