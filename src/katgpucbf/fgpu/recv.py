@@ -60,6 +60,15 @@ metadata_heaps_counter = Counter(
 bad_timestamp_heaps_counter = Counter(
     "input_bad_timestamp_heaps", "timestamp not a multiple of samples per packet", ["pol"], namespace=METRIC_NAMESPACE
 )
+_PER_POL_COUNTERS = [
+    heaps_counter,
+    chunks_counter,
+    bytes_counter,
+    too_old_heaps_counter,
+    missing_heaps_counter,
+    metadata_heaps_counter,
+    bad_timestamp_heaps_counter,
+]
 
 
 class Chunk(spead2.recv.Chunk):
@@ -224,6 +233,7 @@ async def chunk_sets(
         )
         for pol, stream in enumerate(streams)
     ]
+
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
     # These duplicate the Prometheus counters, because prometheus_client
     # doesn't provide an efficient way to get the current value
@@ -322,6 +332,10 @@ def make_stream(
     affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
     """
+    # Reference counters to make the labels exist before the first scrape
+    for counter in _PER_POL_COUNTERS:
+        counter.labels(pol)
+
     stream_config = spead2.recv.StreamConfig(
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
         memcpy=spead2.MEMCPY_NONTEMPORAL,
