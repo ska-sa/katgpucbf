@@ -48,9 +48,10 @@ import spead2
 import spead2.send
 
 from katgpucbf import COMPLEX, N_POLS
+from katgpucbf.recv import make_stream
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu import METRIC_NAMESPACE
-from katgpucbf.xbgpu.recv import Chunk, Layout, make_stream, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
 
 from .. import PromDiff
 from . import test_parameters

@@ -29,6 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
+from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from ..spead import TIMESTAMP_ID
@@ -265,7 +266,7 @@ class Engine(aiokatcp.DeviceServer):
         spead_items = [TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
         stream_stats = ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"]
         self._src_streams = [
-            recv.make_stream(
+            base_recv.make_stream(
                 self._src_layout,
                 spead_items,
                 MAX_CHUNKS,

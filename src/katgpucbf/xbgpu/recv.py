@@ -19,7 +19,7 @@ import ctypes
 import functools
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator
 
 import numba
 import numpy as np
@@ -32,7 +32,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import Chunk, StatsToCounters, user_data_type
+from ..recv import BaseLayout, Chunk, StatsToCounters, user_data_type
 from . import METRIC_NAMESPACE
 
 heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
@@ -67,7 +67,7 @@ class _Statistic(IntEnum):
 
 
 @dataclass(frozen=True)
-class Layout:
+class Layout(BaseLayout):
     """Parameters controlling the sizes of heaps and chunks.
 
     Parameters
@@ -168,65 +168,6 @@ class Layout:
             user_data=user_data.ctypes.data_as(ctypes.c_void_p),
             signature="void (void *, size_t, void *)",
         )
-
-
-def make_stream(
-    layout: Layout,
-    spead_items: List[int],
-    max_active_chunks: int,
-    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    affinity: int,
-    max_heaps: int,
-    stream_stats: List[str],
-    *,
-    stream_id: int = 0,
-) -> spead2.recv.ChunkRingStream:
-    """Create a SPEAD receiver stream.
-
-    Parameters
-    ----------
-    layout
-        Heap size and chunking parameters
-    spead_items
-        List of SPEAD item IDs to be expected in the heap headers.
-    max_active_chunks
-        Maximum number of chunks under construction.
-    data_ringbuffer
-        Output ringbuffer to which chunks will be sent
-    thread_affinity
-        CPU core affinity for the worker thread (negative to not set an affinity)
-    max_heaps
-        Maximum number of heaps to have open at once, increase to account for
-        packets from multiple heaps arriving in a disorderly fashion (likely due
-        to multiple senders sending to the multicast endpoint being received).
-    stream_stats
-        Stats to hook up to prometheus
-    stream_id
-        Stream ID parameter to pass through to the stream config. Canonical use-
-        case is the polarisation index in the F-engine.
-    """
-    stream_config = spead2.recv.StreamConfig(
-        max_heaps=max_heaps,
-        memcpy=spead2.MEMCPY_NONTEMPORAL,
-        stream_id=stream_id,
-    )
-    stats_base = stream_config.next_stat_index()
-    for stat in stream_stats:
-        stream_config.add_stat(stat)
-
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=spead_items,
-        max_chunks=max_active_chunks,
-        place=layout.chunk_place(stats_base),
-    )
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(data_ringbuffer.maxsize)
-    return spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
-        stream_config,
-        chunk_stream_config,
-        data_ringbuffer,
-        free_ringbuffer,
-    )
 
 
 async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chunk, None]:

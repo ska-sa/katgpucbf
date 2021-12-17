@@ -16,10 +16,13 @@
 
 """Shared utilities for receiving SPEAD data."""
 
-from typing import Mapping
+from abc import ABC, abstractmethod
+from typing import List, Mapping
 
 import numpy as np
+import scipy
 import spead2.recv
+import spead2.recv.asyncio
 from numba import types
 from prometheus_client import Counter
 
@@ -75,3 +78,76 @@ class StatsToCounters:
             new = stats[index]
             counter.inc(new - self._current[i])
             self._current[i] = new
+
+
+class BaseLayout(ABC):
+    """Abstract base class for chunk layouts to derive from."""
+
+    @abstractmethod
+    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
+        """Generate low-level code for placing heaps in chunks.
+
+        Parameters
+        ----------
+        stats_base
+            Index of first custom statistic
+        """
+
+
+def make_stream(
+    layout: BaseLayout,
+    spead_items: List[int],
+    max_active_chunks: int,
+    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    affinity: int,
+    max_heaps: int,
+    stream_stats: List[str],
+    *,
+    stream_id: int = 0,
+) -> spead2.recv.ChunkRingStream:
+    """Create a SPEAD receiver stream.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters
+    spead_items
+        List of SPEAD item IDs to be expected in the heap headers.
+    max_active_chunks
+        Maximum number of chunks under construction.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent
+    thread_affinity
+        CPU core affinity for the worker thread (negative to not set an affinity)
+    max_heaps
+        Maximum number of heaps to have open at once, increase to account for
+        packets from multiple heaps arriving in a disorderly fashion (likely due
+        to multiple senders sending to the multicast endpoint being received).
+    stream_stats
+        Stats to hook up to prometheus
+    stream_id
+        Stream ID parameter to pass through to the stream config. Canonical use-
+        case is the polarisation index in the F-engine.
+    """
+    stream_config = spead2.recv.StreamConfig(
+        max_heaps=max_heaps,
+        memcpy=spead2.MEMCPY_NONTEMPORAL,
+        stream_id=stream_id,
+    )
+    stats_base = stream_config.next_stat_index()
+    for stat in stream_stats:
+        stream_config.add_stat(stat)
+
+    chunk_stream_config = spead2.recv.ChunkStreamConfig(
+        items=spead_items,
+        max_chunks=max_active_chunks,
+        place=layout.chunk_place(stats_base),
+    )
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(128)
+    return spead2.recv.ChunkRingStream(
+        spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
+        stream_config,
+        chunk_stream_config,
+        data_ringbuffer,
+        free_ringbuffer,
+    )

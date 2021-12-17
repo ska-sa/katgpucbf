@@ -28,6 +28,7 @@ import spead2.recv.asyncio
 from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
+from katgpucbf import recv as base_recv
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
 from katgpucbf.fgpu.recv import Chunk, Layout
 from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
@@ -81,7 +82,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     :func:`ringbuffer` for output.
     """
     streams = [
-        recv.make_stream(
+        base_recv.make_stream(
             layout,
             [TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
             2,
@@ -143,7 +144,7 @@ def gen_heaps(
 
 
 class TestStream:
-    """Test the stream built by :func:`katgpucbf.fgpu.recv.make_stream`."""
+    """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
 
     @pytest.mark.parametrize("reorder", [True, False])
     @pytest.mark.parametrize("timestamps", ["good", "bad", pytest.param("mask", marks=[pytest.mark.mask_timestamp])])
