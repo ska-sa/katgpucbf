@@ -52,6 +52,7 @@ from aiokatcp import DeviceServer
 from .. import COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
+from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import recv
 from .correlation import CorrelationTemplate
 from .precorrelation_reorder import PrecorrelationReorderTemplate
@@ -323,12 +324,16 @@ class XBEngine(DeviceServer):
         # another to transmit (NGC-471).
         # TODO: find a cleaner solution.
         max_heaps = self.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128
+        spead_items = [TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID]
+        stream_stats = ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"]
         self.receiver_stream = recv.make_stream(
             layout=layout,
+            spead_items=spead_items,
             max_active_chunks=self.max_active_chunks,
             data_ringbuffer=self.ringbuffer,
             affinity=src_affinity,
             max_heaps=max_heaps,
+            stream_stats=stream_stats,
         )
 
         self.context = context

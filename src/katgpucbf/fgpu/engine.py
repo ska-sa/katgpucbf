@@ -24,12 +24,14 @@ from typing import List, Optional, Tuple, Union
 import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
+import spead2
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
+from ..spead import TIMESTAMP_ID
 from . import recv, send
 from .compute import ComputeTemplate
 from .delay import LinearDelayModel, MultiDelayModel
@@ -260,12 +262,17 @@ class Engine(aiokatcp.DeviceServer):
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
+        spead_items = [TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
+        stream_stats = ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"]
         self._src_streams = [
             recv.make_stream(
                 self._src_layout,
+                spead_items,
                 MAX_CHUNKS,
                 ring,
                 src_affinity[pol],
+                1,  # Digitiser heaps are single-packet, so no need for more
+                stream_stats,
                 stream_id=pol,
             )
             for pol in range(N_POLS)

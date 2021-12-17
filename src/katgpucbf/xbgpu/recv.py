@@ -19,7 +19,7 @@ import ctypes
 import functools
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List
 
 import numba
 import numpy as np
@@ -33,7 +33,6 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
 from ..recv import Chunk, StatsToCounters, user_data_type
-from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
 heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
@@ -173,10 +172,12 @@ class Layout:
 
 def make_stream(
     layout: Layout,
+    spead_items: List[int],
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
     max_heaps: int,
+    stream_stats: List[str],
     *,
     stream_id: int = 0,
 ) -> spead2.recv.ChunkRingStream:
@@ -186,6 +187,8 @@ def make_stream(
     ----------
     layout
         Heap size and chunking parameters
+    spead_items
+        List of SPEAD item IDs to be expected in the heap headers.
     max_active_chunks
         Maximum number of chunks under construction.
     data_ringbuffer
@@ -196,6 +199,8 @@ def make_stream(
         Maximum number of heaps to have open at once, increase to account for
         packets from multiple heaps arriving in a disorderly fashion (likely due
         to multiple senders sending to the multicast endpoint being received).
+    stream_stats
+        Stats to hook up to prometheus
     stream_id
         Stream ID parameter to pass through to the stream config. Canonical use-
         case is the polarisation index in the F-engine.
@@ -206,12 +211,11 @@ def make_stream(
         stream_id=stream_id,
     )
     stats_base = stream_config.next_stat_index()
-    stream_config.add_stat("katgpucbf.metadata_heaps")
-    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
-    stream_config.add_stat("katgpucbf.bad_feng_id_heaps")
+    for stat in stream_stats:
+        stream_config.add_stat(stat)
 
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
+        items=spead_items,
         max_chunks=max_active_chunks,
         place=layout.chunk_place(stats_base),
     )

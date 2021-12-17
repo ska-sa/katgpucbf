@@ -172,10 +172,12 @@ def create_test_objects(
 
     receiver_stream = make_stream(
         layout,
+        [TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_active_chunks,
         ringbuffer,
         thread_affinity,
         (layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128),
+        ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
     )
 
     # 4.4 Create empty chunks and add them to the receiver empty queue.

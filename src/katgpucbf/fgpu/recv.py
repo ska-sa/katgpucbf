@@ -34,7 +34,6 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS
 from ..recv import Chunk, StatsToCounters, user_data_type
-from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -273,10 +272,12 @@ async def chunk_sets(
 
 def make_stream(
     layout: Layout,
+    spead_items: List[int],
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
-    max_heaps: int = 1,  # Digitiser heaps are single-packet, so no need for more
+    max_heaps: int,
+    stream_stats: List[str],
     *,
     stream_id: int = 0,
 ) -> spead2.recv.ChunkRingStream:
@@ -296,6 +297,8 @@ def make_stream(
         Maximum number of heaps to have open at once, increase to account for
         packets from multiple heaps arriving in a disorderly fashion (likely due
         to multiple senders sending to the multicast endpoint being received).
+    stream_stats
+        Stats to hook up to prometheus
     stream_id
         Stream ID parameter to pass through to the stream config. Canonical use-
         case is the polarisation index in the F-engine.
@@ -306,10 +309,11 @@ def make_stream(
         stream_id=stream_id,
     )
     stats_base = stream_config.next_stat_index()
-    stream_config.add_stat("katgpucbf.metadata_heaps")
-    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
+    for stat in stream_stats:
+        stream_config.add_stat(stat)
+
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=max_active_chunks, place=layout.chunk_place(stats_base)
+        items=spead_items, max_chunks=max_active_chunks, place=layout.chunk_place(stats_base)
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.
