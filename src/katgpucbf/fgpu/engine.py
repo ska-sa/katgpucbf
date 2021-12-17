@@ -262,11 +262,11 @@ class Engine(aiokatcp.DeviceServer):
         self._src_layout = recv.Layout(compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_streams = [
             recv.make_stream(
-                pol,
                 self._src_layout,
                 MAX_CHUNKS,
                 ring,
                 src_affinity[pol],
+                stream_id=pol,
             )
             for pol in range(N_POLS)
         ]

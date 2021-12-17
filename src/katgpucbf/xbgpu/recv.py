@@ -177,6 +177,8 @@ def make_stream(
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     thread_affinity: int,
     max_heaps: int,
+    *,
+    stream_id: int = 0,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
@@ -194,14 +196,14 @@ def make_stream(
         Maximum number of heaps to have open at once, increase to account for
         packets from multiple heaps arriving in a disorderly fashion (likely due
         to multiple senders sending to the multicast endpoint being received).
+    stream_id
+        Stream ID parameter to pass through to the stream config. Canonical use-
+        case is the polarisation index in the F-engine.
     """
-    # max_heaps is set quite high because timing jitter/bursting means there
-    # could be multiple heaps from one F-Engine during the time it takes
-    # another to transmit (NGC-471).
-    # TODO: find a cleaner solution.
     stream_config = spead2.recv.StreamConfig(
         max_heaps=max_heaps,
         memcpy=spead2.MEMCPY_NONTEMPORAL,
+        stream_id=stream_id,
     )
     stats_base = stream_config.next_stat_index()
     stream_config.add_stat("katgpucbf.metadata_heaps")

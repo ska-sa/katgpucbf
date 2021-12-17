@@ -318,6 +318,10 @@ class XBEngine(DeviceServer):
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.chunk_spectra,
         )
+        # max_heaps is set quite high because timing jitter/bursting means there
+        # could be multiple heaps from one F-Engine during the time it takes
+        # another to transmit (NGC-471).
+        # TODO: find a cleaner solution.
         max_heaps = self.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128
         self.receiver_stream = recv.make_stream(
             layout=layout,

@@ -272,19 +272,18 @@ async def chunk_sets(
 
 
 def make_stream(
-    pol: int,
     layout: Layout,
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
     max_heaps: int = 1,  # Digitiser heaps are single-packet, so no need for more
+    *,
+    stream_id: int = 0,
 ) -> spead2.recv.ChunkRingStream:
     """Create a receive stream for one polarisation.
 
     Parameters
     ----------
-    pol
-        Polarisation index
     layout
         Heap size and chunking parameters
     max_active_chunks
@@ -297,11 +296,14 @@ def make_stream(
         Maximum number of heaps to have open at once, increase to account for
         packets from multiple heaps arriving in a disorderly fashion (likely due
         to multiple senders sending to the multicast endpoint being received).
+    stream_id
+        Stream ID parameter to pass through to the stream config. Canonical use-
+        case is the polarisation index in the F-engine.
     """
     stream_config = spead2.recv.StreamConfig(
         max_heaps=max_heaps,
         memcpy=spead2.MEMCPY_NONTEMPORAL,
-        stream_id=pol,
+        stream_id=stream_id,
     )
     stats_base = stream_config.next_stat_index()
     stream_config.add_stat("katgpucbf.metadata_heaps")
