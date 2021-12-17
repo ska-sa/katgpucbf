@@ -175,7 +175,7 @@ def make_stream(
     layout: Layout,
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    thread_affinity: int,
+    affinity: int,
     max_heaps: int,
     *,
     stream_id: int = 0,
@@ -217,7 +217,7 @@ def make_stream(
     )
     free_ringbuffer = spead2.recv.ChunkRingbuffer(data_ringbuffer.maxsize)
     return spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(1, [] if thread_affinity < 0 else [thread_affinity]),
+        spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
         stream_config,
         chunk_stream_config,
         data_ringbuffer,

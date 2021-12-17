@@ -327,7 +327,7 @@ class XBEngine(DeviceServer):
             layout=layout,
             max_active_chunks=self.max_active_chunks,
             data_ringbuffer=self.ringbuffer,
-            thread_affinity=src_affinity,
+            affinity=src_affinity,
             max_heaps=max_heaps,
         )
 
