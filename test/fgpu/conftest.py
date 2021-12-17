@@ -58,7 +58,7 @@ def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
         queue = next(queue_iter)
         stream.add_inproc_reader(queue)
 
-    mocker.patch("katgpucbf.fgpu.recv.add_reader", autospec=True, side_effect=add_reader)
+    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
     return queues
 
 

@@ -462,7 +462,7 @@ class Engine(aiokatcp.DeviceServer):
         concurrently.
         """
         for pol, stream in enumerate(self._src_streams):
-            recv.add_reader(
+            base_recv.add_reader(
                 stream,
                 src=self._srcs[pol],
                 interface=self._src_interface,

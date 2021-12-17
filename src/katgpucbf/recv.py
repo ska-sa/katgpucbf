@@ -19,7 +19,7 @@
 import ctypes
 import functools
 from abc import ABC, abstractmethod
-from typing import List, Mapping
+from typing import List, Mapping, Optional, Tuple, Union
 
 import numba
 import numpy as np
@@ -165,3 +165,39 @@ def make_stream(
         data_ringbuffer,
         free_ringbuffer,
     )
+
+
+def add_reader(
+    stream: spead2.recv.ChunkRingStream,
+    *,
+    src: Union[str, List[Tuple[str, int]]],
+    interface: Optional[str],
+    ibv: bool,
+    comp_vector: int,
+    buffer: int,
+) -> None:
+    """Connect a stream to an underlying transport.
+
+    See the documentation for :class:`.Engine` for an explanation of the parameters.
+    """
+    if isinstance(src, str):
+        stream.add_udp_pcap_file_reader(src)
+    elif ibv:
+        if interface is None:
+            raise ValueError("--src-interface is required with --src-ibv")
+        ibv_config = spead2.recv.UdpIbvConfig(
+            endpoints=src,
+            interface_address=interface,
+            buffer_size=buffer,
+            comp_vector=comp_vector,
+        )
+        stream.add_udp_ibv_reader(ibv_config)
+    else:
+        buffer_size = buffer // len(src)  # split it across the endpoints
+        for endpoint in src:
+            stream.add_udp_reader(
+                endpoint[0],
+                endpoint[1],
+                buffer_size=buffer_size,
+                interface_address=interface or "",
+            )
