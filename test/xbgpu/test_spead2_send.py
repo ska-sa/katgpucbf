@@ -49,7 +49,8 @@ TODO: Review the xsend.py class to see if some functionality has not been
 covered in all of these tests.
 """
 
-import asyncio
+from asyncio import create_task, gather
+from typing import Final
 
 import numpy as np
 import pytest
@@ -62,91 +63,19 @@ from katgpucbf.xbgpu.xsend import XSend
 
 from . import test_parameters
 
+pytestmark = [pytest.mark.asyncio]
 
-@pytest.mark.combinations(
-    "num_ants, num_channels",
-    test_parameters.array_size,
-    test_parameters.num_channels,
-)
-def test_send_simple(context, event_loop, num_ants, num_channels):
-    """
-    Tests the XSend class in the xsend.py module.
+TOTAL_HEAPS: Final[int] = 20
+DUMP_INTERVAL_S: Final[int] = 0
+SEND_RATE_FACTOR: Final[float] = 1.1
+SAMPLE_BITWIDTH: Final[int] = 32
 
-    This test transmits a number of heaps from a XSend object over a SPEAD2
-    inproc transport. A SPEAD2 receiver object then examines the transmitted
-    heaps to ensure that the correct fields are transmitted with the correct
-    values.
 
-    This test does not generate random data as it will take much more compute
-    to check that the random data is received correctly. I do not think that
-    random data is necessary, as that would be checking that SPEAD2 is
-    assembling heaps correctly which is a function of SPEAD2 not the XSend
-    class. Mangled heaps should be picked up in the SPEAD2 unit tests.
+class TestSend:
+    """Test the spead2 send stream in :class:`xbgpu.xsend.XSend`."""
 
-    Parameters
-    ----------
-    event_loop: AsyncIO Event Loop
-        The event loop that the async events will be placed on. When running a
-        unit test, this is a fixture provided by the pytest-asyncio module.
-    num_ants: int
-        The number of antennas that have been correlated.
-    num_channels: int
-        The number of frequency channels out of the FFT. NB: This is not the
-        number of FFT channels per stream. The number of channels per stream is
-        calculated from this value.
-    """
-    # 1. Configuration Parameters
-    # 1.1 Fixed Parameters
-    heaps_to_send = (
-        20  # Number of heaps to transmit in the this test. I do not see a need for this number to be larger.
-    )
-    dump_interval_s = 0  # Normally 0.4 but we set it to as fast as possible so things run quickly.
-    send_rate_factor = 1.1  # Factor required by the sender to make provision for any headroom in transmission.
-
-    sample_bits = 32
-
-    # 1.2 Derived parameters
-
-    # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
-    n_engines = 1
-    while n_engines < num_ants * 4:
-        n_engines *= 2
-    n_channels_per_stream = num_channels // n_engines
-    n_baselines = (num_ants + 1) * (num_ants) * 2
-
-    # 3. Initialise SPEAD2 sender and receiver objects and link them
-    # together.
-
-    # 3.1 Create the queue that will link the sender and receiver together.
-    queue = spead2.InprocQueue()
-
-    send_stream = XSend(
-        n_ants=num_ants,
-        n_channels=num_channels,
-        n_channels_per_stream=n_channels_per_stream,
-        dump_interval_s=dump_interval_s,
-        send_rate_factor=send_rate_factor,
-        channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
-        context=context,
-        stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
-            spead2.ThreadPool(), [queue], stream_config
-        ),
-    )
-
-    # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the
-    # XSend over the queue.
-    thread_pool = spead2.ThreadPool()
-    recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
-    recv_stream.add_inproc_reader(queue)
-
-    # 4. Define an async function to manage sending of X-Engine heaps. This
-    # function generates the heaps to be tested.
-    async def send_process():
-        """
-        Run the transmit code asynchronously.
-
-        This process sends a fixed number of heaps and then exits.
-        """
+    async def _send_data(self, send_stream: XSend) -> None:
+        """Send a fixed number of heaps."""
         num_sent = 0
 
         # 4.1 Send the descriptor as the recv_stream object needs it to
@@ -154,7 +83,7 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
         send_stream.send_descriptor_heap()
 
         # 4.2 Run until a set number of heaps have been transferred.
-        while num_sent < heaps_to_send:
+        while num_sent < TOTAL_HEAPS:
             # 4.2.1 Get a free buffer to store the next heap - there is not
             # always a free buffer available. This function yields until one it
             # available.
@@ -178,14 +107,18 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
             send_stream.send_heap(num_sent * 0x1000000, buffer_wrapper)
             num_sent += 1
 
-    # 5. Define an async function to manage receiving of X-Engine heaps. This
-    # function checks that the data is correct.
-    async def recv_process():
-        """
-        Run the receiver process asynchronously.
+    async def _recv_data(
+        self,
+        recv_stream: spead2.recv.asyncio.Stream,
+        n_engines: int,
+        n_channels_per_stream: int,
+        n_baselines: int,
+    ) -> None:
+        """Receive data transmitted from :func:`_send_data`.
 
-        This process receives the data transmitted by the send_process() funtion and ensures that it is received
-        correctly.
+        Error-check data here as well.
+
+        TODO: Remove error-checking and consolidate _send and _recv.
         """
         num_received = 0
         ig = spead2.ItemGroup()
@@ -199,7 +132,7 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
         # 5.2 Wait for the rest of the heaps to arrive and then end the function.
-        while num_received < heaps_to_send:
+        while num_received < TOTAL_HEAPS:
             # 5.2.1 The next heap may not be available immediatly. This
             # function waits asynchronously until a
             # heap arrives.
@@ -233,7 +166,7 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
                 # that the values are all the expected value.
                 if item.id == 0x1800:
                     has_xeng_raw = True
-                    data_length_bytes = n_baselines * n_channels_per_stream * COMPLEX * sample_bits // 8
+                    data_length_bytes = n_baselines * n_channels_per_stream * COMPLEX * SAMPLE_BITWIDTH // 8
                     assert item.value.nbytes == data_length_bytes, (
                         "xeng_raw data not correct size. "
                         f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
@@ -249,23 +182,68 @@ def test_send_simple(context, event_loop, num_ants, num_channels):
 
             num_received += 1
 
-    # 6. Function that will launch the send_process() and recv_process() in a
-    # parallel on a single asyncio loop.
-    async def run():
-        """Launch the send_process() function and recv_process() function in parallel in a single asyncio loop."""
-        task1 = asyncio.create_task(send_process())
-        task2 = asyncio.create_task(recv_process())
-        await task1
-        await task2
+    @pytest.mark.combinations(
+        "num_ants, num_channels",
+        test_parameters.array_size,
+        test_parameters.num_channels,
+    )
+    async def test_send_simple(self, context, num_ants, num_channels):
+        """
+        Tests the XSend class in the xsend.py module.
 
-    # 7. Start the IO loop.
-    event_loop.run_until_complete(run())
+        This test transmits a number of heaps from a XSend object over a SPEAD2
+        inproc transport. A SPEAD2 receiver object then examines the transmitted
+        heaps to ensure that the correct fields are transmitted with the correct
+        values.
 
+        This test does not generate random data as it will take much more compute
+        to check that the random data is received correctly. I do not think that
+        random data is necessary, as that would be checking that SPEAD2 is
+        assembling heaps correctly which is a function of SPEAD2 not the XSend
+        class. Mangled heaps should be picked up in the SPEAD2 unit tests.
 
-# A manual run useful when debugging the unit tests.
-if __name__ == "__main__":
-    np.set_printoptions(formatter={"int": hex})
-    print("Running tests")
-    event_loop = asyncio.get_event_loop()
-    test_send_simple(event_loop, num_ants=64, num_channels=32768)
-    print("Tests complete")
+        Parameters
+        ----------
+        num_ants: int
+            The number of antennas that have been correlated.
+        num_channels: int
+            The number of frequency channels out of the FFT. NB: This is not the
+            number of FFT channels per stream. The number of channels per stream is
+            calculated from this value.
+        """
+        # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+        n_engines = 1
+        while n_engines < num_ants * 4:
+            n_engines *= 2
+        n_channels_per_stream = num_channels // n_engines
+        n_baselines = (num_ants + 1) * (num_ants) * 2
+
+        # 3. Initialise SPEAD2 sender and receiver objects and link them
+        # together.
+
+        # 3.1 Create the queue that will link the sender and receiver together.
+        queue = spead2.InprocQueue()
+
+        send_stream = XSend(
+            n_ants=num_ants,
+            n_channels=num_channels,
+            n_channels_per_stream=n_channels_per_stream,
+            dump_interval_s=DUMP_INTERVAL_S,
+            send_rate_factor=SEND_RATE_FACTOR,
+            channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
+            context=context,
+            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
+                spead2.ThreadPool(), [queue], stream_config
+            ),
+        )
+
+        # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the
+        # XSend over the queue.
+        thread_pool = spead2.ThreadPool()
+        recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
+        recv_stream.add_inproc_reader(queue)
+
+        await gather(
+            create_task(self._send_data(send_stream)),
+            create_task(self._recv_data(recv_stream, n_engines, n_channels_per_stream, n_baselines)),
+        )
