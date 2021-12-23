@@ -23,6 +23,7 @@ heaps to transmitting the correlation products.
 The test_xbengine(...) function is the entry point for these tests.
 """
 
+import logging
 from typing import Final
 
 import numpy as np
@@ -33,12 +34,12 @@ import spead2.send
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import XBEngine
 
 from . import test_parameters
+
+logging.basicConfig()
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter), pytest.mark.asyncio]
 
@@ -265,6 +266,30 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     return output_array
 
 
+def test_counters12(counter_fixture1, counter_fixture2):
+    """Invoke the counter_fixtures with three-tuple values.
+
+    Counter1 first.
+    """
+    logging.info(f"Fixture 1: {counter_fixture1}")
+    logging.info(f"Fixture 2: {counter_fixture2}")
+
+
+def test_counters21(counter_fixture2, counter_fixture1):
+    """Invoke the counter_fixtures with three-tuple values.
+
+    Counter2 first.
+    """
+    logging.info(f"Fixture 2: {counter_fixture2}")
+    logging.info(f"Fixture 1: {counter_fixture1}")
+
+
+@pytest.mark.parametrize("square_fixture", [1, 2, 3], indirect=["square_fixture"])
+def test_square(square_fixture, not_square_fixture=1):
+    """Test the square fixture."""
+    logging.info(f"{square_fixture} vs {not_square_fixture}")
+
+
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
@@ -273,8 +298,15 @@ class TestEngine:
         test_parameters.array_size,
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
+        indirect=["engine_server"],
     )
-    def test_xengine_end_to_end(self, context, num_ants, num_spectra_per_heap, num_channels):
+    async def test_xengine_end_to_end(
+        self,
+        num_ants,
+        num_spectra_per_heap,
+        num_channels,
+        engine_server,
+    ):
         """
         Unit tests for the xbgpu/engine.py module.
 
@@ -300,13 +332,16 @@ class TestEngine:
         n_ants = num_ants
         n_channels_total = num_channels
 
+        # result = str_repr_fixture
+        # logging.info(result)
+        # assert False
         # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
         n_engines = 1
         while n_engines < n_ants * 4:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
-        rx_reorder_tol = 2 ** 26  # Increase if needed; this is small to keep memory usage manageable
+        # rx_reorder_tol = 2 ** 26  # Increase if needed; this is small to keep memory usage manageable
         heap_accumulation_threshold = 4
         n_accumulations = 3
 
@@ -358,26 +393,26 @@ class TestEngine:
 
         # 4. Create xbengine
         # 4.1. Create Monitor required by XBEngine
-        monitor = NullMonitor()
+        # monitor = NullMonitor()
 
-        xbengine = XBEngine(
-            katcp_host="",
-            katcp_port=0,
-            adc_sample_rate_hz=ADC_SAMPLE_RATE,
-            send_rate_factor=SEND_RATE_FACTOR,
-            n_ants=n_ants,
-            n_channels_total=n_channels_total,
-            n_channels_per_stream=n_channels_per_stream,
-            n_spectra_per_heap=n_spectra_per_heap,
-            sample_bits=SAMPLE_BITWIDTH,
-            heap_accumulation_threshold=heap_accumulation_threshold,
-            channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
-            src_affinity=0,
-            chunk_spectra=HEAPS_PER_FENGINE_PER_CHUNK,
-            rx_reorder_tol=rx_reorder_tol,
-            monitor=monitor,
-            context=context,
-        )
+        # engine_server = XBEngine(
+        #     katcp_host="",
+        #     katcp_port=0,
+        #     adc_sample_rate_hz=ADC_SAMPLE_RATE,
+        #     send_rate_factor=SEND_RATE_FACTOR,
+        #     n_ants=n_ants,
+        #     n_channels_total=n_channels_total,
+        #     n_channels_per_stream=n_channels_per_stream,
+        #     n_spectra_per_heap=n_spectra_per_heap,
+        #     sample_bits=SAMPLE_BITWIDTH,
+        #     heap_accumulation_threshold=heap_accumulation_threshold,
+        #     channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
+        #     src_affinity=0,
+        #     chunk_spectra=HEAPS_PER_FENGINE_PER_CHUNK,
+        #     rx_reorder_tol=rx_reorder_tol,
+        #     monitor=monitor,
+        #     context=context,
+        # )
 
         # 6. Generate Data to be sent to the receiver. We are performing
         # <n_accumulations> full accumulations. Each accumulation requires
@@ -397,92 +432,98 @@ class TestEngine:
             source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
         # 7. Add transports to xbengine.
-        xbengine.add_inproc_sender_transport(queue)
-        xbengine.send_stream.send_descriptor_heap()
+        engine_server.add_inproc_sender_transport(queue)
+        engine_server.send_stream.send_descriptor_heap()
 
         buffer = source_stream.getvalue()
-        xbengine.add_buffer_receiver_transport(buffer)
+        engine_server.add_buffer_receiver_transport(buffer)
 
-        # 8. Function to receive data.
-        async def recv_process():
-            """Receives data from the xbengine and checks that it correct."""
-            # 8.1 It is expected that the first packet will be a descriptor. We
-            # check to ensure that this is the case.
-            ig_recv = spead2.ItemGroup()
-            heap = await recv_stream.get()
-            items = ig_recv.update(heap)
-            assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
+        await recv_process(
+            recv_stream,
+            n_ants,
+            n_channels_per_stream,
+            n_spectra_per_heap,
+            n_accumulations,
+            heap_accumulation_threshold,
+            timestamp_step,
+        )
 
-            # 8.2 We expect to receive (n_accumulations + 1) output heaps. Each of
-            # these heaps is verified for correctness
-            for i in range(n_accumulations + 1):
-                # 8.2.1 Wait for heap to be ready and then update out item group
-                # with the new values
-                heap = await recv_stream.get()
-                items = ig_recv.update(heap)
 
-                # 8.2.2 The first heap is an incomplete accumulation containing a
-                # single batch, we need to make sure that this is taken into
-                # account by the verification function.
-                if i == 0:
-                    num_batches_in_current_accumulation = 1
-                    base_batch_index = heap_accumulation_threshold - 1
-                else:
-                    num_batches_in_current_accumulation = heap_accumulation_threshold
-                    base_batch_index = i * heap_accumulation_threshold
+# 8. Function to receive data.
+async def recv_process(
+    recv_stream: spead2.recv.asyncio.Stream,
+    n_ants: int,
+    n_channels_per_stream: int,
+    n_spectra_per_heap: int,
+    n_accumulations: int,
+    heap_accumulation_threshold: int,
+    timestamp_step,
+) -> None:
+    """Receives data from the xbengine and checks that it correct."""
+    # 8.1 It is expected that the first packet will be a descriptor. We
+    # check to ensure that this is the case.
+    ig_recv = spead2.ItemGroup()
+    heap = await recv_stream.get()
+    items = ig_recv.update(heap)
+    assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-                # 8.2.3 Ensure that the timestamp from the heap is what we
-                # expect.
-                assert (
-                    ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
-                ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+    # 8.2 We expect to receive (n_accumulations + 1) output heaps. Each of
+    # these heaps is verified for correctness
+    for i in range(n_accumulations + 1):
+        # 8.2.1 Wait for heap to be ready and then update out item group
+        # with the new values
+        heap = await recv_stream.get()
+        items = ig_recv.update(heap)
 
-                assert ig_recv["timestamp"].value == timestamp_step * heap_accumulation_threshold * i, (
-                    "Output timestamp is not correct. "
-                    f"Expected: {hex(timestamp_step * heap_accumulation_threshold * i)}, "
-                    f"actual: {hex(ig_recv['timestamp'].value)}."
-                )
+        # 8.2.2 The first heap is an incomplete accumulation containing a
+        # single batch, we need to make sure that this is taken into
+        # account by the verification function.
+        if i == 0:
+            num_batches_in_current_accumulation = 1
+            base_batch_index = heap_accumulation_threshold - 1
+        else:
+            num_batches_in_current_accumulation = heap_accumulation_threshold
+            base_batch_index = i * heap_accumulation_threshold
 
-                assert (
-                    ig_recv["frequency"].value
-                    == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
-                ), (
-                    "Output channel offset not correct. "
-                    f"Expected: {n_channels_per_stream * 4}, "
-                    f"actual: {ig_recv['frequency'].value}."
-                )
+        # 8.2.3 Ensure that the timestamp from the heap is what we
+        # expect.
+        assert (
+            ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
+        ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
 
-                # 8.2.4 Send the received data to the C verification function and
-                # assert that this function return is what we expect.
+        assert ig_recv["timestamp"].value == timestamp_step * heap_accumulation_threshold * i, (
+            "Output timestamp is not correct. "
+            f"Expected: {hex(timestamp_step * heap_accumulation_threshold * i)}, "
+            f"actual: {hex(ig_recv['timestamp'].value)}."
+        )
 
-                expected_output = generate_expected_output(
-                    base_batch_index,
-                    num_batches_in_current_accumulation,
-                    n_channels_per_stream,
-                    n_ants,
-                    n_spectra_per_heap,
-                )
+        assert (
+            ig_recv["frequency"].value
+            == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
+        ), (
+            "Output channel offset not correct. "
+            f"Expected: {n_channels_per_stream * 4}, "
+            f"actual: {ig_recv['frequency'].value}."
+        )
 
-                # We reshape this to match the current output of the X-engine. The
-                # expected output is generated the old way, and if I naively change
-                # it, things break. For some reason, this way, they work.
-                # TODO: I'd rather re-examine this unit test in its entirety than
-                # fix this particular little oddity, especially since the new
-                # correlator test works so well.
-                gpu_result = ig_recv["xeng_raw"].value
-                expected_output = expected_output.reshape(gpu_result.shape)
+        # 8.2.4 Send the received data to the C verification function and
+        # assert that this function return is what we expect.
 
-                np.testing.assert_equal(expected_output, gpu_result)
+        expected_output = generate_expected_output(
+            base_batch_index,
+            num_batches_in_current_accumulation,
+            n_channels_per_stream,
+            n_ants,
+            n_spectra_per_heap,
+        )
 
-        # 9. This function launches the XB-Engine loop and the receiver function
-        # that verifies the X-Engine data.
-        async def run():
-            """
-            Start the xbengine and run the recv_process() function.
-
-            The recv_process() has an end point while the xbengine runs forever. Waits for the recv_process() finish and
-            then stops the xbengine.
-            """
-            await xbengine.start()
-            await recv_process()
-            await xbengine.stop()
+        # We reshape this to match the current output of the X-engine. The
+        # expected output is generated the old way, and if I naively change
+        # it, things break. For some reason, this way, they work.
+        # TODO: I'd rather re-examine this unit test in its entirety than
+        # fix this particular little oddity, especially since the new
+        # correlator test works so well.
+        gpu_result = ig_recv["xeng_raw"].value
+        expected_output = expected_output.reshape(gpu_result.shape)
+        logging.info(i)
+        np.testing.assert_equal(expected_output, gpu_result)
