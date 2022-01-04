@@ -50,31 +50,6 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
-def generate_weights(channels: int, taps: int) -> np.ndarray:
-    """Generate Hann-window weights for the F-engine's PFB-FIR.
-
-    Parameters
-    ----------
-    channels
-        Number of channels in the PFB.
-    taps
-        Number of taps in the PFB-FIR.
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        Array containing the weights for the PFB-FIR filters, as
-        single-precision floats.
-    """
-    step = 2 * channels
-    window_size = step * taps
-    idx = np.arange(window_size)
-    hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
-    sinc = np.sinc((idx + 0.5) / step - taps / 2)
-    weights = hann * sinc
-    return weights.astype(np.float32)
-
-
 class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
@@ -279,7 +254,6 @@ class Engine(aiokatcp.DeviceServer):
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_gdrcopy:
-                    # device_bytes = compute.slots[f"in{pol}"].required_bytes()
                     device_bytes = self._processor.compute.slots[f"in{pol}"].required_bytes()
                     with context:
                         device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(gdr, device_bytes)

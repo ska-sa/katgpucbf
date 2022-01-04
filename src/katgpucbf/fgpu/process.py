@@ -356,13 +356,17 @@ class Processor:
     managed by the Processor. The Events contained by the Items are the link
     between these two kinds of queues.
 
-    .. todo::
-
-      There is also a command_queue in the Engine class; it may be better to
-      consolidate these.
+    The instantiation of :class:`~katgpucbf.compute.Compute` (and its template)
+    has been incorporated here to consolidate the command queues in fgpu. The
+    parameters required by :class:`~katgpucbf.compute.Compute` are passed
+    here from :class:`~katgpucbf.engine.Engine` - see its docstring for more
+    info on arguments that are not documented below.
 
     Attributes
     ----------
+    compute
+        :class:`OperationSequence` containing all the steps for carrying out the
+        F-engine's processing.
     in_queue
         Ready :class:`InItem` objects for processing on the GPU.
     in_free_queue
@@ -380,9 +384,6 @@ class Processor:
 
     Parameters
     ----------
-    compute
-        :class:`OperationSequence` containing all the steps for carrying out the
-        F-engine's processing.
     delay_models
         The delay models which should be applied to the data.
     use_gdrcopy
