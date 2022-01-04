@@ -31,8 +31,7 @@ from katsdptelstate.endpoint import Endpoint
 from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
-from . import recv, send
-from .compute import ComputeTemplate
+from . import SAMPLE_BITS, recv, send
 from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
 
@@ -240,17 +239,22 @@ class Engine(aiokatcp.DeviceServer):
             )
             self.delay_models.append(delay_model)
 
-        queue = context.create_command_queue()
-        template = ComputeTemplate(context, taps)
         chunk_samples = spectra * channels * 2
         extra_samples = max_delay_diff + taps * channels * 2
         if extra_samples > chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
-        chunk_bytes = chunk_samples * compute.sample_bits // BYTE_BITS
-        device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(queue, generate_weights(channels, taps))
-        self._processor = Processor(compute, self.delay_models, use_gdrcopy, monitor)
+        self._processor = Processor(
+            context,
+            taps,
+            chunk_samples + extra_samples,
+            spectra,
+            spectra_per_heap,
+            channels,
+            self.delay_models,
+            use_gdrcopy,
+            monitor,
+        )
+        chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
         for pol in range(N_POLS):
             self.set_gains(pol, np.full(channels, gain, dtype=np.complex64))
 
@@ -261,7 +265,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.Layout(compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
+        self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_streams = [
             recv.make_stream(
                 pol,
@@ -275,7 +279,8 @@ class Engine(aiokatcp.DeviceServer):
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_gdrcopy:
-                    device_bytes = compute.slots[f"in{pol}"].required_bytes()
+                    # device_bytes = compute.slots[f"in{pol}"].required_bytes()
+                    device_bytes = self._processor.compute.slots[f"in{pol}"].required_bytes()
                     with context:
                         device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(gdr, device_bytes)
                     buf = np.frombuffer(buf_raw, np.uint8)
