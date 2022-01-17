@@ -38,7 +38,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .. import BYTE_BITS, N_POLS
 from ..monitor import Monitor
 from . import recv, send
-from .compute import Compute
+from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,31 @@ def _invert_models(
     parts = [model.invert_range(start, stop, step) for model in delay_models]
     # Transpose so that each element of groups is one result from all delay models
     return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
+
+
+def generate_weights(channels: int, taps: int) -> np.ndarray:
+    """Generate Hann-window weights for the F-engine's PFB-FIR.
+
+    Parameters
+    ----------
+    channels
+        Number of channels in the PFB.
+    taps
+        Number of taps in the PFB-FIR.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Array containing the weights for the PFB-FIR filters, as
+        single-precision floats.
+    """
+    step = 2 * channels
+    window_size = step * taps
+    idx = np.arange(window_size)
+    hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
+    sinc = np.sinc((idx + 0.5) / step - taps / 2)
+    weights = hann * sinc
+    return weights.astype(np.float32)
 
 
 class BaseItem:
@@ -331,13 +356,11 @@ class Processor:
     managed by the Processor. The Events contained by the Items are the link
     between these two kinds of queues.
 
-    .. todo::
-
-      There is also a command_queue in the Engine class; it may be better to
-      consolidate these.
-
     Attributes
     ----------
+    compute
+        :class:`OperationSequence` containing all the steps for carrying out the
+        F-engine's processing.
     in_queue
         Ready :class:`InItem` objects for processing on the GPU.
     in_free_queue
@@ -355,9 +378,6 @@ class Processor:
 
     Parameters
     ----------
-    compute
-        :class:`OperationSequence` containing all the steps for carrying out the
-        F-engine's processing.
     delay_models
         The delay models which should be applied to the data.
     use_gdrcopy
@@ -369,13 +389,28 @@ class Processor:
 
     def __init__(
         self,
-        compute: Compute,
+        context: AbstractContext,
+        taps: int,
+        samples: int,
+        spectra: int,
+        spectra_per_heap: int,
+        channels: int,
         delay_models: Sequence[AbstractDelayModel],
         use_gdrcopy: bool,
         monitor: Monitor,
     ) -> None:
-        self.compute = compute
+        compute_queue = context.create_command_queue()
+        self._upload_queue = context.create_command_queue()
+        self._download_queue = context.create_command_queue()
+
+        template = ComputeTemplate(context, taps)
+        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
+        device_weights = self.compute.slots["weights"].allocate(accel.DeviceAllocator(context))
+        device_weights.set(compute_queue, generate_weights(channels, taps))
+
         self.delay_models = delay_models
+
+        # TODO: Perhaps declare these as constants at the top? Or Class variables?
         n_in = 3
         n_out = 2
         n_send = 4
@@ -391,15 +426,13 @@ class Processor:
         self.monitor = monitor
         self._spectra = []
         for _ in range(n_in):
-            self.in_free_queue.put_nowait(InItem(compute, use_gdrcopy=use_gdrcopy))
+            self.in_free_queue.put_nowait(InItem(self.compute, use_gdrcopy=use_gdrcopy))
         for _ in range(n_out):
-            item = OutItem(compute)
+            item = OutItem(self.compute)
             self._spectra.append(item.spectra)
             self.out_free_queue.put_nowait(item)
         self._in_items: Deque[InItem] = deque()
         self._out_item = self.out_free_queue.get_nowait()
-        self._upload_queue = compute.template.context.create_command_queue()
-        self._download_queue = compute.template.context.create_command_queue()
         self._use_gdrcopy = use_gdrcopy
 
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
