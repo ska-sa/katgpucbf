@@ -356,12 +356,6 @@ class Processor:
     managed by the Processor. The Events contained by the Items are the link
     between these two kinds of queues.
 
-    The instantiation of :class:`~katgpucbf.compute.Compute` (and its template)
-    has been incorporated here to consolidate the command queues in fgpu. The
-    parameters required by :class:`~katgpucbf.compute.Compute` are passed
-    here from :class:`~katgpucbf.engine.Engine` - see its docstring for more
-    info on arguments that are not documented below.
-
     Attributes
     ----------
     compute
@@ -405,11 +399,14 @@ class Processor:
         use_gdrcopy: bool,
         monitor: Monitor,
     ) -> None:
-        queue = context.create_command_queue()
+        compute_queue = context.create_command_queue()
+        self._upload_queue = context.create_command_queue()
+        self._download_queue = context.create_command_queue()
+
         template = ComputeTemplate(context, taps)
-        self.compute = template.instantiate(queue, samples, spectra, spectra_per_heap, channels)
+        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
         device_weights = self.compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(queue, generate_weights(channels, taps))
+        device_weights.set(compute_queue, generate_weights(channels, taps))
 
         self.delay_models = delay_models
 
@@ -436,8 +433,6 @@ class Processor:
             self.out_free_queue.put_nowait(item)
         self._in_items: Deque[InItem] = deque()
         self._out_item = self.out_free_queue.get_nowait()
-        self._upload_queue = context.create_command_queue()
-        self._download_queue = context.create_command_queue()
         self._use_gdrcopy = use_gdrcopy
 
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
