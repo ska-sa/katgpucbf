@@ -25,7 +25,7 @@ by the request handler for the ``?delays`` katcp request.
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -166,23 +166,31 @@ class MultiDelayModel(AbstractDelayModel):
     """Piece-wise linear delay model.
 
     The model evolves over time by calling :meth:`add`. It **must** only be
-    queried monotonically, because as soon as a query is made beyond the end of
-    the first piece it is discarded.
+    queried monotonically, because as soon as a query is made beyond the end
+    of the first piece it is discarded.
 
     In the initial state it has a model with zero delay.
+
+    It accepts an optional callback function that takes in the
+    LinearDelayModels attached to this MultiDelayModel. This callback is
+    called whenever the first linear piece changes. It is also called
+    immediately by the constructor.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, callback_func: Optional[Callable[[Sequence[LinearDelayModel]], None]] = None) -> None:
         # The initial time is -1 rather than 0 so that it doesn't get removed
         # if a model is added with start time 0, which can lead to some
         # spurious warnings in unit tests about non-monotonic queries.
         # Ideally it would use -infinity (or a large negative number), but
         # that causes issues with numeric precision.
         self._models = deque([LinearDelayModel(-1, 0.0, 0.0, 0.0, 0.0)])
+        self.callback_func = callback_func
+        if callback_func is not None:
+            self.callback_func(self._models)  # type: ignore
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:
-            self._models.popleft()
+            self._popleft()
         if time < self._models[0].start:
             warnings.warn(
                 f"Timestamp {time} is before start of first linear model "
@@ -190,6 +198,12 @@ class MultiDelayModel(AbstractDelayModel):
                 NonMonotonicQueryWarning,
             )
         return self._models[0](time)
+
+    def _popleft(self) -> None:
+        """Carry out a popleft and callback invocation."""
+        self._models.popleft()
+        if self.callback_func is not None:
+            self.callback_func(self._models)
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         orig, fine_delay, phase = self._models[0].invert_range(start, stop, step)
@@ -225,7 +239,7 @@ class MultiDelayModel(AbstractDelayModel):
                 # The previous model is completely overwritten
                 cull = i
         for _ in range(cull):
-            self._models.popleft()
+            self._popleft()
         return orig, fine_delay, phase
 
     def add(self, model: LinearDelayModel) -> None:
@@ -238,3 +252,5 @@ class MultiDelayModel(AbstractDelayModel):
         while self._models and model.start <= self._models[-1].start:
             self._models.pop()
         self._models.append(model)
+        if len(self._models) == 1 and self.callback_func is not None:
+            self.callback_func(self._models)

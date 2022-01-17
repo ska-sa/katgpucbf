@@ -19,7 +19,8 @@
 import asyncio
 import logging
 import numbers
-from typing import List, Optional, Tuple, Union
+from functools import partial
+from typing import List, Optional, Sequence, Tuple, Union
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -33,8 +34,7 @@ from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from ..spead import TIMESTAMP_ID
-from . import recv, send
-from .compute import ComputeTemplate
+from . import SAMPLE_BITS, recv, send
 from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
 
@@ -229,8 +229,6 @@ class Engine(aiokatcp.DeviceServer):
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
-        for pol in range(N_POLS):
-            self.sensors[f"input{pol}-eq"].value = str([gain])
 
         if use_gdrcopy:
             import gdrcopy.pycuda
@@ -240,18 +238,32 @@ class Engine(aiokatcp.DeviceServer):
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
-        self.delay_models = [MultiDelayModel() for _ in range(N_POLS)]
-        queue = context.create_command_queue()
-        template = ComputeTemplate(context, taps)
+        self.delay_models = []
+
+        for pol in range(N_POLS):
+            self.sensors[f"input{pol}-eq"].value = str([gain])
+
+            delay_model = MultiDelayModel(
+                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}-delay"])
+            )
+            self.delay_models.append(delay_model)
+
         chunk_samples = spectra * channels * 2
         extra_samples = max_delay_diff + taps * channels * 2
         if extra_samples > chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        compute = template.instantiate(queue, chunk_samples + extra_samples, spectra, spectra_per_heap, channels)
-        chunk_bytes = chunk_samples * compute.sample_bits // BYTE_BITS
-        device_weights = compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(queue, generate_weights(channels, taps))
-        self._processor = Processor(compute, self.delay_models, use_gdrcopy, monitor)
+        self._processor = Processor(
+            context,
+            taps,
+            chunk_samples + extra_samples,
+            spectra,
+            spectra_per_heap,
+            channels,
+            self.delay_models,
+            use_gdrcopy,
+            monitor,
+        )
+        chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
         for pol in range(N_POLS):
             self.set_gains(pol, np.full(channels, gain, dtype=np.complex64))
 
@@ -262,7 +274,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.Layout(compute.sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
+        self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
         spead_items = [TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
         stream_stats = ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"]
         self._src_streams = [
@@ -282,7 +294,7 @@ class Engine(aiokatcp.DeviceServer):
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_gdrcopy:
-                    device_bytes = compute.slots[f"in{pol}"].required_bytes()
+                    device_bytes = self._processor.compute.slots[f"in{pol}"].required_bytes()
                     with context:
                         device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(gdr, device_bytes)
                     buf = np.frombuffer(buf_raw, np.uint8)
@@ -354,6 +366,39 @@ class Engine(aiokatcp.DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
             sensors.add(sensor)
+
+            sensor = aiokatcp.Sensor(
+                str,
+                f"input{pol}-delay",
+                "The delay settings for this input: (loadmcnt <ADC sample "
+                "count when model was loaded>, delay <in seconds>, "
+                "delay-rate <unit-less or, seconds-per-second>, "
+                "phase <radians>, phase-rate <radians per second>).",
+            )
+            sensors.add(sensor)
+
+    def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
+        """Update the delay sensor upon loading of a new model.
+
+        Accepting the delay_models as a read-only Sequence from the
+        MultiDelayModel, even though we only need the first one to update
+        the sensor.
+
+        The delay and phase-rate values need to be scaled back to their
+        original values (delay (s), phase-rate (rad/s)).
+        """
+        logger.debug("Updating delay sensor: %s", delay_sensor.name)
+
+        orig_delay = delay_models[0].delay / self.adc_sample_rate
+        phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
+        orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.adc_sample_rate
+        delay_sensor.value = (
+            f"({delay_models[0].start}, "
+            f"{orig_delay}, "
+            f"{delay_models[0].delay_rate}, "
+            f"{delay_models[0].phase}, "
+            f"{orig_phase_rate})"
+        )
 
     def set_gains(self, input: int, gains: np.ndarray) -> None:
         """Set the eq gains for one polarisation and update the sensor.
