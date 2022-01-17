@@ -83,13 +83,13 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     """
     streams = [
         base_recv.make_stream(
-            layout,
-            [TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
-            2,
-            ringbuffer,
-            -1,
-            1,
-            ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
+            layout=layout,
+            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
+            max_active_chunks=2,
+            data_ringbuffer=ringbuffer,
+            affinity=-1,
+            max_heaps=1,
+            stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
             stream_id=pol,
         )
         for pol in range(N_POLS)
