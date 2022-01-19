@@ -74,7 +74,8 @@ SAMPLE_BITWIDTH: Final[int] = 32
 class TestSend:
     """Test the spead2 send stream in :class:`xbgpu.xsend.XSend`."""
 
-    async def _send_data(self, send_stream: XSend) -> None:
+    @staticmethod
+    async def _send_data(send_stream: XSend) -> None:
         """Send a fixed number of heaps."""
         num_sent = 0
 
@@ -107,8 +108,8 @@ class TestSend:
             send_stream.send_heap(num_sent * 0x1000000, buffer_wrapper)
             num_sent += 1
 
+    @staticmethod
     async def _recv_data(
-        self,
         recv_stream: spead2.recv.asyncio.Stream,
         n_engines: int,
         n_channels_per_stream: int,
@@ -118,7 +119,9 @@ class TestSend:
 
         Error-check data here as well.
 
-        TODO: Remove error-checking and consolidate _send and _recv.
+        .. todo::
+            Remove error-checking, to be placed elsewhere in the unit test, and
+            Consolidate _send and _recv.
         """
         num_received = 0
         ig = spead2.ItemGroup()
@@ -179,7 +182,6 @@ class TestSend:
             assert has_timestamp, f"Received heap is missing timestamp item with ID {hex(TIMESTAMP_ID)}"
             assert has_channel_offset, f"Received heap is missing channel offset item with ID {hex(FREQUENCY_ID)}"
             assert has_xeng_raw, f"Received heap is missing xeng_raw data buffer item with ID {hex(XENG_RAW_ID)}"
-
             num_received += 1
 
     @pytest.mark.combinations(
@@ -187,7 +189,7 @@ class TestSend:
         test_parameters.array_size,
         test_parameters.num_channels,
     )
-    async def test_send_simple(self, context, num_ants, num_channels):
+    async def test_send_simple(self, context, num_ants, num_channels) -> None:
         """
         Tests the XSend class in the xsend.py module.
 
@@ -220,7 +222,6 @@ class TestSend:
 
         # 3. Initialise SPEAD2 sender and receiver objects and link them
         # together.
-
         # 3.1 Create the queue that will link the sender and receiver together.
         queue = spead2.InprocQueue()
 
@@ -243,6 +244,7 @@ class TestSend:
         recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
 
+        # TODO: These need to be consolidated into one task
         await gather(
             create_task(self._send_data(send_stream)),
             create_task(self._recv_data(recv_stream, n_engines, n_channels_per_stream, n_baselines)),
