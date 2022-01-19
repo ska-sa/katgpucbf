@@ -91,7 +91,3 @@ def pytest_generate_tests(metafunc) -> None:
                     combo = tuple(value_list[i % len(value_list)] for value_list in values)
                 combos.append(combo)
             metafunc.parametrize(names, combos)
-        # See if we can initialise any fixtures with these combos
-        indirect_fixture_list = marker.kwargs.get("indirect", [])
-        for fixture_name in indirect_fixture_list:
-            metafunc.parametrize(fixture_name, combos, indirect=[fixture_name])

@@ -50,155 +50,6 @@ SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 
 
-def create_heaps(
-    timestamp: int,
-    batch_index: int,
-    n_ants: int,
-    n_channels_per_stream: int,
-    n_spectra_per_heap: int,
-    ig: spead2.send.ItemGroup,
-):
-    """
-    Generate a list of heaps to send to the xbengine.
-
-    One heap is generated per antenna in the array. All heaps will have the
-    same timestamp. The 8-bit complex samples for both pols are grouped
-    together and encoded as a single 32-bit unsigned integer value. A heap is
-    composed of multiple channels. Per channel all 32-bit values are kept
-    constant. This makes for faster verification with the downside being that
-    if samples within the channel range get mixed up, this will not be
-    detected.
-
-    The coded 32-bit value is a combination of the antenna index, batch_index
-    and channel index. The sample value is equal to the following:
-
-    coded_sample_value =  (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
-                          (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
-
-    The sign value is 1 for even batch indices and -1 for odd ones for an even
-    spread of positive and negative numbers. An added nuance is that if any of
-    these 8-bit values are equal to -128 they are set to -127 as -128 is not
-    supported by the tensor cores.
-
-    This coded sample value can then be generated at the verification side and
-    used to determine the expected output value without having to implement a
-    full CPU-side correlator.
-
-    NOTE: There is significant overlap between this function and the
-    test_spead2_receiver.create_heaps(...) function.  The only difference is
-    that their data is encoded differently. There is scope to merge these two
-    functions.
-
-    Parameters
-    ----------
-    timestamp: int
-        The timestamp that will be assigned to all heaps.
-    batch_index: int
-        Represents the index of this collection of generated heaps. Value is
-        used to encode sample data.
-    n_ants: int
-        The number of antennas that data will be received from. A seperate heap
-        will be generated per antenna.
-    n_channels_per_stream: int
-        The number of frequency channels contained in a heap.
-    n_spectra_per_heap: int
-        The number of time samples per frequency channel.
-    ig: spead2.send.ItemGroup
-        The ig is used to generate heaps that will be passed to the source
-        stream. This ig is expected to have been configured correctly using the
-        create_test_objects function.
-
-    Returns
-    -------
-    heaps: [spead2.send.HeapReference]
-        The required heaps are stored in an array. Each heap is wrapped in a
-        HeapReference object as this is what is required by the SPEAD2
-        send_heaps() function.
-    """
-    # 1. Define heap shapes that will be needed to generate simulated data.
-    heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-    # The heaps shape has been modified with the CPLX dimension and n_pols dimension equal to 1 instead of 2.
-    # This is because we treat the two 8-bit complex samples for both pols as a single 32-bit value when generating the
-    # the simulated data. We correct the shape before sending.
-    modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
-
-    # 2. Generate all the heaps for the different antennas.
-    heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
-    for ant_index in range(n_ants):
-        sample_array = np.zeros(modified_heap_shape, np.uint32)
-
-        # 2.1 Generate the data for the heap iterating assigning a different value to each channel.
-        for chan_index in range(n_channels_per_stream):
-
-            # 2.1.1 Determine the sign modifier value
-            sign = 1 if batch_index % 2 == 0 else -1
-
-            # 2.1.1 Generate the samples to combine into a code word.
-            pol0_real = np.int8(sign * batch_index)
-            pol0_imag = np.int8(sign * chan_index)
-            pol1_real = np.int8(-sign * ant_index)
-            pol1_imag = np.int8(-sign * chan_index)
-
-            # 2.1.1 Make sure none of these samples are equal to -128 as that is not a supported value with the Tensor
-            # cores. Have to re-assign the numpy scalars because they are immutable.
-            if pol0_real == -128:
-                pol0_real = np.int8(-127)
-            if pol0_imag == -128:
-                pol0_imag = np.int8(-127)
-            if pol1_real == -128:
-                pol1_real = np.int8(-127)
-            if pol1_imag == -128:
-                pol1_imag = np.int8(-127)
-
-            # 2.1.2 Combine values into a code word. The values are all cast to uint8s as when I was casting them to
-            # int8s, the sign extension would behave strangly and what I expected to be in the code word would be
-            # one bit off.
-            coded_sample_value = np.uint32(
-                (np.uint8(pol1_imag) << 24)
-                + (np.uint8(pol1_real) << 16)
-                + (np.uint8(pol0_imag) << 8)
-                + (np.uint8(pol0_real) << 0)
-            )
-
-            # 2.1.3 Set each sample in this channel to contain the same value.
-            sample_array[chan_index][:] = coded_sample_value
-
-        # 2.2 Change dtype and shape of the array back to the correct values
-        # required by the receiver. The data itself is not modified, its just
-        # how it is intepreted that is changed.
-        sample_array = sample_array.view(np.int8)
-        sample_array = np.reshape(sample_array, heap_shape)
-
-        # 2.3 Assign all values to the heap fields.
-        ig["timestamp"].value = timestamp
-        ig["feng_id"].value = ant_index
-        ig["frequency"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
-        ig["feng_raw"].value = sample_array
-
-        # 2.4 Create the heap, configure it to send pointers in each packet and
-        # create the heap reference object required by the sender object.
-        heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
-
-        # This function makes sure that the immediate values in each heap are
-        # transmitted per packet in the heap. By default these values are only
-        # transmitted once. These immediate values are required as this is how
-        # data is received from the MeerKAT SKARAB F-Engines.
-        heap.repeat_pointers = True
-
-        # NOTE: The substream_index is set to zero as the SPEAD BytesStream
-        # transport has not had the concept of substreams introduced. It has
-        # not been updated along with the rest of the transports. As such the
-        # unit test cannot yet test that packet interleaving works correctly. I
-        # am not sure if this feature is planning to be added. If it is, then
-        # set `substream_index=ant_index`. If this starts becoming an issue,
-        # then we will need to look at using the inproc transport. The inproc
-        # transport supports substreams, but requires porting a bunch of things
-        # from SPEAD2 python to xbgpu python. This will require much more
-        # work.
-        heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
-    return heaps
-
-
 @njit
 def bounded_int8(val):
     """Create an int8 value bounded to the range [-127, 127].
@@ -267,6 +118,229 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
 
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
+
+    @staticmethod
+    def _create_heaps(
+        timestamp: int,
+        batch_index: int,
+        n_ants: int,
+        n_channels_per_stream: int,
+        n_spectra_per_heap: int,
+        ig: spead2.send.ItemGroup,
+    ):
+        """
+        Generate a list of heaps to send to the xbengine.
+
+        One heap is generated per antenna in the array. All heaps will have the
+        same timestamp. The 8-bit complex samples for both pols are grouped
+        together and encoded as a single 32-bit unsigned integer value. A heap is
+        composed of multiple channels. Per channel all 32-bit values are kept
+        constant. This makes for faster verification with the downside being that
+        if samples within the channel range get mixed up, this will not be
+        detected.
+
+        The coded 32-bit value is a combination of the antenna index, batch_index
+        and channel index. The sample value is equal to the following:
+
+        coded_sample_value =  (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
+                            (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
+
+        The sign value is 1 for even batch indices and -1 for odd ones for an even
+        spread of positive and negative numbers. An added nuance is that if any of
+        these 8-bit values are equal to -128 they are set to -127 as -128 is not
+        supported by the tensor cores.
+
+        This coded sample value can then be generated at the verification side and
+        used to determine the expected output value without having to implement a
+        full CPU-side correlator.
+
+        NOTE: There is significant overlap between this function and the
+        test_spead2_receiver.create_heaps(...) function.  The only difference is
+        that their data is encoded differently. There is scope to merge these two
+        functions.
+
+        Parameters
+        ----------
+        timestamp: int
+            The timestamp that will be assigned to all heaps.
+        batch_index: int
+            Represents the index of this collection of generated heaps. Value is
+            used to encode sample data.
+        n_ants: int
+            The number of antennas that data will be received from. A seperate heap
+            will be generated per antenna.
+        n_channels_per_stream: int
+            The number of frequency channels contained in a heap.
+        n_spectra_per_heap: int
+            The number of time samples per frequency channel.
+        ig: spead2.send.ItemGroup
+            The ig is used to generate heaps that will be passed to the source
+            stream. This ig is expected to have been configured correctly using the
+            create_test_objects function.
+
+        Returns
+        -------
+        heaps: [spead2.send.HeapReference]
+            The required heaps are stored in an array. Each heap is wrapped in a
+            HeapReference object as this is what is required by the SPEAD2
+            send_heaps() function.
+        """
+        # 1. Define heap shapes that will be needed to generate simulated data.
+        heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
+        # The heaps shape has been modified with the CPLX dimension and n_pols
+        # dimension equal to 1 instead of 2. This is because we treat the two
+        # 8-bit complex samples for both pols as a single 32-bit value when
+        # generating the simulated data. We correct the shape before sending.
+        modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
+
+        # 2. Generate all the heaps for the different antennas.
+        heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
+        for ant_index in range(n_ants):
+            sample_array = np.zeros(modified_heap_shape, np.uint32)
+
+            # 2.1 Generate the data for the heap iterating assigning a different value to each channel.
+            for chan_index in range(n_channels_per_stream):
+
+                # 2.1.1 Determine the sign modifier value
+                sign = 1 if batch_index % 2 == 0 else -1
+
+                # 2.1.1 Generate the samples to combine into a code word.
+                pol0_real = np.int8(sign * batch_index)
+                pol0_imag = np.int8(sign * chan_index)
+                pol1_real = np.int8(-sign * ant_index)
+                pol1_imag = np.int8(-sign * chan_index)
+
+                # 2.1.1 Make sure none of these samples are equal to -128 as that is not a supported value
+                # with the Tensor cores. Have to re-assign the numpy scalars because they are immutable.
+                if pol0_real == -128:
+                    pol0_real = np.int8(-127)
+                if pol0_imag == -128:
+                    pol0_imag = np.int8(-127)
+                if pol1_real == -128:
+                    pol1_real = np.int8(-127)
+                if pol1_imag == -128:
+                    pol1_imag = np.int8(-127)
+
+                # 2.1.2 Combine values into a code word. The values are all cast to uint8s as when I was
+                # casting them to int8s, the sign extension would behave strangly and what I expected to
+                # be in the code word would be one bit off.
+                coded_sample_value = np.uint32(
+                    (np.uint8(pol1_imag) << 24)
+                    + (np.uint8(pol1_real) << 16)
+                    + (np.uint8(pol0_imag) << 8)
+                    + (np.uint8(pol0_real) << 0)
+                )
+
+                # 2.1.3 Set each sample in this channel to contain the same value.
+                sample_array[chan_index][:] = coded_sample_value
+
+            # 2.2 Change dtype and shape of the array back to the correct values
+            # required by the receiver. The data itself is not modified, its just
+            # how it is intepreted that is changed.
+            sample_array = sample_array.view(np.int8)
+            sample_array = np.reshape(sample_array, heap_shape)
+
+            # 2.3 Assign all values to the heap fields.
+            ig["timestamp"].value = timestamp
+            ig["feng_id"].value = ant_index
+            ig["frequency"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
+            ig["feng_raw"].value = sample_array
+
+            # 2.4 Create the heap, configure it to send pointers in each packet and
+            # create the heap reference object required by the sender object.
+            heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
+
+            # This function makes sure that the immediate values in each heap are
+            # transmitted per packet in the heap. By default these values are only
+            # transmitted once. These immediate values are required as this is how
+            # data is received from the MeerKAT SKARAB F-Engines.
+            heap.repeat_pointers = True
+
+            # NOTE: The substream_index is set to zero as the SPEAD BytesStream
+            # transport has not had the concept of substreams introduced. It has
+            # not been updated along with the rest of the transports. As such the
+            # unit test cannot yet test that packet interleaving works correctly. I
+            # am not sure if this feature is planning to be added. If it is, then
+            # set `substream_index=ant_index`. If this starts becoming an issue,
+            # then we will need to look at using the inproc transport. The inproc
+            # transport supports substreams, but requires porting a bunch of things
+            # from SPEAD2 python to xbgpu python. This will require much more
+            # work.
+            heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
+        return heaps
+
+    @staticmethod
+    async def _recv_process(
+        recv_stream: spead2.recv.asyncio.Stream,
+        n_ants: int,
+        n_channels_per_stream: int,
+        n_spectra_per_heap: int,
+        n_accumulations: int,
+        heap_accumulation_threshold: int,
+        timestamp_step,
+    ) -> None:
+        """Receives and verifies data from the xbengine."""
+        # It is expected that the first packet will be a descriptor.
+        ig_recv = spead2.ItemGroup()
+        heap = await recv_stream.get()
+        items = ig_recv.update(heap)
+        assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
+
+        # We expect to receive (n_accumulations + 1) output heaps. Each of
+        # these heaps is verified for correctness
+        for i in range(n_accumulations + 1):
+            # Wait for heap to be ready and then update out item group
+            # with the new values.
+            heap = await recv_stream.get()
+            items = ig_recv.update(heap)
+
+            # The first heap is an incomplete accumulation containing a
+            # single batch, we need to make sure that this is taken into
+            # account by the verification function.
+            if i == 0:
+                num_batches_in_current_accumulation = 1
+                base_batch_index = heap_accumulation_threshold - 1
+            else:
+                num_batches_in_current_accumulation = heap_accumulation_threshold
+                base_batch_index = i * heap_accumulation_threshold
+
+            # Ensure that the timestamp from the heap is what we expect.
+            assert (
+                ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
+            ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+
+            assert ig_recv["timestamp"].value == timestamp_step * heap_accumulation_threshold * i, (
+                "Output timestamp is not correct. "
+                f"Expected: {hex(timestamp_step * heap_accumulation_threshold * i)}, "
+                f"actual: {hex(ig_recv['timestamp'].value)}."
+            )
+
+            assert (
+                ig_recv["frequency"].value
+                == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
+            ), (
+                "Output channel offset not correct. "
+                f"Expected: {n_channels_per_stream * 4}, "
+                f"actual: {ig_recv['frequency'].value}."
+            )
+
+            expected_output = generate_expected_output(
+                base_batch_index,
+                num_batches_in_current_accumulation,
+                n_channels_per_stream,
+                n_ants,
+                n_spectra_per_heap,
+            )
+
+            # We reshape this to match the current output of the X-engine. The
+            # expected output is generated the old way, and if I naively change
+            # it, things break. For some reason, this way, they work.
+            # TODO: I'd rather re-examine this unit test in its entirety than
+            # fix this particular little oddity, especially since the new
+            # correlator test works so well.
+            gpu_result = ig_recv["xeng_raw"].value
+            expected_output = expected_output.reshape(gpu_result.shape)
+            np.testing.assert_equal(expected_output, gpu_result)
 
     @pytest.mark.combinations(
         "num_ants, num_channels, num_spectra_per_heap",
@@ -393,7 +467,9 @@ class TestEngine:
             # heap_accumulation_threshold * timestamp_step
             batch_index = i + (heap_accumulation_threshold - 1)
             timestamp = batch_index * timestamp_step
-            heaps = create_heaps(timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send)
+            heaps = self._create_heaps(
+                timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send
+            )
             source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
         # 7. Add transports to xbengine.
@@ -414,76 +490,3 @@ class TestEngine:
             timestamp_step,
         )
         await xbengine.stop()
-
-    async def _recv_process(
-        self,
-        recv_stream: spead2.recv.asyncio.Stream,
-        n_ants: int,
-        n_channels_per_stream: int,
-        n_spectra_per_heap: int,
-        n_accumulations: int,
-        heap_accumulation_threshold: int,
-        timestamp_step,
-    ) -> None:
-        """Receives and verifies data from the xbengine."""
-        # It is expected that the first packet will be a descriptor.
-        ig_recv = spead2.ItemGroup()
-        heap = await recv_stream.get()
-        items = ig_recv.update(heap)
-        assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
-
-        # We expect to receive (n_accumulations + 1) output heaps. Each of
-        # these heaps is verified for correctness
-        for i in range(n_accumulations + 1):
-            # Wait for heap to be ready and then update out item group
-            # with the new values.
-            heap = await recv_stream.get()
-            items = ig_recv.update(heap)
-
-            # The first heap is an incomplete accumulation containing a
-            # single batch, we need to make sure that this is taken into
-            # account by the verification function.
-            if i == 0:
-                num_batches_in_current_accumulation = 1
-                base_batch_index = heap_accumulation_threshold - 1
-            else:
-                num_batches_in_current_accumulation = heap_accumulation_threshold
-                base_batch_index = i * heap_accumulation_threshold
-
-            # Ensure that the timestamp from the heap is what we expect.
-            assert (
-                ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
-            ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
-
-            assert ig_recv["timestamp"].value == timestamp_step * heap_accumulation_threshold * i, (
-                "Output timestamp is not correct. "
-                f"Expected: {hex(timestamp_step * heap_accumulation_threshold * i)}, "
-                f"actual: {hex(ig_recv['timestamp'].value)}."
-            )
-
-            assert (
-                ig_recv["frequency"].value
-                == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
-            ), (
-                "Output channel offset not correct. "
-                f"Expected: {n_channels_per_stream * 4}, "
-                f"actual: {ig_recv['frequency'].value}."
-            )
-
-            expected_output = generate_expected_output(
-                base_batch_index,
-                num_batches_in_current_accumulation,
-                n_channels_per_stream,
-                n_ants,
-                n_spectra_per_heap,
-            )
-
-            # We reshape this to match the current output of the X-engine. The
-            # expected output is generated the old way, and if I naively change
-            # it, things break. For some reason, this way, they work.
-            # TODO: I'd rather re-examine this unit test in its entirety than
-            # fix this particular little oddity, especially since the new
-            # correlator test works so well.
-            gpu_result = ig_recv["xeng_raw"].value
-            expected_output = expected_output.reshape(gpu_result.shape)
-            np.testing.assert_equal(expected_output, gpu_result)
