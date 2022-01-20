@@ -16,7 +16,7 @@
 
 """Common test plugin for all katgpucbf tests.
 
-It adds a new pytest mark. It's use is best demonstrated by example:
+It adds a new pytest mark. Its use is best demonstrated by example:
 
 .. code:: python
 
