@@ -211,6 +211,7 @@ class XSend:
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
+        tx_enabled: bool = False,
     ) -> None:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
@@ -219,6 +220,8 @@ class XSend:
             raise ValueError("n_channels must be an integer multiple of n_channels_per_stream")
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+
+        self.tx_enabled = tx_enabled
 
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
@@ -326,25 +329,31 @@ class XSend:
         buffer_wrapper
             Wrapped buffer to sent as a SPEAD heap.
         """
-        self.item_group["timestamp"].value = timestamp
-        self.item_group["frequency"].value = self.channel_offset
-        self.item_group["xeng_raw"].value = buffer_wrapper.buffer
+        if self.tx_enabled:
+            self.item_group["timestamp"].value = timestamp
+            self.item_group["frequency"].value = self.channel_offset
+            self.item_group["xeng_raw"].value = buffer_wrapper.buffer
 
-        heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
-        # This flag forces the heap to include all item_group pointers in every
-        # packet belonging to a single heap instead of just in the first
-        # packet. This is done to duplicate the format of the packets out of
-        # the MeerKAT SKARABs.
-        heap_to_send.repeat_pointers = True
+            heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
+            # This flag forces the heap to include all item_group pointers in every
+            # packet belonging to a single heap instead of just in the first
+            # packet. This is done to duplicate the format of the packets out of
+            # the MeerKAT SKARABs.
+            heap_to_send.repeat_pointers = True
 
-        future = self.source_stream.async_send_heap(heap_to_send)
-        self._heaps_queue.put((future, buffer_wrapper))
-        # NOTE: It's not strictly true to say that the data has been sent at
-        # this point; it's only been queued for sending. But it should be close
-        # enough for monitoring data rates at the granularity that this is
-        # typically done.
-        output_heaps_counter.inc(1)
-        output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
+            future = self.source_stream.async_send_heap(heap_to_send)
+            self._heaps_queue.put((future, buffer_wrapper))
+            # NOTE: It's not strictly true to say that the data has been sent at
+            # this point; it's only been queued for sending. But it should be close
+            # enough for monitoring data rates at the granularity that this is
+            # typically done.
+            output_heaps_counter.inc(1)
+            output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
+        else:
+            # :meth:`get_free_heap` still needs to await some Future before
+            # returning a buffer_wrapper.
+            flush_stream_task = asyncio.create_task(self.source_stream.async_flush())
+            self._heaps_queue.put((flush_stream_task, buffer_wrapper))
 
     async def get_free_heap(self) -> BufferWrapper:
         """
@@ -382,7 +391,8 @@ class XSend:
         .. todo::
             This async_send_heap should really be await'ed.
         """
-        self.source_stream.async_send_heap(self.descriptor_heap)
+        if self.tx_enabled:
+            self.source_stream.async_send_heap(self.descriptor_heap)
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""

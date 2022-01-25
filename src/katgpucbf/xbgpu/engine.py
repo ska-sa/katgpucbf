@@ -834,6 +834,14 @@ class XBEngine(DeviceServer):
             self.send_stream.send_descriptor_heap()
             await asyncio.sleep(interval_s)
 
+    async def request_capture_start(self, ctx) -> None:
+        """Start transmission of a data stream."""
+        self.send_stream.tx_enabled = True
+
+    async def request_capture_stop(self, ctx) -> None:
+        """Stop transmission of a data stream."""
+        self.send_stream.tx_enabled = False
+
     async def start(self) -> None:
         """
         Launch all the different async functions required to run the X-Engine.
