@@ -835,11 +835,11 @@ class XBEngine(DeviceServer):
             await asyncio.sleep(interval_s)
 
     async def request_capture_start(self, ctx) -> None:
-        """Start transmission of a data stream."""
+        """Start transmission of this baseline-correlation-products stream."""
         self.send_stream.tx_enabled = True
 
     async def request_capture_stop(self, ctx) -> None:
-        """Stop transmission of a data stream."""
+        """Stop transmission of this baseline-correlation-products stream."""
         self.send_stream.tx_enabled = False
 
     async def start(self) -> None:
