@@ -20,6 +20,7 @@ import functools
 import ipaddress
 import logging
 from typing import Callable, Final, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any
 
 import numpy as np
 import spead2
@@ -60,6 +61,18 @@ async def send(stream: "spead2.send.asyncio.AsyncStream", heap_to_send) -> None:
     futures = []
     futures.append(stream.async_send_heap(heap_to_send, spead2.send.GroupMode.ROUND_ROBIN))
     await asyncio.gather(*futures)
+
+def make_immediate(id: int, value: Any) -> spead2.Item:
+    """Synthesize an immediate item.
+
+    Parameters
+    ----------
+    id
+        The SPEAD identifier for the item
+    value
+        The value of the item
+    """
+    return spead2.Item(id, "dummy_item", "", (), format=[("u", FLAVOUR.heap_address_bits)], value=value)
 
 
 async def async_main() -> None:
@@ -103,41 +116,47 @@ async def async_main() -> None:
         format=[("u", FLAVOUR.heap_address_bits)],
     )
 
-    digitiser_id_items = [spead2.Item(DIGITISER_ID_ID, 0)]
-    digitiser_status_item = spead2.Item(DIGITISER_STATUS_ID, 0)
+    # digitiser_id_items = [make_immediate(DIGITISER_ID_ID, 0)]
+    # digitiser_status_item = make_immediate(DIGITISER_STATUS_ID, 0)
+    # item_group.add_item(digitiser_id_items[0])
+    # item_group.add_item(digitiser_status_item)
 
-    item_group.add_item(digitiser_id_items[0])
-    item_group.add_item(digitiser_status_item)
+    value = np.uint8(0)
+    item_group.add_item(
+        DIGITISER_ID_ID,
+        "",
+        "",
+        shape=(value.shape),
+        dtype=value.dtype,
+        value=value,
+    )
+
+    item_group.add_item(
+        DIGITISER_STATUS_ID,
+        "",
+        "",
+        shape=(value.shape),
+        dtype=value.dtype,
+        value=value,
+    )
 
     timestamps = [1, 2, 3, 4, 5]
     n = len(timestamps)
     heap_size = 1024
     payload = np.zeros((N_POLS, n, heap_size), np.uint8)
-
-    item_group.add_item(
-        spead2.Item(
-            RAW_DATA_ID,
-            "",
-            "",
-            shape=heap_payload.shape,
-            dtype=heap_payload.dtype,
-            value=heap_payload,
-        )
-    )
-    heap.repeat_pointers = True
-
-    n_channels_per_stream = 16
-    heap_shape = (n_channels_per_stream, 1)
+    heap_payload = payload[0,0]
 
     item_group.add_item(
         RAW_DATA_ID,
-        "deng_raw",
-        "RAW DEng data.",
-        shape=heap_shape,
-        dtype=np.int32,
+        "",
+        "",
+        shape=heap_payload.shape,
+        dtype=heap_payload.dtype,
+        value=heap_payload,
     )
 
     descriptor_heap = item_group.get_heap(descriptors="all", data="none")
+    descriptor_heap.repeat_pointers = True
 
     del thread_pool
 

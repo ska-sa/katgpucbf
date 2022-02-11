@@ -58,15 +58,15 @@ del thread_pool
 # else:
 #     stream.add_udp_reader(8888)
 
-# ibv_config = spead2.recv.UdpIbvConfig(
-#     endpoints=src,
-#     interface_address=interface,
-#     buffer_size=buffer,
-#     comp_vector=comp_vector,
-# )
-# stream.add_udp_ibv_reader(ibv_config)
+ibv_config = spead2.recv.UdpIbvConfig(
+    endpoints=src,
+    interface_address=interface,
+    buffer_size=buffer,
+    comp_vector=comp_vector,
+)
+stream.add_udp_ibv_reader(ibv_config)
 
-stream.add_udp_reader(multicast_group="239.102.0.64", port=7148, interface_address=interface)
+# stream.add_udp_reader(multicast_group="239.102.0.64", port=7148, interface_address=interface)
 
 ig = spead2.ItemGroup()
 num_heaps = 0
@@ -76,7 +76,7 @@ for heap in stream:
     # print(len(items.values))
     for item in items.values():
         print("heap")
-        # print(heap.cnt, item.name, item.value)
+        print(heap.cnt, item.name, item.value)
     num_heaps += 1
 stream.stop()
 print("Received", num_heaps, "heaps")
