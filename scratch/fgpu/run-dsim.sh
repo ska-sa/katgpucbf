@@ -26,8 +26,11 @@ case "$1" in
         ;;
 esac
 
-cpu="$1"
+nproc="$(nproc)"
+cpu="$(($nproc * $1 / 4))"
 addresses="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
+
+set -x
 exec spead2_net_raw numactl -C $cpu dsim \
     --ibv \
     --interface $iface \
