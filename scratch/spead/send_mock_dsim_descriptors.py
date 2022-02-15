@@ -124,8 +124,8 @@ async def async_main() -> None:
     value = np.uint8(0)
     item_group.add_item(
         DIGITISER_ID_ID,
-        "",
-        "",
+        "Dig ID",
+        "DEng ID",
         shape=(value.shape),
         dtype=value.dtype,
         value=value,
@@ -133,8 +133,8 @@ async def async_main() -> None:
 
     item_group.add_item(
         DIGITISER_STATUS_ID,
-        "",
-        "",
+        "Dig Status ID",
+        "DEng Status ID",
         shape=(value.shape),
         dtype=value.dtype,
         value=value,
@@ -142,14 +142,14 @@ async def async_main() -> None:
 
     timestamps = [1, 2, 3, 4, 5]
     n = len(timestamps)
-    heap_size = 1024
+    heap_size = 4096
     payload = np.zeros((N_POLS, n, heap_size), np.uint8)
     heap_payload = payload[0,0]
 
     item_group.add_item(
         RAW_DATA_ID,
-        "",
-        "",
+        "Raw Data",
+        "DSim Raw Data",
         shape=heap_payload.shape,
         dtype=heap_payload.dtype,
         value=heap_payload,
