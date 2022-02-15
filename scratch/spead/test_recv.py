@@ -17,6 +17,7 @@
 
 import ipaddress
 import logging
+from tkinter.messagebox import NO
 from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 from typing import Final
 from numpy import uint16
@@ -40,24 +41,6 @@ def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
         return [(ep.host, ep.port) for ep in endpoints]
     except ValueError:
         return
-
-@numba.njit
-def _packbits(data: np.ndarray, bits: int) -> np.ndarray:  # pragma: nocover
-    # Note: needs lots of explicit casting to np.uint64, as otherwise
-    # numba seems to want to infer double precision.
-    out = np.zeros(data.size * bits // BYTE_BITS, np.uint8)
-    buf = np.uint64(0)
-    buf_size = 0
-    mask = (np.uint64(1) << bits) - np.uint64(1)
-    out_pos = 0
-    for v in data:
-        buf = (buf << bits) | (np.uint64(v) & mask)
-        buf_size += bits
-        while buf_size >= BYTE_BITS:
-            out[out_pos] = buf >> (buf_size - BYTE_BITS)
-            out_pos += 1
-            buf_size -= BYTE_BITS
-    return out
 
 @numba.njit
 def unpackbits(packed_data):
@@ -84,28 +67,12 @@ def unpackbits(packed_data):
 
     return unpacked_data
 
-
-# Quick pack - unpack test. This is doesn'yt affect the spead processing.
-# test_data = np.ones(64, np.uint16)
-random_data = np.zeros(64, np.int8)
-
-rng = np.random.default_rng(seed=2021)
-random_data = rng.uniform(
-        np.iinfo(random_data.dtype).min,
-        np.iinfo(random_data.dtype).max,
-        random_data.shape,
-    ).astype(random_data.dtype)
-
-packed_data = _packbits(random_data,10)
-unpacked_data = unpackbits(packed_data)
-np.testing.assert_array_equal(random_data, unpacked_data)
-
 logging.basicConfig(level=logging.INFO)
 
 interface = "10.100.44.1"
 buffer = 32 * 1024 * 1024
 comp_vector = -1
-src = "239.102.0.64:7148"
+src = "239.103.0.64:7148"
 
 src = parse_source(src)
 
@@ -115,12 +82,6 @@ stream = spead2.recv.Stream(
     thread_pool, spead2.recv.StreamConfig(memory_allocator=spead2.MemoryPool(16384, 26214400, 12, 8))
 )
 del thread_pool
-# if 0:
-#     with open('junkspeadfile', 'rb') as f:
-#         text = f.read()
-#     stream.add_buffer_reader(text)
-# else:
-#     stream.add_udp_reader(8888)
 
 ibv_config = spead2.recv.UdpIbvConfig(
     endpoints=src,
@@ -130,11 +91,11 @@ ibv_config = spead2.recv.UdpIbvConfig(
 )
 # stream.add_udp_ibv_reader(ibv_config)
 
-stream.add_udp_reader(multicast_group="239.102.0.64", port=7148, interface_address=interface)
+stream.add_udp_reader(multicast_group="239.103.0.64", port=7148, interface_address=interface)
 
 ig = spead2.ItemGroup()
 num_heaps = 0
-unpacked_data = []
+unpacked_data = None
 for heap in stream:
     print("Got heap", heap.cnt)
     items = ig.update(heap)
@@ -143,11 +104,25 @@ for heap in stream:
         if item.name == "Raw Data":
             print('Captured Data')
             tmp = unpackbits(item.value)
-            unpacked_data.append(tmp)
+            if unpacked_data is None:
+                unpacked_data = tmp
+            else:
+                unpacked_data = np.concatenate([unpacked_data, tmp])
+            # unpacked_data.append(tmp)
+
     num_heaps += 1
+    if unpacked_data is not None:
+       if len(unpacked_data) >= 20000:
+           print(f'Heap:{num_heaps}')
+           break
+
+stream.stop()
+
+if len(unpacked_data) > 0:
+    # Plot unpacked data.
     plt.figure(1)
     plt.plot(unpacked_data)
     plt.show()
-stream.stop()
+
 print("Received", num_heaps, "heaps")
-print(f"data length is{len(unpacked_data)}")
+print(f"data length is: {len(unpacked_data)}")

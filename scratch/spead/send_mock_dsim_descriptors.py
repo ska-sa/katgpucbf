@@ -79,7 +79,7 @@ async def async_main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     interface_ip = "10.100.44.1"
-    src = "239.102.0.64:7148"
+    src = "239.103.0.64:7148"
     ttl = 1
 
     dest_ip_port = parse_source(src)
