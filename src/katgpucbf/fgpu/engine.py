@@ -25,7 +25,6 @@ from typing import List, Optional, Sequence, Tuple, Union
 import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
-import spead2
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
@@ -33,7 +32,6 @@ from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
-from ..spead import TIMESTAMP_ID
 from . import SAMPLE_BITS, recv, send
 from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
@@ -51,12 +49,6 @@ def format_complex(value: numbers.Complex) -> str:
     as a Python complex may not give exactly the same value.
     """
     return f"{value.real}{value.imag:+}j"
-
-
-#: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
-#: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
-#: are not delayed by a whole chunk.
-MAX_CHUNKS = 2
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -250,21 +242,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
-        spead_items = [TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
-        stream_stats = ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"]
-        self._src_streams = [
-            base_recv.make_stream(
-                self._src_layout,
-                spead_items,
-                MAX_CHUNKS,
-                ring,
-                src_affinity[pol],
-                1,  # Digitiser heaps are single-packet, so no need for more
-                stream_stats,
-                stream_id=pol,
-            )
-            for pol in range(N_POLS)
-        ]
+        self._src_streams = recv.make_streams(self._src_layout, ring, src_affinity)
         src_chunks_per_stream = 4
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):

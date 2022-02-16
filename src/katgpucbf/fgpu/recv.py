@@ -30,9 +30,17 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS
-from ..recv import BaseLayout, Chunk, StatsToCounters, user_data_type
+from .. import BYTE_BITS, N_POLS
+from ..recv import BaseLayout, Chunk, StatsToCounters
+from ..recv import make_stream as make_base_stream
+from ..recv import user_data_type
+from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
+
+#: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
+#: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
+#: are not delayed by a whole chunk.
+MAX_CHUNKS = 2
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +150,38 @@ class Layout(BaseLayout):
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
         return chunk_place_impl
+
+
+def make_streams(
+    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: List[int]
+) -> List[spead2.recv.ChunkRingStream]:
+    """Create SPEAD receiver streams.
+
+    Small helper function with F-engine-specific logic in it. Returns a stream
+    for each polarisation.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent.
+    src_affinity
+        CPU core affinity for the worker threads ([-1, -1] for no affinity).
+    """
+    return [
+        make_base_stream(
+            layout=layout,
+            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
+            max_active_chunks=MAX_CHUNKS,
+            data_ringbuffer=data_ringbuffer,
+            affinity=src_affinity[pol],
+            max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
+            stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
+            stream_id=pol,
+        )
+        for pol in range(N_POLS)
+    ]
 
 
 async def chunk_sets(

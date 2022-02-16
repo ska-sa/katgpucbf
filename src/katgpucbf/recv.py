@@ -130,7 +130,7 @@ def make_stream(
         Maximum number of chunks under construction.
     data_ringbuffer
         Output ringbuffer to which chunks will be sent
-    thread_affinity
+    affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
     max_heaps
         Maximum number of heaps to have open at once, increase to account for

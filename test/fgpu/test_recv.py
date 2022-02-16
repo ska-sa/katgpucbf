@@ -28,9 +28,7 @@ import spead2.recv.asyncio
 from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
-from katgpucbf import recv as base_recv
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
-from katgpucbf.fgpu.engine import MAX_CHUNKS
 from katgpucbf.fgpu.recv import Chunk, Layout
 from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
 
@@ -82,19 +80,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     They are connected to the :func:`queues` fixture for input and
     :func:`ringbuffer` for output.
     """
-    streams = [
-        base_recv.make_stream(
-            layout=layout,
-            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
-            max_active_chunks=MAX_CHUNKS,
-            data_ringbuffer=ringbuffer,
-            affinity=-1,
-            max_heaps=1,
-            stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
-            stream_id=pol,
-        )
-        for pol in range(N_POLS)
-    ]
+    streams = recv.make_streams(layout, ringbuffer, [-1, -1])
     for stream, queue in zip(streams, queues):
         for _ in range(4):
             data = np.empty(layout.chunk_bytes, np.uint8)
