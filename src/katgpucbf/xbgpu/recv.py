@@ -16,6 +16,7 @@
 
 """SPEAD receiver utilities."""
 import functools
+import math
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import AsyncGenerator
@@ -30,7 +31,10 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import BaseLayout, Chunk, StatsToCounters, user_data_type
+from ..recv import BaseLayout, Chunk, StatsToCounters
+from ..recv import make_stream as make_base_stream
+from ..recv import user_data_type
+from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
 heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
@@ -150,6 +154,38 @@ class Layout(BaseLayout):
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
         return chunk_place_impl
+
+
+def make_stream(
+    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: int, rx_reorder_tol: int
+) -> spead2.recv.ChunkRingStream:
+    """Create a SPEAD receiver stream.
+
+    Helper function with XB-engine-specific logic in it.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent.
+    src_affinity
+        CPU core affinity for the worker thread.
+    """
+    rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
+    return make_base_stream(
+        layout=layout,
+        spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
+        max_active_chunks=math.ceil(rx_reorder_tol / rx_heap_timestamp_step / layout.heaps_per_fengine_per_chunk) + 1,
+        data_ringbuffer=data_ringbuffer,
+        affinity=src_affinity,
+        # max_heaps is set quite high because timing jitter/bursting means there
+        # could be multiple heaps from one F-Engine during the time it takes
+        # another to transmit (NGC-471).
+        # TODO: find a cleaner solution.
+        max_heaps=layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128,
+        stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
+    )
 
 
 async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chunk, None]:

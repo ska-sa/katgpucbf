@@ -48,10 +48,9 @@ import spead2
 import spead2.send
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.recv import make_stream
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu import METRIC_NAMESPACE
-from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, make_stream, recv_chunks
 
 from .. import PromDiff
 from . import test_parameters
@@ -181,15 +180,7 @@ class TestStream:
             heaps_per_fengine_per_chunk,
         )
 
-        receiver_stream = make_stream(
-            layout,
-            [TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
-            max_active_chunks,
-            ringbuffer,
-            thread_affinity,
-            (layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128),
-            ["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
-        )
+        receiver_stream = make_stream(layout, ringbuffer, thread_affinity, rx_reorder_tol=1)
 
         # 4.4 Create empty chunks and add them to the receiver empty queue.
         src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
