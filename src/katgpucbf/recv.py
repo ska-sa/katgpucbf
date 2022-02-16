@@ -17,7 +17,6 @@
 """Shared utilities for receiving SPEAD data."""
 
 import ctypes
-import functools
 from abc import ABC, abstractmethod
 from typing import List, Mapping, Optional, Tuple, Union
 
@@ -86,8 +85,8 @@ class StatsToCounters:
 class BaseLayout(ABC):
     """Abstract base class for chunk layouts to derive from."""
 
+    @property
     @abstractmethod
-    @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         ...
 
@@ -157,6 +156,8 @@ def make_stream(
         max_chunks=max_active_chunks,
         place=layout.chunk_place(stats_base),
     )
+    # Ringbuffer size is largely arbitrary: just needs to be big enough to
+    # never fill up.
     free_ringbuffer = spead2.recv.ChunkRingbuffer(128)
     return spead2.recv.ChunkRingStream(
         spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),

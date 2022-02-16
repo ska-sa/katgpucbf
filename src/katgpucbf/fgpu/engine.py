@@ -53,31 +53,6 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
-def generate_weights(channels: int, taps: int) -> np.ndarray:
-    """Generate Hann-window weights for the F-engine's PFB-FIR.
-
-    Parameters
-    ----------
-    channels
-        Number of channels in the PFB.
-    taps
-        Number of taps in the PFB-FIR.
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        Array containing the weights for the PFB-FIR filters, as
-        single-precision floats.
-    """
-    step = 2 * channels
-    window_size = step * taps
-    idx = np.arange(window_size)
-    hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
-    sinc = np.sinc((idx + 0.5) / step - taps / 2)
-    weights = hann * sinc
-    return weights.astype(np.float32)
-
-
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
