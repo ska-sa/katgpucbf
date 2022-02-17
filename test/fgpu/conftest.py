@@ -20,7 +20,6 @@ from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
 import async_timeout
-import numpy as np
 import pytest
 import spead2.recv
 import spead2.send.asyncio
@@ -90,15 +89,16 @@ def recv_max_chunks_one(monkeypatch) -> None:
     monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
 
 
-def check_gdrcopy(context: AbstractContext) -> None:
-    """Check whether gdrcopy works on `context`, and skip the test if not."""
-    gdrcopy = pytest.importorskip("gdrcopy")
-    pytest.importorskip("gdrcopy.pycuda")
+def check_vkgdr(context: AbstractContext) -> None:
+    """Check whether vkgdr works on `context`, and skip the test if not."""
+    vkgdr = pytest.importorskip("vkgdr")
+    pytest.importorskip("vkgdr.pycuda")
     try:
-        gdr = gdrcopy.Gdr()
-        gdrcopy.pycuda.allocate(gdr, (32 * 1024 * 1024,), np.uint8)
+        with context:
+            handle = vkgdr.Vkgdr.open_current_context()
+            vkgdr.pycuda.Memory(handle, 16 * 1024 * 1024)
     except Exception as exc:
-        pytest.skip(f"gdrcopy not functional on this GPU: {exc}")
+        pytest.skip(f"vkgdr not functional on this GPU: {exc}")
 
 
 @pytest.fixture
@@ -113,9 +113,9 @@ async def engine_server(
     tested.
     """
     arglist = list(request.cls.engine_arglist)
-    if request.node.get_closest_marker("use_gdrcopy"):
-        check_gdrcopy(context)
-        arglist.append("--use-gdrcopy")
+    if request.node.get_closest_marker("use_vkgdr"):
+        check_vkgdr(context)
+        arglist.append("--use-vkgdr")
     args = parse_args(arglist)
     server, _monitor = make_engine(context, args)
 

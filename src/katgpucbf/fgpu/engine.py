@@ -143,8 +143,8 @@ class Engine(aiokatcp.DeviceServer):
         UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
-    use_gdrcopy
-        Assemble chunks directly in GPU memory (requires supported GPU).
+    use_vkgdr
+        Assemble chunks directly in GPU memory (requires Vulkan).
     use_peerdirect
         Send chunks directly from GPU memory (requires supported GPU).
     monitor
@@ -190,17 +190,18 @@ class Engine(aiokatcp.DeviceServer):
         gain: complex,
         sync_epoch: float,
         mask_timestamp: bool,
-        use_gdrcopy: bool,
+        use_vkgdr: bool,
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
 
-        if use_gdrcopy:
-            import gdrcopy.pycuda
+        if use_vkgdr:
+            import vkgdr.pycuda
 
-            gdr = gdrcopy.Gdr()
+            with context:
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context()
 
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
@@ -227,7 +228,7 @@ class Engine(aiokatcp.DeviceServer):
             spectra_per_heap,
             channels,
             self.delay_models,
-            use_gdrcopy,
+            use_vkgdr,
             monitor,
         )
         chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
@@ -246,18 +247,16 @@ class Engine(aiokatcp.DeviceServer):
         src_chunks_per_stream = 4
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
-                if use_gdrcopy:
+                if use_vkgdr:
                     device_bytes = self._processor.compute.slots[f"in{pol}"].required_bytes()
                     with context:
-                        device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(gdr, device_bytes)
-                    buf = np.frombuffer(buf_raw, np.uint8)
+                        mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
+                    buf = np.array(mem, copy=False).view(np.uint8)
                     # The device buffer contains extra space for copying the head
                     # of the following chunk, but we don't need that in the host
                     # mapping.
                     buf = buf[:chunk_bytes]
-                    # Hack to work around limitations in katsdpsigproc and pycuda
-                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=int(device_raw))
-                    device_array.buffer.base = device_raw
+                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
                     chunk = recv.Chunk(data=buf, device=device_array)
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
