@@ -124,7 +124,7 @@ def parse_args() -> argparse.Namespace:
         help="Number of bits for each real and imaginary value in a sample. [%(default)s]",
     )
     parser.add_argument(
-        "--heaps-per-chunk",
+        "--heaps-per-fengine-per-chunk",
         type=int,
         default=5,
         help="A batch is a collection of heaps from different F-Engines with "
@@ -268,7 +268,7 @@ async def async_main(args: argparse.Namespace) -> None:
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         channel_offset_value=args.channel_offset_value,
         src_affinity=args.src_affinity,
-        heaps_per_fengine_per_chunk=args.heaps_per_chunk,
+        heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
         monitor=monitor,
         context=context,
