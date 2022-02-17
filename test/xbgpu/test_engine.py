@@ -377,9 +377,9 @@ class TestEngine:
         n_ants = num_ants
         n_channels_total = num_channels
 
-        # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+        # Get a realistic number of engines, round up to the next power of 2.
         n_engines = 1
-        while n_engines < n_ants * 4:
+        while n_engines < n_ants:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
