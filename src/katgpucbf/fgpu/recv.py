@@ -169,6 +169,11 @@ def make_streams(
     src_affinity
         CPU core affinity for the worker threads ([-1, -1] for no affinity).
     """
+    # Reference counters to make the labels exist before the first scrape
+    for pol in range(N_POLS):
+        for counter in _PER_POL_COUNTERS:
+            counter.labels(pol)
+
     return [
         make_base_stream(
             layout=layout,
