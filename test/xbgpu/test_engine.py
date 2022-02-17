@@ -447,7 +447,7 @@ class TestEngine:
             heap_accumulation_threshold=heap_accumulation_threshold,
             channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
             src_affinity=0,
-            chunk_spectra=HEAPS_PER_FENGINE_PER_CHUNK,
+            heaps_per_fengine_per_chunk=HEAPS_PER_FENGINE_PER_CHUNK,
             rx_reorder_tol=rx_reorder_tol,
             monitor=monitor,
             context=context,
