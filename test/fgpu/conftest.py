@@ -26,6 +26,7 @@ import spead2.recv
 import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
 
+import katgpucbf.fgpu.engine
 import katgpucbf.fgpu.recv
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
@@ -57,7 +58,7 @@ def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
         queue = next(queue_iter)
         stream.add_inproc_reader(queue)
 
-    mocker.patch("katgpucbf.fgpu.recv.add_reader", autospec=True, side_effect=add_reader)
+    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
     return queues
 
 

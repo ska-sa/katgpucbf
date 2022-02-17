@@ -80,7 +80,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     They are connected to the :func:`queues` fixture for input and
     :func:`ringbuffer` for output.
     """
-    streams = [recv.make_stream(pol, layout, ringbuffer, -1) for pol in range(N_POLS)]
+    streams = recv.make_streams(layout, ringbuffer, [-1, -1])
     for stream, queue in zip(streams, queues):
         for _ in range(4):
             data = np.empty(layout.chunk_bytes, np.uint8)
@@ -131,7 +131,7 @@ def gen_heaps(
 
 
 class TestStream:
-    """Test the stream built by :func:`katgpucbf.fgpu.recv.make_stream`."""
+    """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
 
     @pytest.mark.parametrize("reorder", [True, False])
     @pytest.mark.parametrize("timestamps", ["good", "bad", pytest.param("mask", marks=[pytest.mark.mask_timestamp])])

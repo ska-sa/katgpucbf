@@ -29,6 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
+from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import SAMPLE_BITS, recv, send
@@ -241,15 +242,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
-        self._src_streams = [
-            recv.make_stream(
-                pol,
-                self._src_layout,
-                ring,
-                src_affinity[pol],
-            )
-            for pol in range(N_POLS)
-        ]
+        self._src_streams = recv.make_streams(self._src_layout, ring, src_affinity)
         src_chunks_per_stream = 4
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
@@ -467,7 +460,7 @@ class Engine(aiokatcp.DeviceServer):
         concurrently.
         """
         for pol, stream in enumerate(self._src_streams):
-            recv.add_reader(
+            base_recv.add_reader(
                 stream,
                 src=self._srcs[pol],
                 interface=self._src_interface,

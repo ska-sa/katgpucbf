@@ -16,32 +16,33 @@
 
 """Recv module."""
 
-import ctypes
 import functools
 import logging
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator, List, Optional, Tuple, Union, cast
+from typing import AsyncGenerator, List, Optional, cast
 
 import numba
 import numpy as np
-import scipy
 import spead2.recv.asyncio
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS
-from ..recv import StatsToCounters
+from .. import BYTE_BITS, N_POLS
+from ..recv import BaseLayout, Chunk, StatsToCounters
+from ..recv import make_stream as make_base_stream
+from ..recv import user_data_type
 from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
-logger = logging.getLogger(__name__)
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
+
+logger = logging.getLogger(__name__)
 
 heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
@@ -71,27 +72,6 @@ _PER_POL_COUNTERS = [
 ]
 
 
-class Chunk(spead2.recv.Chunk):
-    """Collection of heaps passed to the GPU at one time.
-
-    It extends the spead2 base class to store a timestamp (computed from
-    the chunk ID when the chunk is received), and optionally store a
-    gdrcopy device array.
-    """
-
-    # Refine the types used in the base class
-    present: np.ndarray
-    data: np.ndarray
-    # New fields
-    device: object
-    timestamp: int
-
-    def __init__(self, *args, device: object = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.device = device
-        self.timestamp = 0  # Actual value filled in when chunk received
-
-
 class _Statistic(IntEnum):
     """Custom statistics for the SPEAD receiver."""
 
@@ -101,15 +81,8 @@ class _Statistic(IntEnum):
     BAD_TIMESTAMP_HEAPS = 1
 
 
-_user_data_type = types.Record.make_c_struct(
-    [
-        ("stats_base", types.uintp),  # Index for first custom statistic
-    ]
-)
-
-
 @dataclass(frozen=True)
-class Layout:
+class Layout(BaseLayout):
     """Parameters controlling the sizes of heaps and chunks."""
 
     sample_bits: int
@@ -149,7 +122,7 @@ class Layout:
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
         @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)),
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)),
             nopython=True,
         )
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):  # pragma: nocover
@@ -178,21 +151,42 @@ class Layout:
 
         return chunk_place_impl
 
-    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
-        """Generate low-level code for placing heaps in chunks.
 
-        Parameters
-        ----------
-        stats_base
-            Index of first custom statistic
-        """
-        user_data = np.zeros(1, dtype=_user_data_type.dtype)
-        user_data["stats_base"] = stats_base
-        return scipy.LowLevelCallable(
-            self._chunk_place.ctypes,
-            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
-            signature="void (void *, size_t, void *)",
+def make_streams(
+    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: List[int]
+) -> List[spead2.recv.ChunkRingStream]:
+    """Create SPEAD receiver streams.
+
+    Small helper function with F-engine-specific logic in it. Returns a stream
+    for each polarisation.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent.
+    src_affinity
+        CPU core affinity for the worker threads ([-1, -1] for no affinity).
+    """
+    # Reference counters to make the labels exist before the first scrape
+    for pol in range(N_POLS):
+        for counter in _PER_POL_COUNTERS:
+            counter.labels(pol)
+
+    return [
+        make_base_stream(
+            layout=layout,
+            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
+            max_active_chunks=MAX_CHUNKS,
+            data_ringbuffer=data_ringbuffer,
+            affinity=src_affinity[pol],
+            max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
+            stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
+            stream_id=pol,
         )
+        for pol in range(N_POLS)
+    ]
 
 
 async def chunk_sets(
@@ -313,86 +307,4 @@ async def chunk_sets(
                 streams[c2.stream_id].add_free_chunk(c2)
 
 
-def make_stream(
-    pol: int,
-    layout: Layout,
-    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    affinity: int,
-) -> spead2.recv.ChunkRingStream:
-    """Create a receive stream for one polarisation.
-
-    Parameters
-    ----------
-    pol
-        Polarisation index
-    layout
-        Heap size and chunking parameters
-    data_ringbuffer
-        Output ringbuffer to which chunks will be sent
-    affinity
-        CPU core affinity for the worker thread (negative to not set an affinity)
-    """
-    # Reference counters to make the labels exist before the first scrape
-    for counter in _PER_POL_COUNTERS:
-        counter.labels(pol)
-
-    stream_config = spead2.recv.StreamConfig(
-        max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
-        memcpy=spead2.MEMCPY_NONTEMPORAL,
-        stream_id=pol,
-    )
-    stats_base = stream_config.next_stat_index()
-    stream_config.add_stat("katgpucbf.metadata_heaps")
-    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place(stats_base)
-    )
-    # Ringbuffer size is largely arbitrary: just needs to be big enough to
-    # never fill up.
-    free_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(128)
-    return spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
-        stream_config,
-        chunk_stream_config,
-        data_ringbuffer,
-        free_ringbuffer,
-    )
-
-
-def add_reader(
-    stream: spead2.recv.ChunkRingStream,
-    *,
-    src: Union[str, List[Tuple[str, int]]],
-    interface: Optional[str],
-    ibv: bool,
-    comp_vector: int,
-    buffer: int,
-) -> None:
-    """Connect a stream to an underlying transport.
-
-    See the documentation for :class:`.Engine` for an explanation of the parameters.
-    """
-    if isinstance(src, str):
-        stream.add_udp_pcap_file_reader(src)
-    elif ibv:
-        if interface is None:
-            raise ValueError("--src-interface is required with --src-ibv")
-        ibv_config = spead2.recv.UdpIbvConfig(
-            endpoints=src,
-            interface_address=interface,
-            buffer_size=buffer,
-            comp_vector=comp_vector,
-        )
-        stream.add_udp_ibv_reader(ibv_config)
-    else:
-        buffer_size = buffer // len(src)  # split it across the endpoints
-        for endpoint in src:
-            stream.add_udp_reader(
-                endpoint[0],
-                endpoint[1],
-                buffer_size=buffer_size,
-                interface_address=interface or "",
-            )
-
-
-__all__ = ["Chunk", "Layout", "chunk_sets", "make_stream", "add_reader"]
+__all__ = ["Chunk", "Layout", "chunk_sets"]
