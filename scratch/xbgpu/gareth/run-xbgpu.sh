@@ -4,6 +4,7 @@ set -e -u
 
 iface1=enp193s0f0
 iface2=enp193s0f1
+channels=${channels:-32768}
 channels_per_substream=${channels_per_substream:-512}
 
 affinity="$(($1 * 6))"
@@ -45,9 +46,9 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --array-size ${array_size:-64} \
     --spectra-per-heap ${spectra_per_heap:-256} \
-    --channels ${channels:-32768} \
+    --channels $channels \
     --channels-per-substream $channels_per_substream \
-    --samples-between-spectra ${samples_between_spectra:-65536} \
+    --samples-between-spectra ${samples_between_spectra:-$((channels*2))} \
     --channel-offset-value $channel_offset \
     --heap-accumulation-threshold ${heap_accumulation_threshold:-52} \
     --katcp-port $port \
