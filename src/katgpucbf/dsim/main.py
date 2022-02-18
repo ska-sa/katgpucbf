@@ -26,9 +26,13 @@ import logging
 import math
 import os
 import time
+import spead2
+import spead2.recv
+import spead2.send
+import spead2.send.asyncio
 from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, SIGTERM
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, Final, Union
 
 import dask.config
 import dask.system
@@ -36,11 +40,18 @@ import katsdpservices
 import numpy as np
 import prometheus_async
 import pyparsing as pp
+# import ipaddress
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from . import send, signal
-from .server import DeviceServer
+from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from katgpucbf.dsim import send, signal
+from katgpucbf.dsim.server import DeviceServer
+from katgpucbf.dsim import descriptors
+# from katgpucbf.dsim.descriptors import N_POLS, DIGITISER_ID_ID, DIGITISER_STATUS_ID, RAW_DATA_ID, PREAMBLE_SIZE, TIMESTAMP_ID, FLAVOUR
+
+# from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+# from . import send, signal
+# from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +105,12 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="X.X.X.X[+N]:PORT",
         help="Destination addresses (one per polarisation)",
     )
+    parser.add_argument(
+        "--descriptor-rate",
+        type=float,
+        default=0.25,
+        help="Set rate for sending descriptors. Rate in seconds (or fraction of a second).",
+    )
 
     args = parser.parse_args()
     if args.signal_heaps < 2:
@@ -113,7 +130,6 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     args.signals_orig = args.signals
     args.signals = signals
     return args
-
 
 def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> Tuple[int, float]:
     """Determine ADC timestamp for first sample and the time at which to start sending.
@@ -140,10 +156,31 @@ def add_signal_handlers(server: DeviceServer) -> None:
         for signum in signums:
             loop.remove_signal_handler(signum)
         server.halt()
+        print('Halting dsim')
 
     loop = asyncio.get_event_loop()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
+
+
+async def spead_send(stream: "spead2.send.asyncio.AsyncStream", heap_to_send) -> None:
+    futures = []
+    futures.append(stream.async_send_heap(heap_to_send, spead2.send.GroupMode.ROUND_ROBIN))
+    await asyncio.gather(*futures)
+
+
+async def async_send_descriptors(args, timestamp, endpoints) -> None:
+    # logger.info("Setting up descriptors")
+    pass
+
+    # dsim_descriptors = descriptors.descriptors(args, timestamp, endpoints)
+    # descriptor_heap, stream = dsim_descriptors.create_descriptors(args)
+
+    # print('Descriptor sent')
+    # while True:
+    # Send only descriptors
+    # await dsim_descriptors.run(stream, descriptor_heap)
+    # await asyncio.sleep(args.descriptor_rate)
 
 
 async def async_main() -> None:
@@ -221,16 +258,26 @@ async def async_main() -> None:
     await server.start()
     add_signal_handlers(server)
 
+    logger.info("Setting up descriptors")
+    dsim_descriptors = descriptors.descriptors(args, timestamp, endpoints)
+    descriptor_heap, stream = dsim_descriptors.create_descriptors(args)
+    # await dsim_descriptors.run(stream, descriptor_heap)
+
     logger.info("Starting transmission")
-    await sender.run()
-    await server.join()
+    # await sender.run()
+    sr = asyncio.create_task(sender.run())
+    # dt = asyncio.create_task(async_send_descriptors(args, timestamp, endpoints))
+    dt = asyncio.create_task(dsim_descriptors.run(stream, descriptor_heap))
+    sj = asyncio.create_task(server.join())
+
+    await asyncio.gather(sr, dt, sj)
+    # await server.join()
 
 
 def main() -> None:
     """Run main program."""
     katsdpservices.setup_logging()
     asyncio.run(async_main())
-
 
 if __name__ == "__main__":
     main()
