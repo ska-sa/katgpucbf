@@ -378,6 +378,19 @@ class Processor:
 
     Parameters
     ----------
+    context
+        The GPU context that we'll operate in.
+    taps
+        Number of taps in each branch of the PFB-FIR.
+    samples
+        Number of samples that will be processed each time the operation is run.
+    spectra
+        Number of spectra that will be produced from a chunk of incoming
+        digitiser data.
+    spectra_per_heap
+        Number of spectra to send in each output heap.
+    channels
+        Number of output channels to produce.
     delay_models
         The delay models which should be applied to the data.
     use_gdrcopy

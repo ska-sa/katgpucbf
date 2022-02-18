@@ -76,8 +76,6 @@ class Layout(BaseLayout):
     ----------
     n_ants
         The number of antennas that data will be received from
-    n_channels
-        The total number of frequency channels out of the F-Engine.
     n_channels_per_stream
         The number of frequency channels contained in the stream.
     n_spectra_per_heap
