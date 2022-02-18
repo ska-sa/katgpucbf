@@ -376,6 +376,7 @@ class TestEngine:
         """
         n_ants = num_ants
         n_channels_total = num_channels
+        n_samples_between_spectra = 2 * n_channels_total
 
         # Get a realistic number of engines, round up to the next power of 2.
         n_engines = 1
@@ -390,7 +391,7 @@ class TestEngine:
         # Header is 12 fields of 8 bytes each: So 96 bytes of header
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-        timestamp_step = n_channels_total * 2 * n_spectra_per_heap
+        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         # Create source_stream object - transforms "transmitted" heaps into a
         # byte array to simulate received data.
@@ -442,6 +443,7 @@ class TestEngine:
             n_ants=n_ants,
             n_channels_total=n_channels_total,
             n_channels_per_stream=n_channels_per_stream,
+            n_samples_between_spectra=n_samples_between_spectra,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=SAMPLE_BITWIDTH,
             heap_accumulation_threshold=heap_accumulation_threshold,

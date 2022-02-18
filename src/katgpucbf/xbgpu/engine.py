@@ -191,6 +191,8 @@ class XBEngine(DeviceServer):
         The total number of frequency channels out of the F-Engine.
     n_channels_per_stream
         The number of frequency channels contained per stream.
+    n_samples_between_spectra
+        The number of samples between frequency spectra received.
     n_spectra_per_heap
         The number of time samples received per frequency channel.
     sample_bits
@@ -232,6 +234,7 @@ class XBEngine(DeviceServer):
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
+        n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
@@ -259,6 +262,7 @@ class XBEngine(DeviceServer):
         self.n_channels_per_stream = n_channels_per_stream
         self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
+        self.n_samples_between_spectra = n_samples_between_spectra
 
         # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
         # these values too high results in too much GPU memory being consumed.
@@ -279,7 +283,7 @@ class XBEngine(DeviceServer):
         # configure the receiver, we pass it as a seperate argument to the
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
-        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
+        self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
 
         # The number of bytes for a single batch of F-Engines. A chunk
         # consists of multiple batches.
