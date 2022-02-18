@@ -286,9 +286,9 @@ class TestChunkSets:
         add_chunk(10, 1)
         add_chunk(11, 1)
         add_chunk(12, 1, 1)
+        add_chunk(20, 1)
         add_chunk(12, 0, 2)
         add_chunk(20, 0)
-        add_chunk(20, 1)
         add_chunk(21, 0)
         ringbuffer.stop()
 

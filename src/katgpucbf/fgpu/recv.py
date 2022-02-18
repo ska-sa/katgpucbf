@@ -18,9 +18,10 @@
 
 import functools
 import logging
+from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator, List, Optional, cast
+from typing import AsyncGenerator, Deque, List, cast
 
 import numba
 import numpy as np
@@ -212,8 +213,9 @@ async def chunk_sets(
         Structure of the streams
     """
     n_pol = len(streams)
-    # Working buffer to match up pairs of chunks from both pols.
-    buf: List[Optional[Chunk]] = [None] * n_pol
+    # Working buffer to match up pairs of chunks from both pols. There is
+    # a deque for each pol, ordered by time
+    buf: List[Deque[Chunk]] = [deque() for _ in streams]
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
     stats_to_counters = [
@@ -263,23 +265,24 @@ async def chunk_sets(
             for updater, stream in zip(stats_to_counters, streams):
                 updater.update(stream.stats)
 
-            # Check whether we have a chunk already for this pol.
-            old = buf[pol]
-            if old is not None:
-                logger.warning("Chunk not matched: timestamp=%#x pol=%d", old.chunk_id * layout.chunk_samples, pol)
-                # Chunk was passed by without getting used. Return to the pool.
-                streams[pol].add_free_chunk(old)
-                buf[pol] = None
+            buf[pol].append(chunk)
 
-            # Stick the chunk in the buffer.
-            buf[pol] = chunk
+            # Age out old chunks that will never match. This happens if the
+            # chunk is older than the newest chunk for every pol.
+            min_newest = min((b[-1].chunk_id if b else -1) for b in buf)
+            for pol, b in enumerate(buf):
+                while b and b[0].chunk_id < min_newest:
+                    logger.warning("Chunk not matched: timestamp=%#x pol=%d", b[0].chunk_id * layout.chunk_samples, pol)
+                    # Chunk was passed by without getting used. Return to the pool.
+                    streams[pol].add_free_chunk(b.popleft())
 
-            # If we have both chunks and they match up, then we can yield.
-            if all(c is not None and c.chunk_id == chunk.chunk_id for c in buf):
+            # If we have a matching pair of chunks, then we can yield.
+            if all(b and b[0].chunk_id == chunk.chunk_id for b in buf):
                 expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
-                # mypy isn't smart enough to see that the list can't have Nones
-                # in it at this point.
-                for c in cast(List[Chunk], buf):
+                out = []
+                for b in buf:
+                    c = b.popleft()
+                    out.append(c)
                     pol = c.stream_id
                     # The cast is to force numpy ints to Python ints.
                     buf_good = int(np.sum(c.present))
@@ -296,15 +299,11 @@ async def chunk_sets(
                         missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
                         n_missing_heaps[pol] = new_missing
 
-                # mypy isn't smart enough to see that the list can't have Nones
-                # in it at this point.
-                yield buf  # type: ignore
-                # Empty the buffer again for next use.
-                buf = [None] * n_pol
+                yield out
     finally:
-        for c2 in buf:
-            if c2 is not None:
-                streams[c2.stream_id].add_free_chunk(c2)
+        for b in buf:
+            for c in b:
+                streams[c.stream_id].add_free_chunk(c)
 
 
 __all__ = ["Chunk", "Layout", "chunk_sets"]
