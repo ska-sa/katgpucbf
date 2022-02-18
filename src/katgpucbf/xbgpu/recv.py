@@ -109,6 +109,16 @@ class Layout(BaseLayout):
         """Calculate number of bytes in a heap based on layout parameters."""
         return self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX * self.sample_bits // BYTE_BITS
 
+    @property
+    def chunk_heaps(self) -> int:  # noqa: D401
+        """Number of heaps per chunk."""
+        return self.heaps_per_fengine_per_chunk * self.n_ants
+
+    @property
+    def chunk_bytes(self) -> int:  # noqa: D401
+        """Number of bytes per chunk."""
+        return self.heap_bytes * self.chunk_heaps
+
     @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         n_ants = self.n_ants

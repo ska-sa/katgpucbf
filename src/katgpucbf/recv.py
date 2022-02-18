@@ -87,6 +87,25 @@ class BaseLayout(ABC):
 
     @property
     @abstractmethod
+    def heap_bytes(self) -> int:  # noqa: D401
+        """Number of payload bytes per heap."""
+        ...
+
+    @property
+    @abstractmethod
+    def chunk_heaps(self) -> int:  # noqa: D401
+        """Number of heaps per chunk."""
+        ...
+
+    @property
+    @abstractmethod
+    def chunk_bytes(self) -> int:  # noqa: D401
+        """Number of bytes per chunk."""
+        # TODO this can probably be done by chunk_heaps * heap_bytes, then removed from the derived classes?
+        ...
+
+    @property
+    @abstractmethod
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         ...
 
