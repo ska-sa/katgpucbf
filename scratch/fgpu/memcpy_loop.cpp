@@ -28,6 +28,7 @@ enum class memory_function
 {
     MEMCPY,
     MEMSET,
+    MEMSET_STREAM,
     READ
 };
 
@@ -49,6 +50,7 @@ static string memory_function_name(memory_function func)
     {
     case memory_function::MEMCPY: return "memcpy";
     case memory_function::MEMSET: return "memset";
+    case memory_function::MEMSET_STREAM: return "memset_stream";
     case memory_function::READ:   return "read";
     default: abort();
     }
@@ -78,13 +80,50 @@ static char *allocate(std::size_t size, memory_type type)
     return (char *) addr;
 }
 
+/* memset, but using SSE streaming stores */
+static void memset_stream(void *dst, int c, std::size_t bytes)
+{
+    // Simplifies some edge cases
+    if (bytes <= 16)
+    {
+        std::memset(dst, c, bytes);
+        return;
+    }
+
+    // Process prefix up to 16-byte alignment
+    char *cdst = (char *) dst;
+    char *cdst_round = (char *) ((std::uintptr_t(dst) + 0xf) & ~0xf);
+    if (cdst != cdst_round)
+    {
+        std::memset(dst, c, cdst_round - cdst);
+        bytes -= cdst_round - cdst;
+    }
+
+    // Use streaming stores for the bulk
+    __m128i value;
+    std::memset(&value, 0, sizeof(value));
+    __m128i *mdst = (__m128i *) cdst_round;
+    __m128i *mend = mdst + (bytes / 16);
+    bytes -= 16 * (mend - mdst);
+    while (mdst != mend)
+    {
+        _mm_stream_si128(mdst, value);
+        mdst++;
+    }
+    _mm_sfence();
+
+    // Handle suffix
+    if (bytes > 0)
+        std::memset(mdst, c, bytes);
+}
+
 /* Read all the data in [src, src + bytes) and do nothing with it. */
 static void memory_read(const void *src, std::size_t bytes)
 {
     std::uint8_t result1 = 0;
     // Process prefix up to 16-byte alignment
     const char *csrc = (const char *) src;
-    while (((uintptr_t) csrc) & 0xf)
+    while (((std::uintptr_t) csrc) & 0xf)
     {
         result1 ^= *csrc++;
         bytes--;
@@ -163,6 +202,10 @@ static void worker(int core, std::size_t buffer_size, memory_type mem_type, memo
             for (int p = 0; p < passes; p++)
                 memset(dst, 0, buffer_size);
             break;
+        case memory_function::MEMSET_STREAM:
+            for (int p = 0; p < passes; p++)
+                memset_stream(dst, 0, buffer_size);
+            break;
         case memory_function::READ:
             for (int p = 0; p < passes; p++)
                 memory_read(src, buffer_size);
@@ -204,11 +247,13 @@ int main(int argc, char *const argv[])
                 mem_func = memory_function::MEMCPY;
             else if (optarg == "memset"s)
                 mem_func = memory_function::MEMSET;
+            else if (optarg == "memset_stream"s)
+                mem_func = memory_function::MEMSET_STREAM;
             else if (optarg == "read"s)
                 mem_func = memory_function::READ;
             else
             {
-                std::cerr << "Invalid memory function (must be memcpy, memset or read)\n";
+                std::cerr << "Invalid memory function (must be memcpy, memset, memset_stream or read)\n";
                 return 1;
             }
             break;
