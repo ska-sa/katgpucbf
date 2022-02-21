@@ -195,7 +195,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--chunk-samples",
         type=int,
-        default=2 ** 26,
+        default=2 ** 24,
         metavar="SAMPLES",
         help="Number of digitiser samples to process at a time (per pol). If not a multiple of 2*channels*acc-len,"
         "it will be rounded up to the next multiple. [%(default)s]",
