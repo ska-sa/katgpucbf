@@ -1,7 +1,12 @@
-import spead2
+"""Digitiser simulator descriptor sender."""
 import asyncio
-import numpy as np
 from typing import Final
+
+import numpy as np
+import spead2
+import spead2.recv
+import spead2.send
+import spead2.send.asyncio
 
 DIGITISER_ID_ID = 0x3101
 DIGITISER_STATUS_ID = 0x3102
@@ -19,7 +24,10 @@ SEND_RATE_FACTOR = 1.05
 # SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
 
-class descriptors():
+
+class Descriptors:
+    """Digitiser descriptor sender."""
+
     def __init__(self, args, timestamp, endpoints) -> None:
         self._running = True  # Set to false to start shutdown
         self.descriptor_rate = args.descriptor_rate
@@ -35,16 +43,20 @@ class descriptors():
         self.rate = N_POLS * args.adc_sample_rate * SEND_RATE_FACTOR
         args.heap_samples
         self.config = spead2.send.StreamConfig(
-        rate=self.rate,
-        max_packet_size=args.heap_samples + PREAMBLE_SIZE,
-        max_heaps=4,
+            rate=self.rate,
+            max_packet_size=args.heap_samples + PREAMBLE_SIZE,
+            max_heaps=4,
         )
-        
+
         # Setup Asyncio UDP stream
         stream: "spead2.send.asyncio.AsyncStream"
 
         self.stream = spead2.send.asyncio.UdpStream(
-            self.thread_pool, [(self.dest_ip, self.dest_port)], self.config, ttl=args.ttl, interface_address=self.interface_ip
+            self.thread_pool,
+            [(self.dest_ip, self.dest_port)],
+            self.config,
+            ttl=args.ttl,
+            interface_address=self.interface_ip,
         )
 
         # Create item group
@@ -58,6 +70,7 @@ class descriptors():
         self._running = False
 
     def create_descriptors(self, args):
+        """Add descriptor items to item group."""
         # Add items to item group
         self.item_group.add_item(
             TIMESTAMP_ID,
@@ -89,7 +102,7 @@ class descriptors():
         n = len([self.timestamp])
         heap_size = args.heap_samples
         payload = np.zeros((N_POLS, n, heap_size), np.uint8)
-        heap_payload = payload[0,0]
+        heap_payload = payload[0, 0]
 
         self.item_group.add_item(
             RAW_DATA_ID,
@@ -104,10 +117,10 @@ class descriptors():
         descriptor_heap.repeat_pointers = True
         return [descriptor_heap, self.stream]
 
-
     async def run(self, stream: "spead2.send.asyncio.AsyncStream", heap_to_send) -> None:
+        """Run digitiser descriptor sender."""
         while self._running:
             futures = []
-            futures.append(stream.async_send_heap(heap_to_send, spead2.send.GroupMode.ROUND_ROBIN))
+            futures.append(stream.async_send_heap(heap_to_send))
             await asyncio.gather(*futures)
             await asyncio.sleep(self.descriptor_rate)

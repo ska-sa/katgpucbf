@@ -26,10 +26,6 @@ import logging
 import math
 import os
 import time
-import spead2
-import spead2.recv
-import spead2.send
-import spead2.send.asyncio
 from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, SIGTERM
 from typing import List, Optional, Sequence, Tuple
@@ -43,9 +39,8 @@ import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from katgpucbf.dsim import send, signal
+from katgpucbf.dsim import descriptors, send, signal
 from katgpucbf.dsim.server import DeviceServer
-from katgpucbf.dsim import descriptors
 
 # from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
 # from . import send, signal
@@ -129,6 +124,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     args.signals = signals
     return args
 
+
 def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> Tuple[int, float]:
     """Determine ADC timestamp for first sample and the time at which to start sending.
 
@@ -142,7 +138,8 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align:
     samples = first_block * align
     return samples, sync_time + samples / adc_sample_rate
 
-def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors) -> None:
+
+def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors.Descriptors) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [SIGINT, SIGTERM]
 
@@ -152,15 +149,15 @@ def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors) ->
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
-        print('Halting Server')
+        print("Halting Server")
         server.halt()
-        print('Halting DSim Descriptors')
+        print("Halting DSim Descriptors")
         descriptor_sender.halt()
-
 
     loop = asyncio.get_event_loop()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
+
 
 async def async_main() -> None:
     """Asynchronous main entry point."""
@@ -235,30 +232,25 @@ async def async_main() -> None:
         port=args.katcp_port,
     )
     await server.start()
-    # add_signal_handlers(server, dsim_descriptors)
 
     logger.info("Setting up descriptors")
-    dsim_descriptors = descriptors.descriptors(args, timestamp, endpoints)
+    dsim_descriptors = descriptors.Descriptors(args, timestamp, endpoints)
     descriptor_heap, stream = dsim_descriptors.create_descriptors(args)
-    # await dsim_descriptors.run(stream, descriptor_heap)
     add_signal_handlers(server, dsim_descriptors)
 
     logger.info("Starting transmission")
-    # await sender.run()
     sender_task = asyncio.create_task(sender.run())
     descriptor_task = asyncio.create_task(dsim_descriptors.run(stream, descriptor_heap))
     server_task = asyncio.create_task(server.join())
 
-    # add_descriptor_handlers(dsim_descriptors)
-
     await asyncio.gather(sender_task, descriptor_task, server_task)
-    # await server.join()
 
 
 def main() -> None:
     """Run main program."""
     katsdpservices.setup_logging()
     asyncio.run(async_main())
+
 
 if __name__ == "__main__":
     main()
