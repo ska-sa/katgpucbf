@@ -32,7 +32,7 @@ import spead2.send
 import spead2.send.asyncio
 from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, SIGTERM
-from typing import List, Optional, Sequence, Tuple, Final, Union
+from typing import List, Optional, Sequence, Tuple
 
 import dask.config
 import dask.system
@@ -40,14 +40,12 @@ import katsdpservices
 import numpy as np
 import prometheus_async
 import pyparsing as pp
-# import ipaddress
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
 from katgpucbf.dsim import send, signal
 from katgpucbf.dsim.server import DeviceServer
 from katgpucbf.dsim import descriptors
-# from katgpucbf.dsim.descriptors import N_POLS, DIGITISER_ID_ID, DIGITISER_STATUS_ID, RAW_DATA_ID, PREAMBLE_SIZE, TIMESTAMP_ID, FLAVOUR
 
 # from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
 # from . import send, signal
@@ -144,8 +142,7 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align:
     samples = first_block * align
     return samples, sync_time + samples / adc_sample_rate
 
-
-def add_signal_handlers(server: DeviceServer) -> None:
+def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [SIGINT, SIGTERM]
 
@@ -155,33 +152,15 @@ def add_signal_handlers(server: DeviceServer) -> None:
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
+        print('Halting Server')
         server.halt()
-        print('Halting dsim')
+        print('Halting DSim Descriptors')
+        descriptor_sender.halt()
+
 
     loop = asyncio.get_event_loop()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
-
-
-async def spead_send(stream: "spead2.send.asyncio.AsyncStream", heap_to_send) -> None:
-    futures = []
-    futures.append(stream.async_send_heap(heap_to_send, spead2.send.GroupMode.ROUND_ROBIN))
-    await asyncio.gather(*futures)
-
-
-async def async_send_descriptors(args, timestamp, endpoints) -> None:
-    # logger.info("Setting up descriptors")
-    pass
-
-    # dsim_descriptors = descriptors.descriptors(args, timestamp, endpoints)
-    # descriptor_heap, stream = dsim_descriptors.create_descriptors(args)
-
-    # print('Descriptor sent')
-    # while True:
-    # Send only descriptors
-    # await dsim_descriptors.run(stream, descriptor_heap)
-    # await asyncio.sleep(args.descriptor_rate)
-
 
 async def async_main() -> None:
     """Asynchronous main entry point."""
@@ -256,21 +235,23 @@ async def async_main() -> None:
         port=args.katcp_port,
     )
     await server.start()
-    add_signal_handlers(server)
+    # add_signal_handlers(server, dsim_descriptors)
 
     logger.info("Setting up descriptors")
     dsim_descriptors = descriptors.descriptors(args, timestamp, endpoints)
     descriptor_heap, stream = dsim_descriptors.create_descriptors(args)
     # await dsim_descriptors.run(stream, descriptor_heap)
+    add_signal_handlers(server, dsim_descriptors)
 
     logger.info("Starting transmission")
     # await sender.run()
-    sr = asyncio.create_task(sender.run())
-    # dt = asyncio.create_task(async_send_descriptors(args, timestamp, endpoints))
-    dt = asyncio.create_task(dsim_descriptors.run(stream, descriptor_heap))
-    sj = asyncio.create_task(server.join())
+    sender_task = asyncio.create_task(sender.run())
+    descriptor_task = asyncio.create_task(dsim_descriptors.run(stream, descriptor_heap))
+    server_task = asyncio.create_task(server.join())
 
-    await asyncio.gather(sr, dt, sj)
+    # add_descriptor_handlers(dsim_descriptors)
+
+    await asyncio.gather(sender_task, descriptor_task, server_task)
     # await server.join()
 
 

@@ -1,7 +1,7 @@
 import spead2
 import asyncio
 import numpy as np
-from typing import List, Optional, Sequence, Tuple, Final, Union
+from typing import Final
 
 DIGITISER_ID_ID = 0x3101
 DIGITISER_STATUS_ID = 0x3102
@@ -16,7 +16,7 @@ N_POLS: Final = 2
 PREAMBLE_SIZE = 72
 SEND_RATE_FACTOR = 1.05
 
-#: SPEAD flavour used for all send streams
+# SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
 
 class descriptors():
