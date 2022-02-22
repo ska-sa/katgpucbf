@@ -42,7 +42,12 @@ pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
 SPECTRA_PER_HEAP = 256
-CHUNK_SAMPLES = 1048576  # Lower than the default to make tests quicker
+# Lower than the default to make tests quicker, and smaller than
+# CHUNK_JONES to check that this case works.
+# TODO: use a number that's not a multiple of the number of channels,
+# once _send_data can handle partial chunks.
+CHUNK_SAMPLES = 524288
+CHUNK_JONES = 1048576
 MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 TAPS = 16
 FENG_ID = 42
@@ -94,7 +99,8 @@ class TestEngine:
         "--dst-interface=lo",
         f"--channels={CHANNELS}",
         f"--sync-epoch={SYNC_EPOCH}",
-        f"--chunk-samples={CHUNK_SAMPLES}",
+        f"--input-chunk-samples={CHUNK_SAMPLES}",
+        f"--output-chunk-jones={CHUNK_JONES}",
         f"--max-delay-diff={MAX_DELAY_DIFF}",
         f"--spectra-per-heap={SPECTRA_PER_HEAP}",
         f"--feng-id={FENG_ID}",

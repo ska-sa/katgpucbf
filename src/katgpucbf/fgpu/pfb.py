@@ -65,13 +65,18 @@ class PFBFIR(accel.Operation):
     The best place to look in order to understand how these work from a strictly
     DSP sense is Danny C. Price's paper :cite:`price2018spectrometers`.
 
+    In general the operation can read some interval of the input slot and write
+    to some interval of the output slot. The sizes of these slots need not be
+    related. This can be useful to build up a larger output from smaller
+    invocations that have different coarse delays.
+
     .. bibliography::
 
         price2018spectrometers
 
     .. rubric:: Slots
 
-    **in**  : samples * SAMPLE_BITS // BYTE_BITS, uint8
+    **in** : samples * SAMPLE_BITS // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
