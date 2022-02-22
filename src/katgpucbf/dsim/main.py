@@ -235,12 +235,12 @@ async def async_main() -> None:
 
     logger.info("Setting up descriptors")
     dsim_descriptors = descriptors.Descriptors(args, timestamp, endpoints)
-    descriptor_heap, stream = dsim_descriptors.create_descriptors(args)
+    descriptor_heap = dsim_descriptors.create_descriptors(args)
     add_signal_handlers(server, dsim_descriptors)
 
     logger.info("Starting transmission")
     sender_task = asyncio.create_task(sender.run())
-    descriptor_task = asyncio.create_task(dsim_descriptors.run(stream, descriptor_heap))
+    descriptor_task = asyncio.create_task(dsim_descriptors.run(descriptor_heap))
     server_task = asyncio.create_task(server.join())
 
     await asyncio.gather(sender_task, descriptor_task, server_task)

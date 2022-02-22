@@ -2,6 +2,7 @@
 import asyncio
 from typing import Final
 
+import netifaces as ni
 import numpy as np
 import spead2
 import spead2.recv
@@ -26,7 +27,17 @@ FLAVOUR = spead2.Flavour(4, 64, 48, 0)
 
 
 class Descriptors:
-    """Digitiser descriptor sender."""
+    """Digitiser descriptor sender.
+
+    Parameters
+    ----------
+    args:
+        Runtime arguments passed (or as set by default).
+    timestamp: float
+        Timestamp since start.
+    endpoints: Tuple[str, int]
+        IP address of multicast address to send descriptors (string). The port is stated as an integer.
+    """
 
     def __init__(self, args, timestamp, endpoints) -> None:
         self._running = True  # Set to false to start shutdown
@@ -35,7 +46,7 @@ class Descriptors:
         self.endpoints = endpoints
         self.dest_ip = endpoints[0][0]
         self.dest_port = endpoints[0][1]
-        self.interface_ip = "10.100.44.1"
+        self.interface_ip = ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"]
 
         # Create threadpool
         self.thread_pool = spead2.ThreadPool()
@@ -70,7 +81,13 @@ class Descriptors:
         self._running = False
 
     def create_descriptors(self, args):
-        """Add descriptor items to item group."""
+        """Add descriptor items to item group.
+
+        Parameters
+        ----------
+        args:
+            Runtime arguments passed (or as set by default).
+        """
         # Add items to item group
         self.item_group.add_item(
             TIMESTAMP_ID,
@@ -115,12 +132,18 @@ class Descriptors:
 
         descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
         descriptor_heap.repeat_pointers = True
-        return [descriptor_heap, self.stream]
+        return descriptor_heap
 
-    async def run(self, stream: "spead2.send.asyncio.AsyncStream", heap_to_send) -> None:
-        """Run digitiser descriptor sender."""
+    async def run(self, heap_to_send) -> None:
+        """Run digitiser descriptor sender.
+
+        Parameters
+        ----------
+        heap_to_send:
+            Descriptor heap as formed in create_descriptors method.
+        """
         while self._running:
             futures = []
-            futures.append(stream.async_send_heap(heap_to_send))
+            futures.append(self.stream.async_send_heap(heap_to_send))
             await asyncio.gather(*futures)
             await asyncio.sleep(self.descriptor_rate)
