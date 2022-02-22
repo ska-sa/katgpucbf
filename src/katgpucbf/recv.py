@@ -40,7 +40,7 @@ class Chunk(spead2.recv.Chunk):
 
     It extends the spead2 base class to store a timestamp (computed from
     the chunk ID when the chunk is received), and optionally store a
-    gdrcopy device array.
+    vkgdr device array.
     """
 
     # Refine the types used in the base class

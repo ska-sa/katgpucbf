@@ -179,7 +179,7 @@ class InItem(EventItem):
         A pair of device memory regions for storing the set of samples
         associated with each respective polarisation.
     chunks
-        Chunks to return to recv after processing (used with gdrcopy only).
+        Chunks to return to recv after processing (used with vkgdr only).
     n_samples
         Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in
         :attr:`samples`.
@@ -193,19 +193,19 @@ class InItem(EventItem):
         will take place on the data in :attr:`samples`.
     timestamp
         Timestamp of the oldest digitiser sample represented in the data.
-    use_gdrcopy
+    use_vkgdr
         Use GPU Direct. Defaults to False, because this only works on
         datacenter-grade cards.
     """
 
     samples: List[accel.DeviceArray]
-    chunks: List[recv.Chunk]  # Used with gdrcopy only.
+    chunks: List[recv.Chunk]  # Used with vkgdr only.
     n_samples: int
     sample_bits: int
 
-    def __init__(self, compute: Compute, timestamp: int = 0, use_gdrcopy: bool = False) -> None:
+    def __init__(self, compute: Compute, timestamp: int = 0, use_vkgdr: bool = False) -> None:
         self.sample_bits = compute.sample_bits
-        if use_gdrcopy:
+        if use_vkgdr:
             # Memory belongs to the chunks, and we set samples when
             # initialising the item from the chunks.
             self.samples = []
@@ -393,7 +393,7 @@ class Processor:
         Number of output channels to produce.
     delay_models
         The delay models which should be applied to the data.
-    use_gdrcopy
+    use_vkgdr
         Assemble chunks directly in GPU memory (requires supported GPU).
     monitor
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
@@ -409,7 +409,7 @@ class Processor:
         spectra_per_heap: int,
         channels: int,
         delay_models: Sequence[AbstractDelayModel],
-        use_gdrcopy: bool,
+        use_vkgdr: bool,
         monitor: Monitor,
     ) -> None:
         compute_queue = context.create_command_queue()
@@ -439,14 +439,14 @@ class Processor:
         self.monitor = monitor
         self._spectra = []
         for _ in range(n_in):
-            self.in_free_queue.put_nowait(InItem(self.compute, use_gdrcopy=use_gdrcopy))
+            self.in_free_queue.put_nowait(InItem(self.compute, use_vkgdr=use_vkgdr))
         for _ in range(n_out):
             item = OutItem(self.compute)
             self._spectra.append(item.spectra)
             self.out_free_queue.put_nowait(item)
         self._in_items: Deque[InItem] = deque()
         self._out_item = self.out_free_queue.get_nowait()
-        self._use_gdrcopy = use_gdrcopy
+        self._use_vkgdr = use_vkgdr
 
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
 
@@ -554,7 +554,7 @@ class Processor:
         """Remove the oldest InItem."""
         item = self._in_items.popleft()
         event = self.compute.command_queue.enqueue_marker()
-        if self._use_gdrcopy:
+        if self._use_vkgdr:
             item.samples = []
             chunks = item.chunks
             item.chunks = []
@@ -616,7 +616,7 @@ class Processor:
     ) -> None:
         """Return chunks to the streams once `event` has fired.
 
-        This is only used when using gdrcopy.
+        This is only used when using vkgdr.
         """
         await async_wait_for_events([event])
         for stream, chunk in zip(streams, chunks):
@@ -634,7 +634,7 @@ class Processor:
         Parameters
         ----------
         streams
-            These only seem to be used in the _use_gdrcopy case.
+            These only seem to be used in the _use_vkgdr case.
         """
         while await self._fill_in():
             # If the input starts too late for the next expected timestamp,
@@ -765,7 +765,7 @@ class Processor:
             in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
 
             transfer_events = []
-            if self._use_gdrcopy:
+            if self._use_vkgdr:
                 assert len(in_item.samples) == 0
                 in_item.samples = [chunk.device for chunk in chunks]  # type: ignore
                 in_item.chunks = chunks
