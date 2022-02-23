@@ -116,6 +116,10 @@ async def engine_server(
     if request.node.get_closest_marker("use_gdrcopy"):
         check_gdrcopy(context)
         arglist.append("--use-gdrcopy")
+    # iter_markers works closest-to-furthest, but we want the opposite
+    for marker in reversed(list(request.node.iter_markers("cmdline_args"))):
+        arglist.extend(marker.args)
+
     args = parse_args(arglist)
     server, _monitor = make_engine(context, args)
 

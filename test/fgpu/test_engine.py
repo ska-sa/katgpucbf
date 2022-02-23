@@ -307,7 +307,7 @@ class TestEngine:
         timestamps = np.arange(data.shape[1], dtype=np.int64) * (CHANNELS * 2) + expected_first_timestamp
         return data, timestamps
 
-    # One delay value is tested with gdrcopy
+    # One delay value is tested with gdrcopy, another with smaller output chunks
     @pytest.mark.parametrize(
         "delay_samples",
         [
@@ -315,7 +315,7 @@ class TestEngine:
             (8192.0, 234.5),
             (42.0, 58.0),
             (42.4, 24.2),
-            (42.7, 24.9),
+            pytest.param((42.7, 24.9), marks=[pytest.mark.cmdline_args("--output-chunk-jones=65536")]),
             pytest.param((42.8, 24.5), marks=[pytest.mark.use_gdrcopy]),
         ],
     )
