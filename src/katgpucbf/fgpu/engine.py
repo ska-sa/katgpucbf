@@ -207,7 +207,7 @@ class Engine(aiokatcp.DeviceServer):
                 # We could quite easily make do with non-coherent mappings and
                 # explicit flushing, but since NVIDIA currently only provides
                 # host-coherent memory, this is a simpler option.
-                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.VKGDR_OPEN_REQUIRE_COHERENT_BIT)
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
 
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
