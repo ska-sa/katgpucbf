@@ -27,11 +27,13 @@ case "$1" in
 esac
 
 nproc="$(nproc)"
-cpu="$(($nproc * $1 / 4))"
+cpu1="$(($nproc * $1 / 4))"
+cpu2="$(($cpu1 + 1))"
 addresses="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
 
 set -x
-exec spead2_net_raw numactl -C $cpu dsim \
+exec spead2_net_raw taskset -c $cpu2 dsim \
+    --affinity $cpu1 \
     --ibv \
     --interface $iface \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
