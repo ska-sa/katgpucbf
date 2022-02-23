@@ -1,6 +1,5 @@
 """Digitiser simulator descriptor sender."""
 import asyncio
-from typing import Final
 
 import netifaces as ni
 import numpy as np
@@ -9,21 +8,9 @@ import spead2.recv
 import spead2.send
 import spead2.send.asyncio
 
-DIGITISER_ID_ID = 0x3101
-DIGITISER_STATUS_ID = 0x3102
-FENG_ID_ID = 0x4101
-FENG_RAW_ID = 0x4300
-FREQUENCY_ID = 0x4103
-RAW_DATA_ID = 0x3300  # Digitiser data
-XENG_RAW_ID = 0x1800
-TIMESTAMP_ID = 0x1600
-COMPLEX: Final = 2
-N_POLS: Final = 2
-PREAMBLE_SIZE = 72
-SEND_RATE_FACTOR = 1.05
+from katgpucbf import N_POLS, PREAMBLE_SIZE, SEND_RATE_FACTOR, SPEAD_DESCRIPTOR_INTERVAL_S
 
-# SPEAD flavour used for all send streams
-FLAVOUR = spead2.Flavour(4, 64, 48, 0)
+from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
 
 
 class Descriptors:
@@ -41,7 +28,7 @@ class Descriptors:
 
     def __init__(self, args, timestamp, endpoints) -> None:
         self._running = True  # Set to false to start shutdown
-        self.descriptor_rate = args.descriptor_rate
+        self.descriptor_rate = SPEAD_DESCRIPTOR_INTERVAL_S
         self.timestamp = timestamp
         self.endpoints = endpoints
         self.dest_ip = endpoints[0][0]
@@ -50,9 +37,8 @@ class Descriptors:
 
         # Create threadpool
         self.thread_pool = spead2.ThreadPool()
-
         self.rate = N_POLS * args.adc_sample_rate * SEND_RATE_FACTOR
-        args.heap_samples
+
         self.config = spead2.send.StreamConfig(
             rate=self.rate,
             max_packet_size=args.heap_samples + PREAMBLE_SIZE,

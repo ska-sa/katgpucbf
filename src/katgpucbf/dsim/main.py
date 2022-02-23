@@ -38,13 +38,9 @@ import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from katgpucbf.dsim import descriptors, send, signal
-from katgpucbf.dsim.server import DeviceServer
-
-# from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-# from . import send, signal
-# from .server import DeviceServer
+from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from . import descriptors, send, signal
+from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +94,6 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="X.X.X.X[+N]:PORT",
         help="Destination addresses (one per polarisation)",
     )
-    parser.add_argument(
-        "--descriptor-rate",
-        type=float,
-        default=0.25,
-        help="Set rate for sending descriptors. Rate in seconds (or fraction of a second).",
-    )
 
     args = parser.parse_args()
     if args.signal_heaps < 2:
@@ -149,9 +139,7 @@ def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors.Des
         logger.info("Received signal, shutting down")
         for signum in signums:
             loop.remove_signal_handler(signum)
-        print("Halting Server")
         server.halt()
-        print("Halting DSim Descriptors")
         descriptor_sender.halt()
 
     loop = asyncio.get_event_loop()
@@ -233,7 +221,7 @@ async def async_main() -> None:
     )
     await server.start()
 
-    logger.info("Setting up descriptors")
+    logger.debug("Setting up descriptors")
     dsim_descriptors = descriptors.Descriptors(args, timestamp, endpoints)
     descriptor_heap = dsim_descriptors.create_descriptors(args)
     add_signal_handlers(server, dsim_descriptors)
