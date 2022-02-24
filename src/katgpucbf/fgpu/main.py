@@ -193,14 +193,14 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Spectra in each output heap [%(default)s]",
     )
     parser.add_argument(
-        "--input-chunk-samples",
+        "--src-chunk-samples",
         type=int,
         default=2 ** 24,
         metavar="SAMPLES",
         help="Number of digitiser samples to process at a time (per pol). [%(default)s]",
     )
     parser.add_argument(
-        "--output-chunk-jones",
+        "--dst-chunk-jones",
         type=int,
         default=2 ** 23,
         metavar="VECTORS",
@@ -282,7 +282,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    chunk_jones = accel.roundup(args.output_chunk_jones, args.channels * args.spectra_per_heap)
+    chunk_jones = accel.roundup(args.dst_chunk_jones, args.channels * args.spectra_per_heap)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -305,7 +305,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,
         num_ants=args.array_size,
-        chunk_samples=args.input_chunk_samples,
+        chunk_samples=args.src_chunk_samples,
         spectra=chunk_jones // args.channels,
         spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
