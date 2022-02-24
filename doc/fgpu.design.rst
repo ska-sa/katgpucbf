@@ -74,15 +74,18 @@ because a single core is not fast enough to load the data. This introduces
 some challenges in aligning the polarisations, because locking a shared
 structure on every packet would be prohibitively expensive. Instead, the
 polarisations are kept separate during chunking, and aligned afterwards (in
-Python). Large chunks also make it unlikely that the polarisations will be out
-of sync by more than one chunk, which makes the alignment code quite simple.
+Python). A chunk is buffered until the matching chunk is received on the
+other polarisation. Alternatively, if a later chunk is seen for the other
+polarisation, then the chunk can never match and is discarded.
 
 To minimise the number of copies, chunks are initialised with CUDA pinned
-memory (host memory that can be efficiently copied to the GPU). When a GPU
-supporting `GPUDirect RDMA`_ is used, it is possible to instead provide GPU
-memory that has been mapped into the CPU's address space.
+memory (host memory that can be efficiently copied to the GPU).
+Alternatively, it is possible to use `vkgdr`_ to have the CPU write directly
+to GPU memory while assembling the chunk. This is not enabled by default
+because it is not always possible to use more than 256 MiB of the GPU memory
+for this, which can severely limit the chunk size.
 
-.. _GPUDirect RDMA: https://github.com/NVIDIA/gdrcopy
+.. _vkgdr: https://github.com/ska-sa/vkgdr
 
 GPU Processing
 --------------
