@@ -21,13 +21,14 @@ import functools
 from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
+import spead2.send
 import spead2.send.asyncio
 from katsdpsigproc.accel import DeviceArray
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import N_POLS
-from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, make_immediate
+from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
@@ -57,21 +58,62 @@ class Frame:
         channels = data.shape[0]
         assert channels % substreams == 0
         channels_per_substream = channels // substreams
+        self.descriptor_heaps = []
         self.heaps = []
+
+        imm_format = [("u", FLAVOUR.heap_address_bits)]
         self.data = data
+
+        # We don't necessarily need a new ItemGroup for each substream, just
+        # one that has updated Frequency (start_channel) and data fields.
+        new_ig = spead2.send.ItemGroup(flavour=FLAVOUR)
+        new_ig.add_item(
+            TIMESTAMP_ID,
+            "timestamp",
+            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+            shape=(),
+            format=imm_format,
+            value=timestamp,
+        )
+        new_ig.add_item(
+            FENG_ID_ID,
+            "feng_id",
+            "Uniquely identifies the F-Engine source for the data.",
+            shape=(),
+            format=imm_format,
+            value=feng_id,
+        )
+        new_ig.add_item(
+            FREQUENCY_ID,
+            "frequency",
+            "Identifies the first channel in the band of frequencies in the SPEAD heap.",
+            shape=(),
+            format=imm_format,
+        )
+        new_ig.add_item(
+            FENG_RAW_ID,
+            "feng_raw",
+            "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
+            shape=data[:channels_per_substream].shape,
+            dtype=data.dtype,
+        )
+
         for i in range(substreams):
             start_channel = i * channels_per_substream
-            heap = spead2.send.Heap(FLAVOUR)
-            heap.repeat_pointers = True
-            heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
-            heap.add_item(make_immediate(FENG_ID_ID, feng_id))
-            heap.add_item(make_immediate(FREQUENCY_ID, start_channel))
             heap_data = data[start_channel : start_channel + channels_per_substream]
             assert heap_data.flags.c_contiguous, "Heap data must be contiguous"
-            heap.add_item(
-                spead2.Item(FENG_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data)
-            )
-            self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
+
+            new_ig["frequency"].value = start_channel
+            new_ig["feng_raw"].value = heap_data
+
+            descriptor_heap = new_ig.get_heap(descriptors="all", data="none")
+            # TODO: Change this to an ndarray, so we can send all descriptors
+            #       of the same substream at the same time.
+            self.descriptor_heaps.append(spead2.send.HeapReference(descriptor_heap, substream_index=i))
+
+            heap_to_send = new_ig.get_heap(descriptors="none", data="all")
+            heap_to_send.repeat_pointers = True
+            self.heaps.append(spead2.send.HeapReference(heap_to_send, substream_index=i))
 
 
 class Chunk:
@@ -118,6 +160,15 @@ class Chunk:
         delta = value - self._timestamp
         self._timestamps += delta
         self._timestamp = value
+
+    @property
+    def descriptor_heaps(self) -> List[spead2.send.HeapReference]:
+        """Descriptor heaps of all Frames within the Chunk.
+
+        This removes the need to reach into each :class:`Frame` to grab the
+        generated descriptor heaps for each substream.
+        """
+        return [descriptor_heap for frame in self._frames for descriptor_heap in frame.descriptor_heaps]
 
     @staticmethod
     def _inc_counters(frame: Frame, future: asyncio.Future) -> None:
