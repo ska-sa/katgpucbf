@@ -118,7 +118,7 @@ async def engine_server(
     args = parse_args(arglist)
     server, _monitor = make_engine(context, args)
 
-    await server.start()
+    await server.start(send_descriptors=False)
     yield server
     await server.stop()
 
