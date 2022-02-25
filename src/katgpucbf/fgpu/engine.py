@@ -28,7 +28,7 @@ import numpy as np
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
+from .. import BYTE_BITS, COMPLEX, N_POLS, SPEAD_DESCRIPTOR_INTERVAL_S, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import SAMPLE_BITS, recv, send
@@ -36,6 +36,7 @@ from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
 
 logger = logging.getLogger(__name__)
+logging.basicConfig()
 
 
 def format_complex(value: numbers.Complex) -> str:
@@ -272,7 +273,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
 
-        send_chunks = []
+        send_chunks: List[send.Chunk] = []
         send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
         send_dtype = np.dtype(np.int8)
         for _ in range(self._processor.send_free_queue.maxsize):
@@ -292,6 +293,9 @@ class Engine(aiokatcp.DeviceServer):
                     feng_id=feng_id,
                 )
             )
+        # Perhaps get the descriptor heaps here?
+        self._descriptors = [descriptor_heap for schunk in send_chunks for descriptor_heap in schunk.descriptor_heaps]
+
         extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
         self._send_stream = send.make_stream(
             endpoints=dst,
@@ -459,12 +463,18 @@ class Engine(aiokatcp.DeviceServer):
 
             delay_model.add(new_linear_model)
 
-    async def start(self) -> None:
+    async def start(self, send_descriptors: bool = True) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
         concurrently.
+
+        Parameters
+        ----------
+        send_descriptors
+            Boolean to dictate whether the Engine should send descriptor heaps
+            along with its data transmission.
         """
         for pol, stream in enumerate(self._src_streams):
             recv.add_reader(
@@ -490,6 +500,17 @@ class Engine(aiokatcp.DeviceServer):
                 logger.exception("Processing failed with exception")
 
         self._processing_task.add_done_callback(done_callback)
+
+        if send_descriptors:
+            self._descriptor_task = asyncio.create_task(
+                self._processor.run_descriptors_loop(
+                    self._send_stream,
+                    self._descriptors,
+                    SPEAD_DESCRIPTOR_INTERVAL_S,
+                )
+            )
+
+            self._descriptor_task.add_done_callback(done_callback)
         await super().start()
 
     async def on_stop(self):
