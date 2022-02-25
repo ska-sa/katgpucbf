@@ -69,17 +69,17 @@
 
 struct options
 {
-    std::string strInterface;
+    std::string interface_name;
     std::string strAddress;
-    int iMaxHeaps = 8;
-    double dAdcSampleRate = 1712000000.0;
-    int iTtl = 4;
+    int max_heaps = 8;
+    double adc_sample_rate = 1712000000.0;
+    int ttl = 4;
     int n_ants = 64;
     int n_chans_per_output_stream = 512;
     int n_chans_total = 32768;
     int n_spectra_per_heap = 256;
     size_t packet_payload_size_bytes = 8192;
-    bool bRunOnce = false;
+    bool run_once = false;
 
     // The variables below are not command-line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
@@ -91,15 +91,15 @@ struct options
 
 // TODO: These constexpr could be neatened up a bit.
 
-static constexpr int sample_bits = 8; // This is not very meaningful for the X-Engine but this argument is left here to
+static constexpr int SAMPLE_BITS = 8; // This is not very meaningful for the X-Engine but this argument is left here to
                                       // be consistent with the F-Engine packet simulator.
-static constexpr size_t n_pols = 2;                    // Dual polarisation antennas
-static constexpr size_t complexity = 2;                // real and imaginary components
-static constexpr size_t packet_header_size_bytes = 96; // Nine 8-byte header fields and three padding fields.
+static constexpr size_t N_POLS = 2;                    // Dual polarisation antennas
+static constexpr size_t COMPLEXITY = 2;                // real and imaginary components
+static constexpr size_t PACKET_HEADER_SIZE_BYTES = 96; // Nine 8-byte header fields and three padding fields.
 
-// The 64 indicates that each header SPEAD2 item is 64-bits wide. The 48 value means that the ItemPointers will have 48
+// The 64 indicates that each header spead2 item is 64-bits wide. The 48 value means that the ItemPointers will have 48
 // bits representing the immediate value or pointer to payload. The other 16 bits will be used for the item ID.
-static const spead2::flavour oFlavour(4, 64, 48);
+static const spead2::flavour FLAVOUR(4, 64, 48);
 
 // Function to assist with parsing command line parameters
 template <typename T> static boost::program_options::typed_value<T> *make_opt(T &var)
@@ -113,11 +113,11 @@ static options parse_options(int argc, const char **argv)
     options opts;
     boost::program_options::options_description desc, hidden, all("F- to X- Engine simulator");
     desc.add_options()("help", "produce help message");
-    desc.add_options()("interface", boost::program_options::value(&opts.strInterface)->required(),
+    desc.add_options()("interface", boost::program_options::value(&opts.interface_name)->required(),
                        "Interface address to send data out on");
-    desc.add_options()("max-heaps", make_opt(opts.iMaxHeaps), "Maximum number of heaps per F-Engine");
-    desc.add_options()("adc-sample-rate", make_opt(opts.dAdcSampleRate), "Sampling rate of digitisers feeding the F-Engine");
-    desc.add_options()("ttl", make_opt(opts.iTtl), "Output TTL (Time to live)");
+    desc.add_options()("max-heaps", make_opt(opts.max_heaps), "Maximum number of heaps per F-Engine");
+    desc.add_options()("adc-sample-rate", make_opt(opts.adc_sample_rate), "Sampling rate of digitisers feeding the F-Engine");
+    desc.add_options()("ttl", make_opt(opts.ttl), "Output TTL (Time to live)");
     desc.add_options()("array-size", make_opt(opts.n_ants), "Number of antennas in the array");
     desc.add_options()("channels", make_opt(opts.n_chans_total),
                        "Number of channels out of the FFT. (Normally half of FFT size)");
@@ -127,7 +127,7 @@ static options parse_options(int argc, const char **argv)
                        "The F-Engine cornerturn groups a number of samples into each channel per packet");
     desc.add_options()("dst-packet-payload", make_opt(opts.packet_payload_size_bytes),
                        "The number of payload bytes per packet");
-    desc.add_options()("run-once", make_opt(opts.bRunOnce), "Transmit a single collection of heaps before exiting");
+    desc.add_options()("run-once", make_opt(opts.run_once), "Transmit a single collection of heaps before exiting");
     hidden.add_options()(
         "address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
         "destination address, in form x.x.x.x[+y]:port where y represents the number of additional multicast streams "
@@ -138,14 +138,14 @@ static options parse_options(int argc, const char **argv)
     positional.add("address", -1);
     try
     {
-        boost::program_options::variables_map vm;
+        boost::program_options::variables_map var_map;
         boost::program_options::store(
-            boost::program_options::command_line_parser(argc, argv).options(all).positional(positional).run(), vm);
-        boost::program_options::notify(vm);
-        if (opts.iMaxHeaps <= 0)
+            boost::program_options::command_line_parser(argc, argv).options(all).positional(positional).run(), var_map);
+        boost::program_options::notify(var_map);
+        if (opts.max_heaps <= 0)
             throw boost::program_options::error("--max-heaps must be positive");
 
-        if (vm.count("help"))
+        if (var_map.count("help"))
         {
             std::cout << all << "\n";
             std::exit(1);
@@ -163,7 +163,7 @@ static options parse_options(int argc, const char **argv)
      * data and is thus slightly larger than the payload size.
      */
     opts.heap_size_bytes =
-        opts.n_chans_per_output_stream * opts.n_spectra_per_heap * n_pols * complexity * sample_bits / 8;
+        opts.n_chans_per_output_stream * opts.n_spectra_per_heap * N_POLS * COMPLEXITY * SAMPLE_BITS / 8;
     // Round up when dividing
     opts.packets_per_heap = (opts.heap_size_bytes + opts.packet_payload_size_bytes - 1) / opts.packet_payload_size_bytes;
     opts.timestamp_step =
@@ -212,16 +212,16 @@ static std::vector<boost::asio::ip::udp::endpoint> parse_endpoint_list(const std
  */
 struct heap_data
 {
-    std::unique_ptr<std::uint8_t[]> pu8Data;
+    std::unique_ptr<std::uint8_t[]> data_ptr;
     spead2::send::heap heap;
 
     // The timestamp handle is used to modify the heap timestamp after creation. This is needed as this heap will be
     // sent multiple times to reduce processing load and the timestamp needs to be updated each time it is sent.
-    spead2::send::heap::item_handle timestampHandle;
+    spead2::send::heap::item_handle timestamp_handle;
 
-    heap_data(const options &opts, std::int64_t i64HeapIndex, int iFengId)
-        : pu8Data(std::make_unique<std::uint8_t[]>(opts.heap_size_bytes)), heap(oFlavour),
-          timestampHandle(heap.add_item(0x1600, opts.timestamp_step * i64HeapIndex))
+    heap_data(const options &opts, std::int64_t heap_index, int feng_id)
+        : data_ptr(std::make_unique<std::uint8_t[]>(opts.heap_size_bytes)), heap(FLAVOUR),
+          timestamp_handle(heap.add_item(0x1600, opts.timestamp_step * heap_index))
     {
         /* Heap format defined in section 3.4.5.2.2.1 in the "MeerKAT Functional Interface Control Document for
          * Correlator Beamformer Visibilities and Tied Array Data" (Document ID: M1000-0001-020 rev 4)
@@ -230,18 +230,18 @@ struct heap_data
          * F-Engine - available at doc/fgpu.packet_format.rst.
          */
 
-        heap.add_item(0x4101, iFengId);                            // The index of the F-Engine data is sent from
+        heap.add_item(0x4101, feng_id);                            // The index of the F-Engine data is sent from
         heap.add_item(0x4103, opts.n_chans_per_output_stream * 2); // frequency base - arbitrary offset at the moment
 
         /* This field stores sample data. I need to figure out if I can set the shape of the field to have dimensions:
-         * [n_chans_total / n_xengs][n_spectra_per_heap][n_pols][complexity] instead of a single long dimension.
+         * [n_chans_total / n_xengs][n_spectra_per_heap][N_POLS][COMPLEXITY] instead of a single long dimension.
          *
          * This function adds an ItemPointer to the header and will append the data in data.get() to the packet
          * payload.
          */
-        heap.add_item(0x4300, pu8Data.get(), opts.heap_size_bytes, false); // feng_raw field
+        heap.add_item(0x4300, data_ptr.get(), opts.heap_size_bytes, false); // feng_raw field
 
-        /* The SPEAD header out of the F-Engines is aligned to 256-bit boundaries. To emulate this with SPEAD2, padding
+        /* The SPEAD header out of the F-Engines is aligned to 256-bit boundaries. To emulate this with spead2, padding
          * needs to be added until the 256-bit boundary is reached.
          */
         for (int pad = 0; pad < 3; pad++)
@@ -269,25 +269,25 @@ struct heap_data
          * This current format is not fixed and it is likely that it will be adjusted to be suited for different
          * verification needs.
          */
-        int iInitialOffset = i64HeapIndex * opts.n_spectra_per_heap;
-        double dSampleAnglePol0 = 2.0 * M_PI / ((double)(opts.n_ants * n_pols)) * (iFengId * n_pols + 0);
-        double dSampleAnglePol1 = 2.0 * M_PI / ((double)(opts.n_ants * n_pols)) * (iFengId * n_pols + 1);
+        int initial_offset = heap_index * opts.n_spectra_per_heap;
+        double sample_angle_pol0 = 2.0 * M_PI / ((double)(opts.n_ants * N_POLS)) * (feng_id * N_POLS + 0);
+        double sample_angle_pol1 = 2.0 * M_PI / ((double)(opts.n_ants * N_POLS)) * (feng_id * N_POLS + 1);
         for (int c = 0; c < opts.n_chans_per_output_stream; c++)
         {
             for (int t = 0; t < opts.n_spectra_per_heap; t++)
             {
-                double dSampleAmplitude = (iInitialOffset + c * 10 + t) % 127;
-                double dSampleValuePol0Real = dSampleAmplitude * std::cos(dSampleAnglePol0);
-                double dSampleValuePol0Imag = dSampleAmplitude * std::sin(dSampleAnglePol0);
-                double dSampleValuePol1Real = dSampleAmplitude * std::cos(dSampleAnglePol1);
-                double dSampleValuePol1Imag = dSampleAmplitude * std::sin(dSampleAnglePol1);
+                double sample_amplitude = (initial_offset + c * 10 + t) % 127;
+                double sample_value_pol0_re = sample_amplitude * std::cos(sample_angle_pol0);
+                double sample_value_pol0_im = sample_amplitude * std::sin(sample_angle_pol0);
+                double sample_value_pol1_re = sample_amplitude * std::cos(sample_angle_pol1);
+                double sample_value_pol1_im = sample_amplitude * std::sin(sample_angle_pol1);
 
-                int iSampleIndexBase =
-                    c * opts.n_spectra_per_heap * n_pols * complexity + t * n_pols * complexity;
-                pu8Data[iSampleIndexBase + 0] = static_cast<int8_t>(dSampleValuePol0Real);
-                pu8Data[iSampleIndexBase + 1] = static_cast<int8_t>(dSampleValuePol0Imag);
-                pu8Data[iSampleIndexBase + 2] = static_cast<int8_t>(dSampleValuePol1Real);
-                pu8Data[iSampleIndexBase + 3] = static_cast<int8_t>(dSampleValuePol1Imag);
+                int sample_index_base =
+                    c * opts.n_spectra_per_heap * N_POLS * COMPLEXITY + t * N_POLS * COMPLEXITY;
+                data_ptr[sample_index_base + 0] = static_cast<int8_t>(sample_value_pol0_re);
+                data_ptr[sample_index_base + 1] = static_cast<int8_t>(sample_value_pol0_im);
+                data_ptr[sample_index_base + 2] = static_cast<int8_t>(sample_value_pol1_re);
+                data_ptr[sample_index_base + 3] = static_cast<int8_t>(sample_value_pol1_im);
             }
         }
     }
@@ -296,7 +296,7 @@ struct heap_data
 /* Class to generate simulated data for a number of different F-Engines and transmit them all on a single multicast
  * address.
  *
- * SPEAD2 has the concept of substreams. Different heaps can be queued on different substreams and then the packets on
+ * spead2 has the concept of substreams. Different heaps can be queued on different substreams and then the packets on
  * each heap will be interleaved. This emulates sending data from multiple sources to a single receiver with the caveat
  * that the interleaving is much more predictable than what can be expected from multiple F-Engines. One substream is
  * assigned per F-Engine.
@@ -311,7 +311,7 @@ struct fengines
 {
     // This variable needs to go first so it is initialised first - it is used during the initialisation of other
     // variables.
-    std::uint64_t u64HeapsPerFEngine;
+    std::uint64_t heaps_per_feng;
 
     // This vector of vectors stores all the heaps. The outer vector will have one entry for each F-Engine and the inner
     // one will store the heaps per F-Engine.
@@ -319,47 +319,48 @@ struct fengines
 
     // General variables for coordinating sending of heaps.
     const std::uint64_t uNumAnts;
-    std::uint64_t u64Timestamp = 0;
-    std::uint64_t uNextHeap = 0;
+    std::uint64_t timestamp = 0;
+    std::uint64_t next_heap = 0;
 
     // Step between timestamps of succesive heaps belonging to the same antenna.
-    const std::int64_t u64TimestampStep;
+    const std::int64_t timestamp_step;
 
     // Only transmit a single collection of heaps and then end the transmission.
-    const bool bRunOnce;
+    const bool run_once;
 
     // SPEAD 2 stream that every heap will be queued on.
     spead2::send::udp_ibv_stream stream;
 
     /* Constructor for the fengines simulator.
      *
-     * Initialises the SPEAD2 stream. The stream requires two main objects, the
+     * Initialises the spead2 stream. The stream requires two main objects, the
      * stream_config() for general stream parameters and the udp_ibv_config() for more specific parameters required when
      * using ibverbs to accelerate the packet transmission.
      *
-     * Creates all heaps that will queued on the SPEAD2 stream.
+     * Creates all heaps that will queued on the spead2 stream.
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address, boost::asio::io_service &ios)
-        : u64HeapsPerFEngine(opts.iMaxHeaps), vvHeaps(make_heaps(opts)), uNumAnts(opts.n_ants),
-          u64TimestampStep(opts.timestamp_step), bRunOnce(opts.bRunOnce),
+        : heaps_per_feng(opts.max_heaps), vvHeaps(make_heaps(opts)), uNumAnts(opts.n_ants),
+          timestamp_step(opts.timestamp_step), run_once(opts.run_once),
           stream(ios,
                  spead2::send::stream_config()
-                     .set_max_packet_size(opts.packet_payload_size_bytes + packet_header_size_bytes)
-                     .set_rate(opts.dAdcSampleRate * n_pols * sample_bits / 8.0 *
+                     .set_max_packet_size(opts.packet_payload_size_bytes + PACKET_HEADER_SIZE_BYTES)
+                     .set_rate(opts.adc_sample_rate
+                 * N_POLS * SAMPLE_BITS / 8.0 *
                                opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
-                               (opts.heap_size_bytes + opts.packets_per_heap * packet_header_size_bytes) /
+                               (opts.heap_size_bytes + opts.packets_per_heap * PACKET_HEADER_SIZE_BYTES) /
                                opts.heap_size_bytes)
-                     .set_max_heaps(opts.iMaxHeaps * opts.n_ants),
+                     .set_max_heaps(opts.max_heaps * opts.n_ants),
                  spead2::send::udp_ibv_config()
                      .set_endpoints(endpoints)
                      .set_interface_address(interface_address)
-                     .set_ttl(opts.iTtl)
+                     .set_ttl(opts.ttl)
                      .set_memory_regions(get_memory_regions(opts, vvHeaps)))
     {
     }
 
-    /* Registers all heap data in memory regions and returns a vector of these regions to be used by SPEAD2.
+    /* Registers all heap data in memory regions and returns a vector of these regions to be used by spead2.
      *
      * Memory regions are an ibverbs concept. Any collection of data that ibverbs needs to send on the network needs to
      * be in a memory region. The channel data in each heap is what is being sent in this case, and each one of these
@@ -373,7 +374,7 @@ struct fengines
         {
             for (const heap_data &heap : vSingleFengineHeaps)
             {
-                vMemoryRegions.emplace_back(heap.pu8Data.get(), opts.heap_size_bytes);
+                vMemoryRegions.emplace_back(heap.data_ptr.get(), opts.heap_size_bytes);
             }
         }
         return vMemoryRegions;
@@ -387,12 +388,12 @@ struct fengines
     {
         std::vector<std::vector<heap_data>> vv2AllFengineHeaps;
         vv2AllFengineHeaps.reserve(opts.n_ants);
-        int iHeapsPerFengine = opts.iMaxHeaps;
+        int heaps_per_feng = opts.max_heaps;
         for (int feng_id = 0; feng_id < opts.n_ants; feng_id++)
         {
             std::vector<heap_data> vFengineHeaps;
-            vFengineHeaps.reserve(iHeapsPerFengine);
-            for (int heap_index = 0; heap_index < iHeapsPerFengine; heap_index++)
+            vFengineHeaps.reserve(heaps_per_feng);
+            for (int heap_index = 0; heap_index < heaps_per_feng; heap_index++)
             {
                 vFengineHeaps.emplace_back(opts, heap_index, feng_id);
             }
@@ -401,7 +402,7 @@ struct fengines
         return vv2AllFengineHeaps;
     }
 
-    /* Adds the next collection of heaps to the SPEAD2 stream queue.
+    /* Adds the next collection of heaps to the spead2 stream queue.
      *
      * Heaps from multiple different indexes with
      *
@@ -412,43 +413,43 @@ struct fengines
      */
     void send_next()
     {
-        /* In order to send a collection of heaps with packets interleaved, they need to be given to SPEAD2 to in one
+        /* In order to send a collection of heaps with packets interleaved, they need to be given to spead2 to in one
          * collection using the stream.async_send_heaps function. This function requires iterators of type
          * spead2::send::heap_reference. A heap_reference points to an underlying heap. Here we construct the vector of
          * heap references as required.
          */
         std::vector<spead2::send::heap_reference> vHeapsToInterleave;
         vHeapsToInterleave.reserve(uNumAnts);
-        for (size_t ulFEngineIndex = 0; ulFEngineIndex < uNumAnts; ulFEngineIndex++)
+        for (size_t feng_index = 0; feng_index < uNumAnts; feng_index++)
         {
-            vvHeaps[ulFEngineIndex][uNextHeap]
-                .heap.get_item(vvHeaps[ulFEngineIndex][uNextHeap].timestampHandle)
-                .data.immediate = u64Timestamp;
-            /* The f_engine_index argument tells SPEAD2 which substream to queue the heap on. It is important that each
+            vvHeaps[feng_index][next_heap]
+                .heap.get_item(vvHeaps[feng_index][next_heap].timestamp_handle)
+                .data.immediate = timestamp;
+            /* The f_engine_index argument tells spead2 which substream to queue the heap on. It is important that each
              * F-Engine gets its own unique substream index as heaps with different indexes will be interleaved which is
              * desired.
              */
-            vHeapsToInterleave.emplace_back(vvHeaps[ulFEngineIndex][uNextHeap].heap, -1, ulFEngineIndex);
+            vHeapsToInterleave.emplace_back(vvHeaps[feng_index][next_heap].heap, -1, feng_index);
         }
 
-        bool bQueueSuccesful =
+        bool queue_success =
             stream.async_send_heaps(vHeapsToInterleave.begin(), vHeapsToInterleave.end(),
                                     std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
                                     spead2::send::group_mode::ROUND_ROBIN);
-        if (bQueueSuccesful == false)
+        if (queue_success == false)
         {
             std::cerr << "Error: Heaps not queued succesfully on queue" << std::endl;
             std::exit(1);
         }
 
-        u64Timestamp += u64TimestampStep;
-        uNextHeap++;
+        timestamp += timestamp_step;
+        next_heap++;
 
-        if (uNextHeap == u64HeapsPerFEngine)
-            uNextHeap = 0;
+        if (next_heap == heaps_per_feng)
+            next_heap = 0;
     }
 
-    /* Callback function called when SPEAD2 finishes sending a collection of heaps sent by @ref send_next().
+    /* Callback function called when spead2 finishes sending a collection of heaps sent by @ref send_next().
      *
      * This function immediatley queues the next collection of heaps to be sent on the network.
      */
@@ -459,7 +460,7 @@ struct fengines
             std::cerr << "Error: " << ec;
             std::exit(1);
         }
-        else if (!bRunOnce)
+        else if (!run_once)
         {
             send_next();
         }
@@ -471,11 +472,11 @@ struct fengines
 int main(int argc, const char **argv)
 {
     // 1. IO loop that will be used by all multicast streams.
-    boost::asio::io_service ioService;
+    boost::asio::io_service io_serv;
 
     // 2. Parse all the command line parameters
     options opts = parse_options(argc, argv);
-    auto interfaceAddress = boost::asio::ip::address::from_string(opts.strInterface);
+    auto interface_addr = boost::asio::ip::address::from_string(opts.interface_name);
     std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint_list(opts.strAddress);
 
     // 3. Create multicast stream objects
@@ -487,7 +488,7 @@ int main(int argc, const char **argv)
     {
         // 3.1 Create an endpoint list to pass to the fengines object contructor.
         // Instead of passing a single endpoint into the stream, we create a list continaing n_ants duplicates of the
-        // same endpoint. This is because the SPEAD2 stream object within the fengines object uses one substream for
+        // same endpoint. This is because the spead2 stream object within the fengines object uses one substream for
         // each antenna and each substream needs its own entry in an endpoint list. Duplication is the simplest way to
         // achieve this. This duplication is really an internal working of the fengines class and should be moved to
         // within that class. I have not yet figured out the best way to do this.
@@ -498,27 +499,27 @@ int main(int argc, const char **argv)
         }
 
         // 3.2 Construct the fengines object for a specific multicast stream
-        vMulticastStreams.emplace_back(opts, vEndpointsForSingleStream, interfaceAddress, ioService);
+        vMulticastStreams.emplace_back(opts, vEndpointsForSingleStream, interface_addr, io_serv);
         std::cout << "Created multicast stream: " << endpoints[j].address().to_string() << ":" << endpoints[j].port()
                   << std::endl;
     }
 
     // 4. Kick off packet transmission
-    float dDataRate_Gbps = opts.dAdcSampleRate * n_pols * sample_bits *
+    float data_rate_gbps = opts.adc_sample_rate * N_POLS * SAMPLE_BITS *
                            opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
-                           (opts.heap_size_bytes + opts.packets_per_heap * packet_header_size_bytes) /
+                           (opts.heap_size_bytes + opts.packets_per_heap * PACKET_HEADER_SIZE_BYTES) /
                            opts.heap_size_bytes / 1e9;
-    std::cout << "Beginning fsim data transmission at " << dDataRate_Gbps << " Gbps..." << std::endl;
+    std::cout << "Beginning fsim data transmission at " << data_rate_gbps << " Gbps..." << std::endl;
 
     for (size_t i = 0; i < endpoints.size(); i++)
     {
         // 4.1 The first send_next() function of each multicast stream needs to be queued manually. Once these sends
         // have completed, the callback function called will ensure that send_next() function is called again (assuming
-        // bRunOnce == false)
-        ioService.post(std::bind(&fengines::send_next, &vMulticastStreams[i]));
+        // run_once == false)
+        io_serv.post(std::bind(&fengines::send_next, &vMulticastStreams[i]));
     }
 
     // 4.2 Start IO loop running.
-    ioService.run();
+    io_serv.run();
     return 0;
 }
