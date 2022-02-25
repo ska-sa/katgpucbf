@@ -31,6 +31,7 @@ from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import spead2.recv
+import spead2.send
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -805,8 +806,9 @@ class Processor:
         Parameters
         ----------
         sender
-            This object, written in C++, takes large chunks of data and packages
-            it appropriately in SPEAD heaps for transmission on the network.
+            This object, written in C++, takes large chunks of data and
+            packages it appropriately in SPEAD heaps for transmission on
+            the network.
         """
         task: Optional[asyncio.Future] = None
         while True:
@@ -848,3 +850,31 @@ class Processor:
         for substream_index in range(stream.num_substreams):
             await stream.async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
+
+    async def run_descriptors_loop(
+        self,
+        stream: "spead2.send.asyncio.AsyncStream",
+        descriptor_heaps: List[spead2.send.HeapReference],
+        interval_s: float,
+    ) -> None:
+        """
+        Send the Antenna Channelised Voltage Hardware Heap descriptors.
+
+        This is done every interval_s seconds. This function is not part of the
+        main processing loop(s) as it is not required to run during unit tests.
+
+        Parameters
+        ----------
+        sender
+            This object, written in C++, takes large chunks of data and
+            packages it appropriately in SPEAD heaps for transmission on
+            the network.
+        descriptor_heaps
+            A list of desciptor heaps to send for all substreams.
+        interval_s
+            Interval (in seconds) over which to spread the sending of
+            descriptor heaps.
+        """
+        while True:
+            await asyncio.gather(stream.async_send_heaps(descriptor_heaps, spead2.send.GroupMode.ROUND_ROBIN))
+            await asyncio.sleep(interval_s)
