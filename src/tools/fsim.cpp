@@ -70,7 +70,7 @@
 struct options
 {
     std::string interface_name;
-    std::string strAddress;
+    std::string mcast_addr;
     int max_heaps = 8;
     double adc_sample_rate = 1712000000.0;
     int ttl = 4;
@@ -107,7 +107,7 @@ template <typename T> static boost::program_options::typed_value<T> *make_opt(T 
     return boost::program_options::value<T>(&var)->default_value(var);
 }
 
-// Parse command line parameters - this has been kludged  together. It can probably be done in a neater way.
+// Parse command line parameters - this has been kludged together. It can probably be done in a neater way.
 static options parse_options(int argc, const char **argv)
 {
     options opts;
@@ -129,7 +129,7 @@ static options parse_options(int argc, const char **argv)
                        "The number of payload bytes per packet");
     desc.add_options()("run-once", make_opt(opts.run_once), "Transmit a single collection of heaps before exiting");
     hidden.add_options()(
-        "address", boost::program_options::value<std::string>(&opts.strAddress)->composing(),
+        "address", boost::program_options::value<std::string>(&opts.mcast_addr)->composing(),
         "destination address, in form x.x.x.x[+y]:port where y represents the number of additional multicast streams "
         "to launch in parallel. Each stream is assigned the next consecutive multicast address from the x.x.x.x base.");
     all.add(desc);
@@ -151,9 +151,9 @@ static options parse_options(int argc, const char **argv)
             std::exit(1);
         }
     }
-    catch (boost::program_options::error &e)
+    catch (boost::program_options::error &err)
     {
-        std::cerr << e.what() << '\n';
+        std::cerr << err.what() << '\n';
         std::exit(2);
     }
 
@@ -315,10 +315,10 @@ struct fengines
 
     // This vector of vectors stores all the heaps. The outer vector will have one entry for each F-Engine and the inner
     // one will store the heaps per F-Engine.
-    std::vector<std::vector<heap_data>> vvHeaps;
+    std::vector<std::vector<heap_data>> all_heaps;
 
     // General variables for coordinating sending of heaps.
-    const std::uint64_t uNumAnts;
+    const std::uint64_t NUM_ANTS;
     std::uint64_t timestamp = 0;
     std::uint64_t next_heap = 0;
 
@@ -341,13 +341,12 @@ struct fengines
      */
     fengines(const options &opts, const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
              const boost::asio::ip::address &interface_address, boost::asio::io_service &ios)
-        : heaps_per_feng(opts.max_heaps), vvHeaps(make_heaps(opts)), uNumAnts(opts.n_ants),
+        : heaps_per_feng(opts.max_heaps), all_heaps(make_heaps(opts)), NUM_ANTS(opts.n_ants),
           timestamp_step(opts.timestamp_step), run_once(opts.run_once),
           stream(ios,
                  spead2::send::stream_config()
                      .set_max_packet_size(opts.packet_payload_size_bytes + PACKET_HEADER_SIZE_BYTES)
-                     .set_rate(opts.adc_sample_rate
-                 * N_POLS * SAMPLE_BITS / 8.0 *
+                     .set_rate(opts.adc_sample_rate * N_POLS * SAMPLE_BITS / 8.0 *
                                opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
                                (opts.heap_size_bytes + opts.packets_per_heap * PACKET_HEADER_SIZE_BYTES) /
                                opts.heap_size_bytes)
@@ -356,7 +355,7 @@ struct fengines
                      .set_endpoints(endpoints)
                      .set_interface_address(interface_address)
                      .set_ttl(opts.ttl)
-                     .set_memory_regions(get_memory_regions(opts, vvHeaps)))
+                     .set_memory_regions(get_memory_regions(opts, all_heaps)))
     {
     }
 
@@ -367,17 +366,17 @@ struct fengines
      * needs to be added to a memory region.
      */
     static std::vector<std::pair<const void *, std::size_t>> get_memory_regions(
-        const options &opts, const std::vector<std::vector<heap_data>> &vvAllHeaps)
+        const options &opts, const std::vector<std::vector<heap_data>> &all_heaps)
     {
-        std::vector<std::pair<const void *, std::size_t>> vMemoryRegions;
-        for (const std::vector<heap_data> &vSingleFengineHeaps : vvAllHeaps)
+        std::vector<std::pair<const void *, std::size_t>> memory_regions;
+        for (const std::vector<heap_data> &single_feng_heaps : all_heaps)
         {
-            for (const heap_data &heap : vSingleFengineHeaps)
+            for (const heap_data &heap : single_feng_heaps)
             {
-                vMemoryRegions.emplace_back(heap.data_ptr.get(), opts.heap_size_bytes);
+                memory_regions.emplace_back(heap.data_ptr.get(), opts.heap_size_bytes);
             }
         }
-        return vMemoryRegions;
+        return memory_regions;
     }
 
     /* Creates vector of heaps required to be transmitted by the F-Engine simulator.
@@ -386,20 +385,20 @@ struct fengines
      */
     static std::vector<std::vector<heap_data>> make_heaps(const options &opts)
     {
-        std::vector<std::vector<heap_data>> vv2AllFengineHeaps;
-        vv2AllFengineHeaps.reserve(opts.n_ants);
+        std::vector<std::vector<heap_data>> all_feng_heaps;
+        all_feng_heaps.reserve(opts.n_ants);
         int heaps_per_feng = opts.max_heaps;
         for (int feng_id = 0; feng_id < opts.n_ants; feng_id++)
         {
-            std::vector<heap_data> vFengineHeaps;
-            vFengineHeaps.reserve(heaps_per_feng);
+            std::vector<heap_data> feng_heaps;
+            feng_heaps.reserve(heaps_per_feng);
             for (int heap_index = 0; heap_index < heaps_per_feng; heap_index++)
             {
-                vFengineHeaps.emplace_back(opts, heap_index, feng_id);
+                feng_heaps.emplace_back(opts, heap_index, feng_id);
             }
-            vv2AllFengineHeaps.emplace_back(std::move(vFengineHeaps));
+            all_feng_heaps.emplace_back(std::move(feng_heaps));
         }
-        return vv2AllFengineHeaps;
+        return all_feng_heaps;
     }
 
     /* Adds the next collection of heaps to the spead2 stream queue.
@@ -418,22 +417,22 @@ struct fengines
          * spead2::send::heap_reference. A heap_reference points to an underlying heap. Here we construct the vector of
          * heap references as required.
          */
-        std::vector<spead2::send::heap_reference> vHeapsToInterleave;
-        vHeapsToInterleave.reserve(uNumAnts);
-        for (size_t feng_index = 0; feng_index < uNumAnts; feng_index++)
+        std::vector<spead2::send::heap_reference> heaps_to_interleave;
+        heaps_to_interleave.reserve(NUM_ANTS);
+        for (size_t feng_index = 0; feng_index < NUM_ANTS; feng_index++)
         {
-            vvHeaps[feng_index][next_heap]
-                .heap.get_item(vvHeaps[feng_index][next_heap].timestamp_handle)
+            all_heaps[feng_index][next_heap]
+                .heap.get_item(all_heaps[feng_index][next_heap].timestamp_handle)
                 .data.immediate = timestamp;
             /* The f_engine_index argument tells spead2 which substream to queue the heap on. It is important that each
              * F-Engine gets its own unique substream index as heaps with different indexes will be interleaved which is
              * desired.
              */
-            vHeapsToInterleave.emplace_back(vvHeaps[feng_index][next_heap].heap, -1, feng_index);
+            heaps_to_interleave.emplace_back(all_heaps[feng_index][next_heap].heap, -1, feng_index);
         }
 
         bool queue_success =
-            stream.async_send_heaps(vHeapsToInterleave.begin(), vHeapsToInterleave.end(),
+            stream.async_send_heaps(heaps_to_interleave.begin(), heaps_to_interleave.end(),
                                     std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
                                     spead2::send::group_mode::ROUND_ROBIN);
         if (queue_success == false)
@@ -453,11 +452,11 @@ struct fengines
      *
      * This function immediatley queues the next collection of heaps to be sent on the network.
      */
-    void callback(const boost::system::error_code &ec, std::size_t)
+    void callback(const boost::system::error_code &err_code, std::size_t)
     {
-        if (ec)
+        if (err_code)
         {
-            std::cerr << "Error: " << ec;
+            std::cerr << "Error: " << err_code;
             std::exit(1);
         }
         else if (!run_once)
@@ -477,10 +476,10 @@ int main(int argc, const char **argv)
     // 2. Parse all the command line parameters
     options opts = parse_options(argc, argv);
     auto interface_addr = boost::asio::ip::address::from_string(opts.interface_name);
-    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint_list(opts.strAddress);
+    std::vector<boost::asio::ip::udp::endpoint> endpoints = parse_endpoint_list(opts.mcast_addr);
 
     // 3. Create multicast stream objects
-    std::deque<fengines> vMulticastStreams; // We use a deque as unlike a vector it does not require the fengines object
+    std::deque<fengines> multicast_streams; // We use a deque as unlike a vector it does not require the fengines object
                                             // to have a copy constructor.
 
     // 3. Create a multicast stream for each endpoint specified in the command line.
@@ -492,14 +491,14 @@ int main(int argc, const char **argv)
         // each antenna and each substream needs its own entry in an endpoint list. Duplication is the simplest way to
         // achieve this. This duplication is really an internal working of the fengines class and should be moved to
         // within that class. I have not yet figured out the best way to do this.
-        std::vector<boost::asio::ip::udp::endpoint> vEndpointsForSingleStream;
+        std::vector<boost::asio::ip::udp::endpoint> endpoints_for_single_stream;
         for (int i = 0; i < opts.n_ants; i++)
         {
-            vEndpointsForSingleStream.emplace_back(endpoints[j]);
+            endpoints_for_single_stream.emplace_back(endpoints[j]);
         }
 
         // 3.2 Construct the fengines object for a specific multicast stream
-        vMulticastStreams.emplace_back(opts, vEndpointsForSingleStream, interface_addr, io_serv);
+        multicast_streams.emplace_back(opts, endpoints_for_single_stream, interface_addr, io_serv);
         std::cout << "Created multicast stream: " << endpoints[j].address().to_string() << ":" << endpoints[j].port()
                   << std::endl;
     }
@@ -516,7 +515,7 @@ int main(int argc, const char **argv)
         // 4.1 The first send_next() function of each multicast stream needs to be queued manually. Once these sends
         // have completed, the callback function called will ensure that send_next() function is called again (assuming
         // run_once == false)
-        io_serv.post(std::bind(&fengines::send_next, &vMulticastStreams[i]));
+        io_serv.post(std::bind(&fengines::send_next, &multicast_streams[i]));
     }
 
     // 4.2 Start IO loop running.
