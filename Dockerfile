@@ -1,7 +1,20 @@
 # Use the nvidia development image as a base. This gives access to all
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as build-base
+
+FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as base
+
+# This "base" layer is modified to better support running with Vulkan. That's
+# needed by both build-base (used by Jenkins to run unit tests) and the final
+# image. Additionally, for the Vulkan drivers to work one needs
+# libvulkan1, libegl1 and libxext6, but that's done in later layers together
+# with other packages.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+COPY docker/10_nvidia.json /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+# See also https://github.com/NVIDIA/nvidia-container-toolkit/issues/16
+COPY docker/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json
+
+FROM base as build-base
 
 # Install system packages:
 # - git is needed for setuptools_scm
@@ -24,6 +37,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     librdmacm-dev \
     libpcap-dev \
     libcap-dev \
+    libvulkan-dev libxext6 libegl1 \
     wget
 
 # Create a virtual environment
@@ -89,14 +103,14 @@ RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker
 
 # The above builds everything. Now install it into a lighter-weight runtime
 # image, without all the stuff needed for the build itself.
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04
+FROM base
 LABEL maintainer="MeerKAT CBF team <cbf@ska.ac.za>"
 
 # curl is needed for running under katsdpcontroller
 # numactl allows CPU and memory affinity to be controlled.
 # libboost-program-options is for spead2's C++ command-line tools - not
 # strictly needed but useful for debugging.
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     python3 \
     python3-pip \
     python3-venv \
@@ -109,7 +123,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     librdmacm1 \
     libpcap0.8 \
     libcap2 \
-    libcap2-bin
+    libcap2-bin \
+    libvulkan1 libxext6 libegl1
 
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
