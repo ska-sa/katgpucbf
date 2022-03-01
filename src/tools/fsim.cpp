@@ -385,8 +385,8 @@ struct fengines
      */
     static std::vector<std::vector<heap_data>> make_heaps(const options &opts)
     {
-        std::vector<std::vector<heap_data>> all_feng_heaps;
-        all_feng_heaps.reserve(opts.n_ants);
+        std::vector<std::vector<heap_data>> heaps;
+        heaps.reserve(opts.n_ants);
         int heaps_per_feng = opts.max_heaps;
         for (int feng_id = 0; feng_id < opts.n_ants; feng_id++)
         {
@@ -396,9 +396,9 @@ struct fengines
             {
                 feng_heaps.emplace_back(opts, heap_index, feng_id);
             }
-            all_feng_heaps.emplace_back(std::move(feng_heaps));
+            heaps.emplace_back(std::move(feng_heaps));
         }
-        return all_feng_heaps;
+        return heaps;
     }
 
     /* Adds the next collection of heaps to the spead2 stream queue.
@@ -471,7 +471,7 @@ struct fengines
 int main(int argc, const char **argv)
 {
     // 1. IO loop that will be used by all multicast streams.
-    boost::asio::io_service io_serv;
+    boost::asio::io_service io_service;
 
     // 2. Parse all the command line parameters
     options opts = parse_options(argc, argv);
@@ -498,7 +498,7 @@ int main(int argc, const char **argv)
         }
 
         // 3.2 Construct the fengines object for a specific multicast stream
-        multicast_streams.emplace_back(opts, endpoints_for_single_stream, interface_addr, io_serv);
+        multicast_streams.emplace_back(opts, endpoints_for_single_stream, interface_addr, io_service);
         std::cout << "Created multicast stream: " << endpoints[j].address().to_string() << ":" << endpoints[j].port()
                   << std::endl;
     }
@@ -515,10 +515,10 @@ int main(int argc, const char **argv)
         // 4.1 The first send_next() function of each multicast stream needs to be queued manually. Once these sends
         // have completed, the callback function called will ensure that send_next() function is called again (assuming
         // run_once == false)
-        io_serv.post(std::bind(&fengines::send_next, &multicast_streams[i]));
+        io_service.post(std::bind(&fengines::send_next, &multicast_streams[i]));
     }
 
     // 4.2 Start IO loop running.
-    io_serv.run();
+    io_service.run();
     return 0;
 }
