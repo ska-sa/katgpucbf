@@ -92,9 +92,10 @@ class Compute(accel.OperationSequence):
     samples
         Number of samples that will be processed each time the operation is run.
     spectra
-        Number of spectra that we will get from each chunk of samples.
+        Number of spectra that will be produced from a chunk of incoming
+        digitiser data.
     spectra_per_heap
-        Number of spectra to send out per heap.
+        Number of spectra to send in each output heap.
     channels
         Number of channels into which the input data will be decomposed.
     """

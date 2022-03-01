@@ -50,7 +50,7 @@ import spead2.send
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu import METRIC_NAMESPACE
-from katgpucbf.xbgpu.recv import Chunk, make_stream, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, make_stream, recv_chunks
 
 from .. import PromDiff
 from . import test_parameters
@@ -171,17 +171,16 @@ class TestStream:
 
         # 4.3 Create Receiver
         thread_affinity = 2  # This ties the thread to the CPU core. 2 has been chosen at random.
-        receiver_stream = make_stream(
+        layout = Layout(
             n_ants,
             n_channels_per_stream,
             n_spectra_per_heap,
-            sample_bits,
             timestamp_step,
+            sample_bits,
             heaps_per_fengine_per_chunk,
-            max_active_chunks,
-            ringbuffer,
-            thread_affinity,
         )
+
+        receiver_stream = make_stream(layout, ringbuffer, thread_affinity, rx_reorder_tol=1)
 
         # 4.4 Create empty chunks and add them to the receiver empty queue.
         src_chunks_per_stream = max_active_chunks + 1  # Make sure it works with the minimum sane value
@@ -491,7 +490,6 @@ class TestStream:
 
         This test is run using simulated packets that are passed to xbgpu receiver
         as a ByteArray. This test is useful for determining that the receiver is
-
         doing what is expected when receiving the correct data. It is not able to
         simulate real network conditions.
 

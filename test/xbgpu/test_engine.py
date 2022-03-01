@@ -376,10 +376,11 @@ class TestEngine:
         """
         n_ants = num_ants
         n_channels_total = num_channels
+        n_samples_between_spectra = 2 * n_channels_total
 
-        # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+        # Get a realistic number of engines, round up to the next power of 2.
         n_engines = 1
-        while n_engines < n_ants * 4:
+        while n_engines < n_ants:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
@@ -390,7 +391,7 @@ class TestEngine:
         # Header is 12 fields of 8 bytes each: So 96 bytes of header
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-        timestamp_step = n_channels_total * 2 * n_spectra_per_heap
+        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         # Create source_stream object - transforms "transmitted" heaps into a
         # byte array to simulate received data.
@@ -442,12 +443,13 @@ class TestEngine:
             n_ants=n_ants,
             n_channels_total=n_channels_total,
             n_channels_per_stream=n_channels_per_stream,
+            n_samples_between_spectra=n_samples_between_spectra,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=SAMPLE_BITWIDTH,
             heap_accumulation_threshold=heap_accumulation_threshold,
             channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
             src_affinity=0,
-            chunk_spectra=HEAPS_PER_FENGINE_PER_CHUNK,
+            heaps_per_fengine_per_chunk=HEAPS_PER_FENGINE_PER_CHUNK,
             rx_reorder_tol=rx_reorder_tol,
             monitor=monitor,
             context=context,

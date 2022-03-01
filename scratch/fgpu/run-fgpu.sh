@@ -5,11 +5,15 @@ set -e -u
 # Load variables for machine-specific config
 . config/$(hostname -s).sh
 
-src_affinity="$((6*$1)),$((6*$1+1))"
+nproc=$(nproc)
+step=$(($nproc / 4))
+hstep=$(($step / 2))
+
+src_affinity="$(($step*$1)),$(($step*$1+1))"
 src_comp=$src_affinity
-dst_affinity="$((6*$1+3))"
+dst_affinity="$(($step*$1+$hstep))"
 dst_comp=$dst_affinity
-other_affinity="$((6*$1+4))"
+other_affinity="$(($step*$1+$hstep+1))"
 srcs="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
 dst="239.102.$((200+$1)).0+15:7148"
 katcp_port="$(($1+7140))"

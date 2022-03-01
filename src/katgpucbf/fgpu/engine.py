@@ -29,6 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import BYTE_BITS, COMPLEX, N_POLS, SPEAD_DESCRIPTOR_INTERVAL_S, __version__
+from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import SAMPLE_BITS, recv, send
@@ -134,7 +135,7 @@ class Engine(aiokatcp.DeviceServer):
     channels
         Number of output channels to produce.
     taps
-        Number of taps in each branch of the PFB-FIR
+        Number of taps in each branch of the PFB-FIR.
     max_delay_diff
         Maximum supported difference between delays across polarisations (in samples).
     gain
@@ -143,8 +144,8 @@ class Engine(aiokatcp.DeviceServer):
         UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
-    use_gdrcopy
-        Assemble chunks directly in GPU memory (requires supported GPU).
+    use_vkgdr
+        Assemble chunks directly in GPU memory (requires Vulkan).
     use_peerdirect
         Send chunks directly from GPU memory (requires supported GPU).
     monitor
@@ -190,17 +191,21 @@ class Engine(aiokatcp.DeviceServer):
         gain: complex,
         sync_epoch: float,
         mask_timestamp: bool,
-        use_gdrcopy: bool,
+        use_vkgdr: bool,
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
 
-        if use_gdrcopy:
-            import gdrcopy.pycuda
+        if use_vkgdr:
+            import vkgdr.pycuda
 
-            gdr = gdrcopy.Gdr()
+            with context:
+                # We could quite easily make do with non-coherent mappings and
+                # explicit flushing, but since NVIDIA currently only provides
+                # host-coherent memory, this is a simpler option.
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
 
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
@@ -227,7 +232,7 @@ class Engine(aiokatcp.DeviceServer):
             spectra_per_heap,
             channels,
             self.delay_models,
-            use_gdrcopy,
+            use_vkgdr,
             monitor,
         )
         chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
@@ -242,30 +247,20 @@ class Engine(aiokatcp.DeviceServer):
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
-        self._src_streams = [
-            recv.make_stream(
-                pol,
-                self._src_layout,
-                ring,
-                src_affinity[pol],
-            )
-            for pol in range(N_POLS)
-        ]
+        self._src_streams = recv.make_streams(self._src_layout, ring, src_affinity)
         src_chunks_per_stream = 4
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
-                if use_gdrcopy:
+                if use_vkgdr:
                     device_bytes = self._processor.compute.slots[f"in{pol}"].required_bytes()
                     with context:
-                        device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(gdr, device_bytes)
-                    buf = np.frombuffer(buf_raw, np.uint8)
+                        mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
+                    buf = np.array(mem, copy=False).view(np.uint8)
                     # The device buffer contains extra space for copying the head
                     # of the following chunk, but we don't need that in the host
                     # mapping.
                     buf = buf[:chunk_bytes]
-                    # Hack to work around limitations in katsdpsigproc and pycuda
-                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=int(device_raw))
-                    device_array.buffer.base = device_raw
+                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
                     chunk = recv.Chunk(data=buf, device=device_array)
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
@@ -477,7 +472,7 @@ class Engine(aiokatcp.DeviceServer):
             along with its data transmission.
         """
         for pol, stream in enumerate(self._src_streams):
-            recv.add_reader(
+            base_recv.add_reader(
                 stream,
                 src=self._srcs[pol],
                 interface=self._src_interface,

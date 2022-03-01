@@ -103,6 +103,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of channels in the multicast stream that this engine receives data from.",
     )
     parser.add_argument(
+        "--samples-between-spectra",
+        type=int,
+        required=True,
+        help="Number of samples between spectra.",
+    )
+    parser.add_argument(
         "--channel-offset-value",
         type=int,
         default=0,
@@ -124,12 +130,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of bits for each real and imaginary value in a sample. [%(default)s]",
     )
     parser.add_argument(
-        "--chunk-spectra",
+        "--heaps-per-fengine-per-chunk",
         type=int,
         default=5,
         help="A batch is a collection of heaps from different F-Engines with "
         "the same timestamp. This parameter specifies the number of "
-        "consecutive spectra to store in the same chunk. The higher this "
+        "consecutive batches to store in the same chunk. The higher this "
         "value is, the more GPU and system RAM is allocated, the lower "
         "this value is, the more work the python processing thread "
         "is required to do. [%(default)s]",
@@ -264,11 +270,12 @@ async def async_main(args: argparse.Namespace) -> None:
         n_channels_total=args.channels,
         n_channels_per_stream=args.channels_per_substream,
         n_spectra_per_heap=args.spectra_per_heap,
+        n_samples_between_spectra=args.samples_between_spectra,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         channel_offset_value=args.channel_offset_value,
         src_affinity=args.src_affinity,
-        chunk_spectra=args.chunk_spectra,
+        heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
         monitor=monitor,
         context=context,

@@ -195,7 +195,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--chunk-samples",
         type=int,
-        default=2 ** 26,
+        default=2 ** 24,
         metavar="SAMPLES",
         help="Number of digitiser samples to process at a time (per pol). If not a multiple of 2*channels*acc-len,"
         "it will be rounded up to the next multiple. [%(default)s]",
@@ -220,7 +220,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
     )
     parser.add_argument(
-        "--use-gdrcopy", action="store_true", help="Assemble chunks directly in GPU memory (requires supported GPU)"
+        "--use-vkgdr", action="store_true", help="Assemble chunks directly in GPU memory (requires Vulkan)"
     )
     parser.add_argument(
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
@@ -306,7 +306,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
         gain=args.gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
         mask_timestamp=args.mask_timestamp,
-        use_gdrcopy=args.use_gdrcopy,
+        use_vkgdr=args.use_vkgdr,
         use_peerdirect=args.use_peerdirect,
         monitor=monitor,
     )

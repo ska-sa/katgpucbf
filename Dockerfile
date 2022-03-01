@@ -35,8 +35,7 @@ ENV PATH=/venv/bin:$PATH
 RUN pip install pip==21.3.1 setuptools==58.3.0 wheel==0.36.2
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
-# version, so that we when we want to update we only have to do it in
-# one place.
+# version, so that when we want to update we only have to do it in one place.
 WORKDIR /tmp/katgpucbf
 COPY requirements.txt .
 WORKDIR /tmp
@@ -53,7 +52,7 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 #######################################################################
 
 # The above image is independent of the contents of this package (except
-# for requirement.txt), and is used to form the image for Jenkins
+# for requirements.txt), and is used to form the image for Jenkins
 # testing. We now install the package in a new build stage.
 
 FROM build-base as build-py
@@ -71,17 +70,20 @@ RUN pip install --no-deps . && pip check
 #######################################################################
 
 # Separate stage to build the C++ tools. This is in a separate build stage
-# so that changes to do either the C++ code or the Python code don't
-# invalidate the build cache for the other.
+# so that changes to either the C++ code or the Python code don't invalidate
+# the build cache for the other.
 
 FROM build-base as build-cxx
 
-# Build simulation utilities.
+# Build utilities.
 # We use make clean to ensure that an existing build from the build context
 # won't accidentally get used instead.
 WORKDIR /tmp/tools
 COPY src/tools .
 RUN make clean && make -j fsim
+
+RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-runtime/schedrr.c && \
+    gcc -Wall -O2 -o schedrr schedrr.c
 
 #######################################################################
 
@@ -106,8 +108,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libibverbs1 \
     librdmacm1 \
     libpcap0.8 \
-    libcap2
+    libcap2 \
+    libcap2-bin
 
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
+COPY --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
 ENV PATH=/venv/bin:$PATH
