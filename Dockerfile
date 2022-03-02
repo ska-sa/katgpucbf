@@ -130,6 +130,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     libboost-system1.71.0 \
     libibverbs1 \
     librdmacm1 \
+    ibverbs-providers \
     libpcap0.8 \
     libcap2 \
     libcap2-bin \
