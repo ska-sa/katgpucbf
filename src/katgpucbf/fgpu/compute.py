@@ -74,10 +74,10 @@ class Compute(accel.OperationSequence):
     - spectra_per_heap <= spectra - i.e. a chunk of data must be enough to send out at
       least one heap.
     - spectra % spectra_per_heap == 0
-    - samples >= taps*channels*2. The factor of 2 is because the PFB input is
-      real, so 2*channels samples are needed for each output spectrum. The
-      "extra samples" are to ensure continuity in the PFB- FIR from one chunk
-      to the next.
+    - samples >= taps*channels*2.  An input chunk requires at least enough
+      samples to output a single spectrum. The factor of 2 is because the
+      PFB input is real, so 2*channels samples are needed for each output
+      spectrum.
     - samples % 8 == 0
 
     .. _composing operations: https://katsdpsigproc.readthedocs.io/en/latest/user/operations.html#composing-operations
