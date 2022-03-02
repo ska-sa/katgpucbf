@@ -122,7 +122,7 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==3.7.0
+spead2==3.8.0
     # via -r requirements.in
 toolz==0.11.2
     # via
