@@ -127,8 +127,10 @@ pybtex==0.24.0
     #   sphinxcontrib-bibtex
 pybtex-docutils==1.0.0
     # via sphinxcontrib-bibtex
-pycparser==2.20
-    # via -r requirements-dev.in
+pycparser==2.21
+    # via
+    #   -c requirements.txt
+    #   -r requirements-dev.in
 pygments==2.9.0
     # via
     #   ipython

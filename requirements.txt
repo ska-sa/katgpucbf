@@ -21,6 +21,8 @@ async-timeout==4.0.0
     #   aiokatcp
 attrs==21.2.0
     # via aiohttp
+cffi==1.15.0
+    # via vkgdr
 charset-normalizer==2.0.7
     # via aiohttp
 cloudpickle==2.0.0
@@ -92,6 +94,8 @@ prometheus-async==19.2.0
     # via -r requirements.in
 prometheus-client==0.12.0
     # via prometheus-async
+pycparser==2.21
+    # via cffi
 pycuda==2021.1
     # via
     #   -r requirements.in
@@ -128,6 +132,8 @@ typing-extensions==3.10.0.0
     # via
     #   async-timeout
     #   katsdpsigproc
+git+ssh://git@github.com/ska-sa/vkgdr
+    # via -r requirements.in
 wrapt==1.13.3
     # via prometheus-async
 xarray==0.20.1
