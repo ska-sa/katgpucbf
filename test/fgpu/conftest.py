@@ -116,6 +116,12 @@ async def engine_server(
     if request.node.get_closest_marker("use_vkgdr"):
         check_vkgdr(context)
         arglist.append("--use-vkgdr")
+    # iter_markers works closest-to-furthest, but we want the opposite so
+    # that more specific markers append options to the end, overriding those
+    # added by less-specific markers.
+    for marker in reversed(list(request.node.iter_markers("cmdline_args"))):
+        arglist.extend(marker.args)
+
     args = parse_args(arglist)
     server, _monitor = make_engine(context, args)
 

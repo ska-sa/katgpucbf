@@ -126,6 +126,8 @@ class Engine(aiokatcp.DeviceServer):
     num_ants
         The number of antennas in the array. Used for numbering heaps so as
         not to collide with other antennas transmitting to the same X-engine.
+    chunk_samples
+        Number of samples in each input chunk, excluding padding samples.
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
@@ -182,6 +184,7 @@ class Engine(aiokatcp.DeviceServer):
         send_rate_factor: float,
         feng_id: int,
         num_ants: int,
+        chunk_samples: int,
         spectra: int,
         spectra_per_heap: int,
         channels: int,
@@ -219,7 +222,6 @@ class Engine(aiokatcp.DeviceServer):
             )
             self.delay_models.append(delay_model)
 
-        chunk_samples = spectra * channels * 2
         extra_samples = max_delay_diff + taps * channels * 2
         if extra_samples > chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
