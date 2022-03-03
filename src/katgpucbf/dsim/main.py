@@ -38,9 +38,15 @@ import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from . import descriptors, send, signal
-from .server import DeviceServer
+
+from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from katgpucbf.dsim import send, signal
+from katgpucbf.dsim.server import DeviceServer
+from katgpucbf.dsim import descriptors
+
+# from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+# from . import descriptors, send, signal
+# from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +135,7 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align:
     return samples, sync_time + samples / adc_sample_rate
 
 
-def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors.Descriptors) -> None:
+def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors.DescriptorSender) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [SIGINT, SIGTERM]
 
@@ -222,16 +228,12 @@ async def async_main() -> None:
     await server.start()
 
     logger.debug("Setting up descriptors")
-    dsim_descriptors = descriptors.Descriptors(args, timestamp, endpoints)
-    descriptor_heap = dsim_descriptors.create_descriptors(args)
-    add_signal_handlers(server, dsim_descriptors)
+    descriptor_sender = descriptors.DescriptorSender(args, timestamp, endpoints)
+    descriptor_heap = descriptor_sender.create_descriptors_heap(args.heap_samples, args.sample_bits)
+    add_signal_handlers(server, descriptor_sender)
 
     logger.info("Starting transmission")
-    sender_task = asyncio.create_task(sender.run())
-    descriptor_task = asyncio.create_task(dsim_descriptors.run(descriptor_heap))
-    server_task = asyncio.create_task(server.join())
-
-    await asyncio.gather(sender_task, descriptor_task, server_task)
+    await asyncio.gather(sender.run(), descriptor_sender.run(descriptor_heap), server.join())
 
 
 def main() -> None:
