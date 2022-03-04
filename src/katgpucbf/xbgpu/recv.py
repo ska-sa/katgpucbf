@@ -138,9 +138,9 @@ class Layout(BaseLayout):
             )
             items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
             timestamp = items[0]
-            fengine = items[1]
+            fengine_id = items[1]
             payload_size = items[2]
-            if payload_size != heap_bytes or timestamp < 0 or fengine < 0:
+            if payload_size != heap_bytes or timestamp < 0 or fengine_id < 0:
                 # It's something unexpected - possibly descriptors. Ignore it.
                 batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
                 return
@@ -148,7 +148,7 @@ class Layout(BaseLayout):
                 # Invalid timestamp
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
-            if fengine >= n_ants:
+            if fengine_id >= n_ants:
                 # Invalid F-engine ID
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_FENG_ID_HEAPS] += 1
                 return
@@ -158,7 +158,7 @@ class Layout(BaseLayout):
             data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
             # Position of this heap on the time axis, from the start of the chunk
             heap_time = heap_time_abs % heaps_per_fengine_per_chunk
-            data[0].heap_index = heap_time * n_ants + fengine
+            data[0].heap_index = heap_time * n_ants + fengine_id
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
         return chunk_place_impl
