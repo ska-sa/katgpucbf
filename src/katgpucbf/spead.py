@@ -32,6 +32,7 @@ MAX_PACKET_SIZE = 8872
 
 #: SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
+IMMEDIATE_FORMAT = [("u", FLAVOUR.heap_address_bits)]
 
 
 def make_immediate(id: int, value: Any) -> spead2.Item:
@@ -44,4 +45,4 @@ def make_immediate(id: int, value: Any) -> spead2.Item:
     value
         The value of the item
     """
-    return spead2.Item(id, "dummy_item", "", (), format=[("u", FLAVOUR.heap_address_bits)], value=value)
+    return spead2.Item(id, "dummy_item", "", (), format=IMMEDIATE_FORMAT, value=value)

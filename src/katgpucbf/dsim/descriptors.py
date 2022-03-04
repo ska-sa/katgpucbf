@@ -10,7 +10,16 @@ import spead2.send.asyncio
 
 from katgpucbf import SPEAD_DESCRIPTOR_INTERVAL_S
 
-from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID, MAX_PACKET_SIZE
+from ..spead import (
+    DIGITISER_ID_ID,
+    DIGITISER_STATUS_ID,
+    FLAVOUR,
+    IMMEDIATE_FORMAT,
+    MAX_PACKET_SIZE,
+    RAW_DATA_ID,
+    TIMESTAMP_ID,
+)
+
 
 class DescriptorSender:
     """Digitiser descriptor sender.
@@ -48,7 +57,7 @@ class DescriptorSender:
             ttl=args.ttl,
             interface_address=self.interface_address,
         )
-        
+
         # Create item group
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
 
@@ -70,11 +79,9 @@ class DescriptorSender:
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
             shape=(),
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
 
-
-        value = np.uint8(0)
         self.item_group.add_item(
             DIGITISER_ID_ID,
             "Digitiser ID",

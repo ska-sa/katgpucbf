@@ -51,7 +51,7 @@ import spead2.send.asyncio
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
+from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
 
 output_heaps_counter = Counter("output_heaps_x", "number of X-engine heaps transmitted", namespace=METRIC_NAMESPACE)
@@ -292,14 +292,14 @@ class XSend:
             "frequency",  # Misleading name, but it's what the ICD specifies
             "Value of first channel in collections stored here.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         self.item_group.add_item(
             TIMESTAMP_ID,
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         self.item_group.add_item(
             XENG_RAW_ID,
