@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -70,7 +70,7 @@ def ringbuffer() -> spead2.recv.asyncio.ChunkRingbuffer:
 def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
     """Create a receive stream.
 
-    It is connected to the :func:`queues` fixture for input and
+    It is connected to the :func:`queue` fixture for input and
     :func:`ringbuffer` for output.
     """
     stream = recv.make_stream(layout, ringbuffer, -1, 10)
@@ -89,10 +89,7 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
 
 @pytest.fixture
 def send_stream(queue) -> "spead2.send.asyncio.AsyncStream":
-    """Create a stream that feeds into :func:`streams`.
-
-    It has one substream per polarisation.
-    """
+    """Create a stream that feeds into :func:`stream`."""
     config = spead2.send.StreamConfig(max_packet_size=9000)
     return spead2.send.asyncio.InprocStream(
         spead2.ThreadPool(),
@@ -107,14 +104,13 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
     """Generate heaps from an array of data.
 
     The data must be a 1D array of bytes, evenly divisible by the heap size.
-    The heaps do not exactly match the real digitiser packet format, but
-    contain all the relevant items to test the receiver code.
     """
     data_arr = np.require(data, dtype=np.uint8)
     assert data_arr.ndim == 1
     data_arr = data_arr.reshape(-1, layout.n_ants, layout.heap_bytes)  # One row per heap
-
     imm_format = [("u", FLAVOUR.heap_address_bits)]
+    # I've arbitrarily defined a "batch" here as a set of heaps with the same
+    # timestamp from all the antennas.
     for batch_id, batch in enumerate(data_arr):
         for feng_id, feng_data in enumerate(batch):
             timestamp = first_timestamp + batch_id * layout.timestamp_step
