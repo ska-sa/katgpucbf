@@ -98,11 +98,9 @@ class BaseLayout(ABC):
         ...
 
     @property
-    @abstractmethod
     def chunk_bytes(self) -> int:  # noqa: D401
         """Number of bytes per chunk."""
-        # TODO this can probably be done by chunk_heaps * heap_bytes, then removed from the derived classes?
-        ...
+        return self.heap_bytes * self.chunk_heaps
 
     @property
     @abstractmethod
