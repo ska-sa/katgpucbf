@@ -63,6 +63,7 @@ def queue() -> spead2.InprocQueue:
 @pytest.fixture
 def ringbuffer() -> spead2.recv.asyncio.ChunkRingbuffer:
     """Create an asynchronous chunk ringbuffer."""
+    # 100 is just an arbitrarily large value, no special significance.
     return spead2.recv.asyncio.ChunkRingbuffer(100)
 
 
@@ -109,8 +110,8 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
     assert data_arr.ndim == 1
     data_arr = data_arr.reshape(-1, layout.n_ants, layout.heap_bytes)  # One row per heap
     imm_format = [("u", FLAVOUR.heap_address_bits)]
-    # I've arbitrarily defined a "batch" here as a set of heaps with the same
-    # timestamp from all the antennas.
+    # The term "batch" here takes the same meaning as in the help text of
+    # the `--heaps-per-fengine-per-chunk` parser argument in main.py.
     for batch_id, batch in enumerate(data_arr):
         for feng_id, feng_data in enumerate(batch):
             timestamp = first_timestamp + batch_id * layout.timestamp_step
@@ -228,6 +229,8 @@ class TestStream:
         # Get just the chunks that actually have some data. We needn't worry
         # about returning chunks to the free ring as we don't expect to deplete
         # it.
+        # mypy gives an error `No overload variant of "any" matches argument type "object"`
+        # I don't think it knows what type `chunk` is. Not sure how to fix at present.
         chunks = [chunk async for chunk in ringbuffer if np.any(chunk.present)]  # type: ignore
         assert len(chunks) == 1
         chunk = chunks[0]
