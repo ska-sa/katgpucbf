@@ -75,7 +75,7 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
     """
     stream = recv.make_stream(layout, ringbuffer, -1, 10)
     for _ in range(40):
-        data = np.empty(layout.chunk_bytes, np.uint8)
+        data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
         present = np.ones(layout.chunk_heaps, np.uint8)
         chunk = Chunk(data=data, present=present)
@@ -105,7 +105,7 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
 
     The data must be a 1D array of bytes, evenly divisible by the heap size.
     """
-    data_arr = np.require(data, dtype=np.uint8)
+    data_arr = np.require(data, dtype=np.int8)
     assert data_arr.ndim == 1
     data_arr = data_arr.reshape(-1, layout.n_ants, layout.heap_bytes)  # One row per heap
     imm_format = [("u", FLAVOUR.heap_address_bits)]
@@ -157,7 +157,7 @@ class TestStream:
                 Valid heaps are interleaved with heaps with invalid timestamps.
         """
         rng = np.random.default_rng(seed=1)
-        data = rng.integers(0, 255, size=5 * layout.chunk_bytes, dtype=np.uint8)
+        data = rng.integers(-127, 127, size=5 * layout.chunk_bytes, dtype=np.int8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
 
@@ -213,7 +213,7 @@ class TestStream:
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
         rng = np.random.default_rng(seed=1)
-        data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
+        data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         heaps = list(gen_heaps(layout, data, first_timestamp))
