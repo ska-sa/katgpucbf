@@ -39,14 +39,14 @@ import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 
-from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from katgpucbf.dsim import send, signal
-from katgpucbf.dsim.server import DeviceServer
-from katgpucbf.dsim import descriptors
+# from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+# from katgpucbf.dsim import send, signal
+# from katgpucbf.dsim.server import DeviceServer
+# from katgpucbf.dsim import descriptors
 
-# from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-# from . import descriptors, send, signal
-# from .server import DeviceServer
+from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from . import descriptors, send, signal
+from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align:
     return samples, sync_time + samples / adc_sample_rate
 
 
-def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors.DescriptorSender) -> None:
+def add_signal_handlers(server: DeviceServer) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [SIGINT, SIGTERM]
 
@@ -146,7 +146,6 @@ def add_signal_handlers(server: DeviceServer, descriptor_sender: descriptors.Des
         for signum in signums:
             loop.remove_signal_handler(signum)
         server.halt()
-        descriptor_sender.halt()
 
     loop = asyncio.get_event_loop()
     for signum in signums:
@@ -214,8 +213,10 @@ async def async_main() -> None:
     logger.info("First timestamp will be %#x", timestamp)
 
     sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples, args.sync_time, args.adc_sample_rate)
+    descriptor_sender = descriptors.DescriptorSender(args, timestamp, endpoints)
+
     server = DeviceServer(
-        sender=sender,
+        sender=[sender,descriptor_sender],
         spare=heap_sets[1],
         adc_sample_rate=args.adc_sample_rate,
         first_timestamp=timestamp,
@@ -228,12 +229,10 @@ async def async_main() -> None:
     await server.start()
 
     logger.debug("Setting up descriptors")
-    descriptor_sender = descriptors.DescriptorSender(args, timestamp, endpoints)
-    descriptor_heap = descriptor_sender.create_descriptors_heap(args.heap_samples, args.sample_bits)
-    add_signal_handlers(server, descriptor_sender)
+    add_signal_handlers(server)
 
     logger.info("Starting transmission")
-    await asyncio.gather(sender.run(), descriptor_sender.run(descriptor_heap), server.join())
+    await asyncio.gather(sender.run(), descriptor_sender.run(), server.join())
 
 
 def main() -> None:

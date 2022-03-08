@@ -42,6 +42,8 @@ class DescriptorSender:
         self.interface_address = netifaces.ifaddresses(args.interface)[netifaces.AF_INET][0]["addr"]
 
         self.rate = 0  # rate will be determined by the descriptor_rate
+  
+        self.event = asyncio.Event()
 
         self.config = spead2.send.StreamConfig(
             rate=self.rate,
@@ -60,12 +62,14 @@ class DescriptorSender:
 
         # Create item group
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+        self.heap_to_send = self.__create_descriptors_heap(args.heap_samples, args.sample_bits)
 
     def halt(self) -> None:
         """Request :meth:`run` to stop, but do not wait for it."""
-        self._running = False
+        # self._running = False
+        self.event.set()
 
-    def create_descriptors_heap(self, heap_samples, sample_bits) -> spead2.send.Heap:
+    def __create_descriptors_heap(self, heap_samples, sample_bits) -> spead2.send.Heap:
         """Add descriptor items to item group.
 
         Parameters
@@ -109,7 +113,8 @@ class DescriptorSender:
         descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
         return descriptor_heap
 
-    async def run(self, heap_to_send: spead2.send.Heap) -> None:
+    # async def run(self, heap_to_send: spead2.send.Heap) -> None:
+    async def run(self) -> None:
         """Run digitiser descriptor sender.
 
         Parameters
@@ -117,10 +122,15 @@ class DescriptorSender:
         heap_to_send
             Descriptor heap as formed in create_descriptors method.
         """
-        while self._running:
-            futures = []
-            futures.append(self.stream.async_send_heap(heap_to_send))
-            await asyncio.gather(*futures)
-            # self.stream.set_cnt_sequence()
-            # await self.stream.async_send_heap(heap_to_send)
-            await asyncio.sleep(self.descriptor_rate)
+        # while self._running:
+        #     # self.stream.set_cnt_sequence()
+        #     await self.stream.async_send_heap(heap_to_send)
+        #     await asyncio.sleep(self.descriptor_rate)
+
+        while True:
+            try:
+                await self.stream.async_send_heap(self.heap_to_send)
+                await asyncio.wait_for(self.event.wait(), timeout=self.descriptor_rate)
+                break
+            except asyncio.TimeoutError:
+                pass

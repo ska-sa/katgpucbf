@@ -126,7 +126,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         )
 
     async def on_stop(self) -> None:  # noqa: D102
-        self.sender.halt()
+        """ Go through list of senders passed to DeviceServer and issue halt(). """
+        for s in range(len(self.sender)):
+            self.sender[s].halt()
 
     async def request_signals(self, ctx, signals_str: str) -> int:
         """Update the signals that are generated.
