@@ -17,6 +17,7 @@
 """Unit tests for :mod:`katgpucbf.xbgpu.recv`."""
 
 import itertools
+from random import seed, shuffle
 from typing import Generator, Iterable
 
 import numpy as np
@@ -165,11 +166,10 @@ class TestStream:
         heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
         if reorder:
             heap_list = list(heaps)
-            # In each group of 12 heaps, swap the first and the last. The
-            # stride is non-power-of-2 to ensure that this will swap heaps
-            # across chunk boundaries.
-            for i in range(11, len(heap_list), 12):
-                heap_list[i - 11], heap_list[i] = heap_list[i], heap_list[i - 11]
+            seed(123)
+            shuffle(heap_list[2:])  # We don't shuffle the first couple of heaps,
+            # this just makes sure that we get chunk 123 first, as expected. The
+            # rest are going to be fairly out-of-order.
             heaps = heap_list
         if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
