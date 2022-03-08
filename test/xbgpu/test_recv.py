@@ -18,6 +18,7 @@
 
 import itertools
 from random import seed, shuffle
+from test import PromDiff
 from typing import Generator, Iterable
 
 import numpy as np
@@ -25,9 +26,9 @@ import pytest
 import spead2.recv.asyncio
 from numpy.typing import ArrayLike
 
-from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
-from katgpucbf.xbgpu import recv
-from katgpucbf.xbgpu.recv import Chunk, Layout
+from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
+from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
+from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
 
 pytestmark = [pytest.mark.asyncio]
 
@@ -110,16 +111,15 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
     data_arr = np.require(data, dtype=np.int8)
     assert data_arr.ndim == 1
     data_arr = data_arr.reshape(-1, layout.n_ants, layout.heap_bytes)  # One row per heap
-    imm_format = [("u", FLAVOUR.heap_address_bits)]
     # The term "batch" here takes the same meaning as in the help text of
     # the `--heaps-per-fengine-per-chunk` parser argument in main.py.
     for batch_id, batch in enumerate(data_arr):
         for feng_id, feng_data in enumerate(batch):
             timestamp = first_timestamp + batch_id * layout.timestamp_step
             heap = spead2.send.Heap(FLAVOUR)
-            heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
-            heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=imm_format, value=feng_id))
-            heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=imm_format, value=0))
+            heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
+            heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=feng_id))
+            heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=0))
             heap.add_item(
                 spead2.Item(FENG_RAW_ID, "", "", shape=feng_data.shape, dtype=feng_data.dtype, value=feng_data)
             )
@@ -137,7 +137,6 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
         queue: spead2.InprocQueue,
-        ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
         timestamps: str,
     ) -> None:
@@ -181,28 +180,51 @@ class TestStream:
         await send_stream.async_send_heap(heap)
         for heap in heaps:
             await send_stream.async_send_heap(heap)
+
+        # Send a heap with a bad F-engine ID
+        heap = spead2.send.Heap(FLAVOUR)
+        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=first_timestamp))
+        heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=5))
+        heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=0))
+        heap.add_item(
+            spead2.Item(
+                FENG_RAW_ID,
+                "",
+                "",
+                shape=(layout.heap_bytes,),
+                dtype=np.int8,
+                value=np.zeros((layout.heap_bytes,), dtype=np.int8),
+            )
+        )
+        await send_stream.async_send_heap(heap)
+
         queue.stop()  # Flushes out the receive stream
         seen = 0
-        async for chunk in ringbuffer:
-            assert isinstance(chunk, Chunk)
-            if not np.any(chunk.present):
-                # It's a chunk with no data. Currently spead2 may generate
-                # these due to the way it allocates chunks to keep the window
-                # full.
+
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            async for chunk in recv_chunks(stream):
+                assert isinstance(chunk, Chunk)
+                if not np.any(chunk.present):
+                    # It's a chunk with no data. Currently spead2 may generate
+                    # these due to the way it allocates chunks to keep the window
+                    # full.
+                    stream.add_free_chunk(chunk)
+                    continue
+                assert chunk.chunk_id == expected_chunk_id
+                assert np.all(chunk.present)
+                np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
+                data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
                 stream.add_free_chunk(chunk)
-                continue
-            assert chunk.chunk_id == expected_chunk_id
-            assert np.all(chunk.present)
-            np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
-            print(f"Seen chunk {seen} just fine.")
-            data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
-            stream.add_free_chunk(chunk)
-            seen += 1
-            expected_chunk_id += 1
+                seen += 1
+                expected_chunk_id += 1
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
         assert stream.stats["katgpucbf.metadata_heaps"] == 1
         assert stream.stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
+        # Check the Prometheus counters as well:
+        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
+        assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 1
+        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1
 
     async def test_missing_heaps(
         self,
@@ -210,7 +232,6 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
         queue: spead2.InprocQueue,
-        ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
         rng = np.random.default_rng(seed=1)
@@ -231,7 +252,7 @@ class TestStream:
         # it.
         # mypy gives an error `No overload variant of "any" matches argument type "object"`
         # I don't think it knows what type `chunk` is. Not sure how to fix at present.
-        chunks = [chunk async for chunk in ringbuffer if np.any(chunk.present)]  # type: ignore
+        chunks = [chunk async for chunk in recv_chunks(stream) if np.any(chunk.present)]  # type: ignore
         assert len(chunks) == 1
         chunk = chunks[0]
         assert isinstance(chunk, Chunk)

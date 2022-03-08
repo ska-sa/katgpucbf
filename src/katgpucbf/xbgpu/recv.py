@@ -198,7 +198,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
     """
     counter_map = {
         "incomplete_heaps_evicted": incomplete_heaps_counter,
-        "too_old_heaps": too_old_heaps_counter,
+        "too_old_heaps": too_old_heaps_counter,  # TODO: This counter doesn't appear to be used?
         "katgpucbf.metadata_heaps": metadata_heaps_counter,
         "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
         "katgpucbf.bad_feng_id_heaps": bad_feng_id_heaps_counter,
