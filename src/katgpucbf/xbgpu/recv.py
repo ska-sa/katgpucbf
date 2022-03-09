@@ -174,6 +174,9 @@ def make_stream(
         Output ringbuffer to which chunks will be sent.
     src_affinity
         CPU core affinity for the worker thread.
+    rx_reorder_tol
+        Maximum tolerance for jitter between received packets, as a time
+        expressed in ADC sample ticks.
     """
     rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
     return make_base_stream(

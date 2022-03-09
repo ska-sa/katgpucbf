@@ -19,7 +19,7 @@
 import itertools
 import random
 from test import PromDiff
-from typing import Generator, Iterable
+from typing import Generator, Iterable, List
 
 import numpy as np
 import pytest
@@ -76,7 +76,10 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
     It is connected to the :func:`queue` fixture for input and
     :func:`ringbuffer` for output.
     """
-    stream = recv.make_stream(layout, ringbuffer, -1, 10)
+    # We want reorder tolerance enough to be able to deal with 5 chunks at a time.
+    rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
+    reorder_tol = 5 * rx_heap_timestamp_step * layout.heaps_per_fengine_per_chunk
+    stream = recv.make_stream(layout, ringbuffer, -1, reorder_tol)
     for _ in range(40):
         data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
@@ -164,21 +167,20 @@ class TestStream:
 
         heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
         if reorder:
-            # We don't shuffle the first five heaps, this just makes sure
+            # We don't shuffle the first few heaps, this just makes sure
             # that we get chunk 123 first, as expected.
-            heap_list = []
-            for _ in range(10):
+            heap_list: List[spead2.send.Heap] = []
+            for _ in range(2):
                 # Mypy doesn't know that next works on iterables of Heaps.
                 heap_list.append(next(heaps))  # type: ignore
-            # The rest are going to be shuffled, but not too much: we can tolerate
-            # only a bit of overlap between chunks at the moment.
+            # The rest are going to be pretty well shuffled. Heaps from a given
+            # f-engine are unlikely to arrive out-of-order, we anticipate that
+            # they'll be out-of-sync with each other, but it's possibly not
+            # worth the effort to emulate that so I just shuffle them all.
             r = random.Random(123)
-            for _ in range(3):
-                temp_heap_list = []
-                for _ in range(30):
-                    temp_heap_list.append(next(heaps))  # type: ignore
-                r.shuffle(temp_heap_list)
-                heap_list.extend(temp_heap_list)
+            temp_heap_list = list(heaps)
+            r.shuffle(temp_heap_list)
+            heap_list.extend(temp_heap_list)
             heaps = heap_list
         if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
@@ -235,7 +237,7 @@ class TestStream:
 
         assert prom_diff.get_sample_diff("input_chunks_total") == seen + empty_chunks
         assert prom_diff.get_sample_diff("input_heaps_total") == (seen + empty_chunks) * layout.chunk_heaps
-        assert prom_diff.get_sample_diff("input_bytes_total") == 655360 * 5
+        assert prom_diff.get_sample_diff("input_bytes_total") == layout.chunk_bytes * seen
         assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 1
         assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1
