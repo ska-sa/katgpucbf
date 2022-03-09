@@ -363,7 +363,7 @@ class XBEngine(DeviceServer):
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
-                self.correlation.slots["in_samples"].shape,  # type: ignore
+                (self.heaps_per_fengine_per_chunk,) + self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
             rx_item = RxQueueItem(buffer_device)
@@ -683,11 +683,6 @@ class XBEngine(DeviceServer):
             assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
-            reorder_event = self._proc_command_queue.enqueue_marker()
-            rx_item.reset()
-            rx_item.add_event(reorder_event)
-            await self._rx_free_item_queue.put(rx_item)
-
             # The correlation kernel does not have the concept of a batch at
             # this stage, so the kernel needs to be run on each different batch
             # in the chunk.
@@ -720,6 +715,11 @@ class XBEngine(DeviceServer):
                     self.correlation.zero_visibilities()
 
                 current_timestamp += self.rx_heap_timestamp_step
+
+            proc_event = self._proc_command_queue.enqueue_marker()
+            rx_item.reset()
+            rx_item.add_event(proc_event)
+            await self._rx_free_item_queue.put(rx_item)
 
         # When the stream is closed, if the sender loop is waiting for a tx item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
