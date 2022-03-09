@@ -28,6 +28,7 @@
  *   across multiple calls (with saturation rather than wrapping).
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
+ * - Take the input axes in a different order.
  * - Remove trailing whitespace.
  *
  * SARAO's modification is licenced as follows:
@@ -99,13 +100,13 @@ extern "C++" {
 using namespace nvcuda::wmma;
 
 #if NR_BITS == 4
-typedef char    Samples[NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_RECEIVERS][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK];
+typedef char    Samples[NR_RECEIVERS][NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
 typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 8
-typedef char2   Samples[NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_RECEIVERS][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK];
+typedef char2   Samples[NR_RECEIVERS][NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
 typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 16
-typedef __half2 Samples[NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_RECEIVERS][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK];
+typedef __half2 Samples[NR_RECEIVERS][NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
 typedef float2  Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #endif
 
@@ -195,8 +196,8 @@ template <typename T> struct FetchData
   __device__ void load(const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-      //data = * (T *) &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime];
-      memcpy(&data, &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime], sizeof(T));
+      //data = * (T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][loadPol];
+      memcpy(&data, &samples[firstReceiver + loadRecv][channel][time][loadTime][loadPol], sizeof(T));
   }
 
   template <typename SharedData> __device__ void storeA(SharedData samples) const
@@ -218,13 +219,13 @@ template <typename T> struct FetchData
   template <typename Asamples> __device__ void copyAsyncA(nvcuda::experimental::pipeline &pipe, Asamples dest, const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-      nvcuda::experimental::memcpy_async(* (T *) &dest[loadRecv][loadPol][loadTime][0], * (const T *) &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime], pipe);
+      nvcuda::experimental::memcpy_async(* (T *) &dest[loadRecv][loadPol][loadTime][0], * (const T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][loadPol], pipe);
   }
 
   template<typename Bsamples> __device__ void copyAsyncB(nvcuda::experimental::pipeline &pipe, Bsamples dest, const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-      nvcuda::experimental::memcpy_async(* (T *) &dest[loadRecv][loadPol][0][loadTime][0], * (const T *) &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime], pipe);
+      nvcuda::experimental::memcpy_async(* (T *) &dest[loadRecv][loadPol][0][loadTime][0], * (const T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][loadPol], pipe);
   }
 
   template<typename Bsamples> __device__ void fixB(Bsamples bSamples)
