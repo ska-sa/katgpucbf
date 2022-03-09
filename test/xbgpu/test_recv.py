@@ -17,7 +17,7 @@
 """Unit tests for :mod:`katgpucbf.xbgpu.recv`."""
 
 import itertools
-from random import seed, shuffle
+import random
 from test import PromDiff
 from typing import Generator, Iterable
 
@@ -164,11 +164,21 @@ class TestStream:
 
         heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
         if reorder:
-            heap_list = list(heaps)
-            seed(123)
-            shuffle(heap_list[2:])  # We don't shuffle the first couple of heaps,
-            # this just makes sure that we get chunk 123 first, as expected. The
-            # rest are going to be fairly out-of-order.
+            # We don't shuffle the first five heaps, this just makes sure
+            # that we get chunk 123 first, as expected.
+            heap_list = []
+            for _ in range(10):
+                # Mypy doesn't know that next works on iterables of Heaps.
+                heap_list.append(next(heaps))  # type: ignore
+            # The rest are going to be shuffled, but not too much: we can tolerate
+            # only a bit of overlap between chunks at the moment.
+            r = random.Random(123)
+            for _ in range(3):
+                temp_heap_list = []
+                for _ in range(30):
+                    temp_heap_list.append(next(heaps))  # type: ignore
+                r.shuffle(temp_heap_list)
+                heap_list.extend(temp_heap_list)
             heaps = heap_list
         if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
