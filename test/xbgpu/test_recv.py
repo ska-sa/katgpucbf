@@ -188,8 +188,6 @@ class TestStream:
         # Heap with no payload - representing any sort of metadata heap such as descriptors
         heap = spead2.send.Heap(FLAVOUR)
         await send_stream.async_send_heap(heap)
-        for heap in heaps:
-            await send_stream.async_send_heap(heap)
 
         # Send a heap with a bad F-engine ID
         heap = spead2.send.Heap(FLAVOUR)
@@ -208,9 +206,13 @@ class TestStream:
         )
         await send_stream.async_send_heap(heap)
 
+        # Now the bulk of the actual data
+        for heap in heaps:
+            await send_stream.async_send_heap(heap)
+
         queue.stop()  # Flushes out the receive stream
         seen = 0
-
+        empty_chunks = 0
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             async for chunk in recv_chunks(stream):
                 assert isinstance(chunk, Chunk)
@@ -219,6 +221,7 @@ class TestStream:
                     # these due to the way it allocates chunks to keep the window
                     # full.
                     stream.add_free_chunk(chunk)
+                    empty_chunks += 1
                     continue
                 assert chunk.chunk_id == expected_chunk_id
                 assert np.all(chunk.present)
@@ -229,9 +232,10 @@ class TestStream:
                 expected_chunk_id += 1
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
-        assert stream.stats["katgpucbf.metadata_heaps"] == 1
-        assert stream.stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
-        # Check the Prometheus counters as well:
+
+        assert prom_diff.get_sample_diff("input_chunks_total") == seen + empty_chunks
+        assert prom_diff.get_sample_diff("input_heaps_total") == (seen + empty_chunks) * layout.chunk_heaps
+        assert prom_diff.get_sample_diff("input_bytes_total") == 655360 * 5
         assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 1
         assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1
