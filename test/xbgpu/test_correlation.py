@@ -59,8 +59,8 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
                     i1 = input_array[a1, c, :, p1, 1]
                     for p2 in range(n_pols):
                         bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
-                        r2 = input_array[a2, c, :, p2, 0]
-                        i2 = input_array[a2, c, :, p2, 1]
+                        r2 = input_array[a2, c, :, p2, 0].astype(np.int32)
+                        i2 = input_array[a2, c, :, p2, 1].astype(np.int32)
 
                         output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
                         output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
