@@ -46,4 +46,4 @@ def make_immediate(id: int, value: Any) -> spead2.Item:
     value
         The value of the item
     """
-    return spead2.Item(id, "dummy_item", "", (), format=[("u", FLAVOUR.heap_address_bits)], value=value)
+    return spead2.Item(id, "dummy_item", "", (), format=IMMEDIATE_FORMAT, value=value)
