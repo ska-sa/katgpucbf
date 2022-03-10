@@ -182,6 +182,7 @@ class XBEngine(DeviceServer):
         This value is intended to dictate a data transmission rate slightly
         higher/faster than the ADC rate.
         NOTE:
+
         - A factor of zero (0) tells the sender to transmit as fast as
           possible.
     n_ants
