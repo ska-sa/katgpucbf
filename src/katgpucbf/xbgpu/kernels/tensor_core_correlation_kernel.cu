@@ -28,7 +28,8 @@
  *   across multiple calls (with saturation rather than wrapping).
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
- * - Take the input axes in a different order.
+ * - Take the input axes in a different order (TODO: this currently leads to
+ *   very inefficient memory access patterns).
  * - Remove trailing whitespace.
  *
  * SARAO's modification is licenced as follows:
