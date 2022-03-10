@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -107,6 +107,11 @@ class Layout(BaseLayout):
         """Calculate number of bytes in a heap based on layout parameters."""
         return self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX * self.sample_bits // BYTE_BITS
 
+    @property
+    def chunk_heaps(self) -> int:  # noqa: D401
+        """Number of heaps per chunk."""
+        return self.heaps_per_fengine_per_chunk * self.n_ants
+
     @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         n_ants = self.n_ants
@@ -128,9 +133,9 @@ class Layout(BaseLayout):
             )
             items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
             timestamp = items[0]
-            fengine = items[1]
+            fengine_id = items[1]
             payload_size = items[2]
-            if payload_size != heap_bytes or timestamp < 0 or fengine < 0:
+            if payload_size != heap_bytes or timestamp < 0 or fengine_id < 0:
                 # It's something unexpected - possibly descriptors. Ignore it.
                 batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
                 return
@@ -138,7 +143,7 @@ class Layout(BaseLayout):
                 # Invalid timestamp
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
-            if fengine >= n_ants:
+            if fengine_id >= n_ants:
                 # Invalid F-engine ID
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_FENG_ID_HEAPS] += 1
                 return
@@ -148,7 +153,7 @@ class Layout(BaseLayout):
             data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
             # Position of this heap on the time axis, from the start of the chunk
             heap_time = heap_time_abs % heaps_per_fengine_per_chunk
-            data[0].heap_index = heap_time * n_ants + fengine
+            data[0].heap_index = heap_time * n_ants + fengine_id
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
         return chunk_place_impl
@@ -169,6 +174,9 @@ def make_stream(
         Output ringbuffer to which chunks will be sent.
     src_affinity
         CPU core affinity for the worker thread.
+    rx_reorder_tol
+        Maximum tolerance for jitter between received packets, as a time
+        expressed in ADC sample ticks.
     """
     rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
     return make_base_stream(
@@ -193,7 +201,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
     """
     counter_map = {
         "incomplete_heaps_evicted": incomplete_heaps_counter,
-        "too_old_heaps": too_old_heaps_counter,
+        "too_old_heaps": too_old_heaps_counter,  # TODO: This counter doesn't appear to be used?
         "katgpucbf.metadata_heaps": metadata_heaps_counter,
         "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
         "katgpucbf.bad_feng_id_heaps": bad_feng_id_heaps_counter,
