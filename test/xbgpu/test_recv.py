@@ -19,7 +19,7 @@
 import itertools
 import random
 from test import PromDiff
-from typing import Generator, Iterable, List
+from typing import Generator, Iterator, List
 
 import numpy as np
 import pytest
@@ -165,14 +165,13 @@ class TestStream:
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
 
-        heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
+        heaps: Iterator[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
         if reorder:
             # We don't shuffle the first few heaps, this just makes sure
             # that we get chunk 123 first, as expected.
             heap_list: List[spead2.send.Heap] = []
             for _ in range(2):
-                # Mypy doesn't know that next works on iterables of Heaps.
-                heap_list.append(next(heaps))  # type: ignore
+                heap_list.append(next(heaps))
             # The rest are going to be pretty well shuffled. Heaps from a given
             # f-engine are unlikely to arrive out-of-order, we anticipate that
             # they'll be out-of-sync with each other, but it's possibly not
@@ -181,7 +180,7 @@ class TestStream:
             temp_heap_list = list(heaps)
             r.shuffle(temp_heap_list)
             heap_list.extend(temp_heap_list)
-            heaps = heap_list
+            heaps = iter(heap_list)
         if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
             # Interleave the sequences
