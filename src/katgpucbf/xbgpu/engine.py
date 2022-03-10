@@ -639,12 +639,9 @@ class XBEngine(DeviceServer):
 
         This function performs the following steps:
         1. Retrieve an rx_item from the _rx_item_queue
-        2. Performs the reorder operation on the buffer in the rx item. This
-           gets the buffer data into a format that the correlation kernel
-           requires.
-        3.1 Apply the correlation kernel to small subsets of the reordered data
-            until all the data has been processed.
-        3.2 If sufficient correlations have occured, transfer the correlated
+        2.1 Apply the correlation kernel to small subsets of the data
+            until all the data has been processed.1
+        2.2 If sufficient correlations have occured, transfer the correlated
             data to a tx_item, pass the tx_item to the _tx_item_queue and get a
             new item from the _tx_free_item_queue.
 

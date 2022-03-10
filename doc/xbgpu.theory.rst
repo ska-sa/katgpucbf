@@ -37,7 +37,7 @@ The numbers in the above image correspond to the following actions:
   1. Assemble heaps into a chunk in system RAM.
   2. Transfer chunk to GPU memory.
   3. and
-  4. Correlate reordered data and transfer baselines to GPU memory.
+  4. Correlate data and transfer baselines to GPU memory.
   5. Transfer baselines from GPU memory to host memory.
   6. Transfer baselines from host memory to the NIC and onto the network.
 
