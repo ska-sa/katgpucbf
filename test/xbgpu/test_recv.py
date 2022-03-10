@@ -77,8 +77,8 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
     :func:`ringbuffer` for output.
     """
     # We want reorder tolerance enough to be able to deal with 5 chunks at a time.
-    rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
-    reorder_tol = 5 * rx_heap_timestamp_step * layout.heaps_per_fengine_per_chunk
+
+    reorder_tol = 5 * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
     stream = recv.make_stream(layout, ringbuffer, -1, reorder_tol)
     for _ in range(40):
         data = np.empty(layout.chunk_bytes, np.int8)
