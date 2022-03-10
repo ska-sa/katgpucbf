@@ -83,9 +83,8 @@ command queues:
 The numbers in the image above correspond to the following actions:
 
   1. Copy chunk to GPU memory from host
-  2. Ignore - diagram is out of date
-  3. Correlate chunk
-  4. Transfer heap to host memory from GPU
+  2. Correlate chunk
+  3. Transfer heap to host memory from GPU
 
 Accumulations, Dumps and Auto-resync
 ------------------------------------
