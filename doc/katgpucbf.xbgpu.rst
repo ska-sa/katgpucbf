@@ -10,7 +10,6 @@ Submodules
    katgpucbf.xbgpu.correlation
    katgpucbf.xbgpu.engine
    katgpucbf.xbgpu.main
-   katgpucbf.xbgpu.precorrelation_reorder
    katgpucbf.xbgpu.recv
    katgpucbf.xbgpu.xsend
 

@@ -11,19 +11,16 @@ The general flow of data through the system is shown in the the image below:
 
   XBGPU Concept
 
-The X-Engine processing pipeline can be broken into four different stages:
+The X-Engine processing pipeline can be broken into three different stages:
 
   1. Receive data from the network and assemble it into a chunk. This chunk is
      then transferred to the GPU. This receiver has been implemented using
      SPEAD2 in C++ and bound into Python. See the "SPEAD2 Network Side Software"
      section below for more information.
-  2. Reorder the chunk so that it is in a format that is ready for correlation.
-     This reorder is implemented in the
-     :mod:`~katgpucbf.xbgpu.precorrelation_reorder` module.
-  3. The data is then correlated using the ASTRON Tensor Core Kernel. This is
+  2. The data is then correlated using the ASTRON Tensor Core Kernel. This is
      done by the :class:`katgpucbf.xbgpu.tensorcore_xengine_core` class. This
      correlated data is then transferred back to system RAM.
-  4. Send the correlated data (known as baseline correlation products) back into
+  3. Send the correlated data (known as baseline correlation products) back into
      the network. This is implemented by :mod:`.xsend`.
 
 The image below shows where the data is located at the various stages mentioned above:
