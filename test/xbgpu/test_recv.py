@@ -265,8 +265,6 @@ class TestStream:
         # Get just the chunks that actually have some data. We needn't worry
         # about returning chunks to the free ring as we don't expect to deplete
         # it.
-        # mypy gives an error `No overload variant of "any" matches argument type "object"`
-        # I don't think it knows what type `chunk` is. Not sure how to fix at present.
         chunks = [chunk async for chunk in recv_chunks(stream) if np.any(chunk.present)]
         assert len(chunks) == 1
         chunk = chunks[0]
