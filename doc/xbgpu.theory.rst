@@ -7,7 +7,7 @@ Signal Flow
 The general flow of data through the system is shown in the the image below:
 
 .. figure:: images/concept.png
-  :width: 1087px
+  :width: 887px
 
   XBGPU Concept
 
@@ -37,11 +37,9 @@ The numbers in the above image correspond to the following actions:
   1. Assemble heaps into a chunk in system RAM.
   2. Transfer chunk to GPU memory.
   3. and
-  4. Launch a GPU kernel to reorder a chunk and transfer reordered data back to GPU memory.
-  5. and
-  6. Correlate reordered data and transfer baselines to GPU memory.
-  7. Transfer baselines from GPU memory to host memory.
-  8. Transfer baselines from host memory to the NIC and onto the network.
+  4. Correlate reordered data and transfer baselines to GPU memory.
+  5. Transfer baselines from GPU memory to host memory.
+  6. Transfer baselines from host memory to the NIC and onto the network.
 
 Synchronization and Coordination
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -85,7 +83,7 @@ command queues:
 The numbers in the image above correspond to the following actions:
 
   1. Copy chunk to GPU memory from host
-  2. Reorder Chunk
+  2. Ignore - diagram is out of date
   3. Correlate chunk
   4. Transfer heap to host memory from GPU
 
