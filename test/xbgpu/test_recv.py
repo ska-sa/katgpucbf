@@ -267,7 +267,7 @@ class TestStream:
         # it.
         # mypy gives an error `No overload variant of "any" matches argument type "object"`
         # I don't think it knows what type `chunk` is. Not sure how to fix at present.
-        chunks = [chunk async for chunk in recv_chunks(stream) if np.any(chunk.present)]  # type: ignore
+        chunks = [chunk async for chunk in recv_chunks(stream) if np.any(chunk.present)]
         assert len(chunks) == 1
         chunk = chunks[0]
         assert isinstance(chunk, Chunk)
