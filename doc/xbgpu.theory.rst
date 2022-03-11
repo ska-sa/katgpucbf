@@ -95,7 +95,7 @@ multiple input heaps are received.
 A heap from a single F-Engine consists of a set number of spectra indicated by
 the :option:`!--spectra-per-heap` flag, where the spectra are time samples. Each of
 these time samples is part of a different spectrum, meaning that the timestamp
-difference per sample is equal to the number of :option:`!--samples-between-spectra`.
+difference per sample is equal to the value of :option:`!--samples-between-spectra`.
 The timestamp difference between two consecutive heaps from the same F-Engine is equal to:
 
   `heap_timestamp_step = --spectra-per-heap * --samples-between-spectra`.
