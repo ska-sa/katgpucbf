@@ -35,6 +35,9 @@ HEAP_SAMPLES = 4096
 SAMPLE_BITS = 10
 ADC_SAMPLE_RATE = 1712e6
 
+MULTICAST_ADDRESS = "239.103.0.64"
+PORT = 7148
+
 
 @pytest.fixture
 def inproc_queues() -> Sequence[spead2.InprocQueue]:  # noqa: D401

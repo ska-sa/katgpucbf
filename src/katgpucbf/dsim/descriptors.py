@@ -1,5 +1,6 @@
 """Digitiser simulator descriptor sender."""
 import asyncio
+from typing import List, Tuple
 
 import netifaces
 import numpy as np
@@ -28,23 +29,23 @@ class DescriptorSender:
     ----------
     args:
         Runtime arguments passed (or as set by default).
-    timestamp: float
+    timestamp: int
         Timestamp since start.
     endpoints:
         IP address of multicast address to send descriptors (string). The port is stated as an integer.
     """
 
-    def __init__(self, args, timestamp: float, endpoints: tuple) -> None:
-        self._running = True  # Set to false to start shutdown
+    def __init__(
+        self, interface: str, heap_samples: int, ttl: int, timestamp: int, endpoints: List[Tuple[str, int]]
+    ) -> None:
         self.descriptor_rate = SPEAD_DESCRIPTOR_INTERVAL_S
         self.timestamp = timestamp
         self.endpoints = endpoints
-        self.interface_address = netifaces.ifaddresses(args.interface)[netifaces.AF_INET][0]["addr"]
+        self.interface_address = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]["addr"]
 
         self.rate = 0  # rate will be determined by the descriptor_rate
-  
-        self.event = asyncio.Event()
 
+        self.event = asyncio.Event()
         self.config = spead2.send.StreamConfig(
             rate=self.rate,
             max_packet_size=MAX_PACKET_SIZE,
@@ -54,22 +55,21 @@ class DescriptorSender:
         # Setup Asyncio UDP stream
         self.stream = spead2.send.asyncio.UdpStream(
             spead2.ThreadPool(),
-            endpoints,
+            list(endpoints),
             self.config,
-            ttl=args.ttl,
+            ttl=ttl,
             interface_address=self.interface_address,
         )
 
         # Create item group
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
-        self.heap_to_send = self.__create_descriptors_heap(args.heap_samples, args.sample_bits)
+        self.heap_to_send = self.__create_descriptors_heap(heap_samples)
 
     def halt(self) -> None:
         """Request :meth:`run` to stop, but do not wait for it."""
-        # self._running = False
         self.event.set()
 
-    def __create_descriptors_heap(self, heap_samples, sample_bits) -> spead2.send.Heap:
+    def __create_descriptors_heap(self, heap_samples) -> spead2.send.Heap:
         """Add descriptor items to item group.
 
         Parameters
@@ -113,7 +113,6 @@ class DescriptorSender:
         descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
         return descriptor_heap
 
-    # async def run(self, heap_to_send: spead2.send.Heap) -> None:
     async def run(self) -> None:
         """Run digitiser descriptor sender.
 
@@ -122,11 +121,6 @@ class DescriptorSender:
         heap_to_send
             Descriptor heap as formed in create_descriptors method.
         """
-        # while self._running:
-        #     # self.stream.set_cnt_sequence()
-        #     await self.stream.async_send_heap(heap_to_send)
-        #     await asyncio.sleep(self.descriptor_rate)
-
         while True:
             try:
                 await self.stream.async_send_heap(self.heap_to_send)

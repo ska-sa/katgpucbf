@@ -16,19 +16,21 @@
 
 """Unit tests for katcp server."""
 
-from typing import AsyncGenerator, Sequence
+from typing import AsyncGenerator, List, Sequence, Tuple
 
 import aiokatcp
 import async_timeout
 import numpy as np
 import pytest
 
+from katgpucbf import DEFAULT_TTL
+from katgpucbf.dsim import descriptors
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
 from katgpucbf.dsim.signal import parse_signals
 
 from .. import get_sensor
-from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, SAMPLE_BITS, SIGNAL_HEAPS
+from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, MULTICAST_ADDRESS, PORT, SAMPLE_BITS, SIGNAL_HEAPS
 
 pytestmark = [pytest.mark.asyncio]
 
@@ -40,8 +42,16 @@ async def katcp_server(
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
     # Make up a bogus signal. It's not actually populated in heap_sets
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
+
+    endpoints: List[Tuple[str, int]] = [(MULTICAST_ADDRESS, PORT)]
+
+    # Set fake timestamp (not needed)
+    timestamp = 0
+    descriptor_sender = descriptors.DescriptorSender("lo", HEAP_SAMPLES, DEFAULT_TTL, timestamp, endpoints)
+
     server = DeviceServer(
         sender=sender,
+        descriptor_sender=descriptor_sender,
         spare=heap_sets[1],
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=SAMPLE_BITS,

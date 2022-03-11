@@ -23,6 +23,8 @@ from typing import Sequence
 import aiokatcp
 import pyparsing as pp
 
+from katgpucbf.dsim.descriptors import DescriptorSender
+
 from .. import BYTE_BITS, __version__
 from .send import HeapSet, Sender
 from .signal import Signal, format_signals, parse_signals, sample_async
@@ -62,6 +64,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     def __init__(
         self,
         sender: Sender,
+        descriptor_sender: DescriptorSender,
         spare: HeapSet,
         adc_sample_rate: float,
         sample_bits: int,
@@ -73,6 +76,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.sender = sender
+        self.descriptor_sender = descriptor_sender
         self.spare = spare
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
@@ -126,9 +130,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         )
 
     async def on_stop(self) -> None:  # noqa: D102
-        """ Go through list of senders passed to DeviceServer and issue halt(). """
-        for s in range(len(self.sender)):
-            self.sender[s].halt()
+        """Go through list of senders passed to DeviceServer and issue halt()."""
+        self.sender.halt()
+        self.descriptor_sender.halt()
 
     async def request_signals(self, ctx, signals_str: str) -> int:
         """Update the signals that are generated.

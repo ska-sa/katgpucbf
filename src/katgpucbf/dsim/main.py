@@ -38,15 +38,13 @@ import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
+from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from katgpucbf.dsim import descriptors, send, signal
+from katgpucbf.dsim.server import DeviceServer
 
-# from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-# from katgpucbf.dsim import send, signal
-# from katgpucbf.dsim.server import DeviceServer
-# from katgpucbf.dsim import descriptors
-
-from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from . import descriptors, send, signal
-from .server import DeviceServer
+# from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+# from . import descriptors, send, signal
+# from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -178,25 +176,6 @@ async def async_main() -> None:
         send.HeapSet.create(timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest)))
         for _ in range(2)
     ]
-    await signal.sample_async(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])
-
-    endpoints: List[Tuple[str, int]] = []
-    for pol_dest in args.dest:
-        for ep in pol_dest:
-            endpoints.append((ep.host, ep.port))
-    stream = send.make_stream(
-        endpoints=endpoints,
-        heap_sets=heap_sets,
-        n_pols=len(args.dest),
-        adc_sample_rate=args.adc_sample_rate,
-        heap_samples=args.heap_samples,
-        sample_bits=args.sample_bits,
-        max_heaps=heap_sets[0].data["heaps"].size,
-        ttl=args.ttl,
-        interface_address=katsdpservices.get_interface_address(args.interface),
-        ibv=args.ibv,
-        affinity=args.affinity,
-    )
 
     timestamp = 0
     if args.sync_time is not None:
@@ -212,11 +191,36 @@ async def async_main() -> None:
         args.sync_time = time.time()
     logger.info("First timestamp will be %#x", timestamp)
 
+    endpoints: List[Tuple[str, int]] = []
+    for pol_dest in args.dest:
+        for ep in pol_dest:
+            endpoints.append((ep.host, ep.port))
+
+    # Start descriptor sender first so descriptors are sent before dsim data.
+    descriptor_sender = descriptors.DescriptorSender(args.interface, args.heap_samples, args.ttl, timestamp, endpoints)
+    descriptor_task = asyncio.create_task(descriptor_sender.run())
+
+    await signal.sample_async(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])
+
+    stream = send.make_stream(
+        endpoints=endpoints,
+        heap_sets=heap_sets,
+        n_pols=len(args.dest),
+        adc_sample_rate=args.adc_sample_rate,
+        heap_samples=args.heap_samples,
+        sample_bits=args.sample_bits,
+        max_heaps=heap_sets[0].data["heaps"].size,
+        ttl=args.ttl,
+        interface_address=katsdpservices.get_interface_address(args.interface),
+        ibv=args.ibv,
+        affinity=args.affinity,
+    )
+
     sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples, args.sync_time, args.adc_sample_rate)
-    descriptor_sender = descriptors.DescriptorSender(args, timestamp, endpoints)
 
     server = DeviceServer(
-        sender=[sender,descriptor_sender],
+        sender=sender,
+        descriptor_sender=descriptor_sender,
         spare=heap_sets[1],
         adc_sample_rate=args.adc_sample_rate,
         first_timestamp=timestamp,
@@ -232,7 +236,7 @@ async def async_main() -> None:
     add_signal_handlers(server)
 
     logger.info("Starting transmission")
-    await asyncio.gather(sender.run(), descriptor_sender.run(), server.join())
+    await asyncio.gather(sender.run(), descriptor_task, server.join())
 
 
 def main() -> None:
