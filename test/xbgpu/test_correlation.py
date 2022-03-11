@@ -37,39 +37,30 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     ----------
     input_array
         Dataset to be correlated. Required shape:
-        (n_chans, n_blocks, n_ants, n_pols, n_spectra_per_block, complexity)
+        (n_ants, n_chans, n_spectra, n_pols, complexity)
 
     Returns
     -------
     np.ndarray
         Correlation products or visibilities. Shape:
-        (n_chans, n_ants, n_pols, n_spectra_per_heap, complexity)
-        where n_spectra_per_heap is equal to n_blocks * n_spectra_per_block
-        in the input.
+        (n_chans, n_baselines, complexity)
     """
-    n_chans = input_array.shape[0]
-    n_ants = input_array.shape[2]
+    n_ants = input_array.shape[0]
+    n_chans = input_array.shape[1]
     n_pols = input_array.shape[3]
-    n_spectra_per_heap = input_array.shape[1] * input_array.shape[4]
-    complexity = input_array.shape[5]
-    # I think it's nicer to get the time-series all in one axis so that we can
-    # just use np.sum() across that axis.
-    # Numba can't work on non-contiguous arrays, so we have to copy this one in
-    # order to be able to reshape it in the next step.
-    ez_in = input_array.transpose(0, 2, 3, 1, 4, 5).copy()
-    ez_in = ez_in.reshape((n_chans, n_ants, n_pols, n_spectra_per_heap, complexity)).astype(np.int32)
+    complexity = input_array.shape[4]
     n_baselines = n_ants * (n_ants + 1) * 2
     output_array = np.empty(shape=(n_chans, n_baselines, complexity), dtype=np.int32)
     for c in prange(n_chans):
         for a2 in range(n_ants):
             for a1 in range(a2 + 1):
                 for p1 in range(n_pols):
-                    r1 = ez_in[c, a1, p1, :, 0]
-                    i1 = ez_in[c, a1, p1, :, 1]
+                    r1 = input_array[a1, c, :, p1, 0]
+                    i1 = input_array[a1, c, :, p1, 1]
                     for p2 in range(n_pols):
                         bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
-                        r2 = ez_in[c, a2, p2, :, 0]
-                        i2 = ez_in[c, a2, p2, :, 1]
+                        r2 = input_array[a2, c, :, p2, 0].astype(np.int32)
+                        i2 = input_array[a2, c, :, p2, 1].astype(np.int32)
 
                         output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
                         output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)

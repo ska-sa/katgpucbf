@@ -86,7 +86,7 @@ class CorrelationTemplate:
 
         # This 128 is hardcoded in the original Tensor-Core kernel. The reason
         # it is set to this needs to be determined.
-        self.n_times_per_block = 128 // self._sample_bitwidth
+        n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
         if self._sample_bitwidth not in valid_bitwidths:
@@ -99,17 +99,17 @@ class CorrelationTemplate:
                 "will eventually be supported but has not yet been implemented."
             )
 
-        if self.n_spectra_per_heap % self.n_times_per_block != 0:
-            raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
+        if self.n_spectra_per_heap % n_times_per_block != 0:
+            raise ValueError(f"spectra_per_heap must be divisible by {n_times_per_block}.")
 
         self.input_data_dimensions = (
-            accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
+            accel.Dimension(self.n_channels, exact=True),
+            accel.Dimension(self.n_spectra_per_heap, exact=True),
             accel.Dimension(N_POLS, exact=True),
-            accel.Dimension(self.n_times_per_block, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
+
         self.output_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_baselines * 4, exact=True),
@@ -166,7 +166,7 @@ class Correlation(accel.Operation):
     shape of the buffers.
 
     The input sample buffer must have the shape:
-    ``[channels][spectra_per_heap//times_per_block][n_ants][polarisations][times_per_block]``
+    ``[n_ants][channels][spectra_per_heap][polarisations]``
 
     A complexity that is introduced by the Tensor-Core kernel is that the
     ``spectra_per_heap`` index is split over two different indices. The first
