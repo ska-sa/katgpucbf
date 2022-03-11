@@ -61,6 +61,9 @@ class DescriptorSender:
             interface_address=self.interface_address,
         )
 
+        # Set spead stream to have heap id in odd numbers for descriptors.
+        spead2.send.Stream.set_cnt_sequence(self.stream, 1, 2)
+
         # Create item group
         self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         self.heap_to_send = self.__create_descriptors_heap(heap_samples)

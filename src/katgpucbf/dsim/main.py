@@ -36,6 +36,7 @@ import katsdpservices
 import numpy as np
 import prometheus_async
 import pyparsing as pp
+import spead2.send
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
@@ -216,6 +217,8 @@ async def async_main() -> None:
         affinity=args.affinity,
     )
 
+    # Set spead stream to have heap id in even numbers for dsim data.
+    spead2.send.Stream.set_cnt_sequence(stream, 2, 2)
     sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples, args.sync_time, args.adc_sample_rate)
 
     server = DeviceServer(
