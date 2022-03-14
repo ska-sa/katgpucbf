@@ -82,10 +82,12 @@ class CorrelationTemplate:
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
+        self._n_ants_per_block = 32  # Hardcoded to 32 for now, but can be set to 32/48/64.
 
-        # This 128 is hardcoded in the original Tensor-Core kernel. The reason
-        # it is set to this needs to be determined.
+        # This 128 is hardcoded in the original Tensor-Core kernel. It loads
+        # each block as two int4's, which is 256 bits (the extra factor of 2
+        # is because _sample_bitwidth only counts the real part of a complex
+        # number).
         n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
@@ -116,12 +118,7 @@ class CorrelationTemplate:
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        if self._n_ants_per_block == 32:
-            raise NotImplementedError(
-                "32 antennas per thread-block is not supported yet - \
-                Need to clarify the formula for thread-block calculation."
-            )
-        elif self._n_ants_per_block == 48:
+        if self._n_ants_per_block in {32, 48}:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
                 * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)

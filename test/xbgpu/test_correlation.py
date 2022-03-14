@@ -84,7 +84,7 @@ def test_correlator(
     """Parameterised unit test of the Tensor-Core correlation kernel."""
     # TODO: A lot of this is duplicated in other functions. It would be nice to
     # move it into a test fixture.
-    n_chans_per_stream = num_channels // num_ants // 4
+    n_chans_per_stream = num_channels // num_ants
 
     template = CorrelationTemplate(
         context, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
