@@ -92,13 +92,13 @@ Accumulations, Dumps and Auto-resync
 The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
 
-A heap from a single F-Engine consists of a set number of samples specified by
-the :option:`!--samples-per-channel` flag. Each of these time samples is part of a
-different spectrum. Meaning that the timestamp difference per sample is equal to
-the :option:`!--channels-total` multiplied by 2 (multiple for two to account for the fact
-that we throw half the spectrum away due to the symmetric properties of the
-Fourier Transform). The timestamp difference between consecutive two heaps from
-the same F-Engine is equal to: `--samples-per-channel * --channels-total * 2`.
+A heap from a single F-Engine consists of a set number of spectra indicated by
+the :option:`!--spectra-per-heap` flag, where the spectra are time samples. Each of
+these time samples is part of a different spectrum, meaning that the timestamp
+difference per sample is equal to the value of :option:`!--samples-between-spectra`.
+The timestamp difference between two consecutive heaps from the same F-Engine is equal to:
+
+  `heap_timestamp_step = --spectra-per-heap * --samples-between-spectra`.
 
 A batch of heaps is a collection of heaps from different F-Engines with the same
 timestamp. Correlation occurs on a batch of heaps at a time. The correlated data
@@ -106,9 +106,9 @@ is then accumulated. An accumulation period is called an :dfn:`accumulation` and
 the data output from that accumulation is normally called a :dfn:`dump` - the terms
 are used interchangeably. The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
-between succesive dumps is equal to:
+between succesive dumps is therefore equal to:
 
-  `timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`
+  `timestamp_difference = --spectra-per-heap * --samples-between-spectra * --heap-accumulation-threshold`
 
 The output heap timestamp is aligned to an integer multiple of
 `timestamp_difference` (equivalent to the current SKARAB "auto-resync" logic).
