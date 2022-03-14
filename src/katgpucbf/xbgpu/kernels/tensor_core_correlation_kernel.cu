@@ -28,8 +28,13 @@
  *   across multiple calls (with saturation rather than wrapping).
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
- * - Take the input axes in a different order (TODO: this currently leads to
- *   very inefficient memory access patterns).
+ * - Take the input axes in a different order.
+ * - Remove the asynchronous copy code (it would not have worked well with
+ *   the previous point).
+ * - Restore the type-punning that had been replaced by memcpy. It turns out
+ *   nvcc implements memcpy a byte at a time.
+ * - Guarantee 32-byte alignment of the shared data (required by
+ *   load_matrix_sync / store_matrix_sync).
  * - Remove trailing whitespace.
  *
  * SARAO's modification is licenced as follows:
@@ -185,8 +190,10 @@ template <typename T> struct FetchData
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
     {
-      //data = * (T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][0];
-      memcpy(&data, &samples[firstReceiver + loadRecv][channel][time][loadTime][0], sizeof(T));
+      data = * (T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][0];
+      // The above is undefined behaviour in C++ (type punning), but the
+      // well-defined memcpy below has poor performance (copies one byte at a time).
+      // memcpy(&data, &samples[firstReceiver + loadRecv][channel][time][loadTime][0], sizeof(T));
     }
   }
 
@@ -194,7 +201,7 @@ template <typename T> struct FetchData
   {
 #pragma unroll
     for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
-      memcpy(&samples[loadRecv][i & 1][loadTime + (i >> 1)][0], i + (Sample *) &data, sizeof(Sample));
+      *(Sample *) &samples[loadRecv][i & 1][loadTime + (i >> 1)][0] = ((const Sample *) &data)[i];
   }
 
   template <typename SharedData> __device__ void storeB(SharedData samples) const
@@ -206,8 +213,8 @@ template <typename T> struct FetchData
     for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
     {
       unsigned time = loadTime + (i >> 1);
-      memcpy(&samples[loadRecv][i & 1][0][time][0], i + (const Sample *) &data, sizeof(Sample));
-      memcpy(&samples[loadRecv][i & 1][1][time][0], i + (const Sample *) &tmp, sizeof(Sample));
+      *(Sample *) &samples[loadRecv][i & 1][0][time][0] = ((const Sample *) &data)[i];
+      *(Sample *) &samples[loadRecv][i & 1][1][time][0] = ((const Sample *) &tmp)[i];
     }
   }
 
@@ -551,11 +558,11 @@ void correlate(Visibilities visibilities, const Samples samples)
 
   union shared {
     struct {
-      SharedData<>::Asamples aSamples;
-      SharedData<NR_RECEIVERS_PER_BLOCK == 64 ? 32 : NR_RECEIVERS_PER_BLOCK>::Bsamples bSamples;
+      alignas(32) SharedData<>::Asamples aSamples;
+      alignas(32) SharedData<NR_RECEIVERS_PER_BLOCK == 64 ? 32 : NR_RECEIVERS_PER_BLOCK>::Bsamples bSamples;
     } rectangle;
     struct {
-      SharedData<>::Bsamples samples;
+      alignas(32) SharedData<>::Bsamples samples;
     } triangle;
     ScratchSpace scratchSpace[NR_WARPS];
   };
