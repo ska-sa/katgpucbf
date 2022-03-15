@@ -34,7 +34,7 @@ from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
-from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import XBEngine
 
@@ -410,21 +410,21 @@ class TestEngine:
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         ig_send.add_item(
             FENG_ID_ID,
             "feng_id",
             "F-Engine heap is received from.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         ig_send.add_item(
             FREQUENCY_ID,
             "frequency",
             "Value of first channel in collections stored here.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
 

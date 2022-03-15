@@ -54,7 +54,6 @@ from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import CorrelationTemplate
-from .precorrelation_reorder import PrecorrelationReorderTemplate
 from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
@@ -183,6 +182,7 @@ class XBEngine(DeviceServer):
         This value is intended to dictate a data transmission rate slightly
         higher/faster than the ADC rate.
         NOTE:
+
         - A factor of zero (0) tells the sender to transmit as fast as
           possible.
     n_ants
@@ -347,22 +347,6 @@ class XBEngine(DeviceServer):
         )
         self.correlation = correlation_template.instantiate(self._proc_command_queue)
 
-        reorder_template = PrecorrelationReorderTemplate(
-            self.context,
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap=self.n_spectra_per_heap,
-            n_batches=self.heaps_per_fengine_per_chunk,
-        )
-        self.precorrelation_reorder = reorder_template.instantiate(self._proc_command_queue)
-
-        self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
-            self.context,
-            self.precorrelation_reorder.slots["out_reordered"].shape,  # type: ignore
-            self.precorrelation_reorder.slots["out_reordered"].dtype,  # type: ignore
-        )
-        self.precorrelation_reorder.bind(out_reordered=self.reordered_buffer_device)
-
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
         # * The _rx_item_queue passes items from the _receiver_loop function to
@@ -380,8 +364,8 @@ class XBEngine(DeviceServer):
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
-                self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
-                self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
+                (self.heaps_per_fengine_per_chunk,) + self.correlation.slots["in_samples"].shape,  # type: ignore
+                self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
             rx_item = RxQueueItem(buffer_device)
             self._rx_free_item_queue.put_nowait(rx_item)
@@ -397,8 +381,8 @@ class XBEngine(DeviceServer):
 
         for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
-                self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
-                self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
+                (self.heaps_per_fengine_per_chunk,) + self.correlation.slots["in_samples"].shape,  # type: ignore
+                self.correlation.slots["in_samples"].dtype,  # type: ignore
                 context=self.context,
             )
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
@@ -656,12 +640,9 @@ class XBEngine(DeviceServer):
 
         This function performs the following steps:
         1. Retrieve an rx_item from the _rx_item_queue
-        2. Performs the reorder operation on the buffer in the rx item. This
-           gets the buffer data into a format that the correlation kernel
-           requires.
-        3.1 Apply the correlation kernel to small subsets of the reordered data
-            until all the data has been processed.
-        3.2 If sufficient correlations have occured, transfer the correlated
+        2.1 Apply the correlation kernel to small subsets of the data
+            until all the data has been processed.1
+        2.2 If sufficient correlations have occured, transfer the correlated
             data to a tx_item, pass the tx_item to the _tx_item_queue and get a
             new item from the _tx_free_item_queue.
 
@@ -700,14 +681,6 @@ class XBEngine(DeviceServer):
             assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
-            self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
-            self.precorrelation_reorder()
-
-            reorder_event = self._proc_command_queue.enqueue_marker()
-            rx_item.reset()
-            rx_item.add_event(reorder_event)
-            await self._rx_free_item_queue.put(rx_item)
-
             # The correlation kernel does not have the concept of a batch at
             # this stage, so the kernel needs to be run on each different batch
             # in the chunk.
@@ -716,7 +689,7 @@ class XBEngine(DeviceServer):
                     self.context,
                     self.correlation.slots["in_samples"].shape,  # type: ignore
                     self.correlation.slots["in_samples"].dtype,  # type: ignore
-                    raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
+                    raw=rx_item.buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
                 )
                 self.correlation.bind(in_samples=buffer_slice)
                 self.correlation()
@@ -740,6 +713,11 @@ class XBEngine(DeviceServer):
                     self.correlation.zero_visibilities()
 
                 current_timestamp += self.rx_heap_timestamp_step
+
+            proc_event = self._proc_command_queue.enqueue_marker()
+            rx_item.reset()
+            rx_item.add_event(proc_event)
+            await self._rx_free_item_queue.put(rx_item)
 
         # When the stream is closed, if the sender loop is waiting for a tx item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can

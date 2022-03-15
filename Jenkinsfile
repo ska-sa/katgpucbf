@@ -41,7 +41,9 @@ pipeline {
   stages {
     stage('Install Python packages') {
       steps {
-        sh 'pip install -r requirements.txt -r requirements-dev.txt'
+        sshagent(['github-ssh']) {
+          sh 'pip install -r requirements.txt -r requirements-dev.txt'
+        }
       }
     }
 
@@ -55,7 +57,9 @@ pipeline {
           steps {
             sh 'pre-commit install'
             // no-commit-to-branch complains if we are on the main branch
-            sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
+            sshagent(['github-ssh']) {
+              sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
+            }
           }
         }
 

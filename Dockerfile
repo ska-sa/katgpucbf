@@ -1,7 +1,25 @@
+# syntax = docker/dockerfile:1
+
+# This Dockerfile requires BuildKit to build. To build, run
+# DOCKER_BUILDKIT=1 docker build --ssh default -t <NAME> .
+
 # Use the nvidia development image as a base. This gives access to all
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as build-base
+
+FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as base
+
+# This "base" layer is modified to better support running with Vulkan. That's
+# needed by both build-base (used by Jenkins to run unit tests) and the final
+# image. Additionally, for the Vulkan drivers to work one needs
+# libvulkan1, libegl1 and libxext6, but that's done in later layers together
+# with other packages.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+COPY docker/10_nvidia.json /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+# See also https://github.com/NVIDIA/nvidia-container-toolkit/issues/16
+COPY docker/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json
+
+FROM base as build-base
 
 # Install system packages:
 # - git is needed for setuptools_scm
@@ -24,7 +42,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     librdmacm-dev \
     libpcap-dev \
     libcap-dev \
+    libvulkan-dev libxext6 libegl1 \
+    openssh-client \
     wget
+
+# Provide Github's SSH host keys for fetching vkgdr (private repository).
+COPY docker/github_known_hosts /root/.ssh/known_hosts
 
 # Create a virtual environment
 RUN python -m venv /venv
@@ -57,9 +80,9 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 
 FROM build-base as build-py
 
-# Install requirements (already copied to build-base image)
+# Install requirements (already copied to build-base image).
 WORKDIR /tmp/katgpucbf
-RUN pip install -r requirements.txt
+RUN --mount=type=ssh pip install -r requirements.txt
 
 # Install the package itself. Using --no-deps ensures that if there are
 # requirements that aren't pinned in requirements.txt, the subsequent
@@ -89,14 +112,14 @@ RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker
 
 # The above builds everything. Now install it into a lighter-weight runtime
 # image, without all the stuff needed for the build itself.
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04
+FROM base
 LABEL maintainer="MeerKAT CBF team <cbf@ska.ac.za>"
 
 # curl is needed for running under katsdpcontroller
 # numactl allows CPU and memory affinity to be controlled.
 # libboost-program-options is for spead2's C++ command-line tools - not
 # strictly needed but useful for debugging.
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     python3 \
     python3-pip \
     python3-venv \
@@ -107,9 +130,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libboost-system1.71.0 \
     libibverbs1 \
     librdmacm1 \
+    ibverbs-providers \
     libpcap0.8 \
     libcap2 \
-    libcap2-bin
+    libcap2-bin \
+    libvulkan1 libxext6 libegl1
 
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin

@@ -82,11 +82,13 @@ class CorrelationTemplate:
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
+        self._n_ants_per_block = 32  # Hardcoded to 32 for now, but can be set to 32/48/64.
 
-        # This 128 is hardcoded in the original Tensor-Core kernel. The reason
-        # it is set to this needs to be determined.
-        self.n_times_per_block = 128 // self._sample_bitwidth
+        # This 128 is hardcoded in the original Tensor-Core kernel. It loads
+        # each block as two int4's, which is 256 bits (the extra factor of 2
+        # is because _sample_bitwidth only counts the real part of a complex
+        # number).
+        n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
         if self._sample_bitwidth not in valid_bitwidths:
@@ -99,29 +101,24 @@ class CorrelationTemplate:
                 "will eventually be supported but has not yet been implemented."
             )
 
-        if self.n_spectra_per_heap % self.n_times_per_block != 0:
-            raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
+        if self.n_spectra_per_heap % n_times_per_block != 0:
+            raise ValueError(f"spectra_per_heap must be divisible by {n_times_per_block}.")
 
         self.input_data_dimensions = (
-            accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
             accel.Dimension(self.n_ants, exact=True),
+            accel.Dimension(self.n_channels, exact=True),
+            accel.Dimension(self.n_spectra_per_heap, exact=True),
             accel.Dimension(N_POLS, exact=True),
-            accel.Dimension(self.n_times_per_block, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
+
         self.output_data_dimensions = (
             accel.Dimension(self.n_channels, exact=True),
             accel.Dimension(self.n_baselines * 4, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        if self._n_ants_per_block == 32:
-            raise NotImplementedError(
-                "32 antennas per thread-block is not supported yet - \
-                Need to clarify the formula for thread-block calculation."
-            )
-        elif self._n_ants_per_block == 48:
+        if self._n_ants_per_block in {32, 48}:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
                 * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
@@ -166,7 +163,7 @@ class Correlation(accel.Operation):
     shape of the buffers.
 
     The input sample buffer must have the shape:
-    ``[channels][spectra_per_heap//times_per_block][n_ants][polarisations][times_per_block]``
+    ``[n_ants][channels][spectra_per_heap][polarisations]``
 
     A complexity that is introduced by the Tensor-Core kernel is that the
     ``spectra_per_heap`` index is split over two different indices. The first

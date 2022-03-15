@@ -97,11 +97,6 @@ class Layout(BaseLayout):
         return self.heap_samples * self.sample_bits // BYTE_BITS
 
     @property
-    def chunk_bytes(self) -> int:  # noqa: D401
-        """Number of bytes per chunk."""
-        return self.chunk_samples * self.sample_bits // BYTE_BITS
-
-    @property
     def chunk_heaps(self) -> int:  # noqa: D401
         """Number of heaps per chunk."""
         return self.chunk_samples // self.heap_samples

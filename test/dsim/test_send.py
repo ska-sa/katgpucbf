@@ -80,10 +80,9 @@ async def test_sender(
 
     # We don't have descriptors (yet), so we have to set the items manually
     ig = spead2.ItemGroup()
-    immediate_format = [("u", spead.FLAVOUR.heap_address_bits)]
-    ig.add_item(spead.TIMESTAMP_ID, "timestamp", "", shape=(), format=immediate_format)
-    ig.add_item(spead.DIGITISER_ID_ID, "digitiser_id", "", shape=(), format=immediate_format)
-    ig.add_item(spead.DIGITISER_STATUS_ID, "digitiser_status", "", shape=(), format=immediate_format)
+    ig.add_item(spead.TIMESTAMP_ID, "timestamp", "", shape=(), format=spead.IMMEDIATE_FORMAT)
+    ig.add_item(spead.DIGITISER_ID_ID, "digitiser_id", "", shape=(), format=spead.IMMEDIATE_FORMAT)
+    ig.add_item(spead.DIGITISER_STATUS_ID, "digitiser_status", "", shape=(), format=spead.IMMEDIATE_FORMAT)
     # Just treat it as raw bytes so that we can directly compare to the packed data
     ig.add_item(spead.RAW_DATA_ID, "raw_data", "", dtype=np.uint8, shape=(HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS,))
 

@@ -193,12 +193,19 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Spectra in each output heap [%(default)s]",
     )
     parser.add_argument(
-        "--chunk-samples",
+        "--src-chunk-samples",
         type=int,
         default=2 ** 24,
         metavar="SAMPLES",
-        help="Number of digitiser samples to process at a time (per pol). If not a multiple of 2*channels*acc-len,"
-        "it will be rounded up to the next multiple. [%(default)s]",
+        help="Number of digitiser samples to process at a time (per pol). [%(default)s]",
+    )
+    parser.add_argument(
+        "--dst-chunk-jones",
+        type=int,
+        default=2 ** 23,
+        metavar="VECTORS",
+        help="Number of Jones vectors in output chunks. If not a multiple of "
+        "2*channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
     parser.add_argument(
@@ -275,7 +282,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.spectra_per_heap)
+    chunk_jones = accel.roundup(args.dst_chunk_jones, args.channels * args.spectra_per_heap)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -298,7 +305,8 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,
         num_ants=args.array_size,
-        spectra=chunk_samples // (2 * args.channels),
+        chunk_samples=args.src_chunk_samples,
+        spectra=chunk_jones // args.channels,
         spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
         taps=args.taps,

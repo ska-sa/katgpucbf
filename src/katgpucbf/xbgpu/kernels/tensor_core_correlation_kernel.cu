@@ -28,6 +28,8 @@
  *   across multiple calls (with saturation rather than wrapping).
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
+ * - Take the input axes in a different order (TODO: this currently leads to
+ *   very inefficient memory access patterns).
  * - Remove trailing whitespace.
  *
  * SARAO's modification is licenced as follows:
@@ -99,16 +101,16 @@ extern "C++" {
 using namespace nvcuda::wmma;
 
 #if NR_BITS == 4
-typedef char    Samples[NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_RECEIVERS][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK];
+typedef char    Sample;
 typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 8
-typedef char2   Samples[NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_RECEIVERS][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK];
+typedef char2   Sample;
 typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 16
-typedef __half2 Samples[NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_RECEIVERS][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK];
+typedef __half2 Sample;
 typedef float2  Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #endif
-
+typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
 
 #if NR_BITS == 4
 typedef fragment<matrix_a, 8, 8, 32, experimental::precision::s4, row_major> Afrag;
@@ -195,8 +197,11 @@ template <typename T> struct FetchData
   __device__ void load(const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-      //data = * (T *) &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime];
-      memcpy(&data, &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime], sizeof(T));
+    {
+#pragma unroll
+      for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
+        memcpy((char *) &data + i * sizeof(Sample), &samples[firstReceiver + loadRecv][channel][time][loadTime + i][loadPol], sizeof(Sample));
+    }
   }
 
   template <typename SharedData> __device__ void storeA(SharedData samples) const
@@ -218,13 +223,21 @@ template <typename T> struct FetchData
   template <typename Asamples> __device__ void copyAsyncA(nvcuda::experimental::pipeline &pipe, Asamples dest, const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-      nvcuda::experimental::memcpy_async(* (T *) &dest[loadRecv][loadPol][loadTime][0], * (const T *) &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime], pipe);
+    {
+#pragma unroll
+      for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
+        nvcuda::experimental::memcpy_async(* (Sample *) &dest[loadRecv][loadPol][loadTime + i][0], * (const Sample *) &samples[firstReceiver + loadRecv][channel][time][loadTime + i][loadPol], pipe);
+    }
   }
 
   template<typename Bsamples> __device__ void copyAsyncB(nvcuda::experimental::pipeline &pipe, Bsamples dest, const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-      nvcuda::experimental::memcpy_async(* (T *) &dest[loadRecv][loadPol][0][loadTime][0], * (const T *) &samples[channel][time][firstReceiver + loadRecv][loadPol][loadTime], pipe);
+    {
+#pragma unroll
+      for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
+        nvcuda::experimental::memcpy_async(* (Sample *) &dest[loadRecv][loadPol][0][loadTime + i][0], * (const Sample *) &samples[firstReceiver + loadRecv][channel][time][loadTime + i][loadPol], pipe);
+    }
   }
 
   template<typename Bsamples> __device__ void fixB(Bsamples bSamples)
