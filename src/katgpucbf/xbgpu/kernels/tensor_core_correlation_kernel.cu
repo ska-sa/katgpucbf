@@ -99,10 +99,10 @@ using namespace nvcuda::wmma;
 
 #if NR_BITS == 4
 typedef char    Sample;
-typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
+typedef long2   Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 8
 typedef char2   Sample;
-typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
+typedef long2   Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 16
 typedef __half2 Sample;
 typedef float2  Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
@@ -235,18 +235,13 @@ __device__ inline float2 make_complex(float real, float imag)
 }
 
 
-// Compute x + y clamped to -INT_MAX .. INT_MAX
-__device__ inline int add_sat(int x, int y)
+__device__ inline long2 make_complex(long real, long imag)
 {
-  int out;
-  asm("add.sat.s32 %0, %1, %2;" : "=r" (out) : "r" (x), "r" (y));
-  // add.sat.s32 clamps to INT_MIN..INT_MAX, but we want -INT_MAX..INT_MAX
-  // for symmetry.
-  return max(out, INT_MIN + 1);
+  return make_long2(real, imag);
 }
 
 
-template <typename T> __device__ inline void accumVisibility(T &out, T value)
+template <typename T, typename V> __device__ inline void accumVisibility(T &out, V value)
 {
   /* Store an output value. Unlike the original ASTRON code, for xbgpu this
    * - conjugates the value because we want to store the other half
@@ -254,11 +249,7 @@ template <typename T> __device__ inline void accumVisibility(T &out, T value)
    * - adds to the existing value (with saturation, if integer), to allow
    *   accumulation across multiple calls to the kernel.
    */
-#if NR_BITS == 16
   out = make_complex(out.x + value.x, out.y - value.y);
-#else
-  out = make_complex(add_sat(out.x, value.x), add_sat(out.y, -value.y));
-#endif
 }
 
 
@@ -539,10 +530,13 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
 
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32, NR_RECEIVERS_PER_BLOCK == 32 ? 4 : 2)
-void correlate(Visibilities visibilities, const Samples samples)
+void correlate(Visibilities *visibilities, const Samples *samples, unsigned batchOffset)
 {
   const unsigned nrFragmentsY = NR_RECEIVERS_PER_BLOCK / NR_RECEIVERS_PER_TCM_Y / 2;
 
+  unsigned batch = batchOffset + blockIdx.z;
+  visibilities += batch;
+  samples += batch;
   unsigned block = blockIdx.x;
 
 #if NR_RECEIVERS_PER_BLOCK == 32 || NR_RECEIVERS_PER_BLOCK == 48
@@ -575,19 +569,19 @@ void correlate(Visibilities visibilities, const Samples samples)
 
   if (firstReceiverX == firstReceiverY)
 #if NR_RECEIVERS_PER_BLOCK == 32 || NR_RECEIVERS_PER_BLOCK == 48
-    doCorrelateRectangle<nrFragmentsY, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, false>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<nrFragmentsY, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, false>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 #elif NR_RECEIVERS_PER_BLOCK == 64
     if (NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK != 0 && (NR_RECEIVERS < NR_RECEIVERS_PER_BLOCK || firstReceiverX >= NR_RECEIVERS / NR_RECEIVERS_PER_BLOCK * NR_RECEIVERS_PER_BLOCK))
-      doCorrelateTriangle<false>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
+      doCorrelateTriangle<false>(*visibilities, *samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
     else
-      doCorrelateTriangle<true>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
+      doCorrelateTriangle<true>(*visibilities, *samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
 #endif
 #if NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK != 0
   else if (NR_RECEIVERS < NR_RECEIVERS_PER_BLOCK || firstReceiverY >= NR_RECEIVERS / NR_RECEIVERS_PER_BLOCK * NR_RECEIVERS_PER_BLOCK)
-    doCorrelateRectangle<(NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK + 2 * NR_RECEIVERS_PER_TCM_Y - 1) / NR_RECEIVERS_PER_TCM_Y / 2, false, true, NR_RECEIVERS % (2 * NR_RECEIVERS_PER_TCM_Y) == 0, true>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<(NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK + 2 * NR_RECEIVERS_PER_TCM_Y - 1) / NR_RECEIVERS_PER_TCM_Y / 2, false, true, NR_RECEIVERS % (2 * NR_RECEIVERS_PER_TCM_Y) == 0, true>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 #endif
   else
-    doCorrelateRectangle<nrFragmentsY, true, true, true, true>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<nrFragmentsY, true, true, true, true>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 }
 
 } // extern "C++"

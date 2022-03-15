@@ -104,20 +104,6 @@ class CorrelationTemplate:
         if self.n_spectra_per_heap % n_times_per_block != 0:
             raise ValueError(f"spectra_per_heap must be divisible by {n_times_per_block}.")
 
-        self.input_data_dimensions = (
-            accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap, exact=True),
-            accel.Dimension(N_POLS, exact=True),
-            accel.Dimension(COMPLEX, exact=True),
-        )
-
-        self.output_data_dimensions = (
-            accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_baselines * 4, exact=True),
-            accel.Dimension(COMPLEX, exact=True),
-        )
-
         if self._n_ants_per_block in {32, 48}:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
@@ -149,9 +135,9 @@ class CorrelationTemplate:
         )
         self.kernel = program.get_kernel("correlate")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "Correlation":
+    def instantiate(self, command_queue: accel.AbstractCommandQueue, n_batches: int) -> "Correlation":
         """Create a :class:`Correlation` using this template to build the kernel."""
-        return Correlation(self, command_queue)
+        return Correlation(self, command_queue, n_batches)
 
 
 class Correlation(accel.Operation):
@@ -182,31 +168,54 @@ class Correlation(accel.Operation):
 
     The output visibility buffer must have the shape
     ``[channels][baselines][CPLX]``. In 8-bit mode, each element in this
-    visibility matrix is a 32-bit integer value.
+    visibility matrix is a 64-bit integer value.
 
     Currently only 8-bit input mode is supported.
     """
 
-    def __init__(self, template: CorrelationTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+    def __init__(
+        self, template: CorrelationTemplate, command_queue: accel.AbstractCommandQueue, n_batches: int
+    ) -> None:
         super().__init__(command_queue)
         self.template = template
-        self.slots["in_samples"] = accel.IOSlot(
-            dimensions=self.template.input_data_dimensions, dtype=np.int8
-        )  # TODO: This must depend on input bitwidth
-        self.slots["out_visibilities"] = accel.IOSlot(dimensions=self.template.output_data_dimensions, dtype=np.int32)
+
+        input_data_dimensions = (
+            accel.Dimension(n_batches),
+            accel.Dimension(self.template.n_ants, exact=True),
+            accel.Dimension(self.template.n_channels, exact=True),
+            accel.Dimension(self.template.n_spectra_per_heap, exact=True),
+            accel.Dimension(N_POLS, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
+        )
+        output_data_dimensions = (
+            accel.Dimension(n_batches),
+            accel.Dimension(self.template.n_channels, exact=True),
+            accel.Dimension(self.template.n_baselines * N_POLS * N_POLS, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
+        )
+
+        # TODO: dtypes must depend on input bitwidth
+        self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
+        self.slots["out_visibilities"] = accel.IOSlot(dimensions=output_data_dimensions, dtype=np.int64)
+        self.first_batch = 0
+        self.last_batch = n_batches
+        self.n_batches = n_batches
 
     def _run(self) -> None:
         """Run the correlation kernel and add the generated values to the out_visibilities buffer."""
+        if not 0 <= self.first_batch < self.last_batch <= self.n_batches:
+            raise ValueError("Invalid batch range")
+        n_batches = self.last_batch - self.first_batch
         in_samples_buffer = self.buffer("in_samples")
         out_visibilities_buffer = self.buffer("out_visibilities")
         self.command_queue.enqueue_kernel(
             self.template.kernel,
-            [out_visibilities_buffer.buffer, in_samples_buffer.buffer],
+            [out_visibilities_buffer.buffer, in_samples_buffer.buffer, np.uint32(self.first_batch)],
             # NOTE: Even though we are using CUDA, we follow OpenCL's grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * 1),
+            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * n_batches),
             local_size=(32, 2, 2),
         )
 

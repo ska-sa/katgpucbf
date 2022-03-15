@@ -30,40 +30,44 @@ get_baseline_index = njit(Correlation.get_baseline_index)
 
 
 @njit(parallel=True)
-def correlate_host(input_array: np.ndarray) -> np.ndarray:
+def correlate_host(input_array: np.ndarray, first_batch: int, last_batch: int) -> np.ndarray:
     """Calculate correlation products on the host CPU.
 
     Parameters
     ----------
     input_array
         Dataset to be correlated. Required shape:
-        (n_ants, n_chans, n_spectra, n_pols, complexity)
+        (n_batches, n_ants, n_chans, n_spectra, n_pols, complexity)
+    first_batch, last_batch
+        Half-open interval of batches to process. The other are set to zero.
 
     Returns
     -------
     np.ndarray
         Correlation products or visibilities. Shape:
-        (n_chans, n_baselines, complexity)
+        (n_batches, n_chans, n_baselines, complexity)
     """
-    n_ants = input_array.shape[0]
-    n_chans = input_array.shape[1]
-    n_pols = input_array.shape[3]
-    complexity = input_array.shape[4]
+    n_batches = input_array.shape[0]
+    n_ants = input_array.shape[1]
+    n_chans = input_array.shape[2]
+    n_pols = input_array.shape[4]
+    complexity = input_array.shape[5]
     n_baselines = n_ants * (n_ants + 1) * 2
-    output_array = np.empty(shape=(n_chans, n_baselines, complexity), dtype=np.int32)
-    for c in prange(n_chans):
-        for a2 in range(n_ants):
-            for a1 in range(a2 + 1):
-                for p1 in range(n_pols):
-                    r1 = input_array[a1, c, :, p1, 0]
-                    i1 = input_array[a1, c, :, p1, 1]
-                    for p2 in range(n_pols):
-                        bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
-                        r2 = input_array[a2, c, :, p2, 0].astype(np.int32)
-                        i2 = input_array[a2, c, :, p2, 1].astype(np.int32)
+    output_array = np.zeros(shape=(n_batches, n_chans, n_baselines, complexity), dtype=np.int64)
+    for b in range(first_batch, last_batch):
+        for c in prange(n_chans):
+            for a2 in range(n_ants):
+                for a1 in range(a2 + 1):
+                    for p1 in range(n_pols):
+                        r1 = input_array[b, a1, c, :, p1, 0]
+                        i1 = input_array[b, a1, c, :, p1, 1]
+                        for p2 in range(n_pols):
+                            bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
+                            r2 = input_array[b, a2, c, :, p2, 0].astype(np.int64)
+                            i2 = input_array[b, a2, c, :, p2, 1].astype(np.int64)
 
-                        output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
-                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
+                            output_array[b, c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
+                            output_array[b, c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
 
     return output_array
 
@@ -85,12 +89,17 @@ def test_correlator(
     # TODO: A lot of this is duplicated in other functions. It would be nice to
     # move it into a test fixture.
     n_chans_per_stream = num_channels // num_ants
+    n_batches = 7
 
     template = CorrelationTemplate(
         context, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
     )
-    correlation = template.instantiate(command_queue)
+
+    correlation = template.instantiate(command_queue, n_batches)
     correlation.ensure_all_bound()
+    correlation.zero_visibilities()
+    correlation.first_batch = 1
+    correlation.last_batch = 5
 
     buf_samples_device = correlation.buffer("in_samples")
     buf_samples_host = buf_samples_device.empty_like()
@@ -110,21 +119,19 @@ def test_correlator(
     buf_visibilities_device = correlation.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
     # Set pre-existing values, to check that the computed values are added to them.
+    # We're not interested in testing overflow (64-bit outputs shouldn't overflow
+    # on the timescales they're being used with), so we reduce the range.
     buf_visibilities_host[:] = rng.integers(
-        low=np.iinfo(buf_visibilities_host.dtype).min + 1,
-        high=np.iinfo(buf_visibilities_host.dtype).max,
+        low=np.iinfo(buf_visibilities_host.dtype).min // 2,
+        high=np.iinfo(buf_visibilities_host.dtype).max // 2,
         size=buf_visibilities_host.shape,
         dtype=buf_visibilities_host.dtype,
         endpoint=True,
     )
 
-    calculated_visibilities_host = correlate_host(buf_samples_host)
-    # Add buf_visibilities_host with saturation
-    summed_visibilities_host = (
-        (calculated_visibilities_host.astype(np.int64) + buf_visibilities_host)
-        .clip(np.iinfo(buf_visibilities_host.dtype).min + 1, np.iinfo(buf_visibilities_host.dtype).max)
-        .astype(buf_visibilities_host.dtype)
-    )
+    calculated_visibilities_host = correlate_host(buf_samples_host, correlation.first_batch, correlation.last_batch)
+    # Add buf_visibilities_host
+    summed_visibilities_host = calculated_visibilities_host + buf_visibilities_host
 
     buf_samples_device.set(command_queue, buf_samples_host)
     buf_visibilities_device.set(command_queue, buf_visibilities_host)
