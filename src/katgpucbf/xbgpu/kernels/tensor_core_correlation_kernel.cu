@@ -25,7 +25,7 @@
  * It has been modified by SARAO:
  * - Wrap the file in extern "C++" to make it work with PyCUDA (see below)
  * - Add results to the output instead of overwriting, to allow accumulation
- *   across multiple calls (with saturation rather than wrapping).
+ *   across multiple calls; results use 64-bit integers to avoid overflow.
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
  * - Take the input axes in a different order.
@@ -35,6 +35,8 @@
  *   nvcc implements memcpy a byte at a time.
  * - Guarantee 32-byte alignment of the shared data (required by
  *   load_matrix_sync / store_matrix_sync).
+ * - Parallelise over multiple problem instances.
+ * - Write the output
  * - Remove trailing whitespace.
  *
  * SARAO's modification is licenced as follows:

@@ -17,9 +17,10 @@ The X-Engine processing pipeline can be broken into three different stages:
      then transferred to the GPU. This receiver has been implemented using
      SPEAD2 in C++ and bound into Python. See the "SPEAD2 Network Side Software"
      section below for more information.
-  2. The data is then correlated using the ASTRON Tensor Core Kernel. This is
-     done by the :class:`katgpucbf.xbgpu.tensorcore_xengine_core` class. This
-     correlated data is then transferred back to system RAM.
+  2. The data is then correlated using a modified version of the ASTRON Tensor
+     Core Kernel. This is done by the
+     :class:`~katgpucbf.xbgpu.correlation.Correlation` class. This correlated
+     data is then transferred back to system RAM.
   3. Send the correlated data (known as baseline correlation products) back into
      the network. This is implemented by :mod:`.xsend`.
 
@@ -45,12 +46,12 @@ Synchronization and Coordination
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-The :mod:`~katgpucbf.xbgpu.xbengine` module does the work of assembling all
+The :mod:`~katgpucbf.xbgpu.engine` module does the work of assembling all
 the different modules into a pipeline. This module has three different async
 processing pipelines know as the ``_receiver_loop``, ``_gpu_proc_loop`` and the
 ``_sender_loop``. Data is passed between these three processing loops using
 :class:`asyncio.Queue`\ s. Buffers in queues are reused to prevent unnecessary memory
-allocations. Additionally, buffers are passed between the python program to the
+allocations. Additionally, buffers are passed between the Python program to the
 network threads and back in order to reuse these buffers too.
 
 The image below demonstrates how data moves through the pipeline and how it is
@@ -64,7 +65,7 @@ the different asyncio functions. However the GPU requires a separate type of
 coordination. The GPU has three different command queues that manage the
 coordination.
 
-A command queue is an OpenCL term - within katsdpsigproc, this is still called a
+A command queue is an OpenCL term — within katsdpsigproc, this is still called a
 command queue even though it can be implemented as a CUDA stream. One command
 queue is for processing and the other two are for transferring data from host
 memory to the GPU and back. Events are put onto the command queue and the async
@@ -100,11 +101,20 @@ The timestamp difference between two consecutive heaps from the same F-Engine is
 
   `heap_timestamp_step = --spectra-per-heap * --samples-between-spectra`.
 
-A batch of heaps is a collection of heaps from different F-Engines with the same
-timestamp. Correlation occurs on a batch of heaps at a time. The correlated data
+A :dfn:`batch` of heaps is a collection of heaps from different F-Engines with the same
+timestamp. A :dfn:`chunk` consists of multiple consecutive batches (the number is given
+by the option :option:`!--heaps-per-fengine-per-chunk`). Correlation generally occurs on
+a chunk at a time, with the batches of the chunk being processed in parallel.
+To avoid race conditions in accumulation, there are multiple accumulators, and
+batch *i* of a chunk uses accumulator *i*.
 is then accumulated. An accumulation period is called an :dfn:`accumulation` and
-the data output from that accumulation is normally called a :dfn:`dump` - the terms
-are used interchangeably. The number of batches to accumulate in an accumulation
+the data output from that accumulation is normally called a :dfn:`dump` — the terms
+are used interchangeably. Once all the data for a dump has been correlated, the
+separate accumulators are added together ("reduced") to produce a final result.
+This reduction process also converts from 64-bit to 32-bit integers,
+saturating if necessary.
+
+The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
 between succesive dumps is therefore equal to:
 
@@ -119,4 +129,8 @@ The total accumulation time is equal to:
 The output heap contains multiple packets and these packets are distributed over
 the entire `accumulation_time_s` interval to reduce network burstiness. The
 default configuration in :mod:`katgpucbf.xbgpu.main` is for 0.5 second dumps
-when using the MeerKAT 1712 MSPs L-band digitisers.
+when using the MeerKAT 1712 MSps L-band digitisers.
+
+The dump boundaries are aligned to whole batches, but may fall in the middle of
+a chunk. In this case, each invocation of the correlation kernel will only
+process a subset of the batches in the chunk.
