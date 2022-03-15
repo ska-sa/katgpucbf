@@ -32,6 +32,7 @@ from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 import numpy as np
 import spead2.recv
 import spead2.send
+import spead2.send.asyncio
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -869,7 +870,7 @@ class Processor:
     async def run_descriptors_loop(
         self,
         stream: "spead2.send.asyncio.AsyncStream",
-        descriptor_heaps: List[spead2.send.HeapReference],
+        descriptor_heap: "spead2.send.Heap",
         interval_s: float,
     ) -> None:
         """
@@ -884,12 +885,33 @@ class Processor:
             This object, written in C++, takes large chunks of data and
             packages it appropriately in SPEAD heaps for transmission on
             the network.
-        descriptor_heaps
-            A list of desciptor heaps to send for all substreams.
+        descriptor_heap
+            The descriptor describing the format of the heaps in the data
+            stream.
         interval_s
             Interval (in seconds) over which to spread the sending of
-            descriptor heaps.
+            descriptor heaps. If given zero (0), the descriptors will be
+            sent once.
         """
+        send_descriptor_futures: List[asyncio.Future] = []
+        if interval_s == 0:
+            for substream_index in range(stream.num_substreams):
+                send_descriptor_futures.append(
+                    stream.async_send_heap(
+                        heap=descriptor_heap,
+                        substream_index=substream_index,
+                    )
+                )
+            await asyncio.gather(*send_descriptor_futures)
+            return
         while True:
-            await asyncio.gather(stream.async_send_heaps(descriptor_heaps, spead2.send.GroupMode.ROUND_ROBIN))
+            for substream_index in range(stream.num_substreams):
+                send_descriptor_futures.append(
+                    stream.async_send_heap(
+                        heap=descriptor_heap,
+                        substream_index=substream_index,
+                    )
+                )
+            await asyncio.gather(*send_descriptor_futures)
             await asyncio.sleep(interval_s)
+            send_descriptor_futures.clear()

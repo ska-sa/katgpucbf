@@ -288,8 +288,13 @@ class Engine(aiokatcp.DeviceServer):
                     feng_id=feng_id,
                 )
             )
-        # Perhaps get the descriptor heaps here?
-        self._descriptors = [descriptor_heap for schunk in send_chunks for descriptor_heap in schunk.descriptor_heaps]
+
+        self._descriptor_heap = send.make_descriptor_heap(
+            data_type=send_dtype,
+            channels=channels,
+            substreams=len(dst),
+            spectra_per_heap=spectra_per_heap,
+        )
 
         extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
         self._send_stream = send.make_stream(
@@ -458,18 +463,22 @@ class Engine(aiokatcp.DeviceServer):
 
             delay_model.add(new_linear_model)
 
-    async def start(self, send_descriptors: bool = True) -> None:
+    async def start(self, send_descriptors: bool = True, descr_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
-        concurrently.
+        concurrently. If indicated, it will also add a task to continuously
+        send the descriptor heaps at the specified interval.
 
         Parameters
         ----------
         send_descriptors
             Boolean to dictate whether the Engine should send descriptor heaps
             along with its data transmission.
+        descr_interval_s
+            Descriptor send interval, in seconds. Pass zero (0) to send
+            descriptors once.
         """
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -500,8 +509,8 @@ class Engine(aiokatcp.DeviceServer):
             self._descriptor_task = asyncio.create_task(
                 self._processor.run_descriptors_loop(
                     self._send_stream,
-                    self._descriptors,
-                    SPEAD_DESCRIPTOR_INTERVAL_S,
+                    self._descriptor_heap,
+                    descr_interval_s,
                 )
             )
 
