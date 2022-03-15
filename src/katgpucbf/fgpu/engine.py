@@ -37,7 +37,6 @@ from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
 
 logger = logging.getLogger(__name__)
-logging.basicConfig()
 
 
 def format_complex(value: numbers.Complex) -> str:
@@ -270,7 +269,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
 
-        send_chunks: List[send.Chunk] = []
+        send_chunks = []
         send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
         send_dtype = np.dtype(np.int8)
         for _ in range(self._processor.send_free_queue.maxsize):

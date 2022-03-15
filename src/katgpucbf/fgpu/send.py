@@ -200,12 +200,8 @@ def make_descriptor_heap(
 
     Parameters
     ----------
-    data
-        ndarray which will be used to indicate data shape and type
-        for the FENG_RAW data descriptor, in the format:
-        - (channels // substreams, spectra_per_heap, N_POLS, COMPLEX)
     data_type
-        Type of data to be transmitted by the F-Engine.
+        Type of the raw data transmitted by the F-Engine.
     channels
         Total number of channels output by this F-Engine.
     substreams

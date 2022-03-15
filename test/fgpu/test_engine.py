@@ -248,7 +248,6 @@ class TestEngine:
 
         n_out_streams = len(mock_send_stream)
         assert n_out_streams == 16, "Number of output streams does not match command line"
-
         out_config = spead2.recv.StreamConfig()
         out_tp = spead2.ThreadPool()
         heaps = []
@@ -268,8 +267,7 @@ class TestEngine:
 
             # Now, for the actual processing
             async for heap in stream:
-                changed = ig.update(heap)
-                assert set(changed.keys()) == {"timestamp", "feng_id", "frequency", "feng_raw"}
+                assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
                 assert ig["feng_id"].value == FENG_ID
                 if expected_timestamp is not None:
                     assert ig["timestamp"].value == expected_timestamp
