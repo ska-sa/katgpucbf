@@ -584,4 +584,24 @@ void correlate(Visibilities *visibilities, const Samples *samples, unsigned batc
     doCorrelateRectangle<nrFragmentsY, true, true, true, true>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 }
 
+// TODO: generalise to other values of NR_BITS
+extern "C" __global__
+__launch_bounds__(NR_WARPS * 32)
+void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned batches) {
+  const unsigned int stride = NR_CHANNELS *NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
+  const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= stride)
+    return;
+  long2 sum = make_long2(0, 0);
+  for (unsigned i = 0; i < batches; i++)
+  {
+    long2 value = in[i * stride + idx];
+    sum.x += value.x;
+    sum.y += value.y;
+  }
+  sum.x = llmin(llmax(sum.x, -INT_MAX), INT_MAX);
+  sum.y = llmin(llmax(sum.y, -INT_MAX), INT_MAX);
+  out[idx] = make_complex((int) sum.x, (int) sum.y);
+}
+
 } // extern "C++"

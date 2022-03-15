@@ -30,7 +30,7 @@ get_baseline_index = njit(Correlation.get_baseline_index)
 
 
 @njit(parallel=True)
-def correlate_host(input_array: np.ndarray, first_batch: int, last_batch: int) -> np.ndarray:
+def correlate_host(input_array: np.ndarray) -> np.ndarray:
     """Calculate correlation products on the host CPU.
 
     Parameters
@@ -47,27 +47,25 @@ def correlate_host(input_array: np.ndarray, first_batch: int, last_batch: int) -
         Correlation products or visibilities. Shape:
         (n_batches, n_chans, n_baselines, complexity)
     """
-    n_batches = input_array.shape[0]
     n_ants = input_array.shape[1]
     n_chans = input_array.shape[2]
     n_pols = input_array.shape[4]
     complexity = input_array.shape[5]
     n_baselines = n_ants * (n_ants + 1) * 2
-    output_array = np.zeros(shape=(n_batches, n_chans, n_baselines, complexity), dtype=np.int64)
-    for b in range(first_batch, last_batch):
-        for c in prange(n_chans):
-            for a2 in range(n_ants):
-                for a1 in range(a2 + 1):
-                    for p1 in range(n_pols):
-                        r1 = input_array[b, a1, c, :, p1, 0]
-                        i1 = input_array[b, a1, c, :, p1, 1]
-                        for p2 in range(n_pols):
-                            bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
-                            r2 = input_array[b, a2, c, :, p2, 0].astype(np.int64)
-                            i2 = input_array[b, a2, c, :, p2, 1].astype(np.int64)
+    output_array = np.zeros(shape=(n_chans, n_baselines, complexity), dtype=np.int64)
+    for c in prange(n_chans):
+        for a2 in range(n_ants):
+            for a1 in range(a2 + 1):
+                for p1 in range(n_pols):
+                    r1 = input_array[:, a1, c, :, p1, 0]
+                    i1 = input_array[:, a1, c, :, p1, 1]
+                    for p2 in range(n_pols):
+                        bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
+                        r2 = input_array[:, a2, c, :, p2, 0].astype(np.int64)
+                        i2 = input_array[:, a2, c, :, p2, 1].astype(np.int64)
 
-                            output_array[b, c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
-                            output_array[b, c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
+                        output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
+                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
 
     return output_array
 
@@ -119,23 +117,20 @@ def test_correlator(
     buf_visibilities_device = correlation.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
     # Set pre-existing values, to check that the computed values are added to them.
-    # We're not interested in testing overflow (64-bit outputs shouldn't overflow
-    # on the timescales they're being used with), so we reduce the range.
-    buf_visibilities_host[:] = rng.integers(
-        low=np.iinfo(buf_visibilities_host.dtype).min // 2,
-        high=np.iinfo(buf_visibilities_host.dtype).max // 2,
-        size=buf_visibilities_host.shape,
-        dtype=buf_visibilities_host.dtype,
-        endpoint=True,
-    )
+    buf_visibilities_host[:] = 0
 
-    calculated_visibilities_host = correlate_host(buf_samples_host, correlation.first_batch, correlation.last_batch)
+    calculated_visibilities_host = correlate_host(buf_samples_host[correlation.first_batch : correlation.last_batch])
     # Add buf_visibilities_host
-    summed_visibilities_host = calculated_visibilities_host + buf_visibilities_host
+    summed_visibilities_host = (
+        (calculated_visibilities_host + buf_visibilities_host)
+        .clip(np.iinfo(buf_visibilities_host.dtype).min + 1, np.iinfo(buf_visibilities_host.dtype).max)
+        .astype(buf_visibilities_host.dtype)
+    )
 
     buf_samples_device.set(command_queue, buf_samples_host)
     buf_visibilities_device.set(command_queue, buf_visibilities_host)
     correlation()
+    correlation.reduce()
     buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
     np.testing.assert_equal(buf_visibilities_host, summed_visibilities_host)

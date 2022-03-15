@@ -345,7 +345,9 @@ class XBEngine(DeviceServer):
             n_channels=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
         )
-        self.correlation = correlation_template.instantiate(self._proc_command_queue)
+        self.correlation = correlation_template.instantiate(
+            self._proc_command_queue, n_batches=heaps_per_fengine_per_chunk
+        )
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
@@ -364,7 +366,7 @@ class XBEngine(DeviceServer):
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
-                (self.heaps_per_fengine_per_chunk,) + self.correlation.slots["in_samples"].shape,  # type: ignore
+                self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
             rx_item = RxQueueItem(buffer_device)
@@ -381,7 +383,7 @@ class XBEngine(DeviceServer):
 
         for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
-                (self.heaps_per_fengine_per_chunk,) + self.correlation.slots["in_samples"].shape,  # type: ignore
+                self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
                 context=self.context,
             )
@@ -681,18 +683,13 @@ class XBEngine(DeviceServer):
             assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
+            self.correlation.bind(in_samples=rx_item.buffer_device)
             # The correlation kernel does not have the concept of a batch at
             # this stage, so the kernel needs to be run on each different batch
             # in the chunk.
+            self.correlation.first_batch = 0
             for i in range(self.heaps_per_fengine_per_chunk):
-                buffer_slice = katsdpsigproc.accel.DeviceArray(
-                    self.context,
-                    self.correlation.slots["in_samples"].shape,  # type: ignore
-                    self.correlation.slots["in_samples"].dtype,  # type: ignore
-                    raw=rx_item.buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
-                )
-                self.correlation.bind(in_samples=buffer_slice)
-                self.correlation()
+                self.correlation.last_batch = i + 1
 
                 # NOTE: The timestamp representing the end of an
                 # accumulation does not necessarily line up with the chunk
@@ -702,7 +699,8 @@ class XBEngine(DeviceServer):
                 # X-Engine auto-resync logic.
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
-
+                    self.correlation()
+                    self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
 
@@ -711,9 +709,12 @@ class XBEngine(DeviceServer):
                     tx_item.timestamp = next_heap_timestamp
                     self.correlation.bind(out_visibilities=tx_item.buffer_device)
                     self.correlation.zero_visibilities()
+                    self.correlation.first_batch = i + 1
 
                 current_timestamp += self.rx_heap_timestamp_step
 
+            if self.correlation.first_batch < self.correlation.last_batch:
+                self.correlation()
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
             rx_item.add_event(proc_event)

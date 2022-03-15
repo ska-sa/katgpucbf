@@ -133,7 +133,8 @@ class CorrelationTemplate:
                 f"-DNR_POLARIZATIONS={N_POLS}",
             ],
         )
-        self.kernel = program.get_kernel("correlate")
+        self.correlate_kernel = program.get_kernel("correlate")
+        self.reduce_kernel = program.get_kernel("reduce")
 
     def instantiate(self, command_queue: accel.AbstractCommandQueue, n_batches: int) -> "Correlation":
         """Create a :class:`Correlation` using this template to build the kernel."""
@@ -146,10 +147,13 @@ class Correlation(accel.Operation):
     Specifies the shape of the input sample and output visibility buffers
     required by the kernel. The parameters specified in the
     :class:`CorrelationTemplate` object are used to determine the
-    shape of the buffers.
+    shape of the buffers. There is an outer-most dimension called "batches",
+    over which the operation is parallelised. Not all batches need to be
+    processed every time: set the ``first_batch`` and ``last_batch``
+    attributes to control which batches will be computed.
 
     The input sample buffer must have the shape:
-    ``[n_ants][channels][spectra_per_heap][polarisations]``
+    ``[n_batches][n_ants][channels][spectra_per_heap][polarisations]``
 
     A complexity that is introduced by the Tensor-Core kernel is that the
     ``spectra_per_heap`` index is split over two different indices. The first
@@ -168,7 +172,8 @@ class Correlation(accel.Operation):
 
     The output visibility buffer must have the shape
     ``[channels][baselines][CPLX]``. In 8-bit mode, each element in this
-    visibility matrix is a 64-bit integer value.
+    visibility matrix is a 32-bit integer value. Before reading it, you
+    must call :meth:`reduce`.
 
     Currently only 8-bit input mode is supported.
     """
@@ -187,7 +192,7 @@ class Correlation(accel.Operation):
             accel.Dimension(N_POLS, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
-        output_data_dimensions = (
+        mid_data_dimensions = (
             accel.Dimension(n_batches),
             accel.Dimension(self.template.n_channels, exact=True),
             accel.Dimension(self.template.n_baselines * N_POLS * N_POLS, exact=True),
@@ -196,21 +201,22 @@ class Correlation(accel.Operation):
 
         # TODO: dtypes must depend on input bitwidth
         self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
-        self.slots["out_visibilities"] = accel.IOSlot(dimensions=output_data_dimensions, dtype=np.int64)
+        self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
+        self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
         self.first_batch = 0
         self.last_batch = n_batches
         self.n_batches = n_batches
 
     def _run(self) -> None:
-        """Run the correlation kernel and add the generated values to the out_visibilities buffer."""
+        """Run the correlation kernel and add the generated values to internal buffer."""
         if not 0 <= self.first_batch < self.last_batch <= self.n_batches:
             raise ValueError("Invalid batch range")
-        n_batches = self.last_batch - self.first_batch
+        n_batches = self.last_batch - self.first_batch  # Number of batches for this launch
         in_samples_buffer = self.buffer("in_samples")
-        out_visibilities_buffer = self.buffer("out_visibilities")
+        mid_visibilities_buffer = self.buffer("mid_visibilities")
         self.command_queue.enqueue_kernel(
-            self.template.kernel,
-            [out_visibilities_buffer.buffer, in_samples_buffer.buffer, np.uint32(self.first_batch)],
+            self.template.correlate_kernel,
+            [mid_visibilities_buffer.buffer, in_samples_buffer.buffer, np.uint32(self.first_batch)],
             # NOTE: Even though we are using CUDA, we follow OpenCL's grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
@@ -219,9 +225,23 @@ class Correlation(accel.Operation):
             local_size=(32, 2, 2),
         )
 
+    def reduce(self) -> None:
+        """Finalise computation of the output visibilities from the internal buffer."""
+        self.ensure_all_bound()
+        mid_visibilities_buffer = self.buffer("mid_visibilities")
+        out_visibilities_buffer = self.buffer("out_visibilities")
+        wgs = 128
+        self.command_queue.enqueue_kernel(
+            self.template.reduce_kernel,
+            [out_visibilities_buffer.buffer, mid_visibilities_buffer.buffer, np.uint32(self.n_batches)],
+            global_size=(accel.roundup(int(np.product(out_visibilities_buffer.shape)), wgs), 1, 1),
+            local_size=(wgs, 1, 1),
+        )
+
     def zero_visibilities(self) -> None:
-        """Zero all the values in the out_visibilities buffer."""
-        self.buffer("out_visibilities").zero(self.command_queue)
+        """Zero all the values in the internal buffer."""
+        self.ensure_all_bound()
+        self.buffer("mid_visibilities").zero(self.command_queue)
 
     @staticmethod
     def get_baseline_index(ant1, ant2) -> int:
