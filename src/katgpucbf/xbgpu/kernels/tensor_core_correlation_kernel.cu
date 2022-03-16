@@ -601,6 +601,7 @@ void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned bat
     sum.x += value.x;
     sum.y += value.y;
   }
+  // Apply saturation
   sum.x = llmin(llmax(sum.x, -INT_MAX), INT_MAX);
   sum.y = llmin(llmax(sum.y, -INT_MAX), INT_MAX);
   out[idx] = make_complex((int) sum.x, (int) sum.y);
