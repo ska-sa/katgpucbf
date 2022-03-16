@@ -18,6 +18,7 @@
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
+from katsdpsigproc.accel import DeviceArray
 from numba import njit, prange
 
 from katgpucbf.xbgpu.correlation import Correlation, CorrelationTemplate, device_filter
@@ -70,6 +71,22 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     return output_array
 
 
+def fill_random(rng: np.random.Generator, buf: DeviceArray, command_queue: AbstractCommandQueue) -> None:
+    """Fill a device buffer with random values.
+
+    The buffer must have an integer dtype.
+    """
+    host_buf = buf.empty_like()
+    host_buf[:] = rng.integers(
+        low=np.iinfo(host_buf.dtype).min,
+        high=np.iinfo(host_buf.dtype).max,
+        size=host_buf.shape,
+        dtype=host_buf.dtype,
+        endpoint=True,
+    )
+    buf.set(command_queue, host_buf)
+
+
 @pytest.mark.combinations(
     "num_ants, num_channels, num_spectra_per_heap",
     test_parameters.array_size,
@@ -88,6 +105,7 @@ def test_correlator(
     # move it into a test fixture.
     n_chans_per_stream = num_channels // num_ants
     n_batches = 7
+    batch_ranges = [(1, 5), (3, 4), (0, 7)]
 
     template = CorrelationTemplate(
         context, n_ants=num_ants, n_channels=n_chans_per_stream, n_spectra_per_heap=num_spectra_per_heap
@@ -95,9 +113,6 @@ def test_correlator(
 
     correlation = template.instantiate(command_queue, n_batches)
     correlation.ensure_all_bound()
-    correlation.zero_visibilities()
-    correlation.first_batch = 1
-    correlation.last_batch = 5
 
     buf_samples_device = correlation.buffer("in_samples")
     buf_samples_host = buf_samples_device.empty_like()
@@ -116,21 +131,24 @@ def test_correlator(
 
     buf_visibilities_device = correlation.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
-    # Set pre-existing values, to check that the computed values are added to them.
-    buf_visibilities_host[:] = 0
+    # Fill the buffers with garbage, to ensure that the result does not depend
+    # on the initial values.
+    fill_random(rng, correlation.buffer("mid_visibilities"), command_queue)
+    fill_random(rng, buf_visibilities_device, command_queue)
 
-    calculated_visibilities_host = correlate_host(buf_samples_host[correlation.first_batch : correlation.last_batch])
-    # Add buf_visibilities_host
-    summed_visibilities_host = (
-        (calculated_visibilities_host + buf_visibilities_host)
-        .clip(np.iinfo(buf_visibilities_host.dtype).min + 1, np.iinfo(buf_visibilities_host.dtype).max)
-        .astype(buf_visibilities_host.dtype)
-    )
+    # Calculate expected values
+    calculated_visibilities_host = np.zeros(buf_visibilities_host.shape, buf_visibilities_host.dtype)
+    for (first_batch, last_batch) in batch_ranges:
+        calculated_visibilities_host += correlate_host(buf_samples_host[first_batch:last_batch])
 
+    # Calculate using the kernel
     buf_samples_device.set(command_queue, buf_samples_host)
-    buf_visibilities_device.set(command_queue, buf_visibilities_host)
-    correlation()
+    correlation.zero_visibilities()
+    for (first_batch, last_batch) in batch_ranges:
+        correlation.first_batch = first_batch
+        correlation.last_batch = last_batch
+        correlation()
     correlation.reduce()
     buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
-    np.testing.assert_equal(buf_visibilities_host, summed_visibilities_host)
+    np.testing.assert_equal(buf_visibilities_host, calculated_visibilities_host)
