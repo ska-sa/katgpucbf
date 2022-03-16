@@ -589,14 +589,14 @@ void correlate(Visibilities *visibilities, const Samples *samples, unsigned batc
 // TODO: generalise to other values of NR_BITS
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32)
-void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned batches) {
+void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned batches)
+{
   const unsigned int stride = NR_CHANNELS *NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
   const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= stride)
     return;
   long2 sum = make_long2(0, 0);
-  for (unsigned i = 0; i < batches; i++)
-  {
+  for (unsigned i = 0; i < batches; i++) {
     long2 value = in[i * stride + idx];
     sum.x += value.x;
     sum.y += value.y;
