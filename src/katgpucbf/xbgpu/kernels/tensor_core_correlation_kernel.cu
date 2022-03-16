@@ -591,7 +591,7 @@ extern "C" __global__
 __launch_bounds__(NR_WARPS * 32)
 void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned batches)
 {
-  const unsigned int stride = NR_CHANNELS *NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
+  const unsigned int stride = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
   const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= stride)
     return;
