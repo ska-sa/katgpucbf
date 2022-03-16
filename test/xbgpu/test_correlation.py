@@ -152,3 +152,44 @@ def test_correlator(
     buf_visibilities_device.get(command_queue, buf_visibilities_host)
 
     np.testing.assert_equal(buf_visibilities_host, calculated_visibilities_host)
+
+
+def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
+    """Test that values that overflow are saturated."""
+    template = CorrelationTemplate(context, n_ants=2, n_channels=4, n_spectra_per_heap=256)
+    correlation = template.instantiate(command_queue, 2)
+    correlation.ensure_all_bound()
+
+    # Fill the source with maximal values, to ensure saturation is reach quickly
+    buf_samples_device = correlation.buffer("in_samples")
+    buf_samples_host = buf_samples_device.empty_like()
+    in_dtype = buf_samples_device.dtype
+    high = np.iinfo(in_dtype).max
+    rng = np.random.default_rng(seed=2021)
+    buf_samples_host[:] = rng.choice(np.array([-high, high], dtype=in_dtype), size=buf_samples_host.shape)
+    buf_samples_device.set(command_queue, buf_samples_host)
+
+    buf_visibilities_device = correlation.buffer("out_visibilities")
+    out_dtype = buf_visibilities_device.dtype
+    iters = np.iinfo(out_dtype).max // (2 * high * high) + 1  # Enough to saturate
+
+    correlation.zero_visibilities()
+    correlation.first_batch = 0
+    correlation.last_batch = 1
+    for _ in range(iters):
+        correlation()
+    # Do one iteration of the other batch, which will pull some values back
+    # into range.
+    correlation.first_batch = 1
+    correlation.last_batch = 2
+    correlation()
+    correlation.reduce()
+    buf_visibilities_host = buf_visibilities_device.get(command_queue)
+
+    expected = correlate_host(buf_samples_host[0:1]) * iters + correlate_host(buf_samples_host[1:2])
+    # Check that saturation does in fact occur
+    assert np.sum(expected < np.iinfo(out_dtype).min) > 0
+    assert np.sum(expected > np.iinfo(out_dtype).max) > 0
+    expected = np.clip(expected, -np.iinfo(out_dtype).max, np.iinfo(out_dtype).max)
+
+    np.testing.assert_equal(buf_visibilities_host, expected)
