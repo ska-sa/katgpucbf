@@ -155,12 +155,9 @@ class Correlation(accel.Operation):
     The input sample buffer must have the shape:
     ``[n_batches][n_ants][channels][spectra_per_heap][polarisations]``
 
-    A complexity that is introduced by the Tensor-Core kernel is that the
-    ``spectra_per_heap`` index is split over two different indices. The first
-    index ranges from ``0`` to ``spectra_per_heap//times_per_block`` and the
-    second index ranges from ``0`` to ``times_per_block``. Times per block is
-    calculated by the :class:`CorrelationTemplate`. In 8-bit input mode,
-    ``times_per_block`` is equal to 16.
+    There is an alignment requirement for ``spectra_per_heap`` due to the
+    implementation details of the kernel. For 8-bit input mode,
+    ``spectra_per_heap`` must be a multiple of 16.
 
     Each input element is a complex 8-bit integer sample. :mod:`.numpy` does not
     support 8-bit complex numbers, so the dimensionality is extended by 1, with
@@ -171,9 +168,12 @@ class Correlation(accel.Operation):
     ``-128i`` into the kernel will produce incorrect values at the output.
 
     The output visibility buffer must have the shape
-    ``[channels][baselines][CPLX]``. In 8-bit mode, each element in this
-    visibility matrix is a 32-bit integer value. Before reading it, you
-    must call :meth:`reduce`.
+    ``[channels][baselines][COMPLEX]``. In 8-bit mode, each element in this
+    visibility matrix is a 32-bit integer value.
+
+    Calling this object does not directly update the output. Instead, it
+    updates an intermediate buffer (called ``mid_visibilities``). To produce
+    the output, call :meth:`reduce`.
 
     Currently only 8-bit input mode is supported.
     """
