@@ -104,15 +104,15 @@ The timestamp difference between two consecutive heaps from the same F-Engine is
 A :dfn:`batch` of heaps is a collection of heaps from different F-Engines with the same
 timestamp. A :dfn:`chunk` consists of multiple consecutive batches (the number is given
 by the option :option:`!--heaps-per-fengine-per-chunk`). Correlation generally occurs on
-a chunk at a time, with the batches of the chunk being processed in parallel.
-To avoid race conditions in accumulation, there are multiple accumulators, and
-batch *i* of a chunk uses accumulator *i*.
-is then accumulated. An accumulation period is called an :dfn:`accumulation` and
-the data output from that accumulation is normally called a :dfn:`dump` — the terms
-are used interchangeably. Once all the data for a dump has been correlated, the
-separate accumulators are added together ("reduced") to produce a final result.
-This reduction process also converts from 64-bit to 32-bit integers,
-saturating if necessary.
+a chunk at a time, accumulating results, with the batches of the chunk being
+processed in parallel.  To avoid race conditions in accumulation, there are
+multiple accumulators, and batch *i* of a chunk uses accumulator *i*.
+An accumulation period is called an :dfn:`accumulation` and the data output
+from that accumulation is normally called a :dfn:`dump` — the terms are used
+interchangeably. Once all the data for a dump has been correlated, the separate
+accumulators are added together ("reduced") to produce a final result.  This
+reduction process also converts from 64-bit to 32-bit integers, saturating if
+necessary.
 
 The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
