@@ -186,35 +186,35 @@ class TestStream:
             # Interleave the sequences
             heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
 
-        # Heap with no payload - representing any sort of metadata heap such as descriptors
-        heap = spead2.send.Heap(FLAVOUR)
-        await send_stream.async_send_heap(heap)
-
-        # Send a heap with a bad F-engine ID
-        heap = spead2.send.Heap(FLAVOUR)
-        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=first_timestamp))
-        heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=5))
-        heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=0))
-        heap.add_item(
-            spead2.Item(
-                FENG_RAW_ID,
-                "",
-                "",
-                shape=(layout.heap_bytes,),
-                dtype=np.int8,
-                value=np.zeros((layout.heap_bytes,), dtype=np.int8),
-            )
-        )
-        await send_stream.async_send_heap(heap)
-
-        # Now the bulk of the actual data
-        for heap in heaps:
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            # Heap with no payload - representing any sort of metadata heap such as descriptors
+            heap = spead2.send.Heap(FLAVOUR)
             await send_stream.async_send_heap(heap)
 
-        queue.stop()  # Flushes out the receive stream
-        seen = 0
-        empty_chunks = 0
-        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            # Send a heap with a bad F-engine ID
+            heap = spead2.send.Heap(FLAVOUR)
+            heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=first_timestamp))
+            heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=5))
+            heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=0))
+            heap.add_item(
+                spead2.Item(
+                    FENG_RAW_ID,
+                    "",
+                    "",
+                    shape=(layout.heap_bytes,),
+                    dtype=np.int8,
+                    value=np.zeros((layout.heap_bytes,), dtype=np.int8),
+                )
+            )
+            await send_stream.async_send_heap(heap)
+
+            # Now the bulk of the actual data
+            for heap in heaps:
+                await send_stream.async_send_heap(heap)
+
+            queue.stop()  # Flushes out the receive stream
+            seen = 0
+            empty_chunks = 0
             async for chunk in recv_chunks(stream):
                 assert isinstance(chunk, Chunk)
                 if not np.any(chunk.present):

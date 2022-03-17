@@ -32,7 +32,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, N_POLS
-from ..recv import BaseLayout, Chunk, StatsToCounters
+from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import TIMESTAMP_ID
@@ -50,27 +50,28 @@ chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], n
 bytes_counter = Counter(
     "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
 )
-too_old_heaps_counter = Counter(
-    "input_too_old_heaps", "number of heaps that arrived too late to be processed", ["pol"], namespace=METRIC_NAMESPACE
-)
 missing_heaps_counter = Counter(
     "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
-)
-metadata_heaps_counter = Counter(
-    "input_metadata_heaps", "number of heaps not containing payload", ["pol"], namespace=METRIC_NAMESPACE
-)
-bad_timestamp_heaps_counter = Counter(
-    "input_bad_timestamp_heaps", "timestamp not a multiple of samples per packet", ["pol"], namespace=METRIC_NAMESPACE
 )
 _PER_POL_COUNTERS = [
     heaps_counter,
     chunks_counter,
     bytes_counter,
-    too_old_heaps_counter,
     missing_heaps_counter,
-    metadata_heaps_counter,
-    bad_timestamp_heaps_counter,
 ]
+
+stats_collector = StatsCollector(
+    {
+        "too_old_heaps": ("input_too_old_heaps", "number of heaps that arrived too late to be processed"),
+        "katgpucbf.metadata_heaps": ("input_metadata_heaps", "number of heaps not containing payload"),
+        "katgpucbf.bad_timestamp_heaps": (
+            "input_bad_timestamp_heaps",
+            "timestamp not a multiple of samples per packet",
+        ),
+    },
+    labelnames=["pol"],
+    namespace=METRIC_NAMESPACE,
+)
 
 
 class _Statistic(IntEnum):
@@ -170,7 +171,7 @@ def make_streams(
         for counter in _PER_POL_COUNTERS:
             counter.labels(pol)
 
-    return [
+    streams = [
         make_base_stream(
             layout=layout,
             spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
@@ -183,6 +184,9 @@ def make_streams(
         )
         for pol in range(N_POLS)
     ]
+    for pol, stream in enumerate(streams):
+        stats_collector.add_stream(stream, [str(pol)])
+    return streams
 
 
 async def chunk_sets(
@@ -213,17 +217,6 @@ async def chunk_sets(
     buf: List[Deque[Chunk]] = [deque() for _ in streams]
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
-    stats_to_counters = [
-        StatsToCounters(
-            {
-                "too_old_heaps": too_old_heaps_counter.labels(pol),
-                "katgpucbf.metadata_heaps": metadata_heaps_counter.labels(pol),
-                "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter.labels(pol),
-            },
-            stream.config,
-        )
-        for pol, stream in enumerate(streams)
-    ]
 
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
     # These duplicate the Prometheus counters, because prometheus_client
@@ -254,11 +247,6 @@ async def chunk_sets(
                 layout.chunk_heaps,
                 lost,
             )
-
-            # Update stream statistics. Note that these are not necessarily
-            # synchronised with the chunk.
-            for updater, stream in zip(stats_to_counters, streams):
-                updater.update(stream.stats)
 
             buf[pol].append(chunk)
 
@@ -296,6 +284,7 @@ async def chunk_sets(
 
                 yield out
     finally:
+        stats_collector.update()  # Ensure final stats updates are captured
         for b in buf:
             for c in b:
                 streams[c.stream_id].add_free_chunk(c)
