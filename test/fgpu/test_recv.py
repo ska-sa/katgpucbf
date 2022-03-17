@@ -295,6 +295,10 @@ class TestChunkSets:
         with caplog.at_level(logging.WARNING, logger="katgpucbf.fgpu.recv"), PromDiff(
             namespace=METRIC_NAMESPACE
         ) as prom_diff:
+            # We're not using make_stream, so we have to register the stream with
+            # the stats collector manually.
+            for pol, stream in enumerate(streams):
+                recv.stats_collector.add_stream(stream, labels=[str(pol)])
             sets = [
                 chunk_set
                 async for chunk_set in recv.chunk_sets(cast(List[spead2.recv.ChunkRingStream], streams), layout)

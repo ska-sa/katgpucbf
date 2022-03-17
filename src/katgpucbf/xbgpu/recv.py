@@ -24,14 +24,14 @@ from typing import AsyncGenerator
 import numba
 import numpy as np
 import spead2.recv.asyncio
-import spead2.send
+import spead2.send.asyncio
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import BaseLayout, Chunk, StatsToCounters
+from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
@@ -40,22 +40,23 @@ from . import METRIC_NAMESPACE
 heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
 bytes_counter = Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE)
-incomplete_heaps_counter = Counter(
-    "input_incomplete_heaps", "number of heaps only partially received", namespace=METRIC_NAMESPACE
-)
-too_old_heaps_counter = Counter(
-    "input_too_old_heaps", "number of heaps that arrived too late to be processed", namespace=METRIC_NAMESPACE
-)
 missing_heaps_counter = Counter(
     "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
 )
-metadata_heaps_counter = Counter(
-    "input_metadata_heaps", "number of heaps not containing payload", namespace=METRIC_NAMESPACE
+
+stats_collector = StatsCollector(
+    {
+        "incomplete_heaps_evicted": ("input_incomplete_heaps", "number of heaps only partially received"),
+        "too_old_heaps": ("input_too_old_heaps", "number of heaps that arrived too late to be processed"),
+        "katgpucbf.metadata_heaps": ("input_metadata_heaps", "number of heaps not containing payload"),
+        "katgpucbf.bad_timestamp_heaps": (
+            "input_bad_timestamp_heaps",
+            "timestamp is not a multiple of expected step size",
+        ),
+        "katgpucbf.bad_feng_id_heaps": ("input_bad_feng_id_heaps", "fengine ID is out of range"),
+    },
+    namespace=METRIC_NAMESPACE,
 )
-bad_timestamp_heaps_counter = Counter(
-    "input_bad_timestamp_heaps", "timestamp is not a multiple of expected step size", namespace=METRIC_NAMESPACE
-)
-bad_feng_id_heaps_counter = Counter("input_bad_feng_id_heaps", "fengine ID is out of range", namespace=METRIC_NAMESPACE)
 
 
 class _Statistic(IntEnum):
@@ -179,7 +180,7 @@ def make_stream(
         expressed in ADC sample ticks.
     """
     rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
-    return make_base_stream(
+    stream = make_base_stream(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_active_chunks=math.ceil(rx_reorder_tol / rx_heap_timestamp_step / layout.heaps_per_fengine_per_chunk) + 1,
@@ -192,6 +193,8 @@ def make_stream(
         max_heaps=layout.n_ants * (spead2.send.StreamConfig.DEFAULT_BURST_SIZE // layout.heap_bytes + 1) * 128,
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
     )
+    stats_collector.add_stream(stream)
+    return stream
 
 
 async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chunk, None]:
@@ -199,14 +202,6 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
 
     The returned chunks are yielded from this asynchronous generator.
     """
-    counter_map = {
-        "incomplete_heaps_evicted": incomplete_heaps_counter,
-        "too_old_heaps": too_old_heaps_counter,  # TODO: This counter doesn't appear to be used?
-        "katgpucbf.metadata_heaps": metadata_heaps_counter,
-        "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter,
-        "katgpucbf.bad_feng_id_heaps": bad_feng_id_heaps_counter,
-    }
-    stats_to_counters = StatsToCounters(counter_map, stream.config)
     ringbuffer = stream.data_ringbuffer
     assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
     async for chunk in ringbuffer:
@@ -220,9 +215,6 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
         heaps_counter.inc(expected_heaps)
         chunks_counter.inc(1)
         bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
-        # NOTE: this won't be synchronised with the chunk, as more heaps may
-        # have arrived after the chunk was pushed to the ringbuffer. But on
-        # the time scales at which Prometheus scrapes it will be close.
-        stats_to_counters.update(stream.stats)
 
         yield chunk
+    stats_collector.update()  # Ensure final stats updates are captured
