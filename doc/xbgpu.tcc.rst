@@ -186,7 +186,9 @@ Rather than perform loads using the natural type of the samples, they are
 performed using wide types like :c:type:`int4`, presumably to make more
 efficient use of the memory type, and type-casts pointers to access the raw
 memory. It should be noted that this sort of type-punning is `undefined
-behaviour`_ in C++, and it should eventually be replaced by something safer.
+behaviour`_ in C++, but there doesn't seem to be a safer alternative
+(``memcpy`` is safe but it works one byte at a time, which destroyed
+performance).
 
 .. _undefined behaviour: https://gist.github.com/shafik/848ae25ee209f698763cffee272a58f8
 
@@ -198,6 +200,13 @@ access is outside the bounds, the data is not loaded and left as zero.
 
 Asynchronous loading
 ^^^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+   The asynchronous loading support has been removed in the katgpucbf
+   fork, as it was not really compatible with the axis reordering. This
+   section is left as a reference should it be brought back in future.
+
 When there is support in hardware (Compute Capability 8.0 or later, i.e.,
 Ampere) and a new enough CUDA version, an asynchronous memory copy is used for
 extra latency hiding (or possibly to reduce register pressure). It's
@@ -227,7 +236,7 @@ Result storage
 The result storage is particularly complicated in an attempt to optimise the
 process. CUDA says that the :c:type:`fragment` type has
 implementation-defined memory layout, and the individual matrix elements can
-only be portable read by using :c:func:`store_matrix_sync` to write the
+only be portably read by using :c:func:`store_matrix_sync` to write the
 results to shared or global memory. The memory layouts supported by this
 function don't correspond to the packed triangular shape the kernel wants, so
 some extra steps are required.
