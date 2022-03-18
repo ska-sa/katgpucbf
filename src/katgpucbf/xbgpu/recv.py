@@ -16,7 +16,6 @@
 
 """SPEAD receiver utilities."""
 import functools
-import math
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import AsyncGenerator
@@ -161,7 +160,7 @@ class Layout(BaseLayout):
 
 
 def make_stream(
-    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: int, rx_reorder_tol: int
+    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: int, max_active_chunks: int
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
@@ -175,15 +174,13 @@ def make_stream(
         Output ringbuffer to which chunks will be sent.
     src_affinity
         CPU core affinity for the worker thread.
-    rx_reorder_tol
-        Maximum tolerance for jitter between received packets, as a time
-        expressed in ADC sample ticks.
+    max_active_chunks
+        Maximum number of chunks under construction.
     """
-    rx_heap_timestamp_step = layout.n_channels_per_stream * layout.n_ants * 2 * layout.n_spectra_per_heap
     stream = make_base_stream(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
-        max_active_chunks=math.ceil(rx_reorder_tol / rx_heap_timestamp_step / layout.heaps_per_fengine_per_chunk) + 1,
+        max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
         affinity=src_affinity,
         # max_heaps is set quite high because timing jitter/bursting means there
