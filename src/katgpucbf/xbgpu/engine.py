@@ -49,7 +49,7 @@ import numpy as np
 import spead2
 from aiokatcp import DeviceServer
 
-from .. import COMPLEX, N_POLS, __version__
+from .. import __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
@@ -283,12 +283,6 @@ class XBEngine(DeviceServer):
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
-
-        # The number of bytes for a single batch of F-Engines. A chunk
-        # consists of multiple batches.
-        self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
-        )
 
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
