@@ -326,7 +326,7 @@ class XBEngine(DeviceServer):
             layout=layout,
             data_ringbuffer=self.ringbuffer,
             src_affinity=src_affinity,
-            rx_reorder_tol=rx_reorder_tol,
+            max_active_chunks=self.max_active_chunks,
         )
 
         self.context = context
