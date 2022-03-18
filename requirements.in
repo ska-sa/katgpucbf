@@ -1,7 +1,7 @@
 aiohttp
 aiokatcp
 dask
-katsdpservices
+katsdpservices[aiomonitor]
 katsdpsigproc[CUDA]>=1.4.2
 katsdptelstate
 numpy

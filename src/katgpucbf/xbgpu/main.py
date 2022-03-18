@@ -38,6 +38,7 @@ from typing import List, Optional
 import katsdpsigproc.accel
 import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
+from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
@@ -77,6 +78,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Network port on which to serve Prometheus metrics [none]",
     )
+    add_aiomonitor_arguments(parser)
     parser.add_argument(
         "--adc-sample-rate",
         type=float,
@@ -90,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         help="Target transmission rate faster than ADC sample rate by this factor. "
         "Set to zero to send as fast as possible. [%(default)s]",
     )
-    parser.add_argument("--array-size", type=int, help="Number of antennas in the array.")
+    parser.add_argument("--array-size", type=int, required=True, help="Number of antennas in the array.")
     parser.add_argument(
         "--channels",
         type=int,
@@ -327,11 +329,12 @@ async def async_main(args: argparse.Namespace) -> None:
 
     await xbengine.start()
 
-    await asyncio.gather(
-        asyncio.create_task(xbengine.join()),
-        descriptor_task,
-        return_exceptions=True,
-    )
+    with start_aiomonitor(asyncio.get_running_loop(), args, locals()):
+        await asyncio.gather(
+            asyncio.create_task(xbengine.join()),
+            descriptor_task,
+            return_exceptions=True,
+        )
 
     if prometheus_server:
         await prometheus_server.close()
