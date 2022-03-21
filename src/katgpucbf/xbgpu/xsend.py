@@ -357,7 +357,7 @@ class XSend:
 
     async def get_free_heap(self) -> BufferWrapper:
         """
-        Return a :class:BufferWrapper` object from the internal fifo queue when one is available.
+        Return a :class:`BufferWrapper` object from the internal fifo queue when one is available.
 
         There are a limited number of BufferWrapper in existence and
         they are all stored with a future object. If the future is complete,
