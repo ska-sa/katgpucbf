@@ -279,7 +279,7 @@ class XSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + XSend.header_size,
-            max_heaps=self._n_send_heaps_in_flight,
+            max_heaps=self._n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )
@@ -376,7 +376,7 @@ class XSend:
         await asyncio.wait([future])
         return buffer_wrapper
 
-    def send_descriptor_heap(self) -> None:
+    async def send_descriptor_heap(self) -> None:
         """
         Send the SPEAD descriptor over the spead2 transport.
 
@@ -387,12 +387,8 @@ class XSend:
 
         This function has no associated unit test - it will likely need to be
         revisited later as its need and function become clear.
-
-        .. todo::
-            This async_send_heap should really be await'ed.
         """
-        if self.tx_enabled:
-            self.source_stream.async_send_heap(self.descriptor_heap)
+        await self.source_stream.async_send_heap(self.descriptor_heap)
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""

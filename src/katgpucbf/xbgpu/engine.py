@@ -806,14 +806,19 @@ class XBEngine(DeviceServer):
 
     async def run_descriptors_loop(self, interval_s: float) -> None:
         """
-        Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
+        Send the Baseline Correlation Products descriptors every `interval_s` seconds.
 
         This function is not part of the main run function as we do not want it
         running during the unit tests.
         """
         while True:
-            self.send_stream.send_descriptor_heap()
-            await asyncio.sleep(interval_s)
+            # Send the descriptor heap concurrently with the sleep, so that if
+            # it takes a while (because there is data to send) it doesn't delay
+            # the next iteration.
+            await asyncio.gather(
+                asyncio.sleep(interval_s),
+                self.send_stream.send_descriptor_heap(),
+            )
 
     async def request_capture_start(self, ctx) -> None:
         """Start transmission of this baseline-correlation-products stream."""
