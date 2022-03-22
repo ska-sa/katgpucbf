@@ -40,7 +40,6 @@ location in the process, thereby halving the memory bandwidth required to send.
 
 import asyncio
 import math
-import queue
 from typing import Callable, Final, List, Sequence, Tuple
 
 import katsdpsigproc
@@ -242,10 +241,7 @@ class XSend:
 
         self.context: Final[katsdpsigproc.abc.AbstractContext] = context
 
-        # TODO: There may be scope to use asyncio queues here instead - need to figure it out
-        self._heaps_queue: queue.Queue[Tuple[asyncio.Future, BufferWrapper]] = queue.Queue(
-            maxsize=self._n_send_heaps_in_flight
-        )
+        self._heaps_queue: asyncio.Queue[Tuple[asyncio.Future, BufferWrapper]] = asyncio.Queue()
         self.buffers: List[accel.HostArray] = []
 
         for _ in range(self._n_send_heaps_in_flight):
@@ -259,7 +255,7 @@ class XSend:
             dummy_future: asyncio.Future = asyncio.Future()
             dummy_future.set_result("")
 
-            self._heaps_queue.put((dummy_future, BufferWrapper(buffer)))
+            self._heaps_queue.put_nowait((dummy_future, BufferWrapper(buffer)))
 
             self.buffers.append(buffer)
 
@@ -342,7 +338,7 @@ class XSend:
             heap_to_send.repeat_pointers = True
 
             future = self.source_stream.async_send_heap(heap_to_send)
-            self._heaps_queue.put((future, buffer_wrapper))
+            self._heaps_queue.put_nowait((future, buffer_wrapper))
             # NOTE: It's not strictly true to say that the data has been sent at
             # this point; it's only been queued for sending. But it should be close
             # enough for monitoring data rates at the granularity that this is
@@ -353,7 +349,7 @@ class XSend:
             # :meth:`get_free_heap` still needs to await some Future before
             # returning a buffer_wrapper.
             flush_stream_task = asyncio.create_task(self.source_stream.async_flush())
-            self._heaps_queue.put((flush_stream_task, buffer_wrapper))
+            self._heaps_queue.put_nowait((flush_stream_task, buffer_wrapper))
 
     async def get_free_heap(self) -> BufferWrapper:
         """
@@ -372,7 +368,7 @@ class XSend:
         buffer_wrapper
             Free buffer wrapped in a :class:`BufferWrapper`.
         """
-        future, buffer_wrapper = self._heaps_queue.get()
+        future, buffer_wrapper = await self._heaps_queue.get()
         await asyncio.wait([future])
         return buffer_wrapper
 
