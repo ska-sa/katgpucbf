@@ -16,7 +16,7 @@ bandwidth will most likely need to be reduced. Pass :option:`!--ibv` to
 use the ibverbs acceleration.
 
 When using multiple processes, it is usually necessary to synchronise them.
-The :option:`--sync-time` specifies a time (in the past) that will correspond
+The :option:`!--sync-time` specifies a time (in the past) that will correspond
 to a zero timestamp. The synchronisation is accurate to about a millisecond,
 provided that all threads are pinned to specific CPU cores and real-time
 scheduling is used to prevent other tasks from sharing those cores. Streams
@@ -25,7 +25,7 @@ be perfectly synchronised as they leave the NIC (but could be desynchronised
 by a multi-path network).
 
 By default the content of the signal is a sine wave with a fixed frequency.
-However, the signal is highly configurable with the :option:`--signals`
+However, the signal is highly configurable with the :option:`!--signals`
 option. A domain-specific language (DSL) allows continuous waves and Gaussian
 noise to be combined with basic operators. See :func:`.parse_signal` for a
 specification of this DSL. As an example, the following specification defines
