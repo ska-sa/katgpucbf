@@ -17,8 +17,11 @@
 """Shared utilities for receiving SPEAD data."""
 
 import ctypes
+import time
+import weakref
 from abc import ABC, abstractmethod
-from typing import List, Mapping, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 import numba
 import numpy as np
@@ -26,7 +29,8 @@ import scipy
 import spead2.recv
 import spead2.recv.asyncio
 from numba import types
-from prometheus_client import Counter
+from prometheus_client import REGISTRY, CollectorRegistry, Metric
+from prometheus_client.core import CounterMetricFamily
 
 user_data_type = types.Record.make_c_struct(
     [
@@ -56,30 +60,123 @@ class Chunk(spead2.recv.Chunk):
         self.timestamp = 0  # Actual value filled in when chunk received
 
 
-class StatsToCounters:
-    """Reflect stream statistics as Prometheus Counters.
+class StatsCollector:
+    """Collect statistics from spead2 streams as Prometheus metrics."""
 
-    This class tracks the last-known value of each statistic for the
-    corresponding stream.
+    @dataclass
+    class _StreamInfo:
+        """Information about a single registered stream."""
 
-    Parameters
-    ----------
-    counter_map
-        Dictionary that maps a stream statistic (by name) to a counter.
-    config
-        Configuration of the stream for which the statistics will be retrieved.
-    """
+        stream: "weakref.ReferenceType[spead2.recv.ChunkRingStream]"
+        indices: List[int]  # Indices of counters, in the order given by counter_map
+        prev: List[int]  # Amounts already counted
 
-    def __init__(self, counter_map: Mapping[str, Counter], config: spead2.recv.StreamConfig) -> None:
-        self._updates = [(config.get_stat_index(name), counter) for name, counter in counter_map.items()]
-        self._current = [0] * len(self._updates)
+    class _LabelSet:
+        """Information shared by all streams with the same set of labels."""
 
-    def update(self, stats: spead2.recv.StreamStats) -> None:
-        """Update the counters based on the current stream statistics."""
-        for i, (index, counter) in enumerate(self._updates):
-            new = stats[index]
-            counter.inc(new - self._current[i])
-            self._current[i] = new
+        labels: Tuple[str, ...]
+        totals: Dict[str, int]  # sum over all streams, indexed by stat name
+        created: float  # time of creation
+        streams: List["StatsCollector._StreamInfo"]
+
+        def __init__(self, labels: Tuple[str, ...], stat_names: Iterable[str]) -> None:
+            self.labels = labels
+            self.totals = {stat_name: 0 for stat_name in stat_names}
+            self.created = time.time()
+            self.streams = []
+
+        def add_stream(self, stream: spead2.recv.ChunkRingStream) -> None:
+            """Register a new stream."""
+            config = stream.config
+            indices = [config.get_stat_index(name) for name in self.totals.keys()]
+            # Get the current statistics and immediately update with them
+            stats = stream.stats
+            prev = []
+            for i, stat_name in enumerate(self.totals.keys()):
+                cur = stats[indices[i]]
+                self.totals[stat_name] += cur
+                prev.append(cur)
+            self.streams.append(StatsCollector._StreamInfo(weakref.ref(stream), indices, prev))
+
+        def update(self) -> None:
+            """Fetch statistics from all streams and update totals."""
+            # We build a new copy of the streams list which excludes any that
+            # were garbage collected.
+            new_streams = []
+            for stream_info in self.streams:
+                stream = stream_info.stream()
+                if stream is not None:
+                    new_streams.append(stream_info)
+                    stats = stream.stats
+                    for i, stat_name in enumerate(self.totals.keys()):
+                        cur = stats[stream_info.indices[i]]
+                        self.totals[stat_name] += cur - stream_info.prev[i]
+                        stream_info.prev[i] = cur
+            self.streams = new_streams
+
+    @staticmethod
+    def _build_full_name(namespace: str, name: str) -> str:
+        """Combine the (optional) namespace with the name."""
+        full_name = ""
+        if namespace:
+            full_name += namespace + "_"
+        full_name += name
+        return full_name
+
+    def __init__(
+        self,
+        counter_map: Mapping[str, Tuple[str, str]],
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        registry: CollectorRegistry = REGISTRY,
+    ) -> None:
+        self._counter_map = {
+            stat_name: (self._build_full_name(namespace, name), description)
+            for stat_name, (name, description) in counter_map.items()
+        }
+        self._labelnames = tuple(labelnames)
+        self._label_sets: Dict[Tuple[str, ...], "StatsCollector._LabelSet"] = {}
+        if registry:
+            registry.register(self)
+
+    def update(self) -> None:
+        """Update the internal totals from the streams.
+
+        This is done automatically by :meth:`collect`, but it can also be
+        called explicitly. This may be useful to do just before a stream
+        goes out of scope, to ensure that counter updates since the last
+        scrape are not lost when the stream is garbage collected.
+        """
+        for label_set in self._label_sets.values():
+            label_set.update()
+
+    def add_stream(self, stream: spead2.recv.ChunkRingStream, labels: Iterable[str] = ()) -> None:
+        """Register a new stream.
+
+        If the collector was constructed with a non-empty ``labelnames``, then
+        ``labels`` must contain the same number of elements to provide the
+        labels for the metrics that this stream will update.
+
+        .. warning::
+
+           Calling this more than once with the same stream will cause that
+           stream's statistics to be counted multiple times.
+        """
+        labels_tuple = tuple(labels)
+        if len(labels_tuple) != len(self._labelnames):
+            raise ValueError("labels must have the same length as labelnames")
+        if labels_tuple not in self._label_sets:
+            self._label_sets[labels_tuple] = self._LabelSet(labels_tuple, self._counter_map.keys())
+        self._label_sets[labels_tuple].add_stream(stream)
+
+    def collect(self) -> Iterable[Metric]:
+        """Implement Prometheus' Collector interface."""
+        self.update()
+        for stat_name, (counter_name, counter_help) in self._counter_map.items():
+            metric = CounterMetricFamily(counter_name, counter_help, labels=self._labelnames)
+            for labels, label_set in self._label_sets.items():
+                metric.add_metric(labels, label_set.totals[stat_name], created=label_set.created)
+            yield metric
 
 
 class BaseLayout(ABC):

@@ -25,11 +25,18 @@
  * It has been modified by SARAO:
  * - Wrap the file in extern "C++" to make it work with PyCUDA (see below)
  * - Add results to the output instead of overwriting, to allow accumulation
- *   across multiple calls (with saturation rather than wrapping).
+ *   across multiple calls; results use 64-bit integers to avoid overflow.
  * - Conjugate the output, to provide the other triangle of the visibility
  *   matrix.
- * - Take the input axes in a different order (TODO: this currently leads to
- *   very inefficient memory access patterns).
+ * - Take the input axes in a different order.
+ * - Remove the asynchronous copy code (it would not have worked well with
+ *   the previous point).
+ * - Restore the type-punning that had been replaced by memcpy. It turns out
+ *   nvcc implements memcpy a byte at a time.
+ * - Guarantee 32-byte alignment of the shared data (required by
+ *   load_matrix_sync / store_matrix_sync).
+ * - Parallelise over multiple problem instances.
+ * - Write the output
  * - Remove trailing whitespace.
  *
  * SARAO's modification is licenced as follows:
@@ -59,14 +66,6 @@
  * pycuda.compiler.SourceModule(...) constructor.
  */
 extern "C++" {
-
-#if 1000 * __CUDACC_VER_MAJOR__ + __CUDACC_VER_MINOR__ >= 11001 && __CUDA_ARCH__ >= 800
-#define ASYNC_COPIES
-#endif
-
-#if defined ASYNC_COPIES
-#include <cooperative_groups/memcpy_async.h>
-#endif
 
 #include <mma.h>
 
@@ -102,10 +101,10 @@ using namespace nvcuda::wmma;
 
 #if NR_BITS == 4
 typedef char    Sample;
-typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
+typedef long2   Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 8
 typedef char2   Sample;
-typedef int2    Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
+typedef long2   Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #elif NR_BITS == 16
 typedef __half2 Sample;
 typedef float2  Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
@@ -162,13 +161,8 @@ __device__ inline int4 conj_perm(int4 v)
 }
 
 
-#if defined ASYNC_COPIES
-#define READ_AHEAD        MIN(2, NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK)
-#define NR_SHARED_BUFFERS MIN(4, NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK)
-#else
 #define READ_AHEAD        1
 #define NR_SHARED_BUFFERS 2
-#endif
 
 
 template <unsigned nrReceiversPerBlock = NR_RECEIVERS_PER_BLOCK> struct SharedData
@@ -188,9 +182,9 @@ template <unsigned nrReceiversPerBlock = NR_RECEIVERS_PER_BLOCK> struct SharedDa
 
 template <typename T> struct FetchData
 {
-  __device__ FetchData(unsigned loadRecv, unsigned loadPol, unsigned loadTime)
+  __device__ FetchData(unsigned loadRecv, unsigned loadTime)
   :
-    loadRecv(loadRecv), loadPol(loadPol), loadTime(loadTime), data({0})
+    loadRecv(loadRecv), loadTime(loadTime), data({0})
   {
   }
 
@@ -198,16 +192,18 @@ template <typename T> struct FetchData
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
     {
-#pragma unroll
-      for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
-        memcpy((char *) &data + i * sizeof(Sample), &samples[firstReceiver + loadRecv][channel][time][loadTime + i][loadPol], sizeof(Sample));
+      data = * (T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][0];
+      // The above is undefined behaviour in C++ (type punning), but the
+      // well-defined memcpy below has poor performance (copies one byte at a time).
+      // memcpy(&data, &samples[firstReceiver + loadRecv][channel][time][loadTime][0], sizeof(T));
     }
   }
 
   template <typename SharedData> __device__ void storeA(SharedData samples) const
   {
-    //* ((T *) &samples[loadRecv][loadPol][loadTime][0]) = data;
-    memcpy(&samples[loadRecv][loadPol][loadTime][0], &data, sizeof(T));
+#pragma unroll
+    for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
+      *(Sample *) &samples[loadRecv][i & 1][loadTime + (i >> 1)][0] = ((const Sample *) &data)[i];
   }
 
   template <typename SharedData> __device__ void storeB(SharedData samples) const
@@ -215,40 +211,14 @@ template <typename T> struct FetchData
     //* ((T *) &samples[loadRecv][loadPol][0][loadTime][0]) = data;
     //* ((T *) &samples[loadRecv][loadPol][1][loadTime][0]) = conj_perm(data);
     T tmp = conj_perm(data);
-    memcpy(&samples[loadRecv][loadPol][0][loadTime][0], &data, sizeof(T));
-    memcpy(&samples[loadRecv][loadPol][1][loadTime][0], &tmp, sizeof(T));
-  }
-
-#if defined ASYNC_COPIES
-  template <typename Asamples> __device__ void copyAsyncA(nvcuda::experimental::pipeline &pipe, Asamples dest, const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
-  {
-    if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-    {
 #pragma unroll
-      for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
-        nvcuda::experimental::memcpy_async(* (Sample *) &dest[loadRecv][loadPol][loadTime + i][0], * (const Sample *) &samples[firstReceiver + loadRecv][channel][time][loadTime + i][loadPol], pipe);
+    for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
+    {
+      unsigned time = loadTime + (i >> 1);
+      *(Sample *) &samples[loadRecv][i & 1][0][time][0] = ((const Sample *) &data)[i];
+      *(Sample *) &samples[loadRecv][i & 1][1][time][0] = ((const Sample *) &tmp)[i];
     }
   }
-
-  template<typename Bsamples> __device__ void copyAsyncB(nvcuda::experimental::pipeline &pipe, Bsamples dest, const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
-  {
-    if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
-    {
-#pragma unroll
-      for (unsigned i = 0; i < sizeof(T) / sizeof(Sample); i++)
-        nvcuda::experimental::memcpy_async(* (Sample *) &dest[loadRecv][loadPol][0][loadTime + i][0], * (const Sample *) &samples[firstReceiver + loadRecv][channel][time][loadTime + i][loadPol], pipe);
-    }
-  }
-
-  template<typename Bsamples> __device__ void fixB(Bsamples bSamples)
-  {
-    //* ((T *) &bSamples[loadRecv][loadPol][1][loadTime][0]) = conj_perm(* ((T *) &bSamples[loadRecv][loadPol][0][loadTime][0]));
-    T tmp;
-    memcpy(&tmp, &bSamples[loadRecv][loadPol][0][loadTime][0], sizeof(T));
-    tmp = conj_perm(tmp);
-    memcpy(&bSamples[loadRecv][loadPol][1][loadTime][0], &tmp, sizeof(T));
-  }
-#endif
 
   unsigned loadRecv, loadPol, loadTime;
   T        data;
@@ -267,18 +237,13 @@ __device__ inline float2 make_complex(float real, float imag)
 }
 
 
-// Compute x + y clamped to -INT_MAX .. INT_MAX
-__device__ inline int add_sat(int x, int y)
+__device__ inline long2 make_complex(long real, long imag)
 {
-  int out;
-  asm("add.sat.s32 %0, %1, %2;" : "=r" (out) : "r" (x), "r" (y));
-  // add.sat.s32 clamps to INT_MIN..INT_MAX, but we want -INT_MAX..INT_MAX
-  // for symmetry.
-  return max(out, INT_MIN + 1);
+  return make_long2(real, imag);
 }
 
 
-template <typename T> __device__ inline void accumVisibility(T &out, T value)
+template <typename T, typename V> __device__ inline void accumVisibility(T &out, V value)
 {
   /* Store an output value. Unlike the original ASTRON code, for xbgpu this
    * - conjugates the value because we want to store the other half
@@ -286,11 +251,7 @@ template <typename T> __device__ inline void accumVisibility(T &out, T value)
    * - adds to the existing value (with saturation, if integer), to allow
    *   accumulation across multiple calls to the kernel.
    */
-#if NR_BITS == 16
   out = make_complex(out.x + value.x, out.y - value.y);
-#else
-  out = make_complex(add_sat(out.x, value.x), add_sat(out.y, -value.y));
-#endif
 }
 
 
@@ -399,55 +360,24 @@ template <bool fullTriangle> __device__ void doCorrelateTriangle(Visibilities vi
   unsigned recvXoffset = offsets[warp].x;
   unsigned recvYoffset = offsets[warp].y;
 
-  FetchData<int4> tmp0((tid >> 2)                             , (tid >> 1) & 1, 64 / NR_BITS * (tid & 1));
-  FetchData<int4> tmp1((tid >> 2) + NR_RECEIVERS_PER_BLOCK / 2, (tid >> 1) & 1, 64 / NR_BITS * (tid & 1));
+  FetchData<int4> tmp0((tid >> 2)                             , 32 / NR_BITS * (tid & 3));
+  FetchData<int4> tmp1((tid >> 2) + NR_RECEIVERS_PER_BLOCK / 2, 32 / NR_BITS * (tid & 3));
 
-#if defined ASYNC_COPIES
-  using namespace nvcuda::experimental;
-  pipeline pipe;
-
-  for (unsigned majorTime = 0; majorTime < READ_AHEAD; majorTime ++) {
-    unsigned fetchBuffer = majorTime;
-
-    tmp0.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorTime, firstReceiver, fullTriangle);
-    tmp1.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorTime, firstReceiver, fullTriangle);
-
-    pipe.commit();
-  }
-#else
   tmp0.load(samples, channel, 0, firstReceiver, fullTriangle);
   tmp1.load(samples, channel, 0, firstReceiver, fullTriangle);
-#endif
 
   for (unsigned majorTime = 0; majorTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK; majorTime ++) {
     unsigned buffer = majorTime % NR_SHARED_BUFFERS;
 
-#if !defined ASYNC_COPIES
     tmp0.storeB(bSamples[buffer]);
     tmp1.storeB(bSamples[buffer]);
-#endif
 
     unsigned majorReadTime = majorTime + READ_AHEAD;
 
     if (majorReadTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) {
-#if defined ASYNC_COPIES
-      unsigned fetchBuffer = (buffer + READ_AHEAD) % NR_SHARED_BUFFERS;
-
-      tmp0.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorReadTime, firstReceiver, fullTriangle);
-      tmp1.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorReadTime, firstReceiver, fullTriangle);
-#else
       tmp0.load(samples, channel, majorReadTime, firstReceiver, fullTriangle);
       tmp1.load(samples, channel, majorReadTime, firstReceiver, fullTriangle);
-#endif
     }
-
-#if defined ASYNC_COPIES
-    pipe.commit();
-    pipe.wait_prior<READ_AHEAD>();
-
-    tmp0.fixB(bSamples[buffer]);
-    tmp1.fixB(bSamples[buffer]);
-#endif
 
     __syncthreads();
 
@@ -516,34 +446,15 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
   unsigned recvXoffset = nrFragmentsX * NR_RECEIVERS_PER_TCM_X * threadIdx.y;
   unsigned recvYoffset = nrFragmentsY * NR_RECEIVERS_PER_TCM_Y * threadIdx.z;
 
-  FetchData<int4> tmpY0((tid >> 2)     , (tid >> 1) & 1, 64 / NR_BITS * (tid & 1));
-  FetchData<int4> tmpX0((tid >> 2)     , (tid >> 1) & 1, 64 / NR_BITS * (tid & 1));
+  FetchData<int4> tmpY0((tid >> 2)     , 32 / NR_BITS * (tid & 3));
+  FetchData<int4> tmpX0((tid >> 2)     , 32 / NR_BITS * (tid & 3));
 #if NR_RECEIVERS_PER_BLOCK == 48
-  FetchData<int2> tmpY1((tid >> 3) + 32, (tid >> 2) & 1, 32 / NR_BITS * (tid & 3));
-  FetchData<int2> tmpX1((tid >> 3) + 32, (tid >> 2) & 1, 32 / NR_BITS * (tid & 3));
+  FetchData<int2> tmpY1((tid >> 3) + 32, 16 / NR_BITS * (tid & 7));
+  FetchData<int2> tmpX1((tid >> 3) + 32, 16 / NR_BITS * (tid & 7));
 #elif NR_RECEIVERS_PER_BLOCK == 64
-  FetchData<int4> tmpY1((tid >> 2) + 32, (tid >> 1) & 1, 64 / NR_BITS * (tid & 1));
+  FetchData<int4> tmpY1((tid >> 2) + 32, 32 / NR_BITS * (tid & 3));
 #endif
 
-#if defined ASYNC_COPIES
-  using namespace nvcuda::experimental;
-  pipeline pipe;
-
-  for (unsigned majorTime = 0; majorTime < READ_AHEAD; majorTime ++) {
-    unsigned fetchBuffer = majorTime;
-
-    tmpY0.copyAsyncA(pipe, aSamples[fetchBuffer], samples, channel, majorTime, firstReceiverY, skipLoadYcheck);
-#if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
-    tmpY1.copyAsyncA(pipe, aSamples[fetchBuffer], samples, channel, majorTime, firstReceiverY, skipLoadYcheck);
-#endif
-    tmpX0.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorTime, firstReceiverX, skipLoadXcheck);
-#if NR_RECEIVERS_PER_BLOCK == 48
-    tmpX1.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorTime, firstReceiverX, skipLoadXcheck);
-#endif
-
-    pipe.commit();
-  }
-#else
   tmpY0.load(samples, channel, 0, firstReceiverY, skipLoadYcheck);
 #if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
   tmpY1.load(samples, channel, 0, firstReceiverY, skipLoadYcheck);
@@ -552,12 +463,10 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
 #if NR_RECEIVERS_PER_BLOCK == 48
   tmpX1.load(samples, channel, 0, firstReceiverX, skipLoadXcheck);
 #endif
-#endif
 
   for (unsigned majorTime = 0; majorTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK; majorTime ++) {
     unsigned buffer = majorTime % NR_SHARED_BUFFERS;
 
-#if !defined ASYNC_COPIES
     tmpY0.storeA(aSamples[buffer]);
 #if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
     tmpY1.storeA(aSamples[buffer]);
@@ -566,23 +475,10 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
 #if NR_RECEIVERS_PER_BLOCK == 48
     tmpX1.storeB(bSamples[buffer]);
 #endif
-#endif
 
     unsigned majorReadTime = majorTime + READ_AHEAD;
 
     if (majorReadTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) {
-#if defined ASYNC_COPIES
-      unsigned fetchBuffer = (buffer + READ_AHEAD) % NR_SHARED_BUFFERS;
-
-      tmpY0.copyAsyncA(pipe, aSamples[fetchBuffer], samples, channel, majorReadTime, firstReceiverY, skipLoadYcheck);
-#if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
-      tmpY1.copyAsyncA(pipe, aSamples[fetchBuffer], samples, channel, majorReadTime, firstReceiverY, skipLoadYcheck);
-#endif
-      tmpX0.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorReadTime, firstReceiverX, skipLoadXcheck);
-#if NR_RECEIVERS_PER_BLOCK == 48
-      tmpX1.copyAsyncB(pipe, bSamples[fetchBuffer], samples, channel, majorReadTime, firstReceiverX, skipLoadXcheck);
-#endif
-#else
       tmpY0.load(samples, channel, majorReadTime, firstReceiverY, skipLoadYcheck);
 #if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
       tmpY1.load(samples, channel, majorReadTime, firstReceiverY, skipLoadYcheck);
@@ -591,18 +487,7 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
 #if NR_RECEIVERS_PER_BLOCK == 48
       tmpX1.load(samples, channel, majorReadTime, firstReceiverX, skipLoadXcheck);
 #endif
-#endif
     }
-
-#if defined ASYNC_COPIES
-    pipe.commit();
-    pipe.wait_prior<READ_AHEAD>();
-
-    tmpX0.fixB(bSamples[buffer]);
-#if NR_RECEIVERS_PER_BLOCK == 48
-    tmpX1.fixB(bSamples[buffer]);
-#endif
-#endif
 
     __syncthreads();
 
@@ -647,10 +532,13 @@ template <unsigned nrFragmentsY, bool skipLoadYcheck, bool skipLoadXcheck, bool 
 
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32, NR_RECEIVERS_PER_BLOCK == 32 ? 4 : 2)
-void correlate(Visibilities visibilities, const Samples samples)
+void correlate(Visibilities *visibilities, const Samples *samples, unsigned batchOffset)
 {
   const unsigned nrFragmentsY = NR_RECEIVERS_PER_BLOCK / NR_RECEIVERS_PER_TCM_Y / 2;
 
+  unsigned batch = batchOffset + blockIdx.z;
+  visibilities += batch;
+  samples += batch;
   unsigned block = blockIdx.x;
 
 #if NR_RECEIVERS_PER_BLOCK == 32 || NR_RECEIVERS_PER_BLOCK == 48
@@ -666,11 +554,11 @@ void correlate(Visibilities visibilities, const Samples samples)
 
   union shared {
     struct {
-      SharedData<>::Asamples aSamples;
-      SharedData<NR_RECEIVERS_PER_BLOCK == 64 ? 32 : NR_RECEIVERS_PER_BLOCK>::Bsamples bSamples;
+      alignas(32) SharedData<>::Asamples aSamples;
+      alignas(32) SharedData<NR_RECEIVERS_PER_BLOCK == 64 ? 32 : NR_RECEIVERS_PER_BLOCK>::Bsamples bSamples;
     } rectangle;
     struct {
-      SharedData<>::Bsamples samples;
+      alignas(32) SharedData<>::Bsamples samples;
     } triangle;
     ScratchSpace scratchSpace[NR_WARPS];
   };
@@ -683,19 +571,40 @@ void correlate(Visibilities visibilities, const Samples samples)
 
   if (firstReceiverX == firstReceiverY)
 #if NR_RECEIVERS_PER_BLOCK == 32 || NR_RECEIVERS_PER_BLOCK == 48
-    doCorrelateRectangle<nrFragmentsY, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, false>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<nrFragmentsY, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, false>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 #elif NR_RECEIVERS_PER_BLOCK == 64
     if (NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK != 0 && (NR_RECEIVERS < NR_RECEIVERS_PER_BLOCK || firstReceiverX >= NR_RECEIVERS / NR_RECEIVERS_PER_BLOCK * NR_RECEIVERS_PER_BLOCK))
-      doCorrelateTriangle<false>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
+      doCorrelateTriangle<false>(*visibilities, *samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
     else
-      doCorrelateTriangle<true>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
+      doCorrelateTriangle<true>(*visibilities, *samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
 #endif
 #if NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK != 0
   else if (NR_RECEIVERS < NR_RECEIVERS_PER_BLOCK || firstReceiverY >= NR_RECEIVERS / NR_RECEIVERS_PER_BLOCK * NR_RECEIVERS_PER_BLOCK)
-    doCorrelateRectangle<(NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK + 2 * NR_RECEIVERS_PER_TCM_Y - 1) / NR_RECEIVERS_PER_TCM_Y / 2, false, true, NR_RECEIVERS % (2 * NR_RECEIVERS_PER_TCM_Y) == 0, true>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<(NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK + 2 * NR_RECEIVERS_PER_TCM_Y - 1) / NR_RECEIVERS_PER_TCM_Y / 2, false, true, NR_RECEIVERS % (2 * NR_RECEIVERS_PER_TCM_Y) == 0, true>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 #endif
   else
-    doCorrelateRectangle<nrFragmentsY, true, true, true, true>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<nrFragmentsY, true, true, true, true>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+}
+
+// TODO: generalise to other values of NR_BITS
+extern "C" __global__
+__launch_bounds__(NR_WARPS * 32)
+void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned batches)
+{
+  const unsigned int stride = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
+  const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= stride)
+    return;
+  long2 sum = make_long2(0, 0);
+  for (unsigned i = 0; i < batches; i++) {
+    long2 value = in[i * stride + idx];
+    sum.x += value.x;
+    sum.y += value.y;
+  }
+  // Apply saturation
+  sum.x = llmin(llmax(sum.x, -INT_MAX), INT_MAX);
+  sum.y = llmin(llmax(sum.y, -INT_MAX), INT_MAX);
+  out[idx] = make_complex((int) sum.x, (int) sum.y);
 }
 
 } // extern "C++"

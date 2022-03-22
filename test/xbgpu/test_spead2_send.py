@@ -81,7 +81,7 @@ class TestSend:
 
         # 4.1 Send the descriptor as the recv_stream object needs it to
         # interpret the received heaps correctly.
-        send_stream.send_descriptor_heap()
+        await send_stream.send_descriptor_heap()
 
         # 4.2 Run until a set number of heaps have been transferred.
         while num_sent < TOTAL_HEAPS:

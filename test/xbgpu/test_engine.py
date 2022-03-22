@@ -476,7 +476,7 @@ class TestEngine:
 
         # 7. Add transports to xbengine.
         xbengine.add_inproc_sender_transport(queue)
-        xbengine.send_stream.send_descriptor_heap()
+        await xbengine.send_stream.send_descriptor_heap()
 
         buffer = source_stream.getvalue()
         xbengine.add_buffer_receiver_transport(buffer)

@@ -76,10 +76,7 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
     It is connected to the :func:`queue` fixture for input and
     :func:`ringbuffer` for output.
     """
-    # We want reorder tolerance enough to be able to deal with 5 chunks at a time.
-
-    reorder_tol = 5 * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-    stream = recv.make_stream(layout, ringbuffer, -1, reorder_tol)
+    stream = recv.make_stream(layout, ringbuffer, -1, 5)
     for _ in range(40):
         data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
@@ -106,6 +103,16 @@ def send_stream(queue) -> "spead2.send.asyncio.AsyncStream":
     )
 
 
+def gen_heap(timestamp: int, feng_id: int, frequency: int, feng_raw: np.ndarray) -> spead2.send.Heap:
+    """Create a single heap."""
+    heap = spead2.send.Heap(FLAVOUR)
+    heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
+    heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=feng_id))
+    heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=frequency))
+    heap.add_item(spead2.Item(FENG_RAW_ID, "", "", shape=feng_raw.shape, dtype=feng_raw.dtype, value=feng_raw))
+    return heap
+
+
 def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generator[spead2.send.Heap, None, None]:
     """Generate heaps from an array of data.
 
@@ -119,13 +126,7 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
     for batch_id, batch in enumerate(data_arr):
         for feng_id, feng_data in enumerate(batch):
             timestamp = first_timestamp + batch_id * layout.timestamp_step
-            heap = spead2.send.Heap(FLAVOUR)
-            heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
-            heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=feng_id))
-            heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=0))
-            heap.add_item(
-                spead2.Item(FENG_RAW_ID, "", "", shape=feng_data.shape, dtype=feng_data.dtype, value=feng_data)
-            )
+            heap = gen_heap(timestamp, feng_id, 0, feng_data)
             yield heap
 
 
@@ -186,35 +187,28 @@ class TestStream:
             # Interleave the sequences
             heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
 
-        # Heap with no payload - representing any sort of metadata heap such as descriptors
-        heap = spead2.send.Heap(FLAVOUR)
-        await send_stream.async_send_heap(heap)
-
-        # Send a heap with a bad F-engine ID
-        heap = spead2.send.Heap(FLAVOUR)
-        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=first_timestamp))
-        heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=5))
-        heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=0))
-        heap.add_item(
-            spead2.Item(
-                FENG_RAW_ID,
-                "",
-                "",
-                shape=(layout.heap_bytes,),
-                dtype=np.int8,
-                value=np.zeros((layout.heap_bytes,), dtype=np.int8),
-            )
-        )
-        await send_stream.async_send_heap(heap)
-
-        # Now the bulk of the actual data
-        for heap in heaps:
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            # Heap with no payload - representing any sort of metadata heap such as descriptors
+            heap = spead2.send.Heap(FLAVOUR)
             await send_stream.async_send_heap(heap)
 
-        queue.stop()  # Flushes out the receive stream
-        seen = 0
-        empty_chunks = 0
-        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            # Send a heap with a bad F-engine ID
+            heap = gen_heap(first_timestamp, 5, 0, np.zeros((layout.heap_bytes,), dtype=np.int8))
+            await send_stream.async_send_heap(heap)
+
+            # Now the bulk of the actual data
+            for heap in heaps:
+                await send_stream.async_send_heap(heap)
+
+            # Finally a heap from the distant past
+            heap = gen_heap(
+                first_timestamp - 8 * layout.timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
+            )
+            await send_stream.async_send_heap(heap)
+
+            queue.stop()  # Flushes out the receive stream
+            seen = 0
+            empty_chunks = 0
             async for chunk in recv_chunks(stream):
                 assert isinstance(chunk, Chunk)
                 if not np.any(chunk.present):
@@ -240,6 +234,7 @@ class TestStream:
         assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 1
         assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1
+        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 1
 
     async def test_missing_heaps(
         self,

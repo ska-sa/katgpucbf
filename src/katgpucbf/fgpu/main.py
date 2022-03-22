@@ -32,6 +32,7 @@ import katsdpservices
 import katsdpsigproc.accel as accel
 import prometheus_async
 from katsdpservices import get_interface_address
+from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
@@ -109,6 +110,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=int,
         help="Network port on which to serve Prometheus metrics [none]",
     )
+    add_aiomonitor_arguments(parser)
     parser.add_argument("--src-interface", type=get_interface_address, help="Name of input network device")
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
@@ -332,7 +334,7 @@ async def async_main() -> None:
     prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
-    with monitor:
+    with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
         await engine.start()
         await engine.join()
         if prometheus_server:

@@ -4,10 +4,14 @@
 #
 #    pip-compile requirements.in
 #
+aioconsole==0.4.1
+    # via aiomonitor
 aiohttp==3.8.0
     # via -r requirements.in
 aiokatcp==1.0.0
     # via -r requirements.in
+aiomonitor==0.4.5
+    # via katsdpservices
 aiosignal==1.2.0
     # via aiohttp
 appdirs==1.4.4
@@ -43,7 +47,7 @@ hiredis==2.0.0
     # via katsdptelstate
 idna==3.3
     # via yarl
-katsdpservices==1.1
+katsdpservices[aiomonitor]==1.1
     # via -r requirements.in
 katsdpsigproc[cuda]==1.4.2
     # via -r requirements.in
@@ -124,6 +128,8 @@ six==1.16.0
     #   python-dateutil
 spead2==3.8.0
     # via -r requirements.in
+terminaltables==3.1.10
+    # via aiomonitor
 toolz==0.11.2
     # via
     #   dask
