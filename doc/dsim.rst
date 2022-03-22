@@ -28,8 +28,8 @@ By default the content of the signal is a sine wave with a fixed frequency.
 However, the signal is highly configurable with the :option:`!--signals`
 option. A domain-specific language (DSL) allows continuous waves and Gaussian
 noise to be combined with basic operators. See :func:`.parse_signal` for a
-specification of this DSL. As an example, the following specification defines
-two signals which share a sine wave and some noise, and adds further noise
+specification of this DSL. As an example, the following specification [#nl]_
+defines two signals which share a sine wave and some noise, and adds further
 noise that is uncorrelated between the polarisations:
 
 .. code::
@@ -40,6 +40,9 @@ noise that is uncorrelated between the polarisations:
 
 The signals to send can also be changed on the fly by issuing the ``?signals``
 command over katcp.
+
+.. [#nl] While shown split over multiple lines, whitespace is not significant
+   and it may be easier to place it all on one line.
 
 Design
 ------
