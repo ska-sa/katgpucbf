@@ -152,6 +152,8 @@ class LinearDelayModel(AbstractDelayModel):
         # correction.
         rel_orig = (rel_time - self.delay) / (self.delay_rate + 1)
         rel_orig_rnd = np.rint(rel_orig).astype(np.int64)
+        # Prevent coarse delay from becoming negative
+        np.minimum(rel_orig_rnd, rel_time, out=rel_orig_rnd)
         residual = rel_orig_rnd - rel_orig
 
         # Calculate the phase
