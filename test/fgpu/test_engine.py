@@ -263,7 +263,7 @@ class TestEngine:
             # First heap should be the descriptor heap
             descriptor_heap = await stream.get()
             items = ig.update(descriptor_heap)
-            assert list(items.values()) == [], "This heap contains data, not just descriptors"
+            assert items == {}, "This heap contains data, not just descriptors"
 
             # Now, for the actual processing
             async for heap in stream:

@@ -28,7 +28,17 @@ import numpy as np
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import BYTE_BITS, COMPLEX, N_POLS, SPEAD_DESCRIPTOR_INTERVAL_S, __version__
+from .. import (
+    BYTE_BITS,
+    COMPLEX,
+    DESCRIPTOR_TASK_NAME,
+    GPU_PROC_TASK_NAME,
+    N_POLS,
+    RECV_TASK_NAME,
+    SEND_TASK_NAME,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    __version__,
+)
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
@@ -51,18 +61,19 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
-def done_callback(future: asyncio.Future) -> None:
+def done_callback(task: asyncio.Task) -> None:
     """
     Handle cancellation of Processing Loops as a callback.
 
     Log exceptions as soon as they occur.
     """
     try:
-        future.result()  # Evaluate just for exceptions
+        task.result()  # Evaluate just for exceptions
     except asyncio.CancelledError:
+        logger.exception(f"{task.get_name()} was Cancelled")
         pass
     except Exception:
-        logger.exception("Processing failed with exception")
+        logger.exception(f"Processing {task.get_name()} failed with exception")
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -501,13 +512,24 @@ class Engine(aiokatcp.DeviceServer):
                 comp_vector=self._src_comp_vector[pol],
                 buffer=self._src_buffer,
             )
-        self._processing_task = asyncio.gather(
-            asyncio.create_task(self._processor.run_processing(self._src_streams)),
-            asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
-            asyncio.create_task(self._processor.run_transmit(self._send_stream)),
-        )
 
-        self._processing_task.add_done_callback(done_callback)
+        self._processing_task = asyncio.gather(
+            asyncio.create_task(
+                self._processor.run_processing(self._src_streams),
+                name=GPU_PROC_TASK_NAME,
+            ),
+            asyncio.create_task(
+                self._processor.run_receive(self._src_streams, self._src_layout),
+                name=RECV_TASK_NAME,
+            ),
+            asyncio.create_task(
+                self._processor.run_transmit(self._send_stream),
+                name=SEND_TASK_NAME,
+            ),
+        )
+        # Added a # type: ignore as `add_done_callback` wants a Future
+        # but the Task type-hint works just fine.
+        self._processing_task.add_done_callback(done_callback)  # type: ignore
 
         if send_descriptors_on_startup:
             await self._processor.async_send_descriptors(
@@ -543,9 +565,10 @@ class Engine(aiokatcp.DeviceServer):
                 n_ants,
                 feng_id,
                 descriptor_interval_s,
-            )
+            ),
+            name=DESCRIPTOR_TASK_NAME,
         )
-        self._descriptor_task.add_done_callback(done_callback)
+        self._descriptor_task.add_done_callback(done_callback)  # type: ignore
 
     async def on_stop(self):
         """Shut down processing when the device server is stopped.
