@@ -897,9 +897,9 @@ class Processor:
         await asyncio.sleep(feng_id * base_interval_s)  # Dubbed the 'engine_sleep_interval'
         send_interval_s = n_ants * base_interval_s
         while True:
-            # TODO: May I gather these?
-            await self.async_send_descriptors(stream, descriptor_heap_reflist)
-            await asyncio.sleep(send_interval_s)
+            await asyncio.gather(
+                self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(send_interval_s)
+            )
 
     async def async_send_descriptors(
         self,

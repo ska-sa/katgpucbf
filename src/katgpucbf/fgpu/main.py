@@ -336,7 +336,6 @@ async def async_main() -> None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
     with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
         await engine.start()
-        # TODO: May I gather these?
         await engine.run_descriptors_loop(
             feng_id=args.feng_id,
             n_ants=args.array_size,
