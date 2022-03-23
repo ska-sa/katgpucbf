@@ -28,7 +28,7 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS
-from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, make_immediate
+from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
 from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
@@ -169,7 +169,8 @@ def make_stream(
     config = spead2.send.StreamConfig(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
-        max_heaps=len(chunks) * spectra // spectra_per_heap * len(endpoints),
+        # Adding len(endpoints) to accommodate descriptors sent for each substream
+        max_heaps=(len(chunks) * spectra // spectra_per_heap * len(endpoints)) + len(endpoints),
     )
     stream: "spead2.send.asyncio.AsyncStream"
     if ibv:
@@ -189,14 +190,59 @@ def make_stream(
     return stream
 
 
-def make_descriptor_heap(
+def _make_descriptor_heap(
+    *,
+    data_type: np.dtype,
+    channels_per_substream: int,
+    spectra_per_heap: int,
+) -> "spead2.send.Heap":
+    """Create a descriptor heap for output F-Engine data."""
+    heap_data_shape = (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
+
+    ig = spead2.send.ItemGroup(flavour=FLAVOUR)
+    ig.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    ig.add_item(
+        FENG_ID_ID,
+        "feng_id",
+        "Uniquely identifies the F-Engine source for the data.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    ig.add_item(
+        FREQUENCY_ID,
+        "frequency",
+        "Identifies the first channel in the band of frequencies in the SPEAD heap.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    ig.add_item(
+        FENG_RAW_ID,
+        "feng_raw",
+        "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
+        shape=heap_data_shape,
+        dtype=data_type,
+    )
+
+    return ig.get_heap(descriptors="all", data="none")
+
+
+def make_descriptor_heaps(
     *,
     data_type: np.dtype,
     channels: int,
     substreams: int,
     spectra_per_heap: int,
-) -> "spead2.send.Heap":
-    """Create a descriptor heap for output F-Engine data.
+) -> List[spead2.send.HeapReference]:
+    """Create a list of Reference Heaps for the F-Engine descriptors.
+
+    This is done for efficiency in sending the descriptors to their
+    various destinations.
 
     Parameters
     ----------
@@ -209,40 +255,12 @@ def make_descriptor_heap(
     spectra_per_heap
         Number of spectra in each output heap.
     """
-    imm_format = [("u", FLAVOUR.heap_address_bits)]
-    channels_per_substream = channels // substreams
-    # TODO: Possibly change how this is done,
-    #       by using buf.shape from Engine.__init__
-    heap_data_shape = (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
-
-    ig = spead2.send.ItemGroup(flavour=FLAVOUR)
-    ig.add_item(
-        TIMESTAMP_ID,
-        "timestamp",
-        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-        shape=(),
-        format=imm_format,
+    descriptor_heap = _make_descriptor_heap(
+        data_type=data_type,
+        channels_per_substream=channels // substreams,
+        spectra_per_heap=spectra_per_heap,
     )
-    ig.add_item(
-        FENG_ID_ID,
-        "feng_id",
-        "Uniquely identifies the F-Engine source for the data.",
-        shape=(),
-        format=imm_format,
-    )
-    ig.add_item(
-        FREQUENCY_ID,
-        "frequency",
-        "Identifies the first channel in the band of frequencies in the SPEAD heap.",
-        shape=(),
-        format=imm_format,
-    )
-    ig.add_item(
-        FENG_RAW_ID,
-        "feng_raw",
-        "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
-        shape=heap_data_shape,
-        dtype=data_type,
-    )
-
-    return ig.get_heap(descriptors="all", data="none")
+    return [
+        spead2.send.HeapReference(descriptor_heap, substream_index=substream_index)
+        for substream_index in range(substreams)
+    ]

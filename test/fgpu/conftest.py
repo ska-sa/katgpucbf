@@ -125,7 +125,11 @@ async def engine_server(
     args = parse_args(arglist)
     server, _monitor = make_engine(context, args)
 
-    await server.start(send_descriptors=True, descr_interval_s=0)
+    await server.start()
+    await server.run_descriptors_loop(
+        feng_id=args.feng_id,
+        n_ants=args.array_size,
+    )
     yield server
     await server.stop()
 

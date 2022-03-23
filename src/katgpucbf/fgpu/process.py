@@ -870,48 +870,52 @@ class Processor:
     async def run_descriptors_loop(
         self,
         stream: "spead2.send.asyncio.AsyncStream",
-        descriptor_heap: "spead2.send.Heap",
-        interval_s: float,
+        descriptor_heap_reflist: List[spead2.send.HeapReference],
+        n_ants: int,
+        feng_id: int,
+        base_interval_s: float,
     ) -> None:
-        """
-        Send the Antenna Channelised Voltage Hardware Heap descriptors.
+        """Send the Antenna Channelised Voltage descriptors continuously.
 
-        This is done every interval_s seconds. This function is not part of the
-        main processing loop(s) as it is not required to run during unit tests.
+        After initially sleeping for `feng_id x base_interval_s` seconds, the
+        descriptors are sent every `n_ants x base_interval_s` seconds.
 
         Parameters
         ----------
-        sender
-            This object, written in C++, takes large chunks of data and
-            packages it appropriately in SPEAD heaps for transmission on
-            the network.
-        descriptor_heap
-            The descriptor describing the format of the heaps in the data
-            stream.
-        interval_s
+        stream
+            This object takes large chunks of data and packages it
+            appropriately in SPEAD heaps for transmission on the network.
+        descriptor_heap_reflist
+            The descriptors describing the format of the heaps in the data
+            stream. Formatted as a list of HeapReference's to be as efficient
+            as possible during the send procedure.
+        base_interval_s
             Interval (in seconds) over which to spread the sending of
             descriptor heaps. If given zero (0), the descriptors will be
             sent once.
         """
-        send_descriptor_futures: List[asyncio.Future] = []
-        if interval_s == 0:
-            for substream_index in range(stream.num_substreams):
-                send_descriptor_futures.append(
-                    stream.async_send_heap(
-                        heap=descriptor_heap,
-                        substream_index=substream_index,
-                    )
-                )
-            await asyncio.gather(*send_descriptor_futures)
-            return
+        await asyncio.sleep(feng_id * base_interval_s)  # Dubbed the 'engine_sleep_interval'
+        send_interval_s = n_ants * base_interval_s
         while True:
-            for substream_index in range(stream.num_substreams):
-                send_descriptor_futures.append(
-                    stream.async_send_heap(
-                        heap=descriptor_heap,
-                        substream_index=substream_index,
-                    )
-                )
-            await asyncio.gather(*send_descriptor_futures)
-            await asyncio.sleep(interval_s)
-            send_descriptor_futures.clear()
+            # TODO: May I gather these?
+            await self.async_send_descriptors(stream, descriptor_heap_reflist)
+            await asyncio.sleep(send_interval_s)
+
+    async def async_send_descriptors(
+        self,
+        stream: "spead2.send.asyncio.AsyncStream",
+        descriptor_heap_reflist: List[spead2.send.HeapReference],
+    ) -> asyncio.Future:
+        """Abstracted utility allowing for a once-off or continuous calls.
+
+        Parameters
+        ----------
+        stream
+            This object takes large chunks of data and packages it
+            appropriately in SPEAD heaps for transmission on the network.
+        descriptor_heap_reflist
+            The descriptors describing the format of the heaps in the data
+            stream. Formatted as a HeapReference list to be as efficient as
+            possible during the send procedure.
+        """
+        return stream.async_send_heaps(heaps=descriptor_heap_reflist, mode=spead2.send.GroupMode.ROUND_ROBIN)

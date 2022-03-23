@@ -51,6 +51,20 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
+def done_callback(future: asyncio.Future) -> None:
+    """
+    Handle cancellation of Processing Loops as a callback.
+
+    Log exceptions as soon as they occur.
+    """
+    try:
+        future.result()  # Evaluate just for exceptions
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Processing failed with exception")
+
+
 class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
@@ -290,13 +304,6 @@ class Engine(aiokatcp.DeviceServer):
                 )
             )
 
-        self._descriptor_heap = send.make_descriptor_heap(
-            data_type=send_dtype,
-            channels=channels,
-            substreams=len(dst),
-            spectra_per_heap=spectra_per_heap,
-        )
-
         extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
         self._send_stream = send.make_stream(
             endpoints=dst,
@@ -318,6 +325,13 @@ class Engine(aiokatcp.DeviceServer):
         )
         for schunk in send_chunks:
             self._processor.send_free_queue.put_nowait(schunk)
+
+        self._descriptor_heap_reflist = send.make_descriptor_heaps(
+            data_type=send_dtype,
+            channels=channels,
+            substreams=len(dst),
+            spectra_per_heap=spectra_per_heap,
+        )
 
     @staticmethod
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
@@ -464,7 +478,7 @@ class Engine(aiokatcp.DeviceServer):
 
             delay_model.add(new_linear_model)
 
-    async def start(self, send_descriptors: bool = True, descr_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
+    async def start(self, send_descriptors_on_startup: bool = True) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
@@ -474,12 +488,9 @@ class Engine(aiokatcp.DeviceServer):
 
         Parameters
         ----------
-        send_descriptors
+        send_descriptors_on_startup
             Boolean to dictate whether the Engine should send descriptor heaps
-            along with its data transmission.
-        descr_interval_s
-            Descriptor send interval, in seconds. Pass zero (0) to send
-            descriptors once.
+            during Engine startup.
         """
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -496,36 +507,59 @@ class Engine(aiokatcp.DeviceServer):
             asyncio.create_task(self._processor.run_transmit(self._send_stream)),
         )
 
-        def done_callback(future: asyncio.Future) -> None:
-            try:
-                future.result()  # Evaluate just for exceptions
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("Processing failed with exception")
-
         self._processing_task.add_done_callback(done_callback)
 
-        if send_descriptors:
-            self._descriptor_task = asyncio.create_task(
-                self._processor.run_descriptors_loop(
-                    self._send_stream,
-                    self._descriptor_heap,
-                    descr_interval_s,
-                )
+        if send_descriptors_on_startup:
+            await self._processor.async_send_descriptors(
+                self._send_stream,
+                self._descriptor_heap_reflist,
             )
-
-            self._descriptor_task.add_done_callback(done_callback)
         await super().start()
+
+    async def run_descriptors_loop(
+        self, feng_id: int, n_ants: int, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S
+    ) -> None:
+        """Run the descriptors loop for the Engine.
+
+        Specifically as a Task.
+
+        Parameters
+        ----------
+        feng_id
+            The ID of this F-Engine, used to dictate how long this Engine
+            should wait before beginning to send descriptors continuously.
+        n_ants
+            The number of antennas in the array, used to dictate the spacing
+            of sending descriptors to their destinations.
+        descriptor_interval_s
+            The base interval used as a multiplier on feng_id and n_ants to
+            dictate the initial 'engine_sleep_interval' and 'send_interval'
+            respectively.
+        """
+        self._descriptor_task = asyncio.create_task(
+            self._processor.run_descriptors_loop(
+                self._send_stream,
+                self._descriptor_heap_reflist,
+                n_ants,
+                feng_id,
+                descriptor_interval_s,
+            )
+        )
+        self._descriptor_task.add_done_callback(done_callback)
 
     async def on_stop(self):
         """Shut down processing when the device server is stopped.
 
         This is called by aiokatcp after closing the listening socket.
         """
+        self._descriptor_task.cancel()
         for stream in self._src_streams:
             stream.stop()
         try:
-            await self._processing_task
+            await asyncio.gather(
+                self._processing_task,
+                self._descriptor_task,
+                return_exceptions=True,
+            )
         except Exception:
             pass  # Errors get logged by the done_callback above
