@@ -236,6 +236,13 @@ class WGN(Random):
 
     In practice, the signal has a period equal to the value of `n` given to
     :meth:`sample`, which could lead to undesirable correlations.
+
+    Parameters
+    ----------
+    std
+        Standard deviation of the samples
+    entropy
+        If provided, used to seed the random number generator
     """
 
     std: float  #: standard deviation
@@ -296,10 +303,14 @@ def parse_signals(prog: str) -> List[Signal]:
 
     An expression may consist of function calls, parentheses, the operators
     ``+``, ``-`` and ``*``, and previously-defined variables. The following
-    functions are available (parameters must be floating-point literals).
+    functions are available (parameters must be integer or floating-point
+    literals).
 
     cw(amplitude, frequency)
         See :class:`CW`.
+
+    wgn(std [, entropy])
+        See :class:`WGN`.
     """
     var_table = {}
     output = []
