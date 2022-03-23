@@ -163,6 +163,7 @@ class TestKatcpRequests:
             "3.76,0.12:7.322-1.91",  # Missing comma, phase half
             "3.76,0.12:apple,1.91",  # Non-float value for phase
             "3.76,pear:7.322,1.91",  # Non-float value for delay rate
+            "-1.0,0.0:0.0,0.0",  # Negative delay
         ],
     )
     async def test_delay_model_update_malformed(self, engine_client, malformed_delay_string):

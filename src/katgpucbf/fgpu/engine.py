@@ -432,10 +432,16 @@ class Engine(aiokatcp.DeviceServer):
         # then we'd need to compensate for that here.
         start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
 
-        for coeffs, delay_model in zip(delays, self.delay_models):
+        # Collect them in a temporary until they're all validated
+        new_linear_models = []
+        for coeffs in delays:
             delay_str, phase_str = coeffs.split(":")
             delay, delay_rate = comma_string_to_float(delay_str)
             phase, phase_rate = comma_string_to_float(phase_str)
+            if delay < 0:
+                raise aiokatcp.FailReply("delay cannot be negative")
+            if delay + 5 * delay_rate < 0:
+                logger.warning("delay will become negative within 5s")
 
             delay_samples = delay * self.adc_sample_rate
             # For compatibility with MeerKAT, the phase given is the net change in
@@ -446,14 +452,17 @@ class Engine(aiokatcp.DeviceServer):
             delay_phase_correction = 0.5 * np.pi * delay_samples
             phase += delay_phase_correction
             phase_rate_correction = 0.5 * np.pi * delay_rate
-            new_linear_model = LinearDelayModel(
-                start_sample_count,
-                delay_samples,
-                delay_rate,
-                phase,
-                phase_rate / self.adc_sample_rate + phase_rate_correction,
+            new_linear_models.append(
+                LinearDelayModel(
+                    start_sample_count,
+                    delay_samples,
+                    delay_rate,
+                    phase,
+                    phase_rate / self.adc_sample_rate + phase_rate_correction,
+                )
             )
 
+        for delay_model, new_linear_model in zip(self.delay_models, new_linear_models):
             delay_model.add(new_linear_model)
 
     async def start(self) -> None:
