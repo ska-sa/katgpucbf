@@ -58,7 +58,8 @@ This has a few implications:
 
 1. The frequency resolution is limited by the inverse of the window length.
    For example, a sinusoidal signal must have an integer number of cycles per
-   window.
+   window, which means that the frequency is rounded to a multiple of
+   :math:`\frac{\text{adc-sample-rate}}{\text{signal-heaps}\times \text{heap-samples}}`.
 
 2. Noise is correlated in time, and when averaging over long periods of time
    (longer than the window), the standard deviation does not decrease with the
