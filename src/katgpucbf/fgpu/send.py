@@ -239,10 +239,10 @@ def make_descriptor_heaps(
     substreams: int,
     spectra_per_heap: int,
 ) -> List[spead2.send.HeapReference]:
-    """Create a list of Reference Heaps for the F-Engine descriptors.
+    """Create a list of heap references for the F-Engine descriptors.
 
-    This is done for efficiency in sending the descriptors to their
-    various destinations.
+    This is done for efficiency in sending the descriptors to their various
+    destinations. It produces one descriptor heap for each substream.
 
     Parameters
     ----------

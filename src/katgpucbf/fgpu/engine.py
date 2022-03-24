@@ -70,10 +70,9 @@ def done_callback(task: asyncio.Task) -> None:
     try:
         task.result()  # Evaluate just for exceptions
     except asyncio.CancelledError:
-        logger.exception(f"{task.get_name()} was Cancelled")
-        pass
+        logger.debug("%s was cancelled", task.get_name())
     except Exception:
-        logger.exception(f"Processing {task.get_name()} failed with exception")
+        logger.exception("Processing %s failed with exception", task.get_name())
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -224,6 +223,8 @@ class Engine(aiokatcp.DeviceServer):
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
+        self.feng_id = feng_id
+        self.n_ants = num_ants
 
         if use_vkgdr:
             import vkgdr.pycuda
@@ -489,20 +490,36 @@ class Engine(aiokatcp.DeviceServer):
 
             delay_model.add(new_linear_model)
 
-    async def start(self, send_descriptors_on_startup: bool = True) -> None:
+    async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
-        concurrently. If indicated, it will also add a task to continuously
-        send the descriptor heaps at the specified interval.
+        concurrently. It also adds a task to continuously send the descriptor
+        heaps at the an interval based on the `descriptor_interval_s`. See
+        :meth:`~Processor.run_descriptors_loop` for more details.
 
         Parameters
         ----------
-        send_descriptors_on_startup
-            Boolean to dictate whether the Engine should send descriptor heaps
-            during Engine startup.
+        descriptor_interval_s
+            The base interval used as a multiplier on feng_id and n_ants to
+            dictate the initial 'engine sleep interval' and 'send interval'
+            respectively.
         """
+        # Create the descriptor task first to ensure descriptors will be sent
+        # before any data makes its way through the pipeline.
+        self._descriptor_task = asyncio.create_task(
+            self._processor.run_descriptors_loop(
+                self._send_stream,
+                self._descriptor_heap_reflist,
+                self.n_ants,
+                self.feng_id,
+                descriptor_interval_s,
+            ),
+            name=DESCRIPTOR_TASK_NAME,
+        )
+        self._descriptor_task.add_done_callback(done_callback)
+
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
                 stream,
@@ -513,62 +530,31 @@ class Engine(aiokatcp.DeviceServer):
                 buffer=self._src_buffer,
             )
 
+        proc_task = asyncio.create_task(
+            self._processor.run_processing(self._src_streams),
+            name=GPU_PROC_TASK_NAME,
+        )
+        proc_task.add_done_callback(done_callback)
+
+        recv_task = asyncio.create_task(
+            self._processor.run_receive(self._src_streams, self._src_layout),
+            name=RECV_TASK_NAME,
+        )
+        recv_task.add_done_callback(done_callback)
+
+        send_task = asyncio.create_task(
+            self._processor.run_transmit(self._send_stream),
+            name=SEND_TASK_NAME,
+        )
+        send_task.add_done_callback(done_callback)
+
         self._processing_task = asyncio.gather(
-            asyncio.create_task(
-                self._processor.run_processing(self._src_streams),
-                name=GPU_PROC_TASK_NAME,
-            ),
-            asyncio.create_task(
-                self._processor.run_receive(self._src_streams, self._src_layout),
-                name=RECV_TASK_NAME,
-            ),
-            asyncio.create_task(
-                self._processor.run_transmit(self._send_stream),
-                name=SEND_TASK_NAME,
-            ),
+            proc_task,
+            recv_task,
+            send_task,
         )
-        # Added a # type: ignore as `add_done_callback` wants a Future
-        # but the Task type-hint works just fine.
-        self._processing_task.add_done_callback(done_callback)  # type: ignore
 
-        if send_descriptors_on_startup:
-            await self._processor.async_send_descriptors(
-                self._send_stream,
-                self._descriptor_heap_reflist,
-            )
         await super().start()
-
-    async def run_descriptors_loop(
-        self, feng_id: int, n_ants: int, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S
-    ) -> None:
-        """Run the descriptors loop for the Engine.
-
-        Specifically as a Task.
-
-        Parameters
-        ----------
-        feng_id
-            The ID of this F-Engine, used to dictate how long this Engine
-            should wait before beginning to send descriptors continuously.
-        n_ants
-            The number of antennas in the array, used to dictate the spacing
-            of sending descriptors to their destinations.
-        descriptor_interval_s
-            The base interval used as a multiplier on feng_id and n_ants to
-            dictate the initial 'engine_sleep_interval' and 'send_interval'
-            respectively.
-        """
-        self._descriptor_task = asyncio.create_task(
-            self._processor.run_descriptors_loop(
-                self._send_stream,
-                self._descriptor_heap_reflist,
-                n_ants,
-                feng_id,
-                descriptor_interval_s,
-            ),
-            name=DESCRIPTOR_TASK_NAME,
-        )
-        self._descriptor_task.add_done_callback(done_callback)  # type: ignore
 
     async def on_stop(self):
         """Shut down processing when the device server is stopped.

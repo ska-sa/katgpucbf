@@ -875,10 +875,11 @@ class Processor:
         feng_id: int,
         base_interval_s: float,
     ) -> None:
-        """Send the Antenna Channelised Voltage descriptors continuously.
+        """Send the Antenna Channelised Voltage descriptors.
 
-        After initially sleeping for `feng_id x base_interval_s` seconds, the
-        descriptors are sent every `n_ants x base_interval_s` seconds.
+        The descriptors are initially sent once straight away. This loop then
+        sleeps for `feng_id x base_interval_s` seconds, the continually sends
+        descriptors every `n_ants x base_interval_s` seconds.
 
         Parameters
         ----------
@@ -890,23 +891,24 @@ class Processor:
             stream. Formatted as a list of HeapReference's to be as efficient
             as possible during the send procedure.
         base_interval_s
-            Interval (in seconds) over which to spread the sending of
-            descriptor heaps. If given zero (0), the descriptors will be
-            sent once.
+            The base interval used as a multiplier on feng_id and n_ants to
+            dictate the initial 'engine sleep interval' and 'send interval'
+            respectively.
         """
-        await asyncio.sleep(feng_id * base_interval_s)  # Dubbed the 'engine_sleep_interval'
+        self.async_send_descriptors(stream, descriptor_heap_reflist)
+        await asyncio.sleep(feng_id * base_interval_s)
         send_interval_s = n_ants * base_interval_s
         while True:
             await asyncio.gather(
                 self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(send_interval_s)
             )
 
-    async def async_send_descriptors(
+    def async_send_descriptors(
         self,
         stream: "spead2.send.asyncio.AsyncStream",
         descriptor_heap_reflist: List[spead2.send.HeapReference],
     ) -> asyncio.Future:
-        """Abstracted utility allowing for a once-off or continuous calls.
+        """Send one descriptor to every substream.
 
         Parameters
         ----------
@@ -914,8 +916,6 @@ class Processor:
             This object takes large chunks of data and packages it
             appropriately in SPEAD heaps for transmission on the network.
         descriptor_heap_reflist
-            The descriptors describing the format of the heaps in the data
-            stream. Formatted as a HeapReference list to be as efficient as
-            possible during the send procedure.
+            See :meth:`~fgpu.send.make_descriptor_heaps` for more information.
         """
         return stream.async_send_heaps(heaps=descriptor_heap_reflist, mode=spead2.send.GroupMode.ROUND_ROBIN)
