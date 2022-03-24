@@ -27,10 +27,9 @@ import spead2.send
 from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS, send
+from katgpucbf.fgpu import SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.spead import IMMEDIATE_FORMAT
 
 from .test_recv import gen_heaps
 
@@ -256,15 +255,17 @@ class TestEngine:
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
             stream.add_inproc_reader(queue)
             ig = spead2.ItemGroup()
-            # We don't have descriptors yet, so we have to build the Items manually
             raw_shape = (CHANNELS // n_out_streams, SPECTRA_PER_HEAP, N_POLS, COMPLEX)
-            ig.add_item(send.TIMESTAMP_ID, "timestamp", "", shape=(), format=IMMEDIATE_FORMAT)
-            ig.add_item(send.FENG_ID_ID, "feng_id", "", shape=(), format=IMMEDIATE_FORMAT)
-            ig.add_item(send.FREQUENCY_ID, "frequency", "", shape=(), format=IMMEDIATE_FORMAT)
-            ig.add_item(send.FENG_RAW_ID, "feng_raw", "", shape=raw_shape, dtype=np.int8)
             expected_timestamp = expected_first_timestamp
             timestamp_step = SPECTRA_PER_HEAP * CHANNELS * 2  # TODO not valid for narrowband
             row = []
+
+            # First heap should be the descriptor heap
+            descriptor_heap = await stream.get()
+            items = ig.update(descriptor_heap)
+            assert items == {}, "This heap contains data, not just descriptors"
+
+            # Now, for the actual processing
             async for heap in stream:
                 assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
                 assert ig["feng_id"].value == FENG_ID

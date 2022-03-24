@@ -28,7 +28,17 @@ import numpy as np
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
+from .. import (
+    BYTE_BITS,
+    COMPLEX,
+    DESCRIPTOR_TASK_NAME,
+    GPU_PROC_TASK_NAME,
+    N_POLS,
+    RECV_TASK_NAME,
+    SEND_TASK_NAME,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    __version__,
+)
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
@@ -49,6 +59,20 @@ def format_complex(value: numbers.Complex) -> str:
     as a Python complex may not give exactly the same value.
     """
     return f"{value.real}{value.imag:+}j"
+
+
+def done_callback(task: asyncio.Task) -> None:
+    """
+    Handle cancellation of Processing Loops as a callback.
+
+    Log exceptions as soon as they occur.
+    """
+    try:
+        task.result()  # Evaluate just for exceptions
+    except asyncio.CancelledError:
+        logger.debug("%s was cancelled", task.get_name())
+    except Exception:
+        logger.exception("Processing %s failed with exception", task.get_name())
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -199,6 +223,8 @@ class Engine(aiokatcp.DeviceServer):
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
+        self.feng_id = feng_id
+        self.n_ants = num_ants
 
         if use_vkgdr:
             import vkgdr.pycuda
@@ -289,6 +315,7 @@ class Engine(aiokatcp.DeviceServer):
                     feng_id=feng_id,
                 )
             )
+
         extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
         self._send_stream = send.make_stream(
             endpoints=dst,
@@ -310,6 +337,13 @@ class Engine(aiokatcp.DeviceServer):
         )
         for schunk in send_chunks:
             self._processor.send_free_queue.put_nowait(schunk)
+
+        self._descriptor_heap_reflist = send.make_descriptor_heaps(
+            data_type=send_dtype,
+            channels=channels,
+            substreams=len(dst),
+            spectra_per_heap=spectra_per_heap,
+        )
 
     @staticmethod
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
@@ -465,13 +499,36 @@ class Engine(aiokatcp.DeviceServer):
         for delay_model, new_linear_model in zip(self.delay_models, new_linear_models):
             delay_model.add(new_linear_model)
 
-    async def start(self) -> None:
+    async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
-        concurrently.
+        concurrently. It also adds a task to continuously send the descriptor
+        heaps at an interval based on the `descriptor_interval_s`. See
+        :meth:`~Processor.run_descriptors_loop` for more details.
+
+        Parameters
+        ----------
+        descriptor_interval_s
+            The base interval used as a multiplier on feng_id and n_ants to
+            dictate the initial 'engine sleep interval' and 'send interval'
+            respectively.
         """
+        # Create the descriptor task first to ensure descriptors will be sent
+        # before any data makes its way through the pipeline.
+        self._descriptor_task = asyncio.create_task(
+            self._processor.run_descriptors_loop(
+                self._send_stream,
+                self._descriptor_heap_reflist,
+                self.n_ants,
+                self.feng_id,
+                descriptor_interval_s,
+            ),
+            name=DESCRIPTOR_TASK_NAME,
+        )
+        self._descriptor_task.add_done_callback(done_callback)
+
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
                 stream,
@@ -481,21 +538,31 @@ class Engine(aiokatcp.DeviceServer):
                 comp_vector=self._src_comp_vector[pol],
                 buffer=self._src_buffer,
             )
+
+        proc_task = asyncio.create_task(
+            self._processor.run_processing(self._src_streams),
+            name=GPU_PROC_TASK_NAME,
+        )
+        proc_task.add_done_callback(done_callback)
+
+        recv_task = asyncio.create_task(
+            self._processor.run_receive(self._src_streams, self._src_layout),
+            name=RECV_TASK_NAME,
+        )
+        recv_task.add_done_callback(done_callback)
+
+        send_task = asyncio.create_task(
+            self._processor.run_transmit(self._send_stream),
+            name=SEND_TASK_NAME,
+        )
+        send_task.add_done_callback(done_callback)
+
         self._processing_task = asyncio.gather(
-            asyncio.create_task(self._processor.run_processing(self._src_streams)),
-            asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
-            asyncio.create_task(self._processor.run_transmit(self._send_stream)),
+            proc_task,
+            recv_task,
+            send_task,
         )
 
-        def done_callback(future: asyncio.Future) -> None:
-            try:
-                future.result()  # Evaluate just for exceptions
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("Processing failed with exception")
-
-        self._processing_task.add_done_callback(done_callback)
         await super().start()
 
     async def on_stop(self):
@@ -503,9 +570,14 @@ class Engine(aiokatcp.DeviceServer):
 
         This is called by aiokatcp after closing the listening socket.
         """
+        self._descriptor_task.cancel()
         for stream in self._src_streams:
             stream.stop()
         try:
-            await self._processing_task
+            await asyncio.gather(
+                self._processing_task,
+                self._descriptor_task,
+                return_exceptions=True,
+            )
         except Exception:
             pass  # Errors get logged by the done_callback above
