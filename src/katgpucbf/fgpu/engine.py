@@ -496,7 +496,7 @@ class Engine(aiokatcp.DeviceServer):
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
         concurrently. It also adds a task to continuously send the descriptor
-        heaps at the an interval based on the `descriptor_interval_s`. See
+        heaps at an interval based on the `descriptor_interval_s`. See
         :meth:`~Processor.run_descriptors_loop` for more details.
 
         Parameters

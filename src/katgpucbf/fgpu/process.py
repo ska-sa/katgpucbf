@@ -878,7 +878,7 @@ class Processor:
         """Send the Antenna Channelised Voltage descriptors.
 
         The descriptors are initially sent once straight away. This loop then
-        sleeps for `feng_id x base_interval_s` seconds, the continually sends
+        sleeps for `feng_id x base_interval_s` seconds, then continually sends
         descriptors every `n_ants x base_interval_s` seconds.
 
         Parameters
@@ -895,8 +895,9 @@ class Processor:
             dictate the initial 'engine sleep interval' and 'send interval'
             respectively.
         """
-        self.async_send_descriptors(stream, descriptor_heap_reflist)
-        await asyncio.sleep(feng_id * base_interval_s)
+        await asyncio.gather(
+            self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(feng_id * base_interval_s)
+        )
         send_interval_s = n_ants * base_interval_s
         while True:
             await asyncio.gather(
