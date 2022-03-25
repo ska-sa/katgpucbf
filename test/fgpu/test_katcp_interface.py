@@ -30,7 +30,7 @@ from katgpucbf.fgpu.engine import Engine
 
 from .. import get_sensor
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.cuda_only]
+pytestmark = [pytest.mark.cuda_only]
 
 CHANNELS = 4096
 SYNC_EPOCH = 1632561921

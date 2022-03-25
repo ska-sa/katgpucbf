@@ -30,8 +30,6 @@ from katgpucbf.dsim.signal import parse_signals
 from .. import get_sensor
 from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, SAMPLE_BITS, SIGNAL_HEAPS
 
-pytestmark = [pytest.mark.asyncio]
-
 
 @pytest.fixture
 async def katcp_server(

@@ -21,7 +21,6 @@ import itertools
 from typing import Optional, Sequence
 
 import numpy as np
-import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
@@ -30,8 +29,6 @@ from katgpucbf.dsim import send
 
 from .. import PromDiff
 from .conftest import HEAP_SAMPLES, N_ENDPOINTS_PER_POL, N_POLS, SAMPLE_BITS, SIGNAL_HEAPS
-
-pytestmark = [pytest.mark.asyncio]
 
 
 async def test_sender(
