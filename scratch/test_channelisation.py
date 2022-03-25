@@ -114,6 +114,9 @@ async def async_main(args: argparse.Namespace) -> None:
         channel_width = bandwidth / n_chans
         int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
 
+        # Set fengine gain
+        _, _ = await pc_client.request("gain", "antenna_channelised_voltage", "m800v", "1e-4")
+
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
     HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
@@ -180,13 +183,14 @@ async def async_main(args: argparse.Namespace) -> None:
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
     # Channelisation test.
-    channel = n_chans // 2  # picked fairly arbitrarily.
+    channel = 1234  # picked fairly arbitrarily.
     channel_centre_freq = channel * channel_width  # TODO: check this.
     logger.info("Checking channel %d at frequency %f", channel, channel_centre_freq)
     logger.info("We expect the channel width to be %f", channel_width)
 
-    chans_on_either_side = 3
-    num_points_on_either_side = chans_on_either_side * 5 + 2
+    chans_on_either_side = 2
+    points_per_channel = 50
+    num_points_on_either_side = int(np.round((chans_on_either_side + 0.5) * points_per_channel - 1))
 
     frequencies_to_check = np.linspace(
         channel_centre_freq - chans_on_either_side * channel_width,
@@ -195,11 +199,13 @@ async def async_main(args: argparse.Namespace) -> None:
         endpoint=True,
     )
     frequency_response: List[float] = []
+    to_the_left: List[float] = []
+    to_the_right: List[float] = []
     n_freqs = len(frequencies_to_check)
 
     for n, freq in enumerate(frequencies_to_check):
         logger.info("Setting dsim cw freq to %f", freq)
-        reply, _informs = await dsim_client.request("signals", f"cw(1.0,{freq});wgn(0.05);")
+        reply, _informs = await dsim_client.request("signals", f"cw(0.15,{freq})+wgn(0.5);wgn(0.1);")
         expected_timestamp = int(reply[0])
 
         async for chunk in stream.data_ringbuffer:
@@ -211,12 +217,22 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("Received a chunk with %f Hz, recording response! (%d/%d)", freq, n, n_freqs)
                 # print(chunk.data[channel-chans_on_either_side:channel+chans_on_either_side+1, 0, 0])
                 frequency_response.append(chunk.data[channel, 0, 0])
+                to_the_left.append(chunk.data[channel - 1, 0, 0])
+                to_the_right.append(chunk.data[channel + 1, 0, 0])
                 stream.add_free_chunk(chunk)
                 break
 
-    frequency_response = np.array(frequency_response)
-    plt.plot(frequencies_to_check, frequency_response)
-    plt.savefig("foo.png")
+    frequency_response = np.maximum(frequency_response, 1e-6)
+    to_the_left = np.maximum(to_the_left, 1e-6)
+    to_the_right = np.maximum(to_the_right, 1e-6)
+    xaxis = (frequencies_to_check - channel_centre_freq) / channel_width
+    plt.plot(xaxis, 10 * np.log10(frequency_response))
+    plt.plot(xaxis, 10 * np.log10(to_the_left))
+    plt.plot(xaxis, 10 * np.log10(to_the_right))
+    plt.xlabel(f"Channel relative to {channel}")
+    plt.ylabel("Channel response [dB]")
+    plt.title("Channelisation Test result")
+    plt.savefig("channelisation.png")
 
 
 if __name__ == "__main__":
