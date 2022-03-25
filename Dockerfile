@@ -42,6 +42,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     librdmacm-dev \
     libpcap-dev \
     libcap-dev \
+    libdivide-dev \
     libvulkan-dev libxext6 libegl1 \
     openssh-client \
     wget
