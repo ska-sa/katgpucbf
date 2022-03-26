@@ -215,7 +215,6 @@ async def async_main(args: argparse.Namespace) -> None:
                 stream.add_free_chunk(chunk)
             else:
                 logger.info("Received a chunk with %f Hz, recording response! (%d/%d)", freq, n, n_freqs)
-                # print(chunk.data[channel-chans_on_either_side:channel+chans_on_either_side+1, 0, 0])
                 frequency_response.append(chunk.data[channel, 0, 0])
                 to_the_left.append(chunk.data[channel - 1, 0, 0])
                 to_the_right.append(chunk.data[channel + 1, 0, 0])
