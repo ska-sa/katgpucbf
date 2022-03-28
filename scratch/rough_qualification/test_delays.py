@@ -199,7 +199,7 @@ async def async_main(args: argparse.Namespace) -> None:
     plt.title("Delay tracking")
 
     async for chunk in stream.data_ringbuffer:
-
+        assert np.all(chunk.present)
         recvd_timestamp = chunk.chunk_id * timestamp_step
         if recvd_timestamp <= expected_timestamp:  # give ourselves a bit of buffer for luck
             logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)

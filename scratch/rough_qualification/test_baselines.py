@@ -230,18 +230,19 @@ async def async_main(args: argparse.Namespace) -> None:
         expected_timestamp = await jiggle_dsim(dsim_client, channel_centre_freq)
 
         async for chunk in stream.data_ringbuffer:
+            assert np.all(chunk.present)
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if recvd_timestamp <= expected_timestamp:  # give ourselves a bit of buffer for luck
                 logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
+                stream.add_free_chunk(chunk)
 
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
                 logger.debug("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 for loud_bl in loud_bls:
                     check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl)
+                    stream.add_free_chunk(chunk)
                 break
-
-            stream.add_free_chunk(chunk)
 
 
 def check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl):

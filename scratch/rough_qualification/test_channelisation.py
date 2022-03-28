@@ -209,6 +209,7 @@ async def async_main(args: argparse.Namespace) -> None:
         expected_timestamp = int(reply[0])
 
         async for chunk in stream.data_ringbuffer:
+            assert np.all(chunk.present)
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if recvd_timestamp <= expected_timestamp + timestamp_step:  # give ourselves a bit of buffer for luck
                 logger.info("Skipping chunk with timestamp %d", recvd_timestamp)
