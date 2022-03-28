@@ -21,6 +21,8 @@ from spead2.recv.numba import chunk_place_data
 
 CPLX = 2
 
+logger = logging.getLogger(__name__)
+
 
 async def print_all_sensors(client: aiokatcp.Client):
     _reply, informs = await client.request("sensor-value")
@@ -57,6 +59,25 @@ async def get_dsim_endpoint(pc_client: Endpoint) -> Endpoint:
     return endpoint_parser(None)(await get_sensor_val(pc_client, "sim.m800.1712000000.0.port"))
 
 
+async def jiggle_dsim(dsim_client, channel_centre_freq):
+    """We're doing this just so that I can get a timestamp."""
+    reply, _ = await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
+    return int(reply[0])
+
+
+def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str):
+    bl_idx = (ant1 * (ant1 + 1) // 2 + ant0) * 4
+    if pol0 == "v" and pol1 == "v":
+        pass  # Do nothing, this is zero
+    elif pol0 == "h" and pol1 == "v":
+        bl_idx += 1
+    elif pol0 == "v" and pol1 == "h":
+        bl_idx += 2
+    elif pol0 == "h" and pol1 == "h":
+        bl_idx += 3
+    return bl_idx
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -84,7 +105,6 @@ def main() -> None:
 
 
 async def async_main(args: argparse.Namespace) -> None:
-    logger = logging.getLogger(__name__)
     host, port = await get_product_controller_endpoint(args.mc_address, args.product_name)
     logger.info("Connecting to product controller on %s:%d", host, port)
     pc_client = await aiokatcp.Client.connect(host, port)
@@ -186,13 +206,6 @@ async def async_main(args: argparse.Namespace) -> None:
     channel = 1234  # picked fairly arbitrarily. We just need to see the tone.
     channel_centre_freq = channel * channel_width  # TODO: check this.
 
-    async def jiggle_dsim():
-        """We're doing this just so that I can get a timestamp."""
-        reply, _ = await dsim_client.request(
-            "signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;"
-        )
-        return int(reply[0])
-
     # Let's have some functions to help us.
     async def zero_all_gains():
         for ant in range(n_ants):
@@ -209,50 +222,42 @@ async def async_main(args: argparse.Namespace) -> None:
 
     Baseline = namedtuple("Baseline", ["ant0", "pol0", "ant1", "pol1"])
 
-    def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str):
-        bl_idx = (ant1 * (ant1 + 1) // 2 + ant0) * 4
-        if pol0 == "v" and pol1 == "v":
-            pass  # Do nothing, this is zero
-        elif pol0 == "h" and pol1 == "v":
-            bl_idx += 1
-        elif pol0 == "v" and pol1 == "h":
-            bl_idx += 2
-        elif pol0 == "h" and pol1 == "h":
-            bl_idx += 3
-        return bl_idx
-
     for bl_idx, bl in enumerate(bls_ordering):
         current_bl = Baseline(int(bl[0][3]), bl[0][4], int(bl[1][3]), bl[1][4])
         logger.info("Checking baseline %r (%d)", bl, bl_idx)
         await zero_all_gains()
         await unzero_a_baseline(bl)
-        expected_timestamp = await jiggle_dsim()
+        expected_timestamp = await jiggle_dsim(dsim_client, channel_centre_freq)
 
         async for chunk in stream.data_ringbuffer:
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if recvd_timestamp <= expected_timestamp:  # give ourselves a bit of buffer for luck
                 logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
-                stream.add_free_chunk(chunk)
+
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
                 logger.debug("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 for loud_bl in loud_bls:
-                    if loud_bl == bl_idx:
-                        logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
-                    elif loud_bl == get_bl_idx(current_bl.ant0, current_bl.pol0, current_bl.ant0, current_bl.pol0):
-                        logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
-                    elif loud_bl == get_bl_idx(current_bl.ant1, current_bl.pol1, current_bl.ant1, current_bl.pol1):
-                        logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
-                    elif loud_bl == get_bl_idx(current_bl.ant1, current_bl.pol1, current_bl.ant0, current_bl.pol0):
-                        logger.debug(
-                            "Signal in %r - fine - it's the negative of what we expect.",
-                            loud_bl,
-                        )
-                    else:
-                        logger.error("Signal in %d but it wasn't expected there!", loud_bl)
-
-                stream.add_free_chunk(chunk)
+                    check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl)
                 break
+
+            stream.add_free_chunk(chunk)
+
+
+def check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl):
+    if loud_bl == bl_idx:
+        logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
+    elif loud_bl == get_bl_idx(current_bl.ant0, current_bl.pol0, current_bl.ant0, current_bl.pol0):
+        logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
+    elif loud_bl == get_bl_idx(current_bl.ant1, current_bl.pol1, current_bl.ant1, current_bl.pol1):
+        logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
+    elif loud_bl == get_bl_idx(current_bl.ant1, current_bl.pol1, current_bl.ant0, current_bl.pol0):
+        logger.debug(
+            "Signal in %r - fine - it's the negative of what we expect.",
+            loud_bl,
+        )
+    else:
+        logger.error("Signal in %d but it wasn't expected there!", loud_bl)
 
 
 if __name__ == "__main__":
