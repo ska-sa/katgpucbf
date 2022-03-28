@@ -65,7 +65,7 @@ def main() -> None:
         "--interface",
         type=get_interface_address,
         required=True,
-        help="Name of network  to use for ingest.",
+        help="Name of network to use for ingest.",
     )
     parser.add_argument(
         "--ibv",

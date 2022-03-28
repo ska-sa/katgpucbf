@@ -190,7 +190,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     chans_on_either_side = 2
     points_per_channel = 50
-    num_points_on_either_side = int(np.round((chans_on_either_side + 0.5) * points_per_channel - 1))
+    num_points_on_either_side = round((chans_on_either_side + 0.5) * points_per_channel - 1)
 
     frequencies_to_check = np.linspace(
         channel_centre_freq - chans_on_either_side * channel_width,
@@ -209,9 +209,11 @@ async def async_main(args: argparse.Namespace) -> None:
         expected_timestamp = int(reply[0])
 
         async for chunk in stream.data_ringbuffer:
-            assert np.all(chunk.present)
             recvd_timestamp = chunk.chunk_id * timestamp_step
-            if recvd_timestamp <= expected_timestamp + timestamp_step:  # give ourselves a bit of buffer for luck
+            if not np.all(chunk.present):
+                logger.debug("Incomplete chunk %d", chunk.chunk_id)
+                stream.add_free_chunk(chunk)
+            elif recvd_timestamp <= expected_timestamp + timestamp_step:  # give ourselves a bit of buffer for luck
                 logger.info("Skipping chunk with timestamp %d", recvd_timestamp)
                 stream.add_free_chunk(chunk)
             else:
