@@ -187,7 +187,7 @@ async def async_main(args: argparse.Namespace) -> None:
     # i.e. the baseline (m800h, m800v). The mechanism is the same for all the
     # others so I don't expect there'll be much advantage to being more thorough
     # than this.
-    delay_coeffs = ["1e-10,1e-10:0,0"] + ["0,0:0,0"] * 7
+    delay_coeffs = ["1e-10,2e-11:1,1e-1"] + ["0,0:0,0"] * 7
     load_time = time.time() + 1
     await pc_client.request("delays", "antenna_channelised_voltage", str(load_time), *delay_coeffs)
 
@@ -197,7 +197,7 @@ async def async_main(args: argparse.Namespace) -> None:
     _fig, ax = plt.subplots()
     plt.ylabel("Phase [rad]")
     plt.xlabel("Channel")
-    plt.title("Delay tracking")
+    plt.title("Delay + phase tracking")
 
     async for chunk in stream.data_ringbuffer:
         if not np.all(chunk.present):
