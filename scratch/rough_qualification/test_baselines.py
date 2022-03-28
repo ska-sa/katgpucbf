@@ -239,6 +239,7 @@ async def async_main(args: argparse.Namespace) -> None:
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
                 logger.debug("%d bls had signal in them: %r", len(loud_bls), loud_bls)
+                assert bl_idx in loud_bls  # Best to check the expected baselin is actually in the list.s
                 for loud_bl in loud_bls:
                     check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl)
                     stream.add_free_chunk(chunk)
