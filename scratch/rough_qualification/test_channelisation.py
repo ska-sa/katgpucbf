@@ -145,7 +145,7 @@ async def async_main(args: argparse.Namespace) -> None:
             data[0].heap_index = channel_offset // n_chans_per_substream
             data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
 
-    stream_config = spead2.recv.StreamConfig(max_heaps=HEAPS_PER_CHUNK * 3)
+    stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK)
 
     # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
     # May need to revisit that assumption for much larger array sizes.
