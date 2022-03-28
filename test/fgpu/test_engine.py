@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -48,7 +48,11 @@ MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
-GAIN = np.float32(0.001)
+# Expected frequency-domain magnitude for a tone with time-domain magnitude 1
+# when the eq gain is 1. The factor sqrt(2 * CHANNELS) is an approximation of
+# the normalisation factor applied to the PFB weights.
+COHERENT_SCALE = CHANNELS / np.sqrt(2 * CHANNELS)
+GAIN = np.float32(1 / COHERENT_SCALE)  # Default value passed to ?gain command
 
 
 @dataclass
@@ -366,7 +370,7 @@ class TestEngine:
         # Check for the tones
         for pol in range(2):
             tone_data = out_data[tone_channels[pol], :, pol]
-            expected_mag = tones[pol].magnitude * CHANNELS * GAIN
+            expected_mag = tones[pol].magnitude * COHERENT_SCALE * GAIN
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
             # The frequency corresponds to an integer number of cycles per
@@ -405,7 +409,7 @@ class TestEngine:
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
-        gain = 100 / CHANNELS
+        gain = 100 / COHERENT_SCALE
         for pol in range(N_POLS):
             await engine_client.request("gain", pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
@@ -413,7 +417,7 @@ class TestEngine:
         #
         # The division by 20 (not 10) is because we're dealing with voltage,
         # not power.
-        tol = 10 ** (-53 / 20) * (tones[0].magnitude * CHANNELS) * gain
+        tol = 10 ** (-53 / 20) * (tones[0].magnitude * COHERENT_SCALE) * gain
 
         out_data, _ = await self._send_data(
             mock_recv_streams,

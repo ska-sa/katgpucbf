@@ -67,6 +67,9 @@ def _invert_models(
 def generate_weights(channels: int, taps: int) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
+    The resulting weights are normalised such that the sum of
+    squares is 1.
+
     Parameters
     ----------
     channels
@@ -86,6 +89,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
     sinc = np.sinc((idx + 0.5) / step - taps / 2)
     weights = hann * sinc
+    weights /= np.sqrt(np.sum(np.square(weights)))
     return weights.astype(np.float32)
 
 

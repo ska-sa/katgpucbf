@@ -216,7 +216,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=1048576,
         help="Maximum supported difference between delays across polarisations (in samples) [%(default)s]",
     )
-    parser.add_argument("--gain", type=float, default=0.001, help="Initial eq gains [%(default)s]")
+    parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
     parser.add_argument(
         "--sync-epoch",
         type=int,  # AFAIK, the digitisers sync on PPS signals, so it makes sense for this to be an int.
