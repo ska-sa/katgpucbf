@@ -63,8 +63,6 @@ from katgpucbf.xbgpu.xsend import XSend
 
 from . import test_parameters
 
-pytestmark = [pytest.mark.asyncio]
-
 TOTAL_HEAPS: Final[int] = 20
 DUMP_INTERVAL_S: Final[int] = 0
 SEND_RATE_FACTOR: Final[float] = 1.1

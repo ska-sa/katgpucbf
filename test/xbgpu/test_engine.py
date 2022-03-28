@@ -40,7 +40,7 @@ from katgpucbf.xbgpu.engine import XBEngine
 
 from . import test_parameters
 
-pytestmark = [pytest.mark.device_filter.with_args(device_filter), pytest.mark.asyncio]
+pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
 get_baseline_index = njit(Correlation.get_baseline_index)
 

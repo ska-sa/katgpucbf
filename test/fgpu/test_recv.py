@@ -34,8 +34,6 @@ from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_D
 
 from .. import PromDiff
 
-pytestmark = [pytest.mark.asyncio]
-
 
 @pytest.fixture
 def layout(request) -> Layout:

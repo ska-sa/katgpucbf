@@ -33,7 +33,7 @@ from katgpucbf.fgpu.engine import Engine
 
 from .test_recv import gen_heaps
 
-pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
+pytestmark = [pytest.mark.cuda_only]
 # Command-line arguments
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
