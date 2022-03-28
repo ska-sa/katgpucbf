@@ -30,8 +30,6 @@ from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMME
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
 from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
 
-pytestmark = [pytest.mark.asyncio]
-
 
 @pytest.fixture
 def layout() -> Layout:

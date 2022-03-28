@@ -36,3 +36,8 @@ DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
 DEFAULT_KATCP_HOST = ""  # All interfaces
 DEFAULT_KATCP_PORT = 7147
+
+GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
+RECV_TASK_NAME: Final[str] = "Receiver Loop"
+SEND_TASK_NAME: Final[str] = "Sender Loop"
+DESCRIPTOR_TASK_NAME: Final[str] = "Descriptor Loop"

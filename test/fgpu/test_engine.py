@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -27,14 +27,13 @@ import spead2.send
 from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS, send
+from katgpucbf.fgpu import SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.spead import IMMEDIATE_FORMAT
 
 from .test_recv import gen_heaps
 
-pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
+pytestmark = [pytest.mark.cuda_only]
 # Command-line arguments
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
@@ -49,7 +48,11 @@ MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
-GAIN = np.float32(0.001)
+# Expected frequency-domain magnitude for a tone with time-domain magnitude 1
+# when the eq gain is 1. The factor sqrt(2 * CHANNELS) is an approximation of
+# the normalisation factor applied to the PFB weights.
+COHERENT_SCALE = CHANNELS / np.sqrt(2 * CHANNELS)
+GAIN = np.float32(1 / COHERENT_SCALE)  # Default value passed to ?gain command
 
 
 @dataclass
@@ -256,15 +259,17 @@ class TestEngine:
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
             stream.add_inproc_reader(queue)
             ig = spead2.ItemGroup()
-            # We don't have descriptors yet, so we have to build the Items manually
             raw_shape = (CHANNELS // n_out_streams, SPECTRA_PER_HEAP, N_POLS, COMPLEX)
-            ig.add_item(send.TIMESTAMP_ID, "timestamp", "", shape=(), format=IMMEDIATE_FORMAT)
-            ig.add_item(send.FENG_ID_ID, "feng_id", "", shape=(), format=IMMEDIATE_FORMAT)
-            ig.add_item(send.FREQUENCY_ID, "frequency", "", shape=(), format=IMMEDIATE_FORMAT)
-            ig.add_item(send.FENG_RAW_ID, "feng_raw", "", shape=raw_shape, dtype=np.int8)
             expected_timestamp = expected_first_timestamp
             timestamp_step = SPECTRA_PER_HEAP * CHANNELS * 2  # TODO not valid for narrowband
             row = []
+
+            # First heap should be the descriptor heap
+            descriptor_heap = await stream.get()
+            items = ig.update(descriptor_heap)
+            assert items == {}, "This heap contains data, not just descriptors"
+
+            # Now, for the actual processing
             async for heap in stream:
                 assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
                 assert ig["feng_id"].value == FENG_ID
@@ -365,7 +370,7 @@ class TestEngine:
         # Check for the tones
         for pol in range(2):
             tone_data = out_data[tone_channels[pol], :, pol]
-            expected_mag = tones[pol].magnitude * CHANNELS * GAIN
+            expected_mag = tones[pol].magnitude * COHERENT_SCALE * GAIN
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
             # The frequency corresponds to an integer number of cycles per
@@ -404,7 +409,7 @@ class TestEngine:
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
-        gain = 100 / CHANNELS
+        gain = 100 / COHERENT_SCALE
         for pol in range(N_POLS):
             await engine_client.request("gain", pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
@@ -412,7 +417,7 @@ class TestEngine:
         #
         # The division by 20 (not 10) is because we're dealing with voltage,
         # not power.
-        tol = 10 ** (-53 / 20) * (tones[0].magnitude * CHANNELS) * gain
+        tol = 10 ** (-53 / 20) * (tones[0].magnitude * COHERENT_SCALE) * gain
 
         out_data, _ = await self._send_data(
             mock_recv_streams,

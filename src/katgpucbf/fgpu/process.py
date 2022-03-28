@@ -31,6 +31,8 @@ from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import spead2.recv
+import spead2.send
+import spead2.send.asyncio
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -65,6 +67,9 @@ def _invert_models(
 def generate_weights(channels: int, taps: int) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
+    The resulting weights are normalised such that the sum of
+    squares is 1.
+
     Parameters
     ----------
     channels
@@ -84,6 +89,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
     sinc = np.sinc((idx + 0.5) / step - taps / 2)
     weights = hann * sinc
+    weights /= np.sqrt(np.sum(np.square(weights)))
     return weights.astype(np.float32)
 
 
@@ -820,8 +826,9 @@ class Processor:
         Parameters
         ----------
         sender
-            This object, written in C++, takes large chunks of data and packages
-            it appropriately in SPEAD heaps for transmission on the network.
+            This object, written in C++, takes large chunks of data and
+            packages it appropriately in SPEAD heaps for transmission on
+            the network.
         """
         task: Optional[asyncio.Future] = None
         while True:
@@ -863,3 +870,57 @@ class Processor:
         for substream_index in range(stream.num_substreams):
             await stream.async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
+
+    async def run_descriptors_loop(
+        self,
+        stream: "spead2.send.asyncio.AsyncStream",
+        descriptor_heap_reflist: List[spead2.send.HeapReference],
+        n_ants: int,
+        feng_id: int,
+        base_interval_s: float,
+    ) -> None:
+        """Send the Antenna Channelised Voltage descriptors.
+
+        The descriptors are initially sent once straight away. This loop then
+        sleeps for `feng_id x base_interval_s` seconds, then continually sends
+        descriptors every `n_ants x base_interval_s` seconds.
+
+        Parameters
+        ----------
+        stream
+            This object takes large chunks of data and packages it
+            appropriately in SPEAD heaps for transmission on the network.
+        descriptor_heap_reflist
+            The descriptors describing the format of the heaps in the data
+            stream. Formatted as a list of HeapReference's to be as efficient
+            as possible during the send procedure.
+        base_interval_s
+            The base interval used as a multiplier on feng_id and n_ants to
+            dictate the initial 'engine sleep interval' and 'send interval'
+            respectively.
+        """
+        await asyncio.gather(
+            self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(feng_id * base_interval_s)
+        )
+        send_interval_s = n_ants * base_interval_s
+        while True:
+            await asyncio.gather(
+                self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(send_interval_s)
+            )
+
+    def async_send_descriptors(
+        self,
+        stream: "spead2.send.asyncio.AsyncStream",
+        descriptor_heap_reflist: List[spead2.send.HeapReference],
+    ) -> asyncio.Future:
+        """Send one descriptor to every substream.
+
+        Parameters
+        ----------
+        stream
+            This object takes large chunks of data and packages it
+            appropriately in SPEAD heaps for transmission on the network.
+        descriptor_heap_reflist
+            See :meth:`~fgpu.send.make_descriptor_heaps` for more information.
+        """
+        return stream.async_send_heaps(heaps=descriptor_heap_reflist, mode=spead2.send.GroupMode.ROUND_ROBIN)

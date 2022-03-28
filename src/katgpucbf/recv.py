@@ -21,7 +21,7 @@ import time
 import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 import numba
 import numpy as np
@@ -227,10 +227,8 @@ def make_stream(
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
-    max_heaps: int,
     stream_stats: List[str],
-    *,
-    stream_id: int = 0,
+    **kwargs: Any,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
@@ -246,21 +244,12 @@ def make_stream(
         Output ringbuffer to which chunks will be sent
     affinity
         CPU core affinity for the worker thread (negative to not set an affinity)
-    max_heaps
-        Maximum number of heaps to have open at once, increase to account for
-        packets from multiple heaps arriving in a disorderly fashion (likely due
-        to multiple senders sending to the multicast endpoint being received).
     stream_stats
         Stats to hook up to prometheus
-    stream_id
-        Stream ID parameter to pass through to the stream config. Canonical use-
-        case is the polarisation index in the F-engine.
+    kwargs
+        Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`
     """
-    stream_config = spead2.recv.StreamConfig(
-        max_heaps=max_heaps,
-        memcpy=spead2.MEMCPY_NONTEMPORAL,
-        stream_id=stream_id,
-    )
+    stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
     stats_base = stream_config.next_stat_index()
     for stat in stream_stats:
         stream_config.add_stat(stat)

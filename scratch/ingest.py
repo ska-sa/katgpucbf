@@ -181,15 +181,16 @@ async def async_main(args: argparse.Namespace) -> None:
     # Preparation for the plot. Doing it outside the for-loop, no need to redo it lots.
     frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]  # -1 because it goes all the way to n/2
 
-    fig, ax = plt.subplots(
+    fig, axs = plt.subplots(
         n_bls // 4, 4, sharex=True, figsize=(12, 8) if args.interactive else (24, 16), constrained_layout=True
     )
+    axs = axs.ravel()  # Now that the plot is four columns wide, this comes as a 2-d array. Which is a pain.
     lines = []
-    for i in range(len(ax)):
-        lines.append(ax[i].plot(frequency_axis, [0.0] * len(frequency_axis))[0])
-        ax[i].set_ylabel(bls_ordering[i])
-        ax[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
-        ax[i].set_xlabel("Frequency [MHz]")
+    for i in range(len(axs)):
+        lines.append(axs[i].plot(frequency_axis, [0.0] * len(frequency_axis))[0])
+        axs[i].set_ylabel(bls_ordering[i])
+        axs[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
+        axs[i].set_xlabel("Frequency [MHz]")
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: stream.stop())
         plt.ion()
@@ -202,8 +203,8 @@ async def async_main(args: argparse.Namespace) -> None:
                 # We're just plotting the magnitude for now. Phase is easy enough,
                 # and is left as an exercise to the reader.
                 lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
-                ax[i].relim()
-                ax[i].autoscale_view()
+                axs[i].relim()
+                axs[i].autoscale_view()
             plt.title(f"Chunk {chunk.chunk_id}")
             if not args.interactive:
                 plt.savefig(f"{chunk.chunk_id}.png")
