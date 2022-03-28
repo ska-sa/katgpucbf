@@ -62,19 +62,6 @@ async def get_dsim_endpoint(pc_client: aiokatcp.Client) -> Endpoint:
     return endpoint_parser(None)(await get_sensor_val(pc_client, "sim.m800.1712000000.0.port"))
 
 
-def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
-    bl_idx = (ant1 * (ant1 + 1) // 2 + ant0) * 4
-    if pol0 == "v" and pol1 == "v":
-        pass  # Do nothing, this is zero
-    elif pol0 == "h" and pol1 == "v":
-        bl_idx += 1
-    elif pol0 == "v" and pol1 == "h":
-        bl_idx += 2
-    elif pol0 == "h" and pol1 == "h":
-        bl_idx += 3
-    return bl_idx
-
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -227,7 +214,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 assert bl_idx in loud_bls  # Best to check the expected baselin is actually in the list.
                 for loud_bl in loud_bls:
-                    check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl)
+                    check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl, bls_ordering)
                 stream.add_free_chunk(chunk)
                 break
 
@@ -267,7 +254,10 @@ async def set_dsim_up(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl):
+def check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl, bls_ordering):
+    def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
+        return bls_ordering.index((f"m{800 + ant0}{pol0}", f"m{800 + ant1}{pol1}"))
+
     if loud_bl == bl_idx:
         logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
     elif loud_bl == get_bl_idx(current_bl.ant0, current_bl.pol0, current_bl.ant0, current_bl.pol0):
