@@ -3,6 +3,7 @@ import argparse
 import ast
 import asyncio
 import logging
+import time
 from collections import namedtuple
 from typing import Tuple, Union
 
@@ -22,6 +23,8 @@ from spead2.recv.numba import chunk_place_data
 CPLX = 2
 
 logger = logging.getLogger(__name__)
+
+Baseline = namedtuple("Baseline", ["ant0", "pol0", "ant1", "pol1"])
 
 
 async def print_all_sensors(client: aiokatcp.Client):
@@ -57,12 +60,6 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
 async def get_dsim_endpoint(pc_client: aiokatcp.Client) -> Endpoint:
     """Get the katcp address for a dsim on a product controller (with hardcoded name)."""
     return endpoint_parser(None)(await get_sensor_val(pc_client, "sim.m800.1712000000.0.port"))
-
-
-async def jiggle_dsim(dsim_client, channel_centre_freq):
-    """We're doing this just so that I can get a timestamp."""
-    reply, _ = await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
-    return int(reply[0])
 
 
 def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
@@ -110,11 +107,6 @@ async def async_main(args: argparse.Namespace) -> None:
     pc_client = await aiokatcp.Client.connect(host, port)
     logger.info("Successfully connected to product controller.")
 
-    dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
-    logger.info("Connecting to dsim 0 on %s:%d", dsim_host, dsim_port)
-    dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
-    logger.info("Successfully connected to dsim.")
-
     # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
     # But we can cast Endpoints to tuples, which it does know.
     multicast_endpoints = [
@@ -132,10 +124,17 @@ async def async_main(args: argparse.Namespace) -> None:
     n_bits_per_sample = await get_sensor_val(pc_client, "baseline_correlation_products-xeng-out-bits-per-sample")
     n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
     bandwidth = await get_sensor_val(pc_client, "antenna_channelised_voltage-bandwidth")
-    channel_width = bandwidth / n_chans
     int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
+    sync_time = await get_sensor_val(pc_client, "antenna_channelised_voltage-sync-time")
+    timestamp_scale_factor = await get_sensor_val(pc_client, "antenna_channelised_voltage-scale-factor-timestamp")
 
     bls_ordering = ast.literal_eval(await get_sensor_val(pc_client, "baseline_correlation_products-bls-ordering"))
+
+    # Get dsim ready.
+    channel_width = bandwidth / n_chans
+    dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
+    channel = 1234  # picked fairly arbitrarily. We just need to see the tone.
+    await set_dsim_up(dsim_host, dsim_port, channel, channel_width)
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
@@ -185,9 +184,64 @@ async def async_main(args: argparse.Namespace) -> None:
         free_ringbuffer,
     )
 
+    setup_stream(args, multicast_endpoints, n_bls, n_chans, n_bits_per_sample, HEAPS_PER_CHUNK, max_chunks, stream)
+
+    # Baseline test.
+    # Let's have some functions to help us.
+    async def zero_all_gains():
+        for ant in range(n_ants):
+            for pol in ["v", "h"]:
+                logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
+                await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
+
+    async def unzero_a_baseline(baseline_tuple: Tuple[str]):
+        logger.debug(f"Unzeroing gain on {baseline_tuple}")
+        for ant in baseline_tuple:
+            await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
+
+    for bl_idx, bl in enumerate(bls_ordering):
+        current_bl = Baseline(int(bl[0][3]), bl[0][4], int(bl[1][3]), bl[1][4])
+        logger.info("Checking baseline %r (%d)", bl, bl_idx)
+        await zero_all_gains()
+        await unzero_a_baseline(bl)
+        expected_timestamp = (
+            time.time() + 1 - sync_time
+        ) * timestamp_scale_factor  # + 2 to let a few dumps pass before we check.
+        # Note that we are making an assumption that nothing is straying too far
+        # from wall time here. I don't have a way other than adjusting the dsim
+        # signal of ensuring that we get going after a specific timestamp in the
+        # DSP pipeline itself.
+
+        async for chunk in stream.data_ringbuffer:
+            recvd_timestamp = chunk.chunk_id * timestamp_step
+            if not np.all(chunk.present):
+                logger.debug("Incomplete chunk %d", chunk.chunk_id)
+                stream.add_free_chunk(chunk)
+
+            elif recvd_timestamp <= expected_timestamp:
+                logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
+                stream.add_free_chunk(chunk)
+
+            else:
+                loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
+                logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
+                assert bl_idx in loud_bls  # Best to check the expected baselin is actually in the list.
+                for loud_bl in loud_bls:
+                    check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl)
+                stream.add_free_chunk(chunk)
+                break
+
+
+def setup_stream(args, multicast_endpoints, n_bls, n_chans, n_bits_per_sample, heaps_per_chunk, max_chunks, stream):
+    """Set up the spead2 stream needed for ingest.
+
+    Method clunkily extracted to satisfy flake8's requirement for less complexity.
+    For loops and if-statements are apparently too complex, and it's easier
+    to break this out than break up the test logic.
+    """
     for _ in range(max_chunks):
         chunk = spead2.recv.Chunk(
-            present=np.empty(HEAPS_PER_CHUNK, np.uint8),
+            present=np.empty(heaps_per_chunk, np.uint8),
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
@@ -202,48 +256,15 @@ async def async_main(args: argparse.Namespace) -> None:
         for ep in multicast_endpoints:
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
-    # Baseline test.
-    channel = 1234  # picked fairly arbitrarily. We just need to see the tone.
+
+async def set_dsim_up(dsim_host, dsim_port, channel, channel_width):
+    logger.info("Connecting to dsim 0 on %s:%d", dsim_host, dsim_port)
+    dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
+    logger.info("Successfully connected to dsim.")
     channel_centre_freq = channel * channel_width  # TODO: check this.
-
-    # Let's have some functions to help us.
-    async def zero_all_gains():
-        for ant in range(n_ants):
-            for pol in ["v", "h"]:
-                logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
-                await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
-
-    async def unzero_a_baseline(baseline_tuple: Tuple[str]):
-        logger.debug(f"Unzeroing gain on {baseline_tuple}")
-        for ant in baseline_tuple:
-            await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
-
-    await zero_all_gains()
-
-    Baseline = namedtuple("Baseline", ["ant0", "pol0", "ant1", "pol1"])
-
-    for bl_idx, bl in enumerate(bls_ordering):
-        current_bl = Baseline(int(bl[0][3]), bl[0][4], int(bl[1][3]), bl[1][4])
-        logger.info("Checking baseline %r (%d)", bl, bl_idx)
-        await zero_all_gains()
-        await unzero_a_baseline(bl)
-        expected_timestamp = await jiggle_dsim(dsim_client, channel_centre_freq)
-
-        async for chunk in stream.data_ringbuffer:
-            assert np.all(chunk.present)
-            recvd_timestamp = chunk.chunk_id * timestamp_step
-            if recvd_timestamp <= expected_timestamp:  # give ourselves a bit of buffer for luck
-                logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
-                stream.add_free_chunk(chunk)
-
-            else:
-                loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
-                logger.debug("%d bls had signal in them: %r", len(loud_bls), loud_bls)
-                assert bl_idx in loud_bls  # Best to check the expected baselin is actually in the list.s
-                for loud_bl in loud_bls:
-                    check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl)
-                    stream.add_free_chunk(chunk)
-                break
+    # Set the dsim with a tone.
+    async with dsim_client:
+        await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
 def check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl):
