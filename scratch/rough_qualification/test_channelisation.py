@@ -114,9 +114,6 @@ async def async_main(args: argparse.Namespace) -> None:
         channel_width = bandwidth / n_chans
         int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
 
-        # Set fengine gain
-        _, _ = await pc_client.request("gain", "antenna_channelised_voltage", "m800v", "1e-4")
-
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
     HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
@@ -193,8 +190,8 @@ async def async_main(args: argparse.Namespace) -> None:
     num_points_on_either_side = round((chans_on_either_side + 0.5) * points_per_channel - 1)
 
     frequencies_to_check = np.linspace(
-        channel_centre_freq - chans_on_either_side * channel_width,
-        channel_centre_freq + chans_on_either_side * channel_width,
+        channel_centre_freq - (chans_on_either_side + 0.5) * channel_width,
+        channel_centre_freq + (chans_on_either_side + 0.5) * channel_width,
         2 * num_points_on_either_side + 1,
         endpoint=True,
     )
@@ -205,7 +202,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     for n, freq in enumerate(frequencies_to_check):
         logger.info("Setting dsim cw freq to %f", freq)
-        reply, _informs = await dsim_client.request("signals", f"cw(0.15,{freq})+wgn(0.5);wgn(0.1);")
+        reply, _informs = await dsim_client.request("signals", f"common=cw(0.15,{freq})+wgn(0.01);common;common;")
         expected_timestamp = int(reply[0])
 
         async for chunk in stream.data_ringbuffer:
