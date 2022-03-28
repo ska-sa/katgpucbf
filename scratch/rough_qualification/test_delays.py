@@ -93,7 +93,9 @@ async def async_main(args: argparse.Namespace) -> None:
     dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
     logger.info("Connecting to dsim 0 on %s:%d", dsim_host, dsim_port)
     dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
-    logger.info("Successfully connected to dsim.")
+    # Set the dsim to something noisy, so that the test actually shows something.
+    await dsim_client.request("signals", "common=wgn(0.1);common;common;")
+    logger.info("Successfully set to dsim.")
 
     # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
     # But we can cast Endpoints to tuples, which it does know.
@@ -111,6 +113,8 @@ async def async_main(args: argparse.Namespace) -> None:
     n_bits_per_sample = await get_sensor_val(pc_client, "baseline_correlation_products-xeng-out-bits-per-sample")
     n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
     int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
+    sync_time = await get_sensor_val(pc_client, "antenna_channelised_voltage-sync-time")
+    timestamp_scale_factor = await get_sensor_val(pc_client, "antenna_channelised_voltage-scale-factor-timestamp")
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
@@ -178,20 +182,17 @@ async def async_main(args: argparse.Namespace) -> None:
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
     # Delay tracking test.
-    async def set_dsim():
-        reply, _ = await dsim_client.request("signals", "common=wgn(0.1);common;common;")
-        return int(reply[0])
 
     # I'll set the delays on the first input and compare it with the second
     # i.e. the baseline (m800h, m800v). The mechanism is the same for all the
     # others so I don't expect there'll be much advantage to being more thorough
     # than this.
     delay_coeffs = ["1e-10,1e-10:0,0"] + ["0,0:0,0"] * 7
-    await pc_client.request("delays", "antenna_channelised_voltage", str(time.time() + 1), *delay_coeffs)
+    load_time = time.time() + 1
+    await pc_client.request("delays", "antenna_channelised_voltage", str(load_time), *delay_coeffs)
 
-    # This is really just so that I can get a timestamp from the ringbuffer which
-    # ensures that the data came in after the delays were set.
-    expected_timestamp = await set_dsim()
+    expected_timestamp = (load_time + 1 - sync_time) * timestamp_scale_factor  # + 1 to allow a dump or two to pass.
+
     i = 0
     _fig, ax = plt.subplots()
     plt.ylabel("Phase [rad]")
@@ -199,9 +200,12 @@ async def async_main(args: argparse.Namespace) -> None:
     plt.title("Delay tracking")
 
     async for chunk in stream.data_ringbuffer:
-        assert np.all(chunk.present)
+        if not np.all(chunk.present):
+            logger.debug("Incomplete chunk %d", chunk.chunk_id)
+            stream.add_free_chunk(chunk)
+            continue
         recvd_timestamp = chunk.chunk_id * timestamp_step
-        if recvd_timestamp <= expected_timestamp:  # give ourselves a bit of buffer for luck
+        if recvd_timestamp <= expected_timestamp:
             logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
             stream.add_free_chunk(chunk)
         else:
