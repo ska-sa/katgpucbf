@@ -54,8 +54,8 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
         return endpoint_parser(None)(await get_sensor_val(client, f"{product_name}.katcp-address"))
 
 
-async def get_dsim_endpoint(pc_client: Endpoint) -> Endpoint:
-    """Get the katcp address for a named product controller from the master."""
+async def get_dsim_endpoint(pc_client: aiokatcp.Client) -> Endpoint:
+    """Get the katcp address for a dsim on a product controller (with hardcoded name)."""
     return endpoint_parser(None)(await get_sensor_val(pc_client, "sim.m800.1712000000.0.port"))
 
 
@@ -65,7 +65,7 @@ async def jiggle_dsim(dsim_client, channel_centre_freq):
     return int(reply[0])
 
 
-def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str):
+def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
     bl_idx = (ant1 * (ant1 + 1) // 2 + ant0) * 4
     if pol0 == "v" and pol1 == "v":
         pass  # Do nothing, this is zero
@@ -210,8 +210,8 @@ async def async_main(args: argparse.Namespace) -> None:
     async def zero_all_gains():
         for ant in range(n_ants):
             for pol in ["v", "h"]:
-                logger.debug(f"Setting gain to zero on m80{ant}{pol}")
-                await pc_client.request("gain", "antenna_channelised_voltage", f"m80{ant}{pol}", "0")
+                logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
+                await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
 
     async def unzero_a_baseline(baseline_tuple: Tuple[str]):
         logger.debug(f"Unzeroing gain on {baseline_tuple}")
