@@ -184,6 +184,8 @@ class InItem(EventItem):
     samples
         A pair of device memory regions for storing the set of samples
         associated with each respective polarisation.
+    present
+        Per-pol bitmasks indicating which packets were present in the chunks.
     chunks
         Chunks to return to recv after processing (used with vkgdr only).
     n_samples
@@ -199,17 +201,20 @@ class InItem(EventItem):
         will take place on the data in :attr:`samples`.
     timestamp
         Timestamp of the oldest digitiser sample represented in the data.
+    packet_samples
+        Number of samples per digitiser packet (for sizing :attr:`present`).
     use_vkgdr
         Use GPU Direct. Defaults to False, because this only works on
         datacenter-grade cards.
     """
 
     samples: List[accel.DeviceArray]
+    present: List[np.ndarray]
     chunks: List[recv.Chunk]  # Used with vkgdr only.
     n_samples: int
     sample_bits: int
 
-    def __init__(self, compute: Compute, timestamp: int = 0, use_vkgdr: bool = False) -> None:
+    def __init__(self, compute: Compute, timestamp: int = 0, *, packet_samples: int, use_vkgdr: bool = False) -> None:
         self.sample_bits = compute.sample_bits
         if use_vkgdr:
             # Memory belongs to the chunks, and we set samples when
@@ -220,6 +225,8 @@ class InItem(EventItem):
                 _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots[f"in{pol}"]))
                 for pol in range(N_POLS)
             ]
+        present_size = accel.divup(compute.samples, packet_samples)
+        self.present = [np.ones(present_size, bool) for pol in range(N_POLS)]
         self.chunks = []
         super().__init__(timestamp)
 
@@ -390,6 +397,8 @@ class Processor:
         Number of taps in each branch of the PFB-FIR.
     samples
         Number of samples that will be processed each time the operation is run.
+    src_packet_samples
+        Number of samples per digitiser packet.
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
@@ -411,6 +420,7 @@ class Processor:
         context: AbstractContext,
         taps: int,
         samples: int,
+        src_packet_samples: int,
         spectra: int,
         spectra_per_heap: int,
         channels: int,
@@ -443,9 +453,10 @@ class Processor:
         self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
         self.monitor = monitor
+        self._src_packet_samples = src_packet_samples
         self._spectra = []
         for _ in range(n_in):
-            self.in_free_queue.put_nowait(InItem(self.compute, use_vkgdr=use_vkgdr))
+            self.in_free_queue.put_nowait(InItem(self.compute, packet_samples=src_packet_samples, use_vkgdr=use_vkgdr))
         for _ in range(n_out):
             item = OutItem(self.compute)
             self._spectra.append(item.spectra)
@@ -531,7 +542,7 @@ class Processor:
         if len(self._in_items) == 0:
             if not (await self._next_in()):
                 return False
-        if len(self._in_items) == 1 and (await self._next_in()):
+        if len(self._in_items) == 1:
             # Copy the head of the new chunk to the tail of the older chunk
             # to allow for PFB windows to fit and for some protection against
             # sharp changes in delay.
@@ -541,7 +552,9 @@ class Processor:
             # to copy is missing so we can't do this step.
             # TODO: Currently fgpu doesn't have much (really any)
             # handling for missing data.
-            if self._in_items[0].end_timestamp == self._in_items[1].timestamp:
+            chunk_packets = self._in_items[0].n_samples // self._src_packet_samples
+            copy_packets = len(self._in_items[0].present) - chunk_packets
+            if (await self._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
                 sample_bits = self._in_items[0].sample_bits
                 copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
                 copy_samples = min(copy_samples, self._in_items[1].n_samples)
@@ -553,7 +566,11 @@ class Processor:
                         np.s_[:copy_bytes],
                         np.s_[-copy_bytes:],
                     )
+                    self._in_items[0].present[pol][-copy_packets:] = self._in_items[1].present[pol][:copy_packets]
                 self._in_items[0].n_samples += copy_samples
+            else:
+                for present in self._in_items[0].present:
+                    present[-copy_packets:] = 0  # Mark tail as absent, for each pol
         return True
 
     def _pop_in(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
@@ -783,6 +800,8 @@ class Processor:
                         self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
+                    # Copy the present flags (synchronously).
+                    in_item.present[pol][: len(chunk.present)] = chunk.present
 
                 # Put events on the queue so that run_processing() knows when to
                 # start.

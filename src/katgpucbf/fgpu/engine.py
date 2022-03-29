@@ -255,6 +255,7 @@ class Engine(aiokatcp.DeviceServer):
             context,
             taps,
             chunk_samples + extra_samples,
+            src_packet_samples,
             spectra,
             spectra_per_heap,
             channels,
