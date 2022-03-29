@@ -146,7 +146,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rx-reorder-tol",
         type=int,
-        default=2 ** 29,
+        default=2**29,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
         "and still be accepted. [%(default)s]",
     )

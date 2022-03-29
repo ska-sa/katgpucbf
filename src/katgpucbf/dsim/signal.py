@@ -17,7 +17,7 @@ from .. import BYTE_BITS
 
 logger = logging.getLogger(__name__)
 #: Dask chunk size for sampling signals (must be a multiple of 8)
-CHUNK_SIZE = 2 ** 20
+CHUNK_SIZE = 2**20
 
 
 class Signal(ABC):

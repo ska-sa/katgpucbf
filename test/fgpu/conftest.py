@@ -16,6 +16,7 @@
 
 """Fixtures for use in fgpu unit tests."""
 
+import asyncio
 from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
@@ -133,7 +134,7 @@ async def engine_server(
 @pytest.fixture
 async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
     """Create a KATCP client for communicating with the dummy server."""
-    assert engine_server.server is not None
+    assert isinstance(engine_server.server, asyncio.base_events.Server)
     assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
     async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect

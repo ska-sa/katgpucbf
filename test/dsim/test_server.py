@@ -16,6 +16,7 @@
 
 """Unit tests for katcp server."""
 
+import asyncio.base_events
 from typing import AsyncGenerator, Sequence
 
 import aiokatcp
@@ -57,7 +58,7 @@ async def katcp_server(
 @pytest.fixture
 async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:  # noqa: D401
     """A katcp client connection to :func:`katcp_server`."""
-    assert katcp_server.server is not None
+    assert isinstance(katcp_server.server, asyncio.base_events.Server)
     assert katcp_server.server.sockets is not None
     host, port = katcp_server.server.sockets[0].getsockname()[:2]
     async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
