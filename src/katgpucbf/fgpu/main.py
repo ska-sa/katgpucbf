@@ -197,14 +197,14 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--src-chunk-samples",
         type=int,
-        default=2 ** 24,
+        default=2**24,
         metavar="SAMPLES",
         help="Number of digitiser samples to process at a time (per pol). [%(default)s]",
     )
     parser.add_argument(
         "--dst-chunk-jones",
         type=int,
-        default=2 ** 23,
+        default=2**23,
         metavar="VECTORS",
         help="Number of Jones vectors in output chunks. If not a multiple of "
         "2*channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",

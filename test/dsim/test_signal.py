@@ -69,7 +69,7 @@ class TestWGN:
         # scipy.stats.chi2.isf(1e-6, df=10000, scale=9)
         # (where 9 is the expected population variance). The values are
         # hardcoded to avoid a dependence on scipy just for this test.
-        assert 84079 <= np.sum(data ** 2) <= 96180
+        assert 84079 <= np.sum(data**2) <= 96180
 
     def test_entropy(self) -> None:
         """Test that different instances with the same entropy give the same results."""
@@ -184,13 +184,13 @@ class TestPackbits:
     def test_bits(self, bits: int) -> None:
         """Test with a variety of bit counts."""
         rng = np.random.default_rng(1)
-        data = da.from_array(rng.integers(0, 2 ** bits, dtype=np.int32, size=200), chunks=64)
+        data = da.from_array(rng.integers(0, 2**bits, dtype=np.int32, size=200), chunks=64)
         packed = signal.packbits(data, bits).compute()
         # Unpack and check that the original data is returned
         big_int = int.from_bytes(packed, byteorder="big")
         unpacked = []
         for _ in range(len(data)):
-            unpacked.append(big_int & (2 ** bits - 1))
+            unpacked.append(big_int & (2**bits - 1))
             big_int >>= bits
         unpacked.reverse()
         np.testing.assert_equal(data.compute(), unpacked)

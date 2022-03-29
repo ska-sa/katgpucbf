@@ -54,9 +54,9 @@ class TestLayout:
         assert layout.heap_bytes == 5120
         assert layout.chunk_bytes == 81920
         assert layout.chunk_heaps == 16
-        assert layout.timestamp_mask == 2 ** 64 - 1
+        assert layout.timestamp_mask == 2**64 - 1
         masked = dataclasses.replace(layout, mask_timestamp=True)
-        assert masked.timestamp_mask == 2 ** 64 - 4096
+        assert masked.timestamp_mask == 2**64 - 4096
 
 
 @pytest.fixture

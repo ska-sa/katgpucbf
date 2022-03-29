@@ -138,7 +138,7 @@ typing-extensions==3.10.0.0
     # via
     #   async-timeout
     #   katsdpsigproc
-git+ssh://git@github.com/ska-sa/vkgdr
+vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr
     # via -r requirements.in
 wrapt==1.13.3
     # via prometheus-async
