@@ -47,7 +47,7 @@ hiredis==2.0.0
     # via katsdptelstate
 idna==3.3
     # via yarl
-katsdpservices[aiomonitor]==1.1
+katsdpservices[aiomonitor]==1.2
     # via -r requirements.in
 katsdpsigproc[cuda]==1.4.2
     # via -r requirements.in
