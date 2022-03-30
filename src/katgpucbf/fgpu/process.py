@@ -319,6 +319,9 @@ class OutItem(EventItem):
         transmitted.
     n_spectra
         Number of spectra contained in :attr:`spectra`.
+    skipped_spectra
+        Number of spectra prior to those in this frame that never made it
+        into any OutItem (due to a large gap in input).
 
     Parameters
     ----------
@@ -335,6 +338,7 @@ class OutItem(EventItem):
     gains: accel.HostArray
     present: np.ndarray
     n_spectra: int
+    skipped_spectra: int
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
@@ -352,6 +356,7 @@ class OutItem(EventItem):
         """
         super().reset(timestamp)
         self.n_spectra = 0
+        self.skipped_spectra = 0
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -654,6 +659,7 @@ class Processor:
         # data).
         accs = self._out_item.n_spectra // self.spectra_per_heap
         self._out_item.n_spectra = accs * self.spectra_per_heap
+        self._out_item.skipped_spectra += max(0, (new_timestamp - self._out_item.end_timestamp) // self.spectra_samples)
         if self._out_item.n_spectra > 0:
             # Take a copy of the gains synchronously. This avoids race conditions
             # with gains being updated at the same time as they're in the
@@ -940,6 +946,7 @@ class Processor:
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
             n_frames = out_item.n_spectra // self.spectra_per_heap
+            send.skipped_heaps_counter.inc(out_item.skipped_spectra // self.spectra_per_heap * stream.num_substreams)
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
