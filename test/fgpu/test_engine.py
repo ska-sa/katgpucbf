@@ -626,9 +626,14 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         channels: int,
     ) -> None:
-        """Test that the right output heaps are omitted when input heaps are missing."""
+        """Test that the right output heaps are omitted when input heaps are missing.
+
+        The test sends the same set of data twice, with gaps only in the first half.
+        It then checks that the heaps successfully received in the first half match
+        the heaps in the second half.
+        """
         spectra_per_heap = 32
-        n_samples = 8 * CHUNK_SAMPLES
+        n_samples = 16 * CHUNK_SAMPLES
         # Half-open ranges of input heaps that are missing
         missing_ranges = [
             (8, 10),
@@ -637,7 +642,7 @@ class TestEngine:
             (6 * CHUNK_SAMPLES // PACKET_SAMPLES, 7 * CHUNK_SAMPLES // PACKET_SAMPLES),
         ]
         rng = np.random.default_rng()
-        dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
+        dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
         src_present = np.ones((2, n_samples // PACKET_SAMPLES), bool)
         for a, b in missing_ranges:
             assert b < src_present.shape[1]
@@ -652,13 +657,14 @@ class TestEngine:
         for a, b in missing_ranges:
             first_sample = a * PACKET_SAMPLES
             last_sample = b * PACKET_SAMPLES - 1  # -1 to make it inclusive
+            assert last_sample < n_samples // 2  # Make sure gaps are restricted to first half
             first_spectrum = max(0, first_sample // (channels * 2) - (TAPS - 1))
             last_spectrum = last_sample // (channels * 2)
             first_heap = first_spectrum // spectra_per_heap
             last_heap = last_spectrum // spectra_per_heap
             dst_present[first_heap : last_heap + 1] = False
 
-        await self._send_data(
+        out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
             engine_server,
@@ -669,5 +675,10 @@ class TestEngine:
             channels=channels,
             spectra_per_heap=spectra_per_heap,
         )
-        # TODO: should ideally test that the heaps actually have the right
-        # data, not just the right timestamps.
+        # Position in dst_present corresponding to the second half of dig_data.
+        middle = (n_samples // 2) // (channels * 2 * spectra_per_heap)
+        for i, p in enumerate(dst_present):
+            if p and i + middle < len(dst_present):
+                a = out_data[:, i * spectra_per_heap : (i + 1) * spectra_per_heap]
+                b = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
+                np.testing.assert_equal(a, b)
