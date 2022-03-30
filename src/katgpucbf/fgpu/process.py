@@ -581,8 +581,6 @@ class Processor:
             # This could only fail if we'd lost a whole input chunk of
             # data from the digitiser. In that case the data we'd like
             # to copy is missing so we can't do this step.
-            # TODO: Currently fgpu doesn't have much (really any)
-            # handling for missing data.
             chunk_packets = self._in_items[0].n_samples // self._src_packet_samples
             copy_packets = len(self._in_items[0].pol_data[0].present) - chunk_packets
             if (await self._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
