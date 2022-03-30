@@ -93,6 +93,8 @@ class Chunk:
             raise ValueError("substreams must divide into channels")
         self.data = data
         self.device = device
+        #: Whether each frame has valid data
+        self.present = np.zeros(n_frames, dtype=bool)
         #: Timestamp of the first heap
         self._timestamp = 0
         timestamp_step = spectra_per_heap * channels * 2
@@ -132,10 +134,12 @@ class Chunk:
         Frames from 0 to `frames` - 1 are sent asynchronously.
         """
         futures = []
-        for frame in self._frames[:frames]:
-            futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
-            futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
-        await asyncio.gather(*futures)
+        for present, frame in zip(self.present[:frames], self._frames[:frames]):
+            if present:
+                futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
+                futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
+        if futures:
+            await asyncio.gather(*futures)
 
 
 def make_stream(

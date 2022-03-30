@@ -851,6 +851,9 @@ class Processor:
             in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
 
             transfer_events = []
+            for pol_data, chunk in zip(in_item.pol_data, chunks):
+                # Copy the present flags (synchronously).
+                pol_data.present[: len(chunk.present)] = chunk.present
             if self._use_vkgdr:
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
                     assert pol_data.samples is None
@@ -865,8 +868,6 @@ class Processor:
                         self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
-                    # Copy the present flags (synchronously).
-                    pol_data.present[: len(chunk.present)] = chunk.present
 
                 # Put events on the queue so that run_processing() knows when to
                 # start.
@@ -936,6 +937,8 @@ class Processor:
                 out_item.spectra.get_async(self._download_queue, chunk.data)
                 events = [self._download_queue.enqueue_marker()]
             chunk.timestamp = out_item.timestamp
+            # Each frame is valid if all spectra in it are valid
+            out_item.present.reshape(-1, self.spectra_per_heap).all(axis=-1, out=chunk.present)
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
             n_frames = out_item.n_spectra // self.spectra_per_heap
