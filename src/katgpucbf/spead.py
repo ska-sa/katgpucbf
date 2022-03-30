@@ -29,6 +29,8 @@ RAW_DATA_ID = 0x3300  # Digitiser data
 XENG_RAW_ID = 0x1800
 TIMESTAMP_ID = 0x1600
 MAX_PACKET_SIZE = 8872
+HEAP_SAMPLES = 4096
+SAMPLE_BITS = 10
 
 #: SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
