@@ -248,7 +248,7 @@ From there a number of transformations occur:
 
 1. When copying the head of one chain to append it to the tail of the previous
    one, the same is done with the presence flags.
-2. A prefix sum (see :func:`np.cumsum`) is computed over the flags of the
+2. A prefix sum (see :func:`numpy.cumsum`) is computed over the flags of the
    chunk. This allows the number of good packets in any interval to be
    computed quickly.
 3. For each output spectrum, the corresponding interval of input heaps is
