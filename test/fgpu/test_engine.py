@@ -243,7 +243,7 @@ class TestEngine:
             A bitmask per output frame indicating which frames should be
             present. As a shortcut, specifying an integer indicates the number
             of expected output frames, which must all be present; and specifying
-            None indicates that it the integer should be calculated from the
+            None indicates that this integer should be calculated from the
             input data length, assuming default state for the engine (in
             particular, it will not be correct if there are non-zero delays).
 
