@@ -757,7 +757,7 @@ class XBEngine(DeviceServer):
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            logger.info(
+            logger.debug(
                 "Current output heap timestamp: %#x, difference between timestamps: %#x, "
                 "wall time between dumps %.2f s",
                 item.timestamp,
