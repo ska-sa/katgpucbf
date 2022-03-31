@@ -17,12 +17,8 @@
 """Common fixtures for dsim tests."""
 
 import time
-from typing import Generator, Sequence, List, Tuple
+from typing import Generator, Sequence
 from unittest import mock
-import logging
-from venv import create
-import netifaces
-import itertools
 
 import numpy as np
 import pytest
@@ -32,27 +28,22 @@ import spead2.recv.asyncio
 import spead2.send.asyncio
 
 from katgpucbf import BYTE_BITS, DEFAULT_TTL
-from katgpucbf.dsim import send
-from katgpucbf.dsim import descriptors
-from katgpucbf.dsim.descriptors import create_descriptor_stream, create_config, create_descriptors_heap
-import asyncio
+from katgpucbf.dsim import descriptors, send
+from katgpucbf.spead import HEAP_SAMPLES, SAMPLE_BITS
 
 N_POLS = 2
 N_ENDPOINTS_PER_POL = 4
 SIGNAL_HEAPS = 1024
-HEAP_SAMPLES = 4096
-SAMPLE_BITS = 10
 ADC_SAMPLE_RATE = 1712e6
-
 MULTICAST_ADDRESS = "239.103.0.64"
 PORT = 7148
-interface_address = netifaces.ifaddresses('lo')[netifaces.AF_INET][0]["addr"]
 
 
 @pytest.fixture
 def inproc_queues() -> Sequence[spead2.InprocQueue]:  # noqa: D401
-    """An in-process queue per multicast destination."""
+    """An in-process queue (data) per multicast destination."""
     return [spead2.InprocQueue() for _ in range(N_ENDPOINTS_PER_POL * N_POLS)]
+
 
 @pytest.fixture
 def recv_streams(
@@ -67,6 +58,7 @@ def recv_streams(
     yield streams
     for stream in streams:
         stream.stop()
+
 
 @pytest.fixture
 def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
@@ -91,6 +83,7 @@ def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asy
             ibv=False,
             affinity=-1,
         )
+
 
 @pytest.fixture
 def timestamps() -> np.ndarray:
@@ -121,108 +114,51 @@ def sender(
     return send.Sender(send_stream, heap_sets[0], 0, HEAP_SAMPLES, time.time(), ADC_SAMPLE_RATE)
 
 
-# ----------------------------------------------------------------------------
 @pytest.fixture
 def descriptor_inproc_queue() -> Sequence[spead2.InprocQueue]:  # noqa: D401
-    """An in-process queue for DSim descriptors."""
-    # return [spead2.InprocQueue() for _ in range(N_ENDPOINTS_PER_POL * N_POLS)]
+    """An in-process queue for descriptors. Only one queue needed."""
     return [spead2.InprocQueue()]
 
-@pytest.fixture   
+
+@pytest.fixture
 def descriptor_recv_streams(
-    descriptor_inproc_queue: Sequence[spead2.InprocQueue]
-) -> Generator[Sequence[spead2.recv.Stream], None, None]:
-    """Streams that receive data from :func:`inproc_queues`."""
+    descriptor_inproc_queue: Sequence[spead2.InprocQueue],
+) -> Sequence[spead2.recv.asyncio.Stream]:
+    """Streams that receive data from :func:`descriptor_inproc_queue`."""
     streams = []
     for queue in descriptor_inproc_queue:
         stream = spead2.recv.asyncio.Stream(spead2.ThreadPool())
         stream.add_inproc_reader(queue)
         streams.append(stream)
     return streams
-    # yield streams
-    # for stream in streams:
-    #     stream.stop()
+
 
 @pytest.fixture
 def descriptor_send_stream(descriptor_inproc_queue: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
     """Stream that feeds data to the :func:`inproc_queues`."""
 
-    # config = create_config()
-    # return create_descriptor_stream(
-    #     endpoints=[("invalid", -1) for _ in descriptor_inproc_queue],
-    #     config=config,
-    #     ttl=4,
-    #     interface_address="",    
-    #     queues= descriptor_inproc_queue, 
-    # )
-
     def mock_udp_stream(thread_pool, endpoints, config, **kwargs):
-        # assert len(endpoints) == len(descriptor_inproc_queue)
-        # config.rate = 0  # Just send as fast as possible
         return spead2.send.asyncio.InprocStream(thread_pool, descriptor_inproc_queue, config)
 
-    config = create_config()
+    config = descriptors.create_config()
     with mock.patch("spead2.send.asyncio.UdpStream", side_effect=mock_udp_stream):
-        return create_descriptor_stream(
+        return descriptors.create_descriptor_stream(
             endpoints=[("invalid", -1) for _ in descriptor_inproc_queue],
             config=config,
             ttl=4,
-            interface_address="",      
+            interface_address="",
         )
 
+
 @pytest.fixture
-def descriptor_heap() -> descriptors:  # noqa: D401
-    """One instances of :class:`~katgpucbf.dsim.descriptors.heap_to_send`."""    
-    return create_descriptors_heap(HEAP_SAMPLES)
-    # return descriptor_generator.heap_to_send
+def descriptor_heap() -> spead2.send.Heap:  # noqa: D401
+    """One instances of :class:`~katgpucbf.dsim.descriptors.spead2.send.Heap`."""
+    return descriptors.create_descriptors_heap()
+
 
 @pytest.fixture
 def descriptor_sender(
-    descriptor_send_stream: "spead2.send.asyncio.AsyncStream", descriptor_heap: descriptors
-) -> send.Sender:  # noqa: D401
-    """A :class:`~katgpucbf.dsim.Sender` using the first of :func:`heaps_sets`."""
-    timestamp = 0
-    return descriptors.DescriptorSender(descriptor_send_stream, timestamp, descriptor_heap)
-    # return descriptors.DescriptorSender(descriptor_send_stream, 'lo', HEAP_SAMPLES, DEFAULT_TTL, timestamp, descriptor_heap)
-    # return send.Sender(send_stream, heap_sets[0], 0, HEAP_SAMPLES, time.time(), ADC_SAMPLE_RATE)
-
-
-
-# # # TO BE REMOVED
-# if __name__ == "__main__":
-
-#     async def dgb_rx(recv_stream):
-#         print('rx')
-#         await asyncio.sleep(0)
-#         ig = spead2.ItemGroup()
-#         for stream in recv_stream:
-#             for i, stream in enumerate(itertools.cycle(stream)):
-#                 try:
-#                     for heap in stream:
-#                         items = ig.update(heap)
-#                         # heap = await stream.get()
-#                         # updated = ig.update(heap)
-#                 except spead2.Stopped:
-#                     break
-
-#     async def main():
-#         heap = descriptor_heap()
-#         ig = spead2.ItemGroup()
-#         items = ig.update(heap)
-#         for item in items.values():
-#             print(heap.cnt, item.name, item.value)
-#             if item.name == "ADC Samples":
-#                 print('Captured Data')
-
-
-#         # for raw_descriptor in heap.get_descriptors():
-#         #     descriptor = spead2.Descriptor.from_raw(raw_descriptor, heap.flavour)
-
-
-#         # recv = descriptor_recv_streams(descriptor_inproc_queue())
-#         ds = descriptor_sender(descriptor_send_stream(descriptor_inproc_queue()), descriptor_heap())
-#         task = asyncio.create_task(ds.run())
-#         task_rx = asyncio.create_task(dgb_rx(descriptor_recv_streams(descriptor_inproc_queue())))
-#         await asyncio.gather(task, task_rx)
-
-#     asyncio.run(main())
+    descriptor_send_stream: "spead2.send.asyncio.AsyncStream", descriptor_heap: spead2.send.Heap
+) -> descriptors.DescriptorSender:  # noqa: D401
+    """A :class:`~katgpucbf.dsim.descriptors.DescriptorSender` using the first of :func:`descriptor_heap`."""
+    return descriptors.DescriptorSender(descriptor_send_stream, descriptor_heap)

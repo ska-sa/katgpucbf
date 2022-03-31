@@ -20,10 +20,10 @@ from typing import AsyncGenerator, List, Sequence, Tuple
 
 import aiokatcp
 import async_timeout
+import netifaces
 import numpy as np
 import pytest
 
-from katgpucbf import DEFAULT_TTL
 from katgpucbf.dsim import descriptors
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
@@ -45,9 +45,13 @@ async def katcp_server(
 
     endpoints: List[Tuple[str, int]] = [(MULTICAST_ADDRESS, PORT)]
 
-    # Set fake timestamp (not needed)
-    timestamp = 0
-    descriptor_sender = descriptors.DescriptorSender("lo", HEAP_SAMPLES, DEFAULT_TTL, timestamp, endpoints)
+    config = descriptors.create_config()
+    interface_address = netifaces.ifaddresses("lo")[netifaces.AF_INET][0]["addr"]
+    descriptor_stream = descriptors.create_descriptor_stream(
+        endpoints=endpoints, config=config, ttl=4, interface_address=interface_address
+    )
+    descriptor_heap = descriptors.create_descriptors_heap()
+    descriptor_sender = descriptors.DescriptorSender(descriptor_stream, descriptor_heap)
 
     server = DeviceServer(
         sender=sender,

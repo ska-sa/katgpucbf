@@ -33,6 +33,7 @@ from typing import List, Optional, Sequence, Tuple
 import dask.config
 import dask.system
 import katsdpservices
+import netifaces
 import numpy as np
 import prometheus_async
 import pyparsing as pp
@@ -197,8 +198,15 @@ async def async_main() -> None:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
 
+    config = descriptors.create_config()
+    interface_address = netifaces.ifaddresses(args.interface)[netifaces.AF_INET][0]["addr"]
+    descriptor_stream = descriptors.create_descriptor_stream(
+        endpoints=endpoints, config=config, ttl=4, interface_address=interface_address
+    )
+
     # Start descriptor sender first so descriptors are sent before dsim data.
-    descriptor_sender = descriptors.DescriptorSender(args.interface, args.heap_samples, args.ttl, timestamp, endpoints)
+    descriptor_heap = descriptors.create_descriptors_heap()
+    descriptor_sender = descriptors.DescriptorSender(stream=descriptor_stream, descriptor_heap=descriptor_heap)
     descriptor_task = asyncio.create_task(descriptor_sender.run())
 
     await signal.sample_async(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])

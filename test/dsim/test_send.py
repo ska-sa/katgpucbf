@@ -18,104 +18,62 @@
 
 import asyncio
 import itertools
+import logging
 from typing import Optional, Sequence
 
 import numpy as np
 import pytest
-from pytest_mock import mocker
 import spead2.recv.asyncio
 import spead2.send.asyncio
-import logging
-logging.basicConfig()
 
-from katgpucbf import BYTE_BITS, spead
 from katgpucbf.dsim import send
-from katgpucbf.dsim import descriptors
+from katgpucbf.dsim.descriptors import DescriptorSender
 
 from .. import PromDiff
-from .conftest import HEAP_SAMPLES, N_ENDPOINTS_PER_POL, N_POLS, SAMPLE_BITS, SIGNAL_HEAPS
-
-# from conftest import HEAP_SAMPLES, N_ENDPOINTS_PER_POL, N_POLS, SAMPLE_BITS, SIGNAL_HEAPS, recv_streams
-# from conftest import descriptor_heap, descriptor_sender, descriptor_send_stream, descriptor_recv_streams, descriptor_inproc_queue
-# from conftest import inproc_queues, sender, send_stream, heap_sets, timestamps
+from .conftest import BYTE_BITS, HEAP_SAMPLES, N_ENDPOINTS_PER_POL, N_POLS, SAMPLE_BITS, SIGNAL_HEAPS
 
 pytestmark = [pytest.mark.asyncio]
+logging.basicConfig()
 
-# def descriptor_unpack(rec_streams):
-#     ig = spead2.ItemGroup(rec_streams)
-#     try:
-#         for s in rec_streams:
-#             for heap in s:
-#                 for raw_descriptor in heap.get_descriptors():
-#                     descriptor = spead2.Descriptor.from_raw(raw_descriptor, heap.flavour)
-#                     print('''\
-#                         Descriptor for {0.name} ({0.id:#x})
-#                         description: {0.description}
-#                         format:      {0.format}
-#                         dtype:       {0.dtype}
-#                         shape:       {0.shape}'''.format(descriptor))
-
-#     except asyncio.TimeoutError:
-#         pass
 
 async def descriptor_recv(rec_streams, descriptor_sender):
+    """Descriptor receiver to unpack descriptors and create ItemGroup.
+
+    Parameters
+    ----------
+    rec_streams:
+        Descriptor receiver stream.
+    descriptor_sender:
+        Descriptor sender object. Used to halt the sender method.
+    """
     while True:
-        await asyncio.sleep(0)      
-        for s in rec_streams:
-            async for heap in s:
+        for stream in rec_streams:
+            async for heap in stream:
                 ig = spead2.ItemGroup()
 
                 for raw_descriptor in heap.get_descriptors():
                     descriptor = spead2.Descriptor.from_raw(raw_descriptor, heap.flavour)
-                    print('''\
-                        Descriptor for {0.name} ({0.id:#x})
-                        description: {0.description}
-                        format:      {0.format}
-                        dtype:       {0.dtype}
-                        shape:       {0.shape}'''.format(descriptor))
-                    
-                    ig.add_item(id=descriptor.id,
-                                    name=descriptor.name, 
-                                    dtype=descriptor.dtype,
-                                    description=descriptor.description,
-                                    shape=descriptor.shape,
-                                    format= descriptor.format)
+                    ig.add_item(
+                        id=descriptor.id,
+                        name=descriptor.name,
+                        dtype=descriptor.dtype,
+                        description=descriptor.description,
+                        shape=descriptor.shape,
+                        format=descriptor.format,
+                    )
                 if ig:
                     break
         if ig:
+            # Halt the descriptor sender as a descriptor set has been received.
             descriptor_sender.halt()
             break
     return ig
-
-# async def test_sender_dbg(
-#     descriptor_recv_streams: spead2.recv.asyncio.Stream,
-#     descriptor_inproc_queue: Sequence[spead2.InprocQueue],
-#     descriptor_sender,
-#     descriptor_heap: descriptors,
-# ) -> None:
-#     """Send random data via a :class:`~katgpucbf.dsim.send.Sender` and check it."""
-
-#     # Start descriptor sender and wait for descriptors before awaiting for DSim data
-#     await descriptor_sender.run()
-
-#     # descriptor_task = asyncio.create_task(descriptor_sender.run())
-#     # other_task = asyncio.create_task(other(descriptor_recv_streams))
-#     # await asyncio.gather(descriptor_task, other_task)
-    
-
-#     # stop the descriptor sender and queue
-#     descriptor_sender.halt()
-#     for queue in descriptor_inproc_queue:
-#         queue.stop()
-
-#     descriptors = await descriptor_recv(descriptor_recv_streams)
 
 
 async def test_sender(
     descriptor_recv_streams: spead2.recv.asyncio.Stream,
     descriptor_inproc_queue: Sequence[spead2.InprocQueue],
-    descriptor_sender,
-    # descriptor_heap: descriptors,
+    descriptor_sender: DescriptorSender,
     recv_streams: Sequence[spead2.recv.asyncio.Stream],
     inproc_queues: Sequence[spead2.InprocQueue],
     sender: send.Sender,
@@ -157,41 +115,25 @@ async def test_sender(
     # Start descriptor sender and wait for descriptors before awaiting for DSim data
     descriptor_sender_task = asyncio.create_task(descriptor_sender.run())
     descriptor_recv_streams_task = asyncio.create_task(descriptor_recv(descriptor_recv_streams, descriptor_sender))
-    desc_ig = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
-    ig = desc_ig[1]
+    [_, ig] = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
 
-    # stop the descriptor sender and queue
-    # ig_ref = spead2.ItemGroup()
-    # for raw_descriptor in descriptor_heap.get_descriptors():
-    #     descriptor = spead2.Descriptor.from_raw(raw_descriptor, heap.flavour)
-    
-
+    # Stop the descriptor queue
     for queue in descriptor_inproc_queue:
         queue.stop()
 
     # Check that the descriptors received make sense.
-    assert ig['timestamp'].name == "timestamp"
-    assert ig['digitiser_id'].name == "digitiser_id"
-    assert ig['digitiser_status'].name == "digitiser_status"
-    assert ig['raw_data'].name == "raw_data"
+    assert ig["timestamp"].name == "timestamp"
+    assert ig["digitiser_id"].name == "digitiser_id"
+    assert ig["digitiser_status"].name == "digitiser_status"
+    assert ig["raw_data"].name == "raw_data"
+    assert ig["raw_data"].shape == (HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS,)
+    assert ig["raw_data"].dtype == np.uint8
 
-    # TODO:   fix extra entry in ig
-    # TODO:   clean up code
-    # TODO:   Add descriptor assert
-
+    # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
         await sender.run()
     for queue in inproc_queues:
         queue.stop()
-
-    # We don't have descriptors (yet), so we have to set the items manually
-    # ig = spead2.ItemGroup()
-    # immediate_format = [("u", spead.FLAVOUR.heap_address_bits)]
-    # ig.add_item(spead.TIMESTAMP_ID, "timestamp", "", shape=(), format=immediate_format)
-    # ig.add_item(spead.DIGITISER_ID_ID, "digitiser_id", "", shape=(), format=immediate_format)
-    # ig.add_item(spead.DIGITISER_STATUS_ID, "digitiser_status", "", shape=(), format=immediate_format)
-    # # Just treat it as raw bytes so that we can directly compare to the packed data
-    # ig.add_item(spead.RAW_DATA_ID, "raw_data", "", dtype=np.uint8, shape=(HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS,))
 
     for pol in range(N_POLS):
         pol_streams = recv_streams[N_ENDPOINTS_PER_POL * pol : N_ENDPOINTS_PER_POL * (pol + 1)]
@@ -214,26 +156,3 @@ async def test_sender(
     # Check the Prometheus counters
     assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
     assert prom_diff.get_sample_diff("output_bytes_total") == orig_payload[0].nbytes * repeats
-
-# # TO BE REMOVED
-if __name__ == "__main__":
-    async def main():
-        # Qs = [spead2.InprocQueue()]
-        Qs = descriptor_inproc_queue()
-        Qr = inproc_queues()
-
-        await test_sender(descriptor_recv_streams(Qs), 
-        Qs, 
-        descriptor_sender(descriptor_send_stream(Qs), descriptor_heap()), 
-        descriptor_heap(),
-        recv_streams(Qr),
-        Qr,
-        sender(send_stream(Qr),heap_sets(timestamps())),
-        heap_sets(timestamps()),
-        mocker,
-        )
-
-        await test_sender_dbg(descriptor_recv_streams(Qs), Qs, descriptor_sender(descriptor_send_stream(Qs), 
-        descriptor_heap()), descriptor_heap())
-
-    asyncio.run(main())

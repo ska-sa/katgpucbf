@@ -1,25 +1,82 @@
 """Digitiser simulator descriptor sender."""
 import asyncio
-from typing import List, Tuple
 
-import netifaces
 import numpy as np
 import spead2
 import spead2.recv
 import spead2.send
 import spead2.send.asyncio
 
-from katgpucbf import SPEAD_DESCRIPTOR_INTERVAL_S
+from katgpucbf import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
 
 from ..spead import (
     DIGITISER_ID_ID,
     DIGITISER_STATUS_ID,
     FLAVOUR,
+    HEAP_SAMPLES,
     IMMEDIATE_FORMAT,
     MAX_PACKET_SIZE,
     RAW_DATA_ID,
+    SAMPLE_BITS,
     TIMESTAMP_ID,
 )
+
+
+def create_descriptor_stream(endpoints, config, ttl, interface_address) -> spead2.send.asyncio.UdpStream:
+    """Create stream for descriptors."""
+    return spead2.send.asyncio.UdpStream(
+        spead2.ThreadPool(),
+        list(endpoints),
+        config=config,
+        ttl=ttl,
+        interface_address=interface_address,
+    )
+
+
+def create_descriptors_heap() -> spead2.send.Heap:
+    """Add descriptor items to item group."""
+    item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+
+    # Add items to item group
+    item_group.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        DIGITISER_ID_ID,
+        "digitiser_id",
+        "Digitiser Serial Number",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        DIGITISER_STATUS_ID,
+        "digitiser_status",
+        "Digitiser Status values",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        RAW_DATA_ID,
+        "raw_data",
+        "Digitiser Raw ADC Sample Data",
+        shape=(HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS,),
+        dtype=np.uint8,
+    )
+    descriptor_heap = item_group.get_heap(descriptors="all", data="none")
+    return descriptor_heap
+
+
+def create_config() -> spead2.send.StreamConfig:
+    """Config for stream creation."""
+    return spead2.send.StreamConfig(
+        rate=0,
+        max_packet_size=MAX_PACKET_SIZE,
+        max_heaps=4,
+    )
 
 
 class DescriptorSender:
@@ -27,103 +84,33 @@ class DescriptorSender:
 
     Parameters
     ----------
-    args:
-        Runtime arguments passed (or as set by default).
-    timestamp: int
-        Timestamp since start.
-    endpoints:
-        IP address of multicast address to send descriptors (string). The port is stated as an integer.
+    stream:
+        Stream created for descriptors.
+    descriptor_heap:
+        Descriptor heap to sending.
     """
 
     def __init__(
-        self, interface: str, heap_samples: int, ttl: int, timestamp: int, endpoints: List[Tuple[str, int]]
+        self,
+        stream: "spead2.send.asyncio.AsyncStream",
+        descriptor_heap: spead2.send.Heap,
     ) -> None:
         self.descriptor_rate = SPEAD_DESCRIPTOR_INTERVAL_S
-        self.timestamp = timestamp
-        self.endpoints = endpoints
-        self.interface_address = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]["addr"]
-
         self.rate = 0  # rate will be determined by the descriptor_rate
 
         self.event = asyncio.Event()
-        self.config = spead2.send.StreamConfig(
-            rate=self.rate,
-            max_packet_size=MAX_PACKET_SIZE,
-            max_heaps=4,
-        )
+        self.config = create_config()
 
         # Setup Asyncio UDP stream
-        self.stream = spead2.send.asyncio.UdpStream(
-            spead2.ThreadPool(),
-            list(endpoints),
-            self.config,
-            ttl=ttl,
-            interface_address=self.interface_address,
-        )
-
-        # Set spead stream to have heap id in odd numbers for descriptors.
-        spead2.send.Stream.set_cnt_sequence(self.stream, 1, 2)
-
-        # Create item group
-        self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
-        self.heap_to_send = self.__create_descriptors_heap(heap_samples)
+        self.stream = stream
+        self.heap_to_send = descriptor_heap
 
     def halt(self) -> None:
         """Request :meth:`run` to stop, but do not wait for it."""
         self.event.set()
 
-    def __create_descriptors_heap(self, heap_samples) -> spead2.send.Heap:
-        """Add descriptor items to item group.
-
-        Parameters
-        ----------
-        args:
-            Runtime arguments passed (or as set by default).
-        """
-        # Add items to item group
-        self.item_group.add_item(
-            TIMESTAMP_ID,
-            "timestamp",
-            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-            shape=(),
-            format=IMMEDIATE_FORMAT,
-        )
-
-        self.item_group.add_item(
-            DIGITISER_ID_ID,
-            "Digitiser ID",
-            "Digitiser Serial Number",
-            shape=(),
-            dtype=np.uint8,
-        )
-
-        self.item_group.add_item(
-            DIGITISER_STATUS_ID,
-            "Digitiser Status",
-            "Digitiser Status values",
-            shape=(),
-            dtype=np.uint8,
-        )
-
-        self.item_group.add_item(
-            RAW_DATA_ID,
-            "ADC Samples",
-            "Digitiser Raw ADC Sample Data",
-            shape=(heap_samples,),
-            format=[("i", 10)],
-        )
-
-        descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
-        return descriptor_heap
-
     async def run(self) -> None:
-        """Run digitiser descriptor sender.
-
-        Parameters
-        ----------
-        heap_to_send
-            Descriptor heap as formed in create_descriptors method.
-        """
+        """Run digitiser descriptor sender."""
         while True:
             try:
                 await self.stream.async_send_heap(self.heap_to_send)
