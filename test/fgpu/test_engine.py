@@ -27,10 +27,11 @@ import spead2.send
 from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import SAMPLE_BITS
+from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
 
+from .. import PromDiff
 from .test_recv import gen_heaps
 
 pytestmark = [pytest.mark.cuda_only]
@@ -664,17 +665,18 @@ class TestEngine:
             last_heap = last_spectrum // spectra_per_heap
             dst_present[first_heap : last_heap + 1] = False
 
-        out_data, timestamps = await self._send_data(
-            mock_recv_streams,
-            mock_send_stream,
-            engine_server,
-            dig_data,
-            expected_first_timestamp=0,
-            src_present=src_present,
-            dst_present=dst_present,
-            channels=channels,
-            spectra_per_heap=spectra_per_heap,
-        )
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            out_data, timestamps = await self._send_data(
+                mock_recv_streams,
+                mock_send_stream,
+                engine_server,
+                dig_data,
+                expected_first_timestamp=0,
+                src_present=src_present,
+                dst_present=dst_present,
+                channels=channels,
+                spectra_per_heap=spectra_per_heap,
+            )
         # Position in dst_present corresponding to the second half of dig_data.
         middle = (n_samples // 2) // (channels * 2 * spectra_per_heap)
         for i, p in enumerate(dst_present):
@@ -682,3 +684,13 @@ class TestEngine:
                 a = out_data[:, i * spectra_per_heap : (i + 1) * spectra_per_heap]
                 b = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
                 np.testing.assert_equal(a, b)
+
+        for pol in range(N_POLS):
+            input_missing_heaps = np.sum(~src_present[pol])
+            assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
+        n_substreams = len(mock_send_stream)
+        output_heaps = np.sum(dst_present) * n_substreams
+        assert prom_diff.get_sample_diff("output_heaps_total") == output_heaps
+        frame_size = channels * spectra_per_heap * N_POLS * COMPLEX * np.dtype(np.int8).itemsize
+        assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
+        assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
