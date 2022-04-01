@@ -27,6 +27,7 @@ import asyncio
 import functools
 import logging
 from collections import deque
+from dataclasses import dataclass
 from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
@@ -158,6 +159,29 @@ class EventItem(BaseItem):
         self.events = []
 
 
+@dataclass
+class PolInItem:
+    """Polarisation-specific elements of :class:`InItem`.
+
+    Attributes
+    ----------
+    samples
+        A device memory region for storing the raw samples.
+    present
+        Bitmask indicating which packets were present in the chunk.
+    present_cumsum
+        Cumulative sum over :attr:`present`. It is up to the caller
+        to compute it at the appropriate time.
+    chunk
+        Chunk to return to recv after processing (used with vkgdr only).
+    """
+
+    samples: Optional[accel.DeviceArray]
+    present: np.ndarray
+    present_cumsum: np.ndarray
+    chunk: Optional[recv.Chunk] = None  # Used with vkgdr only.
+
+
 class InItem(EventItem):
     """Item for use in input queues.
 
@@ -170,7 +194,7 @@ class InItem(EventItem):
     .. code-block:: python
 
         # In the receive function
-        my_in_item.samples[pol].set_region(...)  # start copying sample data to the GPU,
+        my_in_item.pol_data[pol].samples.set_region(...)  # start copying sample data to the GPU,
         my_in_item.events.append(command_queue.enqueue_marker())
         in_queue.put_nowait(my_in_item)
         ...
@@ -181,46 +205,50 @@ class InItem(EventItem):
 
     Attributes
     ----------
-    samples
-        A pair of device memory regions for storing the set of samples
-        associated with each respective polarisation.
-    chunks
-        Chunks to return to recv after processing (used with vkgdr only).
+    pol_data
+        Per-polarisation data
     n_samples
         Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in
-        :attr:`samples`.
+        :attr:`PolInItem.samples`.
     sample_bits
-        Bitwidth of the data in :attr:`samples`.
+        Bitwidth of the data in :attr:`PolInItem.samples`.
 
     Parameters
     ----------
     compute
         F-engine Operation Sequence detailing the computation operations which
-        will take place on the data in :attr:`samples`.
+        will take place on the data in :attr:`PolInItem.samples`.
     timestamp
         Timestamp of the oldest digitiser sample represented in the data.
+    packet_samples
+        Number of samples per digitiser packet (for sizing :attr:`PolInItem.present`).
     use_vkgdr
-        Use GPU Direct. Defaults to False, because this only works on
-        datacenter-grade cards.
+        Use vkgdr to write sample data directly to the GPU rather than staging in
+        host memory.
     """
 
-    samples: List[accel.DeviceArray]
-    chunks: List[recv.Chunk]  # Used with vkgdr only.
+    pol_data: List[PolInItem]
     n_samples: int
     sample_bits: int
 
-    def __init__(self, compute: Compute, timestamp: int = 0, use_vkgdr: bool = False) -> None:
+    def __init__(self, compute: Compute, timestamp: int = 0, *, packet_samples: int, use_vkgdr: bool = False) -> None:
         self.sample_bits = compute.sample_bits
-        if use_vkgdr:
-            # Memory belongs to the chunks, and we set samples when
-            # initialising the item from the chunks.
-            self.samples = []
-        else:
-            self.samples = [
-                _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots[f"in{pol}"]))
-                for pol in range(N_POLS)
-            ]
-        self.chunks = []
+        self.pol_data = []
+        present_size = accel.divup(compute.samples, packet_samples)
+        for pol in range(N_POLS):
+            if use_vkgdr:
+                # Memory belongs to the chunks, and we set samples when
+                # initialising the item from the chunks.
+                samples = None
+            else:
+                samples = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots[f"in{pol}"]))
+            self.pol_data.append(
+                PolInItem(
+                    samples=samples,
+                    present=np.zeros(present_size, dtype=bool),
+                    present_cumsum=np.zeros(present_size + 1, np.uint32),
+                )
+            )
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -237,13 +265,14 @@ class InItem(EventItem):
         """Memory capacity in samples.
 
         The amount of space allocated to each polarisation stored in
-        :attr:`samples`.
+        :attr:`PolInData.samples`.
         """
-        return self.samples[0].shape[0] * BYTE_BITS // self.sample_bits
+        assert self.pol_data[0].samples is not None
+        return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.sample_bits
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
-        """End (i.e. latest) timestamp of the item."""
+        """Past-the-end (i.e. latest plus 1) timestamp of the item."""
         return self.timestamp + self.n_samples
 
 
@@ -285,6 +314,9 @@ class OutItem(EventItem):
         the :class:`OutItem` is being prepared.
     gains
         Per-channel gains
+    present
+        Bit-mask indicating which spectra contain valid data and should be
+        transmitted.
     n_spectra
         Number of spectra contained in :attr:`spectra`.
 
@@ -301,6 +333,7 @@ class OutItem(EventItem):
     fine_delay: accel.HostArray
     phase: accel.HostArray
     gains: accel.HostArray
+    present: np.ndarray
     n_spectra: int
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
@@ -308,6 +341,7 @@ class OutItem(EventItem):
         self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
         self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
         self.gains = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["gains"]))
+        self.present = np.zeros(self.fine_delay.shape[0], dtype=bool)
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -390,6 +424,8 @@ class Processor:
         Number of taps in each branch of the PFB-FIR.
     samples
         Number of samples that will be processed each time the operation is run.
+    src_packet_samples
+        Number of samples per digitiser packet.
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
@@ -411,6 +447,7 @@ class Processor:
         context: AbstractContext,
         taps: int,
         samples: int,
+        src_packet_samples: int,
         spectra: int,
         spectra_per_heap: int,
         channels: int,
@@ -443,9 +480,10 @@ class Processor:
         self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
         self.monitor = monitor
+        self._src_packet_samples = src_packet_samples
         self._spectra = []
         for _ in range(n_in):
-            self.in_free_queue.put_nowait(InItem(self.compute, use_vkgdr=use_vkgdr))
+            self.in_free_queue.put_nowait(InItem(self.compute, packet_samples=src_packet_samples, use_vkgdr=use_vkgdr))
         for _ in range(n_out):
             item = OutItem(self.compute)
             self._spectra.append(item.spectra)
@@ -478,7 +516,11 @@ class Processor:
 
     @property
     def spectra_samples(self) -> int:  # noqa: D401
-        """Number of incoming digitiser samples needed per spectrum."""
+        """Number of incoming digitiser samples needed per spectrum.
+
+        Note that this is the spacing between spectra. Each spectrum uses
+        an overlapping window with more samples than this.
+        """
         return 2 * self.channels
 
     @property
@@ -531,7 +573,7 @@ class Processor:
         if len(self._in_items) == 0:
             if not (await self._next_in()):
                 return False
-        if len(self._in_items) == 1 and (await self._next_in()):
+        if len(self._in_items) == 1:
             # Copy the head of the new chunk to the tail of the older chunk
             # to allow for PFB windows to fit and for some protection against
             # sharp changes in delay.
@@ -539,21 +581,34 @@ class Processor:
             # This could only fail if we'd lost a whole input chunk of
             # data from the digitiser. In that case the data we'd like
             # to copy is missing so we can't do this step.
-            # TODO: Currently fgpu doesn't have much (really any)
-            # handling for missing data.
-            if self._in_items[0].end_timestamp == self._in_items[1].timestamp:
+            chunk_packets = self._in_items[0].n_samples // self._src_packet_samples
+            copy_packets = len(self._in_items[0].pol_data[0].present) - chunk_packets
+            if (await self._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
                 sample_bits = self._in_items[0].sample_bits
                 copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
                 copy_samples = min(copy_samples, self._in_items[1].n_samples)
                 copy_bytes = copy_samples * sample_bits // BYTE_BITS
-                for pol in range(len(self._in_items[0].samples)):
-                    self._in_items[1].samples[pol].copy_region(
+                for pol_data0, pol_data1 in zip(self._in_items[0].pol_data, self._in_items[1].pol_data):
+                    assert pol_data0.samples is not None
+                    assert pol_data1.samples is not None
+                    pol_data1.samples.copy_region(
                         self.compute.command_queue,
-                        self._in_items[0].samples[pol],
+                        pol_data0.samples,
                         np.s_[:copy_bytes],
                         np.s_[-copy_bytes:],
                     )
+                    pol_data0.present[-copy_packets:] = pol_data1.present[:copy_packets]
                 self._in_items[0].n_samples += copy_samples
+            else:
+                for pol_data in self._in_items[0].pol_data:
+                    pol_data.present[-copy_packets:] = 0  # Mark tail as absent, for each pol
+            # Update the cumulative sums. Note that during shutdown this may be
+            # done more than once, but since it is shutdown the performance
+            # implications aren't too important.
+            # np.cumsum doesn't provide an initial zero, so we output starting at
+            # position 1.
+            for pol_data in self._in_items[0].pol_data:
+                np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
         return True
 
     def _pop_in(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
@@ -561,9 +616,12 @@ class Processor:
         item = self._in_items.popleft()
         event = self.compute.command_queue.enqueue_marker()
         if self._use_vkgdr:
-            item.samples = []
-            chunks = item.chunks
-            item.chunks = []
+            chunks = []
+            for pol_data in item.pol_data:
+                pol_data.samples = None
+                assert pol_data.chunk is not None
+                chunks.append(pol_data.chunk)
+                pol_data.chunk = None
             asyncio.create_task(self._push_chunks(streams, chunks, event))
         else:
             item.events.append(event)
@@ -719,8 +777,28 @@ class Processor:
                 # Divide by pi because the arguments of sincospif() used in the
                 # kernel are in radians/PI.
                 self._out_item.phase[out_slice] = phase.T / np.pi
-                self.compute.run_frontend(self._in_items[0].samples, offsets, self._out_item.n_spectra, batch_spectra)
+                samples = []
+                for pol_data in self._in_items[0].pol_data:
+                    assert pol_data.samples is not None
+                    samples.append(pol_data.samples)
+                self.compute.run_frontend(samples, offsets, self._out_item.n_spectra, batch_spectra)
                 self._out_item.n_spectra += batch_spectra
+                # Work out which output spectra contain missing data.
+                self._out_item.present[out_slice] = True
+                for pol, pol_data in enumerate(self._in_items[0].pol_data):
+                    # Offset in the chunk of the first sample for each spectrum
+                    first_offset = np.arange(
+                        offsets[pol],
+                        offsets[pol] + batch_spectra * self.spectra_samples,
+                        self.spectra_samples,
+                    )
+                    # Offset of the last sample (inclusive, rather than past-the-end)
+                    last_offset = first_offset + self.taps * self.spectra_samples - 1
+                    first_packet = first_offset // self._src_packet_samples
+                    # last_packet is exclusive
+                    last_packet = last_offset // self._src_packet_samples + 1
+                    present_packets = pol_data.present_cumsum[last_packet] - pol_data.present_cumsum[first_packet]
+                    self._out_item.present[out_slice] &= present_packets == last_packet - first_packet
 
             # The _flush_out method calls the "backend" which triggers the FFT
             # and postproc operations.
@@ -771,15 +849,20 @@ class Processor:
             in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
 
             transfer_events = []
+            for pol_data, chunk in zip(in_item.pol_data, chunks):
+                # Copy the present flags (synchronously).
+                pol_data.present[: len(chunk.present)] = chunk.present
             if self._use_vkgdr:
-                assert len(in_item.samples) == 0
-                in_item.samples = [chunk.device for chunk in chunks]  # type: ignore
-                in_item.chunks = chunks
+                for pol_data, chunk in zip(in_item.pol_data, chunks):
+                    assert pol_data.samples is None
+                    pol_data.samples = chunk.device  # type: ignore
+                    pol_data.chunk = chunk
                 self.in_queue.put_nowait(in_item)
             else:
                 # Copy each pol chunk to the right place on the GPU.
-                for pol, chunk in enumerate(chunks):
-                    in_item.samples[pol].set_region(
+                for pol_data, chunk in zip(in_item.pol_data, chunks):
+                    assert pol_data.samples is not None
+                    pol_data.samples.set_region(
                         self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
@@ -831,6 +914,7 @@ class Processor:
             the network.
         """
         task: Optional[asyncio.Future] = None
+        last_end_timestamp: Optional[int] = None
         while True:
             with self.monitor.with_state("run_transmit", "wait out_queue"):
                 out_item = await self.out_queue.get()
@@ -852,9 +936,18 @@ class Processor:
                 out_item.spectra.get_async(self._download_queue, chunk.data)
                 events = [self._download_queue.enqueue_marker()]
             chunk.timestamp = out_item.timestamp
+            # Each frame is valid if all spectra in it are valid
+            out_item.present.reshape(-1, self.spectra_per_heap).all(axis=-1, out=chunk.present)
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
             n_frames = out_item.n_spectra // self.spectra_per_heap
+            if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
+                # Account for heaps skipped between the end of the previous out_item and the
+                # start of the current one.
+                skipped_samples = out_item.timestamp - last_end_timestamp
+                skipped_frames = skipped_samples // (self.spectra_per_heap * self.spectra_samples)
+                send.skipped_heaps_counter.inc(skipped_frames * stream.num_substreams)
+            last_end_timestamp = out_item.end_timestamp
             out_item.reset()
             self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
