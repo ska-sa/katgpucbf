@@ -33,20 +33,15 @@ from typing import List, Optional, Sequence, Tuple
 import dask.config
 import dask.system
 import katsdpservices
-import netifaces
 import numpy as np
 import prometheus_async
 import pyparsing as pp
 import spead2.send
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from katgpucbf import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-from katgpucbf.dsim import descriptors, send, signal
-from katgpucbf.dsim.server import DeviceServer
-
-# from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
-# from . import descriptors, send, signal
-# from .server import DeviceServer
+from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from . import descriptors, send, signal
+from .server import DeviceServer
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +183,7 @@ async def async_main() -> None:
         # for sleeping until an absolute time, so this will be wrong by the
         # time that elapsed from calling time.time until calling time.sleep,
         # but that's small change.
-        time.sleep(max(0, start_time - time.time()))
+        await asyncio.sleep(max(0, start_time - time.time()))
     else:
         args.sync_time = time.time()
     logger.info("First timestamp will be %#x", timestamp)
@@ -199,7 +194,7 @@ async def async_main() -> None:
             endpoints.append((ep.host, ep.port))
 
     config = descriptors.create_config()
-    interface_address = netifaces.ifaddresses(args.interface)[netifaces.AF_INET][0]["addr"]
+    interface_address = katsdpservices.get_interface_address(args.interface)
     descriptor_stream = descriptors.create_descriptor_stream(
         endpoints=endpoints, config=config, ttl=4, interface_address=interface_address
     )
@@ -220,7 +215,8 @@ async def async_main() -> None:
         sample_bits=args.sample_bits,
         max_heaps=heap_sets[0].data["heaps"].size,
         ttl=args.ttl,
-        interface_address=katsdpservices.get_interface_address(args.interface),
+        # interface_address=katsdpservices.get_interface_address(args.interface),
+        interface_address=interface_address,
         ibv=args.ibv,
         affinity=args.affinity,
     )

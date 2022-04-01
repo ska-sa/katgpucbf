@@ -18,7 +18,6 @@
 
 import asyncio
 import itertools
-import logging
 from typing import Optional, Sequence
 
 import numpy as np
@@ -33,11 +32,10 @@ from .. import PromDiff
 from .conftest import BYTE_BITS, HEAP_SAMPLES, N_ENDPOINTS_PER_POL, N_POLS, SAMPLE_BITS, SIGNAL_HEAPS
 
 pytestmark = [pytest.mark.asyncio]
-logging.basicConfig()
 
 
 async def descriptor_recv(rec_streams, descriptor_sender):
-    """Descriptor receiver to unpack descriptors and create ItemGroup.
+    """Create receiver for unpacking of spead descriptors.
 
     Parameters
     ----------
@@ -115,7 +113,7 @@ async def test_sender(
     # Start descriptor sender and wait for descriptors before awaiting for DSim data
     descriptor_sender_task = asyncio.create_task(descriptor_sender.run())
     descriptor_recv_streams_task = asyncio.create_task(descriptor_recv(descriptor_recv_streams, descriptor_sender))
-    [_, ig] = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
+    _, ig = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
 
     # Stop the descriptor queue
     for queue in descriptor_inproc_queue:

@@ -123,14 +123,16 @@ def descriptor_inproc_queue() -> Sequence[spead2.InprocQueue]:  # noqa: D401
 @pytest.fixture
 def descriptor_recv_streams(
     descriptor_inproc_queue: Sequence[spead2.InprocQueue],
-) -> Sequence[spead2.recv.asyncio.Stream]:
+) -> Generator[Sequence[spead2.recv.asyncio.Stream], None, None]:
     """Streams that receive data from :func:`descriptor_inproc_queue`."""
     streams = []
     for queue in descriptor_inproc_queue:
         stream = spead2.recv.asyncio.Stream(spead2.ThreadPool())
         stream.add_inproc_reader(queue)
         streams.append(stream)
-    return streams
+    yield streams
+    for stream in streams:
+        stream.stop()
 
 
 @pytest.fixture

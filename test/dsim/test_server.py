@@ -16,42 +16,31 @@
 
 """Unit tests for katcp server."""
 
-from typing import AsyncGenerator, List, Sequence, Tuple
+from typing import AsyncGenerator, Sequence
 
 import aiokatcp
 import async_timeout
-import netifaces
 import numpy as np
 import pytest
 
-from katgpucbf.dsim import descriptors
+from katgpucbf.dsim.descriptors import DescriptorSender
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
 from katgpucbf.dsim.signal import parse_signals
 
 from .. import get_sensor
-from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, MULTICAST_ADDRESS, PORT, SAMPLE_BITS, SIGNAL_HEAPS
+from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, SAMPLE_BITS, SIGNAL_HEAPS
 
 pytestmark = [pytest.mark.asyncio]
 
 
 @pytest.fixture
 async def katcp_server(
-    sender: Sender, heap_sets: Sequence[HeapSet]
+    sender: Sender, heap_sets: Sequence[HeapSet], descriptor_sender: DescriptorSender
 ) -> AsyncGenerator[DeviceServer, None]:  # noqa: D401
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
     # Make up a bogus signal. It's not actually populated in heap_sets
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
-
-    endpoints: List[Tuple[str, int]] = [(MULTICAST_ADDRESS, PORT)]
-
-    config = descriptors.create_config()
-    interface_address = netifaces.ifaddresses("lo")[netifaces.AF_INET][0]["addr"]
-    descriptor_stream = descriptors.create_descriptor_stream(
-        endpoints=endpoints, config=config, ttl=4, interface_address=interface_address
-    )
-    descriptor_heap = descriptors.create_descriptors_heap()
-    descriptor_sender = descriptors.DescriptorSender(descriptor_stream, descriptor_heap)
 
     server = DeviceServer(
         sender=sender,

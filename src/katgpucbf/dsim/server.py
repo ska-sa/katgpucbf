@@ -23,9 +23,8 @@ from typing import Sequence
 import aiokatcp
 import pyparsing as pp
 
-from katgpucbf.dsim.descriptors import DescriptorSender
-
 from .. import BYTE_BITS, __version__
+from .descriptors import DescriptorSender
 from .send import HeapSet, Sender
 from .signal import Signal, format_signals, parse_signals, sample_async
 

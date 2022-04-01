@@ -1,14 +1,27 @@
+################################################################################
+# Copyright (c) 2021, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Digitiser simulator descriptor sender."""
 import asyncio
 
 import numpy as np
 import spead2
-import spead2.recv
-import spead2.send
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
-
+from .. import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
 from ..spead import (
     DIGITISER_ID_ID,
     DIGITISER_STATUS_ID,
@@ -23,7 +36,7 @@ from ..spead import (
 
 
 def create_descriptor_stream(endpoints, config, ttl, interface_address) -> spead2.send.asyncio.UdpStream:
-    """Create stream for descriptors."""
+    """Create a stream for sending descriptors alongside dsim data."""
     return spead2.send.asyncio.UdpStream(
         spead2.ThreadPool(),
         list(endpoints),
@@ -34,7 +47,7 @@ def create_descriptor_stream(endpoints, config, ttl, interface_address) -> spead
 
 
 def create_descriptors_heap() -> spead2.send.Heap:
-    """Add descriptor items to item group."""
+    """Create a descriptor heap for output dsim data."""
     item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
 
     # Add items to item group
@@ -71,7 +84,7 @@ def create_descriptors_heap() -> spead2.send.Heap:
 
 
 def create_config() -> spead2.send.StreamConfig:
-    """Config for stream creation."""
+    """Create simple configuration for descriptor stream."""
     return spead2.send.StreamConfig(
         rate=0,
         max_packet_size=MAX_PACKET_SIZE,
@@ -95,26 +108,25 @@ class DescriptorSender:
         stream: "spead2.send.asyncio.AsyncStream",
         descriptor_heap: spead2.send.Heap,
     ) -> None:
-        self.descriptor_rate = SPEAD_DESCRIPTOR_INTERVAL_S
-        self.rate = 0  # rate will be determined by the descriptor_rate
 
-        self.event = asyncio.Event()
+        self._halt_event = asyncio.Event()
         self.config = create_config()
 
-        # Setup Asyncio UDP stream
         self.stream = stream
         self.heap_to_send = descriptor_heap
 
     def halt(self) -> None:
         """Request :meth:`run` to stop, but do not wait for it."""
-        self.event.set()
+        self._halt_event.set()
 
     async def run(self) -> None:
         """Run digitiser descriptor sender."""
         while True:
             try:
                 await self.stream.async_send_heap(self.heap_to_send)
-                await asyncio.wait_for(self.event.wait(), timeout=self.descriptor_rate)
+                # Wait for even (if a halt requested). wait_for will timeout if not received
+                # within descriptor_interval period and descriptor will be resent.
+                await asyncio.wait_for(self._halt_event.wait(), timeout=SPEAD_DESCRIPTOR_INTERVAL_S)
                 break
             except asyncio.TimeoutError:
                 pass
