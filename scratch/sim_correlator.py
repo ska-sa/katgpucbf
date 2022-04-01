@@ -45,7 +45,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
         "--last-stage",
-        choices=["d", "f", "x"],
+        choices=["d", "f", "x", "ingest"],
         default="x",
         help="Do not run any stages past the given one [%(default)s]",
     )
@@ -135,6 +135,18 @@ def generate_config(args: argparse.Namespace) -> dict:
         "src_streams": ["antenna_channelised_voltage"],
         "int_time": args.int_time,
     }
+    if args.last_stage == "x":
+        return config
+
+    config["outputs"]["sdp_l0"] = {
+        "type": "sdp.vis",
+        "src_streams": ["baseline_correlation_products"],
+        "output_int_time": args.int_time,
+        "excise": False,
+        "archive": False,
+        "continuum_factor": 1,
+    }
+
     return config
 
 
