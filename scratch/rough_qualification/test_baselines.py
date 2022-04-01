@@ -121,7 +121,7 @@ async def async_main(args: argparse.Namespace) -> None:
     channel_width = bandwidth / n_chans
     dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
     channel = 1234  # picked fairly arbitrarily. We just need to see the tone.
-    await set_dsim_up(dsim_host, dsim_port, channel, channel_width)
+    await setup_dsim(dsim_host, dsim_port, channel, channel_width)
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
@@ -237,7 +237,7 @@ def setup_stream(args, multicast_endpoints, n_bls, n_chans, n_bits_per_sample, h
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
 
-async def set_dsim_up(dsim_host, dsim_port, channel, channel_width):
+async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
     logger.info("Connecting to dsim 0 on %s:%d", dsim_host, dsim_port)
     dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
     logger.info("Successfully connected to dsim.")
