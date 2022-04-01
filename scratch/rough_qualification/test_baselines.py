@@ -218,12 +218,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
 
 def setup_stream(args, multicast_endpoints, n_bls, n_chans, n_bits_per_sample, heaps_per_chunk, max_chunks, stream):
-    """Set up the spead2 stream needed for ingest.
-
-    Method clunkily extracted to satisfy flake8's requirement for less complexity.
-    For loops and if-statements are apparently too complex, and it's easier
-    to break this out than break up the test logic.
-    """
+    """Set up the spead2 stream needed for ingest."""
     for _ in range(max_chunks):
         chunk = spead2.recv.Chunk(
             present=np.empty(heaps_per_chunk, np.uint8),
