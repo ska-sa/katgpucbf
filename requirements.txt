@@ -47,7 +47,7 @@ hiredis==2.0.0
     # via katsdptelstate
 idna==3.3
     # via yarl
-katsdpservices[aiomonitor]==1.1
+katsdpservices[aiomonitor]==1.2
     # via -r requirements.in
 katsdpsigproc[cuda]==1.4.2
     # via -r requirements.in
@@ -138,7 +138,7 @@ typing-extensions==3.10.0.0
     # via
     #   async-timeout
     #   katsdpsigproc
-git+ssh://git@github.com/ska-sa/vkgdr
+vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr
     # via -r requirements.in
 wrapt==1.13.3
     # via prometheus-async

@@ -35,6 +35,9 @@ from . import METRIC_NAMESPACE
 PREAMBLE_SIZE = 72
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
+skipped_heaps_counter = Counter(
+    "output_skipped_heaps", "heaps not sent because input data was incomplete", namespace=METRIC_NAMESPACE
+)
 
 
 class Frame:
@@ -93,6 +96,8 @@ class Chunk:
             raise ValueError("substreams must divide into channels")
         self.data = data
         self.device = device
+        #: Whether each frame has valid data
+        self.present = np.zeros(n_frames, dtype=bool)
         #: Timestamp of the first heap
         self._timestamp = 0
         timestamp_step = spectra_per_heap * channels * 2
@@ -132,10 +137,14 @@ class Chunk:
         Frames from 0 to `frames` - 1 are sent asynchronously.
         """
         futures = []
-        for frame in self._frames[:frames]:
-            futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
-            futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
-        await asyncio.gather(*futures)
+        for present, frame in zip(self.present[:frames], self._frames[:frames]):
+            if present:
+                futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
+                futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
+            else:
+                skipped_heaps_counter.inc(len(frame.heaps))
+        if futures:
+            await asyncio.gather(*futures)
 
 
 def make_stream(

@@ -384,7 +384,7 @@ class TestEngine:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
-        rx_reorder_tol = 2 ** 26  # Increase if needed; this is small to keep memory usage manageable
+        rx_reorder_tol = 2**26  # Increase if needed; this is small to keep memory usage manageable
         heap_accumulation_threshold = 4
         n_accumulations = 3
 

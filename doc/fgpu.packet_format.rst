@@ -40,16 +40,21 @@ field is 64 bits/8 bytes wide. More information on these fields is listed in the
 In addition, each packet has a number of additional 64-bit fields specific
 to this heap that are used for reassembling the packets.
 The fields are as follows:
+
 ``timestamp`` (See above table)
+  .. comment just to get this formatted as definition list
 
 ``feng_id`` (See above table)
+  .. comment just to get this formatted as definition list
 
 ``frequency`` (See above table)
   Although each packet may represent a different frequency,
   this value remains constant across a heap and represents
   only the first frequency channel in the range of
   channels within the heap.
+
 ``feng_raw item pointer`` (See above table)
+  .. comment just to get this formatted as definition list
 
 Eight of the above fields remain constant for all packets in a heap.
 The heap offset changes across  packets. Heap offset is expected to change in

@@ -233,6 +233,30 @@ constructed so that they reference numpy arrays (including for the timestamps),
 rather than copying data into spead2. This allows heaps to be recycled for new
 data without having to create new heap objects.
 
+Missing data handling
+---------------------
+Inevitably some input data will be lost and this needs to be handled. The
+approach taken is that any output heap which is affected by data loss is
+instead not transmitted. All the processing prior to transmission happens as
+normal, just using bogus data (typically whatever was in the chunk from the
+previous time it was used), as this is simpler than trying to make vectorised
+code skip over the missing data.
+
+To track the missing data, a series of "present" boolean arrays passes down
+the pipeline alongside the data. The first such array is populated by spead2.
+From there a number of transformations occur:
+
+1. When copying the head of one chain to append it to the tail of the previous
+   one, the same is done with the presence flags.
+2. A prefix sum (see :func:`numpy.cumsum`) is computed over the flags of the
+   chunk. This allows the number of good packets in any interval to be
+   computed quickly.
+3. For each output spectrum, the corresponding interval of input heaps is
+   computed (per polarisation) to determine whether any are missing, to
+   produce per-spectrum presence flags.
+4. When an output chunk is ready to be sent, the per-spectrum flags are
+   reduced to per-frame flags.
+
 Challenges and lessons learnt
 -----------------------------
 
