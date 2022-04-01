@@ -95,7 +95,7 @@ async def async_main(args: argparse.Namespace) -> None:
     dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
     # Set the dsim to something noisy, so that the test actually shows something.
     await dsim_client.request("signals", "common=wgn(0.1);common;common;")
-    logger.info("Successfully set to dsim.")
+    logger.info("Successfully set the dsim.")
 
     # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
     # But we can cast Endpoints to tuples, which it does know.
