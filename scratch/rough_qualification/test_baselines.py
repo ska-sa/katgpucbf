@@ -191,9 +191,7 @@ async def async_main(args: argparse.Namespace) -> None:
         logger.info("Checking baseline %r (%d)", bl, bl_idx)
         await zero_all_gains()
         await unzero_a_baseline(bl)
-        expected_timestamp = (
-            time.time() + 1 - sync_time
-        ) * timestamp_scale_factor  # + 2 to let a few dumps pass before we check.
+        expected_timestamp = (time.time() + 1 - sync_time) * timestamp_scale_factor
         # Note that we are making an assumption that nothing is straying too far
         # from wall time here. I don't have a way other than adjusting the dsim
         # signal of ensuring that we get going after a specific timestamp in the
