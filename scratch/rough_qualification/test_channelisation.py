@@ -189,6 +189,8 @@ async def async_main(args: argparse.Namespace) -> None:
     points_per_channel = 50
     num_points_on_either_side = round((chans_on_either_side + 0.5) * points_per_channel - 1)
 
+    # TODO: This formula may be wrong. It gets me what I want for the time being,
+    # but if the code gets reused in a more formal setting, it'll want checking.
     frequencies_to_check = np.linspace(
         channel_centre_freq - (chans_on_either_side + 0.5) * channel_width,
         channel_centre_freq + (chans_on_either_side + 0.5) * channel_width,

@@ -184,6 +184,9 @@ async def async_main(args: argparse.Namespace) -> None:
     async def unzero_a_baseline(baseline_tuple: Tuple[str]):
         logger.debug(f"Unzeroing gain on {baseline_tuple}")
         for ant in baseline_tuple:
+            # This was done prior to NGC-535, so the gain used here will need
+            # to be tweaked if the test is repeated later. 1 may be fine, but
+            # it'll need to be tested.
             await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
 
     for bl_idx, bl in enumerate(bls_ordering):
