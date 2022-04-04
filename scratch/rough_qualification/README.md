@@ -2,13 +2,13 @@ This directory contains tests that were run towards the end of March 2022, for
 initial, first-pass verification that the correlator as a whole does what we
 expect it to do.
 
-Included are, the following tests:
+The following tests are included:
 
 - Channelisation or channel response shape,
 - Baselines, checking whether signal comes where we expect it to, and
 - Delays, checking whether delay and phase tracking are actually doing something.
 
-In each case, we are simply eyeballing the output, no numerical verification of
+In each case, we are simply eyeballing the output, and no numerical verification of
 whether things are meeting spec is attempted at this stage. This is beyond the
 scope of a few scripts in a scratch directory.
 
