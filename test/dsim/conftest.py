@@ -27,9 +27,8 @@ import spead2.recv
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, DEFAULT_TTL
+from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
 from katgpucbf.dsim import descriptors, send
-from katgpucbf.spead import HEAP_SAMPLES, SAMPLE_BITS
 
 N_POLS = 2
 N_ENDPOINTS_PER_POL = 4
@@ -75,8 +74,8 @@ def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asy
             heap_sets=[],  # Only needed for UdpIbvStream, which we're not using
             n_pols=N_POLS,
             adc_sample_rate=ADC_SAMPLE_RATE,
-            heap_samples=HEAP_SAMPLES,
-            sample_bits=SAMPLE_BITS,
+            heap_samples=DIG_HEAP_SAMPLES,
+            sample_bits=DIG_SAMPLE_BITS,
             max_heaps=SIGNAL_HEAPS * N_POLS,
             ttl=DEFAULT_TTL,
             interface_address="",
@@ -96,7 +95,7 @@ def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:  # noqa: D401
     """Two instances of :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes."""
     heap_sets = [
         send.HeapSet.create(
-            timestamps, [N_ENDPOINTS_PER_POL] * N_POLS, HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS, range(N_POLS)
+            timestamps, [N_ENDPOINTS_PER_POL] * N_POLS, DIG_HEAP_SAMPLES * DIG_SAMPLE_BITS // BYTE_BITS, range(N_POLS)
         )
         for _ in range(2)
     ]
@@ -111,22 +110,22 @@ def sender(
     send_stream: "spead2.send.asyncio.AsyncStream", heap_sets: Sequence[send.HeapSet]
 ) -> send.Sender:  # noqa: D401
     """A :class:`~katgpucbf.dsim.Sender` using the first of :func:`heaps_sets`."""
-    return send.Sender(send_stream, heap_sets[0], 0, HEAP_SAMPLES, time.time(), ADC_SAMPLE_RATE)
+    return send.Sender(send_stream, heap_sets[0], 0, DIG_HEAP_SAMPLES, time.time(), ADC_SAMPLE_RATE)
 
 
 @pytest.fixture
-def descriptor_inproc_queue() -> Sequence[spead2.InprocQueue]:  # noqa: D401
+def descriptor_inproc_queues() -> Sequence[spead2.InprocQueue]:  # noqa: D401
     """An in-process queue for descriptors. Only one queue needed."""
     return [spead2.InprocQueue()]
 
 
 @pytest.fixture
 def descriptor_recv_streams(
-    descriptor_inproc_queue: Sequence[spead2.InprocQueue],
+    descriptor_inproc_queues: Sequence[spead2.InprocQueue],
 ) -> Generator[Sequence[spead2.recv.asyncio.Stream], None, None]:
     """Streams that receive data from :func:`descriptor_inproc_queue`."""
     streams = []
-    for queue in descriptor_inproc_queue:
+    for queue in descriptor_inproc_queues:
         stream = spead2.recv.asyncio.Stream(spead2.ThreadPool())
         stream.add_inproc_reader(queue)
         streams.append(stream)
@@ -136,16 +135,16 @@ def descriptor_recv_streams(
 
 
 @pytest.fixture
-def descriptor_send_stream(descriptor_inproc_queue: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
+def descriptor_send_stream(descriptor_inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
     """Stream that feeds data to the :func:`inproc_queues`."""
 
     def mock_udp_stream(thread_pool, endpoints, config, **kwargs):
-        return spead2.send.asyncio.InprocStream(thread_pool, descriptor_inproc_queue, config)
+        return spead2.send.asyncio.InprocStream(thread_pool, descriptor_inproc_queues, config)
 
     config = descriptors.create_config()
     with mock.patch("spead2.send.asyncio.UdpStream", side_effect=mock_udp_stream):
-        return descriptors.create_descriptor_stream(
-            endpoints=[("invalid", -1) for _ in descriptor_inproc_queue],
+        return descriptors.make_descriptor_stream(
+            endpoints=[("invalid", -1) for _ in descriptor_inproc_queues],
             config=config,
             ttl=4,
             interface_address="",

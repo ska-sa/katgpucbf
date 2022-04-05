@@ -16,26 +16,26 @@
 
 """Digitiser simulator descriptor sender."""
 import asyncio
+from typing import Iterable, Tuple
 
-import numpy as np
 import spead2
 import spead2.send.asyncio
 
-from .. import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
+from .. import DIG_HEAP_SAMPLES, SPEAD_DESCRIPTOR_INTERVAL_S
 from ..spead import (
     DIGITISER_ID_ID,
     DIGITISER_STATUS_ID,
     FLAVOUR,
-    HEAP_SAMPLES,
     IMMEDIATE_FORMAT,
     MAX_PACKET_SIZE,
     RAW_DATA_ID,
-    SAMPLE_BITS,
     TIMESTAMP_ID,
 )
 
 
-def create_descriptor_stream(endpoints, config, ttl, interface_address) -> spead2.send.asyncio.UdpStream:
+def make_descriptor_stream(
+    endpoints: Iterable[Tuple[str, int]], config: spead2.send.StreamConfig, ttl: int, interface_address: str
+) -> spead2.send.asyncio.UdpStream:
     """Create a stream for sending descriptors alongside dsim data."""
     return spead2.send.asyncio.UdpStream(
         spead2.ThreadPool(),
@@ -72,12 +72,13 @@ def create_descriptors_heap() -> spead2.send.Heap:
         shape=(),
         format=IMMEDIATE_FORMAT,
     )
+
     item_group.add_item(
         RAW_DATA_ID,
-        "raw_data",
+        "adc_samples",
         "Digitiser Raw ADC Sample Data",
-        shape=(HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS,),
-        dtype=np.uint8,
+        shape=(DIG_HEAP_SAMPLES,),
+        format=[("i", 10)],
     )
     descriptor_heap = item_group.get_heap(descriptors="all", data="none")
     return descriptor_heap
@@ -100,7 +101,7 @@ class DescriptorSender:
     stream:
         Stream created for descriptors.
     descriptor_heap:
-        Descriptor heap to sending.
+        Descriptor heap for sending.
     """
 
     def __init__(

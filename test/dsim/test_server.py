@@ -23,13 +23,14 @@ import async_timeout
 import numpy as np
 import pytest
 
+from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
 from katgpucbf.dsim.descriptors import DescriptorSender
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
 from katgpucbf.dsim.signal import parse_signals
 
 from .. import get_sensor
-from .conftest import ADC_SAMPLE_RATE, HEAP_SAMPLES, SAMPLE_BITS, SIGNAL_HEAPS
+from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 
 pytestmark = [pytest.mark.asyncio]
 
@@ -47,7 +48,7 @@ async def katcp_server(
         descriptor_sender=descriptor_sender,
         spare=heap_sets[1],
         adc_sample_rate=ADC_SAMPLE_RATE,
-        sample_bits=SAMPLE_BITS,
+        sample_bits=DIG_SAMPLE_BITS,
         first_timestamp=0,
         signals_str=signals_str,
         signals=parse_signals(signals_str),
@@ -77,8 +78,8 @@ async def test_sensors(katcp_server: DeviceServer, katcp_client: aiokatcp.Client
     assert await get_sensor(katcp_client, "signals-orig") == "cw(0.2, 123); cw(0.3, 456);"
     assert await get_sensor(katcp_client, "signals") == "cw(0.2, 123); cw(0.3, 456);"
     assert await get_sensor(katcp_client, "adc-sample-rate") == ADC_SAMPLE_RATE
-    assert await get_sensor(katcp_client, "sample-bits") == SAMPLE_BITS
-    assert await get_sensor(katcp_client, "period") == HEAP_SAMPLES * SIGNAL_HEAPS
+    assert await get_sensor(katcp_client, "sample-bits") == DIG_SAMPLE_BITS
+    assert await get_sensor(katcp_client, "period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
 
 
 async def test_signals(

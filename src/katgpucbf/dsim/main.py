@@ -195,7 +195,7 @@ async def async_main() -> None:
 
     config = descriptors.create_config()
     interface_address = katsdpservices.get_interface_address(args.interface)
-    descriptor_stream = descriptors.create_descriptor_stream(
+    descriptor_stream = descriptors.make_descriptor_stream(
         endpoints=endpoints, config=config, ttl=4, interface_address=interface_address
     )
 
@@ -215,7 +215,6 @@ async def async_main() -> None:
         sample_bits=args.sample_bits,
         max_heaps=heap_sets[0].data["heaps"].size,
         ttl=args.ttl,
-        # interface_address=katsdpservices.get_interface_address(args.interface),
         interface_address=interface_address,
         ibv=args.ibv,
         affinity=args.affinity,
