@@ -129,7 +129,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         )
 
     async def on_stop(self) -> None:  # noqa: D102
-        """Go through list of senders passed to DeviceServer and issue halt()."""
         self.sender.halt()
         self.descriptor_sender.halt()
 
