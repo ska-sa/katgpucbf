@@ -39,3 +39,8 @@ DEFAULT_KATCP_HOST = ""  # All interfaces
 DEFAULT_KATCP_PORT = 7147
 DIG_HEAP_SAMPLES = 4096
 DIG_SAMPLE_BITS: Final = 10
+
+GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
+RECV_TASK_NAME: Final[str] = "Receiver Loop"
+SEND_TASK_NAME: Final[str] = "Sender Loop"
+DESCRIPTOR_TASK_NAME: Final[str] = "Descriptor Loop"
