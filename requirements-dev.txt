@@ -62,7 +62,7 @@ imagesize==1.2.0
     # via sphinx
 iniconfig==1.1.1
     # via pytest
-ipython==7.25.0
+ipython==7.31.1
     # via -r requirements-dev.in
 ipython-genutils==0.2.0
     # via traitlets
@@ -127,8 +127,10 @@ pybtex==0.24.0
     #   sphinxcontrib-bibtex
 pybtex-docutils==1.0.0
     # via sphinxcontrib-bibtex
-pycparser==2.20
-    # via -r requirements-dev.in
+pycparser==2.21
+    # via
+    #   -c requirements.txt
+    #   -r requirements-dev.in
 pygments==2.9.0
     # via
     #   ipython
@@ -145,7 +147,7 @@ pytest==6.2.4
     #   pytest-forked
     #   pytest-mock
     #   pytest-xdist
-pytest-asyncio==0.15.1
+pytest-asyncio==0.18.3
     # via -r requirements-dev.in
 pytest-cov==2.12.1
     # via -r requirements-dev.in

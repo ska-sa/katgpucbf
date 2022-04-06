@@ -34,6 +34,7 @@ Welcome to katgpucbf's documentation!
    :maxdepth: 1
    :caption: Tools
 
+   dsim
    fsim
 
 .. toctree::

@@ -22,7 +22,6 @@ from typing import Optional, Sequence
 
 import numba
 import numpy as np
-import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 from spead2 import ItemGroup
@@ -33,8 +32,6 @@ from katgpucbf.dsim.descriptors import DescriptorSender
 
 from .. import PromDiff
 from .conftest import N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
-
-pytestmark = [pytest.mark.asyncio]
 
 
 @numba.njit

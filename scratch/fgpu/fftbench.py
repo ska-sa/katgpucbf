@@ -60,7 +60,7 @@ def benchmark_real(args):
     fmt = "{0}: Time: {1} Speed: {2} GFlop/s BW: {3} GiB/s Scratch: {4} MiB"
 
     time = time_gpu(lambda: fft.fft(x_gpu, X_gpu, plan), args.passes)
-    print(fmt.format("R2C", time, flops / time / 1e9, bw / time / 1e9, cufftGetSize(plan.handle) / 1024 ** 2))
+    print(fmt.format("R2C", time, flops / time / 1e9, bw / time / 1e9, cufftGetSize(plan.handle) / 1024**2))
 
 
 parser = argparse.ArgumentParser()

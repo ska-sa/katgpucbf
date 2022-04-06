@@ -34,13 +34,13 @@ from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.monitor import NullMonitor
-from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import XBEngine
 
 from . import test_parameters
 
-pytestmark = [pytest.mark.device_filter.with_args(device_filter), pytest.mark.asyncio]
+pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
 get_baseline_index = njit(Correlation.get_baseline_index)
 
@@ -376,21 +376,22 @@ class TestEngine:
         """
         n_ants = num_ants
         n_channels_total = num_channels
+        n_samples_between_spectra = 2 * n_channels_total
 
-        # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
+        # Get a realistic number of engines, round up to the next power of 2.
         n_engines = 1
-        while n_engines < n_ants * 4:
+        while n_engines < n_ants:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
-        rx_reorder_tol = 2 ** 26  # Increase if needed; this is small to keep memory usage manageable
+        rx_reorder_tol = 2**26  # Increase if needed; this is small to keep memory usage manageable
         heap_accumulation_threshold = 4
         n_accumulations = 3
 
         # Header is 12 fields of 8 bytes each: So 96 bytes of header
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-        timestamp_step = n_channels_total * 2 * n_spectra_per_heap
+        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         # Create source_stream object - transforms "transmitted" heaps into a
         # byte array to simulate received data.
@@ -409,21 +410,21 @@ class TestEngine:
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         ig_send.add_item(
             FENG_ID_ID,
             "feng_id",
             "F-Engine heap is received from.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         ig_send.add_item(
             FREQUENCY_ID,
             "frequency",
             "Value of first channel in collections stored here.",
             shape=[],
-            format=[("u", FLAVOUR.heap_address_bits)],
+            format=IMMEDIATE_FORMAT,
         )
         ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
 
@@ -442,12 +443,13 @@ class TestEngine:
             n_ants=n_ants,
             n_channels_total=n_channels_total,
             n_channels_per_stream=n_channels_per_stream,
+            n_samples_between_spectra=n_samples_between_spectra,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=SAMPLE_BITWIDTH,
             heap_accumulation_threshold=heap_accumulation_threshold,
             channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
             src_affinity=0,
-            chunk_spectra=HEAPS_PER_FENGINE_PER_CHUNK,
+            heaps_per_fengine_per_chunk=HEAPS_PER_FENGINE_PER_CHUNK,
             rx_reorder_tol=rx_reorder_tol,
             monitor=monitor,
             context=context,
@@ -474,7 +476,7 @@ class TestEngine:
 
         # 7. Add transports to xbengine.
         xbengine.add_inproc_sender_transport(queue)
-        xbengine.send_stream.send_descriptor_heap()
+        await xbengine.send_stream.send_descriptor_heap()
 
         buffer = source_stream.getvalue()
         xbengine.add_buffer_receiver_transport(buffer)

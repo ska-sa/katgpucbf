@@ -49,12 +49,11 @@ import numpy as np
 import spead2
 from aiokatcp import DeviceServer
 
-from .. import COMPLEX, N_POLS, __version__
+from .. import __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import CorrelationTemplate
-from .precorrelation_reorder import PrecorrelationReorderTemplate
 from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
@@ -135,8 +134,7 @@ class XBEngine(DeviceServer):
 
       1. :func:`_receiver_loop` - Receive chunks from network and initiate
          transfer to GPU.
-      2. :func:`_gpu_proc_loop` - Reorder chunk in GPU memory and perform the
-         correlation operation on this reordered data.
+      2. :func:`_gpu_proc_loop` - Perform the correlation operation.
       3. :func:`_sender_loop` - Transfer correlated data to system RAM and then
          send it out on the network.
 
@@ -183,6 +181,7 @@ class XBEngine(DeviceServer):
         This value is intended to dictate a data transmission rate slightly
         higher/faster than the ADC rate.
         NOTE:
+
         - A factor of zero (0) tells the sender to transmit as fast as
           possible.
     n_ants
@@ -191,6 +190,8 @@ class XBEngine(DeviceServer):
         The total number of frequency channels out of the F-Engine.
     n_channels_per_stream
         The number of frequency channels contained per stream.
+    n_samples_between_spectra
+        The number of samples between frequency spectra received.
     n_spectra_per_heap
         The number of time samples received per frequency channel.
     sample_bits
@@ -204,12 +205,10 @@ class XBEngine(DeviceServer):
         spectrum reassembly by the downstream receiver.
     src_affinity
         Specific CPU core to assign the RX stream processing thread to.
-    chunk_spectra
-        A batch is a collection of heaps from different antennas with the same
-        timestamp. This parameter specifies the number of consecutive batches
-        to store in the same chunk. The higher this value is, the more GPU and
-        system RAM is allocated, the lower this value is, the more work the
-        python processing thread is required to do.
+    heaps_per_fengine_per_chunk
+        The number of consecutive batches to store in the same chunk. The higher
+        this value is, the more GPU and system RAM is allocated, the lower,
+        the more work the Python processing thread is required to do.
     rx_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
@@ -234,12 +233,13 @@ class XBEngine(DeviceServer):
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
+        n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
         src_affinity: int,
-        chunk_spectra: int,  # Used for GPU memory tuning
+        heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
         monitor: Monitor,
         context: katsdpsigproc.abc.AbstractContext,
@@ -261,6 +261,7 @@ class XBEngine(DeviceServer):
         self.n_channels_per_stream = n_channels_per_stream
         self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
+        self.n_samples_between_spectra = n_samples_between_spectra
 
         # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
         # these values too high results in too much GPU memory being consumed.
@@ -281,19 +282,15 @@ class XBEngine(DeviceServer):
         # configure the receiver, we pass it as a seperate argument to the
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
-        self.rx_heap_timestamp_step = self.n_channels_total * 2 * self.n_spectra_per_heap
-
-        # The number of bytes for a single batch of F-Engines. A chunk
-        # consists of multiple batches.
-        self.rx_bytes_per_heap_batch = (
-            self.n_ants * self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX
-        )
+        self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
 
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # Sets the number of batches of heaps to store per chunk
-        self.chunk_spectra = chunk_spectra
-        self.max_active_chunks: int = math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.chunk_spectra) + 1
+        self.heaps_per_fengine_per_chunk = heaps_per_fengine_per_chunk
+        self.max_active_chunks: int = (
+            math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
+        )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
         self.channel_offset_value = channel_offset_value
 
@@ -309,16 +306,21 @@ class XBEngine(DeviceServer):
         self.ringbuffer = ChunkRingbuffer(
             n_free_chunks, name="recv_ringbuffer", task_name="receiver_loop", monitor=monitor
         )
-        self.receiver_stream = recv.make_stream(
+
+        layout = recv.Layout(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
-            heaps_per_fengine_per_chunk=self.chunk_spectra,
+            heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
+        )
+
+        self.receiver_stream = recv.make_stream(
+            layout=layout,
+            data_ringbuffer=self.ringbuffer,
+            src_affinity=src_affinity,
             max_active_chunks=self.max_active_chunks,
-            ringbuffer=self.ringbuffer,
-            thread_affinity=src_affinity,
         )
 
         self.context = context
@@ -336,23 +338,9 @@ class XBEngine(DeviceServer):
             n_channels=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
         )
-        self.correlation = correlation_template.instantiate(self._proc_command_queue)
-
-        reorder_template = PrecorrelationReorderTemplate(
-            self.context,
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap=self.n_spectra_per_heap,
-            n_batches=self.chunk_spectra,
+        self.correlation = correlation_template.instantiate(
+            self._proc_command_queue, n_batches=heaps_per_fengine_per_chunk
         )
-        self.precorrelation_reorder = reorder_template.instantiate(self._proc_command_queue)
-
-        self.reordered_buffer_device = katsdpsigproc.accel.DeviceArray(
-            self.context,
-            self.precorrelation_reorder.slots["out_reordered"].shape,  # type: ignore
-            self.precorrelation_reorder.slots["out_reordered"].dtype,  # type: ignore
-        )
-        self.precorrelation_reorder.bind(out_reordered=self.reordered_buffer_device)
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
@@ -371,8 +359,8 @@ class XBEngine(DeviceServer):
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
-                self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
-                self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
+                self.correlation.slots["in_samples"].shape,  # type: ignore
+                self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
             rx_item = RxQueueItem(buffer_device)
             self._rx_free_item_queue.put_nowait(rx_item)
@@ -388,11 +376,11 @@ class XBEngine(DeviceServer):
 
         for _ in range(n_free_chunks):
             buf = katsdpsigproc.accel.HostArray(
-                self.precorrelation_reorder.slots["in_samples"].shape,  # type: ignore
-                self.precorrelation_reorder.slots["in_samples"].dtype,  # type: ignore
+                self.correlation.slots["in_samples"].shape,  # type: ignore
+                self.correlation.slots["in_samples"].dtype,  # type: ignore
                 context=self.context,
             )
-            present = np.zeros(n_ants * self.chunk_spectra, np.uint8)
+            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
 
@@ -462,7 +450,7 @@ class XBEngine(DeviceServer):
         """
         Add the buffer transport to the receiver.
 
-        The receiver will read packet data python ByteArray generated by a
+        The receiver will read packet data Python ByteArray generated by a
         spead2.send.BytesStream object. The sender does not support the inproc
         transport and as such the buffer transport must be used instead.
 
@@ -620,7 +608,7 @@ class XBEngine(DeviceServer):
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
         async for chunk in recv.recv_chunks(self.receiver_stream):
-            timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.chunk_spectra
+            timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.heaps_per_fengine_per_chunk
 
             # Get a free rx_item that will contain the GPU buffer to which the
             # received chunk will be transferred.
@@ -647,12 +635,9 @@ class XBEngine(DeviceServer):
 
         This function performs the following steps:
         1. Retrieve an rx_item from the _rx_item_queue
-        2. Performs the reorder operation on the buffer in the rx item. This
-           gets the buffer data into a format that the correlation kernel
-           requires.
-        3.1 Apply the correlation kernel to small subsets of the reordered data
-            until all the data has been processed.
-        3.2 If sufficient correlations have occured, transfer the correlated
+        2.1 Apply the correlation kernel to small subsets of the data
+            until all the data has been processed.1
+        2.2 If sufficient correlations have occured, transfer the correlated
             data to a tx_item, pass the tx_item to the _tx_item_queue and get a
             new item from the _tx_free_item_queue.
 
@@ -691,26 +676,13 @@ class XBEngine(DeviceServer):
             assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
             self.receiver_stream.add_free_chunk(rx_item.chunk)
 
-            self.precorrelation_reorder.bind(in_samples=rx_item.buffer_device)
-            self.precorrelation_reorder()
-
-            reorder_event = self._proc_command_queue.enqueue_marker()
-            rx_item.reset()
-            rx_item.add_event(reorder_event)
-            await self._rx_free_item_queue.put(rx_item)
-
+            self.correlation.bind(in_samples=rx_item.buffer_device)
             # The correlation kernel does not have the concept of a batch at
             # this stage, so the kernel needs to be run on each different batch
             # in the chunk.
-            for i in range(self.chunk_spectra):
-                buffer_slice = katsdpsigproc.accel.DeviceArray(
-                    self.context,
-                    self.correlation.slots["in_samples"].shape,  # type: ignore
-                    self.correlation.slots["in_samples"].dtype,  # type: ignore
-                    raw=self.reordered_buffer_device.buffer.ptr + self.rx_bytes_per_heap_batch * i,
-                )
-                self.correlation.bind(in_samples=buffer_slice)
-                self.correlation()
+            self.correlation.first_batch = 0
+            for i in range(self.heaps_per_fengine_per_chunk):
+                self.correlation.last_batch = i + 1
 
                 # NOTE: The timestamp representing the end of an
                 # accumulation does not necessarily line up with the chunk
@@ -720,7 +692,8 @@ class XBEngine(DeviceServer):
                 # X-Engine auto-resync logic.
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
-
+                    self.correlation()
+                    self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
 
@@ -729,8 +702,16 @@ class XBEngine(DeviceServer):
                     tx_item.timestamp = next_heap_timestamp
                     self.correlation.bind(out_visibilities=tx_item.buffer_device)
                     self.correlation.zero_visibilities()
+                    self.correlation.first_batch = i + 1
 
                 current_timestamp += self.rx_heap_timestamp_step
+
+            if self.correlation.first_batch < self.correlation.last_batch:
+                self.correlation()
+            proc_event = self._proc_command_queue.enqueue_marker()
+            rx_item.reset()
+            rx_item.add_event(proc_event)
+            await self._rx_free_item_queue.put(rx_item)
 
         # When the stream is closed, if the sender loop is waiting for a tx item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
@@ -776,7 +757,7 @@ class XBEngine(DeviceServer):
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            logger.info(
+            logger.debug(
                 "Current output heap timestamp: %#x, difference between timestamps: %#x, "
                 "wall time between dumps %.2f s",
                 item.timestamp,
@@ -825,14 +806,27 @@ class XBEngine(DeviceServer):
 
     async def run_descriptors_loop(self, interval_s: float) -> None:
         """
-        Send the Baseline Correlation Products Hardware heaps out to the network every interval_s seconds.
+        Send the Baseline Correlation Products descriptors every `interval_s` seconds.
 
         This function is not part of the main run function as we do not want it
         running during the unit tests.
         """
         while True:
-            self.send_stream.send_descriptor_heap()
-            await asyncio.sleep(interval_s)
+            # Send the descriptor heap concurrently with the sleep, so that if
+            # it takes a while (because there is data to send) it doesn't delay
+            # the next iteration.
+            await asyncio.gather(
+                asyncio.sleep(interval_s),
+                self.send_stream.send_descriptor_heap(),
+            )
+
+    async def request_capture_start(self, ctx) -> None:
+        """Start transmission of this baseline-correlation-products stream."""
+        self.send_stream.tx_enabled = True
+
+    async def request_capture_stop(self, ctx) -> None:
+        """Stop transmission of this baseline-correlation-products stream."""
+        self.send_stream.tx_enabled = False
 
     async def start(self) -> None:
         """

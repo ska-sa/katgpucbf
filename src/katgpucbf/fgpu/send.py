@@ -21,19 +21,23 @@ import functools
 from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
+import spead2.send
 import spead2.send.asyncio
 from katsdpsigproc.accel import DeviceArray
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
-from .. import N_POLS
-from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, TIMESTAMP_ID, make_immediate
+from .. import COMPLEX, N_POLS
+from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
 from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
 PREAMBLE_SIZE = 72
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
+skipped_heaps_counter = Counter(
+    "output_skipped_heaps", "heaps not sent because input data was incomplete", namespace=METRIC_NAMESPACE
+)
 
 
 class Frame:
@@ -92,6 +96,8 @@ class Chunk:
             raise ValueError("substreams must divide into channels")
         self.data = data
         self.device = device
+        #: Whether each frame has valid data
+        self.present = np.zeros(n_frames, dtype=bool)
         #: Timestamp of the first heap
         self._timestamp = 0
         timestamp_step = spectra_per_heap * channels * 2
@@ -131,10 +137,14 @@ class Chunk:
         Frames from 0 to `frames` - 1 are sent asynchronously.
         """
         futures = []
-        for frame in self._frames[:frames]:
-            futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
-            futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
-        await asyncio.gather(*futures)
+        for present, frame in zip(self.present[:frames], self._frames[:frames]):
+            if present:
+                futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
+                futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
+            else:
+                skipped_heaps_counter.inc(len(frame.heaps))
+        if futures:
+            await asyncio.gather(*futures)
 
 
 def make_stream(
@@ -168,7 +178,8 @@ def make_stream(
     config = spead2.send.StreamConfig(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
-        max_heaps=len(chunks) * spectra // spectra_per_heap * len(endpoints),
+        # Adding len(endpoints) to accommodate descriptors sent for each substream
+        max_heaps=(len(chunks) * spectra // spectra_per_heap * len(endpoints)) + len(endpoints),
     )
     stream: "spead2.send.asyncio.AsyncStream"
     if ibv:
@@ -186,3 +197,79 @@ def make_stream(
         )
     stream.set_cnt_sequence(feng_id, num_ants)
     return stream
+
+
+def _make_descriptor_heap(
+    *,
+    data_type: np.dtype,
+    channels_per_substream: int,
+    spectra_per_heap: int,
+) -> "spead2.send.Heap":
+    """Create a descriptor heap for output F-Engine data."""
+    heap_data_shape = (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
+
+    ig = spead2.send.ItemGroup(flavour=FLAVOUR)
+    ig.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    ig.add_item(
+        FENG_ID_ID,
+        "feng_id",
+        "Uniquely identifies the F-Engine source for the data.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    ig.add_item(
+        FREQUENCY_ID,
+        "frequency",
+        "Identifies the first channel in the band of frequencies in the SPEAD heap.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    ig.add_item(
+        FENG_RAW_ID,
+        "feng_raw",
+        "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
+        shape=heap_data_shape,
+        dtype=data_type,
+    )
+
+    return ig.get_heap(descriptors="all", data="none")
+
+
+def make_descriptor_heaps(
+    *,
+    data_type: np.dtype,
+    channels: int,
+    substreams: int,
+    spectra_per_heap: int,
+) -> List[spead2.send.HeapReference]:
+    """Create a list of heap references for the F-Engine descriptors.
+
+    This is done for efficiency in sending the descriptors to their various
+    destinations. It produces one descriptor heap for each substream.
+
+    Parameters
+    ----------
+    data_type
+        Type of the raw data transmitted by the F-Engine.
+    channels
+        Total number of channels output by this F-Engine.
+    substreams
+        Number of output streams produced by this F-Engine.
+    spectra_per_heap
+        Number of spectra in each output heap.
+    """
+    descriptor_heap = _make_descriptor_heap(
+        data_type=data_type,
+        channels_per_substream=channels // substreams,
+        spectra_per_heap=spectra_per_heap,
+    )
+    return [
+        spead2.send.HeapReference(descriptor_heap, substream_index=substream_index)
+        for substream_index in range(substreams)
+    ]

@@ -16,16 +16,17 @@
 
 """Fixtures for use in fgpu unit tests."""
 
+import asyncio
 from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 import aiokatcp
 import async_timeout
-import numpy as np
 import pytest
 import spead2.recv
 import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
 
+import katgpucbf.fgpu.engine
 import katgpucbf.fgpu.recv
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
@@ -57,7 +58,7 @@ def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
         queue = next(queue_iter)
         stream.add_inproc_reader(queue)
 
-    mocker.patch("katgpucbf.fgpu.recv.add_reader", autospec=True, side_effect=add_reader)
+    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
     return queues
 
 
@@ -89,15 +90,16 @@ def recv_max_chunks_one(monkeypatch) -> None:
     monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
 
 
-def check_gdrcopy(context: AbstractContext) -> None:
-    """Check whether gdrcopy works on `context`, and skip the test if not."""
-    gdrcopy = pytest.importorskip("gdrcopy")
-    pytest.importorskip("gdrcopy.pycuda")
+def check_vkgdr(context: AbstractContext) -> None:
+    """Check whether vkgdr works on `context`, and skip the test if not."""
+    vkgdr = pytest.importorskip("vkgdr")
+    pytest.importorskip("vkgdr.pycuda")
     try:
-        gdr = gdrcopy.Gdr()
-        gdrcopy.pycuda.allocate(gdr, (32 * 1024 * 1024,), np.uint8)
+        with context:
+            handle = vkgdr.Vkgdr.open_current_context()
+            vkgdr.pycuda.Memory(handle, 16 * 1024 * 1024)
     except Exception as exc:
-        pytest.skip(f"gdrcopy not functional on this GPU: {exc}")
+        pytest.skip(f"vkgdr not functional on this GPU: {exc}")
 
 
 @pytest.fixture
@@ -112,9 +114,15 @@ async def engine_server(
     tested.
     """
     arglist = list(request.cls.engine_arglist)
-    if request.node.get_closest_marker("use_gdrcopy"):
-        check_gdrcopy(context)
-        arglist.append("--use-gdrcopy")
+    if request.node.get_closest_marker("use_vkgdr"):
+        check_vkgdr(context)
+        arglist.append("--use-vkgdr")
+    # iter_markers works closest-to-furthest, but we want the opposite so
+    # that more specific markers append options to the end, overriding those
+    # added by less-specific markers.
+    for marker in reversed(list(request.node.iter_markers("cmdline_args"))):
+        arglist.extend(marker.args)
+
     args = parse_args(arglist)
     server, _monitor = make_engine(context, args)
 
@@ -126,7 +134,7 @@ async def engine_server(
 @pytest.fixture
 async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
     """Create a KATCP client for communicating with the dummy server."""
-    assert engine_server.server is not None
+    assert isinstance(engine_server.server, asyncio.base_events.Server)
     assert engine_server.server.sockets is not None
     host, port = engine_server.server.sockets[0].getsockname()[:2]
     async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect

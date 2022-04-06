@@ -7,23 +7,21 @@ Signal Flow
 The general flow of data through the system is shown in the the image below:
 
 .. figure:: images/concept.png
-  :width: 1087px
+  :width: 887px
 
   XBGPU Concept
 
-The X-Engine processing pipeline can be broken into four different stages:
+The X-Engine processing pipeline can be broken into three different stages:
 
   1. Receive data from the network and assemble it into a chunk. This chunk is
      then transferred to the GPU. This receiver has been implemented using
      SPEAD2 in C++ and bound into Python. See the "SPEAD2 Network Side Software"
      section below for more information.
-  2. Reorder the chunk so that it is in a format that is ready for correlation.
-     This reorder is implemented in the
-     :mod:`~katgpucbf.xbgpu.precorrelation_reorder` module.
-  3. The data is then correlated using the ASTRON Tensor Core Kernel. This is
-     done by the :class:`katgpucbf.xbgpu.tensorcore_xengine_core` class. This
-     correlated data is then transferred back to system RAM.
-  4. Send the correlated data (known as baseline correlation products) back into
+  2. The data is then correlated using a modified version of the ASTRON Tensor
+     Core Kernel. This is done by the
+     :class:`~katgpucbf.xbgpu.correlation.Correlation` class. This correlated
+     data is then transferred back to system RAM.
+  3. Send the correlated data (known as baseline correlation products) back into
      the network. This is implemented by :mod:`.xsend`.
 
 The image below shows where the data is located at the various stages mentioned above:
@@ -40,22 +38,20 @@ The numbers in the above image correspond to the following actions:
   1. Assemble heaps into a chunk in system RAM.
   2. Transfer chunk to GPU memory.
   3. and
-  4. Launch a GPU kernel to reorder a chunk and transfer reordered data back to GPU memory.
-  5. and
-  6. Correlate reordered data and transfer baselines to GPU memory.
-  7. Transfer baselines from GPU memory to host memory.
-  8. Transfer baselines from host memory to the NIC and onto the network.
+  4. Correlate data and transfer baselines to GPU memory.
+  5. Transfer baselines from GPU memory to host memory.
+  6. Transfer baselines from host memory to the NIC and onto the network.
 
 Synchronization and Coordination
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-The :mod:`~katgpucbf.xbgpu.xbengine` module does the work of assembling all
+The :mod:`~katgpucbf.xbgpu.engine` module does the work of assembling all
 the different modules into a pipeline. This module has three different async
 processing pipelines know as the ``_receiver_loop``, ``_gpu_proc_loop`` and the
 ``_sender_loop``. Data is passed between these three processing loops using
 :class:`asyncio.Queue`\ s. Buffers in queues are reused to prevent unnecessary memory
-allocations. Additionally, buffers are passed between the python program to the
+allocations. Additionally, buffers are passed between the Python program to the
 network threads and back in order to reuse these buffers too.
 
 The image below demonstrates how data moves through the pipeline and how it is
@@ -69,7 +65,7 @@ the different asyncio functions. However the GPU requires a separate type of
 coordination. The GPU has three different command queues that manage the
 coordination.
 
-A command queue is an OpenCL term - within katsdpsigproc, this is still called a
+A command queue is an OpenCL term — within katsdpsigproc, this is still called a
 command queue even though it can be implemented as a CUDA stream. One command
 queue is for processing and the other two are for transferring data from host
 memory to the GPU and back. Events are put onto the command queue and the async
@@ -88,9 +84,8 @@ command queues:
 The numbers in the image above correspond to the following actions:
 
   1. Copy chunk to GPU memory from host
-  2. Reorder Chunk
-  3. Correlate chunk
-  4. Transfer heap to host memory from GPU
+  2. Correlate chunk
+  3. Transfer heap to host memory from GPU
 
 Accumulations, Dumps and Auto-resync
 ------------------------------------
@@ -98,23 +93,32 @@ Accumulations, Dumps and Auto-resync
 The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
 
-A heap from a single F-Engine consists of a set number of samples specified by
-the :option:`!--samples-per-channel` flag. Each of these time samples is part of a
-different spectrum. Meaning that the timestamp difference per sample is equal to
-the :option:`!--channels-total` multiplied by 2 (multiple for two to account for the fact
-that we throw half the spectrum away due to the symmetric properties of the
-Fourier Transform). The timestamp difference between consecutive two heaps from
-the same F-Engine is equal to: `--samples-per-channel * --channels-total * 2`.
+A heap from a single F-Engine consists of a set number of spectra indicated by
+the :option:`!--spectra-per-heap` flag, where the spectra are time samples. Each of
+these time samples is part of a different spectrum, meaning that the timestamp
+difference per sample is equal to the value of :option:`!--samples-between-spectra`.
+The timestamp difference between two consecutive heaps from the same F-Engine is equal to:
 
-A batch of heaps is a collection of heaps from different F-Engines with the same
-timestamp. Correlation occurs on a batch of heaps at a time. The correlated data
-is then accumulated. An accumulation period is called an :dfn:`accumulation` and
-the data output from that accumulation is normally called a :dfn:`dump` - the terms
-are used interchangeably. The number of batches to accumulate in an accumulation
+  `heap_timestamp_step = --spectra-per-heap * --samples-between-spectra`.
+
+A :dfn:`batch` of heaps is a collection of heaps from different F-Engines with the same
+timestamp. A :dfn:`chunk` consists of multiple consecutive batches (the number is given
+by the option :option:`!--heaps-per-fengine-per-chunk`). Correlation generally occurs on
+a chunk at a time, accumulating results, with the batches of the chunk being
+processed in parallel.  To avoid race conditions in accumulation, there are
+multiple accumulators, and batch *i* of a chunk uses accumulator *i*.
+An accumulation period is called an :dfn:`accumulation` and the data output
+from that accumulation is normally called a :dfn:`dump` — the terms are used
+interchangeably. Once all the data for a dump has been correlated, the separate
+accumulators are added together ("reduced") to produce a final result.  This
+reduction process also converts from 64-bit to 32-bit integers, saturating if
+necessary.
+
+The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
-between succesive dumps is equal to:
+between succesive dumps is therefore equal to:
 
-  `timestamp_difference = --samples-per-channel * --channels-total * 2 * --heap-accumulation-threshold`
+  `timestamp_difference = --spectra-per-heap * --samples-between-spectra * --heap-accumulation-threshold`
 
 The output heap timestamp is aligned to an integer multiple of
 `timestamp_difference` (equivalent to the current SKARAB "auto-resync" logic).
@@ -125,4 +129,8 @@ The total accumulation time is equal to:
 The output heap contains multiple packets and these packets are distributed over
 the entire `accumulation_time_s` interval to reduce network burstiness. The
 default configuration in :mod:`katgpucbf.xbgpu.main` is for 0.5 second dumps
-when using the MeerKAT 1712 MSPs L-band digitisers.
+when using the MeerKAT 1712 MSps L-band digitisers.
+
+The dump boundaries are aligned to whole batches, but may fall in the middle of
+a chunk. In this case, each invocation of the correlation kernel will only
+process a subset of the batches in the chunk.

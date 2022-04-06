@@ -4,10 +4,14 @@
 #
 #    pip-compile requirements.in
 #
+aioconsole==0.4.1
+    # via aiomonitor
 aiohttp==3.8.0
     # via -r requirements.in
 aiokatcp==1.0.0
     # via -r requirements.in
+aiomonitor==0.4.5
+    # via katsdpservices
 aiosignal==1.2.0
     # via aiohttp
 appdirs==1.4.4
@@ -21,6 +25,8 @@ async-timeout==4.0.0
     #   aiokatcp
 attrs==21.2.0
     # via aiohttp
+cffi==1.15.0
+    # via vkgdr
 charset-normalizer==2.0.7
     # via aiohttp
 cloudpickle==2.0.0
@@ -41,7 +47,7 @@ hiredis==2.0.0
     # via katsdptelstate
 idna==3.3
     # via yarl
-katsdpservices==1.1
+katsdpservices[aiomonitor]==1.2
     # via -r requirements.in
 katsdpsigproc[cuda]==1.4.2
     # via -r requirements.in
@@ -92,6 +98,8 @@ prometheus-async==19.2.0
     # via -r requirements.in
 prometheus-client==0.12.0
     # via prometheus-async
+pycparser==2.21
+    # via cffi
 pycuda==2021.1
     # via
     #   -r requirements.in
@@ -118,8 +126,10 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==3.7.0
+spead2==3.9.0
     # via -r requirements.in
+terminaltables==3.1.10
+    # via aiomonitor
 toolz==0.11.2
     # via
     #   dask
@@ -128,6 +138,8 @@ typing-extensions==3.10.0.0
     # via
     #   async-timeout
     #   katsdpsigproc
+vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr
+    # via -r requirements.in
 wrapt==1.13.3
     # via prometheus-async
 xarray==0.20.1

@@ -63,8 +63,6 @@ from katgpucbf.xbgpu.xsend import XSend
 
 from . import test_parameters
 
-pytestmark = [pytest.mark.asyncio]
-
 TOTAL_HEAPS: Final[int] = 20
 DUMP_INTERVAL_S: Final[int] = 0
 SEND_RATE_FACTOR: Final[float] = 1.1
@@ -81,7 +79,7 @@ class TestSend:
 
         # 4.1 Send the descriptor as the recv_stream object needs it to
         # interpret the received heaps correctly.
-        send_stream.send_descriptor_heap()
+        await send_stream.send_descriptor_heap()
 
         # 4.2 Run until a set number of heaps have been transferred.
         while num_sent < TOTAL_HEAPS:

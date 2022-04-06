@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 import argparse
-import ast
 import asyncio
 import logging
+import time
 from typing import Union
 
 import aiokatcp
-import matplotlib
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
@@ -21,6 +20,12 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 CPLX = 2
+
+
+async def print_all_sensors(client: aiokatcp.Client):
+    _reply, informs = await client.request("sensor-value")
+    for inform in informs:
+        print(inform)
 
 
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
@@ -47,6 +52,11 @@ async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: s
         return endpoint_parser(None)(await get_sensor_val(client, f"{product_name}.katcp-address"))
 
 
+async def get_dsim_endpoint(pc_client: Endpoint) -> Endpoint:
+    """Get the katcp address for a named product controller from the master."""
+    return endpoint_parser(None)(await get_sensor_val(pc_client, "sim.m800.1712000000.0.port"))
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -55,7 +65,7 @@ def main() -> None:
         "--interface",
         type=get_interface_address,
         required=True,
-        help="Name of network interface.",
+        help="Name of network to use for ingest.",
     )
     parser.add_argument(
         "--ibv",
@@ -68,51 +78,43 @@ def main() -> None:
         default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
         help="Master controller to query for details about the product. [%(default)s]",
     )
-    parser.add_argument(
-        "--interactive",
-        action="store_true",
-        help="Show dumps as they are received",
-    )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
-    if args.interactive:
-        matplotlib.use("WebAgg")
-        # plt.show will run a Tornado event loop, which in turn runs an asyncio
-        # event loop. So we can't directly run an event loop ourselves, but
-        # must instead schedule async_main onto the one run by matplotlib.
-        asyncio.get_event_loop().create_task(async_main(args))
-        plt.show()
-    else:
-        asyncio.run(async_main(args))
+    asyncio.run(async_main(args))
 
 
 async def async_main(args: argparse.Namespace) -> None:
     logger = logging.getLogger(__name__)
     host, port = await get_product_controller_endpoint(args.mc_address, args.product_name)
-    client = await aiokatcp.Client.connect(host, port)
+    logger.info("Connecting to product controller on %s:%d", host, port)
+    pc_client = await aiokatcp.Client.connect(host, port)
+    logger.info("Successfully connected to product controller.")
 
-    async with client:
-        # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
-        # But we can cast Endpoints to tuples, which it does know.
-        multicast_endpoints = [
-            tuple(endpoint)
-            for endpoint in endpoint_list_parser(7148)(
-                await get_sensor_val(client, "baseline_correlation_products-destination")
-            )
-        ]
+    dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
+    logger.info("Connecting to dsim 0 on %s:%d", dsim_host, dsim_port)
+    dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
+    # Set the dsim to something noisy, so that the test actually shows something.
+    await dsim_client.request("signals", "common=wgn(0.1);common;common;")
+    logger.info("Successfully set the dsim.")
 
-        # We need these parameters for various useful reasons.
-        n_bls = await get_sensor_val(client, "baseline_correlation_products-n-bls")
-        n_chans = await get_sensor_val(client, "baseline_correlation_products-n-chans")
-        n_chans_per_substream = await get_sensor_val(client, "baseline_correlation_products-n-chans-per-substream")
-        n_bits_per_sample = await get_sensor_val(client, "baseline_correlation_products-xeng-out-bits-per-sample")
-        n_spectra_per_acc = await get_sensor_val(client, "baseline_correlation_products-n-accs")
-        adc_sample_rate = await get_sensor_val(client, "antenna_channelised_voltage-adc-sample-rate")
-        int_time = await get_sensor_val(client, "baseline_correlation_products-int-time")
+    # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
+    # But we can cast Endpoints to tuples, which it does know.
+    multicast_endpoints = [
+        tuple(endpoint)
+        for endpoint in endpoint_list_parser(7148)(
+            await get_sensor_val(pc_client, "baseline_correlation_products-destination")
+        )
+    ]
 
-        # The only reason for getting this info is to annotate the plot we make at the end.
-        # I quite like this trick. It gives us a list of tuples.
-        bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline_correlation_products-bls-ordering"))
+    # We need these parameters for various useful reasons.
+    n_bls = await get_sensor_val(pc_client, "baseline_correlation_products-n-bls")
+    n_chans = await get_sensor_val(pc_client, "baseline_correlation_products-n-chans")
+    n_chans_per_substream = await get_sensor_val(pc_client, "baseline_correlation_products-n-chans-per-substream")
+    n_bits_per_sample = await get_sensor_val(pc_client, "baseline_correlation_products-xeng-out-bits-per-sample")
+    n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
+    int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
+    sync_time = await get_sensor_val(pc_client, "antenna_channelised_voltage-sync-time")
+    timestamp_scale_factor = await get_sensor_val(pc_client, "antenna_channelised_voltage-scale-factor-timestamp")
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
@@ -125,7 +127,7 @@ async def async_main(args: argparse.Namespace) -> None:
     # These are the spead items that we will need for placing the individual
     # heaps within the chunk.
     items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
-    timestamp_step = 2 * n_chans * n_spectra_per_acc
+    timestamp_step = 2 * n_chans * n_spectra_per_acc  # True only for wideband.
 
     # Heap placement function. Gets compiled so that spead2's C code can call it.
     # A chunk consists of all baselines and channels for a single point in time.
@@ -168,51 +170,55 @@ async def async_main(args: argparse.Namespace) -> None:
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
+        chunk.chunk_id
 
-    config = spead2.recv.UdpIbvConfig(
-        endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
-    )
     if args.ibv:
+        config = spead2.recv.UdpIbvConfig(
+            endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
+        )
         stream.add_udp_ibv_reader(config)
     else:
         for ep in multicast_endpoints:
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
-    # Preparation for the plot. Doing it outside the for-loop, no need to redo it lots.
-    frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]  # -1 because it goes all the way to n/2
+    # Delay tracking test.
 
-    fig, axs = plt.subplots(
-        n_bls // 4, 4, sharex=True, figsize=(12, 8) if args.interactive else (24, 16), constrained_layout=True
-    )
-    axs = axs.ravel()  # Now that the plot is four columns wide, this comes as a 2-d array. Which is a pain.
-    lines = []
-    for i in range(len(axs)):
-        lines.append(axs[i].plot(frequency_axis, [0.0] * len(frequency_axis))[0])
-        axs[i].set_ylabel(bls_ordering[i])
-        axs[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
-        axs[i].set_xlabel("Frequency [MHz]")
-    if args.interactive:
-        fig.canvas.mpl_connect("close_event", lambda event: stream.stop())
-        plt.ion()
-        plt.show()
+    # I'll set the delays on the first input and compare it with the second
+    # i.e. the baseline (m800h, m800v). The mechanism is the same for all the
+    # others so I don't expect there'll be much advantage to being more thorough
+    # than this.
+    delay_coeffs = ["1e-10,2e-11:1,1e-1"] + ["0,0:0,0"] * 7
+    load_time = time.time() + 1
+    await pc_client.request("delays", "antenna_channelised_voltage", str(load_time), *delay_coeffs)
+
+    expected_timestamp = (load_time + 1 - sync_time) * timestamp_scale_factor  # + 1 to allow a dump or two to pass.
+
+    i = 0
+    _fig, ax = plt.subplots()
+    plt.ylabel("Phase [rad]")
+    plt.xlabel("Channel")
+    plt.title("Delay + phase tracking")
+
     async for chunk in stream.data_ringbuffer:
-        received_heaps = int(np.sum(chunk.present))
-        if received_heaps == HEAPS_PER_CHUNK:
-            # We have a full chunk.
-            for i in range(n_bls):
-                # We're just plotting the magnitude for now. Phase is easy enough,
-                # and is left as an exercise to the reader.
-                lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
-                axs[i].relim()
-                axs[i].autoscale_view()
-            plt.title(f"Chunk {chunk.chunk_id}")
-            if not args.interactive:
-                plt.savefig(f"{chunk.chunk_id}.png")
-                logger.info("Wrote chunk %d", chunk.chunk_id)
+        if not np.all(chunk.present):
+            logger.debug("Incomplete chunk %d", chunk.chunk_id)
+            stream.add_free_chunk(chunk)
+            continue
+        recvd_timestamp = chunk.chunk_id * timestamp_step
+        if recvd_timestamp <= expected_timestamp:
+            logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
+            stream.add_free_chunk(chunk)
         else:
-            logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
-
-        stream.add_free_chunk(chunk)
+            my_data = chunk.data[:, 1, :]
+            my_data = np.float32(my_data).view(dtype=np.complex64).flatten()
+            ax.plot(np.angle(my_data), label=f"spectrum {i}")
+            stream.add_free_chunk(chunk)
+            if i == 3:
+                break
+            else:
+                i += 1
+    plt.legend()
+    plt.savefig("delay_tracking.png")
 
 
 if __name__ == "__main__":

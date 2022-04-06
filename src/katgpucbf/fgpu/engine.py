@@ -28,7 +28,18 @@ import numpy as np
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
-from .. import BYTE_BITS, COMPLEX, N_POLS, __version__
+from .. import (
+    BYTE_BITS,
+    COMPLEX,
+    DESCRIPTOR_TASK_NAME,
+    GPU_PROC_TASK_NAME,
+    N_POLS,
+    RECV_TASK_NAME,
+    SEND_TASK_NAME,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    __version__,
+)
+from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import SAMPLE_BITS, recv, send
@@ -48,6 +59,20 @@ def format_complex(value: numbers.Complex) -> str:
     as a Python complex may not give exactly the same value.
     """
     return f"{value.real}{value.imag:+}j"
+
+
+def done_callback(task: asyncio.Task) -> None:
+    """
+    Handle cancellation of Processing Loops as a callback.
+
+    Log exceptions as soon as they occur.
+    """
+    try:
+        task.result()  # Evaluate just for exceptions
+    except asyncio.CancelledError:
+        logger.debug("%s was cancelled", task.get_name())
+    except Exception:
+        logger.exception("Processing %s failed with exception", task.get_name())
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -125,6 +150,8 @@ class Engine(aiokatcp.DeviceServer):
     num_ants
         The number of antennas in the array. Used for numbering heaps so as
         not to collide with other antennas transmitting to the same X-engine.
+    chunk_samples
+        Number of samples in each input chunk, excluding padding samples.
     spectra
         Number of spectra that will be produced from a chunk of incoming
         digitiser data.
@@ -133,7 +160,7 @@ class Engine(aiokatcp.DeviceServer):
     channels
         Number of output channels to produce.
     taps
-        Number of taps in each branch of the PFB-FIR
+        Number of taps in each branch of the PFB-FIR.
     max_delay_diff
         Maximum supported difference between delays across polarisations (in samples).
     gain
@@ -142,8 +169,8 @@ class Engine(aiokatcp.DeviceServer):
         UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
-    use_gdrcopy
-        Assemble chunks directly in GPU memory (requires supported GPU).
+    use_vkgdr
+        Assemble chunks directly in GPU memory (requires Vulkan).
     use_peerdirect
         Send chunks directly from GPU memory (requires supported GPU).
     monitor
@@ -181,6 +208,7 @@ class Engine(aiokatcp.DeviceServer):
         send_rate_factor: float,
         feng_id: int,
         num_ants: int,
+        chunk_samples: int,
         spectra: int,
         spectra_per_heap: int,
         channels: int,
@@ -189,17 +217,23 @@ class Engine(aiokatcp.DeviceServer):
         gain: complex,
         sync_epoch: float,
         mask_timestamp: bool,
-        use_gdrcopy: bool,
+        use_vkgdr: bool,
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
+        self.feng_id = feng_id
+        self.n_ants = num_ants
 
-        if use_gdrcopy:
-            import gdrcopy.pycuda
+        if use_vkgdr:
+            import vkgdr.pycuda
 
-            gdr = gdrcopy.Gdr()
+            with context:
+                # We could quite easily make do with non-coherent mappings and
+                # explicit flushing, but since NVIDIA currently only provides
+                # host-coherent memory, this is a simpler option.
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
 
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
@@ -214,7 +248,6 @@ class Engine(aiokatcp.DeviceServer):
             )
             self.delay_models.append(delay_model)
 
-        chunk_samples = spectra * channels * 2
         extra_samples = max_delay_diff + taps * channels * 2
         if extra_samples > chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
@@ -222,11 +255,12 @@ class Engine(aiokatcp.DeviceServer):
             context,
             taps,
             chunk_samples + extra_samples,
+            src_packet_samples,
             spectra,
             spectra_per_heap,
             channels,
             self.delay_models,
-            use_gdrcopy,
+            use_vkgdr,
             monitor,
         )
         chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
@@ -241,30 +275,20 @@ class Engine(aiokatcp.DeviceServer):
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
-        self._src_streams = [
-            recv.make_stream(
-                pol,
-                self._src_layout,
-                ring,
-                src_affinity[pol],
-            )
-            for pol in range(N_POLS)
-        ]
+        self._src_streams = recv.make_streams(self._src_layout, ring, src_affinity)
         src_chunks_per_stream = 4
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
-                if use_gdrcopy:
+                if use_vkgdr:
                     device_bytes = self._processor.compute.slots[f"in{pol}"].required_bytes()
                     with context:
-                        device_raw, buf_raw, _ = gdrcopy.pycuda.allocate_raw(gdr, device_bytes)
-                    buf = np.frombuffer(buf_raw, np.uint8)
+                        mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
+                    buf = np.array(mem, copy=False).view(np.uint8)
                     # The device buffer contains extra space for copying the head
                     # of the following chunk, but we don't need that in the host
                     # mapping.
                     buf = buf[:chunk_bytes]
-                    # Hack to work around limitations in katsdpsigproc and pycuda
-                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=int(device_raw))
-                    device_array.buffer.base = device_raw
+                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
                     chunk = recv.Chunk(data=buf, device=device_array)
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
@@ -292,6 +316,7 @@ class Engine(aiokatcp.DeviceServer):
                     feng_id=feng_id,
                 )
             )
+
         extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
         self._send_stream = send.make_stream(
             endpoints=dst,
@@ -313,6 +338,13 @@ class Engine(aiokatcp.DeviceServer):
         )
         for schunk in send_chunks:
             self._processor.send_free_queue.put_nowait(schunk)
+
+        self._descriptor_heap_reflist = send.make_descriptor_heaps(
+            data_type=send_dtype,
+            channels=channels,
+            substreams=len(dst),
+            spectra_per_heap=spectra_per_heap,
+        )
 
     @staticmethod
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
@@ -435,10 +467,16 @@ class Engine(aiokatcp.DeviceServer):
         # then we'd need to compensate for that here.
         start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
 
-        for coeffs, delay_model in zip(delays, self.delay_models):
+        # Collect them in a temporary until they're all validated
+        new_linear_models = []
+        for coeffs in delays:
             delay_str, phase_str = coeffs.split(":")
             delay, delay_rate = comma_string_to_float(delay_str)
             phase, phase_rate = comma_string_to_float(phase_str)
+            if delay < 0:
+                raise aiokatcp.FailReply("delay cannot be negative")
+            if delay + 5 * delay_rate < 0:
+                logger.warning("delay will become negative within 5s")
 
             delay_samples = delay * self.adc_sample_rate
             # For compatibility with MeerKAT, the phase given is the net change in
@@ -449,25 +487,51 @@ class Engine(aiokatcp.DeviceServer):
             delay_phase_correction = 0.5 * np.pi * delay_samples
             phase += delay_phase_correction
             phase_rate_correction = 0.5 * np.pi * delay_rate
-            new_linear_model = LinearDelayModel(
-                start_sample_count,
-                delay_samples,
-                delay_rate,
-                phase,
-                phase_rate / self.adc_sample_rate + phase_rate_correction,
+            new_linear_models.append(
+                LinearDelayModel(
+                    start_sample_count,
+                    delay_samples,
+                    delay_rate,
+                    phase,
+                    phase_rate / self.adc_sample_rate + phase_rate_correction,
+                )
             )
 
+        for delay_model, new_linear_model in zip(self.delay_models, new_linear_models):
             delay_model.add(new_linear_model)
 
-    async def start(self) -> None:
+    async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
         event loop and does the `gather` so that they can do their thing
-        concurrently.
+        concurrently. It also adds a task to continuously send the descriptor
+        heaps at an interval based on the `descriptor_interval_s`. See
+        :meth:`~Processor.run_descriptors_loop` for more details.
+
+        Parameters
+        ----------
+        descriptor_interval_s
+            The base interval used as a multiplier on feng_id and n_ants to
+            dictate the initial 'engine sleep interval' and 'send interval'
+            respectively.
         """
+        # Create the descriptor task first to ensure descriptors will be sent
+        # before any data makes its way through the pipeline.
+        self._descriptor_task = asyncio.create_task(
+            self._processor.run_descriptors_loop(
+                self._send_stream,
+                self._descriptor_heap_reflist,
+                self.n_ants,
+                self.feng_id,
+                descriptor_interval_s,
+            ),
+            name=DESCRIPTOR_TASK_NAME,
+        )
+        self._descriptor_task.add_done_callback(done_callback)
+
         for pol, stream in enumerate(self._src_streams):
-            recv.add_reader(
+            base_recv.add_reader(
                 stream,
                 src=self._srcs[pol],
                 interface=self._src_interface,
@@ -475,21 +539,31 @@ class Engine(aiokatcp.DeviceServer):
                 comp_vector=self._src_comp_vector[pol],
                 buffer=self._src_buffer,
             )
+
+        proc_task = asyncio.create_task(
+            self._processor.run_processing(self._src_streams),
+            name=GPU_PROC_TASK_NAME,
+        )
+        proc_task.add_done_callback(done_callback)
+
+        recv_task = asyncio.create_task(
+            self._processor.run_receive(self._src_streams, self._src_layout),
+            name=RECV_TASK_NAME,
+        )
+        recv_task.add_done_callback(done_callback)
+
+        send_task = asyncio.create_task(
+            self._processor.run_transmit(self._send_stream),
+            name=SEND_TASK_NAME,
+        )
+        send_task.add_done_callback(done_callback)
+
         self._processing_task = asyncio.gather(
-            asyncio.create_task(self._processor.run_processing(self._src_streams)),
-            asyncio.create_task(self._processor.run_receive(self._src_streams, self._src_layout)),
-            asyncio.create_task(self._processor.run_transmit(self._send_stream)),
+            proc_task,
+            recv_task,
+            send_task,
         )
 
-        def done_callback(future: asyncio.Future) -> None:
-            try:
-                future.result()  # Evaluate just for exceptions
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("Processing failed with exception")
-
-        self._processing_task.add_done_callback(done_callback)
         await super().start()
 
     async def on_stop(self):
@@ -497,9 +571,14 @@ class Engine(aiokatcp.DeviceServer):
 
         This is called by aiokatcp after closing the listening socket.
         """
+        self._descriptor_task.cancel()
         for stream in self._src_streams:
             stream.stop()
         try:
-            await self._processing_task
+            await asyncio.gather(
+                self._processing_task,
+                self._descriptor_task,
+                return_exceptions=True,
+            )
         except Exception:
             pass  # Errors get logged by the done_callback above

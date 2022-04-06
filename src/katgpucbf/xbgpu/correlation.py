@@ -82,11 +82,13 @@ class CorrelationTemplate:
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
         self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
-        self._n_ants_per_block = 64  # Hardcoded to 64 for now, but can be set to 48. 32 is not supported yet.
+        self._n_ants_per_block = 32  # Hardcoded to 32 for now, but can be set to 32/48/64.
 
-        # This 128 is hardcoded in the original Tensor-Core kernel. The reason
-        # it is set to this needs to be determined.
-        self.n_times_per_block = 128 // self._sample_bitwidth
+        # This 128 is hardcoded in the original Tensor-Core kernel. It loads
+        # each block as two int4's, which is 256 bits (the extra factor of 2
+        # is because _sample_bitwidth only counts the real part of a complex
+        # number).
+        n_times_per_block = 128 // self._sample_bitwidth
 
         valid_bitwidths = [4, 8, 16]
         if self._sample_bitwidth not in valid_bitwidths:
@@ -99,29 +101,10 @@ class CorrelationTemplate:
                 "will eventually be supported but has not yet been implemented."
             )
 
-        if self.n_spectra_per_heap % self.n_times_per_block != 0:
-            raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
+        if self.n_spectra_per_heap % n_times_per_block != 0:
+            raise ValueError(f"spectra_per_heap must be divisible by {n_times_per_block}.")
 
-        self.input_data_dimensions = (
-            accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_spectra_per_heap // self.n_times_per_block, exact=True),
-            accel.Dimension(self.n_ants, exact=True),
-            accel.Dimension(N_POLS, exact=True),
-            accel.Dimension(self.n_times_per_block, exact=True),
-            accel.Dimension(COMPLEX, exact=True),
-        )
-        self.output_data_dimensions = (
-            accel.Dimension(self.n_channels, exact=True),
-            accel.Dimension(self.n_baselines * 4, exact=True),
-            accel.Dimension(COMPLEX, exact=True),
-        )
-
-        if self._n_ants_per_block == 32:
-            raise NotImplementedError(
-                "32 antennas per thread-block is not supported yet - \
-                Need to clarify the formula for thread-block calculation."
-            )
-        elif self._n_ants_per_block == 48:
+        if self._n_ants_per_block in {32, 48}:
             self.n_blocks = int(
                 ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
                 * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
@@ -150,11 +133,12 @@ class CorrelationTemplate:
                 f"-DNR_POLARIZATIONS={N_POLS}",
             ],
         )
-        self.kernel = program.get_kernel("correlate")
+        self.correlate_kernel = program.get_kernel("correlate")
+        self.reduce_kernel = program.get_kernel("reduce")
 
-    def instantiate(self, command_queue: accel.AbstractCommandQueue) -> "Correlation":
+    def instantiate(self, command_queue: accel.AbstractCommandQueue, n_batches: int) -> "Correlation":
         """Create a :class:`Correlation` using this template to build the kernel."""
-        return Correlation(self, command_queue)
+        return Correlation(self, command_queue, n_batches)
 
 
 class Correlation(accel.Operation):
@@ -163,17 +147,17 @@ class Correlation(accel.Operation):
     Specifies the shape of the input sample and output visibility buffers
     required by the kernel. The parameters specified in the
     :class:`CorrelationTemplate` object are used to determine the
-    shape of the buffers.
+    shape of the buffers. There is an outer-most dimension called "batches",
+    over which the operation is parallelised. Not all batches need to be
+    processed every time: set the ``first_batch`` and ``last_batch``
+    attributes to control which batches will be computed.
 
     The input sample buffer must have the shape:
-    ``[channels][spectra_per_heap//times_per_block][n_ants][polarisations][times_per_block]``
+    ``[n_batches][n_ants][channels][spectra_per_heap][polarisations]``
 
-    A complexity that is introduced by the Tensor-Core kernel is that the
-    ``spectra_per_heap`` index is split over two different indices. The first
-    index ranges from ``0`` to ``spectra_per_heap//times_per_block`` and the
-    second index ranges from ``0`` to ``times_per_block``. Times per block is
-    calculated by the :class:`CorrelationTemplate`. In 8-bit input mode,
-    ``times_per_block`` is equal to 16.
+    There is an alignment requirement for ``spectra_per_heap`` due to the
+    implementation details of the kernel. For 8-bit input mode,
+    ``spectra_per_heap`` must be a multiple of 16.
 
     Each input element is a complex 8-bit integer sample. :mod:`.numpy` does not
     support 8-bit complex numbers, so the dimensionality is extended by 1, with
@@ -184,38 +168,80 @@ class Correlation(accel.Operation):
     ``-128i`` into the kernel will produce incorrect values at the output.
 
     The output visibility buffer must have the shape
-    ``[channels][baselines][CPLX]``. In 8-bit mode, each element in this
+    ``[channels][baselines][COMPLEX]``. In 8-bit mode, each element in this
     visibility matrix is a 32-bit integer value.
+
+    Calling this object does not directly update the output. Instead, it
+    updates an intermediate buffer (called ``mid_visibilities``). To produce
+    the output, call :meth:`reduce`.
 
     Currently only 8-bit input mode is supported.
     """
 
-    def __init__(self, template: CorrelationTemplate, command_queue: accel.AbstractCommandQueue) -> None:
+    def __init__(
+        self, template: CorrelationTemplate, command_queue: accel.AbstractCommandQueue, n_batches: int
+    ) -> None:
         super().__init__(command_queue)
         self.template = template
-        self.slots["in_samples"] = accel.IOSlot(
-            dimensions=self.template.input_data_dimensions, dtype=np.int8
-        )  # TODO: This must depend on input bitwidth
-        self.slots["out_visibilities"] = accel.IOSlot(dimensions=self.template.output_data_dimensions, dtype=np.int32)
+
+        input_data_dimensions = (
+            accel.Dimension(n_batches),
+            accel.Dimension(self.template.n_ants, exact=True),
+            accel.Dimension(self.template.n_channels, exact=True),
+            accel.Dimension(self.template.n_spectra_per_heap, exact=True),
+            accel.Dimension(N_POLS, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
+        )
+        mid_data_dimensions = (
+            accel.Dimension(n_batches),
+            accel.Dimension(self.template.n_channels, exact=True),
+            accel.Dimension(self.template.n_baselines * N_POLS * N_POLS, exact=True),
+            accel.Dimension(COMPLEX, exact=True),
+        )
+
+        # TODO: dtypes must depend on input bitwidth
+        self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
+        self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
+        self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
+        self.first_batch = 0
+        self.last_batch = n_batches
+        self.n_batches = n_batches
 
     def _run(self) -> None:
-        """Run the correlation kernel and add the generated values to the out_visibilities buffer."""
+        """Run the correlation kernel and add the generated values to internal buffer."""
+        if not 0 <= self.first_batch < self.last_batch <= self.n_batches:
+            raise ValueError("Invalid batch range")
+        n_batches = self.last_batch - self.first_batch  # Number of batches for this launch
         in_samples_buffer = self.buffer("in_samples")
-        out_visibilities_buffer = self.buffer("out_visibilities")
+        mid_visibilities_buffer = self.buffer("mid_visibilities")
         self.command_queue.enqueue_kernel(
-            self.template.kernel,
-            [out_visibilities_buffer.buffer, in_samples_buffer.buffer],
+            self.template.correlate_kernel,
+            [mid_visibilities_buffer.buffer, in_samples_buffer.buffer, np.uint32(self.first_batch)],
             # NOTE: Even though we are using CUDA, we follow OpenCL's grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * 1),
+            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * n_batches),
             local_size=(32, 2, 2),
         )
 
+    def reduce(self) -> None:
+        """Finalise computation of the output visibilities from the internal buffer."""
+        self.ensure_all_bound()
+        mid_visibilities_buffer = self.buffer("mid_visibilities")
+        out_visibilities_buffer = self.buffer("out_visibilities")
+        wgs = 128
+        self.command_queue.enqueue_kernel(
+            self.template.reduce_kernel,
+            [out_visibilities_buffer.buffer, mid_visibilities_buffer.buffer, np.uint32(self.n_batches)],
+            global_size=(accel.roundup(int(np.product(out_visibilities_buffer.shape)), wgs), 1, 1),
+            local_size=(wgs, 1, 1),
+        )
+
     def zero_visibilities(self) -> None:
-        """Zero all the values in the out_visibilities buffer."""
-        self.buffer("out_visibilities").zero(self.command_queue)
+        """Zero all the values in the internal buffer."""
+        self.ensure_all_bound()
+        self.buffer("mid_visibilities").zero(self.command_queue)
 
     @staticmethod
     def get_baseline_index(ant1, ant2) -> int:

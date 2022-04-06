@@ -16,80 +16,62 @@
 
 """Recv module."""
 
-import ctypes
 import functools
 import logging
+from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator, List, Optional, Tuple, Union, cast
+from typing import AsyncGenerator, Deque, List, cast
 
 import numba
 import numpy as np
-import scipy
 import spead2.recv.asyncio
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS
-from ..recv import StatsToCounters
+from .. import BYTE_BITS, N_POLS
+from ..recv import BaseLayout, Chunk, StatsCollector
+from ..recv import make_stream as make_base_stream
+from ..recv import user_data_type
 from ..spead import TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
-logger = logging.getLogger(__name__)
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
+
+logger = logging.getLogger(__name__)
 
 heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
 bytes_counter = Counter(
     "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
 )
-too_old_heaps_counter = Counter(
-    "input_too_old_heaps", "number of heaps that arrived too late to be processed", ["pol"], namespace=METRIC_NAMESPACE
-)
 missing_heaps_counter = Counter(
     "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
-)
-metadata_heaps_counter = Counter(
-    "input_metadata_heaps", "number of heaps not containing payload", ["pol"], namespace=METRIC_NAMESPACE
-)
-bad_timestamp_heaps_counter = Counter(
-    "input_bad_timestamp_heaps", "timestamp not a multiple of samples per packet", ["pol"], namespace=METRIC_NAMESPACE
 )
 _PER_POL_COUNTERS = [
     heaps_counter,
     chunks_counter,
     bytes_counter,
-    too_old_heaps_counter,
     missing_heaps_counter,
-    metadata_heaps_counter,
-    bad_timestamp_heaps_counter,
 ]
 
-
-class Chunk(spead2.recv.Chunk):
-    """Collection of heaps passed to the GPU at one time.
-
-    It extends the spead2 base class to store a timestamp (computed from
-    the chunk ID when the chunk is received), and optionally store a
-    gdrcopy device array.
-    """
-
-    # Refine the types used in the base class
-    present: np.ndarray
-    data: np.ndarray
-    # New fields
-    device: object
-    timestamp: int
-
-    def __init__(self, *args, device: object = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.device = device
-        self.timestamp = 0  # Actual value filled in when chunk received
+stats_collector = StatsCollector(
+    {
+        "too_old_heaps": ("input_too_old_heaps", "number of heaps that arrived too late to be processed"),
+        "katgpucbf.metadata_heaps": ("input_metadata_heaps", "number of heaps not containing payload"),
+        "katgpucbf.bad_timestamp_heaps": (
+            "input_bad_timestamp_heaps",
+            "timestamp not a multiple of samples per packet",
+        ),
+    },
+    labelnames=["pol"],
+    namespace=METRIC_NAMESPACE,
+)
 
 
 class _Statistic(IntEnum):
@@ -101,15 +83,8 @@ class _Statistic(IntEnum):
     BAD_TIMESTAMP_HEAPS = 1
 
 
-_user_data_type = types.Record.make_c_struct(
-    [
-        ("stats_base", types.uintp),  # Index for first custom statistic
-    ]
-)
-
-
 @dataclass(frozen=True)
-class Layout:
+class Layout(BaseLayout):
     """Parameters controlling the sizes of heaps and chunks."""
 
     sample_bits: int
@@ -121,11 +96,6 @@ class Layout:
     def heap_bytes(self) -> int:  # noqa: D401
         """Number of payload bytes per heap."""
         return self.heap_samples * self.sample_bits // BYTE_BITS
-
-    @property
-    def chunk_bytes(self) -> int:  # noqa: D401
-        """Number of bytes per chunk."""
-        return self.chunk_samples * self.sample_bits // BYTE_BITS
 
     @property
     def chunk_heaps(self) -> int:  # noqa: D401
@@ -149,7 +119,7 @@ class Layout:
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
         @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(_user_data_type)),
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)),
             nopython=True,
         )
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):  # pragma: nocover
@@ -178,21 +148,45 @@ class Layout:
 
         return chunk_place_impl
 
-    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
-        """Generate low-level code for placing heaps in chunks.
 
-        Parameters
-        ----------
-        stats_base
-            Index of first custom statistic
-        """
-        user_data = np.zeros(1, dtype=_user_data_type.dtype)
-        user_data["stats_base"] = stats_base
-        return scipy.LowLevelCallable(
-            self._chunk_place.ctypes,
-            user_data=user_data.ctypes.data_as(ctypes.c_void_p),
-            signature="void (void *, size_t, void *)",
+def make_streams(
+    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: List[int]
+) -> List[spead2.recv.ChunkRingStream]:
+    """Create SPEAD receiver streams.
+
+    Small helper function with F-engine-specific logic in it. Returns a stream
+    for each polarisation.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent.
+    src_affinity
+        CPU core affinity for the worker threads ([-1, -1] for no affinity).
+    """
+    # Reference counters to make the labels exist before the first scrape
+    for pol in range(N_POLS):
+        for counter in _PER_POL_COUNTERS:
+            counter.labels(pol)
+
+    streams = [
+        make_base_stream(
+            layout=layout,
+            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
+            max_active_chunks=MAX_CHUNKS,
+            data_ringbuffer=data_ringbuffer,
+            affinity=src_affinity[pol],
+            max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
+            stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
+            stream_id=pol,
         )
+        for pol in range(N_POLS)
+    ]
+    for pol, stream in enumerate(streams):
+        stats_collector.add_stream(stream, [str(pol)])
+    return streams
 
 
 async def chunk_sets(
@@ -218,21 +212,11 @@ async def chunk_sets(
         Structure of the streams
     """
     n_pol = len(streams)
-    # Working buffer to match up pairs of chunks from both pols.
-    buf: List[Optional[Chunk]] = [None] * n_pol
+    # Working buffer to match up pairs of chunks from both pols. There is
+    # a deque for each pol, ordered by time
+    buf: List[Deque[Chunk]] = [deque() for _ in streams]
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
-    stats_to_counters = [
-        StatsToCounters(
-            {
-                "too_old_heaps": too_old_heaps_counter.labels(pol),
-                "katgpucbf.metadata_heaps": metadata_heaps_counter.labels(pol),
-                "katgpucbf.bad_timestamp_heaps": bad_timestamp_heaps_counter.labels(pol),
-            },
-            stream.config,
-        )
-        for pol, stream in enumerate(streams)
-    ]
 
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
     # These duplicate the Prometheus counters, because prometheus_client
@@ -264,28 +248,24 @@ async def chunk_sets(
                 lost,
             )
 
-            # Update stream statistics. Note that these are not necessarily
-            # synchronised with the chunk.
-            for updater, stream in zip(stats_to_counters, streams):
-                updater.update(stream.stats)
+            buf[pol].append(chunk)
 
-            # Check whether we have a chunk already for this pol.
-            old = buf[pol]
-            if old is not None:
-                logger.warning("Chunk not matched: timestamp=%#x pol=%d", old.chunk_id * layout.chunk_samples, pol)
-                # Chunk was passed by without getting used. Return to the pool.
-                streams[pol].add_free_chunk(old)
-                buf[pol] = None
+            # Age out old chunks that will never match. This happens if the
+            # chunk is older than the newest chunk for every pol.
+            min_newest = min((b[-1].chunk_id if b else -1) for b in buf)
+            for pol, b in enumerate(buf):
+                while b and b[0].chunk_id < min_newest:
+                    logger.warning("Chunk not matched: timestamp=%#x pol=%d", b[0].chunk_id * layout.chunk_samples, pol)
+                    # Chunk was passed by without getting used. Return to the pool.
+                    streams[pol].add_free_chunk(b.popleft())
 
-            # Stick the chunk in the buffer.
-            buf[pol] = chunk
-
-            # If we have both chunks and they match up, then we can yield.
-            if all(c is not None and c.chunk_id == chunk.chunk_id for c in buf):
+            # If we have a matching pair of chunks, then we can yield.
+            if all(b and b[0].chunk_id == chunk.chunk_id for b in buf):
                 expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
-                # mypy isn't smart enough to see that the list can't have Nones
-                # in it at this point.
-                for c in cast(List[Chunk], buf):
+                out = []
+                for b in buf:
+                    c = b.popleft()
+                    out.append(c)
                     pol = c.stream_id
                     # The cast is to force numpy ints to Python ints.
                     buf_good = int(np.sum(c.present))
@@ -302,97 +282,12 @@ async def chunk_sets(
                         missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
                         n_missing_heaps[pol] = new_missing
 
-                # mypy isn't smart enough to see that the list can't have Nones
-                # in it at this point.
-                yield buf  # type: ignore
-                # Empty the buffer again for next use.
-                buf = [None] * n_pol
+                yield out
     finally:
-        for c2 in buf:
-            if c2 is not None:
-                streams[c2.stream_id].add_free_chunk(c2)
+        stats_collector.update()  # Ensure final stats updates are captured
+        for b in buf:
+            for c in b:
+                streams[c.stream_id].add_free_chunk(c)
 
 
-def make_stream(
-    pol: int,
-    layout: Layout,
-    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    affinity: int,
-) -> spead2.recv.ChunkRingStream:
-    """Create a receive stream for one polarisation.
-
-    Parameters
-    ----------
-    pol
-        Polarisation index
-    layout
-        Heap size and chunking parameters
-    data_ringbuffer
-        Output ringbuffer to which chunks will be sent
-    affinity
-        CPU core affinity for the worker thread (negative to not set an affinity)
-    """
-    # Reference counters to make the labels exist before the first scrape
-    for counter in _PER_POL_COUNTERS:
-        counter.labels(pol)
-
-    stream_config = spead2.recv.StreamConfig(
-        max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
-        memcpy=spead2.MEMCPY_NONTEMPORAL,
-        stream_id=pol,
-    )
-    stats_base = stream_config.next_stat_index()
-    stream_config.add_stat("katgpucbf.metadata_heaps")
-    stream_config.add_stat("katgpucbf.bad_timestamp_heaps")
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID], max_chunks=MAX_CHUNKS, place=layout.chunk_place(stats_base)
-    )
-    # Ringbuffer size is largely arbitrary: just needs to be big enough to
-    # never fill up.
-    free_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(128)
-    return spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
-        stream_config,
-        chunk_stream_config,
-        data_ringbuffer,
-        free_ringbuffer,
-    )
-
-
-def add_reader(
-    stream: spead2.recv.ChunkRingStream,
-    *,
-    src: Union[str, List[Tuple[str, int]]],
-    interface: Optional[str],
-    ibv: bool,
-    comp_vector: int,
-    buffer: int,
-) -> None:
-    """Connect a stream to an underlying transport.
-
-    See the documentation for :class:`.Engine` for an explanation of the parameters.
-    """
-    if isinstance(src, str):
-        stream.add_udp_pcap_file_reader(src)
-    elif ibv:
-        if interface is None:
-            raise ValueError("--src-interface is required with --src-ibv")
-        ibv_config = spead2.recv.UdpIbvConfig(
-            endpoints=src,
-            interface_address=interface,
-            buffer_size=buffer,
-            comp_vector=comp_vector,
-        )
-        stream.add_udp_ibv_reader(ibv_config)
-    else:
-        buffer_size = buffer // len(src)  # split it across the endpoints
-        for endpoint in src:
-            stream.add_udp_reader(
-                endpoint[0],
-                endpoint[1],
-                buffer_size=buffer_size,
-                interface_address=interface or "",
-            )
-
-
-__all__ = ["Chunk", "Layout", "chunk_sets", "make_stream", "add_reader"]
+__all__ = ["Chunk", "Layout", "chunk_sets"]

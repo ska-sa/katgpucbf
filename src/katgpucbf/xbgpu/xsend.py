@@ -40,7 +40,6 @@ location in the process, thereby halving the memory bandwidth required to send.
 
 import asyncio
 import math
-import queue
 from typing import Callable, Final, List, Sequence, Tuple
 
 import katsdpsigproc
@@ -211,6 +210,7 @@ class XSend:
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
+        tx_enabled: bool = True,
     ) -> None:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
@@ -219,6 +219,8 @@ class XSend:
             raise ValueError("n_channels must be an integer multiple of n_channels_per_stream")
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+
+        self.tx_enabled = tx_enabled
 
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
@@ -239,10 +241,7 @@ class XSend:
 
         self.context: Final[katsdpsigproc.abc.AbstractContext] = context
 
-        # TODO: There may be scope to use asyncio queues here instead - need to figure it out
-        self._heaps_queue: queue.Queue[Tuple[asyncio.Future, BufferWrapper]] = queue.Queue(
-            maxsize=self._n_send_heaps_in_flight
-        )
+        self._heaps_queue: asyncio.Queue[Tuple[asyncio.Future, BufferWrapper]] = asyncio.Queue()
         self.buffers: List[accel.HostArray] = []
 
         for _ in range(self._n_send_heaps_in_flight):
@@ -256,7 +255,7 @@ class XSend:
             dummy_future: asyncio.Future = asyncio.Future()
             dummy_future.set_result("")
 
-            self._heaps_queue.put((dummy_future, BufferWrapper(buffer)))
+            self._heaps_queue.put_nowait((dummy_future, BufferWrapper(buffer)))
 
             self.buffers.append(buffer)
 
@@ -276,7 +275,7 @@ class XSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + XSend.header_size,
-            max_heaps=self._n_send_heaps_in_flight,
+            max_heaps=self._n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )
@@ -326,29 +325,35 @@ class XSend:
         buffer_wrapper
             Wrapped buffer to sent as a SPEAD heap.
         """
-        self.item_group["timestamp"].value = timestamp
-        self.item_group["frequency"].value = self.channel_offset
-        self.item_group["xeng_raw"].value = buffer_wrapper.buffer
+        if self.tx_enabled:
+            self.item_group["timestamp"].value = timestamp
+            self.item_group["frequency"].value = self.channel_offset
+            self.item_group["xeng_raw"].value = buffer_wrapper.buffer
 
-        heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
-        # This flag forces the heap to include all item_group pointers in every
-        # packet belonging to a single heap instead of just in the first
-        # packet. This is done to duplicate the format of the packets out of
-        # the MeerKAT SKARABs.
-        heap_to_send.repeat_pointers = True
+            heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
+            # This flag forces the heap to include all item_group pointers in every
+            # packet belonging to a single heap instead of just in the first
+            # packet. This is done to duplicate the format of the packets out of
+            # the MeerKAT SKARABs.
+            heap_to_send.repeat_pointers = True
 
-        future = self.source_stream.async_send_heap(heap_to_send)
-        self._heaps_queue.put((future, buffer_wrapper))
-        # NOTE: It's not strictly true to say that the data has been sent at
-        # this point; it's only been queued for sending. But it should be close
-        # enough for monitoring data rates at the granularity that this is
-        # typically done.
-        output_heaps_counter.inc(1)
-        output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
+            future = self.source_stream.async_send_heap(heap_to_send)
+            self._heaps_queue.put_nowait((future, buffer_wrapper))
+            # NOTE: It's not strictly true to say that the data has been sent at
+            # this point; it's only been queued for sending. But it should be close
+            # enough for monitoring data rates at the granularity that this is
+            # typically done.
+            output_heaps_counter.inc(1)
+            output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
+        else:
+            # :meth:`get_free_heap` still needs to await some Future before
+            # returning a buffer_wrapper.
+            flush_stream_task = asyncio.create_task(self.source_stream.async_flush())
+            self._heaps_queue.put_nowait((flush_stream_task, buffer_wrapper))
 
     async def get_free_heap(self) -> BufferWrapper:
         """
-        Return a :class:BufferWrapper` object from the internal fifo queue when one is available.
+        Return a :class:`BufferWrapper` object from the internal fifo queue when one is available.
 
         There are a limited number of BufferWrapper in existence and
         they are all stored with a future object. If the future is complete,
@@ -363,11 +368,11 @@ class XSend:
         buffer_wrapper
             Free buffer wrapped in a :class:`BufferWrapper`.
         """
-        future, buffer_wrapper = self._heaps_queue.get()
+        future, buffer_wrapper = await self._heaps_queue.get()
         await asyncio.wait([future])
         return buffer_wrapper
 
-    def send_descriptor_heap(self) -> None:
+    async def send_descriptor_heap(self) -> None:
         """
         Send the SPEAD descriptor over the spead2 transport.
 
@@ -378,11 +383,8 @@ class XSend:
 
         This function has no associated unit test - it will likely need to be
         revisited later as its need and function become clear.
-
-        .. todo::
-            This async_send_heap should really be await'ed.
         """
-        self.source_stream.async_send_heap(self.descriptor_heap)
+        await self.source_stream.async_send_heap(self.descriptor_heap)
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""

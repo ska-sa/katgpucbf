@@ -57,9 +57,6 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Specification for the signals to generate (see the docstring for parse_signals). "
         "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
-    parser.add_argument(
-        "--signal-freq", type=float, default=232101234.0, help="Frequency of simulated tone (Hz) [%(default)s]"
-    )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")

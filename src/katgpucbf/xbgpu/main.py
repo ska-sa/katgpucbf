@@ -24,6 +24,7 @@ everything required to run the XB-Engine.
 .. todo::
     - Checks need to be put in place to ensure the command line parameters are
       correct:
+
         - Is the port number valid, is the IP address a multicast address, is
           the array size >0, etc.
 """
@@ -37,6 +38,7 @@ from typing import List, Optional
 import katsdpsigproc.accel
 import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
+from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
@@ -76,6 +78,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Network port on which to serve Prometheus metrics [none]",
     )
+    add_aiomonitor_arguments(parser)
     parser.add_argument(
         "--adc-sample-rate",
         type=float,
@@ -89,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         help="Target transmission rate faster than ADC sample rate by this factor. "
         "Set to zero to send as fast as possible. [%(default)s]",
     )
-    parser.add_argument("--array-size", type=int, help="Number of antennas in the array.")
+    parser.add_argument("--array-size", type=int, required=True, help="Number of antennas in the array.")
     parser.add_argument(
         "--channels",
         type=int,
@@ -101,6 +104,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         required=True,
         help="Number of channels in the multicast stream that this engine receives data from.",
+    )
+    parser.add_argument(
+        "--samples-between-spectra",
+        type=int,
+        required=True,
+        help="Number of samples between spectra.",
     )
     parser.add_argument(
         "--channel-offset-value",
@@ -124,12 +133,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of bits for each real and imaginary value in a sample. [%(default)s]",
     )
     parser.add_argument(
-        "--chunk-spectra",
+        "--heaps-per-fengine-per-chunk",
         type=int,
         default=5,
         help="A batch is a collection of heaps from different F-Engines with "
         "the same timestamp. This parameter specifies the number of "
-        "consecutive spectra to store in the same chunk. The higher this "
+        "consecutive batches to store in the same chunk. The higher this "
         "value is, the more GPU and system RAM is allocated, the lower "
         "this value is, the more work the python processing thread "
         "is required to do. [%(default)s]",
@@ -137,7 +146,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rx-reorder-tol",
         type=int,
-        default=2 ** 29,
+        default=2**29,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
         "and still be accepted. [%(default)s]",
     )
@@ -264,11 +273,12 @@ async def async_main(args: argparse.Namespace) -> None:
         n_channels_total=args.channels,
         n_channels_per_stream=args.channels_per_substream,
         n_spectra_per_heap=args.spectra_per_heap,
+        n_samples_between_spectra=args.samples_between_spectra,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         channel_offset_value=args.channel_offset_value,
         src_affinity=args.src_affinity,
-        chunk_spectra=args.chunk_spectra,
+        heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
         monitor=monitor,
         context=context,
@@ -319,11 +329,12 @@ async def async_main(args: argparse.Namespace) -> None:
 
     await xbengine.start()
 
-    await asyncio.gather(
-        asyncio.create_task(xbengine.join()),
-        descriptor_task,
-        return_exceptions=True,
-    )
+    with start_aiomonitor(asyncio.get_running_loop(), args, locals()):
+        await asyncio.gather(
+            asyncio.create_task(xbengine.join()),
+            descriptor_task,
+            return_exceptions=True,
+        )
 
     if prometheus_server:
         await prometheus_server.close()

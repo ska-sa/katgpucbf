@@ -19,7 +19,7 @@
 import dataclasses
 import itertools
 import logging
-from typing import Generator, Iterable, List, Optional, cast
+from typing import Generator, Iterable, List, Optional, Sequence, cast
 from unittest.mock import Mock
 
 import numpy as np
@@ -33,8 +33,6 @@ from katgpucbf.fgpu.recv import Chunk, Layout
 from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
 
 from .. import PromDiff
-
-pytestmark = [pytest.mark.asyncio]
 
 
 @pytest.fixture
@@ -56,9 +54,9 @@ class TestLayout:
         assert layout.heap_bytes == 5120
         assert layout.chunk_bytes == 81920
         assert layout.chunk_heaps == 16
-        assert layout.timestamp_mask == 2 ** 64 - 1
+        assert layout.timestamp_mask == 2**64 - 1
         masked = dataclasses.replace(layout, mask_timestamp=True)
-        assert masked.timestamp_mask == 2 ** 64 - 4096
+        assert masked.timestamp_mask == 2**64 - 4096
 
 
 @pytest.fixture
@@ -80,7 +78,7 @@ def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingS
     They are connected to the :func:`queues` fixture for input and
     :func:`ringbuffer` for output.
     """
-    streams = [recv.make_stream(pol, layout, ringbuffer, -1) for pol in range(N_POLS)]
+    streams = recv.make_streams(layout, ringbuffer, [-1, -1])
     for stream, queue in zip(streams, queues):
         for _ in range(4):
             data = np.empty(layout.chunk_bytes, np.uint8)
@@ -107,31 +105,40 @@ def send_stream(queues) -> "spead2.send.asyncio.AsyncStream":
 
 
 def gen_heaps(
-    layout: Layout, data: ArrayLike, first_timestamp: int, pol: int
+    layout: Layout,
+    data: ArrayLike,
+    first_timestamp: int,
+    pol: int,
+    present: Optional[Sequence[bool]] = None,
 ) -> Generator[spead2.send.Heap, None, None]:
     """Generate heaps from an array of data.
 
     The data must be a 1D array of bytes, evenly divisible by the heap size.
     The heaps do not exactly match the real digitiser packet format, but
     contain all the relevant items to test the receiver code.
+
+    If `present` is specified, it must contain one boolean per heap. If the
+    boolean is false, the heap is skipped.
     """
     data_arr = np.require(data, dtype=np.uint8)
     assert data_arr.ndim == 1
     data_arr = data_arr.reshape(-1, layout.heap_bytes)  # One row per heap
+    assert present is None or len(present) == data_arr.shape[0]
     timestamp = first_timestamp
     imm_format = [("u", FLAVOUR.heap_address_bits)]
-    for row in data_arr:
-        heap = spead2.send.Heap(FLAVOUR)
-        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
-        heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
-        heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=0))
-        heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
-        yield heap
+    for i, row in enumerate(data_arr):
+        if present is None or present[i]:
+            heap = spead2.send.Heap(FLAVOUR)
+            heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
+            heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
+            heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=0))
+            heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
+            yield heap
         timestamp += layout.heap_samples
 
 
 class TestStream:
-    """Test the stream built by :func:`katgpucbf.fgpu.recv.make_stream`."""
+    """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
 
     @pytest.mark.parametrize("reorder", [True, False])
     @pytest.mark.parametrize("timestamps", ["good", "bad", pytest.param("mask", marks=[pytest.mark.mask_timestamp])])
@@ -286,15 +293,19 @@ class TestChunkSets:
         add_chunk(10, 1)
         add_chunk(11, 1)
         add_chunk(12, 1, 1)
+        add_chunk(20, 1)
         add_chunk(12, 0, 2)
         add_chunk(20, 0)
-        add_chunk(20, 1)
         add_chunk(21, 0)
         ringbuffer.stop()
 
         with caplog.at_level(logging.WARNING, logger="katgpucbf.fgpu.recv"), PromDiff(
             namespace=METRIC_NAMESPACE
         ) as prom_diff:
+            # We're not using make_stream, so we have to register the stream with
+            # the stats collector manually.
+            for pol, stream in enumerate(streams):
+                recv.stats_collector.add_stream(stream, labels=[str(pol)])
             sets = [
                 chunk_set
                 async for chunk_set in recv.chunk_sets(cast(List[spead2.recv.ChunkRingStream], streams), layout)

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,12 +16,9 @@
 
 """Unit tests for Engine functions."""
 
-import asyncio
-import logging
 from dataclasses import dataclass
 from functools import partial
-from typing import Dict, List, Optional, Tuple
-from unittest import mock
+from typing import Dict, List, Optional, Tuple, Union
 
 import aiokatcp
 import numpy as np
@@ -30,24 +27,34 @@ import spead2.send
 from numpy.typing import ArrayLike
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS, send
+from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
-from katgpucbf.spead import FLAVOUR
 
+from .. import PromDiff
 from .test_recv import gen_heaps
 
-pytestmark = [pytest.mark.cuda_only, pytest.mark.asyncio]
+pytestmark = [pytest.mark.cuda_only]
 # Command-line arguments
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
 SPECTRA_PER_HEAP = 256
-CHUNK_SAMPLES = 1048576  # Lower than the default to make tests quicker
+# Lower than the default to make tests quicker, and smaller than
+# CHUNK_JONES to check that this case works.
+# TODO: use a number that's not a multiple of the number of channels,
+# once _send_data can handle partial chunks.
+CHUNK_SAMPLES = 524288
+CHUNK_JONES = 1048576
 MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
+PACKET_SAMPLES = 4096
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
-GAIN = np.float32(0.001)
+# Expected frequency-domain magnitude for a tone with time-domain magnitude 1
+# when the eq gain is 1. The factor sqrt(2 * CHANNELS) is an approximation of
+# the normalisation factor applied to the PFB weights.
+COHERENT_SCALE = CHANNELS / np.sqrt(2 * CHANNELS)
+GAIN = np.float32(1 / COHERENT_SCALE)  # Default value passed to ?gain command
 
 
 @dataclass
@@ -94,9 +101,11 @@ class TestEngine:
         "--dst-interface=lo",
         f"--channels={CHANNELS}",
         f"--sync-epoch={SYNC_EPOCH}",
-        f"--chunk-samples={CHUNK_SAMPLES}",
+        f"--src-chunk-samples={CHUNK_SAMPLES}",
+        f"--dst-chunk-jones={CHUNK_JONES}",
         f"--max-delay-diff={MAX_DELAY_DIFF}",
         f"--spectra-per-heap={SPECTRA_PER_HEAP}",
+        f"--src-packet-samples={PACKET_SAMPLES}",
         f"--feng-id={FENG_ID}",
         f"--taps={TAPS}",
         f"--adc-sample-rate={ADC_SAMPLE_RATE}",
@@ -203,18 +212,15 @@ class TestEngine:
         mock_send_stream: List[spead2.InprocQueue],
         engine: Engine,
         dig_data: np.ndarray,
+        *,
         first_timestamp: int = 0,
         expected_first_timestamp: Optional[int] = None,
+        src_present: Optional[np.ndarray] = None,
+        dst_present: Union[int, np.ndarray, None] = None,
+        channels: int = CHANNELS,
+        spectra_per_heap: int = SPECTRA_PER_HEAP,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve results.
-
-        This is a little tricky because :func:`.chunk_sets` drops data
-        if the pols get more than a chunk out of sync, and if we just push
-        all the heaps in at once we have no control over the order in which
-        spead2 processes them. To avoid getting too far ahead, we watch the
-        mock the counter that indicates how many heaps have been received, and
-        push updates to a queue that we can block on. We must transmit data
-        from the next chunk to force spead2 to flush out a prior chunk.
 
         `dig_data` must contain integer values rather than packed 10-bit samples.
 
@@ -230,6 +236,23 @@ class TestEngine:
         expected_first_timestamp
             Timestamp expected for the first output heap; if none is provided
             the first timestamp in the data is not checked.
+        src_present
+            If present, a bitmask per pol and input heap indicating which heaps
+            will be sent.
+        dst_present
+            A bitmask per output frame indicating which frames should be
+            present. As a shortcut, specifying an integer indicates the number
+            of expected output frames, which must all be present; and specifying
+            None indicates that this integer should be calculated from the
+            input data length, assuming default state for the engine (in
+            particular, it will not be correct if there are non-zero delays).
+
+            Missing frames still take space in the output but are zeroed out.
+        channels
+            Number of channels used by the engine, overriding ``CHANNELS``.
+        spectra_per_heap
+            Number of spectra per heap used by the engine, overriding
+            ``SPECTRA_PER_HEAP``.
 
         Returns
         -------
@@ -240,25 +263,25 @@ class TestEngine:
         """
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
         src_layout = engine._src_layout
+        n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
-        assert dig_data.shape[1] % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
+        assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
         dig_data = self._pack_samples(dig_data)
         dig_stream = self._make_digitiser(mock_recv_streams)
-        heaps_received = 0
-        heaps_received_queue = asyncio.Queue()  # type: asyncio.Queue[int]
-        heap_gens = [gen_heaps(src_layout, pol_data, first_timestamp, pol) for pol, pol_data in enumerate(dig_data)]
+        heap_gens = [
+            gen_heaps(
+                src_layout,
+                pol_data,
+                first_timestamp,
+                pol,
+                present=src_present[pol] if src_present is not None else None,
+            )
+            for pol, pol_data in enumerate(dig_data)
+        ]
 
-        def counter_inc(counter, amount=1, exemplar=None):
-            if counter.describe()[0].name == f"{METRIC_NAMESPACE}_input_heaps":
-                heaps_received_queue.put_nowait(amount)
-
-        with mock.patch("prometheus_client.Counter.inc", side_effect=counter_inc, autospec=True):
-            for i, cur_heaps in enumerate(zip(*heap_gens)):
-                for pol in range(N_POLS):
-                    await dig_stream.async_send_heap(cur_heaps[pol], substream_index=pol)
-                while i >= heaps_received // N_POLS + src_layout.chunk_heaps:
-                    logging.debug("heaps_received = %d, waiting for more", heaps_received)
-                    heaps_received += await heaps_received_queue.get()
+        for cur_heaps in zip(*heap_gens):
+            for pol in range(N_POLS):
+                await dig_stream.async_send_heap(cur_heaps[pol], substream_index=pol)
         for queue in mock_recv_streams:
             queue.stop()
 
@@ -266,42 +289,58 @@ class TestEngine:
         assert n_out_streams == 16, "Number of output streams does not match command line"
         out_config = spead2.recv.StreamConfig()
         out_tp = spead2.ThreadPool()
-        heaps = []
+
+        timestamp_step_spectrum = 2 * channels  # TODO not valid for narrowband
+        timestamp_step = spectra_per_heap * timestamp_step_spectrum
+        if dst_present is None:
+            expected_spectra = n_samples // timestamp_step_spectrum - (TAPS - 1)
+            dst_present_mask = np.ones(expected_spectra // spectra_per_heap, dtype=bool)
+        elif isinstance(dst_present, int):
+            dst_present_mask = np.ones(dst_present, dtype=bool)
+        else:
+            dst_present_mask = dst_present
+
+        data = np.zeros((channels, len(dst_present_mask) * spectra_per_heap, N_POLS, COMPLEX), np.int8)
+        channels_per_substream = channels // n_out_streams
         for i, queue in enumerate(mock_send_stream):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
             stream.add_inproc_reader(queue)
             ig = spead2.ItemGroup()
-            # We don't have descriptors yet, so we have to build the Items manually
-            imm_format = [("u", FLAVOUR.heap_address_bits)]
-            raw_shape = (CHANNELS // n_out_streams, SPECTRA_PER_HEAP, N_POLS, COMPLEX)
-            ig.add_item(send.TIMESTAMP_ID, "timestamp", "", shape=(), format=imm_format)
-            ig.add_item(send.FENG_ID_ID, "feng_id", "", shape=(), format=imm_format)
-            ig.add_item(send.FREQUENCY_ID, "frequency", "", shape=(), format=imm_format)
-            ig.add_item(send.FENG_RAW_ID, "feng_raw", "", shape=raw_shape, dtype=np.int8)
             expected_timestamp = expected_first_timestamp
-            timestamp_step = SPECTRA_PER_HEAP * CHANNELS * 2  # TODO not valid for narrowband
-            row = []
-            async for heap in stream:
-                assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
-                assert ig["feng_id"].value == FENG_ID
+
+            # First heap should be the descriptor heap
+            descriptor_heap = await stream.get()
+            items = ig.update(descriptor_heap)
+            assert items == {}, "This heap contains data, not just descriptors"
+
+            # Now, for the actual processing
+            for j, present in enumerate(dst_present_mask):
+                if present:
+                    heap = await stream.get()
+                    assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
+                    assert ig["feng_id"].value == FENG_ID
+                    if expected_timestamp is not None:
+                        assert ig["timestamp"].value == expected_timestamp
+                    else:
+                        expected_timestamp = expected_first_timestamp = ig["timestamp"].value
+                    assert ig["frequency"].value == i * channels_per_substream
+                    assert ig["feng_raw"].shape == (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
+                    data[
+                        i * channels_per_substream : (i + 1) * channels_per_substream,
+                        j * spectra_per_heap : (j + 1) * spectra_per_heap,
+                    ] = ig["feng_raw"].value
                 if expected_timestamp is not None:
-                    assert ig["timestamp"].value == expected_timestamp
-                else:
-                    expected_timestamp = expected_first_timestamp = ig["timestamp"].value
-                assert ig["frequency"].value == i * raw_shape[0]
-                expected_timestamp += timestamp_step
-                row.append(ig["feng_raw"].value.copy())
-            # Glue all the heaps together along the time axis
-            heaps.append(np.concatenate(row, axis=1))
-        # Glue the parts of the band together along the channel axis. This
-        # also ensures that there were the same number of heaps per channel.
-        data = np.concatenate(heaps, axis=0)
+                    expected_timestamp += timestamp_step
+            # Check that we didn't get more heaps we weren't expecting
+            with pytest.raises(spead2.Stopped):
+                await stream.get()
+
         # Convert to complex for analysis
         data = data[..., 0] + 1j * data[..., 1]
-        timestamps = np.arange(data.shape[1], dtype=np.int64) * (CHANNELS * 2) + expected_first_timestamp
+        timestamps = np.arange(data.shape[1], dtype=np.int64) * (channels * 2) + expected_first_timestamp
         return data, timestamps
 
-    # One delay value is tested with gdrcopy
+    # One delay value is tested with vkgdr, another with smaller output chunks
     @pytest.mark.parametrize(
         "delay_samples",
         [
@@ -309,8 +348,8 @@ class TestEngine:
             (8192.0, 234.5),
             (42.0, 58.0),
             (42.4, 24.2),
-            (42.7, 24.9),
-            pytest.param((42.8, 24.5), marks=[pytest.mark.use_gdrcopy]),
+            pytest.param((42.7, 24.9), marks=[pytest.mark.cmdline_args("--dst-chunk-jones=65536")]),
+            pytest.param((42.8, 24.5), marks=[pytest.mark.use_vkgdr]),
         ],
     )
     async def test_channel_centre_tones(
@@ -361,8 +400,7 @@ class TestEngine:
         expected_first_timestamp = first_timestamp
         # The data should have as many samples as the input, minus a reduction
         # from PFB windowing, rounded down to a full heap.
-        expected_spectra = (n_samples + min(delay_samples)) // (CHANNELS * 2) - (TAPS - 1)
-        expected_spectra = expected_spectra // SPECTRA_PER_HEAP * SPECTRA_PER_HEAP
+        expected_spectra = (n_samples + round(min(delay_samples))) // (CHANNELS * 2) - (TAPS - 1)
         if max(delay_samples) > 0:
             # The first output heap would require data from before the first
             # timestamp, so it does not get produced
@@ -375,13 +413,13 @@ class TestEngine:
             dig_data,
             first_timestamp=first_timestamp,
             expected_first_timestamp=expected_first_timestamp,
+            dst_present=expected_spectra // SPECTRA_PER_HEAP,
         )
-        assert out_data.shape[1] == expected_spectra
 
         # Check for the tones
         for pol in range(2):
             tone_data = out_data[tone_channels[pol], :, pol]
-            expected_mag = tones[pol].magnitude * CHANNELS * GAIN
+            expected_mag = tones[pol].magnitude * COHERENT_SCALE * GAIN
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
             # The frequency corresponds to an integer number of cycles per
@@ -420,7 +458,7 @@ class TestEngine:
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
-        gain = 100 / CHANNELS
+        gain = 100 / COHERENT_SCALE
         for pol in range(N_POLS):
             await engine_client.request("gain", pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
@@ -428,7 +466,7 @@ class TestEngine:
         #
         # The division by 20 (not 10) is because we're dealing with voltage,
         # not power.
-        tol = 10 ** (-53 / 20) * (tones[0].magnitude * CHANNELS) * gain
+        tol = 10 ** (-53 / 20) * (tones[0].magnitude * COHERENT_SCALE) * gain
 
         out_data, _ = await self._send_data(
             mock_recv_streams,
@@ -474,12 +512,18 @@ class TestEngine:
         await engine_client.request("delays", SYNC_EPOCH, *coeffs)
 
         first_timestamp = 100 * src_layout.chunk_samples
+        end_delay = round(min(delay_rate) * n_samples)
+        expected_spectra = (n_samples + end_delay) // (2 * CHANNELS) - (TAPS - 1)
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
             engine_server,
             dig_data,
             first_timestamp=first_timestamp,
+            # The first output heap would require data from before first_timestamp, so
+            # is omitted.
+            expected_first_timestamp=first_timestamp + 2 * CHANNELS * SPECTRA_PER_HEAP,
+            dst_present=expected_spectra // SPECTRA_PER_HEAP - 1,
         )
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
@@ -562,3 +606,91 @@ class TestEngine:
                 np.testing.assert_allclose(int(sensor_values[0]), expected_time, atol=200)
                 # NOTE: Using the default relative tolerance of 1e-07
                 np.testing.assert_allclose(sensor_values[3], expected_phase)
+
+    # Test with spectra_samples less than, equal to and greater than src-packet-samples
+    @pytest.mark.parametrize(
+        "channels",
+        [
+            pytest.param(channels, marks=pytest.mark.cmdline_args(f"--channels={channels}"))
+            for channels in [64, 2048, 8192]
+        ],
+    )
+    # Use small spectra-per-heap to get finer-grained testing of which spectra
+    # were ditched. Fewer would be better, but there are internal alignment
+    # requirements.
+    @pytest.mark.cmdline_args("--spectra-per-heap=32")
+    async def test_missing_heaps(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        channels: int,
+    ) -> None:
+        """Test that the right output heaps are omitted when input heaps are missing.
+
+        The test sends the same set of data twice, with gaps only in the first half.
+        It then checks that the heaps successfully received in the first half match
+        the heaps in the second half.
+        """
+        spectra_per_heap = 32
+        n_samples = 16 * CHUNK_SAMPLES
+        # Half-open ranges of input heaps that are missing
+        missing_ranges = [
+            (8, 10),
+            (15, 16),
+            (117, 133),
+            (6 * CHUNK_SAMPLES // PACKET_SAMPLES, 7 * CHUNK_SAMPLES // PACKET_SAMPLES),
+        ]
+        rng = np.random.default_rng()
+        dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
+        src_present = np.ones((2, n_samples // PACKET_SAMPLES), bool)
+        for a, b in missing_ranges:
+            assert b < src_present.shape[1]
+            src_present[:, a:b] = False
+        # The data should have as many samples as the input, minus a reduction
+        # from PFB windowing, rounded down to a full heap.
+        total_spectra = n_samples // (channels * 2) - (TAPS - 1)
+        total_heaps = total_spectra // spectra_per_heap
+        dst_present = np.ones(total_heaps, bool)
+        # Compute which output heaps should be missing. first_* and last_* are
+        # both inclusive (b is exclusive)
+        for a, b in missing_ranges:
+            first_sample = a * PACKET_SAMPLES
+            last_sample = b * PACKET_SAMPLES - 1  # -1 to make it inclusive
+            assert last_sample < n_samples // 2  # Make sure gaps are restricted to first half
+            first_spectrum = max(0, first_sample // (channels * 2) - (TAPS - 1))
+            last_spectrum = last_sample // (channels * 2)
+            first_heap = first_spectrum // spectra_per_heap
+            last_heap = last_spectrum // spectra_per_heap
+            dst_present[first_heap : last_heap + 1] = False
+
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            out_data, timestamps = await self._send_data(
+                mock_recv_streams,
+                mock_send_stream,
+                engine_server,
+                dig_data,
+                expected_first_timestamp=0,
+                src_present=src_present,
+                dst_present=dst_present,
+                channels=channels,
+                spectra_per_heap=spectra_per_heap,
+            )
+        # Position in dst_present corresponding to the second half of dig_data.
+        middle = (n_samples // 2) // (channels * 2 * spectra_per_heap)
+        for i, p in enumerate(dst_present):
+            if p and i + middle < len(dst_present):
+                a = out_data[:, i * spectra_per_heap : (i + 1) * spectra_per_heap]
+                b = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
+                np.testing.assert_equal(a, b)
+
+        for pol in range(N_POLS):
+            input_missing_heaps = np.sum(~src_present[pol])
+            assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
+        n_substreams = len(mock_send_stream)
+        output_heaps = np.sum(dst_present) * n_substreams
+        assert prom_diff.get_sample_diff("output_heaps_total") == output_heaps
+        frame_size = channels * spectra_per_heap * N_POLS * COMPLEX * np.dtype(np.int8).itemsize
+        assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
+        assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams

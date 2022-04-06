@@ -32,6 +32,7 @@ import katsdpservices
 import katsdpsigproc.accel as accel
 import prometheus_async
 from katsdpservices import get_interface_address
+from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
@@ -109,6 +110,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=int,
         help="Network port on which to serve Prometheus metrics [none]",
     )
+    add_aiomonitor_arguments(parser)
     parser.add_argument("--src-interface", type=get_interface_address, help="Name of input network device")
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
@@ -193,12 +195,19 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Spectra in each output heap [%(default)s]",
     )
     parser.add_argument(
-        "--chunk-samples",
+        "--src-chunk-samples",
         type=int,
-        default=2 ** 26,
+        default=2**24,
         metavar="SAMPLES",
-        help="Number of digitiser samples to process at a time (per pol). If not a multiple of 2*channels*acc-len,"
-        "it will be rounded up to the next multiple. [%(default)s]",
+        help="Number of digitiser samples to process at a time (per pol). [%(default)s]",
+    )
+    parser.add_argument(
+        "--dst-chunk-jones",
+        type=int,
+        default=2**23,
+        metavar="VECTORS",
+        help="Number of Jones vectors in output chunks. If not a multiple of "
+        "2*channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
     parser.add_argument(
@@ -207,7 +216,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=1048576,
         help="Maximum supported difference between delays across polarisations (in samples) [%(default)s]",
     )
-    parser.add_argument("--gain", type=float, default=0.001, help="Initial eq gains [%(default)s]")
+    parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
     parser.add_argument(
         "--sync-epoch",
         type=int,  # AFAIK, the digitisers sync on PPS signals, so it makes sense for this to be an int.
@@ -220,7 +229,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
     )
     parser.add_argument(
-        "--use-gdrcopy", action="store_true", help="Assemble chunks directly in GPU memory (requires supported GPU)"
+        "--use-vkgdr", action="store_true", help="Assemble chunks directly in GPU memory (requires Vulkan)"
     )
     parser.add_argument(
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
@@ -275,7 +284,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    chunk_samples = accel.roundup(args.chunk_samples, 2 * args.channels * args.spectra_per_heap)
+    chunk_jones = accel.roundup(args.dst_chunk_jones, args.channels * args.spectra_per_heap)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -298,7 +307,8 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,
         num_ants=args.array_size,
-        spectra=chunk_samples // (2 * args.channels),
+        chunk_samples=args.src_chunk_samples,
+        spectra=chunk_jones // args.channels,
         spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
         taps=args.taps,
@@ -306,7 +316,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine,
         gain=args.gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
         mask_timestamp=args.mask_timestamp,
-        use_gdrcopy=args.use_gdrcopy,
+        use_vkgdr=args.use_vkgdr,
         use_peerdirect=args.use_peerdirect,
         monitor=monitor,
     )
@@ -324,7 +334,7 @@ async def async_main() -> None:
     prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
-    with monitor:
+    with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
         await engine.start()
         await engine.join()
         if prometheus_server:

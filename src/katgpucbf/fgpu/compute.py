@@ -63,7 +63,7 @@ class Compute(accel.OperationSequence):
 
     The actual running of this operation isn't done through the :meth:`_run`
     method or by calling it directly, if you're familiar with the usual method
-    of `composing operations`_. Katfgpu's compute is streaming rather than
+    of `composing operations`_. Fgpu's compute is streaming rather than
     batched, i.e. we have to coordinate the receiving of new data and the
     transmission of processed data along with the actual processing operation.
 
@@ -74,10 +74,10 @@ class Compute(accel.OperationSequence):
     - spectra_per_heap <= spectra - i.e. a chunk of data must be enough to send out at
       least one heap.
     - spectra % spectra_per_heap == 0
-    - samples >= spectra*channels*2 + taps*channels*2 - 1. The factor of 2 is
-      because the PFB input is real, 2*channels samples are needed for each
-      output spectrum. The "extra samples" are to ensure continuity in the PFB-
-      FIR from one chunk to the next.
+    - samples >= taps*channels*2.  An input chunk requires at least enough
+      samples to output a single spectrum. The factor of 2 is because the
+      PFB input is real, so 2*channels samples are needed for each output
+      spectrum.
     - samples % 8 == 0
 
     .. _composing operations: https://katsdpsigproc.readthedocs.io/en/latest/user/operations.html#composing-operations
@@ -90,11 +90,12 @@ class Compute(accel.OperationSequence):
         The GPU command queue (typically this will be a CUDA Stream) on which
         actual processing operations are to be scheduled.
     samples
-        Number of samples that will be processed each time the operation is run.
+        Number of samples in each input chunk (per polarisation), including
+        padding samples.
     spectra
-        Number of spectra that we will get from each chunk of samples.
+        Number of spectra in each output chunk.
     spectra_per_heap
-        Number of spectra to send out per heap.
+        Number of spectra to send in each output heap.
     channels
         Number of channels into which the input data will be decomposed.
     """

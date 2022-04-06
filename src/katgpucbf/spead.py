@@ -34,6 +34,9 @@ MAX_PACKET_SIZE = 8872
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
 IMMEDIATE_FORMAT = [("u", FLAVOUR.heap_address_bits)]
 
+# Format for immediate items
+IMMEDIATE_FORMAT = [("u", FLAVOUR.heap_address_bits)]
+
 
 def make_immediate(id: int, value: Any) -> spead2.Item:
     """Synthesize an immediate item.

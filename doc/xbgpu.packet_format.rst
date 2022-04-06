@@ -46,12 +46,16 @@ field is 64 bits/8 bytes wide. More information on these fields is listed in the
 ``header``
   Contains information about the flavour of SPEAD being used.
   The most significant bit is always 0x53.
+
 ``heap counter/id``
   A unique identifier that increments for each new heap.
+
 ``heap size``
   Size of the heap in bytes.
+
 ``heap offset``
   Address in bytes indicating the current packets location within the heap.
+
 ``payload size``
   Number of bytes within the current packet payload.
 
@@ -63,9 +67,12 @@ to this heap that are used for reassembling the packets.
   this value remains constant across a heap and represents
   only the first frequency channel in the range of
   channels within the heap.
+
 ``timestamp`` (See above table)
+  .. comment just to get this formatted as definition list
 
 ``xeng_raw item pointer`` (See above table)
+  .. comment just to get this formatted as definition list
 
 Seven of the above fields remain constant for all packets in a heap. The heap offset changes across
 packets. Heap offset is expected to change in multiples of 2048. This is used to reassemble packets
