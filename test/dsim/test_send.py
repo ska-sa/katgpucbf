@@ -145,6 +145,7 @@ async def test_sender(
     # Check that the descriptors received make sense.
     assert set(ig.keys()) == {"timestamp", "digitiser_id", "digitiser_status", "adc_samples"}
     assert ig["adc_samples"].format == [("i", 10)]
+    assert ig["adc_samples"].shape == (DIG_HEAP_SAMPLES,)
 
     # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
