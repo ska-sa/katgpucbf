@@ -51,7 +51,7 @@ def unpackbits(packed_data: np.ndarray) -> np.ndarray:
     pack_idx = 0
     unpack_idx = 0
 
-    for _ in range(len(packed_data) // 5):
+    for pack_idx in range(0, len(packed_data), 5):
         tmp_40b_word = np.uint64(
             packed_data[pack_idx] << (8 * 4)
             | packed_data[pack_idx + 1] << (8 * 3)
@@ -59,14 +59,14 @@ def unpackbits(packed_data: np.ndarray) -> np.ndarray:
             | packed_data[pack_idx + 3] << 8
             | packed_data[pack_idx + 4]
         )
+
         for data_idx in range(4):
-            data_sample = np.int16((tmp_40b_word & np.uint64(1098437885952)) >> np.uint64(30))
+            data_sample = np.int16((tmp_40b_word & np.uint64(0xFFC0000000)) >> np.uint64(30))
             if data_sample > 511:
                 data_sample = data_sample - 1024
             unpacked_data[unpack_idx + data_idx] = np.int16(data_sample)
             tmp_40b_word = tmp_40b_word << np.uint8(10)
         unpack_idx += 4
-        pack_idx += 5
     return unpacked_data
 
 
@@ -88,9 +88,9 @@ async def descriptor_recv(
             ig.update(heap)
             if ig:
                 break
-    if ig:
-        # Halt the descriptor sender as a descriptor set has been received.
-        descriptor_sender.halt()
+
+    assert ig
+    descriptor_sender.halt()  # Halt the descriptor sender as a descriptor set has been received.
     return ig
 
 
@@ -147,6 +147,7 @@ async def test_sender(
 
     # Check that the descriptors received make sense.
     assert set(ig.keys()) == {"timestamp", "digitiser_id", "digitiser_status", "adc_samples"}
+    assert ig["adc_samples"].format == [("i", 10)]
 
     # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
