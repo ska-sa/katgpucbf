@@ -22,8 +22,6 @@ from unittest import mock
 
 import numpy as np
 import pytest
-import spead2
-import spead2.recv
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
@@ -34,13 +32,11 @@ N_POLS = 2
 N_ENDPOINTS_PER_POL = 4
 SIGNAL_HEAPS = 1024
 ADC_SAMPLE_RATE = 1712e6
-MULTICAST_ADDRESS = "239.103.0.64"
-PORT = 7148
 
 
 @pytest.fixture
 def inproc_queues() -> Sequence[spead2.InprocQueue]:  # noqa: D401
-    """An in-process queue (data) per multicast destination."""
+    """An in-process queue for data per multicast destination."""
     return [spead2.InprocQueue() for _ in range(N_ENDPOINTS_PER_POL * N_POLS)]
 
 
@@ -136,7 +132,7 @@ def descriptor_recv_streams(
 
 @pytest.fixture
 def descriptor_send_stream(descriptor_inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
-    """Stream that feeds data to the :func:`inproc_queues`."""
+    """Stream that feeds data to the :func:`descriptor_inproc_queues`."""
 
     def mock_udp_stream(thread_pool, endpoints, config, **kwargs):
         return spead2.send.asyncio.InprocStream(thread_pool, descriptor_inproc_queues, config)
@@ -161,5 +157,5 @@ def descriptor_heap() -> spead2.send.Heap:  # noqa: D401
 def descriptor_sender(
     descriptor_send_stream: "spead2.send.asyncio.AsyncStream", descriptor_heap: spead2.send.Heap
 ) -> descriptors.DescriptorSender:  # noqa: D401
-    """A :class:`~katgpucbf.dsim.descriptors.DescriptorSender` using the first of :func:`descriptor_heap`."""
+    """A :class:`~katgpucbf.dsim.descriptors.DescriptorSender`."""
     return descriptors.DescriptorSender(descriptor_send_stream, descriptor_heap)

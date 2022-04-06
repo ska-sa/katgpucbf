@@ -111,7 +111,6 @@ class DescriptorSender:
     ) -> None:
 
         self._halt_event = asyncio.Event()
-        self.config = create_config()
 
         self.stream = stream
         self.heap_to_send = descriptor_heap
@@ -125,7 +124,7 @@ class DescriptorSender:
         while True:
             try:
                 await self.stream.async_send_heap(self.heap_to_send)
-                # Wait for even (if a halt requested). wait_for will timeout if not received
+                # Wait for event (if a halt requested). wait_for will time out if not received
                 # within descriptor_interval period and descriptor will be resent.
                 await asyncio.wait_for(self._halt_event.wait(), timeout=SPEAD_DESCRIPTOR_INTERVAL_S)
                 break

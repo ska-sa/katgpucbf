@@ -36,7 +36,6 @@ import katsdpservices
 import numpy as np
 import prometheus_async
 import pyparsing as pp
-import spead2.send
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
@@ -196,8 +195,9 @@ async def async_main() -> None:
     config = descriptors.create_config()
     interface_address = katsdpservices.get_interface_address(args.interface)
     descriptor_stream = descriptors.make_descriptor_stream(
-        endpoints=endpoints, config=config, ttl=4, interface_address=interface_address
+        endpoints=endpoints, config=config, ttl=args.ttl, interface_address=interface_address
     )
+    descriptor_stream.set_cnt_sequence(1, 2)
 
     # Start descriptor sender first so descriptors are sent before dsim data.
     descriptor_heap = descriptors.create_descriptors_heap()
@@ -221,7 +221,7 @@ async def async_main() -> None:
     )
 
     # Set spead stream to have heap id in even numbers for dsim data.
-    spead2.send.Stream.set_cnt_sequence(stream, 2, 2)
+    stream.set_cnt_sequence(2, 2)
     sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples, args.sync_time, args.adc_sample_rate)
 
     server = DeviceServer(
@@ -238,7 +238,6 @@ async def async_main() -> None:
     )
     await server.start()
 
-    logger.debug("Setting up descriptors")
     add_signal_handlers(server)
 
     logger.info("Starting transmission")

@@ -70,29 +70,22 @@ def unpackbits(packed_data: np.ndarray) -> np.ndarray:
     return unpacked_data
 
 
-async def descriptor_recv(rec_streams, descriptor_sender) -> ItemGroup:
+async def descriptor_recv(
+    recv_streams: Sequence[spead2.recv.asyncio.Stream], descriptor_sender: DescriptorSender
+) -> ItemGroup:
     """Create receiver for unpacking of spead descriptors.
 
     Parameters
     ----------
-    rec_streams
+    recv_streams
         Descriptor receiver stream.
     descriptor_sender
         Descriptor sender object. Used to halt the sender method.
     """
-    for stream in rec_streams:
+    for stream in recv_streams:
         async for heap in stream:
             ig = spead2.ItemGroup()
-            for raw_descriptor in heap.get_descriptors():
-                descriptor = spead2.Descriptor.from_raw(raw_descriptor, heap.flavour)
-                ig.add_item(
-                    id=descriptor.id,
-                    name=descriptor.name,
-                    dtype=descriptor.dtype,
-                    description=descriptor.description,
-                    shape=descriptor.shape,
-                    format=descriptor.format,
-                )
+            ig.update(heap)
             if ig:
                 break
     if ig:
@@ -102,7 +95,7 @@ async def descriptor_recv(rec_streams, descriptor_sender) -> ItemGroup:
 
 
 async def test_sender(
-    descriptor_recv_streams: spead2.recv.asyncio.Stream,
+    descriptor_recv_streams: Sequence[spead2.recv.asyncio.Stream],
     descriptor_inproc_queues: Sequence[spead2.InprocQueue],
     descriptor_sender: DescriptorSender,
     recv_streams: Sequence[spead2.recv.asyncio.Stream],
