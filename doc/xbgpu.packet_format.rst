@@ -1,10 +1,10 @@
 .. _baseline-correlation-products-data-packet-format:
 
-Baseline Correlation Products Data Packet Format
-================================================
+Packet Format
+=============
 
 According to the **MeerKAT M1000-0001 CBF-Data Subscribers ICD (M1200-0001-020)**,
-the output SPEAD heaps from the X-Engine have the following data format:
+the Baseline Correlation Products SPEAD heaps have the following data format:
 
 .. figure:: images/xeng_spead_heap_format_table.png
 
@@ -28,7 +28,7 @@ heap, and each X-engine correlates a contiguous subset of the entire spectrum.
 For example, an 80A, 8192-channel array with 64 X-engines, each X-engine output
 heap contains 8192/64 = 128 channels.
 
-The heap size is equal to
+The heap payload size in this example is equal to
 
   channels_per_heap * baselines * complex_sample_size = 128 * 12960 * 8 = 13,271,040 bytes or 12.656 MiB.
 
@@ -40,7 +40,6 @@ field is 64 bits/8 bytes wide. More information on these fields is listed in the
 
 ``header``
   Contains information about the flavour of SPEAD being used.
-  The most significant bit is always 0x53.
 
 ``heap counter/id``
   A unique identifier that increments for each new heap.

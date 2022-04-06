@@ -1,10 +1,10 @@
 .. _channelised-voltage-data-packet-format:
 
-Channelised Voltage Data Packet Format
-======================================
+Packet Format
+=============
 
 According to the **MeerKAT M1000-0001 CBF-Data Subscribers ICD (M1200-0001-020)**,
-the output SPEAD heaps from the F-Engine have the following data format:
+the Channelised Voltage Data SPEAD heaps have the following data format:
 
 .. figure:: images/feng_spead_heap_format_table.png
 
@@ -13,7 +13,10 @@ the output SPEAD heaps from the F-Engine have the following data format:
 In the case of a 80A 8k array with 64 X-engines, each heap contains 8192/(64) =
 128 channels. By default, there are 256 time samples per channel. Each sample is
 dual-pol complex 8-bit data for a combined sample width of 32 bits or 4 bytes.
-The heap payload size in this example is equal to 128 * 256 * 4 bytes.
+
+The heap payload size in this example is equal to
+
+    channels_per_heap * samples_per_channel * complex_sample_size = 128 * 256 * 4 = 131,072 = 128 KiB.
 
 The SPEAD protocol assigns a number of metadata fields to each packet. Each metadata
 field is 64 bits/8 bytes wide. More information on these fields is listed in the
@@ -23,12 +26,16 @@ field is 64 bits/8 bytes wide. More information on these fields is listed in the
 
 ``header``
   Contains information about the flavour of SPEAD being used.
+
 ``heap counter/id``
   A unique identifier for each heap.
+
 ``heap size``
   Size of the heap in bytes.
+
 ``heap offset``
   Address in bytes indicating the current packet's location within the heap.
+
 ``payload size``
   Number of bytes within the current packet payload.
 
