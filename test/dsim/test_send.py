@@ -20,18 +20,81 @@ import asyncio
 import itertools
 from typing import Optional, Sequence
 
+import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
+from spead2 import ItemGroup
 
-from katgpucbf import BYTE_BITS, spead
+from katgpucbf import DIG_HEAP_SAMPLES
 from katgpucbf.dsim import send
+from katgpucbf.dsim.descriptors import DescriptorSender
 
 from .. import PromDiff
-from .conftest import HEAP_SAMPLES, N_ENDPOINTS_PER_POL, N_POLS, SAMPLE_BITS, SIGNAL_HEAPS
+from .conftest import N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
+
+
+@numba.njit
+def unpackbits(packed_data: np.ndarray) -> np.ndarray:
+    """Unpack 8b data words to 10b data words.
+
+    Parameters
+    ----------
+    packed_data
+        A numpy ndarray of packed 8b data words.
+    """
+    unpacked_data = np.zeros((DIG_HEAP_SAMPLES,), dtype=np.int16)
+    data_sample = np.int16(0)
+    pack_idx = 0
+    unpack_idx = 0
+
+    for pack_idx in range(0, len(packed_data), 5):
+        tmp_40b_word = np.uint64(
+            packed_data[pack_idx] << (8 * 4)
+            | packed_data[pack_idx + 1] << (8 * 3)
+            | packed_data[pack_idx + 2] << (8 * 2)
+            | packed_data[pack_idx + 3] << 8
+            | packed_data[pack_idx + 4]
+        )
+
+        for data_idx in range(4):
+            data_sample = np.int16((tmp_40b_word & np.uint64(0xFFC0000000)) >> np.uint64(30))
+            if data_sample > 511:
+                data_sample = data_sample - 1024
+            unpacked_data[unpack_idx + data_idx] = np.int16(data_sample)
+            tmp_40b_word = tmp_40b_word << np.uint8(10)
+        unpack_idx += 4
+    return unpacked_data
+
+
+async def descriptor_recv(
+    recv_streams: Sequence[spead2.recv.asyncio.Stream], descriptor_sender: DescriptorSender
+) -> ItemGroup:
+    """Create receiver for unpacking of spead descriptors.
+
+    Parameters
+    ----------
+    recv_streams
+        Descriptor receiver stream.
+    descriptor_sender
+        Descriptor sender object. Used to halt the sender method.
+    """
+    for stream in recv_streams:
+        async for heap in stream:
+            ig = spead2.ItemGroup()
+            ig.update(heap)
+            if ig:
+                break
+
+    assert ig
+    descriptor_sender.halt()  # Halt the descriptor sender as a descriptor set has been received.
+    return ig
 
 
 async def test_sender(
+    descriptor_recv_streams: Sequence[spead2.recv.asyncio.Stream],
+    descriptor_inproc_queues: Sequence[spead2.InprocQueue],
+    descriptor_sender: DescriptorSender,
     recv_streams: Sequence[spead2.recv.asyncio.Stream],
     inproc_queues: Sequence[spead2.InprocQueue],
     sender: send.Sender,
@@ -70,18 +133,25 @@ async def test_sender(
         spead2.send.asyncio.InprocStream, "async_send_heaps", side_effect=wrapped_send_heaps, autospec=True
     )
 
+    # Start descriptor sender and wait for descriptors before awaiting for DSim data
+    descriptor_sender_task = asyncio.create_task(descriptor_sender.run())
+    descriptor_recv_streams_task = asyncio.create_task(descriptor_recv(descriptor_recv_streams, descriptor_sender))
+    _, ig = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
+
+    # Stop the descriptor queue
+    for queue in descriptor_inproc_queues:
+        queue.stop()
+
+    # Check that the descriptors received make sense.
+    assert set(ig.keys()) == {"timestamp", "digitiser_id", "digitiser_status", "adc_samples"}
+    assert ig["adc_samples"].format == [("i", 10)]
+    assert ig["adc_samples"].shape == (DIG_HEAP_SAMPLES,)
+
+    # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
         await sender.run()
     for queue in inproc_queues:
         queue.stop()
-
-    # We don't have descriptors (yet), so we have to set the items manually
-    ig = spead2.ItemGroup()
-    ig.add_item(spead.TIMESTAMP_ID, "timestamp", "", shape=(), format=spead.IMMEDIATE_FORMAT)
-    ig.add_item(spead.DIGITISER_ID_ID, "digitiser_id", "", shape=(), format=spead.IMMEDIATE_FORMAT)
-    ig.add_item(spead.DIGITISER_STATUS_ID, "digitiser_status", "", shape=(), format=spead.IMMEDIATE_FORMAT)
-    # Just treat it as raw bytes so that we can directly compare to the packed data
-    ig.add_item(spead.RAW_DATA_ID, "raw_data", "", dtype=np.uint8, shape=(HEAP_SAMPLES * SAMPLE_BITS // BYTE_BITS,))
 
     for pol in range(N_POLS):
         pol_streams = recv_streams[N_ENDPOINTS_PER_POL * pol : N_ENDPOINTS_PER_POL * (pol + 1)]
@@ -91,15 +161,16 @@ async def test_sender(
                 updated = ig.update(heap)
             except spead2.Stopped:
                 break
-            assert updated["timestamp"].value == i * HEAP_SAMPLES
+            assert updated["timestamp"].value == i * DIG_HEAP_SAMPLES
             assert updated["digitiser_id"].value == pol
             assert updated["digitiser_status"].value == 0
             side = int(i >= switch_heap)
             expected = orig_payload[side].isel(time=i % SIGNAL_HEAPS, pol=pol)
-            np.testing.assert_equal(updated["raw_data"].value, expected)
+            expected = unpackbits(expected.to_numpy())
+            np.testing.assert_equal(updated["adc_samples"].value, expected)
         assert i == SIGNAL_HEAPS * repeats  # Check that all the data arrived
     assert switch_task is not None
-    assert (await switch_task) == switch_heap * HEAP_SAMPLES
+    assert (await switch_task) == switch_heap * DIG_HEAP_SAMPLES
 
     # Check the Prometheus counters
     assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS

@@ -32,10 +32,13 @@ BYTE_BITS: Final = 8
 COMPLEX: Final = 2
 N_POLS: Final = 2
 SPEAD_DESCRIPTOR_INTERVAL_S: Final = 5
+SEND_RATE_FACTOR = 1.1
 DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
 DEFAULT_KATCP_HOST = ""  # All interfaces
 DEFAULT_KATCP_PORT = 7147
+DIG_HEAP_SAMPLES = 4096
+DIG_SAMPLE_BITS: Final = 10
 
 GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
 RECV_TASK_NAME: Final[str] = "Receiver Loop"
