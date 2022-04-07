@@ -4,20 +4,20 @@ Packet Format
 =============
 
 According to the **MeerKAT M1000-0001 CBF-Data Subscribers ICD (M1200-0001-020)**,
-the Baseline Correlation Products SPEAD heaps have the following data format:
+the Baseline Correlation Products SPEAD packets have the following data format:
 
 .. figure:: images/xeng_spead_heap_format_table.png
 
-  Table indicating SPEAD heap format output by X-Engine
+  SPEAD packet format output by an X-Engine
 
 In MeerKAT Extension, four correlation products are computed for each canonical
-baseline, namely vv, hv, vh, and hh. Thus, for an 80A correlator, there are
-n*(n+1)/2 = 3240 baselines, and 12960 correlation products. The parameter
+baseline, namely vv, hv, vh, and hh. Thus, for an 80-antenna correlator, there are
+:math:`\frac{n(n+1)}{2} = 3240` baselines, and 12960 correlation products. The parameter
 ``n-bls`` in the above table refers to the latter figure.
 
 Each correlation product contains a real and imaginary sample (both 32-bit
 integer) for a combined size of 8 bytes per baseline. The ordering of the
-correlation products is given in the <xeng-stream-name>-bls-ordering sensor in
+correlation products is given in the :samp:`{xeng-stream-name}-bls-ordering` sensor in
 the product controller, but can be calculated deterministically:
 :func:`~katgpucbf.xbgpu.correlation.get_baseline_index` indicates the ordering
 of the baselines, and the four individual correlation products are always
@@ -25,12 +25,12 @@ ordered ``vv, hv, vh, hh``.
 
 All the baselines for a single channel are grouped together contiguously in the
 heap, and each X-engine correlates a contiguous subset of the entire spectrum.
-For example, an 80A, 8192-channel array with 64 X-engines, each X-engine output
+For example, in an 80-antenna, 8192-channel array with 64 X-engines, each X-engine output
 heap contains 8192/64 = 128 channels.
 
 The heap payload size in this example is equal to
 
-  channels_per_heap * baselines * complex_sample_size = 128 * 12960 * 8 = 13,271,040 bytes or 12.656 MiB.
+  channels_per_heap * correlation_products * complex_sample_size = 128 * 12960 * 8 = 13,271,040 bytes or 12.656 MiB.
 
 The SPEAD format assigns a number of metadata fields to each packet. Each metadata
 field is 64 bits/8 bytes wide. More information on these fields is listed in the

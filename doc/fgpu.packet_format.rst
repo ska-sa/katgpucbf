@@ -8,9 +8,9 @@ the Channelised Voltage Data SPEAD heaps have the following data format:
 
 .. figure:: images/feng_spead_heap_format_table.png
 
-  Table indicating SPEAD heap format output by F-Engine
+  SPEAD packet format output by an F-Engine
 
-In the case of a 80A 8k array with 64 X-engines, each heap contains 8192/(64) =
+In the case of an 8192-channel array with 64 X-engines, each heap contains 8192/64 =
 128 channels. By default, there are 256 time samples per channel. Each sample is
 dual-pol complex 8-bit data for a combined sample width of 32 bits or 4 bytes.
 
