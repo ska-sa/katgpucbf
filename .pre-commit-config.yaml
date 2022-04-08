@@ -55,14 +55,14 @@ repos:
             'katsdptelstate==0.11',
             'numpy==1.21.0',
             'pyparsing==3.0.6',
-            'spead2==3.9.0',
+            'spead2==3.9.1',
             'types-decorator==0.1.5',
             'types-redis==3.5.4',
             'types-setuptools==57.0.0',
             'types-six==0.1.7',
         ]
   - repo: https://github.com/jazzband/pip-tools
-    rev: 6.5.1
+    rev: 6.6.0
     hooks:
       - id: pip-compile
         name: pip-compile requirements.in
