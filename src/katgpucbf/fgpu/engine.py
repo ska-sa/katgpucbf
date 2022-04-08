@@ -47,7 +47,6 @@ from .delay import LinearDelayModel, MultiDelayModel
 from .process import Processor
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 def format_complex(value: numbers.Complex) -> str:
