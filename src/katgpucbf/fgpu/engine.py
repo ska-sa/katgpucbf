@@ -212,7 +212,7 @@ class Engine(aiokatcp.DeviceServer):
         self.populate_sensors(self.sensors)
         self.feng_id = feng_id
         self.n_ants = num_ants
-        self._halted_task: asyncio.Task() = None  # type: ignore
+        self._halted_task: asyncio.Task = None  # type: ignore
 
         if use_vkgdr:
             import vkgdr.pycuda
@@ -500,6 +500,8 @@ class Engine(aiokatcp.DeviceServer):
         except asyncio.CancelledError:
             logger.debug("%s was cancelled", task.get_name())
         except Exception:
+            # TODO: Perhaps change this to logger.error as on_stop also does a
+            #       full logger.exception
             logger.exception("Processing %s failed with exception", task.get_name())
             self._halted_task = self.halt()
 
@@ -561,10 +563,11 @@ class Engine(aiokatcp.DeviceServer):
         )
         send_task.add_done_callback(self.halt_done_callback)
 
-        self._processing_task = asyncio.gather(
+        self._all_tasks = asyncio.gather(
             proc_task,
             recv_task,
             send_task,
+            self._descriptor_task,
         )
 
         await super().start()
@@ -585,17 +588,21 @@ class Engine(aiokatcp.DeviceServer):
         """Shut down processing when the device server is stopped.
 
         This is called by aiokatcp after closing the listening socket.
+        Also handle any Exceptions thrown unexpectedly in any of the
+        processing loops.
         """
         self._descriptor_task.cancel()
         for stream in self._src_streams:
             stream.stop()
         try:
             gathered_results = await asyncio.gather(
-                self._processing_task,
-                self._descriptor_task,
+                self._all_tasks,
                 return_exceptions=True,
             )
+            # See what issues arose, pass them up the chain
             for result in gathered_results:
-                logger.debug(f"{type(result).__name__}: {result.args}")
-        except Exception:
-            pass  # Errors get logged by the done_callback above
+                if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                    raise result
+        except Exception as ex:
+            # logger.exception logs a full traceback of the Exception
+            logger.exception(ex)

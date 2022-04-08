@@ -700,7 +700,6 @@ class Processor:
         streams
             These only seem to be used in the _use_vkgdr case.
         """
-        # raise NotImplementedError("Raising an error on purpose")
         while await self._fill_in():
             # If the input starts too late for the next expected timestamp,
             # we need to skip ahead to the next heap after the start, and
@@ -837,7 +836,6 @@ class Processor:
         layout
             The structure of the streams.
         """
-        # raise NotImplementedError("Raising an error on purpose")
         async for chunks in recv.chunk_sets(streams, layout):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self.in_free_queue.get()
