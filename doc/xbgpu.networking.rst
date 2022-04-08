@@ -45,10 +45,10 @@ the Baseline Correlation Products SPEAD packets have the following data format:
 
   SPEAD packet format output by an X-Engine
 
-In MeerKAT Extension, four correlation products are computed for each canonical
-baseline, namely vv, hv, vh, and hh. Thus, for an 80-antenna correlator, there
-are :math:`\frac{n(n+1)}{2} = 3240` baselines, and 12960 correlation products.
-The parameter ``n-bls`` in the above table refers to the latter figure.
+In MeerKAT Extension, four correlation products are computed for each baseline,
+namely vv, hv, vh, and hh. Thus, for an 80-antenna correlator, there are
+:math:`\frac{n(n+1)}{2} = 3240` baselines, and 12960 correlation products. The
+parameter ``n-bls`` in the above table refers to the latter figure.
 
 The immediate items specific to the X-engine output stream are as follows:
 

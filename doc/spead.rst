@@ -52,7 +52,9 @@ Each packet contains the following metadata fields:
 Each SPEAD stream will have additional 64-bit fields specific to itself,
 referred to in SPEAD nomenclature as :dfn:`immediate items`. Each packet
 transmitted will contain all the immediate items to assist third-party consumers
-that prefer to work at the packet level.
+that prefer to work at the packet level (see
+:attr:`spead2.send.Heap.repeat_pointers` - note that this is not default spead2
+behaviour, but it is always on in katgpucbf).
 
 Most of the metadata remains constant for all packets in a heap. The heap offset
 changes across packets, in multiples of the packet size (which is configurable
