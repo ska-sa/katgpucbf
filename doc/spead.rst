@@ -6,13 +6,15 @@ SPEAD protocol
 Introduction
 ------------
 
-The Streaming Protocol for Exchanging Astronomical Data (SPEAD) is a
+The Streaming Protocol for Exchanging Astronomical Data (`SPEAD`_) is a
 lightweight streaming protocol, primarily UDP-based, designed for components
 of a radio astronomy signal-chain to transmit data to each other over Ethernet
 links.
 
+.. _SPEAD: https://spead2.readthedocs.io/en/latest/_downloads/6160ba1748b1812337d9c7766bdf747a/SPEAD_Protocol_Rev1_2012.pdf
+
 The SPEAD implementation used in :mod:`katgpucbf` is :mod:`spead2`. It is highly
-recommended that users of this module (i.e. :mod:`katgpucbf`) also make use of
+recommended that consumers of :mod:`katgpucbf` output data also make use of
 :mod:`spead2`. For those who cannot, this document serves as a brief summary
 of the SPEAD protocol in order to understand the output of each application
 within :mod:`katgpucbf`, which are further detailed elsewhere.
@@ -28,8 +30,9 @@ Packet Format
 
 A number of metadata fields are included within each packet, to facilitate heap
 reassembly. The SPEAD flavour used in :mod:`katgpucbf` is 64-48, which means that
-each metadata field is 64 bits wide, with the first 16 bits carrying the item ID
-and the remaining 48 carrying the value.
+each metadata field is 64 bits wide, with the first bit indicating the address
+mode, the next 15 carrying the item ID and the remaining 48 carrying the value
+(in the case of immediate items).
 
 Each packet contains the following metadata fields:
 
@@ -60,6 +63,6 @@ Most of the metadata remains constant for all packets in a heap. The heap offset
 changes across packets, in multiples of the packet size (which is configurable
 at runtime). This is used by the receiver to reassemble packets into a full heap.
 
-The value contained in the immediate items may change from heap to heap, or it
-may be static, with the data payload being the only changing thing, this depends
-on the nature of the stream.
+The values contained in the immediate items may change from heap to heap, or
+they may be static, with the data payload being the only changing thing,
+depending on the nature of the stream.
