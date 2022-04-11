@@ -6,7 +6,7 @@ SPEAD protocol
 Introduction
 ------------
 
-The Streaming Prototocol for Exchanging Astronomical Data (SPEAD) is a
+The Streaming Protocol for Exchanging Astronomical Data (SPEAD) is a
 lightweight streaming protocol, primarily UDP-based, designed for components
 of a radio astronomy signal-chain to transmit data to each other over Ethernet
 links.
@@ -37,7 +37,7 @@ Each packet contains the following metadata fields:
   Contains information about the flavour of SPEAD being used.
 
 ``heap counter/id``
-  A unique identifier that increments for each new heap.
+  A unique identifier for each new heap.
 
 ``heap size``
   Size of the heap in bytes.
@@ -53,8 +53,8 @@ Each SPEAD stream will have additional 64-bit fields specific to itself,
 referred to in SPEAD nomenclature as :dfn:`immediate items`. Each packet
 transmitted will contain all the immediate items to assist third-party consumers
 that prefer to work at the packet level (see
-:attr:`spead2.send.Heap.repeat_pointers` - note that this is not default spead2
-behaviour, but it is always on in katgpucbf).
+:attr:`spead2.send.Heap.repeat_pointers` — note that this is not default spead2
+behaviour, but it is always enabled in katgpucbf).
 
 Most of the metadata remains constant for all packets in a heap. The heap offset
 changes across packets, in multiples of the packet size (which is configurable
