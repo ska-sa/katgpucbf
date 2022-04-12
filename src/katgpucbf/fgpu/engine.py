@@ -61,20 +61,6 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
-def done_callback(task: asyncio.Task) -> None:
-    """
-    Handle cancellation of Processing Loops as a callback.
-
-    Log exceptions as soon as they occur.
-    """
-    try:
-        task.result()  # Evaluate just for exceptions
-    except asyncio.CancelledError:
-        logger.debug("%s was cancelled", task.get_name())
-    except Exception:
-        logger.exception("Processing %s failed with exception", task.get_name())
-
-
 class Engine(aiokatcp.DeviceServer):
     """A logical grouping to combine a `Processor` with other things it needs.
 
@@ -225,6 +211,11 @@ class Engine(aiokatcp.DeviceServer):
         self.populate_sensors(self.sensors)
         self.feng_id = feng_id
         self.n_ants = num_ants
+        self._stop_task: Optional[asyncio.Task] = None
+        # Passes possible exceptions back from on_stop. Ideally these would be
+        # recorded by _stop_task, but aiokatcp doesn't cope well with on_stop
+        # throwing.
+        self._stop_result = asyncio.get_running_loop().create_future()
 
         if use_vkgdr:
             import vkgdr.pycuda
@@ -500,12 +491,30 @@ class Engine(aiokatcp.DeviceServer):
         for delay_model, new_linear_model in zip(self.delay_models, new_linear_models):
             delay_model.add(new_linear_model)
 
+    def _halt_done_callback(self, task: asyncio.Task) -> None:
+        """
+        Handle cancellation of Processing Loops as a callback.
+
+        Log exceptions as soon as they occur and trigger an Engine halt if it
+        was an unexpected Exception.
+        """
+        try:
+            task.result()  # Evaluate just for exceptions
+        except asyncio.CancelledError:
+            logger.debug("%s was cancelled", task.get_name())
+        except Exception:
+            logger.exception("Processing %s failed with exception", task.get_name())
+            for proc_task in self._all_tasks:
+                proc_task.cancel()
+            if self._stop_task is None:
+                # So that only one task invokes the halt
+                self._stop_task = self.halt()
+
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
-        event loop and does the `gather` so that they can do their thing
-        concurrently. It also adds a task to continuously send the descriptor
+        event loop. It also adds a task to continuously send the descriptor
         heaps at an interval based on the `descriptor_interval_s`. See
         :meth:`~Processor.run_descriptors_loop` for more details.
 
@@ -528,7 +537,6 @@ class Engine(aiokatcp.DeviceServer):
             ),
             name=DESCRIPTOR_TASK_NAME,
         )
-        self._descriptor_task.add_done_callback(done_callback)
 
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -544,41 +552,56 @@ class Engine(aiokatcp.DeviceServer):
             self._processor.run_processing(self._src_streams),
             name=GPU_PROC_TASK_NAME,
         )
-        proc_task.add_done_callback(done_callback)
 
         recv_task = asyncio.create_task(
             self._processor.run_receive(self._src_streams, self._src_layout),
             name=RECV_TASK_NAME,
         )
-        recv_task.add_done_callback(done_callback)
 
         send_task = asyncio.create_task(
             self._processor.run_transmit(self._send_stream),
             name=SEND_TASK_NAME,
         )
-        send_task.add_done_callback(done_callback)
 
-        self._processing_task = asyncio.gather(
+        self._all_tasks = [
             proc_task,
             recv_task,
             send_task,
-        )
+            self._descriptor_task,
+        ]
+        for proc_task in self._all_tasks:
+            proc_task.add_done_callback(self._halt_done_callback)
 
         await super().start()
+
+    async def join(self) -> None:
+        """Block until the server has stopped.
+
+        Wait on the Engine.halt task if it was invoked by a raised Exception.
+        """
+        await super().join()
+        if self._stop_task is not None:
+            await self._stop_task
+        self._stop_result.result()  # Evaluate just for the exception
 
     async def on_stop(self):
         """Shut down processing when the device server is stopped.
 
         This is called by aiokatcp after closing the listening socket.
+        Also handle any Exceptions thrown unexpectedly in any of the
+        processing loops.
         """
         self._descriptor_task.cancel()
         for stream in self._src_streams:
             stream.stop()
-        try:
-            await asyncio.gather(
-                self._processing_task,
-                self._descriptor_task,
-                return_exceptions=True,
-            )
-        except Exception:
-            pass  # Errors get logged by the done_callback above
+        gathered_results = await asyncio.gather(
+            *self._all_tasks,
+            return_exceptions=True,
+        )
+        # See what issues arose, pass them up the chain
+        for result in gathered_results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                self._stop_result.set_exception(result)
+                break
+        else:
+            self._stop_result.set_result(None)
