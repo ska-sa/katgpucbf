@@ -514,8 +514,7 @@ class Engine(aiokatcp.DeviceServer):
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
-        event loop and does the `gather` so that they can do their thing
-        concurrently. It also adds a task to continuously send the descriptor
+        event loop. It also adds a task to continuously send the descriptor
         heaps at an interval based on the `descriptor_interval_s`. See
         :meth:`~Processor.run_descriptors_loop` for more details.
 
@@ -538,7 +537,6 @@ class Engine(aiokatcp.DeviceServer):
             ),
             name=DESCRIPTOR_TASK_NAME,
         )
-        self._descriptor_task.add_done_callback(self._halt_done_callback)
 
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -554,19 +552,16 @@ class Engine(aiokatcp.DeviceServer):
             self._processor.run_processing(self._src_streams),
             name=GPU_PROC_TASK_NAME,
         )
-        proc_task.add_done_callback(self._halt_done_callback)
 
         recv_task = asyncio.create_task(
             self._processor.run_receive(self._src_streams, self._src_layout),
             name=RECV_TASK_NAME,
         )
-        recv_task.add_done_callback(self._halt_done_callback)
 
         send_task = asyncio.create_task(
             self._processor.run_transmit(self._send_stream),
             name=SEND_TASK_NAME,
         )
-        send_task.add_done_callback(self._halt_done_callback)
 
         self._all_tasks = [
             proc_task,
@@ -574,6 +569,8 @@ class Engine(aiokatcp.DeviceServer):
             send_task,
             self._descriptor_task,
         ]
+        for proc_task in self._all_tasks:
+            proc_task.add_done_callback(self._halt_done_callback)
 
         await super().start()
 
