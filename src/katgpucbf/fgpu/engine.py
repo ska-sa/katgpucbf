@@ -499,13 +499,12 @@ class Engine(aiokatcp.DeviceServer):
         except asyncio.CancelledError:
             logger.debug("%s was cancelled", task.get_name())
         except Exception:
-            # TODO: Perhaps change this to logger.error as on_stop also does a
-            #       full logger.exception
             logger.exception("Processing %s failed with exception", task.get_name())
-            for task in self._all_tasks:
-                if not task.cancelled():
-                    task.cancel()
-            self._stop_task = self.halt()
+            for proc_task in self._all_tasks:
+                proc_task.cancel()
+            if self._stop_task is None:
+                # So that only one task invokes the halt
+                self._stop_task = self.halt()
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
@@ -579,9 +578,9 @@ class Engine(aiokatcp.DeviceServer):
 
         Wait on the Engine.halt task if it was invoked by a raised Exception.
         """
-        await super().join()
         if self._stop_task is not None:
             await self._stop_task
+        await super().join()
 
     async def on_stop(self):
         """Shut down processing when the device server is stopped.
@@ -598,10 +597,6 @@ class Engine(aiokatcp.DeviceServer):
             return_exceptions=True,
         )
         # See what issues arose, pass them up the chain
-        for task, result in zip(self._all_tasks, gathered_results):
-            try:
-                if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
-                    raise result
-            except Exception:
-                # logger.exception logs a full traceback of the Exception
-                logger.exception("Task: %s failed with Exception", task.get_name())
+        for result in gathered_results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
