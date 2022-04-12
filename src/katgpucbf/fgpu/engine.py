@@ -212,6 +212,10 @@ class Engine(aiokatcp.DeviceServer):
         self.feng_id = feng_id
         self.n_ants = num_ants
         self._stop_task: Optional[asyncio.Task] = None
+        # Passes possible exceptions back from on_stop. Ideally these would be
+        # recorded by _stop_task, but aiokatcp doesn't cope well with on_stop
+        # throwing.
+        self._stop_result = asyncio.get_running_loop().create_future()
 
         if use_vkgdr:
             import vkgdr.pycuda
@@ -578,9 +582,10 @@ class Engine(aiokatcp.DeviceServer):
 
         Wait on the Engine.halt task if it was invoked by a raised Exception.
         """
+        await super().join()
         if self._stop_task is not None:
             await self._stop_task
-        await super().join()
+        self._stop_result.result()  # Evaluate just for the exception
 
     async def on_stop(self):
         """Shut down processing when the device server is stopped.
@@ -599,4 +604,7 @@ class Engine(aiokatcp.DeviceServer):
         # See what issues arose, pass them up the chain
         for result in gathered_results:
             if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
-                raise result
+                self._stop_result.set_exception(result)
+                break
+        else:
+            self._stop_result.set_result(None)
