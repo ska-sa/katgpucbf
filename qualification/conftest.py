@@ -1,15 +1,23 @@
 """Fixtures and options for qualification testing of the correlator."""
 import json
 import logging
-import time
 from dataclasses import dataclass
 
 import aiokatcp
 import pytest
 
+from . import CorrelatorRemoteControl, get_dsim_endpoint
+
 
 def pytest_addoption(parser, pluginmanager):  # noqa: D103
-    parser.addoption("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
+    # I'm adding the image override as a cmd-line parameter. This process
+    # basically doesn't work without it, because you can't be sure what the MC
+    # is going to use. It seems best that it be explicit.
+    parser.addoption(
+        "--image-override", action="append", required=True, metavar="NAME:IMAGE:TAG", help="Override a single image"
+    )
+    # On the other hand, these things aren't likely to change very frequently,
+    # so an INI file is probably appropriate.
     parser.addini("master_controller_host", "Hostname (or IP address) of the SDP master controller", type="string")
     parser.addini("master_controller_port", "TCP port of the SDP master controller", type="string", default="5001")
 
@@ -26,8 +34,6 @@ def n_channels(request):  # noqa: D401
     return request.param
 
 
-# TODO: We may want to keep these in some kind of central place.
-# Though having said that, it may end up making more overhead than it's worth.
 @dataclass
 class Band:
     """Holds presets for a known band."""
@@ -56,7 +62,7 @@ def int_time() -> float:  # noqa: D104
 
 @pytest.fixture
 async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band: str, int_time: float) -> dict:
-    """Produce the configuration dict from the parsed command-line arguments."""
+    """Produce the configuration dict from the given parameters."""
     config: dict = {
         "version": "3.1",
         "config": {},
@@ -87,7 +93,7 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
         }
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
-        # Cycle through digitisers as necessary
+        # Right now I'm just using a single dsim, but this logic will scale for more.
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * n_antennas)],
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
@@ -102,21 +108,28 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
 
 
 @pytest.fixture
-async def correlator(pytestconfig, correlator_config):
+async def correlator(pytestconfig, correlator_config, band: Band):
     """Start a correlator using the SDP master controller.
 
     Shut the correlator down afterwards also.
     """
     host = pytestconfig.getini("master_controller_host")
     port = int(pytestconfig.getini("master_controller_port"))
-    name = f"qualification_correlator_{int(time.time())}"
-    client = await aiokatcp.Client.connect(host, port)
     try:
-        reply, _ = await client.request("product-configure", name, json.dumps(correlator_config))
-        host = reply[1].decode()
-        port = int(reply[2].decode())
-        logging.info(f"Product controller is at {host}:{port}")
-        yield
+        client = await aiokatcp.Client.connect(host, port)
+        async with client:
+            reply, _ = await client.request(
+                "product-configure", "qualification_correlator*", json.dumps(correlator_config)
+            )
+        product_controller_host = reply[1].decode()
+        product_controller_port = int(reply[2].decode())
+        logging.info(
+            f"Product controller for qualification correlator is at {product_controller_host}:{product_controller_port}"
+        )
+        product_controller_client = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
+        dsim_host, dsim_port = await get_dsim_endpoint(product_controller_client, BANDS[band].adc_sample_rate)
+        dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
+        yield CorrelatorRemoteControl(product_controller_client, dsim_client)
     except ConnectionError:
         logging.exception("unable to connect")
         raise
@@ -124,5 +137,6 @@ async def correlator(pytestconfig, correlator_config):
         logging.exception("Something went wrong with starting the correlator!")
         raise
     finally:
-
-        await client.request("product-deconfigure", name)
+        await dsim_client.close()
+        await product_controller_client.request("product-deconfigure")
+        product_controller_client.close()
