@@ -4,7 +4,7 @@ import ast
 import asyncio
 import logging
 import time
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 import aiokatcp
 import numba
@@ -194,7 +194,7 @@ async def async_main(args: argparse.Namespace) -> None:
         # Note that we are making an assumption that nothing is straying too far
         # from wall time here. I don't have a way other than adjusting the dsim
         # signal of ensuring that we get going after a specific timestamp in the
-        # DSP pipeline itself.
+        # DSP pipeline itself. See NGC-549
 
         async for chunk in stream.data_ringbuffer:
             recvd_timestamp = chunk.chunk_id * timestamp_step
@@ -211,7 +211,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 assert bl_idx in loud_bls  # Best to check the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
-                    check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering)
+                    assert check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering)
                 stream.add_free_chunk(chunk)
                 break
 
@@ -246,8 +246,33 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering):
+def check_signal_expected_in_bl(bl_idx: int, bl: Tuple[str], loud_bl: int, bls_ordering: List[Tuple[str]]):
+    """Check whether signal is expected in this baseline, given which one is being tested.
+
+    It isn't possible in the general case to get signal in only a single
+    baseline. There will be auto-correlations, and the negative correlations
+    which will show signal as well.
+
+    Parameters
+    ----------
+    bl_idx
+        The expected index of the baseline that we are testing.
+    bl
+        The baseline. A tuple of the form ("m801h", "m802v").
+    loud_bl
+        The baseline where signal has been detected.
+    bls_ordering
+        The output of the `baseline_correlation_products-bls-ordering`
+        sensor, so that we can check the indices of the above.
+
+    Returns
+    -------
+    bool
+        Indication of whether signal is expected, i.e. whether the test can pass.
+    """
+
     def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
+        """Get the index of the baseline ordering for the given antennas /pols."""
         return bls_ordering.index((f"m{800 + ant0}{pol0}", f"m{800 + ant1}{pol1}"))
 
     ant0 = int(bl[0][3])
@@ -257,17 +282,22 @@ def check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering):
 
     if loud_bl == bl_idx:
         logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
+        return True
     elif loud_bl == get_bl_idx(ant0, pol0, ant0, pol0):
         logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
+        return True
     elif loud_bl == get_bl_idx(ant1, pol1, ant1, pol1):
         logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
+        return True
     elif loud_bl == get_bl_idx(ant1, pol1, ant0, pol0):
         logger.debug(
             "Signal in %r - fine - it's the negative of what we expect.",
             loud_bl,
         )
+        return True
     else:
         logger.error("Signal in %d but it wasn't expected there!", loud_bl)
+        return False
 
 
 if __name__ == "__main__":
