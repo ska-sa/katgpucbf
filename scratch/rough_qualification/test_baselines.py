@@ -4,7 +4,6 @@ import ast
 import asyncio
 import logging
 import time
-from collections import namedtuple
 from typing import Tuple, Union
 
 import aiokatcp
@@ -23,8 +22,6 @@ from spead2.recv.numba import chunk_place_data
 CPLX = 2
 
 logger = logging.getLogger(__name__)
-
-Baseline = namedtuple("Baseline", ["ant0", "pol0", "ant1", "pol1"])
 
 
 async def print_all_sensors(client: aiokatcp.Client):
@@ -190,7 +187,6 @@ async def async_main(args: argparse.Namespace) -> None:
             await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
 
     for bl_idx, bl in enumerate(bls_ordering):
-        current_bl = Baseline(int(bl[0][3]), bl[0][4], int(bl[1][3]), bl[1][4])
         logger.info("Checking baseline %r (%d)", bl, bl_idx)
         await zero_all_gains()
         await unzero_a_baseline(bl)
@@ -215,7 +211,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 assert bl_idx in loud_bls  # Best to check the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
-                    check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl, bls_ordering)
+                    check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering)
                 stream.add_free_chunk(chunk)
                 break
 
@@ -250,17 +246,22 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_bl(bl_idx, bl, current_bl, loud_bl, bls_ordering):
+def check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering):
     def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
         return bls_ordering.index((f"m{800 + ant0}{pol0}", f"m{800 + ant1}{pol1}"))
 
+    ant0 = int(bl[0][3])
+    pol0 = bl[0][4]
+    ant1 = int(bl[1][3])
+    pol1 = bl[1][4]
+
     if loud_bl == bl_idx:
         logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
-    elif loud_bl == get_bl_idx(current_bl.ant0, current_bl.pol0, current_bl.ant0, current_bl.pol0):
+    elif loud_bl == get_bl_idx(ant0, pol0, ant0, pol0):
         logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
-    elif loud_bl == get_bl_idx(current_bl.ant1, current_bl.pol1, current_bl.ant1, current_bl.pol1):
+    elif loud_bl == get_bl_idx(ant1, pol1, ant1, pol1):
         logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
-    elif loud_bl == get_bl_idx(current_bl.ant1, current_bl.pol1, current_bl.ant0, current_bl.pol0):
+    elif loud_bl == get_bl_idx(ant1, pol1, ant0, pol0):
         logger.debug(
             "Signal in %r - fine - it's the negative of what we expect.",
             loud_bl,
