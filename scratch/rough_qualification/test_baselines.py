@@ -111,64 +111,27 @@ async def async_main(args: argparse.Namespace) -> None:
     int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
     sync_time = await get_sensor_val(pc_client, "antenna_channelised_voltage-sync-time")
     timestamp_scale_factor = await get_sensor_val(pc_client, "antenna_channelised_voltage-scale-factor-timestamp")
-
+    n_samples_between_spectra = await get_sensor_val(pc_client, "antenna_channelised_voltage-n-samples-between-spectra")
     bls_ordering = ast.literal_eval(await get_sensor_val(pc_client, "baseline_correlation_products-bls-ordering"))
 
     # Get dsim ready.
     channel_width = bandwidth / n_chans
     dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
-    channel = 1234  # picked fairly arbitrarily. We just need to see the tone.
+    channel = n_chans // 3  # picked fairly arbitrarily. We just need to see the tone.
     await setup_dsim(dsim_host, dsim_port, channel, channel_width)
 
-    # Lifted from :class:`katgpucbf.xbgpu.XSend`.
-    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
-    HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
-
-    # According to the ICD.
-    TIMESTAMP = 0x1600  # noqa: N806
-    FREQUENCY = 0x4103  # noqa: N806
-
-    # These are the spead items that we will need for placing the individual
-    # heaps within the chunk.
-    items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
-    timestamp_step = 2 * n_chans * n_spectra_per_acc  # True only for wideband.
-
-    # Heap placement function. Gets compiled so that spead2's C code can call it.
-    # A chunk consists of all baselines and channels for a single point in time.
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
-    def chunk_place(data_ptr, data_size):
-        data = numba.carray(data_ptr, 1)
-        items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
-        channel_offset = items[0]
-        timestamp = items[1]
-        payload_size = items[2]
-        # If the payload size doesn't match, discard the heap (could be descriptors etc).
-        if payload_size == HEAP_PAYLOAD_SIZE:
-            data[0].chunk_id = timestamp // timestamp_step
-            data[0].heap_index = channel_offset // n_chans_per_substream
-            data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
-
-    stream_config = spead2.recv.StreamConfig(max_heaps=HEAPS_PER_CHUNK * 3)
-
-    # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
-    # May need to revisit that assumption for much larger array sizes.
-    max_chunks = round(1 // int_time) + 1
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=items,
-        max_chunks=max_chunks,
-        place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
+    timestamp_step, stream = create_stream(
+        args.interface,
+        multicast_endpoints,
+        n_bls,
+        n_chans,
+        n_chans_per_substream,
+        n_bits_per_sample,
+        n_spectra_per_acc,
+        int_time,
+        n_samples_between_spectra,
+        args.ibv,
     )
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks)
-    data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_chunks)
-    stream = spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(),
-        stream_config,
-        chunk_stream_config,
-        data_ringbuffer,
-        free_ringbuffer,
-    )
-
-    setup_stream(args, multicast_endpoints, n_bls, n_chans, n_bits_per_sample, HEAPS_PER_CHUNK, max_chunks, stream)
 
     # Baseline test.
     # Let's have some functions to help us.
@@ -211,29 +174,87 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 assert bl_idx in loud_bls  # Best to check the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
-                    assert check_signal_expected_in_bl(bl_idx, bl, loud_bl, bls_ordering)
+                    assert check_signal_expected_in_baseline(bl_idx, bl, loud_bl, bls_ordering)
                 stream.add_free_chunk(chunk)
                 break
 
 
-def setup_stream(args, multicast_endpoints, n_bls, n_chans, n_bits_per_sample, heaps_per_chunk, max_chunks, stream):
-    """Set up the spead2 stream needed for ingest."""
+def create_stream(
+    interface_address,
+    multicast_endpoints,
+    n_bls,
+    n_chans,
+    n_chans_per_substream,
+    n_bits_per_sample,
+    n_spectra_per_acc,
+    int_time,
+    n_samples_between_spectra,
+    ibv=False,
+):
+    # Lifted from :class:`katgpucbf.xbgpu.XSend`.
+    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
+    HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
+
+    # According to the ICD.
+    TIMESTAMP = 0x1600  # noqa: N806
+    FREQUENCY = 0x4103  # noqa: N806
+
+    # Needed for placing the individual heaps within the chunk.
+    items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
+    timestamp_step = n_samples_between_spectra * n_spectra_per_acc
+
+    # Heap placement function. Gets compiled so that spead2's C code can call it.
+    # A chunk consists of all baselines and channels for a single point in time.
+    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
+    def chunk_place(data_ptr, data_size):
+        data = numba.carray(data_ptr, 1)
+        items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
+        channel_offset = items[0]
+        timestamp = items[1]
+        payload_size = items[2]
+        # If the payload size doesn't match, discard the heap (could be descriptors etc).
+        if payload_size == HEAP_PAYLOAD_SIZE:
+            data[0].chunk_id = timestamp // timestamp_step
+            data[0].heap_index = channel_offset // n_chans_per_substream
+            data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
+
+    stream_config = spead2.recv.StreamConfig(max_heaps=HEAPS_PER_CHUNK * 3)
+
+    # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
+    # May need to revisit that assumption for much larger array sizes.
+    max_chunks = round(1 // int_time) + 1
+    chunk_stream_config = spead2.recv.ChunkStreamConfig(
+        items=items,
+        max_chunks=max_chunks,
+        place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
+    )
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks)
+    data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_chunks)
+    stream = spead2.recv.ChunkRingStream(
+        spead2.ThreadPool(),
+        stream_config,
+        chunk_stream_config,
+        data_ringbuffer,
+        free_ringbuffer,
+    )
+
     for _ in range(max_chunks):
         chunk = spead2.recv.Chunk(
-            present=np.empty(heaps_per_chunk, np.uint8),
+            present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
         chunk.chunk_id
 
-    if args.ibv:
+    if ibv:
         config = spead2.recv.UdpIbvConfig(
-            endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
+            endpoints=multicast_endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
         )
         stream.add_udp_ibv_reader(config)
     else:
         for ep in multicast_endpoints:
-            stream.add_udp_reader(*ep, interface_address=args.interface)
+            stream.add_udp_reader(*ep, interface_address=interface_address)
+    return timestamp_step, stream
 
 
 async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
@@ -246,12 +267,17 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_bl(bl_idx: int, bl: Tuple[str], loud_bl: int, bls_ordering: List[Tuple[str]]):
+def check_signal_expected_in_baseline(bl_idx: int, bl: Tuple[str], loud_bl: int, bls_ordering: List[Tuple[str]]):
     """Check whether signal is expected in this baseline, given which one is being tested.
 
     It isn't possible in the general case to get signal in only a single
     baseline. There will be auto-correlations, and the negative correlations
     which will show signal as well.
+
+    .. todo:
+
+        I'm still not entirely happy with this function. Maybe it should just be
+        a small helper function in the larger one.
 
     Parameters
     ----------
