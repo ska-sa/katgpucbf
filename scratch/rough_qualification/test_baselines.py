@@ -150,7 +150,7 @@ async def async_main(args: argparse.Namespace) -> None:
             await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
 
     for bl_idx, bl in enumerate(bls_ordering):
-        logger.info("Checking baseline %r (%d)", bl, bl_idx)
+        logger.info("Checking baseline %r (%d/%d)", bl, bl_idx + 1, n_bls)
         await zero_all_gains()
         await unzero_a_baseline(bl)
         expected_timestamp = (time.time() + 1 - sync_time) * timestamp_scale_factor
@@ -172,24 +172,24 @@ async def async_main(args: argparse.Namespace) -> None:
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
-                assert bl_idx in loud_bls  # Best to check the expected baseline is actually in the list.
+                assert bls_ordering.index(bl) in loud_bls  # Check that the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
-                    assert check_signal_expected_in_baseline(bl_idx, bl, loud_bl, bls_ordering)
+                    assert check_signal_expected_in_baseline(bl, loud_bl, bls_ordering)
                 stream.add_free_chunk(chunk)
                 break
 
 
 def create_stream(
-    interface_address,
-    multicast_endpoints,
-    n_bls,
-    n_chans,
-    n_chans_per_substream,
-    n_bits_per_sample,
-    n_spectra_per_acc,
-    int_time,
-    n_samples_between_spectra,
-    ibv=False,
+    interface_address: str,
+    multicast_endpoints: List[Tuple[str, int]],
+    n_bls: int,
+    n_chans: int,
+    n_chans_per_substream: int,
+    n_bits_per_sample: int,
+    n_spectra_per_acc: int,
+    int_time: float,
+    n_samples_between_spectra: int,
+    use_ibv: bool = False,
 ):
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
@@ -204,7 +204,7 @@ def create_stream(
     timestamp_step = n_samples_between_spectra * n_spectra_per_acc
 
     # Heap placement function. Gets compiled so that spead2's C code can call it.
-    # A chunk consists of all baselines and channels for a single point in time.
+    # A chunk consists of all channels and all baselines for a single point in time.
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
     def chunk_place(data_ptr, data_size):
         data = numba.carray(data_ptr, 1)
@@ -246,7 +246,7 @@ def create_stream(
         stream.add_free_chunk(chunk)
         chunk.chunk_id
 
-    if ibv:
+    if use_ibv:
         config = spead2.recv.UdpIbvConfig(
             endpoints=multicast_endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
         )
@@ -267,7 +267,7 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_baseline(bl_idx: int, bl: Tuple[str], loud_bl: int, bls_ordering: List[Tuple[str]]):
+def check_signal_expected_in_baseline(bl: Tuple[str], loud_bl: int, bls_ordering: List[Tuple[str]]):
     """Check whether signal is expected in this baseline, given which one is being tested.
 
     It isn't possible in the general case to get signal in only a single
@@ -281,8 +281,6 @@ def check_signal_expected_in_baseline(bl_idx: int, bl: Tuple[str], loud_bl: int,
 
     Parameters
     ----------
-    bl_idx
-        The expected index of the baseline that we are testing.
     bl
         The baseline. A tuple of the form ("m801h", "m802v").
     loud_bl
@@ -306,7 +304,7 @@ def check_signal_expected_in_baseline(bl_idx: int, bl: Tuple[str], loud_bl: int,
     ant1 = int(bl[1][3])
     pol1 = bl[1][4]
 
-    if loud_bl == bl_idx:
+    if loud_bl == get_bl_idx(ant0, pol0, ant1, pol1):
         logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
         return True
     elif loud_bl == get_bl_idx(ant0, pol0, ant0, pol0):
