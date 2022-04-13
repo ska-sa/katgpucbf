@@ -24,12 +24,6 @@ CPLX = 2
 logger = logging.getLogger(__name__)
 
 
-async def print_all_sensors(client: aiokatcp.Client):
-    _reply, informs = await client.request("sensor-value")
-    for inform in informs:
-        print(inform)
-
-
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
     """Get the value of a katcp sensor.
 
