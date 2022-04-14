@@ -261,11 +261,11 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_baseline(bl: Tuple[str], loud_bl: int, bls_ordering: List[Tuple[str]]):
+def check_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_ordering: List[Tuple[str, str]]) -> bool:
     """Check whether signal is expected in this baseline, given which one is being tested.
 
     It isn't possible in the general case to get signal in only a single
-    baseline. There will be auto-correlations, and the negative correlations
+    baseline. There will be auto-correlations, and the conjugate correlations
     which will show signal as well.
 
     .. todo:
