@@ -1,5 +1,5 @@
 aiohttp
-aiokatcp
+aiokatcp>=1.1.0
 dask
 katsdpservices[aiomonitor]>=1.2
 katsdpsigproc[CUDA]>=1.4.2
