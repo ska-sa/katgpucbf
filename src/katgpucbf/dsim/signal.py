@@ -121,8 +121,7 @@ class CombinedSignal(Signal):
     op_name: str
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
-        # The ignore is due to https://github.com/python/mypy/issues/10711
-        return self.combine(self.a.sample(n, sample_rate), self.b.sample(n, sample_rate))  # type: ignore
+        return self.combine(self.a.sample(n, sample_rate), self.b.sample(n, sample_rate))
 
     def __str__(self) -> str:
         return f"({self.a} {self.op_name} {self.b})"
