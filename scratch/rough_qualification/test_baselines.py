@@ -115,16 +115,16 @@ async def async_main(args: argparse.Namespace) -> None:
     await setup_dsim(dsim_host, dsim_port, channel, channel_width)
 
     timestamp_step, stream = create_stream(
-        args.interface,
-        multicast_endpoints,
-        n_bls,
-        n_chans,
-        n_chans_per_substream,
-        n_bits_per_sample,
-        n_spectra_per_acc,
-        int_time,
-        n_samples_between_spectra,
-        args.ibv,
+        interface_address=args.interface,
+        multicast_endpoints=multicast_endpoints,
+        n_bls=n_bls,
+        n_chans=n_chans,
+        n_chans_per_substream=n_chans_per_substream,
+        n_bits_per_sample=n_bits_per_sample,
+        n_spectra_per_acc=n_spectra_per_acc,
+        int_time=int_time,
+        n_samples_between_spectra=n_samples_between_spectra,
+        use_ibv=args.ibv,
     )
 
     # Baseline test.
@@ -143,8 +143,8 @@ async def async_main(args: argparse.Namespace) -> None:
             # it'll need to be tested.
             await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
 
-    for bl_idx, bl in enumerate(bls_ordering):
-        logger.info("Checking baseline %r (%d/%d)", bl, bl_idx + 1, n_bls)
+    for bl in bls_ordering:
+        logger.info("Checking baseline %r", bl)
         await zero_all_gains()
         await unzero_a_baseline(bl)
         expected_timestamp = (time.time() + 1 - sync_time) * timestamp_scale_factor
@@ -267,20 +267,17 @@ def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_orderi
     baseline. There will be auto-correlations, and the conjugate correlations
     which will show signal as well.
 
-    .. todo:
-
-        I'm still not entirely happy with this function. Maybe it should just be
-        a small helper function in the larger one.
-
     Parameters
     ----------
     bl
-        The baseline. A tuple of the form ("m801h", "m802v").
+        A tuple of the form ("m801h", "m802v") indicating which baseline we are
+        checking.
     loud_bl
-        The baseline where signal has been detected.
+        A baseline where signal has been detected.
     bls_ordering
-        The output of the `baseline_correlation_products-bls-ordering`
-        sensor, so that we can check the indices of the above.
+        The output of the ``baseline_correlation_products-bls-ordering``
+        sensor, so that we can verify whether signal is expected in ``loud_bl``
+        based on the input ``bl``.
 
     Returns
     -------
@@ -288,32 +285,20 @@ def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_orderi
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
 
-    def get_bl_idx(ant0: int, pol0: str, ant1: int, pol1: str) -> int:
-        """Get the index of the baseline ordering for the given antennas /pols."""
-        return bls_ordering.index((f"m{800 + ant0}{pol0}", f"m{800 + ant1}{pol1}"))
-
-    ant0 = int(bl[0][3])
-    pol0 = bl[0][4]
-    ant1 = int(bl[1][3])
-    pol1 = bl[1][4]
-
-    if loud_bl == get_bl_idx(ant0, pol0, ant1, pol1):
+    if loud_bl == bls_ordering.index((bl[0], bl[1])):
         logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
         return True
-    elif loud_bl == get_bl_idx(ant0, pol0, ant0, pol0):
+    elif loud_bl == bls_ordering.index((bl[0], bl[0])):
         logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
         return True
-    elif loud_bl == get_bl_idx(ant1, pol1, ant1, pol1):
+    elif loud_bl == bls_ordering.index((bl[1], bl[1])):
         logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
         return True
-    elif loud_bl == get_bl_idx(ant1, pol1, ant0, pol0):
-        logger.debug(
-            "Signal in %r - fine - it's the negative of what we expect.",
-            loud_bl,
-        )
+    elif loud_bl == bls_ordering.index((bl[1], bl[0])):
+        logger.debug("Signal in %r - fine - it's the negative of what we expect.", loud_bl)
         return True
     else:
-        logger.error("Signal in %d but it wasn't expected there!", loud_bl)
+        logger.error("Signal from bl %r wasn't expected in baseline index %d!", bl, loud_bl)
         return False
 
 
