@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -57,20 +57,6 @@ from .correlation import CorrelationTemplate
 from .xsend import XSend, make_stream
 
 logger = logging.getLogger(__name__)
-
-
-def done_callback(future: asyncio.Future) -> None:
-    """
-    Handle cancellation of Processing Loops as a callback.
-
-    Log exceptions as soon as they occur.
-    """
-    try:
-        future.result()  # Evaluate just for exceptions
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.exception("Processing failed with exception")
 
 
 class QueueItem:
@@ -840,13 +826,9 @@ class XBEngine(DeviceServer):
         if self.tx_transport_added is not True:
             raise AttributeError("Transport for sending data has not yet been set.")
 
-        self.task = asyncio.gather(
-            asyncio.create_task(self._receiver_loop()),
-            asyncio.create_task(self._gpu_proc_loop()),
-            asyncio.create_task(self._sender_loop()),
-        )
-
-        self.task.add_done_callback(done_callback)
+        self.add_service_task(asyncio.create_task(self._receiver_loop(), name="receiver"))
+        self.add_service_task(asyncio.create_task(self._gpu_proc_loop(), name="processing"))
+        self.add_service_task(asyncio.create_task(self._sender_loop(), name="sender"))
 
         await super().start()
 
@@ -858,8 +840,10 @@ class XBEngine(DeviceServer):
         """
         self.receiver_stream.stop()
 
-        try:
-            await self.task
-        except Exception:
-            # Errors get logged by the done_callback in start()
-            pass
+        # If any of the tasks are already done then we had an exception, and
+        # waiting for the rest may hang as the shutdown path won't proceed
+        # neatly.
+        if not any(task.done() for task in self.service_tasks):
+            for task in self.service_tasks:
+                if task.get_name() != "descriptors":
+                    await task
