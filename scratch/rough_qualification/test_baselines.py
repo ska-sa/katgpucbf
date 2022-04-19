@@ -168,7 +168,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 assert bls_ordering.index(bl) in loud_bls  # Check that the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
-                    assert check_signal_expected_in_baseline(bl, loud_bl, bls_ordering)
+                    assert is_signal_expected_in_baseline(bl, loud_bl, bls_ordering)
                 stream.add_free_chunk(chunk)
                 break
 
@@ -212,7 +212,7 @@ def create_stream(
             data[0].heap_index = channel_offset // n_chans_per_substream
             data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
 
-    stream_config = spead2.recv.StreamConfig(max_heaps=HEAPS_PER_CHUNK * 3)
+    stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK)
 
     # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
     # May need to revisit that assumption for much larger array sizes.
@@ -238,7 +238,6 @@ def create_stream(
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
-        chunk.chunk_id
 
     if use_ibv:
         config = spead2.recv.UdpIbvConfig(
@@ -261,7 +260,7 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def check_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_ordering: List[Tuple[str, str]]) -> bool:
+def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_ordering: List[Tuple[str, str]]) -> bool:
     """Check whether signal is expected in this baseline, given which one is being tested.
 
     It isn't possible in the general case to get signal in only a single
