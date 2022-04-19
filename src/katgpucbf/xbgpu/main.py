@@ -48,6 +48,7 @@ from .. import (
     DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
     DEFAULT_TTL,
+    DESCRIPTOR_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
 )
@@ -317,7 +318,7 @@ async def async_main(args: argparse.Namespace) -> None:
     logger.info("Starting main processing loop")
 
     descriptor_task = asyncio.create_task(
-        xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S), name="descriptors"
+        xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S), name=DESCRIPTOR_TASK_NAME
     )
     xbengine.add_service_task(descriptor_task)
 

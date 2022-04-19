@@ -49,7 +49,7 @@ import numpy as np
 import spead2
 from aiokatcp import DeviceServer
 
-from .. import __version__
+from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
@@ -290,7 +290,7 @@ class XBEngine(DeviceServer):
         # transport yet and will not function until one of the
         # add_*_receiver_transport() functions has been called.
         self.ringbuffer = ChunkRingbuffer(
-            n_free_chunks, name="recv_ringbuffer", task_name="receiver_loop", monitor=monitor
+            n_free_chunks, name="recv_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
 
         layout = recv.Layout(
@@ -826,9 +826,9 @@ class XBEngine(DeviceServer):
         if self.tx_transport_added is not True:
             raise AttributeError("Transport for sending data has not yet been set.")
 
-        self.add_service_task(asyncio.create_task(self._receiver_loop(), name="receiver"))
-        self.add_service_task(asyncio.create_task(self._gpu_proc_loop(), name="processing"))
-        self.add_service_task(asyncio.create_task(self._sender_loop(), name="sender"))
+        self.add_service_task(asyncio.create_task(self._receiver_loop(), name=RECV_TASK_NAME))
+        self.add_service_task(asyncio.create_task(self._gpu_proc_loop(), name=GPU_PROC_TASK_NAME))
+        self.add_service_task(asyncio.create_task(self._sender_loop(), name=SEND_TASK_NAME))
 
         await super().start()
 
@@ -845,5 +845,5 @@ class XBEngine(DeviceServer):
         # neatly.
         if not any(task.done() for task in self.service_tasks):
             for task in self.service_tasks:
-                if task.get_name() != "descriptors":
+                if task.get_name() != DESCRIPTOR_TASK_NAME:
                     await task
