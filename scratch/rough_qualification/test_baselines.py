@@ -295,7 +295,7 @@ def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_orderi
         logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
         return True
     elif loud_bl == bls_ordering.index((bl[1], bl[0])):
-        logger.debug("Signal in %r - fine - it's the negative of what we expect.", loud_bl)
+        logger.debug("Signal in %r - fine - it's the conjugate of what we expect.", loud_bl)
         return True
     else:
         logger.error("Signal from bl %r wasn't expected in baseline index %d!", bl, loud_bl)
