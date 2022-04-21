@@ -107,6 +107,11 @@ pipeline {
         sh 'pytest -v -rs --all-combinations --junitxml=reports/result.xml'
       }
     }
+    stage('Publish test results') {
+      steps {
+        junit 'reports/results.xml'
+      }
+    }
   }
 
   /* This post stage is configured to always run at the end of the pipeline,
