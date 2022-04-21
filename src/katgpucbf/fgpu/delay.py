@@ -188,7 +188,7 @@ class MultiDelayModel(AbstractDelayModel):
         self._models = deque([LinearDelayModel(-1, 0.0, 0.0, 0.0, 0.0)])
         self.callback_func = callback_func
         if callback_func is not None:
-            self.callback_func(self._models)  # type: ignore
+            callback_func(self._models)
 
     def __call__(self, time: float) -> float:  # noqa: D102
         while len(self._models) > 1 and time >= self._models[1].start:

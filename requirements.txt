@@ -8,7 +8,7 @@ aioconsole==0.4.1
     # via aiomonitor
 aiohttp==3.8.0
     # via -r requirements.in
-aiokatcp==1.0.0
+aiokatcp==1.2.0
     # via -r requirements.in
 aiomonitor==0.4.5
     # via katsdpservices
@@ -126,7 +126,7 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==3.9.0
+spead2==3.9.1
     # via -r requirements.in
 terminaltables==3.1.10
     # via aiomonitor
@@ -136,6 +136,7 @@ toolz==0.11.2
     #   partd
 typing-extensions==3.10.0.0
     # via
+    #   aiokatcp
     #   async-timeout
     #   katsdpsigproc
 vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr

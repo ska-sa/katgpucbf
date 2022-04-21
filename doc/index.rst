@@ -12,13 +12,14 @@ Welcome to katgpucbf's documentation!
    :caption: Development
 
    dev-guide
+   spead
 
 .. toctree::
    :maxdepth: 2
    :caption: F engine
 
    fgpu.design
-   fgpu.packet_format
+   fgpu.networking
    fgpu.glossary
 
 .. toctree::
@@ -27,7 +28,6 @@ Welcome to katgpucbf's documentation!
 
    xbgpu.theory
    xbgpu.networking
-   xbgpu.packet_format
    xbgpu.tcc
 
 .. toctree::

@@ -14,29 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""
-Module for sending baselines produced by the GPU X-Engine onto the network.
-
-This module has been designed to work with asyncio.
-
-The data sent onto the network conforms to the SPEAD protocol. This module
-takes the baseline data, turns it into a SPEAD heap and then transmits that
-heap out onto the network using the spead2 Python module. The high-performance
-ibverbs implementation of spead2 is recommended even though the data rates out
-are very low. This is due to the ibverbs implementation using far fewer system
-resources. The format of the packets transmitted by SPEAD2 can be found here:
-- :ref:`baseline-correlation-products-data-packet-format`.
-
-The XSend class creates its own buffers and data in those buffers will be
-encapsulated into SPEAD heaps and sent onto the network. The user can request
-the buffers from the object, populate them and then give them back to the object
-for transmission. In using ibverbs, the memory regions of the XSend-generated
-buffers have been registered with ibverbs to enable zero copy transmission -
-using other buffers will force an extra copy.  Zero copy transmission means
-that the data to be transmitted can sent from its current memory location
-directly to the NIC without having to be copied to an intermediary memory
-location in the process, thereby halving the memory bandwidth required to send.
-"""
+"""Module for sending baseline correlation products onto the network."""
 
 import asyncio
 import math
@@ -280,6 +258,8 @@ class XSend:
             rate=send_rate_bytes_per_second,
         )
         self.source_stream = stream_factory(stream_config, self.buffers)
+        # Set heap count sequence to allow a receiver to ingest multiple
+        # X-engine outputs, if they should so choose.
         self.source_stream.set_cnt_sequence(
             channel_offset // n_channels_per_stream,
             n_channels // n_channels_per_stream,

@@ -151,12 +151,10 @@ async def async_main() -> None:
     # Override dask's default thread pool with one that runs with SCHED_IDLE
     # priority. This ensures that when the networking code needs a CPU core,
     # it gets priority over dask.
-    # The type: ignore is because typeshed is currently missing os.sched_param
-    # (it is fixed in https://github.com/python/typeshed/pull/6442).
     pool = ThreadPoolExecutor(
         dask.config.get("num_workers", dask.system.CPU_COUNT),
         initializer=os.sched_setscheduler,
-        initargs=(0, os.SCHED_IDLE, os.sched_param(0)),  # type: ignore
+        initargs=(0, os.SCHED_IDLE, os.sched_param(0)),
     )
     atexit.register(pool.shutdown)
     dask.config.set(pool=pool)

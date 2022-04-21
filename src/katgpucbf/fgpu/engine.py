@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -59,20 +59,6 @@ def format_complex(value: numbers.Complex) -> str:
     as a Python complex may not give exactly the same value.
     """
     return f"{value.real}{value.imag:+}j"
-
-
-def done_callback(task: asyncio.Task) -> None:
-    """
-    Handle cancellation of Processing Loops as a callback.
-
-    Log exceptions as soon as they occur.
-    """
-    try:
-        task.result()  # Evaluate just for exceptions
-    except asyncio.CancelledError:
-        logger.debug("%s was cancelled", task.get_name())
-    except Exception:
-        logger.exception("Processing %s failed with exception", task.get_name())
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -504,8 +490,7 @@ class Engine(aiokatcp.DeviceServer):
         """Start the engine.
 
         This function adds the receive, processing and transmit tasks onto the
-        event loop and does the `gather` so that they can do their thing
-        concurrently. It also adds a task to continuously send the descriptor
+        event loop. It also adds a task to continuously send the descriptor
         heaps at an interval based on the `descriptor_interval_s`. See
         :meth:`~Processor.run_descriptors_loop` for more details.
 
@@ -528,7 +513,7 @@ class Engine(aiokatcp.DeviceServer):
             ),
             name=DESCRIPTOR_TASK_NAME,
         )
-        self._descriptor_task.add_done_callback(done_callback)
+        self.add_service_task(self._descriptor_task)
 
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -544,41 +529,36 @@ class Engine(aiokatcp.DeviceServer):
             self._processor.run_processing(self._src_streams),
             name=GPU_PROC_TASK_NAME,
         )
-        proc_task.add_done_callback(done_callback)
+        self.add_service_task(proc_task)
 
         recv_task = asyncio.create_task(
             self._processor.run_receive(self._src_streams, self._src_layout),
             name=RECV_TASK_NAME,
         )
-        recv_task.add_done_callback(done_callback)
+        self.add_service_task(recv_task)
 
         send_task = asyncio.create_task(
             self._processor.run_transmit(self._send_stream),
             name=SEND_TASK_NAME,
         )
-        send_task.add_done_callback(done_callback)
-
-        self._processing_task = asyncio.gather(
-            proc_task,
-            recv_task,
-            send_task,
-        )
+        self.add_service_task(send_task)
 
         await super().start()
 
-    async def on_stop(self):
+    async def on_stop(self) -> None:
         """Shut down processing when the device server is stopped.
 
         This is called by aiokatcp after closing the listening socket.
+        Also handle any Exceptions thrown unexpectedly in any of the
+        processing loops.
         """
         self._descriptor_task.cancel()
         for stream in self._src_streams:
             stream.stop()
-        try:
-            await asyncio.gather(
-                self._processing_task,
-                self._descriptor_task,
-                return_exceptions=True,
-            )
-        except Exception:
-            pass  # Errors get logged by the done_callback above
+        # If any of the tasks are already done then we had an exception, and
+        # waiting for the rest may hang as the shutdown path won't proceed
+        # neatly.
+        if not any(task.done() for task in self.service_tasks):
+            for task in self.service_tasks:
+                if task is not self._descriptor_task:
+                    await task
