@@ -168,7 +168,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
                 assert bls_ordering.index(bl) in loud_bls  # Check that the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
-                    assert is_signal_expected_in_baseline(bl, loud_bl, bls_ordering)
+                    assert is_signal_expected_in_baseline(bl, bls_ordering[loud_bl])
                 stream.add_free_chunk(chunk)
                 break
 
@@ -260,8 +260,8 @@ async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
         await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
-def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_ordering: List[Tuple[str, str]]) -> bool:
-    """Check whether signal is expected in this baseline, given which one is being tested.
+def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[str, str]) -> bool:
+    """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
 
     It isn't possible in the general case to get signal in only a single
     baseline. There will be auto-correlations, and the conjugate correlations
@@ -274,10 +274,6 @@ def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_orderi
         checking.
     loud_bl
         A baseline where signal has been detected.
-    bls_ordering
-        The output of the ``baseline_correlation_products-bls-ordering``
-        sensor, so that we can verify whether signal is expected in ``loud_bl``
-        based on the input ``bl``.
 
     Returns
     -------
@@ -285,20 +281,20 @@ def is_signal_expected_in_baseline(bl: Tuple[str, str], loud_bl: int, bls_orderi
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
 
-    if loud_bl == bls_ordering.index((bl[0], bl[1])):
-        logger.info("Signal confirmed in bl %d for %r where expected", loud_bl, bl)
+    if loud_bl == expected_bl:
+        logger.info("Signal confirmed in bl %r where expected", expected_bl)
         return True
-    elif loud_bl == bls_ordering.index((bl[0], bl[0])):
+    elif loud_bl == (expected_bl[0], expected_bl[0]):
         logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
         return True
-    elif loud_bl == bls_ordering.index((bl[1], bl[1])):
+    elif loud_bl == (expected_bl[1], expected_bl[1]):
         logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
         return True
-    elif loud_bl == bls_ordering.index((bl[1], bl[0])):
+    elif loud_bl == (expected_bl[1], expected_bl[0]):
         logger.debug("Signal in %r - fine - it's the conjugate of what we expect.", loud_bl)
         return True
     else:
-        logger.error("Signal from bl %r wasn't expected in baseline index %d!", bl, loud_bl)
+        logger.error("Signal injected into bl %r wasn't expected to show up in %r!", expected_bl, loud_bl)
         return False
 
 
