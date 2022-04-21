@@ -168,7 +168,6 @@ async def async_main(args: argparse.Namespace) -> None:
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
-        chunk.chunk_id
 
     if args.ibv:
         config = spead2.recv.UdpIbvConfig(
