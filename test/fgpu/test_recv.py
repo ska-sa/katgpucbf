@@ -30,7 +30,7 @@ from numpy.typing import ArrayLike
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
 from katgpucbf.fgpu.recv import Chunk, Layout
-from katgpucbf.spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, RAW_DATA_ID, TIMESTAMP_ID
+from katgpucbf.spead import ADC_SAMPLES_ID, DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, TIMESTAMP_ID
 
 from .. import PromDiff
 
@@ -132,7 +132,7 @@ def gen_heaps(
             heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
             heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
             heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=0))
-            heap.add_item(spead2.Item(RAW_DATA_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
+            heap.add_item(spead2.Item(ADC_SAMPLES_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
             yield heap
         timestamp += layout.heap_samples
 
