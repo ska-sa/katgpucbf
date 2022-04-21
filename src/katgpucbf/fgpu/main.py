@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -25,7 +25,6 @@ import argparse
 import asyncio
 import ipaddress
 import logging
-import signal
 from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import katsdpservices
@@ -38,6 +37,7 @@ from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
+from ..utils import add_signal_handlers
 from .engine import Engine
 
 _T = TypeVar("_T")
@@ -249,23 +249,6 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         if not isinstance(src, str) and args.src_interface is None:
             parser.error("Live source requires --src-interface")
     return args
-
-
-def add_signal_handlers(engine: Engine) -> None:
-    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
-    signums = [signal.SIGINT, signal.SIGTERM]
-
-    def handler():
-        # Remove the handlers so that if it fails to shut down, the next
-        # attempt will try harder.
-        logger.info("Received signal, shutting down")
-        for signum in signums:
-            loop.remove_signal_handler(signum)
-        engine.halt()
-
-    loop = asyncio.get_event_loop()
-    for signum in signums:
-        loop.add_signal_handler(signum, handler)
 
 
 def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine, Monitor]:
