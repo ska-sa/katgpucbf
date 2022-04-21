@@ -269,7 +269,7 @@ def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[
 
     Parameters
     ----------
-    bl
+    expected_bl
         A tuple of the form ("m801h", "m802v") indicating which baseline we are
         checking.
     loud_bl
