@@ -1,136 +1,49 @@
 #!/usr/bin/env python3
-import argparse
+
+"""Baseline verification tests."""
+
 import ast
-import asyncio
 import logging
 import time
-from typing import List, Tuple, Union
+from typing import Tuple
 
-import aiokatcp
-import numba
 import numpy as np
-import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from katsdpservices import get_interface_address
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
-from numba import types
-from spead2.numba import intp_to_voidptr
-from spead2.recv.numba import chunk_place_data
+
+from . import CorrelatorRemoteControl, get_sensor_val
 
 CPLX = 2
 
 logger = logging.getLogger(__name__)
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
-    """Get the value of a katcp sensor.
+async def test_baselines(
+    n_antennas: int, n_channels: int, correlator: CorrelatorRemoteControl, receive_stream: spead2.recv.ChunkRingStream
+):
+    """Test that the baseline ordering indicated in the sensor matches the output data."""
+    pc_client = correlator.product_controller_client
 
-    If the sensor value can't be cast as an int or a float (in that order), the
-    value will get returned as a string. This simple implementation ignores the
-    actual type advertised by the server.
-    """
-    _reply, informs = await client.request("sensor-value", sensor_name)
-
-    expected_types = [int, float, str]
-    for t in expected_types:
-        try:
-            return aiokatcp.decode(t, informs[0].arguments[4])
-        except ValueError:
-            continue
-
-
-async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
-    """Get the katcp address for a named product controller from the master."""
-    client = await aiokatcp.Client.connect(*mc_endpoint)
-    async with client:
-        return endpoint_parser(None)(await get_sensor_val(client, f"{product_name}.katcp-address"))
-
-
-async def get_dsim_endpoint(pc_client: aiokatcp.Client) -> Endpoint:
-    """Get the katcp address for a dsim on a product controller (with hardcoded name)."""
-    return endpoint_parser(None)(await get_sensor_val(pc_client, "sim.m800.1712000000.0.port"))
-
-
-def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--interface",
-        type=get_interface_address,
-        required=True,
-        help="Name of network  to use for ingest.",
-    )
-    parser.add_argument(
-        "--ibv",
-        action="store_true",
-        help="Use ibverbs",
-    )
-    parser.add_argument(
-        "--mc-address",
-        type=endpoint_parser(5001),
-        default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
-        help="Master controller to query for details about the product. [%(default)s]",
-    )
-    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
-    args = parser.parse_args()
-    asyncio.run(async_main(args))
-
-
-async def async_main(args: argparse.Namespace) -> None:
-    host, port = await get_product_controller_endpoint(args.mc_address, args.product_name)
-    logger.info("Connecting to product controller on %s:%d", host, port)
-    pc_client = await aiokatcp.Client.connect(host, port)
-    logger.info("Successfully connected to product controller.")
-
-    # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
-    # But we can cast Endpoints to tuples, which it does know.
-    multicast_endpoints = [
-        tuple(endpoint)
-        for endpoint in endpoint_list_parser(7148)(
-            await get_sensor_val(pc_client, "baseline_correlation_products-destination")
-        )
-    ]
-
-    # We need these parameters for various useful reasons.
-    n_ants = await get_sensor_val(pc_client, "antenna_channelised_voltage-n-fengs")
-    n_bls = await get_sensor_val(pc_client, "baseline_correlation_products-n-bls")
-    n_chans = await get_sensor_val(pc_client, "baseline_correlation_products-n-chans")
-    n_chans_per_substream = await get_sensor_val(pc_client, "baseline_correlation_products-n-chans-per-substream")
-    n_bits_per_sample = await get_sensor_val(pc_client, "baseline_correlation_products-xeng-out-bits-per-sample")
-    n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
-    bandwidth = await get_sensor_val(pc_client, "antenna_channelised_voltage-bandwidth")
-    int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
+    # Get some necessary sensor values from the correlator.
+    bls_ordering = ast.literal_eval(await get_sensor_val(pc_client, "baseline_correlation_products-bls-ordering"))
     sync_time = await get_sensor_val(pc_client, "antenna_channelised_voltage-sync-time")
     timestamp_scale_factor = await get_sensor_val(pc_client, "antenna_channelised_voltage-scale-factor-timestamp")
     n_samples_between_spectra = await get_sensor_val(pc_client, "antenna_channelised_voltage-n-samples-between-spectra")
-    bls_ordering = ast.literal_eval(await get_sensor_val(pc_client, "baseline_correlation_products-bls-ordering"))
+    n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
+    bandwidth = await get_sensor_val(pc_client, "antenna_channelised_voltage-bandwidth")
 
-    # Get dsim ready.
-    channel_width = bandwidth / n_chans
-    dsim_host, dsim_port = await get_dsim_endpoint(pc_client)
-    channel = n_chans // 3  # picked fairly arbitrarily. We just need to see the tone.
-    await setup_dsim(dsim_host, dsim_port, channel, channel_width)
+    timestamp_step = n_samples_between_spectra * n_spectra_per_acc
 
-    timestamp_step, stream = create_stream(
-        interface_address=args.interface,
-        multicast_endpoints=multicast_endpoints,
-        n_bls=n_bls,
-        n_chans=n_chans,
-        n_chans_per_substream=n_chans_per_substream,
-        n_bits_per_sample=n_bits_per_sample,
-        n_spectra_per_acc=n_spectra_per_acc,
-        int_time=int_time,
-        n_samples_between_spectra=n_samples_between_spectra,
-        use_ibv=args.ibv,
-    )
+    # Get dsim ready with a tone in a known channel that we can check for on the output.
+    channel = n_channels // 3  # picked fairly arbitrarily. We just need to know where to set and look for the tone.
+    channel_width = bandwidth / n_channels
+    channel_centre_freq = channel * channel_width
+    await correlator.dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
-    # Baseline test.
-    # Let's have some functions to help us.
+    # Some helper functions:
     async def zero_all_gains():
-        for ant in range(n_ants):
+        for ant in range(n_antennas):
             for pol in ["v", "h"]:
                 logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
                 await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
@@ -141,7 +54,7 @@ async def async_main(args: argparse.Namespace) -> None:
             # This was done prior to NGC-535, so the gain used here will need
             # to be tweaked if the test is repeated later. 1 may be fine, but
             # it'll need to be tested.
-            await pc_client.request("gain", "antenna_channelised_voltage", ant, "1e-4")
+            await pc_client.request("gain", "antenna_channelised_voltage", ant, "1")
 
     for bl in bls_ordering:
         logger.info("Checking baseline %r", bl)
@@ -153,15 +66,15 @@ async def async_main(args: argparse.Namespace) -> None:
         # signal of ensuring that we get going after a specific timestamp in the
         # DSP pipeline itself. See NGC-549
 
-        async for chunk in stream.data_ringbuffer:
+        async for chunk in receive_stream.data_ringbuffer:
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                stream.add_free_chunk(chunk)
+                receive_stream.add_free_chunk(chunk)
 
             elif recvd_timestamp <= expected_timestamp:
                 logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
-                stream.add_free_chunk(chunk)
+                receive_stream.add_free_chunk(chunk)
 
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
@@ -169,95 +82,8 @@ async def async_main(args: argparse.Namespace) -> None:
                 assert bls_ordering.index(bl) in loud_bls  # Check that the expected baseline is actually in the list.
                 for loud_bl in loud_bls:
                     assert is_signal_expected_in_baseline(bl, bls_ordering[loud_bl])
-                stream.add_free_chunk(chunk)
+                receive_stream.add_free_chunk(chunk)
                 break
-
-
-def create_stream(
-    interface_address: str,
-    multicast_endpoints: List[Tuple[str, int]],
-    n_bls: int,
-    n_chans: int,
-    n_chans_per_substream: int,
-    n_bits_per_sample: int,
-    n_spectra_per_acc: int,
-    int_time: float,
-    n_samples_between_spectra: int,
-    use_ibv: bool = False,
-):
-    # Lifted from :class:`katgpucbf.xbgpu.XSend`.
-    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
-    HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
-
-    # According to the ICD.
-    TIMESTAMP = 0x1600  # noqa: N806
-    FREQUENCY = 0x4103  # noqa: N806
-
-    # Needed for placing the individual heaps within the chunk.
-    items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
-    timestamp_step = n_samples_between_spectra * n_spectra_per_acc
-
-    # Heap placement function. Gets compiled so that spead2's C code can call it.
-    # A chunk consists of all channels and all baselines for a single point in time.
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp), nopython=True)
-    def chunk_place(data_ptr, data_size):
-        data = numba.carray(data_ptr, 1)
-        items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
-        channel_offset = items[0]
-        timestamp = items[1]
-        payload_size = items[2]
-        # If the payload size doesn't match, discard the heap (could be descriptors etc).
-        if payload_size == HEAP_PAYLOAD_SIZE:
-            data[0].chunk_id = timestamp // timestamp_step
-            data[0].heap_index = channel_offset // n_chans_per_substream
-            data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
-
-    stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK)
-
-    # Assuming X-engines are at most 1 second out of sync, with one extra chunk for luck.
-    # May need to revisit that assumption for much larger array sizes.
-    max_chunks = round(1 // int_time) + 1
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=items,
-        max_chunks=max_chunks,
-        place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
-    )
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks)
-    data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_chunks)
-    stream = spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(),
-        stream_config,
-        chunk_stream_config,
-        data_ringbuffer,
-        free_ringbuffer,
-    )
-
-    for _ in range(max_chunks):
-        chunk = spead2.recv.Chunk(
-            present=np.empty(HEAPS_PER_CHUNK, np.uint8),
-            data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
-        )
-        stream.add_free_chunk(chunk)
-
-    if use_ibv:
-        config = spead2.recv.UdpIbvConfig(
-            endpoints=multicast_endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
-        )
-        stream.add_udp_ibv_reader(config)
-    else:
-        for ep in multicast_endpoints:
-            stream.add_udp_reader(*ep, interface_address=interface_address)
-    return timestamp_step, stream
-
-
-async def setup_dsim(dsim_host, dsim_port, channel, channel_width):
-    logger.info("Connecting to dsim 0 on %s:%d", dsim_host, dsim_port)
-    dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
-    logger.info("Successfully connected to dsim.")
-    channel_centre_freq = channel * channel_width  # TODO: check this.
-    # Set the dsim with a tone.
-    async with dsim_client:
-        await dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
 
 
 def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[str, str]) -> bool:
@@ -280,7 +106,6 @@ def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[
     bool
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
-
     if loud_bl == expected_bl:
         logger.info("Signal confirmed in bl %r where expected", expected_bl)
         return True
@@ -296,7 +121,3 @@ def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[
     else:
         logger.error("Signal injected into bl %r wasn't expected to show up in %r!", expected_bl, loud_bl)
         return False
-
-
-if __name__ == "__main__":
-    main()
