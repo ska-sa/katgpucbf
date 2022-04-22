@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -27,7 +27,6 @@ import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from signal import SIGINT, SIGTERM
 from typing import List, Optional, Sequence, Tuple
 
 import dask.config
@@ -39,6 +38,7 @@ import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from ..utils import add_signal_handlers
 from . import descriptors, send, signal
 from .server import DeviceServer
 
@@ -124,23 +124,6 @@ def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align:
     # Convert to a sample count
     samples = first_block * align
     return samples, sync_time + samples / adc_sample_rate
-
-
-def add_signal_handlers(server: DeviceServer) -> None:
-    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
-    signums = [SIGINT, SIGTERM]
-
-    def handler():
-        # Remove the handlers so that if it fails to shut down, the next
-        # attempt will try harder.
-        logger.info("Received signal, shutting down")
-        for signum in signums:
-            loop.remove_signal_handler(signum)
-        server.halt()
-
-    loop = asyncio.get_event_loop()
-    for signum in signums:
-        loop.add_signal_handler(signum, handler)
 
 
 async def async_main() -> None:
