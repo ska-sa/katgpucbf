@@ -110,7 +110,7 @@ pipeline {
     stage('Publish test results') {
       steps {
         junit 'reports/result.xml'
-        cobertura coberturaReportFile: 'coverage.xml'
+        cobertura coberturaReportFile: 'reports/result.xml'
       }
     }
   }
