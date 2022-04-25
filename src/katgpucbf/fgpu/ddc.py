@@ -113,17 +113,20 @@ class DDC(accel.Operation):
         group_in_size = template._group_out_size * template.decimation
         # TODO: rather have the kernel avoid needing alignment, as stray NaNs
         # could take things down the slow path in sincospif.
+        groups = accel.divup(self.out_samples, template.wgs)
         self.slots["in"] = accel.IOSlot(
             (
                 accel.Dimension(
                     samples * SAMPLE_BITS // BYTE_BITS,
-                    min_padded_size=accel.roundup(samples, group_in_size) * SAMPLE_BITS // BYTE_BITS,
+                    min_padded_size=(groups * group_in_size + template.taps - template.decimation)
+                    * SAMPLE_BITS
+                    // BYTE_BITS,
                 ),
             ),
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot(
-            (accel.Dimension(self.out_samples, alignment=template._group_out_size),),
+            (accel.Dimension(self.out_samples, min_padded_size=groups * template._group_out_size),),
             np.complex64,
         )
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
