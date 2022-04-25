@@ -49,14 +49,14 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         l_weights[i] = weights[i];
 
     // Load, decode and mix input data
-    LOCAL_DECL float2 samples[PADDED_SHARED_SIZE];
+    LOCAL_DECL float2 samples[PADDED_SHARED_SIZE + PADDED_SHARED_SIZE / DECIMATION];
     for (int i = lid; i < PADDED_SHARED_SIZE; i += WGS)
     {
         float orig = get_sample_10bit(in, in_offset + i);
         float phase = i * mix_scale + mix_bias;
         float2 mix;
         sincospif(phase, &mix.y, &mix.x);
-        samples[i] = make_float2(mix.x * orig, mix.y * orig);
+        samples[i + (unsigned) i / DECIMATION] = make_float2(mix.x * orig, mix.y * orig);
     }
 
     BARRIER();
@@ -64,12 +64,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     for (int i = lid; i < GROUP_OUT_SIZE; i += WGS)
     {
         float2 sum = make_float2(0.0f, 0.0f);
-        int start = lid * DECIMATION;
-#pragma unroll
+        int start = lid * (DECIMATION + 1);
         for (int j = 0; j < TAPS; j++)
         {
             float c = l_weights[j];
-            float2 v = samples[start + j];
+            float2 v = samples[start + j + j / DECIMATION];
             sum.x += c * v.x;
             sum.y += c * v.y;
         }
