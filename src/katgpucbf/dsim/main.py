@@ -151,20 +151,6 @@ async def async_main() -> None:
         for _ in range(2)
     ]
 
-    timestamp = 0
-    if args.sync_time is not None:
-        timestamp, start_time = first_timestamp(
-            args.sync_time, time.time(), args.adc_sample_rate, args.signal_heaps * args.heap_samples
-        )
-        # Sleep until start_time. Python doesn't seem to have an interface
-        # for sleeping until an absolute time, so this will be wrong by the
-        # time that elapsed from calling time.time until calling time.sleep,
-        # but that's small change.
-        await asyncio.sleep(max(0, start_time - time.time()))
-    else:
-        args.sync_time = time.time()
-    logger.info("First timestamp will be %#x", timestamp)
-
     endpoints: List[Tuple[str, int]] = []
     for pol_dest in args.dest:
         for ep in pol_dest:
@@ -197,6 +183,20 @@ async def async_main() -> None:
         ibv=args.ibv,
         affinity=args.affinity,
     )
+
+    timestamp = 0
+    if args.sync_time is not None:
+        timestamp, start_time = first_timestamp(
+            args.sync_time, time.time(), args.adc_sample_rate, args.signal_heaps * args.heap_samples
+        )
+        # Sleep until start_time. Python doesn't seem to have an interface
+        # for sleeping until an absolute time, so this will be wrong by the
+        # time that elapsed from calling time.time until calling time.sleep,
+        # but that's small change.
+        await asyncio.sleep(max(0, start_time - time.time()))
+    else:
+        args.sync_time = time.time()
+    logger.info("First timestamp will be %#x", timestamp)
 
     # Set spead stream to have heap id in even numbers for dsim data.
     stream.set_cnt_sequence(2, 2)
