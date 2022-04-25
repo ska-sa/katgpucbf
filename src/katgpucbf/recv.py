@@ -23,7 +23,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
-import numba
+import numba.core.ccallback
 import numpy as np
 import scipy
 import spead2.recv

@@ -53,7 +53,7 @@ katsdpsigproc[cuda]==1.4.2
     # via -r requirements.in
 katsdptelstate==0.11
     # via -r requirements.in
-llvmlite==0.36.0
+llvmlite==0.38.0
     # via numba
 locket==0.2.1
     # via partd
@@ -73,7 +73,7 @@ netifaces==0.11.0
     # via
     #   katsdpservices
     #   katsdptelstate
-numba==0.53.1
+numba==0.55.1
     # via katsdpsigproc
 numpy==1.21.0
     # via
