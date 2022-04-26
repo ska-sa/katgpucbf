@@ -47,7 +47,11 @@ ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.o
 
 typedef union
 {
-    float weights[TAPS];
+    struct
+    {
+        float2 samples[PAD_ADDR(LOAD_SIZE)];
+        float weights[TAPS];
+    };
     float2 out[COARSEN * (WGS / SG_SIZE)];
 } local_t;
 
@@ -77,7 +81,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         local_data.weights[i] = weights[i];
 
     // Load, decode and mix input data
-    LOCAL_DECL float2 samples[PAD_ADDR(LOAD_SIZE)];
     for (int i = lid; i < LOAD_SIZE; i += WGS)
     {
         int idx = in_offset + i;
@@ -85,7 +88,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         float phase = i * mix_scale + mix_bias;
         float2 mix;
         sincospif(phase, &mix.y, &mix.x);
-        samples[pad_addr(i)] = make_float2(mix.x * orig, mix.y * orig);
+        local_data.samples[pad_addr(i)] = make_float2(mix.x * orig, mix.y * orig);
     }
 
     int sgid = (unsigned int) lid / SG_SIZE;
@@ -105,12 +108,12 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         {
             float2 r_samples[COARSEN];
             for (int j = 0; j < COARSEN - 1; j++)
-                r_samples[j] = samples[start + pad_addr(phase + j * DECIMATION)];
+                r_samples[j] = local_data.samples[start + pad_addr(phase + j * DECIMATION)];
             for (int row = 0; row < TAPS; row += DECIMATION)
             {
                 int i = row + phase;
                 float w = local_data.weights[i + sgpos];
-                r_samples[COARSEN - 1] = samples[start + pad_addr(i + (COARSEN - 1) * DECIMATION)];
+                r_samples[COARSEN - 1] = local_data.samples[start + pad_addr(i + (COARSEN - 1) * DECIMATION)];
                 for (int j = 0; j < COARSEN; j++)
                 {
                     sums[j].x += w * r_samples[j].x;
