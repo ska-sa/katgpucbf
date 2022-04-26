@@ -56,13 +56,20 @@ class DDCTemplate:
         if taps % decimation != 0:
             raise ValueError("taps must be a multiple of decimation")
         self.wgs = 128  # TODO: tune
+        self.coarsen = 2  # TODO: tune
         self.taps = taps
         self.decimation = decimation
-        self._group_out_size = self.wgs  # TODO: tune
+        self._group_out_size = self.wgs * self.coarsen  # TODO: tune
         program = accel.build(
             context,
             "kernels/ddc_serial.mako",
-            {"wgs": self.wgs, "taps": taps, "decimation": decimation, "group_out_size": self._group_out_size},
+            {
+                "wgs": self.wgs,
+                "taps": taps,
+                "decimation": decimation,
+                "group_out_size": self._group_out_size,
+                "coarsen": self.coarsen,
+            },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("ddc")
@@ -110,23 +117,15 @@ class DDC(accel.Operation):
         self.template = template
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.decimation)
-        group_in_size = template._group_out_size * template.decimation
         # TODO: rather have the kernel avoid needing alignment, as stray NaNs
         # could take things down the slow path in sincospif.
         groups = accel.divup(self.out_samples, template.wgs)
         self.slots["in"] = accel.IOSlot(
-            (
-                accel.Dimension(
-                    samples * SAMPLE_BITS // BYTE_BITS,
-                    min_padded_size=(groups * group_in_size + template.taps - template.decimation)
-                    * SAMPLE_BITS
-                    // BYTE_BITS,
-                ),
-            ),
+            (accel.Dimension(samples * SAMPLE_BITS // BYTE_BITS),),
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot(
-            (accel.Dimension(self.out_samples, min_padded_size=groups * template._group_out_size),),
+            (accel.Dimension(self.out_samples),),
             np.complex64,
         )
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
@@ -135,6 +134,7 @@ class DDC(accel.Operation):
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
         weights_buffer = self.buffer("weights")
+        groups = accel.divup(out_buffer.shape[0], self.template._group_out_size)
         # TODO: set up the offsets and mix frequency
         self.command_queue.enqueue_kernel(
             self.template.kernel,
@@ -144,9 +144,11 @@ class DDC(accel.Operation):
                 weights_buffer.buffer,
                 np.int32(0),  # out_offset
                 np.int32(0),  # in_offset
+                np.int32(out_buffer.shape[0]),  # out_size
+                np.int32(in_buffer.shape[0] * BYTE_BITS // SAMPLE_BITS),  # in_size
                 np.float32(0),  # mix_scale
                 np.float32(0),  # mix_bias
             ],
-            global_size=(accel.roundup(out_buffer.shape[0], self.template.wgs), 1, 1),
+            global_size=(groups * self.template.wgs, 1, 1),
             local_size=(self.template.wgs, 1, 1),
         )

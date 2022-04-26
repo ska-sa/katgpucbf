@@ -19,6 +19,7 @@
 
 /* Alignment requirements:
  * - DECIMATION must divide into TAPS
+ * - GROUP_OUT_SIZE must be a multiple of COARSEN * WGS
  */
 
 #define WGS ${wgs}
@@ -27,6 +28,7 @@
 #define GROUP_OUT_SIZE ${group_out_size}
 #define GROUP_IN_SIZE (GROUP_OUT_SIZE * DECIMATION)
 #define PADDED_SHARED_SIZE (GROUP_IN_SIZE + TAPS - DECIMATION)
+#define COARSEN ${coarsen}
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     GLOBAL float2 * RESTRICT out,
@@ -34,6 +36,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     const GLOBAL float * RESTRICT weights,
     int out_offset,
     int in_offset,
+    int out_size,
+    int in_size,
     float mix_scale,
     float mix_bias)
 {
@@ -41,6 +45,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     int group = get_group_id(0);
     in_offset += group * GROUP_IN_SIZE;
     out_offset += group * GROUP_OUT_SIZE;
+    out += out_offset;
+    out_size -= out_offset;
     mix_bias += group * GROUP_IN_SIZE * mix_scale; // TODO: does this lose precision?
 
     // Load coefficients
@@ -52,7 +58,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     LOCAL_DECL float2 samples[PADDED_SHARED_SIZE + PADDED_SHARED_SIZE / DECIMATION];
     for (int i = lid; i < PADDED_SHARED_SIZE; i += WGS)
     {
-        float orig = get_sample_10bit(in, in_offset + i);
+        int idx = in_offset + i;
+        float orig = (idx < in_size) ? get_sample_10bit(in, in_offset + i) : 0.0f;
         float phase = i * mix_scale + mix_bias;
         float2 mix;
         sincospif(phase, &mix.y, &mix.x);
@@ -61,17 +68,27 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 
     BARRIER();
 
-    for (int i = lid; i < GROUP_OUT_SIZE; i += WGS)
+    for (int i = COARSEN * lid; i < GROUP_OUT_SIZE; i += COARSEN * WGS)
     {
-        float2 sum = make_float2(0.0f, 0.0f);
-        int start = lid * (DECIMATION + 1);
+        float2 sums[COARSEN];
+        for (int k = 0; k < COARSEN; k++)
+            sums[k] = make_float2(0.0f, 0.0f);
+        int start = i * (DECIMATION + 1);
         for (int j = 0; j < TAPS; j++)
         {
             float c = l_weights[j];
-            float2 v = samples[start + j + j / DECIMATION];
-            sum.x += c * v.x;
-            sum.y += c * v.y;
+            for (int k = 0; k < COARSEN; k++)
+            {
+                float2 v = samples[start + k * (DECIMATION + 1) + j + j / DECIMATION];
+                sums[k].x += c * v.x;
+                sums[k].y += c * v.y;
+            }
         }
-        out[out_offset + i] = sum;
+        for (int k = 0; k < COARSEN; k++)
+        {
+            int idx = i + k;
+            if (idx < out_size)
+                out[idx] = sums[k];
+        }
     }
 }
