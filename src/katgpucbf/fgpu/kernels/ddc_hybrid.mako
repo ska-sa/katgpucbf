@@ -45,6 +45,12 @@ DEVICE_FN unsigned int pad_addr(unsigned int addr)
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
+typedef union
+{
+    float weights[TAPS];
+    float2 out[COARSEN * (WGS / SG_SIZE)];
+} local_t;
+
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     GLOBAL float2 * RESTRICT out,
     const GLOBAL uchar * RESTRICT in,
@@ -56,6 +62,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     float mix_scale,
     float mix_bias)
 {
+    LOCAL_DECL local_t local_data;
+
     int lid = get_local_id(0);
     int group = get_group_id(0);
     in_offset += group * GROUP_IN_SIZE;
@@ -65,9 +73,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     mix_bias += group * GROUP_IN_SIZE * mix_scale; // TODO: does this lose precision?
 
     // Load coefficients
-    LOCAL_DECL float l_weights[TAPS];
     for (int i = lid; i < TAPS; i += WGS)
-        l_weights[i] = weights[i];
+        local_data.weights[i] = weights[i];
 
     // Load, decode and mix input data
     LOCAL_DECL float2 samples[PAD_ADDR(LOAD_SIZE)];
@@ -81,12 +88,12 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         samples[pad_addr(i)] = make_float2(mix.x * orig, mix.y * orig);
     }
 
-    BARRIER();
-
     int sgid = (unsigned int) lid / SG_SIZE;
     int sgpos = (unsigned int) lid % SG_SIZE;
     for (int outer = 0; outer < GROUP_OUT_SIZE; outer += COARSEN * (WGS / SG_SIZE))
     {
+        BARRIER();
+
         // This subgroup will compute COARSEN consecutive outputs starting from
         // outer + sgid * COARSEN.
         float2 sums[COARSEN];
@@ -102,7 +109,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             for (int row = 0; row < TAPS; row += DECIMATION)
             {
                 int i = row + phase;
-                float w = l_weights[i + sgpos];
+                float w = local_data.weights[i + sgpos];
                 r_samples[COARSEN - 1] = samples[start + pad_addr(i + (COARSEN - 1) * DECIMATION)];
                 for (int j = 0; j < COARSEN; j++)
                 {
@@ -122,19 +129,22 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             sums[j].x = reduce(sums[j].x, sgpos, &scratch);
             sums[j].y = reduce(sums[j].y, sgpos, &scratch);
         }
+
+        BARRIER();
+
+        /* TODO: write directly to global memory if it won't cause
+         * uncoalesced accesses.
+         */
         if (sgpos == 0)
         {
             for (int j = 0; j < COARSEN; j++)
-            {
-                int idx = outer + sgid * COARSEN + j;
-                /* TODO: This is uncoalesced. Is it worth collecting
-                 * results in shmem? Or trying to broadcast results
-                 * so that all the work items in the subgroup can
-                 * be involved?
-                 */
-                if (idx < out_size)
-                    out[idx] = sums[j];
-            }
+                local_data.out[sgid * COARSEN + j] = sums[j]; // TODO: can bank conflicts be avoided?
         }
+
+        BARRIER();
+
+        // TODO: ensure the loop is unrollable when the trip count is fixed
+        for (int j = lid; j < COARSEN * (WGS / SG_SIZE); j += WGS)
+            out[outer + j] = local_data.out[j];
     }
 }
