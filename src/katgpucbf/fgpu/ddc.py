@@ -55,20 +55,23 @@ class DDCTemplate:
             raise ValueError("decimation must be positive")
         if taps % decimation != 0:
             raise ValueError("taps must be a multiple of decimation")
-        self.wgs = 128  # TODO: tune
-        self.coarsen = 2  # TODO: tune
+        # TODO: tune the magic numbers
+        self.wgs = 128
+        self._sg_size = 4
+        self._coarsen = 4
         self.taps = taps
         self.decimation = decimation
-        self._group_out_size = self.wgs * self.coarsen  # TODO: tune
+        self._group_out_size = self.wgs // self._sg_size * self._coarsen  # TODO: tune
         program = accel.build(
             context,
-            "kernels/ddc_serial.mako",
+            "kernels/ddc_hybrid.mako",
             {
                 "wgs": self.wgs,
                 "taps": taps,
                 "decimation": decimation,
                 "group_out_size": self._group_out_size,
-                "coarsen": self.coarsen,
+                "coarsen": self._coarsen,
+                "sg_size": self._sg_size,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
@@ -117,9 +120,6 @@ class DDC(accel.Operation):
         self.template = template
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.decimation)
-        # TODO: rather have the kernel avoid needing alignment, as stray NaNs
-        # could take things down the slow path in sincospif.
-        groups = accel.divup(self.out_samples, template.wgs)
         self.slots["in"] = accel.IOSlot(
             (accel.Dimension(samples * SAMPLE_BITS // BYTE_BITS),),
             np.uint8,
