@@ -1,6 +1,8 @@
 """Fixtures and options for qualification testing of the correlator."""
 import json
 import logging
+import subprocess
+import time
 
 import aiokatcp
 import pytest
@@ -9,6 +11,7 @@ from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from . import BANDS, Band, CorrelatorRemoteControl, create_stream, get_dsim_endpoint, get_sensor_val
+from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +32,42 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addini("use_ibv", "Use ibverbs", type="bool", default="false")
 
 
-@pytest.fixture(params=[2, 3])
+def pytest_report_collectionfinish(config):  # noqa: D103
+    # Using this hook to collect configuration information, because it's run
+    # once, after collection but before the actual tests. Couldn't really find a
+    # better place, and I did look around quite a bit.
+    git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty"]).decode()
+    logger.info("Git information: %s", git_information)
+    config._report_log_plugin._write_json_data(
+        {"$report_type": "TestConfiguration", "Test Suite Git Info": git_information}
+    )
+
+
+@pytest.fixture(
+    params=[
+        14,
+    ]
+)
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param
 
 
-@pytest.fixture(params=[4096, 8192])
+@pytest.fixture(
+    params=[
+        8192,
+    ]
+)
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
     return request.param
 
 
-@pytest.fixture(params=["l", "u"])
+@pytest.fixture(
+    params=[
+        "l",
+    ]
+)
 def band(request) -> str:  # noqa: D104
     """Band ID."""
     return request.param
@@ -51,6 +77,14 @@ def band(request) -> str:  # noqa: D104
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
     return 0.5
+
+
+@pytest.fixture
+def pdf_report(request) -> Reporter:
+    """Fixture for logging steps in a test."""
+    data = [{"$msg_type": "test_info", "blurb": request.node.function.__doc__, "test_start": time.time()}]
+    request.node.user_properties.append(("pdf_report_data", data))
+    return Reporter(data)
 
 
 @pytest.fixture
@@ -97,7 +131,7 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
         "int_time": int_time,
     }
 
-    logger.debug("Config for correlator generated.")
+    logger.info(f"Config for {n_antennas}-A, {n_channels}-chan {band}-band correlator generated.")
     return config
 
 
@@ -110,31 +144,42 @@ async def correlator(pytestconfig, correlator_config, band: Band):
     host = pytestconfig.getini("master_controller_host")
     port = int(pytestconfig.getini("master_controller_port"))
     try:
-        logger.debug("Connecting to master controller to try and create a correlator.")
+        logger.debug("Connecting to master controller at %s:%d to try and create a correlator.", host, port)
         client = await aiokatcp.Client.connect(host, port)
+    except ConnectionError:
+        logger.exception("unable to connect to master controller!")
+        raise
+
+    try:
         async with client:
             reply, _ = await client.request(
                 "product-configure", "qualification_correlator*", json.dumps(correlator_config)
             )
-        product_controller_host = reply[1].decode()
-        product_controller_port = int(reply[2].decode())
-        logger.info(
-            f"Product controller for qualification correlator is at {product_controller_host}:{product_controller_port}"
-        )
-        product_controller_client = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
-        dsim_host, dsim_port = await get_dsim_endpoint(product_controller_client, BANDS[band].adc_sample_rate)
-        dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
-        yield CorrelatorRemoteControl(product_controller_client, dsim_client)
-    except ConnectionError:
-        logger.exception("unable to connect")
-        raise
+        # TODO: Sometimes this fails citing not enough resources if the previous
+        # correlator in the parameter set hasn't completely gone away yet. It may
+        # be nice to have a way to wait a bit and re-try.
     except aiokatcp.FailReply:
         logger.exception("Something went wrong with starting the correlator!")
         raise
-    finally:
-        dsim_client.close()
-        await product_controller_client.request("product-deconfigure")
-        product_controller_client.close()
+
+    product_controller_host = reply[1].decode()
+    product_controller_port = int(reply[2].decode())
+    logger.info(
+        "Correlator created, connecting to product controller at %s:%d",
+        product_controller_host,
+        product_controller_port,
+    )
+    # Low chance of issues here if the above worked, so I'm going to skip try/excepts for now.
+    product_controller_client = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
+    dsim_host, dsim_port = await get_dsim_endpoint(product_controller_client, BANDS[band].adc_sample_rate)
+    dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
+
+    yield CorrelatorRemoteControl(product_controller_client, dsim_client)
+
+    logger.info("Tearing down correlator.")
+    dsim_client.close()
+    await product_controller_client.request("product-deconfigure")
+    product_controller_client.close()
 
 
 @pytest.fixture

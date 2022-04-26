@@ -1,4 +1,11 @@
-"""A few handy things intended for correlator qualification."""
+"""A few handy things intended for correlator qualification.
+
+.. todo::
+
+    This is a bit more than what I'm comfortable to inhabit an __init__.py file,
+    but there's not enough really for it to make its way into a proper module.
+    Maybe just a ``utils.py`` or something like that would be better.
+"""
 import logging
 from dataclasses import dataclass
 from typing import List, Tuple, Union

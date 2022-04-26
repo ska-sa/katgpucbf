@@ -13,16 +13,48 @@ import spead2.recv
 import spead2.recv.asyncio
 
 from . import CorrelatorRemoteControl, get_sensor_val
+from .reporter import Reporter
 
 CPLX = 2
 
 logger = logging.getLogger(__name__)
 
 
-async def test_baselines(
-    n_antennas: int, n_channels: int, correlator: CorrelatorRemoteControl, receive_stream: spead2.recv.ChunkRingStream
+async def test_baseline_correlation_products(
+    n_antennas: int,
+    n_channels: int,
+    correlator: CorrelatorRemoteControl,
+    receive_stream: spead2.recv.ChunkRingStream,
+    pdf_report: Reporter,
+    expect,
 ):
-    """Test that the baseline ordering indicated in the sensor matches the output data."""
+    """Test that the baseline ordering indicated in the sensor matches the output data.
+
+    Requirements verified:
+
+    CBF-REQ-0087
+        The CBF shall, on request via the CAM interface, compute all cross-
+        correlation and auto-correlation products for all configured baselines
+        in each defined sub-array.
+
+    CBF-REQ-0104
+        The CBF, when requested to produce the Baseline Correlation Products
+        data product, shall transfer the appropriate data continuously to the
+        subscribed user(s) via the interface as specified in the appropriate
+        ICD.
+
+
+    Verification method:
+
+    Verification by means of test. Verify by testing all correlation product
+    combinations. Use gain correction after channelisation to turn the input
+    signal on or off. Iterate through all combinations and verify that the
+    expected doutput appears in the correct baseline product.
+
+    """
+    pdf_report.step(
+        "Connect to correlator's product controller to retrieve " "configuration for the running correlator."
+    )
     pc_client = correlator.product_controller_client
 
     # Get some necessary sensor values from the correlator.
@@ -35,29 +67,34 @@ async def test_baselines(
 
     timestamp_step = n_samples_between_spectra * n_spectra_per_acc
 
+    pdf_report.step("Select and configure the D-sim with a strong tone.")
     # Get dsim ready with a tone in a known channel that we can check for on the output.
     channel = n_channels // 3  # picked fairly arbitrarily. We just need to know where to set and look for the tone.
     channel_width = bandwidth / n_channels
     channel_centre_freq = channel * channel_width
+    pdf_report.detail(f"Tone frequency of {channel_centre_freq} Hz selected, in the centre of channel {channel}.")
+
     await correlator.dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
+    pdf_report.detail(
+        "Set D-sim with {channel_centre_freq} Hz tone, amplitude=0.15, with wgn amplitude 0.01 on both pols."
+    )
 
     # Some helper functions:
     async def zero_all_gains():
+        pdf_report.detail("Setting all F-engine gains to zero.")
         for ant in range(n_antennas):
             for pol in ["v", "h"]:
+                # This may be useful debug info but we don't need it in the PDF report.
                 logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
                 await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
 
     async def unzero_a_baseline(baseline_tuple: Tuple[str]):
-        logger.debug(f"Unzeroing gain on {baseline_tuple}")
+        pdf_report.detail(f"Unzeroing gain on {baseline_tuple}")
         for ant in baseline_tuple:
-            # This was done prior to NGC-535, so the gain used here will need
-            # to be tweaked if the test is repeated later. 1 may be fine, but
-            # it'll need to be tested.
             await pc_client.request("gain", "antenna_channelised_voltage", ant, "1")
 
-    for bl in bls_ordering:
-        logger.info("Checking baseline %r", bl)
+    for idx, bl in enumerate(bls_ordering):
+        pdf_report.step(f"Check baseline {bl} ({idx+1}/{len(bls_ordering)})")
         await zero_all_gains()
         await unzero_a_baseline(bl)
         expected_timestamp = (time.time() + 1 - sync_time) * timestamp_scale_factor
@@ -78,15 +115,23 @@ async def test_baselines(
 
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
-                logger.info("%d bls had signal in them: %r", len(loud_bls), loud_bls)
-                assert bls_ordering.index(bl) in loud_bls  # Check that the expected baseline is actually in the list.
+                pdf_report.detail(
+                    f"{len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
+                    f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
+                )
+                expect(bls_ordering.index(bl) in loud_bls, "Expected baseline doesn't show up in the list!")
                 for loud_bl in loud_bls:
-                    assert is_signal_expected_in_baseline(bl, bls_ordering[loud_bl])
+                    expect(
+                        is_signal_expected_in_baseline(bl, bls_ordering[loud_bl], pdf_report),
+                        "Signal found in unexpected baseline.",
+                    )
                 receive_stream.add_free_chunk(chunk)
                 break
 
 
-def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[str, str]) -> bool:
+def is_signal_expected_in_baseline(
+    expected_bl: Tuple[str, str], loud_bl: Tuple[str, str], pdf_report: Reporter
+) -> bool:
     """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
 
     It isn't possible in the general case to get signal in only a single
@@ -107,17 +152,17 @@ def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
     if loud_bl == expected_bl:
-        logger.info("Signal confirmed in bl %r where expected", expected_bl)
+        pdf_report.detail(f"Signal confirmed in bl {expected_bl} where expected")
         return True
     elif loud_bl == (expected_bl[0], expected_bl[0]):
-        logger.debug("Signal in %r - fine - it's ant0's autocorrelation.", loud_bl)
+        pdf_report.detail(f"Signal in {loud_bl} is ok, it's ant0's autocorrelation.")
         return True
     elif loud_bl == (expected_bl[1], expected_bl[1]):
-        logger.debug("Signal in %r - fine - it's ant1's autocorrelation.", loud_bl)
+        pdf_report.detail(f"Signal in {loud_bl} is ok, it's ant1's autocorrelation.")
         return True
     elif loud_bl == (expected_bl[1], expected_bl[0]):
-        logger.debug("Signal in %r - fine - it's the conjugate of what we expect.", loud_bl)
+        pdf_report.detail(f"Signal in {loud_bl} is ok, it's the conjugate of what we expect.")
         return True
     else:
-        logger.error("Signal injected into bl %r wasn't expected to show up in %r!", expected_bl, loud_bl)
+        pdf_report.detail(f"Signal injected into bl {expected_bl} wasn't expected to show up in {loud_bl}!")
         return False
