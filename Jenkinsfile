@@ -97,14 +97,14 @@ pipeline {
       when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
       options { timeout(time: 10, unit: 'MINUTES') }
       steps {
-        sh 'pytest -v -ra --junitxml=reports/result.xml' --cov=[katgpucbf] --cov-report=xml --cov-branch
+        sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov-report=xml --cov-branch'
       }
     }
     stage('Run pytest (full)') {
       when { anyOf { changeRequest target: 'main'; branch 'main' } }
       options { timeout(time: 60, unit: 'MINUTES') }
       steps {
-        sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml' --cov=[katgpucbf] --cov-report=xml --cov-branch
+        sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=katgpucbf --cov-report=xml --cov-branch'
       }
     }
     stage('Publish test results') {
