@@ -143,8 +143,16 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 
         BARRIER();
 
-        // TODO: ensure the loop is unrollable when the trip count is fixed
-        for (int j = lid; j < COARSEN * (WGS / SG_SIZE); j += WGS)
-            out[outer + j] = local_data.out[j];
+        if (COARSEN % SG_SIZE == 0)
+        {
+            // All work items will do the same amount of work
+            for (int j = 0; j < COARSEN * (WGS / SG_SIZE); j += WGS)
+                out[outer + j + lid] = local_data.out[j + lid];
+        }
+        else
+        {
+            for (int j = lid; j < COARSEN * (WGS / SG_SIZE); j += WGS)
+                out[outer + j] = local_data.out[j];
+        }
     }
 }
