@@ -96,17 +96,24 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         int start = pad_addr((outer + COARSEN * sgid) * DECIMATION) + sgpos;
         for (int phase = 0; phase < DECIMATION; phase += SG_SIZE)
         {
+            float2 r_samples[COARSEN];
+            for (int j = 0; j < COARSEN - 1; j++)
+                r_samples[j] = samples[start + pad_addr(phase + j * DECIMATION)];
             for (int row = 0; row < TAPS; row += DECIMATION)
             {
                 int i = row + phase;
                 float w = l_weights[i + sgpos];
-                // TODO: recycle samples in registers
+                r_samples[COARSEN - 1] = samples[start + pad_addr(i + (COARSEN - 1) * DECIMATION)];
                 for (int j = 0; j < COARSEN; j++)
                 {
-                    float2 v = samples[start + pad_addr(i + j * DECIMATION)];
-                    sums[j].x += w * v.x;
-                    sums[j].y += w * v.y;
+                    sums[j].x += w * r_samples[j].x;
+                    sums[j].y += w * r_samples[j].y;
                 }
+                /* Shift down all the samples. The compiler should make
+                 * these free by the magic of loop unrolling.
+                 */
+                for (int j = 0; j < COARSEN - 1; j++)
+                    r_samples[j] = r_samples[j + 1];
             }
         }
         for (int j = 0; j < COARSEN; j++)
@@ -120,6 +127,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             for (int j = 0; j < COARSEN; j++)
             {
                 int idx = outer + sgid * COARSEN + j;
+                /* TODO: This is uncoalesced. Is it worth collecting
+                 * results in shmem? Or trying to broadcast results
+                 * so that all the work items in the subgroup can
+                 * be involved?
+                 */
                 if (idx < out_size)
                     out[idx] = sums[j];
             }
