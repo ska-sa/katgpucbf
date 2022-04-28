@@ -249,31 +249,17 @@ async def async_main(args: argparse.Namespace) -> None:
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         channel_offset_value=args.channel_offset_value,
+        src=args.src,
+        src_interface=args.src_interface,
+        src_ibv=args.src_ibv,
         src_affinity=args.src_affinity,
+        src_comp_vector=args.src_comp_vector,
+        src_buffer=args.src_buffer,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
         monitor=monitor,
         context=context,
     )
-
-    if args.src_ibv:
-        # Attach this transport to receive channelisation products from the
-        # network at high data rates.
-        xbengine.add_udp_ibv_receiver_transport(
-            src_ip=args.src.host,
-            src_port=args.src.port,
-            interface_ip=args.src_interface,
-            comp_vector=args.src_comp_vector,
-            buffer_size=args.src_buffer,
-        )
-    else:
-        # Attach a plain-old UDP Receiver
-        xbengine.add_udp_receiver_transport(
-            src_ip=args.src.host,
-            src_port=args.src.port,
-            interface_ip=args.src_interface,
-            buffer_size=args.src_buffer,
-        )
 
     # Attach this transport to send the baseline correlation products to the
     # network.
