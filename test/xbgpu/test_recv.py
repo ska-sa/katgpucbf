@@ -74,7 +74,7 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
     It is connected to the :func:`queue` fixture for input and
     :func:`ringbuffer` for output.
     """
-    max_chunks = 128
+    max_chunks = 40
     stream = recv.make_stream(layout, ringbuffer, -1, max_chunks)
     for _ in range(max_chunks):
         data = np.empty(layout.chunk_bytes, np.int8)
@@ -170,7 +170,7 @@ class TestStream:
             # We don't shuffle the first few heaps, this just makes sure
             # that we get chunk 123 first, as expected.
             heap_list: List[spead2.send.Heap] = []
-            for _ in range(2):
+            for _ in range(5):
                 heap_list.append(next(heaps))
             # The rest are going to be pretty well shuffled. Heaps from a given
             # f-engine are unlikely to arrive out-of-order, we anticipate that
@@ -201,7 +201,7 @@ class TestStream:
 
             # Finally a heap from the distant past
             heap = gen_heap(
-                first_timestamp - 8 * layout.timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
+                first_timestamp - 250 * layout.timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
             )
             await send_stream.async_send_heap(heap)
 
