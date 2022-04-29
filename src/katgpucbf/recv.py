@@ -261,7 +261,7 @@ def make_stream(
     )
     # Ringbuffer size is largely arbitrary: just needs to be big enough to
     # never fill up.
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(128)
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_active_chunks + 32)
     return spead2.recv.ChunkRingStream(
         spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
         stream_config,

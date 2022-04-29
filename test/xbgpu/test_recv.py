@@ -74,8 +74,9 @@ def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, 
     It is connected to the :func:`queue` fixture for input and
     :func:`ringbuffer` for output.
     """
-    stream = recv.make_stream(layout, ringbuffer, -1, 5)
-    for _ in range(40):
+    max_chunks = 128
+    stream = recv.make_stream(layout, ringbuffer, -1, max_chunks)
+    for _ in range(max_chunks):
         data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
         present = np.ones(layout.chunk_heaps, np.uint8)
