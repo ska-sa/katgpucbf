@@ -36,6 +36,7 @@
 #define SG_SIZE ${sg_size}
 
 #define PAD_ADDR(x) ((x) + (x) / (COARSEN * DECIMATION) * SG_SIZE)
+#define SAMPLE_ADDR(x) (((x) >> 2) + ((x) >> 4))  // * 10 / 32, but without overflow
 
 DEVICE_FN unsigned int pad_addr(unsigned int addr)
 {
@@ -49,15 +50,19 @@ typedef union
 {
     struct
     {
+        union
+        {
+            float weights[TAPS];
+            unsigned int raw_samples[WGS * 5];
+        };
         float2 samples[PAD_ADDR(LOAD_SIZE)];
-        float weights[TAPS];
     };
     float2 out[COARSEN * (WGS / SG_SIZE)];
 } local_t;
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     GLOBAL float2 * RESTRICT out,
-    const GLOBAL uchar * RESTRICT in,
+    const GLOBAL unsigned int * RESTRICT in,
     const GLOBAL float * RESTRICT weights,
     int out_offset,
     int in_offset,
@@ -76,20 +81,68 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     out_size -= out_offset;
     mix_bias += group * GROUP_IN_SIZE * mix_scale; // TODO: does this lose precision?
 
+    // Load, decode and mix input data
+    // Load 20 bytes (160 bits / 16 samples) per work item
+    // TODO: this doesn't handle non-round in_offset, which is necessary for coarse delay?
+    // TODO: pad the array to avoid out-of-bounds accesses
+    int load_addr = SAMPLE_ADDR(in_offset);
+#pragma unroll
+    for (int i = 0; i < SAMPLE_ADDR(LOAD_SIZE); i += WGS * 5)
+    {
+        unsigned int raw[5];
+        for (int j = 0; j < 5; j++)
+        {
+            if (i + j * WGS < SAMPLE_ADDR(LOAD_SIZE))
+                raw[j] = in[load_addr + lid + i + j * WGS];
+        }
+        for (int j = 0; j < 5; j++)
+        {
+            if (i + j * WGS < SAMPLE_ADDR(LOAD_SIZE))
+                local_data.raw_samples[lid + i + j * WGS] = raw[j];
+        }
+
+        BARRIER();
+
+        for (int j = 0; j < 5; j++)
+        {
+            // CUDA is little endian but the bits are packed in big endian
+            raw[j] = local_data.raw_samples[i + j + 5 * lid];
+            raw[j] = __byte_perm(raw[j], raw[j], 0x0123);
+        }
+        if (i * 16 / 5 + lid * 16 < LOAD_SIZE)
+        {
+            for (int j = 0; j < 16; j++)
+            {
+                int word0 = SAMPLE_ADDR(j);
+                int shift = j * 10 % 32;
+                int top;  // 10-bit value shifted to the top of a 32-bit word
+                if (shift + 10 <= 32)
+                    top = raw[word0] << shift;
+                else
+                    top = __funnelshift_l(raw[word0 + 1], raw[word0], shift);
+                top >>= 22;  // trusts nvcc to sign extend - undefined in C++
+                float orig = top;
+
+                int idx = i * 16 / 5 + lid * 16 + j;
+#if 0
+                float phase = idx * mix_scale + mix_bias;
+                float2 mix = make_float2(0.1f, 0.2f);
+                sincospif(phase, &mix.y, &mix.x);
+                local_data.samples[pad_addr(idx)] = make_float2(mix.x * orig, mix.y * orig);
+#else
+                if (idx < LOAD_SIZE) // TODO: massive bank conflicts
+                    local_data.samples[pad_addr(idx)] = make_float2(orig, orig);
+#endif
+            }
+        }
+
+        BARRIER();
+    }
+
+#if 0
     // Load coefficients
     for (int i = lid; i < TAPS; i += WGS)
         local_data.weights[i] = weights[i];
-
-    // Load, decode and mix input data
-    for (int i = lid; i < LOAD_SIZE; i += WGS)
-    {
-        int idx = in_offset + i;
-        float orig = (idx < in_size) ? get_sample_10bit(in, in_offset + i) : 0.0f;
-        float phase = i * mix_scale + mix_bias;
-        float2 mix;
-        sincospif(phase, &mix.y, &mix.x);
-        local_data.samples[pad_addr(i)] = make_float2(mix.x * orig, mix.y * orig);
-    }
 
     int sgid = (unsigned int) lid / SG_SIZE;
     int sgpos = (unsigned int) lid % SG_SIZE;
@@ -158,4 +211,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 out[outer + j] = local_data.out[j];
         }
     }
+#else
+    volatile float x = local_data.samples[get_group_id(1)].x;
+    volatile float y = local_data.raw_samples[get_group_id(1)];
+#endif
 }

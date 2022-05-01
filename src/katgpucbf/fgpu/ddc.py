@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -57,8 +57,8 @@ class DDCTemplate:
             raise ValueError("taps must be a multiple of decimation")
         # TODO: tune the magic numbers and enforce more requirements
         self.wgs = 128
-        self._sg_size = 4
-        self._coarsen = 4
+        self._sg_size = 1
+        self._coarsen = 1
         self.taps = taps
         self.decimation = decimation
         self._group_out_size = self.wgs // self._sg_size * self._coarsen  # TODO: tune
@@ -121,7 +121,12 @@ class DDC(accel.Operation):
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.decimation)
         self.slots["in"] = accel.IOSlot(
-            (accel.Dimension(samples * SAMPLE_BITS // BYTE_BITS),),
+            (
+                accel.Dimension(
+                    samples * SAMPLE_BITS // BYTE_BITS,
+                    min_padded_size=samples * SAMPLE_BITS // BYTE_BITS + 65536,
+                ),
+            ),
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot(
