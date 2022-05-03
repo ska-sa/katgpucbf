@@ -10,16 +10,13 @@ sending it KATCP requests and by ingesting the output data.
 
 ## Requirements
 
-The following modules are required to get things to work properly:
+A `requirements.in` and `requirements.txt` is provided in this directory, based
+on `katgpucbf`'s `requirements-dev.txt`. A pared-down version of this may become
+available in future.
 
-- `pytest-expectr`
-- `pytest-reportlog`
-
-I've not picked out exactly what's necessary and what's not from `katgpucbf`'s
-requirements, but I had them installed in the venv that I was using and the two
-above had to be added. `katgpucbf` itself doesn't need to be installed for the
-test framework to work, you just need to have the appropriate Docker image
-available as specified (see below).
+While `katgpucbf` itself doesn't need to be installed for the test framework to
+work, you need to have the appropriate Docker image available as specified (see
+below).
 
 ## Sample pytest.ini
 
@@ -39,7 +36,7 @@ log_cli_level = info
 addopts = --report-log=report.json
 ```
 
-## Runnning
+## Running
 
 Currently, I use the following command to run the tests contained in this
 directory:
