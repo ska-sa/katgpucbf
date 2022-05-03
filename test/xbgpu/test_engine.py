@@ -430,6 +430,8 @@ class TestEngine:
         recv_stream.add_inproc_reader(queue)
 
         arglist = [
+            '--katcp-host=""',
+            "--katcp-port=0",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
