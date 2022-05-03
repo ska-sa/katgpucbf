@@ -254,15 +254,20 @@ class Engine(aiokatcp.DeviceServer):
             self.set_gains(pol, np.full(channels, gain, dtype=np.complex64))
 
         ringbuffer_capacity = 2
-        ring = ChunkRingbuffer(ringbuffer_capacity, name="recv_ringbuffer", task_name="run_receive", monitor=monitor)
+        data_ringbuffer = ChunkRingbuffer(
+            ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
+        )
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
-        self._src_streams = recv.make_streams(self._src_layout, ring, src_affinity)
         src_chunks_per_stream = 4
+        free_ringbuffer = ChunkRingbuffer(
+            src_chunks_per_stream * N_POLS, name="recv_free_ringbuffer", task_name="run_receive", monitor=monitor
+        )
+        self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffer, src_affinity)
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_vkgdr:
