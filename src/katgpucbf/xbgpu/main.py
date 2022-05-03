@@ -222,7 +222,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> Tuple[XBE
     Parameters
     ----------
     context
-        The GPU context in which the :class:`.Engine` will operate.
+        The GPU context in which the :class:`.XBEngine` will operate.
     args
         Parsed arguments returned from :func:`parse_args`.
     """
