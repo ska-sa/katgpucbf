@@ -272,7 +272,7 @@ async def async_main(args: argparse.Namespace) -> None:
         Parsed arguments returned from :func:`parse_args`.
     """
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
-    xbengine, _ = make_engine(context, args)
+    xbengine, monitor = make_engine(context, args)
 
     # Attach this transport to send the baseline correlation products to the
     # network.
@@ -291,22 +291,22 @@ async def async_main(args: argparse.Namespace) -> None:
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
-    logger.info("Starting main processing loop")
+    with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
+        logger.info("Starting main processing loop")
 
-    descriptor_task = asyncio.create_task(
-        xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S), name=DESCRIPTOR_TASK_NAME
-    )
-    xbengine.add_service_task(descriptor_task)
+        # TODO: Work the descriptor task into being handled by xbengine.start
+        # see NGC-589.
+        descriptor_task = asyncio.create_task(
+            xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S), name=DESCRIPTOR_TASK_NAME
+        )
+        xbengine.add_service_task(descriptor_task)
+        add_signal_handlers(xbengine)
 
-    add_signal_handlers(xbengine)
-
-    await xbengine.start()
-
-    with start_aiomonitor(asyncio.get_running_loop(), args, locals()):
+        await xbengine.start()
         await xbengine.join()
 
-    if prometheus_server:
-        await prometheus_server.close()
+        if prometheus_server:
+            await prometheus_server.close()
 
 
 def main() -> None:
