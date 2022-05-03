@@ -12,6 +12,8 @@ import spead2
 import spead2.recv
 import spead2.recv.asyncio
 
+import katgpucbf.recv
+
 from . import CorrelatorRemoteControl, get_sensor_val
 from .reporter import Reporter
 
@@ -102,8 +104,10 @@ async def test_baseline_correlation_products(
         # from wall time here. I don't have a way other than adjusting the dsim
         # signal of ensuring that we get going after a specific timestamp in the
         # DSP pipeline itself. See NGC-549
-
-        async for chunk in receive_stream.data_ringbuffer:
+        data_ringbuffer = receive_stream.data_ringbuffer
+        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+        async for chunk in data_ringbuffer:
+            assert isinstance(chunk, katgpucbf.recv.Chunk)
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)

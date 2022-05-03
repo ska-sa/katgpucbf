@@ -1,16 +1,25 @@
 """Fixtures and options for qualification testing of the correlator."""
+import asyncio
 import json
 import logging
 import subprocess
 import time
+from typing import AsyncGenerator
 
 import aiokatcp
 import pytest
 import spead2.recv
+from async_timeout import timeout
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from . import BANDS, Band, CorrelatorRemoteControl, create_stream, get_dsim_endpoint, get_sensor_val
+from . import (
+    BANDS,
+    CorrelatorRemoteControl,
+    create_baseline_correlation_product_receive_stream,
+    get_dsim_endpoint,
+    get_sensor_val,
+)
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -18,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def pytest_addoption(parser, pluginmanager):  # noqa: D103
     # I'm adding the image override as a cmd-line parameter. It seems best (at
-    # this stage anyway) that it be explicit what image you're testing.
+    # this stage anyway) that it be explicit which image you're testing.
     parser.addoption(
         "--image-override", action="append", required=True, metavar="NAME:IMAGE:TAG", help="Override a single image"
     )
@@ -136,7 +145,7 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
 
 
 @pytest.fixture
-async def correlator(pytestconfig, correlator_config, band: Band):
+async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
     Shut the correlator down afterwards also.
@@ -145,8 +154,9 @@ async def correlator(pytestconfig, correlator_config, band: Band):
     port = int(pytestconfig.getini("master_controller_port"))
     try:
         logger.debug("Connecting to master controller at %s:%d to try and create a correlator.", host, port)
-        client = await aiokatcp.Client.connect(host, port)
-    except ConnectionError:
+        async with timeout(10):
+            client = await aiokatcp.Client.connect(host, port)
+    except (ConnectionError, asyncio.TimeoutError):
         logger.exception("unable to connect to master controller!")
         raise
 
@@ -180,6 +190,7 @@ async def correlator(pytestconfig, correlator_config, band: Band):
     dsim_client.close()
     await product_controller_client.request("product-deconfigure")
     product_controller_client.close()
+    await asyncio.gather(product_controller_client.wait_closed(), dsim_client.wait_closed())
 
 
 @pytest.fixture
@@ -208,9 +219,9 @@ async def receive_stream(pytestconfig, correlator: CorrelatorRemoteControl) -> s
         )
     ]
 
-    return create_stream(
+    return create_baseline_correlation_product_receive_stream(
         interface_address=interface_address,
-        multicast_endpoints=multicast_endpoints,
+        multicast_endpoints=multicast_endpoints,  # type: ignore
         n_bls=n_bls,
         n_chans=n_chans,
         n_chans_per_substream=n_chans_per_substream,

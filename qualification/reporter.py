@@ -80,7 +80,7 @@ class Reporter:
         assert x.ndim == 1, f"x has {x.ndim} dimensions, expected 1!"
         assert y.ndim <= 2, "Can't have y with more than 2 dimensions!"
         assert x.size == y.shape[-1], "x and y must have same length for plotting!"
-        if y.ndim > 1:
+        if y.ndim > 1 and legend_labels is not None:
             assert len(legend_labels) == y.shape[0], "If y is 2-dimensional, we need legend labels."
 
         # Moving swiftly along.

@@ -8,7 +8,7 @@
 """
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple, Union
+from typing import List, Tuple
 
 import aiokatcp
 import numba
@@ -24,6 +24,7 @@ from spead2.recv.numba import chunk_place_data
 
 logger = logging.getLogger(__name__)
 COMPLEX = 2
+DSIM_NAME = "sim.m800"
 
 
 @dataclass
@@ -40,7 +41,7 @@ BANDS = {
 }
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
+async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
     """Get the value of a katcp sensor.
 
     If the sensor value can't be cast as an int or a float (in that order), the
@@ -57,13 +58,15 @@ async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int
             continue
 
 
-async def get_dsim_endpoint(pc_client: Endpoint, adc_sample_rate: float) -> Endpoint:
+async def get_dsim_endpoint(product_controller_client: aiokatcp.Client, adc_sample_rate: float) -> Endpoint:
     """Get the katcp address for a dsim on a product controller.
 
-    The assumption is made that a single dsim is used, with the name
-    ``sim.m800`` suffixed with the ADC sample rate.
+    The assumption is made that a single dsim is used, with its name suffixed
+    with the ADC sample rate.
     """
-    return endpoint_parser(None)(await get_sensor_val(pc_client, f"sim.m800.{int(adc_sample_rate)}.0.port"))
+    return endpoint_parser(None)(
+        await get_sensor_val(product_controller_client, f"{DSIM_NAME}.{int(adc_sample_rate)}.0.port")  # type: ignore
+    )
 
 
 class CorrelatorRemoteControl:
@@ -74,7 +77,7 @@ class CorrelatorRemoteControl:
         self.dsim_client = dsim_client
 
 
-def create_stream(
+def create_baseline_correlation_product_receive_stream(
     interface_address: str,
     multicast_endpoints: List[Tuple[str, int]],
     n_bls: int,
@@ -86,17 +89,17 @@ def create_stream(
     n_samples_between_spectra: int,
     use_ibv: bool = False,
 ) -> spead2.recv.ChunkRingStream:
-    """Create a spead2 recv stream."""
+    """Create a spead2 recv stream for ingesting baseline correlation product data."""
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * COMPLEX * n_bits_per_sample // 8  # noqa: N806
     HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
 
     # According to the ICD.
-    TIMESTAMP = 0x1600  # noqa: N806
-    FREQUENCY = 0x4103  # noqa: N806
+    TIMESTAMP_ID = 0x1600  # noqa: N806
+    FREQUENCY_ID = 0x4103  # noqa: N806
 
     # Needed for placing the individual heaps within the chunk.
-    items = [FREQUENCY, TIMESTAMP, spead2.HEAP_LENGTH_ID]
+    items = [FREQUENCY_ID, TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
     timestamp_step = n_samples_between_spectra * n_spectra_per_acc
 
     # Heap placement function. Gets compiled so that spead2's C code can call it.
@@ -119,15 +122,15 @@ def create_stream(
     # Assuming X-engines are at most 1 second out of sync with each other, with
     # one extra chunk for luck. May need to revisit that assumption for much
     # larger array sizes.
-    max_chunks = round(1 // int_time) + 1
-
+    max_chunks = round(1 / int_time) + 1
+    n_extra_chunks = 2  # A couple extra to make sure we have breathing room.
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
         max_chunks=max_chunks,
         place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
     )
 
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks)
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_chunks)
 
     stream = spead2.recv.ChunkRingStream(
@@ -138,7 +141,7 @@ def create_stream(
         free_ringbuffer,
     )
 
-    for _ in range(max_chunks):
+    for _ in range(max_chunks + n_extra_chunks):
         chunk = spead2.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, COMPLEX), dtype=getattr(np, f"int{n_bits_per_sample}")),
