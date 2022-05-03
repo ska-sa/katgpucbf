@@ -441,7 +441,6 @@ class TestEngine:
             f"--heap-accumulation-threshold={heap_accumulation_threshold}",
             "--src-interface=lo",
             "--dst-interface=lo",
-            "--monitor-log=/tmp/monitor_log.txt",
             "239.10.11.4:7149",  # src
             "239.21.11.4:7149",  # dst
         ]
