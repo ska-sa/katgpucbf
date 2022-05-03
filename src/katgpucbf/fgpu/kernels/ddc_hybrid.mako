@@ -98,7 +98,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         for (int j = 0; j < 5; j++)
         {
             if (i + j * WGS < SAMPLE_ADDR(LOAD_SIZE))
-                local_data.raw_samples[lid + i + j * WGS] = raw[j];
+                local_data.raw_samples[lid + j * WGS] = raw[j];
         }
 
         BARRIER();
@@ -106,7 +106,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         for (int j = 0; j < 5; j++)
         {
             // CUDA is little endian but the bits are packed in big endian
-            raw[j] = local_data.raw_samples[i + j + 5 * lid];
+            raw[j] = local_data.raw_samples[j + 5 * lid];
             raw[j] = __byte_perm(raw[j], raw[j], 0x0123);
         }
         if (i * 16 / 5 + lid * 16 < LOAD_SIZE)

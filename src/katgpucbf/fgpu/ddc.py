@@ -120,6 +120,7 @@ class DDC(accel.Operation):
         self.template = template
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.decimation)
+        # TODO: can padding be eliminated? If not, at least calculate how much is needed
         self.slots["in"] = accel.IOSlot(
             (
                 accel.Dimension(
@@ -130,7 +131,12 @@ class DDC(accel.Operation):
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot(
-            (accel.Dimension(self.out_samples),),
+            (
+                accel.Dimension(
+                    self.out_samples,
+                    min_padded_size=self.out_samples + 65536,
+                ),
+            ),
             np.complex64,
         )
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
