@@ -23,7 +23,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 logger = logging.getLogger(__name__)
-CPLX = 2
+COMPLEX = 2
 
 
 @dataclass
@@ -88,7 +88,7 @@ def create_stream(
 ) -> spead2.recv.ChunkRingStream:
     """Create a spead2 recv stream."""
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
-    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
+    HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * COMPLEX * n_bits_per_sample // 8  # noqa: N806
     HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
 
     # According to the ICD.
@@ -141,7 +141,7 @@ def create_stream(
     for _ in range(max_chunks):
         chunk = spead2.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
-            data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
+            data=np.empty((n_chans, n_bls, COMPLEX), dtype=getattr(np, f"int{n_bits_per_sample}")),
         )
         stream.add_free_chunk(chunk)
 
