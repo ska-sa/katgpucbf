@@ -36,7 +36,7 @@
 #define SG_SIZE ${sg_size}
 
 #define PAD_ADDR(x) ((x) + (x) / (COARSEN * DECIMATION) * SG_SIZE)
-#define SAMPLE_ADDR(x) (((x) >> 2) + ((x) >> 4))  // * 10 / 32, but without overflow
+#define SAMPLE_ADDR(x) (((x) >> 2) + ((x) >> 4))  // * 10 / 32, but without overflow (must be a multiple of 16 though)
 
 DEVICE_FN unsigned int pad_addr(unsigned int addr)
 {
@@ -46,17 +46,14 @@ DEVICE_FN unsigned int pad_addr(unsigned int addr)
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
-typedef union
+typedef struct  // TODO see if more space can be saved here (some unions if "outer" loop only goes round once)
 {
-    struct
+    union
     {
-        union
-        {
-            float weights[TAPS];
-            unsigned int raw_samples[WGS * 5];
-        };
-        float2 samples[PAD_ADDR(LOAD_SIZE)];
+        float weights[TAPS];
+        unsigned int raw_samples[WGS * 5];
     };
+    float2 samples[PAD_ADDR(LOAD_SIZE)];
     float2 out[COARSEN * (WGS / SG_SIZE)];
 } local_t;
 
@@ -81,14 +78,20 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     out_size -= out_offset;
     mix_bias += group * GROUP_IN_SIZE * mix_scale; // TODO: does this lose precision?
 
-    // Load, decode and mix input data
-    // Load 20 bytes (160 bits / 16 samples) per work item
+    /* Load, decode and mix input data. Each work item decodes and mixes
+     * 16 consecutive samples (20 bytes) at a time. These samples are first
+     * loaded collaboratively to shared memory to improve the access
+     * patterns.
+     */
     // TODO: this doesn't handle non-round in_offset, which is necessary for coarse delay?
     // TODO: pad the array to avoid out-of-bounds accesses
     int load_addr = SAMPLE_ADDR(in_offset);
 #pragma unroll
     for (int i = 0; i < SAMPLE_ADDR(LOAD_SIZE); i += WGS * 5)
     {
+        // TODO: could use memcpy_async for this
+        // TODO: can this be restructured so that synchronisation is only
+        // needed on the warp level?
         unsigned int raw[5];
         for (int j = 0; j < 5; j++)
         {
@@ -109,11 +112,13 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             raw[j] = local_data.raw_samples[j + 5 * lid];
             raw[j] = __byte_perm(raw[j], raw[j], 0x0123);
         }
-        if (i * 16 / 5 + lid * 16 < LOAD_SIZE)
+
+        int i_samples = i / 5 * 16;
+        if (i_samples + lid * 16 < LOAD_SIZE)
         {
             for (int j = 0; j < 16; j++)
             {
-                int word0 = SAMPLE_ADDR(j);
+                int word0 = j * 10 / 32;
                 int shift = j * 10 % 32;
                 int top;  // 10-bit value shifted to the top of a 32-bit word
                 if (shift + 10 <= 32)
@@ -123,23 +128,19 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 top >>= 22;  // trusts nvcc to sign extend - undefined in C++
                 float orig = top;
 
-                int idx = i * 16 / 5 + lid * 16 + j;
-#if 0
+                int idx = i_samples + lid * 16 + j;
                 float phase = idx * mix_scale + mix_bias;
-                float2 mix = make_float2(0.1f, 0.2f);
-                sincospif(phase, &mix.y, &mix.x);
-                local_data.samples[pad_addr(idx)] = make_float2(mix.x * orig, mix.y * orig);
-#else
-                if (idx < LOAD_SIZE) // TODO: massive bank conflicts
-                    local_data.samples[pad_addr(idx)] = make_float2(orig, orig);
-#endif
+                float2 mix = make_float2(1.0f, 0.0f);
+                //sincospif(phase, &mix.y, &mix.x); // TODO reenable/rework to be incremental
+                // TODO: massive bank conflicts
+                if (idx < LOAD_SIZE)
+                    local_data.samples[pad_addr(idx)] = make_float2(mix.x * orig, mix.y * orig);
             }
         }
 
         BARRIER();
     }
 
-#if 0
     // Load coefficients
     for (int i = lid; i < TAPS; i += WGS)
         local_data.weights[i] = weights[i];
@@ -211,8 +212,4 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 out[outer + j] = local_data.out[j];
         }
     }
-#else
-    volatile float x = local_data.samples[get_group_id(1)].x;
-    volatile float y = local_data.raw_samples[get_group_id(1)];
-#endif
 }
