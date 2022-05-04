@@ -104,7 +104,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
      */
     // TODO: this doesn't handle non-round in_offset, which is necessary for coarse delay?
     // TODO: pad the array to avoid out-of-bounds accesses
-    int load_addr = SAMPLE_ADDR(in_offset);
+    in += SAMPLE_ADDR(in_offset);
     int padded_lid = pad_addr(lid * 16);
 #pragma unroll
     for (int i = 0; i < SAMPLE_ADDR(LOAD_SIZE); i += WGS * 5)
@@ -117,7 +117,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         for (int j = 0; j < 5; j++)
         {
             if (i + j * WGS < SAMPLE_ADDR(LOAD_SIZE))
-                raw[j] = in[load_addr + lid + i + j * WGS];
+                raw[j] = in[lid + i + j * WGS];
         }
         for (int j = 0; j < 5; j++)
         {
@@ -130,7 +130,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             raw[j] = local_data.raw_samples[j + 5 * lid];
 #else
         for (int j = 0; j < 5; j++)
-            raw[j] = in[load_addr + 5 * lid + i + j];
+            raw[j] = in[5 * lid + i + j];
 #endif
         // CUDA is little endian but the bits are packed in big endian
         for (int j = 0; j < 5; j++)
