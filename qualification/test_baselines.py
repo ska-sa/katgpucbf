@@ -12,8 +12,6 @@ import spead2
 import spead2.recv
 import spead2.recv.asyncio
 
-import katgpucbf.recv
-
 from . import CorrelatorRemoteControl, get_sensor_val
 from .reporter import Reporter
 
@@ -107,7 +105,9 @@ async def test_baseline_correlation_products(
         data_ringbuffer = receive_stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         async for chunk in data_ringbuffer:
-            assert isinstance(chunk, katgpucbf.recv.Chunk)
+            # These asserts aren't particularly important, but they keep mypy happy.
+            assert isinstance(chunk.present, np.ndarray)
+            assert isinstance(chunk.data, np.ndarray)
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)

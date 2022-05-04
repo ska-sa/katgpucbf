@@ -13,6 +13,7 @@ from async_timeout import timeout
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
+from katgpucbf import N_POLS
 from katgpucbf.meerkat import BANDS
 
 from . import (
@@ -100,6 +101,10 @@ def pdf_report(request) -> Reporter:
 @pytest.fixture
 async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band: str, int_time: float) -> dict:
     """Produce the configuration dict from the given parameters."""
+    # Adapted from `sim_correlator.py` but with logic for using multiple dsims
+    # removed. For the time being, we're going to use a single dsim for
+    # consistency with MeerKAT's qualification testing.
+
     config: dict = {
         "version": "3.1",
         "config": {},
@@ -112,26 +117,26 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
             name, image = override.split(":", 1)
             image_overrides[name] = image
         config["config"]["image_overrides"] = image_overrides
+
     dig_names = []
-    dig_number = 800  # Avoid confusion with real antennas
+    antenna_name = "m800"  # Avoid confusion with real antennas
 
     adc_sample_rate = BANDS[band].adc_sample_rate
     centre_frequency = BANDS[band].centre_frequency
 
     for pol in ["v", "h"]:
-        name = f"m{dig_number}{pol}"
+        name = f"{antenna_name}{pol}"
         dig_names.append(name)
         config["outputs"][name] = {
             "type": "sim.dig.raw_antenna_voltage",
             "band": band,
             "adc_sample_rate": adc_sample_rate,
             "centre_frequency": centre_frequency,
-            "antenna": f"m{dig_number}, 0:0:0, 0:0:0, 0, 0",
+            "antenna": f"{antenna_name}, 0:0:0, 0:0:0, 0, 0",
         }
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
-        # Right now I'm just using a single dsim, but this logic will scale for more.
-        "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * n_antennas)],
+        "src_streams": [dig_names[i % N_POLS] for i in range(2 * n_antennas)],
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
     }
@@ -166,9 +171,9 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
             reply, _ = await client.request(
                 "product-configure", "qualification_correlator*", json.dumps(correlator_config)
             )
-        # TODO: Sometimes this fails citing not enough resources if the previous
-        # correlator in the parameter set hasn't completely gone away yet. It may
-        # be nice to have a way to wait a bit and re-try.
+        # Sometimes this fails citing not enough resources if the previous
+        # correlator in the parameter set hasn't completely gone away yet. Will
+        # be fixed in NGC-544.
     except aiokatcp.FailReply:
         logger.exception("Something went wrong with starting the correlator!")
         raise
@@ -180,18 +185,26 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         product_controller_host,
         product_controller_port,
     )
-    # Low chance of issues here if the above worked, so I'm going to skip try/excepts for now.
-    product_controller_client = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
-    dsim_host, dsim_port = await get_dsim_endpoint(product_controller_client, BANDS[band].adc_sample_rate)
-    dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
+    try:
+        product_controller_client = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
+        dsim_host, dsim_port = await get_dsim_endpoint(product_controller_client, BANDS[band].adc_sample_rate)
+        dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
 
-    yield CorrelatorRemoteControl(product_controller_client, dsim_client)
+        yield CorrelatorRemoteControl(product_controller_client, dsim_client)
 
-    logger.info("Tearing down correlator.")
-    dsim_client.close()
-    await product_controller_client.request("product-deconfigure")
-    product_controller_client.close()
-    await asyncio.gather(product_controller_client.wait_closed(), dsim_client.wait_closed())
+        logger.info("Tearing down correlator.")
+        dsim_client.close()
+        await dsim_client.wait_closed()
+
+    finally:
+        # In case anything does go wrong, we want to make sure that we the
+        # deconfigure the product.
+        # TODO: This would probably be more robust if we issued the request
+        # to the master controller, but since we used an asterisk for the MC
+        # to decide on a unique name, we don't actually know what that name is.
+        await product_controller_client.request("product-deconfigure")
+        product_controller_client.close()
+        await product_controller_client.wait_closed()
 
 
 @pytest.fixture
