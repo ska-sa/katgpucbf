@@ -165,8 +165,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 float orig = top;
 
                 int idx_padded = pad_addr(i_samples + j) + padded_lid;
+                float2 mixed = make_float2(mix.x * orig, mix.y * orig);
                 if (idx_padded < PADDED_LOAD_SIZE)
-                    local_data.samples[idx_padded] = make_float2(mix.x * orig, mix.y * orig);
+                    local_data.samples[idx_padded] = mixed;
                 mix = cmul(mix, mix_step);
             }
         }
