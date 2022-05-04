@@ -13,24 +13,11 @@ import contextlib
 import ipaddress
 import json
 import sys
-from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import aiokatcp
 
-
-@dataclass
-class Band:
-    """Holds presets for a known band."""
-
-    adc_sample_rate: float
-    centre_frequency: float
-
-
-BANDS = {
-    "l": Band(adc_sample_rate=1712e6, centre_frequency=1284e6),
-    "u": Band(adc_sample_rate=1088e6, centre_frequency=816e6),
-}
+from katgpucbf.meerkat import BANDS
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

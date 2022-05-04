@@ -13,8 +13,9 @@ from async_timeout import timeout
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import endpoint_list_parser
 
+from katgpucbf.meerkat import BANDS
+
 from . import (
-    BANDS,
     CorrelatorRemoteControl,
     create_baseline_correlation_product_receive_stream,
     get_dsim_endpoint,

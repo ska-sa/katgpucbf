@@ -7,7 +7,6 @@
     Maybe just a ``utils.py`` or something like that would be better.
 """
 import logging
-from dataclasses import dataclass
 from typing import List, Tuple
 
 import aiokatcp
@@ -25,20 +24,6 @@ from spead2.recv.numba import chunk_place_data
 logger = logging.getLogger(__name__)
 COMPLEX = 2
 DSIM_NAME = "sim.m800"
-
-
-@dataclass
-class Band:
-    """Holds presets for a known band."""
-
-    adc_sample_rate: float
-    centre_frequency: float
-
-
-BANDS = {
-    "l": Band(adc_sample_rate=1712e6, centre_frequency=1284e6),
-    "u": Band(adc_sample_rate=1088e6, centre_frequency=816e6),
-}
 
 
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
