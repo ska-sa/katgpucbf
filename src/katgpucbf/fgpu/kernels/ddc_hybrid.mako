@@ -65,7 +65,7 @@ typedef union
         float2 samples[PAD_ADDR(LOAD_SIZE)];
     };
 #if REORDER_WRITE
-    float2 out[COARSEN * (WGS / SG_SIZE)];
+    float2 out[GROUP_OUT_SIZE];
 #endif
 } local_t;
 
