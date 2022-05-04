@@ -36,6 +36,7 @@
 #define COARSEN ${coarsen}
 #define SG_SIZE ${sg_size}
 
+#define REORDER_READ 0
 #define REORDER_WRITE 0
 
 // TODO: adapt to COARSEN and SG_SIZE
@@ -57,7 +58,9 @@ typedef union
         union
         {
             float weights[TAPS];
+#if REORDER_READ
             unsigned int raw_samples[WGS * 5];
+#endif
         };
         float2 samples[PAD_ADDR(LOAD_SIZE)];
     };
@@ -103,6 +106,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         // TODO: can this be restructured so that synchronisation is only
         // needed on the warp level?
         unsigned int raw[5];
+#if REORDER_READ
         for (int j = 0; j < 5; j++)
         {
             if (i + j * WGS < SAMPLE_ADDR(LOAD_SIZE))
@@ -113,15 +117,17 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             if (i + j * WGS < SAMPLE_ADDR(LOAD_SIZE))
                 local_data.raw_samples[lid + j * WGS] = raw[j];
         }
-
         BARRIER();
 
         for (int j = 0; j < 5; j++)
-        {
-            // CUDA is little endian but the bits are packed in big endian
             raw[j] = local_data.raw_samples[j + 5 * lid];
+#else
+        for (int j = 0; j < 5; j++)
+            raw[j] = in[load_addr + 5 * lid + i + j];
+#endif
+        // CUDA is little endian but the bits are packed in big endian
+        for (int j = 0; j < 5; j++)
             raw[j] = __byte_perm(raw[j], raw[j], 0x0123);
-        }
 
         int i_samples = i / 5 * 16;
         if (i_samples + lid * 16 < LOAD_SIZE)
@@ -149,7 +155,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             }
         }
 
+#if REORDER_READ
         BARRIER();
+#endif
     }
 
     // Load coefficients
