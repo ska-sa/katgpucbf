@@ -57,6 +57,11 @@ DEVICE_FN static float2 cmul(float2 a, float2 b)
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
+DEVICE_FN static unsigned int reverse_endian(unsigned int v)
+{
+    return __byte_perm(v, v, 0x0123);
+}
+
 typedef union
 {
     struct
@@ -134,7 +139,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 #endif
         // CUDA is little endian but the bits are packed in big endian
         for (int j = 0; j < 5; j++)
-            raw[j] = __byte_perm(raw[j], raw[j], 0x0123);
+            raw[j] = reverse_endian(raw[j]);
 
         int i_samples = i / 5 * 16;
         int first_idx = i_samples + lid * 16;
