@@ -27,11 +27,13 @@ from katgpucbf.fgpu.ddc import DDCTemplate
 from .test_pfb import decode_10bit_host
 
 
-def ddc_host(samples: np.ndarray, weights: np.ndarray, decimation: int) -> np.ndarray:
+def ddc_host(samples: np.ndarray, weights: np.ndarray, decimation: int, mix_frequency: float) -> np.ndarray:
     """Implement the DDC calculation simply in numpy."""
     # Calculation is done in double precision for better accuracy
     samples = decode_10bit_host(samples).astype(np.complex128)
-    # TODO: mix
+    mix_angle = 2 * np.pi * mix_frequency * np.arange(0, len(samples), dtype=np.float64)
+    mix = np.cos(mix_angle) + 1j * np.sin(mix_angle)
+    samples *= mix
     # weights is reversed to make it a standard convolution instead of a correlation
     filtered = np.convolve(samples, weights[::-1], mode="valid")
     decimated = filtered[::decimation]
@@ -55,10 +57,12 @@ def test_ddc(
     rng = np.random.default_rng(seed=1)
     h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
-    expected = ddc_host(h_in, weights, decimation)
+    mix_frequency = 0.375
+    expected = ddc_host(h_in, weights, decimation, mix_frequency)
 
     template = DDCTemplate(context, taps=taps, decimation=decimation)
     fn = template.instantiate(command_queue, samples)
+    fn.mix_frequency = mix_frequency
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("weights").set(command_queue, weights)

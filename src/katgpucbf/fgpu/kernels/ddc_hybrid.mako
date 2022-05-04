@@ -42,14 +42,20 @@
 // TODO: adapt to COARSEN and SG_SIZE
 #define PAD_ADDR(x) ((x) + ((x) >> 5))
 #define SAMPLE_ADDR(x) (((x) >> 2) + ((x) >> 4))  // * 10 / 32, but without overflow (must be a multiple of 16 though)
+#define PADDED_LOAD_SIZE (PAD_ADDR(LOAD_SIZE - 1) + 1)
 
-DEVICE_FN unsigned int pad_addr(unsigned int addr)
+DEVICE_FN static unsigned int pad_addr(unsigned int addr)
 {
     return PAD_ADDR(addr);
 }
 
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
+
+DEVICE_FN static float2 cmul(float2 a, float2 b)
+{
+    return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
 
 typedef union
 {
@@ -62,7 +68,7 @@ typedef union
             unsigned int raw_samples[WGS * 5];
 #endif
         };
-        float2 samples[PAD_ADDR(LOAD_SIZE)];
+        float2 samples[PADDED_LOAD_SIZE];
     };
 #if REORDER_WRITE
     float2 out[GROUP_OUT_SIZE];
@@ -78,7 +84,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     int out_size,
     int in_size,
     float mix_scale,
-    float mix_bias)
+    float mix_bias,
+    float2 mix_step)
 {
     LOCAL_DECL local_t local_data;
 
@@ -130,8 +137,12 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             raw[j] = __byte_perm(raw[j], raw[j], 0x0123);
 
         int i_samples = i / 5 * 16;
-        if (i_samples + lid * 16 < LOAD_SIZE)
+        int first_idx = i_samples + lid * 16;
+        if (first_idx < LOAD_SIZE)
         {
+            float first_phase = first_idx * mix_scale + mix_bias;
+            float2 mix;
+            sincospif(first_phase, &mix.y, &mix.x);
 #pragma unroll
             for (int j = 0; j < 16; j++)
             {
@@ -145,13 +156,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 top >>= 22;  // trusts nvcc to sign extend - undefined in C++
                 float orig = top;
 
-                int idx = i_samples + j + lid * 16;
                 int idx_padded = pad_addr(i_samples + j) + padded_lid;
-                float phase = idx * mix_scale + mix_bias;
-                float2 mix = make_float2(1.0f, 0.0f);
-                //sincospif(phase, &mix.y, &mix.x); // TODO reenable/rework to be incremental
-                if (idx < LOAD_SIZE)
+                if (idx_padded < PADDED_LOAD_SIZE)
                     local_data.samples[idx_padded] = make_float2(mix.x * orig, mix.y * orig);
+                mix = cmul(mix, mix_step);
             }
         }
 

@@ -139,6 +139,8 @@ class DDC(accel.Operation):
             np.complex64,
         )
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
+        self.mix_frequency = 0.0  # Specify in cycles per sample
+        self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
 
     def _run(self) -> None:
         in_buffer = self.buffer("in")
@@ -146,6 +148,9 @@ class DDC(accel.Operation):
         weights_buffer = self.buffer("weights")
         groups = accel.divup(out_buffer.shape[0], self.template._group_out_size)
         # TODO: set up the offsets and mix frequency
+
+        mix_step_angle = 2 * np.pi * self.mix_frequency
+        mix_step = np.cos(mix_step_angle) + 1j * np.sin(mix_step_angle)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
@@ -156,8 +161,9 @@ class DDC(accel.Operation):
                 np.int32(0),  # in_offset
                 np.int32(out_buffer.shape[0]),  # out_size
                 np.int32(in_buffer.shape[0] * BYTE_BITS // SAMPLE_BITS),  # in_size
-                np.float32(0),  # mix_scale
-                np.float32(0),  # mix_bias
+                np.float32(2 * self.mix_frequency),  # mix_scale
+                np.float32(2 * self.mix_phase),  # mix_bias
+                np.complex64(mix_step),
             ],
             global_size=(groups * self.template.wgs, 1, 1),
             local_size=(self.template.wgs, 1, 1),
