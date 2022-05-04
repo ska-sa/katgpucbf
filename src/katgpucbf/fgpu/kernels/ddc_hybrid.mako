@@ -24,6 +24,7 @@
  * - SG_SIZE must divide into DECIMATION
  * - SG_SIZE should ideally be a power of 2
  * - COARSEN * (WGS / SG_SIZE) must divide into GROUP_OUT_SIZE
+ * - COARSEN * DECIMATION must be a multiple of 16
  */
 
 #define WGS ${wgs}
@@ -37,7 +38,7 @@
 
 #define REORDER_WRITE 0
 
-#define PAD_ADDR(x) ((x) + (x) / (COARSEN * DECIMATION) * SG_SIZE)
+#define PAD_ADDR(x) ((x) + ((x) >> 4))
 #define SAMPLE_ADDR(x) (((x) >> 2) + ((x) >> 4))  // * 10 / 32, but without overflow (must be a multiple of 16 though)
 
 DEVICE_FN unsigned int pad_addr(unsigned int addr)
@@ -48,7 +49,7 @@ DEVICE_FN unsigned int pad_addr(unsigned int addr)
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
-typedef union  // TODO see if more space can be saved here (some unions if "outer" loop only goes round once)
+typedef union
 {
     struct
     {
@@ -123,6 +124,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         int i_samples = i / 5 * 16;
         if (i_samples + lid * 16 < LOAD_SIZE)
         {
+#pragma unroll
             for (int j = 0; j < 16; j++)
             {
                 int word0 = j * 10 / 32;
@@ -135,13 +137,14 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 top >>= 22;  // trusts nvcc to sign extend - undefined in C++
                 float orig = top;
 
-                int idx = i_samples + lid * 16 + j;
+                int idx = i_samples + j + lid * 16;
+                int idx_padded = pad_addr(i_samples + j) + lid * 17;
                 float phase = idx * mix_scale + mix_bias;
                 float2 mix = make_float2(1.0f, 0.0f);
                 //sincospif(phase, &mix.y, &mix.x); // TODO reenable/rework to be incremental
                 // TODO: massive bank conflicts
                 if (idx < LOAD_SIZE)
-                    local_data.samples[pad_addr(idx)] = make_float2(mix.x * orig, mix.y * orig);
+                    local_data.samples[idx_padded] = make_float2(mix.x * orig, mix.y * orig);
             }
         }
 
