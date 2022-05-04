@@ -61,22 +61,18 @@ def queue() -> spead2.InprocQueue:
 
 
 @pytest.fixture
-def ringbuffer() -> spead2.recv.asyncio.ChunkRingbuffer:
-    """Create an asynchronous chunk ringbuffer."""
-    # 100 is just an arbitrarily large value, no special significance.
-    return spead2.recv.asyncio.ChunkRingbuffer(100)
-
-
-@pytest.fixture
-def stream(layout, ringbuffer, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
+def stream(layout, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
     """Create a receive stream.
 
     It is connected to the :func:`queue` fixture for input and
-    :func:`ringbuffer` for output.
+    :func:`data_ringbuffer` for output.
     """
-    max_chunks = 40
-    stream = recv.make_stream(layout, ringbuffer, -1, max_chunks)
-    for _ in range(max_chunks):
+    max_active_chunks = 5
+    data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_active_chunks)
+    n_chunks_total = max_active_chunks + 8  # 8 is just a few more.
+    free_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_chunks_total)
+    stream = recv.make_stream(layout, data_ringbuffer, free_ringbuffer, -1, max_active_chunks)
+    for _ in range(n_chunks_total):
         data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
         present = np.ones(layout.chunk_heaps, np.uint8)

@@ -226,6 +226,7 @@ def make_stream(
     spead_items: List[int],
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     affinity: int,
     stream_stats: List[str],
     **kwargs: Any,
@@ -235,19 +236,21 @@ def make_stream(
     Parameters
     ----------
     layout
-        Heap size and chunking parameters
+        Heap size and chunking parameters.
     spead_items
         List of SPEAD item IDs to be expected in the heap headers.
     max_active_chunks
         Maximum number of chunks under construction.
     data_ringbuffer
-        Output ringbuffer to which chunks will be sent
+        Output ringbuffer to which chunks will be sent.
+    free_ringbuffer
+        Ringbuffer for holding chunks for recycling once they've been used.
     affinity
-        CPU core affinity for the worker thread (negative to not set an affinity)
+        CPU core affinity for the worker thread (negative to not set an affinity).
     stream_stats
-        Stats to hook up to prometheus
+        Stats to hook up to prometheus.
     kwargs
-        Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`
+        Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`.
     """
     stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
     stats_base = stream_config.next_stat_index()
@@ -259,9 +262,7 @@ def make_stream(
         max_chunks=max_active_chunks,
         place=layout.chunk_place(stats_base),
     )
-    # Ringbuffer size is largely arbitrary: just needs to be big enough to
-    # never fill up.
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_active_chunks + 32)
+
     return spead2.recv.ChunkRingStream(
         spead2.ThreadPool(1, [] if affinity < 0 else [affinity]),
         stream_config,

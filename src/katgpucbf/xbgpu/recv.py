@@ -160,7 +160,11 @@ class Layout(BaseLayout):
 
 
 def make_stream(
-    layout: Layout, data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer, src_affinity: int, max_active_chunks: int
+    layout: Layout,
+    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    src_affinity: int,
+    max_active_chunks: int,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
 
@@ -172,6 +176,8 @@ def make_stream(
         Heap size and chunking parameters.
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
+    free_ringbuffer
+        Ringbuffer for holding chunks for recycling once they've been used.
     src_affinity
         CPU core affinity for the worker thread.
     max_active_chunks
@@ -182,6 +188,7 @@ def make_stream(
         spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
+        free_ringbuffer=free_ringbuffer,
         affinity=src_affinity,
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
