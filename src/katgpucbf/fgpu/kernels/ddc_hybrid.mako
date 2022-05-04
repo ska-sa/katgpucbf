@@ -38,7 +38,8 @@
 
 #define REORDER_WRITE 0
 
-#define PAD_ADDR(x) ((x) + ((x) >> 4))
+// TODO: adapt to COARSEN and SG_SIZE
+#define PAD_ADDR(x) ((x) + ((x) >> 5))
 #define SAMPLE_ADDR(x) (((x) >> 2) + ((x) >> 4))  // * 10 / 32, but without overflow (must be a multiple of 16 though)
 
 DEVICE_FN unsigned int pad_addr(unsigned int addr)
@@ -94,6 +95,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     // TODO: this doesn't handle non-round in_offset, which is necessary for coarse delay?
     // TODO: pad the array to avoid out-of-bounds accesses
     int load_addr = SAMPLE_ADDR(in_offset);
+    int padded_lid = pad_addr(lid * 16);
 #pragma unroll
     for (int i = 0; i < SAMPLE_ADDR(LOAD_SIZE); i += WGS * 5)
     {
@@ -138,11 +140,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 float orig = top;
 
                 int idx = i_samples + j + lid * 16;
-                int idx_padded = pad_addr(i_samples + j) + lid * 17;
+                int idx_padded = pad_addr(i_samples + j) + padded_lid;
                 float phase = idx * mix_scale + mix_bias;
                 float2 mix = make_float2(1.0f, 0.0f);
                 //sincospif(phase, &mix.y, &mix.x); // TODO reenable/rework to be incremental
-                // TODO: massive bank conflicts
                 if (idx < LOAD_SIZE)
                     local_data.samples[idx_padded] = make_float2(mix.x * orig, mix.y * orig);
             }
