@@ -103,7 +103,8 @@ def mock_recv_streams(mocker, n_src_streams: int) -> List[spead2.InprocQueue]:
     Returns
     -------
     queues
-        An in-process queue to use for sending to each polarisation.
+        A list of in-process queue to use for sending data. The number of queues
+        in the list is determined by ``n_src_streams``.
     """
     queues = [spead2.InprocQueue() for _ in range(n_src_streams)]
     queue_iter = iter(queues)  # Each call to add_reader gets the next queue
