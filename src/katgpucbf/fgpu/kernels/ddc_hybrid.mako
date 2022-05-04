@@ -38,6 +38,7 @@
 
 #define REORDER_READ 0
 #define REORDER_WRITE 0
+#define LOCAL_WEIGHTS 0
 
 // TODO: adapt to COARSEN and SG_SIZE
 #define PAD_ADDR(x) ((x) + ((x) >> 5))
@@ -68,7 +69,9 @@ typedef union
     {
         union
         {
+#if LOCAL_WEIGHTS
             float weights[TAPS];
+#endif
 #if REORDER_READ
             unsigned int raw_samples[WGS * 5];
 #endif
@@ -174,8 +177,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     }
 
     // Load coefficients
+#if LOCAL_WEIGHTS
     for (int i = lid; i < TAPS; i += WGS)
         local_data.weights[i] = weights[i];
+#endif
 
     int sgid = (unsigned int) lid / SG_SIZE;
     int sgpos = (unsigned int) lid % SG_SIZE;
@@ -198,7 +203,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         for (int row = 0; row < TAPS; row += DECIMATION)
         {
             int i = row + phase;
+#if LOCAL_WEIGHTS
             float w = local_data.weights[i + sgpos];
+#else
+            float w = weights[i + sgpos];
+#endif
             r_samples[COARSEN - 1] = local_data.samples[start + pad_addr(i + (COARSEN - 1) * DECIMATION)];
             for (int j = 0; j < COARSEN; j++)
             {
