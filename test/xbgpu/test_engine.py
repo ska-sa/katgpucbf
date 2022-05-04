@@ -354,7 +354,7 @@ class TestEngine:
         num_ants,
         num_spectra_per_heap,
         num_channels,
-        mock_recv_stream,
+        mock_recv_streams,
     ):
         """
         End-to-end test for the XBEngine.
@@ -397,7 +397,7 @@ class TestEngine:
         feng_stream_config = spead2.send.StreamConfig(
             max_packet_size=max_packet_size, max_heaps=n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         )
-        feng_stream = spead2.send.asyncio.InprocStream(spead2.ThreadPool(), mock_recv_stream, feng_stream_config)
+        feng_stream = spead2.send.asyncio.InprocStream(spead2.ThreadPool(), mock_recv_streams, feng_stream_config)
 
         # Create ItemGroup and add all the required fields.
         ig_send = spead2.send.ItemGroup(flavour=FLAVOUR)
@@ -425,12 +425,11 @@ class TestEngine:
         ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
 
         queue = spead2.InprocQueue()
-        thread_pool = spead2.ThreadPool()
-        recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
+        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
 
         arglist = [
-            '--katcp-host=""',
+            "--katcp-host=127.0.0.1",
             "--katcp-port=0",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
@@ -474,7 +473,8 @@ class TestEngine:
                 timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send
             )
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
-        mock_recv_stream.stop()
+        for q in mock_recv_streams:
+            q.stop()
 
         await self._recv_process(
             recv_stream,

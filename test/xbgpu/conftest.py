@@ -16,34 +16,10 @@
 
 """Fixtures for use in xbgpu unit tests."""
 
-from typing import Optional, Tuple
-
 import pytest
-import spead2
 
 
 @pytest.fixture
-def mock_recv_stream(mocker) -> spead2.InprocQueue:
-    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
-
-    Returns
-    -------
-    queue
-        An in-process queue to use for sending to the X-engine under test.
-    """
-    queue = spead2.InprocQueue()
-
-    def add_reader(
-        stream: spead2.recv.ChunkRingStream,
-        *,
-        src: Tuple[str, int],
-        interface: Optional[str],
-        ibv: bool,
-        comp_vector: int,
-        buffer: int,
-    ) -> None:
-        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
-        stream.add_inproc_reader(queue)
-
-    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
-    return queue
+def n_src_streams() -> int:  # noqa: D401
+    """Number of source streams for an xbgpu instance."""
+    return 1

@@ -16,7 +16,7 @@
 
 """Fixtures for use in fgpu unit tests."""
 
-from typing import AsyncGenerator, List, Optional, Tuple, Union
+from typing import AsyncGenerator, List
 
 import aiokatcp
 import async_timeout
@@ -33,32 +33,9 @@ from katgpucbf.fgpu.main import make_engine, parse_args
 
 
 @pytest.fixture
-def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
-    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
-
-    Returns
-    -------
-    queues
-        An in-process queue to use for sending to each polarisation.
-    """
-    queues = [spead2.InprocQueue() for _ in range(N_POLS)]
-    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
-
-    def add_reader(
-        stream: spead2.recv.ChunkRingStream,
-        *,
-        src: Union[str, List[Tuple[str, int]]],
-        interface: Optional[str],
-        ibv: bool,
-        comp_vector: int,
-        buffer: int,
-    ) -> None:
-        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
-        queue = next(queue_iter)
-        stream.add_inproc_reader(queue)
-
-    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
-    return queues
+def n_src_streams() -> int:  # noqa: D401
+    """Number of source streams for an fgpu instance."""
+    return N_POLS
 
 
 @pytest.fixture
