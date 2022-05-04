@@ -56,12 +56,12 @@ class DDCTemplate:
         if taps % decimation != 0:
             raise ValueError("taps must be a multiple of decimation")
         # TODO: tune the magic numbers and enforce more requirements
-        self.wgs = 128
+        self.wgs = 64
         self._sg_size = 4
-        self._coarsen = 4
+        self._coarsen = 8
         self.taps = taps
         self.decimation = decimation
-        self._group_out_size = self.wgs // self._sg_size * self._coarsen  # TODO: tune
+        self._group_out_size = self.wgs // self._sg_size * self._coarsen
         program = accel.build(
             context,
             "kernels/ddc_hybrid.mako",
@@ -69,7 +69,6 @@ class DDCTemplate:
                 "wgs": self.wgs,
                 "taps": taps,
                 "decimation": decimation,
-                "group_out_size": self._group_out_size,
                 "coarsen": self._coarsen,
                 "sg_size": self._sg_size,
             },
