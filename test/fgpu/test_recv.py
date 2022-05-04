@@ -88,7 +88,7 @@ def streams(
     """
     streams = recv.make_streams(layout, data_ringbuffer, free_ringbuffer, [-1, -1])
     for stream, queue in zip(streams, queues):
-        for _ in range(4):
+        for _ in range(free_ringbuffer.maxsize // len(streams)):
             data = np.empty(layout.chunk_bytes, np.uint8)
             # Use np.ones to make sure the bits get zeroed out
             present = np.ones(layout.chunk_heaps, np.uint8)
