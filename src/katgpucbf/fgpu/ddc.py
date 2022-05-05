@@ -58,7 +58,7 @@ class DDCTemplate:
         # TODO: tune the magic numbers and enforce more requirements
         self.context = context
         self.wgs = 64
-        self._sg_size = 4
+        self._sg_size = 2
         self._coarsen = 8
         self.taps = taps
         self.decimation = decimation
