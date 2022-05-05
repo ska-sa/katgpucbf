@@ -150,8 +150,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     int in_offset,  // in samples (TODO: make it words to simplify?)
     int out_size,
     int in_size,
-    float mix_scale,
-    float mix_bias,  // TODO: fold into mix_lookup?
+    double mix_scale,
+    double mix_bias,  // TODO: fold into mix_lookup?
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
 {
     LOCAL_DECL tile tiles[TILES];
@@ -165,11 +165,15 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     in_offset += group * GROUP_IN_SIZE;
     in += in_offset / SEGMENT_SAMPLES * SEGMENT_WORDS;
     out += out_offset + group * GROUP_OUT_SIZE;
-    // Adjust mix_bias to the first segment handled by the thread
-    // (TODO: could incorporate GROUP_IN_SIZE in mix_scale)
-    mix_bias += (group * GROUP_IN_SIZE + lid * SEGMENT_SAMPLES) * mix_scale;
+
     float2 mix_base;
-    sincospif(mix_bias, &mix_base.y, &mix_base.x);
+    /* mix_bias needs to be computed at double precision because there are many
+     * bits to the left of the decimal point. After we've gotten rid of those
+     * we can go back to single precision.
+     */
+    mix_bias += (group * GROUP_IN_SIZE + lid * SEGMENT_SAMPLES) * mix_scale;
+    mix_bias -= rint(mix_bias);
+    sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);
 
     load_segments(in, segs, lid);
 

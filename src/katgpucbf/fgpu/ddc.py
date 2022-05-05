@@ -190,8 +190,8 @@ class DDC(accel.Operation):
                 np.int32(0),  # in_offset
                 np.int32(out_buffer.shape[0]),  # out_size
                 np.int32(in_buffer.shape[0] * BYTE_BITS // SAMPLE_BITS),  # in_size
-                np.float32(2 * self.mix_frequency),  # mix_scale
-                np.float32(2 * self.mix_phase),  # mix_bias
+                np.float64(self.mix_frequency),  # mix_scale
+                np.float64(self.mix_phase),  # mix_bias
                 self._mix_lookup.buffer,
             ],
             global_size=(groups * self.template.wgs, 1, 1),

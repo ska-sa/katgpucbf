@@ -60,7 +60,7 @@ def test_ddc(
     rng = np.random.default_rng(seed=1)
     h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
-    mix_frequency = 0.375
+    mix_frequency = 0.21
     expected = ddc_host(h_in, weights, decimation, mix_frequency)
 
     template = DDCTemplate(context, taps=taps, decimation=decimation)
