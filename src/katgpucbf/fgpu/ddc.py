@@ -148,8 +148,30 @@ class DDC(accel.Operation):
         self._mix_lookup = accel.DeviceArray(
             template.context, (template._segments, template._segment_samples), np.complex64
         )
+        self._mix_lookup_host = self._mix_lookup.empty_like()
         self.mix_frequency = 0.0  # Specify in cycles per sample
         self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
+
+    @property
+    def mix_frequency(self) -> float:
+        """Mixer frequency in cycles per ADC sample."""
+        return self._mix_frequency
+
+    @mix_frequency.setter
+    def mix_frequency(self, frequency: float) -> None:
+        self._mix_frequency = frequency
+        major = self.template.wgs * self.template._segment_samples
+        angles = (
+            2
+            * np.pi
+            * frequency
+            * (
+                (np.arange(self._mix_lookup_host.shape[0]) * major)[:, np.newaxis]
+                + (np.arange(self.template._segment_samples)[np.newaxis, :])
+            )
+        )
+        self._mix_lookup_host[:] = np.cos(angles) + 1j * np.sin(angles)
+        self._mix_lookup.set(self.command_queue, self._mix_lookup_host)
 
     def _run(self) -> None:
         in_buffer = self.buffer("in")
