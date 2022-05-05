@@ -220,10 +220,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             // the subgroup
             unsigned int total_phase = phase + dphase;
             float2 samples[COARSEN];
-            // TODO: can constant fold some of this
-            int tile_index_base = pad_tile(
-                total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION)
-            );
+            // This is a padded index, but calculated by hand to ensure some constant folding
+            int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION + 1);
 #pragma unroll
             for (int j = 0; j < COARSEN - 1; j++)
             {
@@ -248,9 +246,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                     samples[j] = samples[j + 1];
             }
 
-            // tiles is read above and written by the next loop iteration
-            // (TODO: could be eliminated on the final loop pass)
         }
+        // tiles is read above and written by the next loop iteration
+        // (TODO: could be eliminated on the final loop pass)
         BARRIER();
     }
 
