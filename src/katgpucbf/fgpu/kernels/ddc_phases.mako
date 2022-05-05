@@ -154,7 +154,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     float mix_bias,
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
 {
-    LOCAL_DECL tile tiles[TILES];
+    LOCAL_DECL tile tiles[PADDED_TILES];
     segment segs[SEGMENTS];
     float2 sums[COARSEN];
 
@@ -186,15 +186,18 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 // TODO: can optimise this calculation with some constant folding?
                 unsigned int tile_id = i * WGS * TILES_PER_SEGMENT + lid * TILES_PER_SEGMENT + j;
                 unsigned int padded_tile_id = pad_tile(tile_id);
-#pragma unroll
-                for (int k = 0; k < SG_SIZE; k++)
+                if (padded_tile_id < PADDED_TILES)
                 {
-                    int seg_idx = j * TILE_SAMPLES + phase + k;
-                    float sample = segment_get(&segs[i], seg_idx);
-                    float2 mixed = cmul(mix_base, mix_lookup[i][seg_idx]);
-                    mixed.x *= sample;
-                    mixed.y *= sample;
-                    tiles[padded_tile_id].samples[k] = mixed;
+#pragma unroll
+                    for (int k = 0; k < SG_SIZE; k++)
+                    {
+                        int seg_idx = j * TILE_SAMPLES + phase + k;
+                        float sample = segment_get(&segs[i], seg_idx);
+                        float2 mixed = cmul(mix_base, mix_lookup[i][seg_idx]);
+                        mixed.x *= sample;
+                        mixed.y *= sample;
+                        tiles[padded_tile_id].samples[k] = mixed;
+                    }
                 }
             }
 
@@ -220,7 +223,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 samples[j] = tiles[tile_index_base + pad_tile(j * TILES_PER_DECIMATION)].samples[sg_rank];
             }
 #pragma unroll
-            for (int i = 0; i < TAPS; i++)
+            for (int i = 0; i < TAPS / DECIMATION; i++)
             {
                 float w = weights[i];
                 samples[COARSEN - 1] = tiles[tile_index_base + pad_tile((i + COARSEN - 1) * TILES_PER_DECIMATION)].samples[sg_rank];
