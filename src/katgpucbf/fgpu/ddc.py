@@ -56,15 +56,20 @@ class DDCTemplate:
         if taps % decimation != 0:
             raise ValueError("taps must be a multiple of decimation")
         # TODO: tune the magic numbers and enforce more requirements
+        self.context = context
         self.wgs = 64
         self._sg_size = 4
         self._coarsen = 8
         self.taps = taps
         self.decimation = decimation
+        self._segment_samples = 16
         self._group_out_size = self.wgs // self._sg_size * self._coarsen
+        self._group_in_size = self._group_out_size * decimation
+        self._load_size = self._group_in_size + taps - decimation
+        self._segments = (self._load_size - 1) // (self._segment_samples * self.wgs) + 1
         program = accel.build(
             context,
-            "kernels/ddc_hybrid.mako",
+            "kernels/ddc_phases.mako",
             {
                 "wgs": self.wgs,
                 "taps": taps,
@@ -139,6 +144,10 @@ class DDC(accel.Operation):
             np.complex64,
         )
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
+        # TODO: fill in _mix_lookup as mix_frequency is set
+        self._mix_lookup = accel.DeviceArray(
+            template.context, (template._segments, template._segment_samples), np.complex64
+        )
         self.mix_frequency = 0.0  # Specify in cycles per sample
         self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
 
@@ -147,10 +156,8 @@ class DDC(accel.Operation):
         out_buffer = self.buffer("out")
         weights_buffer = self.buffer("weights")
         groups = accel.divup(out_buffer.shape[0], self.template._group_out_size)
-        # TODO: set up the offsets and mix frequency
+        # TODO: set up the offsets
 
-        mix_step_angle = 2 * np.pi * self.mix_frequency
-        mix_step = np.cos(mix_step_angle) + 1j * np.sin(mix_step_angle)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
@@ -163,7 +170,7 @@ class DDC(accel.Operation):
                 np.int32(in_buffer.shape[0] * BYTE_BITS // SAMPLE_BITS),  # in_size
                 np.float32(2 * self.mix_frequency),  # mix_scale
                 np.float32(2 * self.mix_phase),  # mix_bias
-                np.complex64(mix_step),
+                self._mix_lookup.buffer,
             ],
             global_size=(groups * self.template.wgs, 1, 1),
             local_size=(self.template.wgs, 1, 1),
