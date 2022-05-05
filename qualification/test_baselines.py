@@ -123,7 +123,10 @@ async def test_baseline_correlation_products(
                     f"{len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
                     f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
                 )
-                expect(bls_ordering.index(bl) in loud_bls, "Expected baseline doesn't show up in the list!")
+                expect(
+                    bls_ordering.index(bl) in loud_bls,
+                    f"{bl} ({bls_ordering.index(bl)}) doesn't show up in the list ({loud_bls})!",
+                )
                 for loud_bl in loud_bls:
                     expect(
                         is_signal_expected_in_baseline(bl, bls_ordering[loud_bl], pdf_report),
