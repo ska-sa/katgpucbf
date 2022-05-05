@@ -135,17 +135,18 @@ DEVICE_FN static void load_segments(
         {
             int addr = i * WGS * SEGMENT_WORDS + lid * SEGMENT_WORDS + j;
             // TODO: Could also use this check to avoid need for padding `in`
-            if (addr < LOAD_WORDS)
-                segs[i].raw[j] = in[addr];
+            segs[i].raw[j] = (addr < LOAD_WORDS) ? in[addr] : 0;
         }
 
     /* First schedule all the loads so that they can happen asynchronously,
      * and only then do endian swapping.
+     *
+     * Note: this will do some unnecessary work (some of the values are
+     * outside LOAD_SAMPLES) but it's cheaper to just do it than to check.
      */
     for (int i = 0; i < SEGMENTS; i++)
         for (int j = 0; j < SEGMENT_WORDS; j++)
-            if (i * WGS * SEGMENT_WORDS + j < LOAD_WORDS)
-                segs[i].raw[j] = reverse_endian(segs[i].raw[j]);
+            segs[i].raw[j] = reverse_endian(segs[i].raw[j]);
 }
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
