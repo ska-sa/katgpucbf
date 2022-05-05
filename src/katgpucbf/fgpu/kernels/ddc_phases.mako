@@ -162,8 +162,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     unsigned int group = get_group_id(0);
     unsigned int sg_rank = lid % SG_SIZE;
     unsigned int sg_group = lid / SG_SIZE;
+    in_offset += group * GROUP_IN_SIZE;
     in += in_offset / SEGMENT_SAMPLES * SEGMENT_WORDS;
-    out += out_offset;
+    out += out_offset + group * GROUP_OUT_SIZE;
     // Adjust mix_bias to the first segment handled by the thread
     // (TODO: could incorporate GROUP_IN_SIZE in mix_scale)
     mix_bias += (group * GROUP_IN_SIZE + lid * SEGMENT_SAMPLES) * mix_scale;
