@@ -151,7 +151,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     int out_size,
     int in_size,
     float mix_scale,
-    float mix_bias,
+    float mix_bias,  // TODO: fold into mix_lookup?
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
 {
     LOCAL_DECL tile tiles[PADDED_TILES];
@@ -225,7 +225,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 #pragma unroll
             for (int i = 0; i < TAPS / DECIMATION; i++)
             {
-                float w = weights[i];
+                int tap = i * DECIMATION + total_phase + sg_rank;
+                float w = weights[tap];
                 samples[COARSEN - 1] = tiles[tile_index_base + pad_tile((i + COARSEN - 1) * TILES_PER_DECIMATION)].samples[sg_rank];
                 for (int j = 0; j < COARSEN; j++)
                 {
