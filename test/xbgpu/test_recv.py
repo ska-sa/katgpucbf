@@ -166,7 +166,7 @@ class TestStream:
             # We don't shuffle the first few heaps, this just makes sure
             # that we get chunk 123 first, as expected.
             heap_list: List[spead2.send.Heap] = []
-            for _ in range(5):
+            for _ in range(2):
                 heap_list.append(next(heaps))
             # The rest are going to be pretty well shuffled. Heaps from a given
             # f-engine are unlikely to arrive out-of-order, we anticipate that
@@ -197,7 +197,7 @@ class TestStream:
 
             # Finally a heap from the distant past
             heap = gen_heap(
-                first_timestamp - 250 * layout.timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
+                first_timestamp - 8 * layout.timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
             )
             await send_stream.async_send_heap(heap)
 
