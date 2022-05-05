@@ -57,9 +57,9 @@ class DDCTemplate:
             raise ValueError("taps must be a multiple of decimation")
         # TODO: tune the magic numbers and enforce more requirements
         self.context = context
-        self.wgs = 64
+        self.wgs = 32
         self._sg_size = 2
-        self._coarsen = 8
+        self._coarsen = 11
         self.taps = taps
         self.decimation = decimation
         self._segment_samples = 16

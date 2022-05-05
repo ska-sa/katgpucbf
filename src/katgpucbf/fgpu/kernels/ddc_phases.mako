@@ -32,13 +32,15 @@
 
 /* Alignment requirements: TODO complete this
  * - in_offset must be a multiple of SEGMENT_SAMPLES
- * - All the tuning parameters must be powers of 2 (probably not strictly required, but
- *   ensures that any parameter is either a multiple of or fraction of any other).
+ * - All the tuning parameters except for COARSEN must be powers of 2 (probably
+ *   not strictly required, but ensures that any parameter is either a multiple
+ *   of or fraction of any other).
  *   TODO: don't think WGS needs to be
  * - WGS must be a multiple of SG_SIZE
  * - TAPS must be a multiple of DECIMATION
  * - SEGMENT_SAMPLES must be a multiple of SG_SIZE
  * - DECIMATION must be a multiple of SG_SIZE
+ * - COARSEN should be odd for best performance
  */
 
 #define WGS ${wgs}
@@ -69,14 +71,10 @@
  * of SG_SIZE.
  */
 #define TILE_SAMPLES (SEGMENT_SAMPLES < DECIMATION ? SEGMENT_SAMPLES : DECIMATION)
-// Number of tiles to store in local memory, prior to padding
+// Number of tiles to store in local memory
 #define TILES (LOAD_SIZE / TILE_SAMPLES)
 #define TILES_PER_SEGMENT (SEGMENT_SAMPLES / TILE_SAMPLES)
 #define TILES_PER_DECIMATION (DECIMATION / TILE_SAMPLES)
-
-#define PAD_TILE_SCALE (COARSEN * TILES_PER_DECIMATION)
-#define PAD_TILE(idx) ((idx) + (idx) / PAD_TILE_SCALE)
-#define PADDED_TILES (PAD_TILE(TILES - 1) + 1)
 
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
@@ -89,11 +87,6 @@ DEVICE_FN static float2 cmul(float2 a, float2 b)
 DEVICE_FN static unsigned int reverse_endian(unsigned int v)
 {
     return __byte_perm(v, v, 0x0123);
-}
-
-DEVICE_FN static unsigned int pad_tile(unsigned int idx)
-{
-    return PAD_TILE(idx);
 }
 
 /* A segment consists of SEGMENT_SAMPLES contiguous samples, still in 10-bit
@@ -161,7 +154,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     float mix_bias,  // TODO: fold into mix_lookup?
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
 {
-    LOCAL_DECL tile tiles[PADDED_TILES];
+    LOCAL_DECL tile tiles[TILES];
     segment segs[SEGMENTS];
     float2 sums[COARSEN];
 
@@ -193,8 +186,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             {
                 // TODO: can optimise this calculation with some constant folding?
                 unsigned int tile_id = i * WGS * TILES_PER_SEGMENT + lid * TILES_PER_SEGMENT + j;
-                unsigned int padded_tile_id = pad_tile(tile_id);
-                if (padded_tile_id < PADDED_TILES)
+                if (tile_id < TILES)
                 {
 #pragma unroll
                     for (int k = 0; k < SG_SIZE; k++)
@@ -204,7 +196,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                         float2 mixed = cmul(mix_base, mix_lookup[i][seg_idx]);
                         mixed.x *= sample;
                         mixed.y *= sample;
-                        tiles[padded_tile_id].samples[k] = mixed;
+                        tiles[tile_id].samples[k] = mixed;
                     }
                 }
             }
@@ -220,20 +212,19 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             // the subgroup
             unsigned int total_phase = phase + dphase;
             float2 samples[COARSEN];
-            // This is a padded index, but calculated by hand to ensure some constant folding
-            int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION + 1);
+            int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION);
 #pragma unroll
             for (int j = 0; j < COARSEN - 1; j++)
             {
                 // Prime the pipeline
-                samples[j] = tiles[tile_index_base + pad_tile(j * TILES_PER_DECIMATION)].samples[sg_rank];
+                samples[j] = tiles[tile_index_base + j * TILES_PER_DECIMATION].samples[sg_rank];
             }
 #pragma unroll
             for (int i = 0; i < TAPS / DECIMATION; i++)
             {
                 int tap = i * DECIMATION + total_phase + sg_rank;
                 float w = weights[tap];
-                samples[COARSEN - 1] = tiles[tile_index_base + pad_tile((i + COARSEN - 1) * TILES_PER_DECIMATION)].samples[sg_rank];
+                samples[COARSEN - 1] = tiles[tile_index_base + (i + COARSEN - 1) * TILES_PER_DECIMATION].samples[sg_rank];
                 for (int j = 0; j < COARSEN; j++)
                 {
                     sums[j].x += w * samples[j].x;
