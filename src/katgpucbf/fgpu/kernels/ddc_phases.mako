@@ -20,16 +20,15 @@
 
 /* TODO:
  * - specify alignment requirements
- * - test reading via shared memory (possibly with memcpy_async)
+ * - test reading via shared memory with memcpy_async
  * - test writing via shared memory
  * - test putting constants into shared memory
  * - look into __constant memory type
- * - Try cache hints e.g. __ldcg / __ldcs / __stcs
  * - Try packing multiple logical workgroups into one physical one e.g. to
  *   enable warp-synchronous operation without harming occupancy
- * - Check if PAD_TILE padding is optimal
- * - Check if it could be more official to load SG_SIZE strided values per
+ * - Check if it could be more efficient to load SG_SIZE strided values per
  *   tile, instead of contiguous
+ */
 
 /* Alignment requirements: TODO complete this
  * - in_offset must be a multiple of SEGMENT_SAMPLES
