@@ -61,6 +61,8 @@
 #define GROUP_IN_SIZE (GROUP_OUT_SIZE * DECIMATION)
 // Number of input samples to load in this workgroup
 #define LOAD_SIZE (GROUP_IN_SIZE + TAPS - DECIMATION)
+// Load-size expressed in 32-bit words (rounding up)
+#define LOAD_WORDS ((LOAD_SIZE - 1) * SAMPLE_BITS / 32 + 1)
 // Number of segments to load per work-item
 #define SEGMENTS ((LOAD_SIZE - 1) / (SEGMENT_SAMPLES * WGS) + 1)
 /* Number of contiguous samples that take turns occupying a tile
@@ -129,17 +131,22 @@ DEVICE_FN static void load_segments(
     segment segs[SEGMENTS],
     int lid)
 {
-    // TODO: make loads conditional to avoid loading unneeded data?
     for (int i = 0; i < SEGMENTS; i++)
         for (int j = 0; j < SEGMENT_WORDS; j++)
-            segs[i].raw[j] = in[i * WGS * SEGMENT_WORDS + lid * SEGMENT_WORDS + j];
+        {
+            int addr = i * WGS * SEGMENT_WORDS + lid * SEGMENT_WORDS + j;
+            // TODO: Could also use this check to avoid need for padding `in`
+            if (addr < LOAD_WORDS)
+                segs[i].raw[j] = in[addr];
+        }
 
-    /* First schedule all the loads so that they can happen asynchronous, and
-     * only then do endian swapping.
+    /* First schedule all the loads so that they can happen asynchronously,
+     * and only then do endian swapping.
      */
     for (int i = 0; i < SEGMENTS; i++)
         for (int j = 0; j < SEGMENT_WORDS; j++)
-            segs[i].raw[j] = reverse_endian(segs[i].raw[j]);
+            if (i * WGS * SEGMENT_WORDS + j < LOAD_WORDS)
+                segs[i].raw[j] = reverse_endian(segs[i].raw[j]);
 }
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
