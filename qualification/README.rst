@@ -21,6 +21,9 @@ While ``katgpucbf`` itself doesn't need to be installed for the test
 framework to work, you need to have the appropriate Docker image
 available as specified (see below).
 
+The machine running the tests needs to be able to receive data from the
+correlator network. The data rate can become quite high for larger array sizes.
+
 Sample pytest.ini
 -----------------
 

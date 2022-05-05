@@ -57,9 +57,41 @@ async def get_dsim_endpoint(product_controller_client: aiokatcp.Client, adc_samp
 class CorrelatorRemoteControl:
     """A container class for katcp clients needed by qualification tests."""
 
-    def __init__(self, product_controller_client: aiokatcp.Client, dsim_client: aiokatcp.Client) -> None:
+    def __init__(
+        self,
+        product_controller_client: aiokatcp.Client,
+        dsim_client: aiokatcp.Client,
+        config: dict,
+        *,
+        n_bls: int,
+        n_chans_per_substream: int,
+        n_bits_per_sample: int,
+        n_spectra_per_acc: int,
+        int_time: float,
+        n_samples_between_spectra: int,
+        bls_ordering: List[Tuple[str, str]],
+        sync_time: float,
+        timestamp_scale_factor: float,
+        bandwidth: float,
+        multicast_endpoints: List[Tuple[str, int]],
+    ) -> None:
         self.product_controller_client = product_controller_client
         self.dsim_client = dsim_client
+        # Some parameters we already know because they were in the config;
+        self.n_chans = config["outputs"]["antenna_channelised_voltage"]["n_chans"]
+
+        # Others we can't get from the config and have to be passed in:
+        self.n_bls = n_bls
+        self.n_chans_per_substream = n_chans_per_substream
+        self.n_bits_per_sample = n_bits_per_sample
+        self.n_spectra_per_acc = n_spectra_per_acc
+        self.int_time = int_time
+        self.n_samples_between_spectra = n_samples_between_spectra
+        self.bls_ordering = bls_ordering
+        self.sync_time = sync_time
+        self.timestamp_scale_factor = timestamp_scale_factor
+        self.bandwidth = bandwidth
+        self.multicast_endpoints = multicast_endpoints
 
 
 def create_baseline_correlation_product_receive_stream(

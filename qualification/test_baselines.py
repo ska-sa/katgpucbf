@@ -2,7 +2,6 @@
 
 """Baseline verification tests."""
 
-import ast
 import logging
 import time
 from typing import Tuple
@@ -12,7 +11,7 @@ import spead2
 import spead2.recv
 import spead2.recv.asyncio
 
-from . import CorrelatorRemoteControl, get_sensor_val
+from . import CorrelatorRemoteControl
 from .reporter import Reporter
 
 CPLX = 2
@@ -57,20 +56,12 @@ async def test_baseline_correlation_products(
     )
     pc_client = correlator.product_controller_client
 
-    # Get some necessary sensor values from the correlator.
-    bls_ordering = ast.literal_eval(await get_sensor_val(pc_client, "baseline_correlation_products-bls-ordering"))
-    sync_time = await get_sensor_val(pc_client, "antenna_channelised_voltage-sync-time")
-    timestamp_scale_factor = await get_sensor_val(pc_client, "antenna_channelised_voltage-scale-factor-timestamp")
-    n_samples_between_spectra = await get_sensor_val(pc_client, "antenna_channelised_voltage-n-samples-between-spectra")
-    n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
-    bandwidth = await get_sensor_val(pc_client, "antenna_channelised_voltage-bandwidth")
-
-    timestamp_step = n_samples_between_spectra * n_spectra_per_acc
+    timestamp_step = correlator.n_samples_between_spectra * correlator.n_spectra_per_acc
 
     pdf_report.step("Select and configure the D-sim with a strong tone.")
     # Get dsim ready with a tone in a known channel that we can check for on the output.
     channel = n_channels // 3  # picked fairly arbitrarily. We just need to know where to set and look for the tone.
-    channel_width = bandwidth / n_channels
+    channel_width = correlator.bandwidth / n_channels
     channel_centre_freq = channel * channel_width
     pdf_report.detail(f"Tone frequency of {channel_centre_freq} Hz selected, in the centre of channel {channel}.")
 
@@ -88,16 +79,16 @@ async def test_baseline_correlation_products(
                 logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
                 await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
 
-    async def unzero_a_baseline(baseline_tuple: Tuple[str]):
+    async def unzero_a_baseline(baseline_tuple: Tuple[str, str]):
         pdf_report.detail(f"Unzeroing gain on {baseline_tuple}")
         for ant in baseline_tuple:
             await pc_client.request("gain", "antenna_channelised_voltage", ant, "1")
 
-    for idx, bl in enumerate(bls_ordering):
-        pdf_report.step(f"Check baseline {bl} ({idx+1}/{len(bls_ordering)})")
+    for idx, bl in enumerate(correlator.bls_ordering):
+        pdf_report.step(f"Check baseline {bl} ({idx+1}/{len(correlator.bls_ordering)})")
         await zero_all_gains()
         await unzero_a_baseline(bl)
-        expected_timestamp = (time.time() + 1 - sync_time) * timestamp_scale_factor
+        expected_timestamp = (time.time() + 1 - correlator.sync_time) * correlator.timestamp_scale_factor
         # Note that we are making an assumption that nothing is straying too far
         # from wall time here. I don't have a way other than adjusting the dsim
         # signal of ensuring that we get going after a specific timestamp in the
@@ -124,12 +115,12 @@ async def test_baseline_correlation_products(
                     f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
                 )
                 expect(
-                    bls_ordering.index(bl) in loud_bls,
-                    f"{bl} ({bls_ordering.index(bl)}) doesn't show up in the list ({loud_bls})!",
+                    correlator.bls_ordering.index(bl) in loud_bls,
+                    f"{bl} ({correlator.bls_ordering.index(bl)}) doesn't show up in the list ({loud_bls})!",
                 )
                 for loud_bl in loud_bls:
                     expect(
-                        is_signal_expected_in_baseline(bl, bls_ordering[loud_bl], pdf_report),
+                        is_signal_expected_in_baseline(bl, correlator.bls_ordering[loud_bl], pdf_report),
                         "Signal found in unexpected baseline.",
                     )
                 receive_stream.add_free_chunk(chunk)

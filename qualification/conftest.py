@@ -1,4 +1,5 @@
 """Fixtures and options for qualification testing of the correlator."""
+import ast
 import asyncio
 import json
 import logging
@@ -186,11 +187,45 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         product_controller_port,
     )
     try:
-        product_controller_client = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
-        dsim_host, dsim_port = await get_dsim_endpoint(product_controller_client, BANDS[band].adc_sample_rate)
+        pcc = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
+        dsim_host, dsim_port = await get_dsim_endpoint(pcc, BANDS[band].adc_sample_rate)
         dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
 
-        yield CorrelatorRemoteControl(product_controller_client, dsim_client)
+        # A few pieces of info can't be gotten from the config. So we connect to
+        # our shiny new correlator to find out what its parameters are.
+        n_bls = await get_sensor_val(pcc, "baseline_correlation_products-n-bls")
+        n_chans_per_substream = await get_sensor_val(pcc, "baseline_correlation_products-n-chans-per-substream")
+        n_bits_per_sample = await get_sensor_val(pcc, "baseline_correlation_products-xeng-out-bits-per-sample")
+        n_spectra_per_acc = await get_sensor_val(pcc, "baseline_correlation_products-n-accs")
+        int_time = await get_sensor_val(pcc, "baseline_correlation_products-int-time")
+        n_samples_between_spectra = await get_sensor_val(pcc, "antenna_channelised_voltage-n-samples-between-spectra")
+        bls_ordering = ast.literal_eval(await get_sensor_val(pcc, "baseline_correlation_products-bls-ordering"))
+        sync_time = await get_sensor_val(pcc, "antenna_channelised_voltage-sync-time")
+        timestamp_scale_factor = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
+        bandwidth = await get_sensor_val(pcc, "antenna_channelised_voltage-bandwidth")
+        multicast_endpoints = [
+            tuple(endpoint)  # mypy is  not quite smart enough to figure out that this makes it Tuple[str, int]
+            for endpoint in endpoint_list_parser(7148)(
+                await get_sensor_val(pcc, "baseline_correlation_products-destination")
+            )
+        ]
+
+        yield CorrelatorRemoteControl(
+            pcc,
+            dsim_client,
+            correlator_config,
+            n_bls=n_bls,
+            n_chans_per_substream=n_chans_per_substream,
+            n_bits_per_sample=n_bits_per_sample,
+            n_spectra_per_acc=n_spectra_per_acc,
+            int_time=int_time,
+            n_samples_between_spectra=n_samples_between_spectra,
+            bls_ordering=bls_ordering,
+            sync_time=sync_time,
+            timestamp_scale_factor=timestamp_scale_factor,
+            bandwidth=bandwidth,
+            multicast_endpoints=multicast_endpoints,  # type: ignore
+        )
 
         logger.info("Tearing down correlator.")
         dsim_client.close()
@@ -202,9 +237,9 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         # TODO: This would probably be more robust if we issued the request
         # to the master controller, but since we used an asterisk for the MC
         # to decide on a unique name, we don't actually know what that name is.
-        await product_controller_client.request("product-deconfigure")
-        product_controller_client.close()
-        await product_controller_client.wait_closed()
+        await pcc.request("product-deconfigure")
+        pcc.close()
+        await pcc.wait_closed()
 
 
 @pytest.fixture
@@ -214,34 +249,15 @@ async def receive_stream(pytestconfig, correlator: CorrelatorRemoteControl) -> s
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
 
-    # I'm still in two minds as to whether to pass these things around as data
-    # members of the CorrelatorRemoteControl class, or to get them this way
-    # via katcp.
-    pc_client = correlator.product_controller_client
-    n_bls = await get_sensor_val(pc_client, "baseline_correlation_products-n-bls")
-    n_chans = await get_sensor_val(pc_client, "baseline_correlation_products-n-chans")
-    n_chans_per_substream = await get_sensor_val(pc_client, "baseline_correlation_products-n-chans-per-substream")
-    n_bits_per_sample = await get_sensor_val(pc_client, "baseline_correlation_products-xeng-out-bits-per-sample")
-    n_spectra_per_acc = await get_sensor_val(pc_client, "baseline_correlation_products-n-accs")
-    int_time = await get_sensor_val(pc_client, "baseline_correlation_products-int-time")
-    n_samples_between_spectra = await get_sensor_val(pc_client, "antenna_channelised_voltage-n-samples-between-spectra")
-
-    multicast_endpoints = [
-        tuple(endpoint)
-        for endpoint in endpoint_list_parser(7148)(
-            await get_sensor_val(pc_client, "baseline_correlation_products-destination")
-        )
-    ]
-
     return create_baseline_correlation_product_receive_stream(
         interface_address=interface_address,
-        multicast_endpoints=multicast_endpoints,  # type: ignore
-        n_bls=n_bls,
-        n_chans=n_chans,
-        n_chans_per_substream=n_chans_per_substream,
-        n_bits_per_sample=n_bits_per_sample,
-        n_spectra_per_acc=n_spectra_per_acc,
-        int_time=int_time,
-        n_samples_between_spectra=n_samples_between_spectra,
+        multicast_endpoints=correlator.multicast_endpoints,  # type: ignore
+        n_bls=correlator.n_bls,
+        n_chans=correlator.n_chans,
+        n_chans_per_substream=correlator.n_chans_per_substream,
+        n_bits_per_sample=correlator.n_bits_per_sample,
+        n_spectra_per_acc=correlator.n_spectra_per_acc,
+        int_time=correlator.int_time,
+        n_samples_between_spectra=correlator.n_samples_between_spectra,
         use_ibv=use_ibv,
     )

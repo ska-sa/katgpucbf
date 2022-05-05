@@ -1,3 +1,4 @@
+async-timeout
 pytest-expectr
 pytest-reportlog
 spead2>=3.9.1
