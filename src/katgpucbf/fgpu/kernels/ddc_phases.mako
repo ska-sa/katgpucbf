@@ -14,6 +14,12 @@
  * limitations under the License.
  ******************************************************************************/
 
+extern "C++" {
+#include <cooperative_groups.h>
+
+using namespace cooperative_groups;
+}
+
 <%include file="/port.mako"/>
 <%include file="unpack_10bit.mako"/>
 <%namespace name="wg_reduce" file="/wg_reduce.mako"/>
@@ -154,6 +160,15 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     double mix_bias,  // TODO: fold into mix_lookup?
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
 {
+    auto workgroup = this_thread_block();
+#if WGS == 32  // Warp size - nvcc doesn't appear to have a macro for it
+    /* If we're only using a single warp, make sure that tb.sync() only
+     * issues warp synchronization and not workgroup synchronisation.
+     */
+    auto tb = tiled_partition<WGS>(workgroup);
+#else
+    auto tb = workgroup;
+#endif
     LOCAL_DECL tile tiles[TILES];
     segment segs[SEGMENTS];
     float2 sums[COARSEN];
@@ -206,7 +221,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             }
 
         // tiles is written above and read below
-        BARRIER();
+        tb.sync();
 
         /* Apply the filter */
 #pragma unroll
@@ -244,7 +259,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         }
         // tiles is read above and written by the next loop iteration
         // (TODO: could be eliminated on the final loop pass)
-        BARRIER();
+        tb.sync();
     }
 
     // Reduce the result across work items that are contributing to the same sum.
