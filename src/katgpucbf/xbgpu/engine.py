@@ -289,8 +289,11 @@ class XBEngine(DeviceServer):
         # The receiver_stream object has no attached
         # transport yet and will not function until one of the
         # add_*_receiver_transport() functions has been called.
-        self.ringbuffer = ChunkRingbuffer(
-            n_free_chunks, name="recv_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
+        data_ringbuffer = ChunkRingbuffer(
+            self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
+        )
+        free_ringbuffer = ChunkRingbuffer(
+            n_free_chunks, name="recv_free_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
 
         layout = recv.Layout(
@@ -304,7 +307,8 @@ class XBEngine(DeviceServer):
 
         self.receiver_stream = recv.make_stream(
             layout=layout,
-            data_ringbuffer=self.ringbuffer,
+            data_ringbuffer=data_ringbuffer,
+            free_ringbuffer=free_ringbuffer,
             src_affinity=src_affinity,
             max_active_chunks=self.max_active_chunks,
         )

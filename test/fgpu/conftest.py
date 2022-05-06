@@ -34,7 +34,7 @@ from katgpucbf.fgpu.main import make_engine, parse_args
 
 @pytest.fixture
 def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
-    """Mock out :func:`katgpucbf.fgpu.recv.add_reader` to use in-process queues.
+    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
 
     Returns
     -------
@@ -53,7 +53,7 @@ def mock_recv_streams(mocker) -> List[spead2.InprocQueue]:
         comp_vector: int,
         buffer: int,
     ) -> None:
-        """Mock implementation of :func:`katgpucbf.fgpu.recv.add_reader`."""
+        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
         queue = next(queue_iter)
         stream.add_inproc_reader(queue)
 

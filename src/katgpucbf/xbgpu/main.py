@@ -32,7 +32,6 @@ everything required to run the XB-Engine.
 import argparse
 import asyncio
 import logging
-import signal
 from typing import Optional
 
 import katsdpsigproc.accel
@@ -53,6 +52,7 @@ from .. import (
     __version__,
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
+from ..utils import add_signal_handlers
 from .correlation import device_filter
 
 logger = logging.getLogger(__name__)
@@ -215,29 +215,6 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def add_signal_handlers(engine: XBEngine) -> None:
-    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM.
-
-    Parameters
-    ----------
-    engine
-        The XBEngine instance launched to facilitate XBEngine operations.
-    """
-    signums = [signal.SIGINT, signal.SIGTERM]
-
-    def handler():
-        # Remove the handlers so that if it fails to shut down, the next
-        # attempt will try harder.
-        logger.info("Received signal, shutting down")
-        for signum in signums:
-            loop.remove_signal_handler(signum)
-        engine.halt()
-
-    loop = asyncio.get_event_loop()
-    for signum in signums:
-        loop.add_signal_handler(signum, handler)
-
-
 async def async_main(args: argparse.Namespace) -> None:
     """
     Create and launch the XB-Engine.
@@ -322,7 +299,7 @@ async def async_main(args: argparse.Namespace) -> None:
     )
     xbengine.add_service_task(descriptor_task)
 
-    add_signal_handlers(engine=xbengine)
+    add_signal_handlers(xbengine)
 
     await xbengine.start()
 

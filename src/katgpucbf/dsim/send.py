@@ -110,7 +110,7 @@ class HeapSet:
                 heap.add_item(digitiser_status_item)
                 heap.add_item(
                     spead2.Item(
-                        spead.RAW_DATA_ID,
+                        spead.ADC_SAMPLES_ID,
                         "",
                         "",
                         shape=heap_payload.shape,

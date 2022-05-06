@@ -23,12 +23,12 @@ import spead2.send.asyncio
 
 from .. import DIG_HEAP_SAMPLES, SPEAD_DESCRIPTOR_INTERVAL_S
 from ..spead import (
+    ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
     DIGITISER_STATUS_ID,
     FLAVOUR,
     IMMEDIATE_FORMAT,
     MAX_PACKET_SIZE,
-    RAW_DATA_ID,
     TIMESTAMP_ID,
 )
 
@@ -74,7 +74,7 @@ def create_descriptors_heap() -> spead2.send.Heap:
     )
 
     item_group.add_item(
-        RAW_DATA_ID,
+        ADC_SAMPLES_ID,
         "adc_samples",
         "Digitiser Raw ADC Sample Data",
         shape=(DIG_HEAP_SAMPLES,),
