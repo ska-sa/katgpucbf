@@ -6,9 +6,9 @@
 #
 aioconsole==0.4.1
     # via aiomonitor
-aiohttp==3.8.0
+aiohttp==3.8.1
     # via -r requirements.in
-aiokatcp==1.2.0
+aiokatcp==1.3.0
     # via -r requirements.in
 aiomonitor==0.4.5
     # via katsdpservices
@@ -18,30 +18,32 @@ appdirs==1.4.4
     # via
     #   katsdpsigproc
     #   pycuda
-    #   pytools
-async-timeout==4.0.0
+async-timeout==4.0.2
     # via
     #   aiohttp
     #   aiokatcp
-attrs==21.2.0
+    #   redis
+attrs==21.4.0
     # via aiohttp
 cffi==1.15.0
     # via vkgdr
-charset-normalizer==2.0.7
+charset-normalizer==2.0.12
     # via aiohttp
 cloudpickle==2.0.0
     # via dask
-dask==2021.11.2
+dask==2022.5.0
     # via -r requirements.in
-decorator==5.0.9
+decorator==5.1.1
     # via
     #   aiokatcp
     #   katsdpsigproc
-frozenlist==1.2.0
+deprecated==1.2.13
+    # via redis
+frozenlist==1.3.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2021.11.1
+fsspec==2022.3.0
     # via dask
 hiredis==2.0.0
     # via katsdptelstate
@@ -55,17 +57,17 @@ katsdptelstate==0.11
     # via -r requirements.in
 llvmlite==0.38.0
     # via numba
-locket==0.2.1
+locket==1.0.0
     # via partd
-mako==1.1.4
+mako==1.2.0
     # via
     #   katsdpsigproc
     #   pycuda
-markupsafe==2.0.1
+markupsafe==2.1.1
     # via mako
-msgpack==1.0.2
+msgpack==1.0.3
     # via katsdptelstate
-multidict==5.2.0
+multidict==6.0.2
     # via
     #   aiohttp
     #   yarl
@@ -75,7 +77,7 @@ netifaces==0.11.0
     #   katsdptelstate
 numba==0.55.1
     # via katsdpsigproc
-numpy==1.21.0
+numpy==1.21.6
     # via
     #   -r requirements.in
     #   katsdpsigproc
@@ -87,16 +89,21 @@ numpy==1.21.0
     #   spead2
     #   xarray
 packaging==21.3
-    # via dask
-pandas==1.3.0
+    # via
+    #   dask
+    #   redis
+    #   xarray
+pandas==1.4.2
     # via
     #   katsdpsigproc
     #   xarray
 partd==1.2.0
     # via dask
-prometheus-async==19.2.0
+platformdirs==2.5.2
+    # via pytools
+prometheus-async==22.1.0
     # via -r requirements.in
-prometheus-client==0.12.0
+prometheus-client==0.14.1
     # via prometheus-async
 pycparser==2.21
     # via cffi
@@ -104,23 +111,23 @@ pycuda==2021.1
     # via
     #   -r requirements.in
     #   katsdpsigproc
-pygelf==0.4.0
+pygelf==0.4.2
     # via katsdpservices
-pyparsing==3.0.6
+pyparsing==3.0.8
     # via
     #   -r requirements.in
     #   packaging
-python-dateutil==2.8.1
+python-dateutil==2.8.2
     # via pandas
-pytools==2021.2.7
+pytools==2022.1.7
     # via pycuda
-pytz==2021.1
+pytz==2022.1
     # via pandas
 pyyaml==6.0
     # via dask
-redis==3.5.3
+redis==4.2.2
     # via katsdptelstate
-scipy==1.7.0
+scipy==1.8.0
     # via katsdpsigproc
 six==1.16.0
     # via
@@ -134,16 +141,19 @@ toolz==0.11.2
     # via
     #   dask
     #   partd
-typing-extensions==3.10.0.0
+typing-extensions==4.2.0
     # via
     #   aiokatcp
-    #   async-timeout
     #   katsdpsigproc
+    #   prometheus-async
+    #   pytools
 vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr
     # via -r requirements.in
-wrapt==1.13.3
-    # via prometheus-async
-xarray==0.20.1
+wrapt==1.14.1
+    # via
+    #   deprecated
+    #   prometheus-async
+xarray==2022.3.0
     # via -r requirements.in
 yarl==1.7.2
     # via aiohttp
