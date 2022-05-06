@@ -13,7 +13,7 @@ ingesting the output data.
 Requirements
 ------------
 
-A ``requirements.in`` and ``requirements.txt`` is provided in this
+A ``requirements.in`` and ``requirements.txt`` are provided in this
 directory, based on ``katgpucbf``\ 's ``requirements-dev.txt``. A
 pared-down version of this may become available in future.
 
