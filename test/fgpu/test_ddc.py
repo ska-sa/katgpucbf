@@ -51,6 +51,7 @@ def ddc_host(samples: np.ndarray, weights: np.ndarray, decimation: int, mix_freq
         (256, 32, 1234568),
         (256, 64, 1234568),
         (32, 32, 1234568),
+        (55, 5, 123464),
     ],
 )
 def test_ddc(

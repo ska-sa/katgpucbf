@@ -16,6 +16,8 @@
 
 """Digital down-conversion."""
 
+from typing import Optional, TypedDict
+
 import numpy as np
 import pkg_resources
 from katsdpsigproc import accel
@@ -23,6 +25,8 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS
 from . import SAMPLE_BITS
+
+_TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": "int"})
 
 
 class DDCTemplate:
@@ -48,18 +52,21 @@ class DDCTemplate:
         If `taps` is not a multiple of `decimation`
     """
 
-    def __init__(self, context: AbstractContext, taps: int, decimation: int) -> None:
+    def __init__(
+        self, context: AbstractContext, taps: int, decimation: int, tuning: Optional[_TuningDict] = None
+    ) -> None:
         if taps <= 0:
             raise ValueError("taps must be positive")
         if decimation <= 0:
             raise ValueError("decimation must be positive")
         if taps % decimation != 0:
             raise ValueError("taps must be a multiple of decimation")
-        # TODO: tune the magic numbers and enforce more requirements
+        if tuning is None:
+            tuning = self.autotune(context, taps, decimation)
         self.context = context
-        self.wgs = 32
-        self._sg_size = 2
-        self._coarsen = 11
+        self.wgs = tuning["wgs"]
+        self._sg_size = tuning["sg_size"]
+        self._coarsen = tuning["coarsen"]
         self.taps = taps
         self.decimation = decimation
         self._segment_samples = 16
@@ -67,6 +74,15 @@ class DDCTemplate:
         self._group_in_size = self._group_out_size * decimation
         self._load_size = self._group_in_size + taps - decimation
         self._segments = (self._load_size - 1) // (self._segment_samples * self.wgs) + 1
+
+        # Sanity check the tuning parameters
+        if self.wgs % self._sg_size:
+            raise ValueError("wgs must be a multiple of sg_size")
+        if self.decimation % self._sg_size:
+            raise ValueError("decimation must be a multiple of sg_size")
+        if self._group_in_size % self._segment_samples:
+            raise ValueError("group_in_size must be a multiple of segment_samples (fix sg_size)")
+
         program = accel.build(
             context,
             "kernels/ddc_phases.mako",
@@ -80,6 +96,20 @@ class DDCTemplate:
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("ddc")
+
+    def autotune(self, context: AbstractContext, taps: int, decimation: int) -> _TuningDict:
+        """Determine tuning parameters.
+
+        .. todo::
+
+           Actually do autotuning instead of using fixed logic.
+        """
+        wgs = 32
+        coarsen = 9
+        sg_size = 2
+        while sg_size > 1 and decimation % sg_size != 0:
+            sg_size //= 2
+        return {"wgs": wgs, "coarsen": coarsen, "sg_size": sg_size}
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""

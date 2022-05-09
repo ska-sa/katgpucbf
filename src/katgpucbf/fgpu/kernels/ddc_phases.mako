@@ -19,7 +19,6 @@
 <%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 
 /* TODO:
- * - specify alignment requirements
  * - test reading via shared memory with memcpy_async
  * - test writing via shared memory
  * - test putting constants into shared memory
@@ -30,18 +29,15 @@
  *   tile, instead of contiguous
  */
 
-/* Alignment requirements: TODO complete this
+/* Alignment requirements:
  * - in_offset must be a multiple of SEGMENT_SAMPLES
  * - GROUP_IN_SIZE must be a multiple of SEGMENT_SAMPLES
- * - All the tuning parameters except for COARSEN must be powers of 2 (probably
- *   not strictly required, but ensures that any parameter is either a multiple
- *   of or fraction of any other).
- *   TODO: don't think WGS needs to be
  * - WGS must be a multiple of SG_SIZE
  * - TAPS must be a multiple of DECIMATION
  * - SEGMENT_SAMPLES must be a multiple of SG_SIZE
  * - DECIMATION must be a multiple of SG_SIZE
  * - COARSEN should be odd for best performance
+ * - SG_SIZE should be a power of two for best performance
  */
 
 #define WGS ${wgs}
@@ -69,9 +65,16 @@
 #define SEGMENTS ((LOAD_SIZE - 1) / (SEGMENT_SAMPLES * WGS) + 1)
 /* Number of contiguous samples that take turns occupying a tile
  * (must divide both SEGMENT_SAMPLES and DECIMATION, and be a multiple
- * of SG_SIZE).
+ * of SG_SIZE). This implementation is pessimistic when DECIMATION is
+ * not a power of 2, but that's not expected to be a common case.
  */
-#define TILE_SAMPLES (SEGMENT_SAMPLES < DECIMATION ? SEGMENT_SAMPLES : DECIMATION)
+#if DECIMATION % SEGMENT_SAMPLES == 0
+# define TILE_SAMPLES SEGMENT_SAMPLES
+#elif SEGMENT_SAMPLES % DECIMATION == 0
+# define TILE_SAMPLES DECIMATION
+#else
+# define TILE_SAMPLES SG_SIZE
+#endif
 // Number of tiles to store in local memory
 #define TILES (LOAD_SIZE / TILE_SAMPLES)
 #define TILES_PER_SEGMENT (SEGMENT_SAMPLES / TILE_SAMPLES)
