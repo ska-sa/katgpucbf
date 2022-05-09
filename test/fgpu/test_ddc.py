@@ -16,13 +16,15 @@
 
 """Unit tests for digital down conversion."""
 
+from typing import Optional
+
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf import BYTE_BITS
 from katgpucbf.fgpu import SAMPLE_BITS
-from katgpucbf.fgpu.ddc import DDCTemplate
+from katgpucbf.fgpu.ddc import DDCTemplate, _TuningDict
 
 from .test_pfb import decode_10bit_host
 
@@ -41,21 +43,27 @@ def ddc_host(samples: np.ndarray, weights: np.ndarray, decimation: int, mix_freq
 
 
 @pytest.mark.parametrize(
-    "taps,decimation,samples",
+    "taps,decimation,samples,tuning",
     [
-        (256, 16, 256),
-        (256, 16, 1024 * 1024),
-        (256, 16, 1234568),
-        (256, 8, 1234568),
-        (256, 4, 1234568),
-        (256, 32, 1234568),
-        (256, 64, 1234568),
-        (32, 32, 1234568),
-        (55, 5, 123464),
+        (256, 16, 256, None),
+        (256, 16, 1024 * 1024, None),
+        (256, 16, 1234568, None),
+        (256, 8, 1234568, None),
+        (256, 4, 1234568, None),
+        (256, 32, 1234568, None),
+        (256, 64, 1234568, None),
+        (32, 32, 1234568, None),
+        (55, 5, 123464, None),
+        (256, 16, 256 * 1024, {"wgs": 96, "coarsen": 3, "sg_size": 8}),
     ],
 )
 def test_ddc(
-    context: AbstractContext, command_queue: AbstractCommandQueue, taps: int, decimation: int, samples: int
+    context: AbstractContext,
+    command_queue: AbstractCommandQueue,
+    taps: int,
+    decimation: int,
+    samples: int,
+    tuning: Optional[_TuningDict],
 ) -> None:
     """Test DDC kernel."""
     rng = np.random.default_rng(seed=1)
@@ -64,7 +72,7 @@ def test_ddc(
     mix_frequency = 0.21
     expected = ddc_host(h_in, weights, decimation, mix_frequency)
 
-    template = DDCTemplate(context, taps=taps, decimation=decimation)
+    template = DDCTemplate(context, taps=taps, decimation=decimation, tuning=tuning)
     fn = template.instantiate(command_queue, samples)
     fn.mix_frequency = mix_frequency
     fn.ensure_all_bound()
@@ -79,3 +87,24 @@ def test_ddc(
     err = h_out - expected
     rms = np.sqrt(np.vdot(err, err) / err.size)
     assert rms < 2e-3
+
+
+@pytest.mark.parametrize(
+    "taps,decimation",
+    [
+        (123, 12),  # Not a multiple
+        (0, 64),  # <= 0
+        (8, -1),  # <= 0
+    ],
+)
+def test_bad_template_parameters(context: AbstractContext, taps: int, decimation: int) -> None:
+    """Test that :class:`DDCTemplate` raises ValueError when given invalid parameters."""
+    with pytest.raises(ValueError):
+        DDCTemplate(context, taps=taps, decimation=decimation)
+
+
+def test_too_few_samples(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
+    """Test that :class:`DDC` raises ValueError when `samples` is too small."""
+    template = DDCTemplate(context, taps=256, decimation=16)
+    with pytest.raises(ValueError):
+        template.instantiate(command_queue, 255)
