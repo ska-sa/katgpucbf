@@ -79,11 +79,20 @@
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
-// When only a single warp is in use, we can use a cheaper barrier
-#if defined(__CUDA_ARCH__) && WGS == 32  // Warp size - nvcc doesn't appear to have a macro for it
-# undef BARRIER
-# define BARRIER() __syncwarp()
+DEVICE_FN void sync()
+{
+    // When only a single warp is in use, we can use a cheaper barrier
+#if defined(__CUDA_ARCH__)
+    if (WGS == warpSize)
+    {
+        __syncwarp();
+    }
+    else
 #endif
+    {
+        BARRIER();
+    }
+}
 
 DEVICE_FN static float2 cmul(float2 a, float2 b)
 {
@@ -267,13 +276,13 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         mix(segs, tiles, mix_base, mix_lookup, phase, lid);
 
         // tiles is written above and read below
-        BARRIER();
+        sync();
 
         filter(weights, tiles, sums, phase, sg_group, sg_rank);
 
         // tiles is read above and written by the next loop iteration
         // (TODO: could be eliminated on the final loop pass)
-        BARRIER();
+        sync();
     }
 
     // Reduce the result across work items that are contributing to the same sum.
