@@ -236,7 +236,7 @@ class XBEngine(DeviceServer):
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
-        src: Tuple[str, int],
+        src: List[Tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
         src_interface: str,
         src_ibv: bool,
         src_affinity: int,
@@ -751,9 +751,7 @@ class XBEngine(DeviceServer):
         """
         base_recv.add_reader(
             self.receiver_stream,
-            src=[
-                self._src,
-            ],
+            src=self._src,
             interface=self._src_interface,
             ibv=self._src_ibv,
             comp_vector=self._src_comp_vector,

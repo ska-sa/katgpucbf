@@ -53,7 +53,7 @@ from .. import (
     __version__,
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from ..utils import add_signal_handlers
+from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
 
 logger = logging.getLogger(__name__)
@@ -205,7 +205,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("src", type=endpoint_parser(7148), help="Multicast address data is received from.")
+    parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
     parser.add_argument("dst", type=endpoint_parser(7148), help="Multicast address data is sent on.")
 
     args = parser.parse_args(arglist)

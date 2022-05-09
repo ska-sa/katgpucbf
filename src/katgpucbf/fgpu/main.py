@@ -23,9 +23,8 @@ actual running of the processing.
 
 import argparse
 import asyncio
-import ipaddress
 import logging
-from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -37,22 +36,11 @@ from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from ..utils import add_signal_handlers
+from ..utils import add_signal_handlers, parse_source
 from .engine import Engine
 
 _T = TypeVar("_T")
 logger = logging.getLogger(__name__)
-
-
-def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
-    """Parse a string into a list of IP endpoints."""
-    try:
-        endpoints = endpoint_list_parser(7148)(value)
-        for endpoint in endpoints:
-            ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
-        return [(ep.host, ep.port) for ep in endpoints]
-    except ValueError:
-        return value
 
 
 def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> Callable[[str], List[_T]]:
