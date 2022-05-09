@@ -317,7 +317,10 @@ class TestEngine:
             for j, present in enumerate(dst_present_mask):
                 if present:
                     heap = await stream.get()
-                    assert set(ig.update(heap)) == {"timestamp", "feng_id", "frequency", "feng_raw"}
+                    if (updated_items := set(ig.update(heap))) == {}:
+                        # Empty set - we got another descriptor heap
+                        continue
+                    assert updated_items == {"timestamp", "feng_id", "frequency", "feng_raw"}
                     assert ig["feng_id"].value == FENG_ID
                     if expected_timestamp is not None:
                         assert ig["timestamp"].value == expected_timestamp
