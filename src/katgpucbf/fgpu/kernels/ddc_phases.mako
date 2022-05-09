@@ -104,7 +104,7 @@ struct segment
     unsigned int raw[SEGMENT_WORDS];
 };
 
-/* A tile represents a contiguous group of TILE_COLUMNS samples, of which
+/* A tile represents a contiguous group of TILE_SAMPLES samples, of which
  * only SG_SIZE (contiguous) are loaded in memory at a time.
  */
 struct tile
@@ -112,6 +112,7 @@ struct tile
     float2 samples[SG_SIZE];
 };
 
+/* Retrieve a sample from a segment. */
 DEVICE_FN static int segment_get(const segment *seg, int idx)
 {
     int word0 = idx * SAMPLE_BITS / 32;
@@ -124,6 +125,7 @@ DEVICE_FN static int segment_get(const segment *seg, int idx)
     return top >>= 32 - SAMPLE_BITS;  // trusts nvcc to sign extend - undefined in C++
 }
 
+/* Retrieve the data for all segments from global memory into registers. */
 DEVICE_FN static void load_segments(
     const GLOBAL unsigned int * RESTRICT in,
     segment segs[SEGMENTS],
@@ -148,6 +150,76 @@ DEVICE_FN static void load_segments(
             segs[i].raw[j] = reverse_endian(segs[i].raw[j]);
 }
 
+/* Decode and mix the samples for the phase */
+DEVICE_FN static void mix(
+    const segment segs[SEGMENTS],
+    LOCAL tile tiles[TILES],
+    float2 mix_base,
+    const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES],
+    int phase,
+    int lid)
+{
+#pragma unroll
+    for (int i = 0; i < SEGMENTS; i++)
+        for (int j = 0; j < TILES_PER_SEGMENT; j++)
+        {
+            int tile_id = i * WGS * TILES_PER_SEGMENT + lid * TILES_PER_SEGMENT + j;
+            if (tile_id < TILES)
+            {
+#pragma unroll
+                for (int k = 0; k < SG_SIZE; k++)
+                {
+                    int seg_idx = j * TILE_SAMPLES + phase + k;
+                    float sample = segment_get(&segs[i], seg_idx);
+                    float2 mixed = cmul(mix_base, mix_lookup[i][seg_idx]);
+                    mixed.x *= sample;
+                    mixed.y *= sample;
+                    tiles[tile_id].samples[k] = mixed;
+                }
+            }
+        }
+}
+
+DEVICE_FN static void filter(
+    const GLOBAL float * RESTRICT weights,
+    const LOCAL tile tiles[TILES],
+    float2 sums[COARSEN],
+    int phase, int sg_group, int sg_rank)
+{
+#pragma unroll
+    for (int dphase = 0; dphase < DECIMATION; dphase += TILE_SAMPLES)
+    {
+        // Sample within the decimation group for the first work item in
+        // the subgroup
+        int total_phase = phase + dphase;
+        float2 samples[COARSEN];
+        int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION);
+#pragma unroll
+        for (int j = 0; j < COARSEN - 1; j++)
+        {
+            // Prime the pipeline
+            samples[j] = tiles[tile_index_base + j * TILES_PER_DECIMATION].samples[sg_rank];
+        }
+#pragma unroll
+        for (int i = 0; i < TAPS / DECIMATION; i++)
+        {
+            int tap = i * DECIMATION + total_phase + sg_rank;
+            float w = weights[tap];
+            samples[COARSEN - 1] = tiles[tile_index_base + (i + COARSEN - 1) * TILES_PER_DECIMATION].samples[sg_rank];
+            for (int j = 0; j < COARSEN; j++)
+            {
+                sums[j].x += w * samples[j].x;
+                sums[j].y += w * samples[j].y;
+            }
+            /* Shift down all the samples. The compiler should make
+             * these free by the magic of loop unrolling.
+             */
+            for (int j = 0; j < COARSEN - 1; j++)
+                samples[j] = samples[j + 1];
+        }
+    }
+}
+
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     GLOBAL float2 * RESTRICT out,
     const GLOBAL unsigned int * RESTRICT in,
@@ -164,6 +236,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     segment segs[SEGMENTS];
     float2 sums[COARSEN];
 
+    /* Note: unsigned is important here as it allows the compiler to turn
+     * div/mod into shift/mask when SG_SIZE is a power of 2.
+     */
     unsigned int lid = get_local_id(0);
     unsigned int group = get_group_id(0);
     unsigned int sg_rank = lid % SG_SIZE;
@@ -189,65 +264,13 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 #pragma unroll
     for (int phase = 0; phase < TILE_SAMPLES; phase += SG_SIZE)
     {
-        /* Decode and mix the samples for the phase */
-#pragma unroll
-        for (int i = 0; i < SEGMENTS; i++)
-            for (int j = 0; j < TILES_PER_SEGMENT; j++)
-            {
-                // TODO: can optimise this calculation with some constant folding?
-                unsigned int tile_id = i * WGS * TILES_PER_SEGMENT + lid * TILES_PER_SEGMENT + j;
-                if (tile_id < TILES)
-                {
-#pragma unroll
-                    for (int k = 0; k < SG_SIZE; k++)
-                    {
-                        int seg_idx = j * TILE_SAMPLES + phase + k;
-                        float sample = segment_get(&segs[i], seg_idx);
-                        float2 mixed = cmul(mix_base, mix_lookup[i][seg_idx]);
-                        mixed.x *= sample;
-                        mixed.y *= sample;
-                        tiles[tile_id].samples[k] = mixed;
-                    }
-                }
-            }
+        mix(segs, tiles, mix_base, mix_lookup, phase, lid);
 
         // tiles is written above and read below
         BARRIER();
 
-        /* Apply the filter */
-#pragma unroll
-        for (int dphase = 0; dphase < DECIMATION; dphase += TILE_SAMPLES)
-        {
-            // Sample within the decimation group for the first work item in
-            // the subgroup
-            unsigned int total_phase = phase + dphase;
-            float2 samples[COARSEN];
-            int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION);
-#pragma unroll
-            for (int j = 0; j < COARSEN - 1; j++)
-            {
-                // Prime the pipeline
-                samples[j] = tiles[tile_index_base + j * TILES_PER_DECIMATION].samples[sg_rank];
-            }
-#pragma unroll
-            for (int i = 0; i < TAPS / DECIMATION; i++)
-            {
-                int tap = i * DECIMATION + total_phase + sg_rank;
-                float w = weights[tap];
-                samples[COARSEN - 1] = tiles[tile_index_base + (i + COARSEN - 1) * TILES_PER_DECIMATION].samples[sg_rank];
-                for (int j = 0; j < COARSEN; j++)
-                {
-                    sums[j].x += w * samples[j].x;
-                    sums[j].y += w * samples[j].y;
-                }
-                /* Shift down all the samples. The compiler should make
-                 * these free by the magic of loop unrolling.
-                 */
-                for (int j = 0; j < COARSEN - 1; j++)
-                    samples[j] = samples[j + 1];
-            }
+        filter(weights, tiles, sums, phase, sg_group, sg_rank);
 
-        }
         // tiles is read above and written by the next loop iteration
         // (TODO: could be eliminated on the final loop pass)
         BARRIER();
