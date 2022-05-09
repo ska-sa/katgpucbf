@@ -159,7 +159,9 @@ DEVICE_FN static void load_segments(
             segs[i].raw[j] = reverse_endian(segs[i].raw[j]);
 }
 
-/* Decode and mix the samples for the phase */
+/* Decode and mix the samples for the phase. Specifically, each tile is
+ * populated with the samples in positions [phase, phase + SG_SIZE).
+ */
 DEVICE_FN static void mix(
     const segment segs[SEGMENTS],
     LOCAL tile tiles[TILES],
@@ -189,6 +191,8 @@ DEVICE_FN static void mix(
         }
 }
 
+/* Multiply samples in `tiles` with `weights` and accumulate in `sums`.
+ */
 DEVICE_FN static void filter(
     const GLOBAL float * RESTRICT weights,
     const LOCAL tile tiles[TILES],
@@ -201,6 +205,8 @@ DEVICE_FN static void filter(
         // Sample within the decimation group for the first work item in
         // the subgroup
         int total_phase = phase + dphase;
+        // Holds a sliding window of samples which get multiplied by the
+        // sample weights.
         float2 samples[COARSEN];
         int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION);
 #pragma unroll
@@ -237,8 +243,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     int in_offset,  // in samples (TODO: make it words to simplify?)
     int out_size,
     int in_size,
-    double mix_scale,
-    double mix_bias,  // TODO: fold into mix_lookup?
+    double mix_scale,  // Mixer frequency in cycles per sample
+    double mix_bias,   // Mixer phase in cycles at the first sample
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
 {
     LOCAL_DECL tile tiles[TILES];
@@ -256,6 +262,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     in += in_offset / SEGMENT_SAMPLES * SEGMENT_WORDS;
     out += out_offset + group * GROUP_OUT_SIZE;
 
+    // Complex mixer value at first sample mixed by this work item
     float2 mix_base;
     /* mix_bias needs to be computed at double precision because there are many
      * bits to the left of the decimal point. After we've gotten rid of those
@@ -270,6 +277,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     for (int i = 0; i < COARSEN; i++)
         sums[i] = make_float2(0.0f, 0.0f);
 
+    /* This loop determines which mixed samples are kept in `tiles`, namely
+     * those in positions [phase, phase + SG_SIZE) within each tile.
+     */
 #pragma unroll
     for (int phase = 0; phase < TILE_SAMPLES; phase += SG_SIZE)
     {
@@ -281,7 +291,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         filter(weights, tiles, sums, phase, sg_group, sg_rank);
 
         // tiles is read above and written by the next loop iteration
-        // (TODO: could be eliminated on the final loop pass)
+        // (could possibly be eliminated on the final loop pass)
         sync();
     }
 
