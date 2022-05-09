@@ -16,6 +16,7 @@
 
 """Unit tests for Engine functions."""
 
+import logging
 from dataclasses import dataclass
 from functools import partial
 from typing import Dict, List, Optional, Tuple, Union
@@ -33,6 +34,8 @@ from katgpucbf.fgpu.engine import Engine
 
 from .. import PromDiff
 from .test_recv import gen_heaps
+
+logger = logging.getLogger(__name__)
 
 pytestmark = [pytest.mark.cuda_only]
 # Command-line arguments
@@ -317,9 +320,9 @@ class TestEngine:
             for j, present in enumerate(dst_present_mask):
                 if present:
                     heap = await stream.get()
-                    if (updated_items := set(ig.update(heap))) == set():
-                        # Empty set - we got another descriptor heap
-                        continue
+                    while (updated_items := set(ig.update(heap))) == set():
+                        logger.warning("Test has gone on long enough that we've gotten another descriptor.")
+                        heap = await stream.get()
                     assert updated_items == {"timestamp", "feng_id", "frequency", "feng_raw"}
                     assert ig["feng_id"].value == FENG_ID
                     if expected_timestamp is not None:
