@@ -117,7 +117,15 @@ class DDCTemplate:
 
 
 class DDC(accel.Operation):
-    """Operation implementating :class:`DDCTemplate`.
+    r"""Operation implementating :class:`DDCTemplate`.
+
+    Element j of the output contains the dot product of **weights** with
+    elements :math:`dj, d(j+1), \ldots, d(j+taps-1)` of the mixed signal. The
+    mixed signal is the product of sample :math:`j` of the input with
+    :math:`e^{2\pi i (aj + b)}`, where :math:`a` and :math:`b` are set with
+    the :attr:`mix_frequency` and :attr:`mix_phase` properties. Note that
+    setting :attr:`mix_frequency` is somewhat expensive as it has to update an
+    array on the device.
 
     .. rubric:: Slots
 
