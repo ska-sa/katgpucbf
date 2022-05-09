@@ -162,16 +162,16 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
     try:
         logger.debug("Connecting to master controller at %s:%d to try and create a correlator.", host, port)
         async with timeout(10):
-            client = await aiokatcp.Client.connect(host, port)
+            master_controller_client = await aiokatcp.Client.connect(host, port)
     except (ConnectionError, asyncio.TimeoutError):
         logger.exception("unable to connect to master controller!")
         raise
 
     try:
-        async with client:
-            reply, _ = await client.request(
-                "product-configure", "qualification_correlator*", json.dumps(correlator_config)
-            )
+        reply, _ = await master_controller_client.request(
+            "product-configure", "qualification_correlator*", json.dumps(correlator_config)
+        )
+
         # Sometimes this fails citing not enough resources if the previous
         # correlator in the parameter set hasn't completely gone away yet. Will
         # be fixed in NGC-544.
@@ -179,6 +179,7 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         logger.exception("Something went wrong with starting the correlator!")
         raise
 
+    product_name = reply[0].decode()
     product_controller_host = reply[1].decode()
     product_controller_port = int(reply[2].decode())
     logger.info(
@@ -229,17 +230,15 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
 
         logger.info("Tearing down correlator.")
         dsim_client.close()
-        await dsim_client.wait_closed()
+        pcc.close()
+        await asyncio.gather(pcc.wait_closed(), dsim_client.wait_closed())
 
     finally:
         # In case anything does go wrong, we want to make sure that we the
         # deconfigure the product.
-        # TODO: This would probably be more robust if we issued the request
-        # to the master controller, but since we used an asterisk for the MC
-        # to decide on a unique name, we don't actually know what that name is.
-        await pcc.request("product-deconfigure")
-        pcc.close()
-        await pcc.wait_closed()
+        await master_controller_client.request("product-deconfigure", product_name)
+        master_controller_client.close()
+        await master_controller_client.wait_closed()
 
 
 @pytest.fixture
