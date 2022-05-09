@@ -124,25 +124,16 @@ class DDC(accel.Operation):
         self.template = template
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.decimation)
-        # TODO: can padding be eliminated? If not, at least calculate how much is needed
         self.slots["in"] = accel.IOSlot(
             (
                 accel.Dimension(
                     samples * SAMPLE_BITS // BYTE_BITS,
-                    min_padded_size=samples * SAMPLE_BITS // BYTE_BITS + 65536,
+                    alignment=4,
                 ),
             ),
             np.uint8,
         )
-        self.slots["out"] = accel.IOSlot(
-            (
-                accel.Dimension(
-                    self.out_samples,
-                    min_padded_size=self.out_samples + 65536,
-                ),
-            ),
-            np.complex64,
-        )
+        self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
         # TODO: fill in _mix_lookup as mix_frequency is set
         self._mix_lookup = accel.DeviceArray(
@@ -187,9 +178,9 @@ class DDC(accel.Operation):
                 in_buffer.buffer,
                 weights_buffer.buffer,
                 np.int32(0),  # out_offset
-                np.int32(0),  # in_offset
+                np.int32(0),  # in_offset_words
                 np.int32(out_buffer.shape[0]),  # out_size
-                np.int32(in_buffer.shape[0] * BYTE_BITS // SAMPLE_BITS),  # in_size
+                np.int32(accel.divup(in_buffer.shape[0], 4)),  # in_size_words
                 np.float64(self.mix_frequency),  # mix_scale
                 np.float64(self.mix_phase),  # mix_bias
                 self._mix_lookup.buffer,

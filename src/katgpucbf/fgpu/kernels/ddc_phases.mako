@@ -32,6 +32,7 @@
 
 /* Alignment requirements: TODO complete this
  * - in_offset must be a multiple of SEGMENT_SAMPLES
+ * - GROUP_IN_SIZE must be a multiple of SEGMENT_SAMPLES
  * - All the tuning parameters except for COARSEN must be powers of 2 (probably
  *   not strictly required, but ensures that any parameter is either a multiple
  *   of or fraction of any other).
@@ -68,7 +69,7 @@
 #define SEGMENTS ((LOAD_SIZE - 1) / (SEGMENT_SAMPLES * WGS) + 1)
 /* Number of contiguous samples that take turns occupying a tile
  * (must divide both SEGMENT_SAMPLES and DECIMATION, and be a multiple
- * of SG_SIZE.
+ * of SG_SIZE).
  */
 #define TILE_SAMPLES (SEGMENT_SAMPLES < DECIMATION ? SEGMENT_SAMPLES : DECIMATION)
 // Number of tiles to store in local memory
@@ -138,14 +139,14 @@ DEVICE_FN static int segment_get(const segment *seg, int idx)
 DEVICE_FN static void load_segments(
     const GLOBAL unsigned int * RESTRICT in,
     segment segs[SEGMENTS],
-    int lid)
+    int lid,
+    int in_size_words)
 {
     for (int i = 0; i < SEGMENTS; i++)
         for (int j = 0; j < SEGMENT_WORDS; j++)
         {
             int addr = i * WGS * SEGMENT_WORDS + lid * SEGMENT_WORDS + j;
-            // TODO: Could also use this check to avoid need for padding `in`
-            segs[i].raw[j] = (addr < LOAD_WORDS) ? in[addr] : 0;
+            segs[i].raw[j] = (addr < in_size_words) ? in[addr] : 0;
         }
 
     /* First schedule all the loads so that they can happen asynchronously,
@@ -240,9 +241,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     const GLOBAL unsigned int * RESTRICT in,
     const GLOBAL float * RESTRICT weights,
     int out_offset,
-    int in_offset,  // in samples (TODO: make it words to simplify?)
+    int in_offset_words,
     int out_size,
-    int in_size,
+    int in_size_words,
     double mix_scale,  // Mixer frequency in cycles per sample
     double mix_bias,   // Mixer phase in cycles at the first sample
     const GLOBAL float2 (* RESTRICT mix_lookup)[SEGMENT_SAMPLES])
@@ -256,11 +257,20 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
      */
     unsigned int lid = get_local_id(0);
     unsigned int group = get_group_id(0);
-    unsigned int sg_rank = lid % SG_SIZE;
-    unsigned int sg_group = lid / SG_SIZE;
-    in_offset += group * GROUP_IN_SIZE;
-    in += in_offset / SEGMENT_SAMPLES * SEGMENT_WORDS;
+    unsigned int sg_rank = lid % SG_SIZE;   // Position within subgroup
+    unsigned int sg_group = lid / SG_SIZE;  // Subgroup number
+
+    unsigned int in_offset_group = group * (GROUP_IN_SIZE * SEGMENT_WORDS / SEGMENT_SAMPLES);
+    in_offset_words += in_offset_group;
+    in += in_offset_words;
+    in_size_words -= in_offset_group;
+    /* Note: could also limit in_size_words to LOAD_WORDS to avoid loading
+     * unwanted data. But that data will be needed by another workgroup and
+     * it seems beneficial to load it into L2 cache.
+     */
+
     out += out_offset + group * GROUP_OUT_SIZE;
+    out_size -= group * GROUP_OUT_SIZE;
 
     // Complex mixer value at first sample mixed by this work item
     float2 mix_base;
@@ -272,7 +282,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     mix_bias -= rint(mix_bias);
     sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);
 
-    load_segments(in, segs, lid);
+    load_segments(in, segs, lid, in_size_words);
 
     for (int i = 0; i < COARSEN; i++)
         sums[i] = make_float2(0.0f, 0.0f);
@@ -302,6 +312,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         sums[j].x = reduce(sums[j].x, sg_rank, &scratch);
         sums[j].y = reduce(sums[j].y, sg_rank, &scratch);
         if (sg_rank == 0)
-            out[sg_group * COARSEN + j] = sums[j];
+        {
+            int addr = sg_group * COARSEN + j;
+            if (addr < out_size)
+                out[addr] = sums[j];
+        }
     }
 }
