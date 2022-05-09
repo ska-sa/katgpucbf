@@ -66,21 +66,29 @@ def queues() -> List[spead2.InprocQueue]:
 
 
 @pytest.fixture
-def ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
-    """Create an asynchronous chunk ringbuffer, to be shared by the receive streams."""
+def data_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
+    """Create an asynchronous data chunk ringbuffer, to be shared by the receive streams."""
     return spead2.recv.asyncio.ChunkRingbuffer(1)
 
 
 @pytest.fixture
-def streams(layout, ringbuffer, queues) -> Generator[List[spead2.recv.ChunkRingStream], None, None]:
+def free_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
+    """Create an asynchronous free chunk ringbuffer, to be shared by the receive streams."""
+    return spead2.recv.asyncio.ChunkRingbuffer(8)
+
+
+@pytest.fixture
+def streams(
+    layout, data_ringbuffer, free_ringbuffer, queues
+) -> Generator[List[spead2.recv.ChunkRingStream], None, None]:
     """Create a receive stream per polarization.
 
     They are connected to the :func:`queues` fixture for input and
-    :func:`ringbuffer` for output.
+    :func:`data_ringbuffer` for output.
     """
-    streams = recv.make_streams(layout, ringbuffer, [-1, -1])
+    streams = recv.make_streams(layout, data_ringbuffer, free_ringbuffer, [-1, -1])
     for stream, queue in zip(streams, queues):
-        for _ in range(4):
+        for _ in range(free_ringbuffer.maxsize // len(streams)):
             data = np.empty(layout.chunk_bytes, np.uint8)
             # Use np.ones to make sure the bits get zeroed out
             present = np.ones(layout.chunk_heaps, np.uint8)
@@ -148,7 +156,7 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         streams: List[spead2.recv.ChunkRingStream],
         queues: List[spead2.InprocQueue],
-        ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+        data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
         timestamps: str,
     ) -> None:
@@ -201,7 +209,7 @@ class TestStream:
         for queue in queues:
             queue.stop()  # Flushes out the receive streams
         seen = 0
-        async for chunk in ringbuffer:
+        async for chunk in data_ringbuffer:
             assert isinstance(chunk, Chunk)
             if not np.any(chunk.present):
                 # It's a chunk with no data. Currently spead2 may generate
@@ -228,7 +236,7 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         streams: List[spead2.recv.ChunkRingStream],
         queues: List[spead2.InprocQueue],
-        ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+        data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
         POL = 1  # Only test one of the pols # noqa: N806
@@ -249,7 +257,7 @@ class TestStream:
         # Get just the chunks that actually have some data. We needn't worry
         # about returning chunks to the free ring as we don't expect to deplete
         # it.
-        chunks = [chunk async for chunk in ringbuffer if np.any(chunk.present)]  # type: ignore
+        chunks = [chunk async for chunk in data_ringbuffer if np.any(chunk.present)]  # type: ignore
         assert len(chunks) == 1
         chunk = chunks[0]
         assert isinstance(chunk, Chunk)
