@@ -152,15 +152,10 @@ class DDC(accel.Operation):
     def mix_frequency(self, frequency: float) -> None:
         self._mix_frequency = frequency
         major = self.template.wgs * self.template._segment_samples
-        angles = (
-            2
-            * np.pi
-            * frequency
-            * (
-                (np.arange(self._mix_lookup_host.shape[0]) * major)[:, np.newaxis]
-                + (np.arange(self.template._segment_samples)[np.newaxis, :])
-            )
+        sample_indices = (np.arange(self._mix_lookup_host.shape[0]) * major)[:, np.newaxis] + (
+            np.arange(self.template._segment_samples)[np.newaxis, :]
         )
+        angles = 2 * np.pi * frequency * sample_indices
         self._mix_lookup_host[:] = np.cos(angles) + 1j * np.sin(angles)
         self._mix_lookup.set(self.command_queue, self._mix_lookup_host)
 
