@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,20 +23,20 @@ heaps to transmitting the correlation products.
 The test_xbengine(...) function is the entry point for these tests.
 """
 
-from typing import Final
+from typing import Final, List
 
 import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
 import spead2.send
+import spead2.send.asyncio
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.monitor import NullMonitor
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import XBEngine
+from katgpucbf.xbgpu.main import make_engine, parse_args
 
 from . import test_parameters
 
@@ -127,7 +127,7 @@ class TestEngine:
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
         ig: spead2.send.ItemGroup,
-    ):
+    ) -> List[spead2.send.HeapReference]:
         """
         Generate a list of heaps to send to the xbengine.
 
@@ -354,6 +354,7 @@ class TestEngine:
         num_ants,
         num_spectra_per_heap,
         num_channels,
+        mock_recv_streams,
     ):
         """
         End-to-end test for the XBEngine.
@@ -384,7 +385,6 @@ class TestEngine:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
-        rx_reorder_tol = 2**26  # Increase if needed; this is small to keep memory usage manageable
         heap_accumulation_threshold = 4
         n_accumulations = 3
 
@@ -393,15 +393,11 @@ class TestEngine:
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        # Create source_stream object - transforms "transmitted" heaps into a
-        # byte array to simulate received data.
-        thread_pool = spead2.ThreadPool()
-        source_stream = spead2.send.BytesStream(
-            thread_pool,
-            spead2.send.StreamConfig(
-                max_packet_size=max_packet_size, max_heaps=n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
-            ),  # Need a bigger buffer
+        # Create source stream object - simulates received data.
+        feng_stream_config = spead2.send.StreamConfig(
+            max_packet_size=max_packet_size, max_heaps=n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         )
+        feng_stream = spead2.send.asyncio.InprocStream(spead2.ThreadPool(), mock_recv_streams, feng_stream_config)
 
         # Create ItemGroup and add all the required fields.
         ig_send = spead2.send.ItemGroup(flavour=FLAVOUR)
@@ -429,31 +425,35 @@ class TestEngine:
         ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
 
         queue = spead2.InprocQueue()
-        thread_pool = spead2.ThreadPool()
-        recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
+        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
 
-        monitor = NullMonitor()
+        arglist = [
+            "--katcp-host=127.0.0.1",
+            "--katcp-port=0",
+            f"--adc-sample-rate={ADC_SAMPLE_RATE}",
+            f"--array-size={n_ants}",
+            f"--channels={n_channels_total}",
+            f"--channels-per-substream={n_channels_per_stream}",
+            f"--samples-between-spectra={n_samples_between_spectra}",
+            f"--channel-offset-value={n_channels_per_stream * 4}",  # Arbitrary value for now
+            f"--spectra-per-heap={n_spectra_per_heap}",
+            f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
+            f"--heap-accumulation-threshold={heap_accumulation_threshold}",
+            "--src-interface=lo",
+            "--dst-interface=lo",
+            "239.10.11.4:7149",  # src
+            "239.21.11.4:7149",  # dst
+        ]
 
-        xbengine = XBEngine(
-            katcp_host="",
-            katcp_port=0,
-            adc_sample_rate_hz=ADC_SAMPLE_RATE,
-            send_rate_factor=SEND_RATE_FACTOR,
-            n_ants=n_ants,
-            n_channels_total=n_channels_total,
-            n_channels_per_stream=n_channels_per_stream,
-            n_samples_between_spectra=n_samples_between_spectra,
-            n_spectra_per_heap=n_spectra_per_heap,
-            sample_bits=SAMPLE_BITWIDTH,
-            heap_accumulation_threshold=heap_accumulation_threshold,
-            channel_offset_value=n_channels_per_stream * 4,  # Arbitrary value for now
-            src_affinity=0,
-            heaps_per_fengine_per_chunk=HEAPS_PER_FENGINE_PER_CHUNK,
-            rx_reorder_tol=rx_reorder_tol,
-            monitor=monitor,
-            context=context,
-        )
+        args = parse_args(arglist)
+        xbengine, _ = make_engine(context, args)
+
+        # 7. Add transports to xbengine.
+        xbengine.add_inproc_sender_transport(queue)
+        await xbengine.send_stream.send_descriptor_heap()
+
+        await xbengine.start()
 
         # Generate Data to be sent to the receiver. We are performing
         # <n_accumulations> full accumulations. Each accumulation requires
@@ -472,16 +472,10 @@ class TestEngine:
             heaps = self._create_heaps(
                 timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send
             )
-            source_stream.send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+            await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        for q in mock_recv_streams:
+            q.stop()
 
-        # 7. Add transports to xbengine.
-        xbengine.add_inproc_sender_transport(queue)
-        await xbengine.send_stream.send_descriptor_heap()
-
-        buffer = source_stream.getvalue()
-        xbengine.add_buffer_receiver_transport(buffer)
-
-        await xbengine.start()
         await self._recv_process(
             recv_stream,
             n_ants,
