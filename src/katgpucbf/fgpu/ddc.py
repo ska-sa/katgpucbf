@@ -135,7 +135,6 @@ class DDC(accel.Operation):
         )
         self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
-        # TODO: fill in _mix_lookup as mix_frequency is set
         self._mix_lookup = accel.DeviceArray(
             template.context, (template._segments, template._segment_samples), np.complex64
         )
