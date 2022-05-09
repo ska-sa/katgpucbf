@@ -82,7 +82,7 @@ class DDCTemplate:
 
         program = accel.build(
             context,
-            "kernels/ddc_phases.mako",
+            "kernels/ddc.mako",
             {
                 "wgs": self.wgs,
                 "taps": taps,
