@@ -32,10 +32,7 @@ _TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": "
 class DDCTemplate:
     """Template for digital down-conversion.
 
-    The kernel takes 10-bit integer inputs (real) and produces 32-bit
-    floating-point outputs (complex). The user provides a real-valued FIR
-    baseband filter and a mixer frequency for translating the signal from
-    the desired band to baseband.
+    See :class:`DDC` for a more detailed description of what it does.
 
     Parameters
     ----------
@@ -118,6 +115,11 @@ class DDCTemplate:
 
 class DDC(accel.Operation):
     r"""Operation implementating :class:`DDCTemplate`.
+
+    The kernel takes 10-bit integer inputs (real) and produces 32-bit
+    floating-point outputs (complex). The user provides a real-valued FIR
+    baseband filter and a mixer frequency for translating the signal from
+    the desired band to baseband.
 
     Element j of the output contains the dot product of **weights** with
     elements :math:`dj, d(j+1), \ldots, d(j+taps-1)` of the mixed signal. The
