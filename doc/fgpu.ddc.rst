@@ -32,29 +32,32 @@ samples (given by the constant :c:macro:`GROUP_OUT_SIZE`). To do so, it needs
 to load data from :c:macro:`LOAD_SIZE` input samples, which includes the extra
 samples needed to cater for the footprint of the low-pass filter.
 
-Modes
------
-The kernel uses two different mappings of work items to work, and switches
-back and forth between them (using local memory to pass results between them).
-In the first (let's call it Mode A), each work item holds the packed 10-bit
-data for some number of input samples, in registers. To save space, these are
-unpacked only on demand. To simplify alignment, the input samples are divided
+To maximise the arithmetic intensity and minimise the number of load/store
+operations, it's necessary for the kernel to hold a lot of data in registers.
+To avoid needing all the data at the same time, it has an outer loop that
+alternates between firstly, loading, decoding and mixing some data, and
+secondly, applying the low-pass filter. These two stages use different
+mappings of work items to work, and communicate through local memory.
+
+Loading and unpacking
+---------------------
+Initially (prior to the outer loop mentioned above), each work item loads the
+packed 10-bit samples for some number of input samples into registers (between
+them they load all :c:macro:`LOAD_SIZE` samples). To save space, these are
+unpacked only as needed.
+
+To simplify alignment, the input samples are divided
 into :dfn:`segments` of 16 consecutive samples, which consumes 20 bytes or
 five 32-bit words. The segments are distributed amongst the work items in
 round-robin fashion, so that work item :math:`i` holds segments :math:`i + jW`
 where :math:`W` is the work group size (:c:macro:`WGS` in the code). There
 won't be an equal number of segments for each work item, so some work items
-will be holding dummy data.
+will be holding useless data.
 
-In the other mode (Mode B), :c:macro:`SG_SIZE` work items (a :dfn:`subgroup`)
-collaborate to compute :c:macro:`COARSEN` consecutive output samples.
-
-Unpacking
----------
 When a sample is required, it is unpacked, given the segment and position
 within the segment. The kernel is designed so that the position in the segment
-is always a compile-time constant, which means the necessary registers and
-shift amounts are also known at compile-time.
+is always a compile-time constant (after loop unrolling), which means the
+necessary registers and shift amounts are also known at compile-time.
 
 To cheaply achieve sign extension, the value is first shifted to the top 10
 bits of a 32-bit (signed integer), then shifted right. In standard C/C++ this
@@ -65,15 +68,6 @@ In some cases the desired sample is split across a word boundary. CUDA
 provides a (hardware-accelerated) :dfn:`funnel-shift` intrinsic, which allows two
 words to be combined into a 64-bit word and shifted, retaining just the high
 32 bits of the result; this is ideal for our use case.
-
-Tiles
------
-Each segment is further subdivided into :dfn:`tiles`. For each tile,
-:c:macro:`SG_SIZE` decoded and mixed samples are kept in local memory at a
-time; this limitation helps reduce local memory usage. These are prepared in
-mode A (decoding and mixing), processed (to apply the FIR filter) in mode B,
-and then the next set of :c:macro:`SG_SIZE` samples are prepared in mode A
-again etc.
 
 Mixer signal
 ------------
@@ -97,19 +91,25 @@ available) and then proceed in single precision.
 
 FIR filter
 ----------
-The position of each work item with its subgroup is stored in
+For the FIR filter, a different mapping of work items to samples is used.
+The work items are partitioned into :dfn:`subgroups` each containing
+:c:macro:`SG_SIZE` work items. Each subgroup collaborates to produce
+:c:macro:`COARSEN` consecutive output samples.
+
+The position of each work item within its subgroup is stored in
 :c:var:`sg_rank`). Each work item is responsible only for samples whose index
 modulo :c:macro:`SG_SIZE` equals :c:var:`sg_rank`. It's not entirely clear why
 having this division of labour improves performance, although it does reduce
 the ratio of (input and output) samples to threads and hence allows for
 greater occupancy.
 
-Samples are a loaded in an order that processes all input samples with the
+Samples are loaded in an order that processes all input samples with the
 same index modulo :c:macro:`DECIMATION` together, keeping a sliding window of
 :c:macro:`COARSEN` such samples. This allows each subgroup to load each input
 sample from local memory just once, even though each contributes to multiple
 output samples. Note that other subgroups will still retrieve some of the
-same samples, but the coarsening mitigates the cost of this.
+same samples (from local memory), but the coarsening mitigates the cost of
+this.
 
 At the end of the kernel, the work items in a subgroup need to sum their
 individual results. This is done using a facility of :mod:`katsdpsigproc`,
@@ -117,6 +117,22 @@ which in practice utilises warp shuffle instructions. While reasonably
 efficient for small values of :c:var:`SG_SIZE`, this rapidly becomes costly as
 it increases: the overhead relative to the per-work item accumulation scales
 as :math:`O(n\log n)`.
+
+Tiles
+-----
+Each segment is further subdivided into :dfn:`tiles`. For each tile,
+:c:macro:`SG_SIZE` decoded and mixed samples are kept in local memory at a
+time; this limitation helps reduce local memory usage. These are written in
+the first phase (decoding and mixing), and read in the second phase (FIR
+filter), and then the next set of :c:macro:`SG_SIZE` samples are written for
+every tile, etc.
+
+The tile size should generally be as large as possible (so that the fraction
+of data held in memory is as small as possible), and in the simplest
+case, tiles correspond exactly to segments. However, the tile
+size must divide into the decimation factor, so when the decimation factor is
+smaller than (or not a multiple of) the segment size, tiles must be smaller
+than segments.
 
 Uncoalesced access
 ------------------
