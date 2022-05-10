@@ -78,7 +78,7 @@ again etc.
 Mixer signal
 ------------
 Care needs to be taken with the precision of the argument to the mixer signal.
-Simplify evaluating the sine and cosine of :math:`2\pi \omega t` when
+Simply evaluating the sine and cosine of :math:`2\pi \omega t` when
 :math:`t` is large can lead to a catastrophic loss of precision, as the
 product :math:`\omega t` will have a large integer part and leave few bits for
 the fractional part. Even passing :math:`\omega` in single precision can lead

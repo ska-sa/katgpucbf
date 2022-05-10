@@ -26,7 +26,7 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 from .. import BYTE_BITS
 from . import SAMPLE_BITS
 
-_TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": "int"})
+_TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": int})
 
 
 class DDCTemplate:
