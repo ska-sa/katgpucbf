@@ -16,11 +16,14 @@
 
 """A collection of utility functions for katgpucbf."""
 
+import ipaddress
 import logging
 import signal
 from asyncio import get_event_loop
+from typing import List, Tuple, Union
 
 from aiokatcp import DeviceServer
+from katsdptelstate.endpoint import endpoint_list_parser
 
 logger = logging.getLogger(__name__)
 
@@ -40,3 +43,14 @@ def add_signal_handlers(server: DeviceServer) -> None:
     loop = get_event_loop()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
+
+
+def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
+    """Parse a string into a list of IP endpoints."""
+    try:
+        endpoints = endpoint_list_parser(7148)(value)
+        for endpoint in endpoints:
+            ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
+        return [(ep.host, ep.port) for ep in endpoints]
+    except ValueError:
+        return value
