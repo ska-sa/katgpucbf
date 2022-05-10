@@ -5,7 +5,7 @@ To provide efficient operation on a narrowband region, several logical steps are
 performed:
 
 1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
-   :math:`e^{2\pi i\omega t}`, to effect a shift in the frequency of the
+   :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
    signal. The centre of the desired band is placed at the DC frequency.
 
 2. The signal is convolved with a low-pass filter. This eliminates the
@@ -72,20 +72,20 @@ words to be combined into a 64-bit word and shifted, retaining just the high
 Mixer signal
 ------------
 Care needs to be taken with the precision of the argument to the mixer signal.
-Simply evaluating the sine and cosine of :math:`2\pi \omega t` when
+Simply evaluating the sine and cosine of :math:`2\pi f t` when
 :math:`t` is large can lead to a catastrophic loss of precision, as the
-product :math:`\omega t` will have a large integer part and leave few bits for
-the fractional part. Even passing :math:`\omega` in single precision can lead
+product :math:`f t` will have a large integer part and leave few bits for
+the fractional part. Even passing :math:`f` in single precision can lead
 to large errors.
 
 To overcome this, a hybrid approach is used. Let the first sample handled by a
-work item be :math:`t_0`, and the jth sample of the ith segment be :math:`t_0
-+ t_{i,j}`. Note that :math:`t_{i,j}` is the same for all work items.
+work item be :math:`t_0`, and the kth sample of the ith segment be :math:`t_0
++ t_{i,k}`. Note that :math:`t_{i,k}` is the same for all work items.
 We can write the mixer value as
-:math:`e^{2\pi \omega t_0}e^{2\pi \omega t_{i,j}}`. The second factor can be
-pre-computed for all :math:`i` and :math:`j` and stored in a small lookup
+:math:`e^{2\pi j f t_0}e^{2\pi j f t_{i,k}}`. The second factor can be
+pre-computed for all :math:`i` and :math:`k` and stored in a small lookup
 table. The former still needs expensive handling, but needs to be performed
-far fewer times. We compute :math:`\omega t_0` in double precision, subtract
+far fewer times. We compute :math:`f t_0` in double precision, subtract
 the nearest integer (to increase the number of fractional mantissa bits
 available) and then proceed in single precision.
 
