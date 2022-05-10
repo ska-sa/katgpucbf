@@ -39,6 +39,8 @@ alternates between firstly, loading, decoding and mixing some data, and
 secondly, applying the low-pass filter. These two stages use different
 mappings of work items to work, and communicate through local memory.
 
+.. _ddc-load:
+
 Loading and unpacking
 ---------------------
 Initially (prior to the outer loop mentioned above), each work item loads the

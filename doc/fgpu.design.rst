@@ -130,7 +130,7 @@ While many bytes get loaded twice (because they hold bits from two samples),
 the cache is able to prevent this affecting DRAM bandwidth.
 
 The narrowband digital down conversion also decodes the 10-bit samples, but this
-is discussed separately.
+is discussed :ref:`separately <ddc-load>`.
 
 Polyphase Filter Bank
 ^^^^^^^^^^^^^^^^^^^^^
