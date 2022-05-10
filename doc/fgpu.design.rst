@@ -48,7 +48,7 @@ grouped into "chunks" of fixed numbers of samples. There is a tradeoff in the
 chunk size: large chunks use more memory, add more latency to the system, and
 reduce LLC (last-level cache) hit rates. Smaller chunks limit parallelism, and
 as will be seen later, increase the overheads associated with overlapping PFB
-windows.
+(polyphase filter bank) windows.
 
 Chunking also helps reduce the impact of slow Python code. Digitiser heaps
 consist of only a single packet, and involving Python on a per-heap basis
@@ -118,7 +118,7 @@ Digitiser samples are 10-bit and stored compactly. While it is possible to
 write a dedicated kernel for decoding that makes efficient accesses to memory
 (using contiguous word-size loads), it is faster overall to do the decoding as
 part of the PFB filter because it avoids a round trip to memory. For the
-polyphase filter bank, the decode is done in a very simple manner:
+PFB, the decode is done in a very simple manner:
 
  1. Determine the two bytes that hold the sample.
  2. Load them and combine them into a 16-bit value.
