@@ -164,7 +164,8 @@ DEVICE_FN static void load_segments(
 }
 
 /* Decode and mix the samples for the phase. Specifically, each tile is
- * populated with the samples in positions [phase, phase + SG_SIZE).
+ * populated with the samples with positions in the range
+ * [phase, phase + SG_SIZE).
  */
 DEVICE_FN static void mix(
     const segment segs[SEGMENTS],
