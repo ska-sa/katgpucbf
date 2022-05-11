@@ -51,10 +51,6 @@
 
 // Number of contiguous 32-bit words to store in each segment
 #define SEGMENT_WORDS (SEGMENT_SAMPLES * SAMPLE_BITS / 32)
-/* Number of contiguous 32-bit words to store in each segment. This must
- * correspond to a whole number of samples (and hence needs to be adjusted
- * if SAMPLE_BITS changes).
- */
 // Number of output samples
 #define GROUP_OUT_SIZE (COARSEN * (WGS / SG_SIZE))
 // Stride of input samples between workgroups
