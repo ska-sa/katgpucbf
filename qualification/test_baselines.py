@@ -59,7 +59,7 @@ async def test_baseline_correlation_products(
     channel_centre_freq = channel * channel_width
     pdf_report.detail(f"Tone frequency of {channel_centre_freq} Hz selected, in the centre of channel {channel}.")
 
-    await correlator.dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq})+wgn(0.01);common;common;")
+    await correlator.dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq});common;common;")
     pdf_report.detail(
         "Set D-sim with {channel_centre_freq} Hz tone, amplitude=0.15, with wgn amplitude 0.01 on both pols."
     )
