@@ -6,7 +6,9 @@
     but there's not enough really for it to make its way into a proper module.
     Maybe just a ``utils.py`` or something like that would be better.
 """
+import ast
 import logging
+from dataclasses import dataclass
 from typing import List, Tuple
 
 import aiokatcp
@@ -16,7 +18,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from katsdptelstate.endpoint import Endpoint, endpoint_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
@@ -55,44 +57,72 @@ async def get_dsim_endpoint(product_controller_client: aiokatcp.Client, adc_samp
     )
 
 
+@dataclass
 class CorrelatorRemoteControl:
     """A container class for katcp clients needed by qualification tests."""
 
-    def __init__(
-        self,
-        product_controller_client: aiokatcp.Client,
-        dsim_client: aiokatcp.Client,
-        config: dict,
-        *,
-        n_bls: int,
-        n_chans_per_substream: int,
-        n_bits_per_sample: int,
-        n_spectra_per_acc: int,
-        int_time: float,
-        n_samples_between_spectra: int,
-        bls_ordering: List[Tuple[str, str]],
-        sync_time: float,
-        timestamp_scale_factor: float,
-        bandwidth: float,
-        multicast_endpoints: List[Tuple[str, int]],
-    ) -> None:
-        self.product_controller_client = product_controller_client
-        self.dsim_client = dsim_client
-        # Some parameters we already know because they were in the config;
-        self.n_chans = config["outputs"]["antenna_channelised_voltage"]["n_chans"]
+    product_controller_client: aiokatcp.Client
+    dsim_client: aiokatcp.Client
+    n_chans: int
+    n_bls: int
+    n_chans_per_substream: int
+    n_bits_per_sample: int
+    n_spectra_per_acc: int
+    int_time: float
+    n_samples_between_spectra: int
+    bls_ordering: List[Tuple[str, str]]
+    sync_time: float
+    timestamp_scale_factor: float
+    bandwidth: float
+    multicast_endpoints: List[Tuple[str, int]]
 
-        # Others we can't get from the config and have to be passed in:
-        self.n_bls = n_bls
-        self.n_chans_per_substream = n_chans_per_substream
-        self.n_bits_per_sample = n_bits_per_sample
-        self.n_spectra_per_acc = n_spectra_per_acc
-        self.int_time = int_time
-        self.n_samples_between_spectra = n_samples_between_spectra
-        self.bls_ordering = bls_ordering
-        self.sync_time = sync_time
-        self.timestamp_scale_factor = timestamp_scale_factor
-        self.bandwidth = bandwidth
-        self.multicast_endpoints = multicast_endpoints
+    @classmethod
+    async def connect(
+        cls, pcc: aiokatcp.Client, dsim_client: aiokatcp.Client, correlator_config: dict
+    ) -> "CorrelatorRemoteControl":
+        """Connect to a correlator's product controller.
+
+        The function connects and gathers sufficient metadata in order for the
+        user to know how to use the correlator for whatever testing needs to be
+        done.
+        """
+        # Some metadata we know already from the config.
+        n_chans = correlator_config["outputs"]["antenna_channelised_voltage"]["n_chans"]
+
+        # But some can't.
+        n_bls = await get_sensor_val(pcc, "baseline_correlation_products-n-bls")
+        n_chans_per_substream = await get_sensor_val(pcc, "baseline_correlation_products-n-chans-per-substream")
+        n_bits_per_sample = await get_sensor_val(pcc, "baseline_correlation_products-xeng-out-bits-per-sample")
+        n_spectra_per_acc = await get_sensor_val(pcc, "baseline_correlation_products-n-accs")
+        int_time = await get_sensor_val(pcc, "baseline_correlation_products-int-time")
+        n_samples_between_spectra = await get_sensor_val(pcc, "antenna_channelised_voltage-n-samples-between-spectra")
+        bls_ordering = ast.literal_eval(await get_sensor_val(pcc, "baseline_correlation_products-bls-ordering"))
+        sync_time = await get_sensor_val(pcc, "antenna_channelised_voltage-sync-time")
+        timestamp_scale_factor = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
+        bandwidth = await get_sensor_val(pcc, "antenna_channelised_voltage-bandwidth")
+        multicast_endpoints = [
+            (endpoint.host, endpoint.port)
+            for endpoint in endpoint_list_parser(7148)(
+                await get_sensor_val(pcc, "baseline_correlation_products-destination")
+            )
+        ]
+
+        return CorrelatorRemoteControl(
+            product_controller_client=pcc,
+            dsim_client=dsim_client,
+            n_chans=n_chans,
+            n_bls=n_bls,
+            n_chans_per_substream=n_chans_per_substream,
+            n_bits_per_sample=n_bits_per_sample,
+            n_spectra_per_acc=n_spectra_per_acc,
+            int_time=int_time,
+            n_samples_between_spectra=n_samples_between_spectra,
+            bls_ordering=bls_ordering,
+            sync_time=sync_time,
+            timestamp_scale_factor=timestamp_scale_factor,
+            bandwidth=bandwidth,
+            multicast_endpoints=multicast_endpoints,
+        )
 
 
 def create_baseline_correlation_product_receive_stream(

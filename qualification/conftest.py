@@ -1,5 +1,4 @@
 """Fixtures and options for qualification testing of the correlator."""
-import ast
 import asyncio
 import json
 import logging
@@ -12,17 +11,11 @@ import pytest
 import spead2.recv
 from async_timeout import timeout
 from katsdpservices import get_interface_address
-from katsdptelstate.endpoint import endpoint_list_parser
 
 from katgpucbf import N_POLS
 from katgpucbf.meerkat import BANDS
 
-from . import (
-    CorrelatorRemoteControl,
-    create_baseline_correlation_product_receive_stream,
-    get_dsim_endpoint,
-    get_sensor_val,
-)
+from . import CorrelatorRemoteControl, create_baseline_correlation_product_receive_stream, get_dsim_endpoint
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -185,41 +178,8 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         dsim_host, dsim_port = await get_dsim_endpoint(pcc, BANDS[band].adc_sample_rate)
         dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
 
-        # A few pieces of info can't be gotten from the config. So we connect to
-        # our shiny new correlator to find out what its parameters are.
-        n_bls = await get_sensor_val(pcc, "baseline_correlation_products-n-bls")
-        n_chans_per_substream = await get_sensor_val(pcc, "baseline_correlation_products-n-chans-per-substream")
-        n_bits_per_sample = await get_sensor_val(pcc, "baseline_correlation_products-xeng-out-bits-per-sample")
-        n_spectra_per_acc = await get_sensor_val(pcc, "baseline_correlation_products-n-accs")
-        int_time = await get_sensor_val(pcc, "baseline_correlation_products-int-time")
-        n_samples_between_spectra = await get_sensor_val(pcc, "antenna_channelised_voltage-n-samples-between-spectra")
-        bls_ordering = ast.literal_eval(await get_sensor_val(pcc, "baseline_correlation_products-bls-ordering"))
-        sync_time = await get_sensor_val(pcc, "antenna_channelised_voltage-sync-time")
-        timestamp_scale_factor = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
-        bandwidth = await get_sensor_val(pcc, "antenna_channelised_voltage-bandwidth")
-        multicast_endpoints = [
-            (endpoint.host, endpoint.port)
-            for endpoint in endpoint_list_parser(7148)(
-                await get_sensor_val(pcc, "baseline_correlation_products-destination")
-            )
-        ]
-
-        yield CorrelatorRemoteControl(
-            pcc,
-            dsim_client,
-            correlator_config,
-            n_bls=n_bls,
-            n_chans_per_substream=n_chans_per_substream,
-            n_bits_per_sample=n_bits_per_sample,
-            n_spectra_per_acc=n_spectra_per_acc,
-            int_time=int_time,
-            n_samples_between_spectra=n_samples_between_spectra,
-            bls_ordering=bls_ordering,
-            sync_time=sync_time,
-            timestamp_scale_factor=timestamp_scale_factor,
-            bandwidth=bandwidth,
-            multicast_endpoints=multicast_endpoints,
-        )
+        remote_control = await CorrelatorRemoteControl.connect(pcc, dsim_client, correlator_config)
+        yield remote_control
 
         logger.info("Tearing down correlator.")
         dsim_client.close()
