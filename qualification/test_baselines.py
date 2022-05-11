@@ -23,7 +23,7 @@ async def test_baseline_correlation_products(
     n_antennas: int,
     n_channels: int,
     correlator: CorrelatorRemoteControl,
-    receive_stream: spead2.recv.ChunkRingStream,
+    receive_baseline_correlation_products_stream: spead2.recv.ChunkRingStream,
     pdf_report: Reporter,
     expect,
 ):
@@ -51,9 +51,7 @@ async def test_baseline_correlation_products(
     expected output appears in the correct baseline product.
 
     """
-    pdf_report.step(
-        "Connect to correlator's product controller to retrieve configuration for the running correlator."
-    )
+    pdf_report.step("Connect to correlator's product controller to retrieve configuration for the running correlator.")
     pc_client = correlator.product_controller_client
 
     timestamp_step = correlator.n_samples_between_spectra * correlator.n_spectra_per_acc
@@ -93,7 +91,7 @@ async def test_baseline_correlation_products(
         # from wall time here. I don't have a way other than adjusting the dsim
         # signal of ensuring that we get going after a specific timestamp in the
         # DSP pipeline itself. See NGC-549
-        data_ringbuffer = receive_stream.data_ringbuffer
+        data_ringbuffer = receive_baseline_correlation_products_stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         async for chunk in data_ringbuffer:
             # These asserts aren't particularly important, but they keep mypy happy.
@@ -102,11 +100,11 @@ async def test_baseline_correlation_products(
             recvd_timestamp = chunk.chunk_id * timestamp_step
             if not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                receive_stream.add_free_chunk(chunk)
+                receive_baseline_correlation_products_stream.add_free_chunk(chunk)
 
             elif recvd_timestamp <= expected_timestamp:
                 logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
-                receive_stream.add_free_chunk(chunk)
+                receive_baseline_correlation_products_stream.add_free_chunk(chunk)
 
             else:
                 loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
@@ -123,7 +121,7 @@ async def test_baseline_correlation_products(
                         is_signal_expected_in_baseline(bl, correlator.bls_ordering[loud_bl], pdf_report),
                         "Signal found in unexpected baseline.",
                     )
-                receive_stream.add_free_chunk(chunk)
+                receive_baseline_correlation_products_stream.add_free_chunk(chunk)
                 break
 
 

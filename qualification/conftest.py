@@ -235,7 +235,9 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
 
 
 @pytest.fixture
-async def receive_stream(pytestconfig, correlator: CorrelatorRemoteControl) -> spead2.recv.ChunkRingStream:
+async def receive_baseline_correlation_products_stream(
+    pytestconfig, correlator: CorrelatorRemoteControl
+) -> spead2.recv.ChunkRingStream:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     # This will require running pytest with spead2_net_raw which is unusual.
