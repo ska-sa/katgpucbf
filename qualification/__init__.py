@@ -21,8 +21,9 @@ from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+from katgpucbf import COMPLEX
+
 logger = logging.getLogger(__name__)
-COMPLEX = 2
 DSIM_NAME = "sim.m800"
 
 

@@ -48,18 +48,14 @@ def pytest_report_collectionfinish(config):  # noqa: D103
     # Using this hook to collect configuration information, because it's run
     # once, after collection but before the actual tests. Couldn't really find a
     # better place, and I did look around quite a bit.
-    git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty"]).decode()
+    git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
     logger.info("Git information: %s", git_information)
     config._report_log_plugin._write_json_data(
         {"$report_type": "TestConfiguration", "Test Suite Git Info": git_information}
     )
 
 
-@pytest.fixture(
-    params=[
-        14,
-    ]
-)
+@pytest.fixture(params=[4, 8, 14])
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param
@@ -172,9 +168,6 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
             "product-configure", "qualification_correlator*", json.dumps(correlator_config)
         )
 
-        # Sometimes this fails citing not enough resources if the previous
-        # correlator in the parameter set hasn't completely gone away yet. Will
-        # be fixed in NGC-544.
     except aiokatcp.FailReply:
         logger.exception("Something went wrong with starting the correlator!")
         raise
@@ -205,7 +198,7 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         timestamp_scale_factor = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
         bandwidth = await get_sensor_val(pcc, "antenna_channelised_voltage-bandwidth")
         multicast_endpoints = [
-            tuple(endpoint)  # mypy is  not quite smart enough to figure out that this makes it Tuple[str, int]
+            (endpoint.host, endpoint.port)
             for endpoint in endpoint_list_parser(7148)(
                 await get_sensor_val(pcc, "baseline_correlation_products-destination")
             )
@@ -225,7 +218,7 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
             sync_time=sync_time,
             timestamp_scale_factor=timestamp_scale_factor,
             bandwidth=bandwidth,
-            multicast_endpoints=multicast_endpoints,  # type: ignore
+            multicast_endpoints=multicast_endpoints,
         )
 
         logger.info("Tearing down correlator.")
