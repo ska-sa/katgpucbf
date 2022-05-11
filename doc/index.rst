@@ -20,6 +20,7 @@ Welcome to katgpucbf's documentation!
 
    fgpu.design
    fgpu.networking
+   fgpu.ddc
    fgpu.glossary
 
 .. toctree::

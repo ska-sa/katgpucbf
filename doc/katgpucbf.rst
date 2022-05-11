@@ -21,6 +21,7 @@ Submodules
    katgpucbf.recv
    katgpucbf.ringbuffer
    katgpucbf.spead
+   katgpucbf.utils
 
 Module contents
 ---------------
