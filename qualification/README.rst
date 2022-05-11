@@ -51,7 +51,7 @@ this directory:
 
 ::
 
-   spead2_net_raw pytest -v  qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:main-20220328
+   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:main-20220328
 
 Explanation:
 
