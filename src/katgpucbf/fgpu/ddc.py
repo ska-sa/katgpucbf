@@ -26,7 +26,7 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 from .. import BYTE_BITS
 from . import SAMPLE_BITS
 
-_TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": int})
+_TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": int, "segment_samples": int})
 
 
 class DDCTemplate:
@@ -64,9 +64,10 @@ class DDCTemplate:
         self.wgs = tuning["wgs"]
         self._sg_size = tuning["sg_size"]
         self._coarsen = tuning["coarsen"]
+        self._segment_samples = tuning["segment_samples"]
         self.taps = taps
         self.decimation = decimation
-        self._segment_samples = 16
+
         self._group_out_size = self.wgs // self._sg_size * self._coarsen
         self._group_in_size = self._group_out_size * decimation
         self._load_size = self._group_in_size + taps - decimation
@@ -79,6 +80,8 @@ class DDCTemplate:
             raise ValueError("decimation must be a multiple of sg_size")
         if self._group_in_size % self._segment_samples:
             raise ValueError("group_in_size must be a multiple of segment_samples (fix sg_size)")
+        if self._segment_samples * SAMPLE_BITS % 32:
+            raise ValueError("segment_samples * SAMPLE_BITS must be a multiple of 32")
 
         program = accel.build(
             context,
@@ -89,6 +92,8 @@ class DDCTemplate:
                 "decimation": decimation,
                 "coarsen": self._coarsen,
                 "sg_size": self._sg_size,
+                "sample_bits": SAMPLE_BITS,
+                "segment_samples": self._segment_samples,
             },
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
@@ -104,9 +109,10 @@ class DDCTemplate:
         wgs = 32
         coarsen = 9
         sg_size = 2
+        segment_samples = 16
         while sg_size > 1 and decimation % sg_size != 0:
             sg_size //= 2
-        return {"wgs": wgs, "coarsen": coarsen, "sg_size": sg_size}
+        return {"wgs": wgs, "coarsen": coarsen, "sg_size": sg_size, "segment_samples": segment_samples}
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""

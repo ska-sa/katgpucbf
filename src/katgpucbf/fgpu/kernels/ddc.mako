@@ -32,6 +32,7 @@
 /* Alignment requirements:
  * - in_offset must be a multiple of SEGMENT_SAMPLES
  * - GROUP_IN_SIZE must be a multiple of SEGMENT_SAMPLES
+ * - SEGMENT_SAMPLES * SAMPLE_BITS must be a multiple of 32
  * - WGS must be a multiple of SG_SIZE
  * - TAPS must be a multiple of DECIMATION
  * - SEGMENT_SAMPLES must be a multiple of SG_SIZE
@@ -45,14 +46,15 @@
 #define DECIMATION ${decimation}
 #define COARSEN ${coarsen}
 #define SG_SIZE ${sg_size}
+#define SAMPLE_BITS ${sample_bits}
+#define SEGMENT_SAMPLES ${segment_samples}
 
-// Bits per input sample. Defined for clarity, but can't easily be changed
-// without breaking all the code
-#define SAMPLE_BITS 10
 // Number of contiguous 32-bit words to store in each segment
-#define SEGMENT_WORDS (SAMPLE_BITS / 2)
-// Number of samples in each segment
-#define SEGMENT_SAMPLES (SEGMENT_WORDS * 32 / SAMPLE_BITS)
+#define SEGMENT_WORDS (SEGMENT_SAMPLES * SAMPLE_BITS / 32)
+/* Number of contiguous 32-bit words to store in each segment. This must
+ * correspond to a whole number of samples (and hence needs to be adjusted
+ * if SAMPLE_BITS changes).
+ */
 // Number of output samples
 #define GROUP_OUT_SIZE (COARSEN * (WGS / SG_SIZE))
 // Stride of input samples between workgroups
@@ -66,7 +68,8 @@
 /* Number of contiguous samples that take turns occupying a tile
  * (must divide both SEGMENT_SAMPLES and DECIMATION, and be a multiple
  * of SG_SIZE). This implementation is pessimistic when DECIMATION is
- * not a power of 2, but that's not expected to be a common case.
+ * neither a factor nor multiple of SEGMENT_SAMPLES, but that's not expected to
+ * be a common case.
  */
 #if DECIMATION % SEGMENT_SAMPLES == 0
 # define TILE_SAMPLES SEGMENT_SAMPLES
