@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,7 +19,6 @@ import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 from katsdpsigproc.accel import DeviceArray
-from numba import njit, prange
 
 from katgpucbf.xbgpu.correlation import Correlation, CorrelationTemplate, device_filter
 
@@ -27,10 +26,7 @@ from . import test_parameters
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
-get_baseline_index = njit(Correlation.get_baseline_index)
 
-
-@njit(parallel=True)
 def correlate_host(input_array: np.ndarray) -> np.ndarray:
     """Calculate correlation products on the host CPU.
 
@@ -39,8 +35,6 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     input_array
         Dataset to be correlated. Required shape:
         (n_batches, n_ants, n_chans, n_spectra, n_pols, complexity)
-    first_batch, last_batch
-        Half-open interval of batches to process. The other are set to zero.
 
     Returns
     -------
@@ -48,25 +42,39 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
         Correlation products or visibilities. Shape:
         (n_batches, n_chans, n_baselines, complexity)
     """
+    n_batches = input_array.shape[0]
     n_ants = input_array.shape[1]
     n_chans = input_array.shape[2]
+    n_spectra = input_array.shape[3]
     n_pols = input_array.shape[4]
     complexity = input_array.shape[5]
     n_baselines = n_ants * (n_ants + 1) * 2
     output_array = np.zeros(shape=(n_chans, n_baselines, complexity), dtype=np.int64)
-    for c in prange(n_chans):
-        for a2 in range(n_ants):
-            for a1 in range(a2 + 1):
-                for p1 in range(n_pols):
-                    r1 = input_array[:, a1, c, :, p1, 0]
-                    i1 = input_array[:, a1, c, :, p1, 1]
-                    for p2 in range(n_pols):
-                        bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
-                        r2 = input_array[:, a2, c, :, p2, 0].astype(np.int64)
-                        i2 = input_array[:, a2, c, :, p2, 1].astype(np.int64)
+    # Reorder axes to channel, ant/pol, batch/spectum, complexity
+    input_array = input_array.transpose(2, 1, 4, 0, 3, 5)
+    input_array = input_array.reshape(n_chans, n_ants * n_pols, n_batches * n_spectra, complexity)
+    # Compute mapping from baseline to position in the correlation product
+    # matrix. baseline i is stored in position idx1[i], idx2[i].
+    idx1 = np.zeros(n_baselines, int)
+    idx2 = np.zeros(n_baselines, int)
+    for a2 in range(n_ants):
+        for a1 in range(a2 + 1):
+            for p1 in range(n_pols):
+                for p2 in range(n_pols):
+                    bl_idx = Correlation.get_baseline_index(a1, a2) * n_pols * n_pols + p1 + n_pols * p2
+                    idx1[bl_idx] = n_pols * a1 + p1
+                    idx2[bl_idx] = n_pols * a2 + p2
 
-                        output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
-                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
+    for c in range(n_chans):
+        # Convert to double precision. Integers up to 2^54 can be represented
+        # without losing precision, and BLAS implementations have highly
+        # optimised matrix multiplication.
+        ch_input = input_array[c].astype(np.float64).view(np.complex128)[..., 0]
+        corr = ch_input @ ch_input.conj().T
+        # Apply baseline ordering
+        baselines = corr[idx1, idx2]
+        # Turn complexity back into an axis, and (implicitly) convert to int64
+        output_array[c] = baselines[..., np.newaxis].view(np.float64)
 
     return output_array
 
