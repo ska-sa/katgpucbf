@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Baseline verification tests."""
 
 import logging
@@ -13,8 +11,6 @@ import spead2.recv.asyncio
 
 from . import CorrelatorRemoteControl
 from .reporter import Reporter
-
-CPLX = 2
 
 logger = logging.getLogger(__name__)
 
