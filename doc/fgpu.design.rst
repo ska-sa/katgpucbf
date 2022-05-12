@@ -48,7 +48,7 @@ grouped into "chunks" of fixed numbers of samples. There is a tradeoff in the
 chunk size: large chunks use more memory, add more latency to the system, and
 reduce LLC (last-level cache) hit rates. Smaller chunks limit parallelism, and
 as will be seen later, increase the overheads associated with overlapping PFB
-windows.
+(polyphase filter bank) windows.
 
 Chunking also helps reduce the impact of slow Python code. Digitiser heaps
 consist of only a single packet, and involving Python on a per-heap basis
@@ -90,6 +90,8 @@ for this, which can severely limit the chunk size.
 GPU Processing
 --------------
 
+.. _gpu-terminology:
+
 Terminology
 ^^^^^^^^^^^
 We will use OpenCL terminology, as it is more generic. An OpenCL *workitem*
@@ -98,13 +100,25 @@ program but with different parameters, and can share data through *local
 memory* (shared memory in CUDA) with other workitems in the same
 *workgroup* (thread block in CUDA).
 
+Narrowband
+^^^^^^^^^^
+In narrow-band modes, the first step is a down-conversion filter that produces
+a new sample stream with a lower bandwidth and sampling rate. The kernel
+implementing this is particularly complex, and is discussed separately in
+:doc:`fgpu.ddc`.
+
+.. note::
+
+   At the time of writing, the kernel has been written but the full narrowband
+   implementation is not yet implemented.
+
 Decode
 ^^^^^^
 Digitiser samples are 10-bit and stored compactly. While it is possible to
 write a dedicated kernel for decoding that makes efficient accesses to memory
 (using contiguous word-size loads), it is faster overall to do the decoding as
-part of the PFB filter because it avoids a round trip to memory. The decode is
-done in a very simple manner:
+part of the PFB filter because it avoids a round trip to memory. For the
+PFB, the decode is done in a very simple manner:
 
  1. Determine the two bytes that hold the sample.
  2. Load them and combine them into a 16-bit value.
@@ -114,6 +128,9 @@ done in a very simple manner:
 
 While many bytes get loaded twice (because they hold bits from two samples),
 the cache is able to prevent this affecting DRAM bandwidth.
+
+The narrowband digital down conversion also decodes the 10-bit samples, but this
+is discussed :ref:`separately <ddc-load>`.
 
 Polyphase Filter Bank
 ^^^^^^^^^^^^^^^^^^^^^

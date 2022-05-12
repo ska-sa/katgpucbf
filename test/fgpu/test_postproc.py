@@ -35,8 +35,8 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay,
     data = data[:, :channels]
     # Compute delay phases
     channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :]
-    m2ipi = np.complex64(-2j * np.pi)
-    phase = np.exp(m2ipi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
+    m2jpi = np.complex64(-2j * np.pi)
+    phase = np.exp(m2jpi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
     assert phase.dtype == np.complex64
     # Apply delay, phase and gain
     corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)

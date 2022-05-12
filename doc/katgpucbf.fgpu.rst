@@ -8,6 +8,7 @@ Submodules
    :maxdepth: 4
 
    katgpucbf.fgpu.compute
+   katgpucbf.fgpu.ddc
    katgpucbf.fgpu.delay
    katgpucbf.fgpu.engine
    katgpucbf.fgpu.main

@@ -39,7 +39,7 @@ import asyncio
 import logging
 import math
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import katsdpsigproc
 import katsdpsigproc.abc
@@ -50,6 +50,7 @@ import spead2
 from aiokatcp import DeviceServer
 
 from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
+from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
@@ -189,8 +190,19 @@ class XBEngine(DeviceServer):
         The index of the first channel in the subset of channels processed by
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
         spectrum reassembly by the downstream receiver.
+    src
+        Endpoint for the incoming data.
+    src_interface
+        IP address of the network device to use for input.
+    src_ibv
+        Use ibverbs for input.
     src_affinity
         Specific CPU core to assign the RX stream processing thread to.
+    src_comp_vector
+        Completion vector for source stream, or -1 for polling.
+        See :class:`spead2.recv.UdpIbvConfig` for further information.
+    src_buffer
+        The size of the network receive buffer.
     heaps_per_fengine_per_chunk
         The number of consecutive batches to store in the same chunk. The higher
         this value is, the more GPU and system RAM is allocated, the lower,
@@ -224,7 +236,12 @@ class XBEngine(DeviceServer):
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
+        src: List[Tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
+        src_interface: str,
+        src_ibv: bool,
         src_affinity: int,
+        src_comp_vector: int,
+        src_buffer: int,
         heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
         monitor: Monitor,
@@ -248,6 +265,12 @@ class XBEngine(DeviceServer):
         self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
         self.n_samples_between_spectra = n_samples_between_spectra
+
+        self._src = src
+        self._src_interface = src_interface
+        self._src_ibv = src_ibv
+        self._src_buffer = src_buffer
+        self._src_comp_vector = src_comp_vector
 
         # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
         # these values too high results in too much GPU memory being consumed.
@@ -282,20 +305,15 @@ class XBEngine(DeviceServer):
 
         # False if no transport has been added, true otherwise.
         self.tx_transport_added = False
-        self.rx_transport_added = False
 
         self.monitor = monitor
 
-        # The receiver_stream object has no attached
-        # transport yet and will not function until one of the
-        # add_*_receiver_transport() functions has been called.
         data_ringbuffer = ChunkRingbuffer(
             self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
         free_ringbuffer = ChunkRingbuffer(
             n_free_chunks, name="recv_free_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
-
         layout = recv.Layout(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
@@ -304,7 +322,6 @@ class XBEngine(DeviceServer):
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
         )
-
         self.receiver_stream = recv.make_stream(
             layout=layout,
             data_ringbuffer=data_ringbuffer,
@@ -373,105 +390,6 @@ class XBEngine(DeviceServer):
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
-
-    def add_udp_ibv_receiver_transport(
-        self, src_ip: str, src_port: int, interface_ip: str, comp_vector: int, buffer_size: int
-    ) -> None:
-        """
-        Add the ibv_udp transport to the receiver.
-
-        The receiver will read udp packets off of the specified interface using
-        the ibverbs library to offload processing from the CPU.
-
-        This transport is intended to be the transport used in production.
-
-        Parameters
-        ----------
-        src_ip
-            multicast IP address of source data.
-        src_port
-            Port of source data
-        interface_ip
-            IP address of interface to listen for data on.
-        comp_vector
-            Received packets will generate interrupts from the NIC. This value
-            selects an interrupt vector, and the OS controls the mapping from
-            interrupt vector to CPU core.
-        buffer_size
-            The size of the network receive buffer.
-        """
-        if self.rx_transport_added is True:
-            raise AttributeError("Transport for receiving data has already been set.")
-        self.receiver_stream.add_udp_ibv_reader(
-            [(src_ip, src_port)], interface_ip, buffer_size=buffer_size, comp_vector=comp_vector
-        )
-        self.rx_transport_added = True
-
-    def add_udp_receiver_transport(self, src_ip: str, src_port: int, interface_ip: str, buffer_size: int) -> None:
-        """
-        Add the 'regular' UDP transport to the receiver.
-
-        Allow the user to run the XBEngine without the use of IBVerbs.
-
-        Parameters
-        ----------
-        src_ip
-            multicast IP address of source data.
-        src_port
-            Port of source data
-        interface_ip
-            IP address of interface to listen for data on.
-        buffer_size
-            The size of the network receive buffer.
-        """
-        if self.rx_transport_added is True:
-            raise AttributeError("Transport for receiving data has already been set.")
-
-        self.receiver_stream.add_udp_reader(
-            src_ip,
-            src_port,
-            buffer_size=buffer_size,
-            interface_address=interface_ip or "",
-        )
-
-        self.rx_transport_added = True
-
-    def add_buffer_receiver_transport(self, buffer: bytes) -> None:
-        """
-        Add the buffer transport to the receiver.
-
-        The receiver will read packet data Python ByteArray generated by a
-        spead2.send.BytesStream object. The sender does not support the inproc
-        transport and as such the buffer transport must be used instead.
-
-        This transport is intended to be used for testing purposes.
-
-        Parameters
-        ----------
-        buffer
-            Buffer containing simulated packet data.
-        """
-        if self.rx_transport_added is True:
-            raise AttributeError("Transport for receiving data has already been set.")
-        self.receiver_stream.add_buffer_reader(buffer)
-        self.rx_transport_added = True
-
-    def add_pcap_receiver_transport(self, pcap_filename: str) -> None:
-        """
-        Add the pcap transport to the receiver.
-
-        The receiver will read packet data from a pcap file. This transport is
-        intended to be used for testing purposes.
-
-        Parameters
-        ----------
-        pcap_filename
-            Name of PCAP file to open.
-        """
-        if self.rx_transport_added is True:
-            raise AttributeError("Transport for receiving data has already been set.")
-        self.rx_transport_added = True
-        self.receiver_stream.add_udp_pcap_file_reader(pcap_filename)
 
     def add_udp_sender_transport(
         self,
@@ -824,9 +742,22 @@ class XBEngine(DeviceServer):
 
         These functions will loop forever and only exit once the XBEngine receives
         a SIGINT or SIGTERM.
+
+        .. todo::
+
+            Starting up of descriptor transmission is currently done in
+            ``main.py``, it should be done here. For harmonious feng-shui.
+
         """
-        if self.rx_transport_added is not True:
-            raise AttributeError("Transport for receiving data has not yet been set.")
+        base_recv.add_reader(
+            self.receiver_stream,
+            src=self._src,
+            interface=self._src_interface,
+            ibv=self._src_ibv,
+            comp_vector=self._src_comp_vector,
+            buffer=self._src_buffer,
+        )
+
         if self.tx_transport_added is not True:
             raise AttributeError("Transport for sending data has not yet been set.")
 

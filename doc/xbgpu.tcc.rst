@@ -17,7 +17,7 @@ multiplications to be performed. The `GTC presentation`_ shows diagrams of
 this, so only a brief explanation will be given.
 
 Consider a correlation product :math:`A \times B^H`. The real part of
-:math:`(a_r + ia_i)(\overline{b_r + ib_i})` is :math:`a_rb_r + a_ib_i`, so
+:math:`(a_r + ja_i)(\overline{b_r + jb_i})` is :math:`a_rb_r + a_ib_i`, so
 simply by placing the real and imaginary parts in alternate columns of
 :math:`A` and :math:`B`, each dot product between rows will give the desired
 real part.

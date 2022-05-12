@@ -20,7 +20,6 @@ These classes handle the operation of the GPU in performing the PFB-FIR part
 through a mako-templated kernel.
 """
 
-
 import numpy as np
 import pkg_resources
 from katsdpsigproc import accel
@@ -35,9 +34,9 @@ class PFBFIRTemplate:
 
     Parameters
     ----------
-    context: AbstractContext
+    context
         The GPU context that we'll operate in.
-    taps: int
+    taps
         The number of taps that you want the resulting PFB-FIRs to have.
     """
 

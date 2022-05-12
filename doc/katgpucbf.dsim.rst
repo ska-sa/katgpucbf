@@ -7,6 +7,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.dsim.descriptors
    katgpucbf.dsim.main
    katgpucbf.dsim.send
    katgpucbf.dsim.server
