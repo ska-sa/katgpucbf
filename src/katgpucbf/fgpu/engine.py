@@ -25,6 +25,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
+import spead2.recv
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
@@ -264,10 +265,8 @@ class Engine(aiokatcp.DeviceServer):
         self._src_ibv = src_ibv
         self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
         src_chunks_per_stream = 4
-        free_ringbuffer = ChunkRingbuffer(
-            src_chunks_per_stream * N_POLS, name="recv_free_ringbuffer", task_name="run_receive", monitor=monitor
-        )
-        self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffer, src_affinity)
+        free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
+        self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if use_vkgdr:

@@ -46,7 +46,7 @@ import katsdpsigproc.abc
 import katsdpsigproc.accel
 import katsdpsigproc.resource
 import numpy as np
-import spead2
+import spead2.recv
 from aiokatcp import DeviceServer
 
 from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
@@ -311,9 +311,7 @@ class XBEngine(DeviceServer):
         data_ringbuffer = ChunkRingbuffer(
             self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
-        free_ringbuffer = ChunkRingbuffer(
-            n_free_chunks, name="recv_free_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
-        )
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
         layout = recv.Layout(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,

@@ -72,23 +72,23 @@ def data_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
 
 
 @pytest.fixture
-def free_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
-    """Create an asynchronous free chunk ringbuffer, to be shared by the receive streams."""
-    return spead2.recv.asyncio.ChunkRingbuffer(8)
+def free_ringbuffers(layout) -> List[spead2.recv.asyncio.ChunkRingbuffer]:
+    """Create asynchronous free chunk ringbuffers, to be used by the receive streams."""
+    return [spead2.recv.asyncio.ChunkRingbuffer(4) for _ in range(N_POLS)]
 
 
 @pytest.fixture
 def streams(
-    layout, data_ringbuffer, free_ringbuffer, queues
+    layout, data_ringbuffer, free_ringbuffers, queues
 ) -> Generator[List[spead2.recv.ChunkRingStream], None, None]:
     """Create a receive stream per polarization.
 
     They are connected to the :func:`queues` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    streams = recv.make_streams(layout, data_ringbuffer, free_ringbuffer, [-1, -1])
-    for stream, queue in zip(streams, queues):
-        for _ in range(free_ringbuffer.maxsize // len(streams)):
+    streams = recv.make_streams(layout, data_ringbuffer, free_ringbuffers, [-1, -1])
+    for stream, queue, free_ringbuffer in zip(streams, queues, free_ringbuffers):
+        for _ in range(free_ringbuffer.maxsize):
             data = np.empty(layout.chunk_bytes, np.uint8)
             # Use np.ones to make sure the bits get zeroed out
             present = np.ones(layout.chunk_heaps, np.uint8)

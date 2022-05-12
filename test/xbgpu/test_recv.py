@@ -70,7 +70,7 @@ def stream(layout, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
     max_active_chunks = 5
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(max_active_chunks)
     n_chunks_total = max_active_chunks + 8  # 8 is just a few more.
-    free_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_chunks_total)
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(n_chunks_total)
     stream = recv.make_stream(layout, data_ringbuffer, free_ringbuffer, -1, max_active_chunks)
     for _ in range(n_chunks_total):
         data = np.empty(layout.chunk_bytes, np.int8)

@@ -226,7 +226,7 @@ def make_stream(
     spead_items: List[int],
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    free_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.ChunkRingbuffer,
     affinity: int,
     stream_stats: List[str],
     **kwargs: Any,
