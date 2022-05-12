@@ -106,3 +106,7 @@ autoclass_content = "both"
 # TODO: autodoc_default_options
 
 todo_include_todos = True
+
+# Adds \usetikzlibrary{...} to the latex preamble. We need "chains" for
+# rendering flowcharts.
+tikz_tikzlibraries = "chains"

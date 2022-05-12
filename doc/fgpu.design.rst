@@ -191,7 +191,7 @@ saturation function, we can access the CUDA functionality through inline PTX
 assembly (OpenCL C has an equivalent function).
 
 Fine delays are computed using the `sincospi` function, which saves both a
-multiplication by π and a range reduction.
+multiplication by :math:`\pi` and a range reduction.
 
 Coarse delays
 ^^^^^^^^^^^^^
