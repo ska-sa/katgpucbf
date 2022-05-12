@@ -45,7 +45,6 @@ async def test_baseline_correlation_products(
     combinations. Use gain correction after channelisation to turn the input
     signal on or off. Iterate through all combinations and verify that the
     expected output appears in the correct baseline product.
-
     """
     pdf_report.step("Connect to correlator's product controller to retrieve configuration for the running correlator.")
     pc_client = correlator.product_controller_client
