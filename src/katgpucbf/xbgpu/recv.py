@@ -162,7 +162,7 @@ class Layout(BaseLayout):
 def make_stream(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    free_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.ChunkRingbuffer,
     src_affinity: int,
     max_active_chunks: int,
 ) -> spead2.recv.ChunkRingStream:

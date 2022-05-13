@@ -21,7 +21,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator, Deque, List, cast
+from typing import AsyncGenerator, Deque, List, Sequence, cast
 
 import numba
 import numpy as np
@@ -152,8 +152,8 @@ class Layout(BaseLayout):
 def make_streams(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    free_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    src_affinity: List[int],
+    free_ringbuffers: Sequence[spead2.recv.ChunkRingbuffer],
+    src_affinity: Sequence[int],
 ) -> List[spead2.recv.ChunkRingStream]:
     """Create SPEAD receiver streams.
 
@@ -166,8 +166,9 @@ def make_streams(
         Heap size and chunking parameters.
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
-    free_ringbuffer
-        Ringbuffer for holding chunks for recycling once they've been used.
+    free_ringbuffers
+        Ringbuffers for holding chunks for recycling once they've been used
+        (one per pol).
     src_affinity
         CPU core affinity for the worker threads ([-1, -1] for no affinity).
     """
@@ -182,7 +183,7 @@ def make_streams(
             spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
             max_active_chunks=MAX_CHUNKS,
             data_ringbuffer=data_ringbuffer,
-            free_ringbuffer=free_ringbuffer,
+            free_ringbuffer=free_ringbuffers[pol],
             affinity=src_affinity[pol],
             max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
             stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
