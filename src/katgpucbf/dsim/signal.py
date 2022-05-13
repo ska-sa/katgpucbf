@@ -5,6 +5,7 @@ import logging
 import multiprocessing.connection
 import operator
 import os
+import signal
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
@@ -464,15 +465,28 @@ def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample
 
 
 class SignalService:
-    """Compute signals in a separate process."""
+    """Compute signals in a separate process.
+
+    This only works with the fork model of multiprocessing, as it depends on
+    inheriting the arrays across the :meth:`os.fork`. Additionally, the arrays
+    must be allocated in such a way that they are shared rather than
+    copy-on-write, for example, using :mod:`multiprocessing.sharedctypes`.
+
+    Parameters
+    ----------
+    arrays
+        All the arrays that might be passed to :meth:`sample`.
+    """
 
     @dataclass
     class _Request:
+        """Serialises a request from the main process to the service process."""
+
         signals: Sequence[Signal]
         timestamp: int
         sample_rate: float
         sample_bits: int
-        out_idx: int
+        out_idx: int  #: Index of the array in the list of valid arrays
 
     @staticmethod
     def _run(
@@ -480,6 +494,14 @@ class SignalService:
         pipe: multiprocessing.connection.Connection,
         parent_pipe: multiprocessing.connection.Connection,
     ) -> None:
+        """Run the main service loop for the separate process.
+
+        It receives a _Request on the pipe, and replies with either ``None``
+        or an exception. When the main process wants to shut down, it will
+        close the pipe.
+        """
+        # Avoid catching Ctrl-C meant for the parent
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         # This runs in the child, so doesn't need to hold a handle to the
         # parent close. Closing it ensures that the get the EOFError when
         # the parent closes the pipe and we try to read.
@@ -508,6 +530,12 @@ class SignalService:
         self._pipe.close()
         await asyncio.get_running_loop().run_in_executor(None, self._process.join)
 
+    def _make_request(self, request: "SignalService._Request") -> None:
+        self._pipe.send(request)
+        reply = self._pipe.recv()
+        if reply is not None:
+            raise reply
+
     async def sample(
         self, signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray
     ) -> None:
@@ -516,14 +544,21 @@ class SignalService:
         `out` must be one of the arrays passed to the constructor.
         """
         for i, array in enumerate(self.arrays):
-            if array is out or np.shares_memory(array, out):
+            # Object identity doesn't work well, I think because fetching one
+            # xr.DataArray from a xr.DataSet creates a new object on the fly.
+            # So we check if they're referencing the same memory in the same
+            # way.
+            if array.data.__array_interface__ == out.data.__array_interface__:
                 out_idx = i
                 break
         else:
             raise ValueError("output was not registered with the constructor")
         loop = asyncio.get_running_loop()
         req = SignalService._Request(signals, timestamp, sample_rate, sample_bits, out_idx)
-        await loop.run_in_executor(None, self._pipe.send, req)
-        reply = await loop.run_in_executor(None, self._pipe.recv)
-        if reply is not None:
-            raise reply
+        await loop.run_in_executor(None, self._make_request, req)
+
+    async def __aenter__(self) -> "SignalService":
+        return self
+
+    async def __aexit__(self, *exc_info) -> None:
+        await self.stop()

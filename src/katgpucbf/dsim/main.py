@@ -152,9 +152,10 @@ async def async_main() -> None:
     descriptor_sender = descriptors.DescriptorSender(stream=descriptor_stream, descriptor_heap=descriptor_heap)
     descriptor_task = asyncio.create_task(descriptor_sender.run())
 
-    signal_service = signal.SignalService([heap_sets[0].data["payload"]])
-    await signal_service.sample(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])
-    await signal_service.stop()  # The server will make its own one
+    async with signal.SignalService([heap_sets[0].data["payload"]]) as signal_service:
+        await signal_service.sample(
+            args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"]
+        )
 
     stream = send.make_stream(
         endpoints=endpoints,
