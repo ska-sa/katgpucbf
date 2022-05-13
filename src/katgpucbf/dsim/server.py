@@ -26,7 +26,7 @@ import pyparsing as pp
 from .. import BYTE_BITS, __version__
 from .descriptors import DescriptorSender
 from .send import HeapSet, Sender
-from .signal import Signal, format_signals, parse_signals, sample_async
+from .signal import Signal, SignalService, format_signals, parse_signals
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sample_bits = sample_bits
         self.first_timestamp = first_timestamp
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
+        self._signal_service = SignalService([self.sender.heap_set.data["payload"], self.spare.data["payload"]])
 
         self._signals_orig_sensor = aiokatcp.Sensor(
             str,
@@ -131,6 +132,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     async def on_stop(self) -> None:  # noqa: D102
         self.sender.halt()
         self.descriptor_sender.halt()
+        await self._signal_service.stop()
 
     async def request_signals(self, ctx, signals_str: str) -> int:
         """Update the signals that are generated.
@@ -156,7 +158,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise aiokatcp.FailReply(f"expected {n_pol} signals, received {len(signals)}")
 
         async with self._signals_lock:
-            await sample_async(
+            await self._signal_service.sample(
                 signals, self.first_timestamp, self.adc_sample_rate, self.sample_bits, self.spare.data["payload"]
             )
             spare = self.sender.heap_set

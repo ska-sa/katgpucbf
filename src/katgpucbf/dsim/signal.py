@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
+import multiprocessing.connection
 import operator
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
@@ -461,8 +463,67 @@ def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample
     da.store(sampled, [out.isel(pol=i).data.ravel() for i in range(len(signals))], lock=False)
 
 
-async def sample_async(
-    signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray
-) -> None:
-    """Call :func:`sample` using a helper thread (to avoid blocking the event loop)."""
-    await asyncio.get_running_loop().run_in_executor(None, sample, signals, timestamp, sample_rate, sample_bits, out)
+class SignalService:
+    """Compute signals in a separate process."""
+
+    @dataclass
+    class _Request:
+        signals: Sequence[Signal]
+        timestamp: int
+        sample_rate: float
+        sample_bits: int
+        out_idx: int
+
+    @staticmethod
+    def _run(
+        arrays: Sequence[xr.DataArray],
+        pipe: multiprocessing.connection.Connection,
+        parent_pipe: multiprocessing.connection.Connection,
+    ) -> None:
+        # This runs in the child, so doesn't need to hold a handle to the
+        # parent close. Closing it ensures that the get the EOFError when
+        # the parent closes the pipe and we try to read.
+        parent_pipe.close()
+        os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+        while True:
+            try:
+                req: SignalService._Request = pipe.recv()
+            except EOFError:
+                return  # Caller has shut down the pipe
+            try:
+                sample(req.signals, req.timestamp, req.sample_rate, req.sample_bits, arrays[req.out_idx])
+            except Exception as exc:
+                pipe.send(exc)
+            else:
+                pipe.send(None)
+
+    def __init__(self, arrays: Sequence[xr.DataArray]) -> None:
+        self.arrays = arrays
+        self._pipe, remote_pipe = multiprocessing.Pipe()
+        self._process = multiprocessing.Process(target=self._run, args=(arrays, remote_pipe, self._pipe))
+        self._process.start()
+
+    async def stop(self) -> None:
+        """Shut down the process."""
+        self._pipe.close()
+        await asyncio.get_running_loop().run_in_executor(None, self._process.join)
+
+    async def sample(
+        self, signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray
+    ) -> None:
+        """Perform signal sampling in the remote process.
+
+        `out` must be one of the arrays passed to the constructor.
+        """
+        for i, array in enumerate(self.arrays):
+            if array is out or np.shares_memory(array, out):
+                out_idx = i
+                break
+        else:
+            raise ValueError("output was not registered with the constructor")
+        loop = asyncio.get_running_loop()
+        req = SignalService._Request(signals, timestamp, sample_rate, sample_bits, out_idx)
+        await loop.run_in_executor(None, self._pipe.send, req)
+        reply = await loop.run_in_executor(None, self._pipe.recv)
+        if reply is not None:
+            raise reply
