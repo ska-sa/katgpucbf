@@ -58,15 +58,22 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
         for a2 in range(n_ants):
             for a1 in range(a2 + 1):
                 for p1 in range(n_pols):
-                    r1 = input_array[:, a1, c, :, p1, 0]
-                    i1 = input_array[:, a1, c, :, p1, 1]
+                    input1 = input_array[:, a1, c, :, p1]
                     for p2 in range(n_pols):
                         bl_idx = get_baseline_index(a1, a2) * 4 + p1 + 2 * p2
-                        r2 = input_array[:, a2, c, :, p2, 0].astype(np.int64)
-                        i2 = input_array[:, a2, c, :, p2, 1].astype(np.int64)
-
-                        output_array[c, bl_idx, 0] = np.sum(r1 * r2 + i1 * i2)
-                        output_array[c, bl_idx, 1] = np.sum(r2 * i1 - r1 * i2)
+                        input2 = input_array[:, a2, c, :, p2]
+                        r_sum = np.int64(0)
+                        i_sum = np.int64(0)
+                        for i in range(input1.shape[0]):
+                            for j in range(input1.shape[1]):
+                                r1 = np.int64(input1[i, j, 0])
+                                i1 = np.int64(input1[i, j, 1])
+                                r2 = np.int64(input2[i, j, 0])
+                                i2 = np.int64(input2[i, j, 1])
+                                r_sum += r1 * r2 + i1 * i2
+                                i_sum += r2 * i1 - r1 * i2
+                        output_array[c, bl_idx, 0] = r_sum
+                        output_array[c, bl_idx, 1] = i_sum
 
     return output_array
 
