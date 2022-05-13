@@ -134,13 +134,16 @@ async def async_main() -> None:
     # Override dask's default thread pool with one that runs with SCHED_IDLE
     # priority. This ensures that when the networking code needs a CPU core,
     # it gets priority over dask.
+    # At least 2 threads are created, since one is consumed by sample_async.
     pool = ThreadPoolExecutor(
-        dask.config.get("num_workers", dask.system.CPU_COUNT),
+        dask.config.get("num_workers", max(dask.system.CPU_COUNT, 2)),
         initializer=os.sched_setscheduler,
         initargs=(0, os.SCHED_IDLE, os.sched_param(0)),
     )
     atexit.register(pool.shutdown)
     dask.config.set(pool=pool)
+    # Also use it for run_in_executor
+    asyncio.get_running_loop().set_default_executor(pool)
 
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
