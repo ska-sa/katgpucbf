@@ -6,6 +6,7 @@ katsdpsigproc[CUDA]>=1.4.2
 katsdptelstate
 numpy
 prometheus-async
+psutil  # Gives more accurate dask.system.CPU_COUNT
 pycuda
 pyparsing>=3.0.0
 spead2>=3.9.1
