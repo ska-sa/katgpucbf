@@ -156,16 +156,19 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
         logger.exception("unable to connect to master controller!")
         raise
 
+    # We'll always name the correlator the same thing, so that if there are
+    # zombies left behind from past runs, it'll bail straight away and alert
+    # the user that there's a problem.
+    product_name = "qualification_correlator"
     try:
         reply, _ = await master_controller_client.request(
-            "product-configure", "qualification_correlator*", json.dumps(correlator_config)
+            "product-configure", product_name, json.dumps(correlator_config)
         )
 
     except aiokatcp.FailReply:
         logger.exception("Something went wrong with starting the correlator!")
         raise
 
-    product_name = reply[0].decode()
     product_controller_host = reply[1].decode()
     product_controller_port = int(reply[2].decode())
     logger.info(
