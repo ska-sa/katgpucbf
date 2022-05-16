@@ -503,7 +503,7 @@ class SignalService:
         # Avoid catching Ctrl-C meant for the parent
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         # This runs in the child, so doesn't need to hold a handle to the
-        # parent close. Closing it ensures that the get the EOFError when
+        # parent close. Closing it ensures that we get the EOFError when
         # the parent closes the pipe and we try to read.
         parent_pipe.close()
         os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
