@@ -105,6 +105,8 @@ prometheus-async==22.1.0
     # via -r requirements.in
 prometheus-client==0.14.1
     # via prometheus-async
+psutil==5.9.0
+    # via -r requirements.in
 pycparser==2.21
     # via cffi
 pycuda==2021.1

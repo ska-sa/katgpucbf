@@ -21,16 +21,11 @@ Simulates the packet structure of MeerKAT digitisers.
 
 import argparse
 import asyncio
-import atexit
 import logging
 import math
-import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Sequence, Tuple
 
-import dask.config
-import dask.system
 import katsdpservices
 import numpy as np
 import prometheus_async
@@ -131,17 +126,6 @@ async def async_main() -> None:
     args = parse_args()
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
 
-    # Override dask's default thread pool with one that runs with SCHED_IDLE
-    # priority. This ensures that when the networking code needs a CPU core,
-    # it gets priority over dask.
-    pool = ThreadPoolExecutor(
-        dask.config.get("num_workers", dask.system.CPU_COUNT),
-        initializer=os.sched_setscheduler,
-        initargs=(0, os.SCHED_IDLE, os.sched_param(0)),
-    )
-    atexit.register(pool.shutdown)
-    dask.config.set(pool=pool)
-
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
@@ -168,7 +152,10 @@ async def async_main() -> None:
     descriptor_sender = descriptors.DescriptorSender(stream=descriptor_stream, descriptor_heap=descriptor_heap)
     descriptor_task = asyncio.create_task(descriptor_sender.run())
 
-    await signal.sample_async(args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"])
+    async with signal.SignalService([heap_sets[0].data["payload"]]) as signal_service:
+        await signal_service.sample(
+            args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"]
+        )
 
     stream = send.make_stream(
         endpoints=endpoints,

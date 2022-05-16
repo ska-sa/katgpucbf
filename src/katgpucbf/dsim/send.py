@@ -18,6 +18,7 @@
 
 import asyncio
 import itertools
+import multiprocessing.sharedctypes
 import time
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -91,7 +92,8 @@ class HeapSet:
         # TODO: make sure that this uses huge pages, as that is more
         # efficient for ibverbs.
         n = len(timestamps)
-        payload = np.zeros((n_pols, n, heap_size), np.uint8)
+        raw_payload = multiprocessing.sharedctypes.RawArray("b", n_pols * n * heap_size)
+        payload = np.frombuffer(raw_payload, np.uint8).reshape(n_pols, n, heap_size)
         heaps = []
         substream_offset = list(itertools.accumulate(n_substreams, initial=0))
         digitiser_id_items = [spead.make_immediate(spead.DIGITISER_ID_ID, dig_id) for dig_id in digitiser_id]
