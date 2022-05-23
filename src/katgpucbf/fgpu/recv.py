@@ -44,6 +44,7 @@ from . import METRIC_NAMESPACE
 MAX_CHUNKS = 2
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)

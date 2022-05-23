@@ -35,15 +35,15 @@ esac
 
 set -x
 
-exec spead2_net_raw numactl -C $other_affinity xbgpu \
+    # --src-ibv --dst-ibv \
+exec numactl -C $other_affinity xbgpu \
     --src-affinity $rx_affinity \
     --src-comp-vector $rx_comp \
     --dst-affinity $tx_affinity \
     --dst-comp-vector $tx_comp \
     --src-interface $iface \
     --dst-interface $iface \
-    --src-ibv --dst-ibv \
-    --adc-sample-rate ${adc_sample_rate:-1712000000} \
+    --adc-sample-rate ${adc_sample_rate:-171200000} \
     --array-size ${array_size:-64} \
     --spectra-per-heap ${spectra_per_heap:-256} \
     --channels $channels \

@@ -36,11 +36,11 @@ esac
 
 set -x
 exec spead2_net_raw taskset -c $other_affinity fgpu \
-    --src-interface $iface --src-ibv \
-    --dst-interface $iface --dst-ibv \
+    --src-interface $iface \
+    --dst-interface $iface \
     --src-affinity $src_affinity --src-comp-vector=$src_comp \
     --dst-affinity $dst_affinity --dst-comp-vector=$dst_comp \
-    --adc-sample-rate ${adc_sample_rate:-1712000000} \
+    --adc-sample-rate ${adc_sample_rate:-171200000} \
     --channels ${channels:-32768} \
     --spectra-per-heap ${spectra_per_heap:-256} \
     --gain 0.0001 \

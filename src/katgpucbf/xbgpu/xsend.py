@@ -35,6 +35,12 @@ output_heaps_counter = Counter("output_heaps_x", "number of X-engine heaps trans
 output_bytes_counter = Counter(
     "output_bytes_x", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
+# TODO: Perhaps find a better name for this Counter
+incomplete_accum_counter = Counter(
+    "output_incomplete_accum_counter",
+    "incomplete output accumulations because input data was incomplete",
+    namespace=METRIC_NAMESPACE,
+)
 
 
 def make_stream(

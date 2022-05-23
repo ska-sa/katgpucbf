@@ -264,3 +264,20 @@ class Correlation(accel.Operation):
         if ant1 > ant2:
             raise ValueError("It is required that ant2 >= ant1 in all cases")
         return ant2 * (ant2 + 1) // 2 + ant1
+
+    @staticmethod
+    def get_baselines_for_antenna(req_ant, n_ants):
+        """Get all basellines for a single antenna.
+
+        Intended to be used when the req_ant has missing data during an accumulation period,
+        the Engine will zero data for the affected baselines.
+
+        .. todo:: Figure out a way to get this njit-compatible.
+        """
+        baseline_list = []
+        # The one-line list comprehension did look a bit untidy
+        for a2 in range(n_ants):
+            for a1 in range(a2 + 1):
+                if a1 == req_ant or a2 == req_ant:
+                    baseline_list.append(Correlation.get_baseline_index(a1, a2))
+        return baseline_list

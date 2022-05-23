@@ -39,6 +39,9 @@ import asyncio
 import logging
 import math
 import time
+
+# from numba import njit
+from itertools import groupby
 from typing import List, Optional, Tuple
 
 import katsdpsigproc
@@ -54,8 +57,8 @@ from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
-from .correlation import CorrelationTemplate
-from .xsend import XSend, make_stream
+from .correlation import Correlation, CorrelationTemplate
+from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +95,7 @@ class QueueItem:
 
 class RxQueueItem(QueueItem):
     """
-    Extension of the QueueItem to also store a chunk reference.
+    Extension of the QueueItem to also store a chunk reference and heap presence.
 
     The RxQueueItem between the sender and the gpu proc loops need to also
     store a reference to the chunk that data in the GPU buffer was copied from.
@@ -100,10 +103,15 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
+    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
+        self.present = present
+        super().__init__(buffer_device, timestamp)
+
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events and chunk."""
+        """Reset the timestamp, events, chunk and heap presence."""
         super().reset(timestamp=timestamp)
         self.chunk: Optional[recv.Chunk] = None
+        self.present.fill(0)
 
 
 class XBEngine(DeviceServer):
@@ -164,7 +172,7 @@ class XBEngine(DeviceServer):
         pipeline to stall as heaps queue at the sender faster than they are
         sent.
     send_rate_factor
-        Configure the SPEAD2 sender with a rate proportional to this factor.
+        Configure the spead2 sender with a rate proportional to this factor.
         This value is intended to dictate a data transmission rate slightly
         higher/faster than the ADC rate.
         NOTE:
@@ -361,13 +369,14 @@ class XBEngine(DeviceServer):
         self._tx_item_queue: asyncio.Queue[Optional[QueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
+        present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
-            rx_item = RxQueueItem(buffer_device)
+            rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
@@ -385,9 +394,15 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
                 context=self.context,
             )
-            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
+
+        # To track antennas that have missing data during an accumulation
+        # - This is simply to show if an antenna has had any missing heaps
+        #   during an accumulation period
+        # - Much like the Chunk.present array, 0 = False and 1 = True
+        self.curr_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=np.uint8)
+        self.next_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=np.uint8)
 
     def add_udp_sender_transport(
         self,
@@ -521,6 +536,13 @@ class XBEngine(DeviceServer):
             item = await self._rx_free_item_queue.get()
             item.timestamp += timestamp
             item.chunk = chunk
+            # Need to reshape chunk.present to get Antennas in one dimension
+            # - Can't readily access n_ants from here
+            item.present = (
+                chunk.present.copy()
+                .reshape((self.heaps_per_fengine_per_chunk, self.correlation.template.n_ants))
+                .transpose()
+            )
 
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
@@ -542,7 +564,7 @@ class XBEngine(DeviceServer):
         This function performs the following steps:
         1. Retrieve an rx_item from the _rx_item_queue
         2.1 Apply the correlation kernel to small subsets of the data
-            until all the data has been processed.1
+            until all the data has been processed.
         2.2 If sufficient correlations have occured, transfer the correlated
             data to a tx_item, pass the tx_item to the _tx_item_queue and get a
             new item from the _tx_free_item_queue.
@@ -566,7 +588,6 @@ class XBEngine(DeviceServer):
         tx_item.timestamp = 0
         self.correlation.bind(out_visibilities=tx_item.buffer_device)
         self.correlation.zero_visibilities()
-
         while True:
             # Get item from the receiver function.
             # - Wait for the HtoD transfers to complete, then
@@ -596,9 +617,12 @@ class XBEngine(DeviceServer):
                 # chunk though, this is why this check has to happen for each
                 # batch. This check is the equivalent of the MeerKAT SKARAB
                 # X-Engine auto-resync logic.
+                # TODO: Perhaps introduce the timestamp check here
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
                     self.correlation()
+                    # Update the missing ants tracker one last time
+                    self.next_accum_missing_ants[: i + 1] &= rx_item.present.all(axis=1)[: i + 1]
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
@@ -610,9 +634,15 @@ class XBEngine(DeviceServer):
                     self.correlation.zero_visibilities()
                     self.correlation.first_batch = i + 1
 
+                    self.curr_accum_missing_ants = self.next_accum_missing_ants.copy()
+                    # Reset the 'Missing Antenna data' tracker list
+                    self.next_accum_missing_ants[: i + 1] = 1
+                    self.next_accum_missing_ants[i + 1 :] = rx_item.present.all(axis=1)[i + 1 :]
+
                 current_timestamp += self.rx_heap_timestamp_step
 
             if self.correlation.first_batch < self.correlation.last_batch:
+                self.next_accum_missing_ants[:] &= rx_item.present.all(axis=1)
                 self.correlation()
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
@@ -663,6 +693,13 @@ class XBEngine(DeviceServer):
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
+            # There's a situation where a break in input data for up to two minutes
+            # is still handled gracefully/well by the spead2 receiver.
+            # - The receiver waits for more data, and
+            # - Still uses the next-logical-increment for the chunk_id, etc
+            # So in terms of chunks received
+            # - It seems as if there was never a break in data reception,
+            # - But in reality, there were a number of seconds between dumps
             logger.debug(
                 "Current output heap timestamp: %#x, difference between timestamps: %#x, "
                 "wall time between dumps %.2f s",
@@ -702,9 +739,35 @@ class XBEngine(DeviceServer):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            self.send_stream.send_heap(item.timestamp, buffer_wrapper)
+            if np.all(self.curr_accum_missing_ants == 0):
+                # All Antennas have missed data at some point, zero the entire dump
+                logger.warn("All Antennas had a break in data during this accumulation")
+                buffer_wrapper.buffer.fill(0)
+                incomplete_accum_counter.inc(1)
+            elif not self.curr_accum_missing_ants.all():
+                all_affected_baselines = []
+                # At least one Antenna has had consistent data
+                for ant_idx, missing_ant in enumerate(self.curr_accum_missing_ants):
+                    if not missing_ant:
+                        missing_ants_baselines = Correlation.get_baselines_for_antenna(
+                            ant_idx, self.correlation.template.n_ants
+                        )
+                        for baseline in missing_ants_baselines:
+                            all_affected_baselines.append(baseline)
 
+                all_affected_baselines.sort()
+                unique_baselines_list = list(baseline for baseline, _ in groupby(all_affected_baselines))
+                for affected_baseline in unique_baselines_list:
+                    buffer_wrapper.buffer[:, affected_baseline : affected_baseline + 4, :] = 0
+
+                incomplete_accum_counter.inc(1)
+            else:
+                # No F-Engine has had a break in data Tx, this probably isn't needed
+                pass
+
+            self.send_stream.send_heap(item.timestamp, buffer_wrapper)
             item.reset()
+            self.curr_accum_missing_ants.fill(0)
             await self._tx_free_item_queue.put(item)
 
         await self.send_stream.send_stop_heap()

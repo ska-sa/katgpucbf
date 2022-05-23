@@ -15,7 +15,7 @@
 ################################################################################
 
 """
-Module for performing unit tests on the xbengine module.
+Module for testing missing packets received by the XBengine.
 
 These tests ensure that the xbengine pipeline works from receiving the F-Engine
 heaps to transmitting the correlation products.
@@ -23,7 +23,7 @@ heaps to transmitting the correlation products.
 The test_xbengine(...) function is the entry point for these tests.
 """
 
-from typing import Final, List
+from typing import Final, List, Optional
 
 import numpy as np
 import pytest
@@ -32,6 +32,7 @@ import spead2.recv.asyncio
 import spead2.send
 import spead2.send.asyncio
 from numba import njit
+from numba.typed import List as NumbaTypedList
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
@@ -48,6 +49,7 @@ ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
+MISSING_ANTS_LIST: Final[List[int]] = [0, 0, 0]
 
 
 @njit
@@ -83,7 +85,14 @@ def cmult_and_scale(a, b, c):
 
 
 @njit
-def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_spectra_per_heap):
+def generate_expected_output(
+    batch_start_idx,
+    num_batches,
+    channels,
+    antennas,
+    n_spectra_per_heap,
+    missing_ants,
+):
     """Calculate the expected correlator output.
 
     This doesn't do a full correlator. It calculates the results according to
@@ -108,10 +117,18 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
-                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
-                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
-                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
-                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
+                    if a1 in missing_ants or a2 in missing_ants:
+                        # The output_array is zeros anyway
+                        # output_array[c, bl_idx, 0, 0, :] = 0
+                        # output_array[c, bl_idx, 1, 0, :] = 0
+                        # output_array[c, bl_idx, 0, 1, :] = 0
+                        # output_array[c, bl_idx, 1, 1, :] = 0
+                        pass
+                    else:
+                        output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
+                        output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
+                        output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
+                        output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
 
     return output_array
 
@@ -127,6 +144,8 @@ class TestEngine:
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
         ig: spead2.send.ItemGroup,
+        skip_antenna: bool,
+        missing_antenna: Optional[int] = None,
     ) -> List[spead2.send.HeapReference]:
         """
         Generate a list of heaps to send to the xbengine.
@@ -161,22 +180,28 @@ class TestEngine:
 
         Parameters
         ----------
-        timestamp: int
+        timestamp
             The timestamp that will be assigned to all heaps.
-        batch_index: int
+        batch_index
             Represents the index of this collection of generated heaps. Value is
             used to encode sample data.
-        n_ants: int
+        n_ants
             The number of antennas that data will be received from. A seperate heap
             will be generated per antenna.
-        n_channels_per_stream: int
+        n_channels_per_stream
             The number of frequency channels contained in a heap.
-        n_spectra_per_heap: int
+        n_spectra_per_heap
             The number of time samples per frequency channel.
-        ig: spead2.send.ItemGroup
+        ig
             The ig is used to generate heaps that will be passed to the source
             stream. This ig is expected to have been configured correctly using the
             create_test_objects function.
+        skip_antenna
+            Boolean to indicate whether the antenna in `missing_antenna` should have
+            its data removed from the list of created heaps.
+        missing_antenna
+            The desired antenna's heaps to be removed from the created list, indexed
+            from zero (0).
 
         Returns
         -------
@@ -185,7 +210,7 @@ class TestEngine:
             HeapReference object as this is what is required by the SPEAD2
             send_heaps() function.
         """
-        # 1. Define heap shapes that will be needed to generate simulated data.
+        # 1. Define heap shapes needed to generate simulated data.
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
         # The heaps shape has been modified with the CPLX dimension and n_pols
         # dimension equal to 1 instead of 2. This is because we treat the two
@@ -222,7 +247,7 @@ class TestEngine:
                     pol1_imag = np.int8(-127)
 
                 # 2.1.2 Combine values into a code word. The values are all cast to uint8s as when I was
-                # casting them to int8s, the sign extension would behave strangly and what I expected to
+                # casting them to int8s, the sign extension would behave strangely and what I expected to
                 # be in the code word would be one bit off.
                 coded_sample_value = np.uint32(
                     (np.uint8(pol1_imag) << 24)
@@ -267,6 +292,8 @@ class TestEngine:
             # from SPEAD2 python to xbgpu python. This will require much more
             # work.
             heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
+        if skip_antenna and (missing_antenna is not None):
+            del heaps[missing_antenna]
         return heaps
 
     @staticmethod
@@ -324,12 +351,15 @@ class TestEngine:
                 f"actual: {ig_recv['frequency'].value}."
             )
 
+            typed_missing_ants_list = NumbaTypedList()
+            _ = [typed_missing_ants_list.append(missing_ant) for missing_ant in MISSING_ANTS_LIST]
             expected_output = generate_expected_output(
                 base_batch_index,
                 num_batches_in_current_accumulation,
                 n_channels_per_stream,
                 n_ants,
                 n_spectra_per_heap,
+                typed_missing_ants_list,
             )
 
             # We reshape this to match the current output of the X-engine. The
@@ -385,7 +415,8 @@ class TestEngine:
             n_engines *= 2
         n_channels_per_stream = num_channels // n_engines
         n_spectra_per_heap = num_spectra_per_heap
-        heap_accumulation_threshold = 4
+        # TODO: Decrease this for testing
+        heap_accumulation_threshold = 5
         n_accumulations = 3
 
         # Header is 12 fields of 8 bytes each: So 96 bytes of header
@@ -440,6 +471,7 @@ class TestEngine:
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             f"--heap-accumulation-threshold={heap_accumulation_threshold}",
+            f"--rx-reorder-tol={2**21}",
             "--src-interface=lo",
             "--dst-interface=lo",
             "239.10.11.4:7149",  # src
@@ -470,7 +502,14 @@ class TestEngine:
             batch_index = i + (heap_accumulation_threshold - 1)
             timestamp = batch_index * timestamp_step
             heaps = self._create_heaps(
-                timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send
+                timestamp,
+                batch_index,
+                n_ants,
+                n_channels_per_stream,
+                n_spectra_per_heap,
+                ig_send,
+                skip_antenna=True,
+                missing_antenna=MISSING_ANTS_LIST[i % len(MISSING_ANTS_LIST)],
             )
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         for q in mock_recv_streams:
