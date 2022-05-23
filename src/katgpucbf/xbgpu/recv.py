@@ -16,6 +16,7 @@
 
 """SPEAD receiver utilities."""
 import functools
+import logging
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import AsyncGenerator
@@ -35,6 +36,8 @@ from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
+
+logger = logging.getLogger(__name__)
 
 heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
@@ -203,6 +206,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
     The returned chunks are yielded from this asynchronous generator.
     """
     ringbuffer = stream.data_ringbuffer
+    prev_chunk_id = -1
     assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
     async for chunk in ringbuffer:
         assert isinstance(chunk, Chunk)
@@ -211,10 +215,18 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
         received_heaps = int(np.sum(chunk.present))
         dropped_heaps = expected_heaps - received_heaps
 
+        # Check if we've missed any chunks
+        if chunk.chunk_id != (prev_chunk_id + 1):
+            missed_chunks = chunk.chunk_id - prev_chunk_id
+            logger.warn(
+                f"Receiver missed {missed_chunks} chunks. Expected ID {(prev_chunk_id + 1)}, received {chunk.chunk_id}"
+            )
+            dropped_heaps += missed_chunks * expected_heaps
         missing_heaps_counter.inc(dropped_heaps)
         heaps_counter.inc(expected_heaps)
         chunks_counter.inc(1)
         bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
+        prev_chunk_id = chunk.chunk_id
 
         yield chunk
     stats_collector.update()  # Ensure final stats updates are captured
