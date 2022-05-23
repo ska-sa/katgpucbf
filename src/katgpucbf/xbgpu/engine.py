@@ -39,8 +39,6 @@ import asyncio
 import logging
 import math
 import time
-
-# from numba import njit
 from itertools import groupby
 from typing import List, Optional, Tuple
 
