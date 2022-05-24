@@ -49,3 +49,9 @@ source = [
 
 [tool.coverage.html]
 show_contexts = true
+
+[tool.coverage.paths]
+source = [
+	"src",
+	"*/site-packages",
+]
