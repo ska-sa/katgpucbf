@@ -1,0 +1,6 @@
+# Rewrite paths to point at src directory, just to get saner filenames in
+# coverage reports.
+[paths]
+source =
+    src
+    */site-packages
