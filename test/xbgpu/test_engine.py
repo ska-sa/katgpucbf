@@ -192,14 +192,12 @@ class TestEngine:
                 sign = 1 if batch_index % 2 == 0 else -1
 
                 def clamp_to_127(input: int):
-                    """Clamp the output to -127 to support Tensor Cores.
-
-                    Doesn't test for any other case than -128.
-                    """
-                    if input == -128:
+                    """Clamp the output to [-127, 127] to support Tensor Cores."""
+                    retval = np.int8(input)
+                    if retval == -128:
                         return np.int8(-127)
                     else:
-                        return np.int8(input)
+                        return retval
 
                 # 2.1.1 Generate the samples to combine into a code word.
                 pol0_real = clamp_to_127(sign * batch_index)
