@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Module for performing unit tests on the Tensor core correlation kernel."""
+"""Unit tests for the Tensor Core correlation kernel."""
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
@@ -39,8 +39,6 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     input_array
         Dataset to be correlated. Required shape:
         (n_batches, n_ants, n_chans, n_spectra, n_pols, complexity)
-    first_batch, last_batch
-        Half-open interval of batches to process. The other are set to zero.
 
     Returns
     -------
@@ -107,9 +105,7 @@ def test_correlator(
     num_spectra_per_heap: int,
     num_channels: int,
 ) -> None:
-    """Parameterised unit test of the Tensor-Core correlation kernel."""
-    # TODO: A lot of this is duplicated in other functions. It would be nice to
-    # move it into a test fixture.
+    """Test the Tensor Core correlation kernel for correctness."""
     n_chans_per_stream = num_channels // num_ants
     n_batches = 7
     batch_ranges = [(1, 5), (3, 4), (0, 7)]
@@ -126,7 +122,7 @@ def test_correlator(
 
     rng = np.random.default_rng(seed=2021)
     buf_samples_host[:] = rng.integers(
-        # The Tensor-Core correlator can't manage the maximum negative value,
+        # The Tensor Core correlator can't manage the maximum negative value,
         # due to the asymmetry of signed integers, so we adjust the lower bound
         # up by 1.
         low=np.iinfo(buf_samples_host.dtype).min + 1,

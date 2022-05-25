@@ -14,14 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""
-Module for performing unit tests on the xbengine module.
-
-These tests ensure that the xbengine pipeline works from receiving the F-Engine
-heaps to transmitting the correlation products.
-
-The test_xbengine(...) function is the entry point for these tests.
-"""
+"""Unit tests for XBEngine module."""
 
 from typing import Final, List
 
@@ -48,6 +41,7 @@ ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
+CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
 
 
 @njit
@@ -117,7 +111,7 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
 
 
 class TestEngine:
-    r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
+    r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
     @staticmethod
     def _create_heaps(
@@ -128,13 +122,12 @@ class TestEngine:
         n_spectra_per_heap: int,
         ig: spead2.send.ItemGroup,
     ) -> List[spead2.send.HeapReference]:
-        """
-        Generate a list of heaps to send to the xbengine.
+        """Generate a deterministic input for sending to the XBEngine.
 
         One heap is generated per antenna in the array. All heaps will have the
         same timestamp. The 8-bit complex samples for both pols are grouped
         together and encoded as a single 32-bit unsigned integer value. A heap is
-        composed of multiple channels. Per channel all 32-bit values are kept
+        composed of multiple channels. Per channel, all 32-bit values are kept
         constant. This makes for faster verification with the downside being that
         if samples within the channel range get mixed up, this will not be
         detected.
@@ -142,59 +135,53 @@ class TestEngine:
         The coded 32-bit value is a combination of the antenna index, batch_index
         and channel index. The sample value is equal to the following:
 
-        coded_sample_value =  (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
-                            (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
+        .. code-block:: python
+
+            coded_sample_value = (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
+                                 (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
 
         The sign value is 1 for even batch indices and -1 for odd ones for an even
-        spread of positive and negative numbers. An added nuance is that if any of
-        these 8-bit values are equal to -128 they are set to -127 as -128 is not
-        supported by the tensor cores.
+        spread of positive and negative numbers. An added nuance is that these
+        8-bit values are clamped to -127 as -128 is not supported by the Tensor
+        Cores.
 
-        This coded sample value can then be generated at the verification side and
-        used to determine the expected output value without having to implement a
-        full CPU-side correlator.
-
-        NOTE: There is significant overlap between this function and the
-        test_spead2_receiver.create_heaps(...) function.  The only difference is
-        that their data is encoded differently. There is scope to merge these two
-        functions.
+        This results in a deterministic expected output value without the need
+        for a full CPU-side correlator.
 
         Parameters
         ----------
-        timestamp: int
+        timestamp
             The timestamp that will be assigned to all heaps.
-        batch_index: int
+        batch_index
             Represents the index of this collection of generated heaps. Value is
             used to encode sample data.
-        n_ants: int
+        n_ants
             The number of antennas that data will be received from. A seperate heap
             will be generated per antenna.
-        n_channels_per_stream: int
+        n_channels_per_stream
             The number of frequency channels contained in a heap.
-        n_spectra_per_heap: int
+        n_spectra_per_heap
             The number of time samples per frequency channel.
-        ig: spead2.send.ItemGroup
+        ig
             The ig is used to generate heaps that will be passed to the source
             stream. This ig is expected to have been configured correctly using the
             create_test_objects function.
 
         Returns
         -------
-        heaps: [spead2.send.HeapReference]
-            The required heaps are stored in an array. Each heap is wrapped in a
-            HeapReference object as this is what is required by the SPEAD2
-            send_heaps() function.
+        heaps
+            A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
         # 1. Define heap shapes that will be needed to generate simulated data.
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-        # The heaps shape has been modified with the CPLX dimension and n_pols
+        # The heaps shape has been modified with the COMPLEX dimension and n_pols
         # dimension equal to 1 instead of 2. This is because we treat the two
         # 8-bit complex samples for both pols as a single 32-bit value when
         # generating the simulated data. We correct the shape before sending.
         modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
 
         # 2. Generate all the heaps for the different antennas.
-        heaps = []  # Needs to be of type heap reference, not heap for substream transmission.
+        heaps: List[spead2.send.HeapReference] = []
         for ant_index in range(n_ants):
             sample_array = np.zeros(modified_heap_shape, np.uint32)
 
@@ -204,26 +191,24 @@ class TestEngine:
                 # 2.1.1 Determine the sign modifier value
                 sign = 1 if batch_index % 2 == 0 else -1
 
+                def clamp_to_127(input: int) -> np.int8:
+                    """Clamp the output to [-127, 127] to support Tensor Cores."""
+                    retval = np.int8(input)
+                    if retval == -128:
+                        return np.int8(-127)
+                    else:
+                        return retval
+
                 # 2.1.1 Generate the samples to combine into a code word.
-                pol0_real = np.int8(sign * batch_index)
-                pol0_imag = np.int8(sign * chan_index)
-                pol1_real = np.int8(-sign * ant_index)
-                pol1_imag = np.int8(-sign * chan_index)
+                pol0_real = clamp_to_127(sign * batch_index)
+                pol0_imag = clamp_to_127(sign * chan_index)
+                pol1_real = clamp_to_127(-sign * ant_index)
+                pol1_imag = clamp_to_127(-sign * chan_index)
 
-                # 2.1.1 Make sure none of these samples are equal to -128 as that is not a supported value
-                # with the Tensor cores. Have to re-assign the numpy scalars because they are immutable.
-                if pol0_real == -128:
-                    pol0_real = np.int8(-127)
-                if pol0_imag == -128:
-                    pol0_imag = np.int8(-127)
-                if pol1_real == -128:
-                    pol1_real = np.int8(-127)
-                if pol1_imag == -128:
-                    pol1_imag = np.int8(-127)
-
-                # 2.1.2 Combine values into a code word. The values are all cast to uint8s as when I was
-                # casting them to int8s, the sign extension would behave strangly and what I expected to
-                # be in the code word would be one bit off.
+                # 2.1.2 Combine values into a code word. The values are all cast
+                # to uint8s as when I was casting them to int8s, the sign
+                # extension would behave strangely and what I expected to be in
+                # the code word would be one bit off.
                 coded_sample_value = np.uint32(
                     (np.uint8(pol1_imag) << 24)
                     + (np.uint8(pol1_real) << 16)
@@ -243,7 +228,7 @@ class TestEngine:
             # 2.3 Assign all values to the heap fields.
             ig["timestamp"].value = timestamp
             ig["feng_id"].value = ant_index
-            ig["frequency"].value = n_channels_per_stream * 4  # Arbitrary multiple for now
+            ig["frequency"].value = n_channels_per_stream * CHANNEL_OFFSET
             ig["feng_raw"].value = sample_array
 
             # 2.4 Create the heap, configure it to send pointers in each packet and
@@ -279,7 +264,7 @@ class TestEngine:
         heap_accumulation_threshold: int,
         timestamp_step,
     ) -> None:
-        """Receives and verifies data from the xbengine."""
+        """Receive and verify XBEngine output data."""
         # It is expected that the first packet will be a descriptor.
         ig_recv = spead2.ItemGroup()
         heap = await recv_stream.get()
@@ -315,12 +300,9 @@ class TestEngine:
                 f"actual: {hex(ig_recv['timestamp'].value)}."
             )
 
-            assert (
-                ig_recv["frequency"].value
-                == n_channels_per_stream * 4  # This is the value that is passed into the xbengine constructor.
-            ), (
+            assert ig_recv["frequency"].value == n_channels_per_stream * CHANNEL_OFFSET, (
                 "Output channel offset not correct. "
-                f"Expected: {n_channels_per_stream * 4}, "
+                f"Expected: {n_channels_per_stream * CHANNEL_OFFSET}, "
                 f"actual: {ig_recv['frequency'].value}."
             )
 
@@ -343,7 +325,7 @@ class TestEngine:
             np.testing.assert_equal(expected_output, gpu_result)
 
     @pytest.mark.combinations(
-        "num_ants, num_channels, num_spectra_per_heap",
+        "n_ants, n_channels_total, n_spectra_per_heap",
         test_parameters.array_size,
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
@@ -351,21 +333,16 @@ class TestEngine:
     async def test_xengine_end_to_end(
         self,
         context,
-        num_ants,
-        num_spectra_per_heap,
-        num_channels,
+        n_ants,
+        n_spectra_per_heap,
+        n_channels_total,
         mock_recv_streams,
     ):
         """
         End-to-end test for the XBEngine.
 
-        Data is generated for a number of accumulations and then the ouput of
-        these dumps is verified.
-
-        This unit test creates simulated input data and passes it to the xbengine
-        using a SPEAD2 buffer transport. The xbengine then processes this data and
-        gives it to the process using the SPEAD2 inproc transport. These transports
-        allow for testing of the xbengine without being connected to a network.
+        Simulated input data is generated and passed to the XBEngine, which
+        produces an output which is then verified.
 
         The simulated data is not random, it is encoded based on certain
         parameters, this allows the verification function to generate the
@@ -375,16 +352,13 @@ class TestEngine:
         This test simulates an incomplete accumulation at the start of transmission
         to ensure that the auto-resync logic works correctly.
         """
-        n_ants = num_ants
-        n_channels_total = num_channels
         n_samples_between_spectra = 2 * n_channels_total
 
         # Get a realistic number of engines, round up to the next power of 2.
         n_engines = 1
         while n_engines < n_ants:
             n_engines *= 2
-        n_channels_per_stream = num_channels // n_engines
-        n_spectra_per_heap = num_spectra_per_heap
+        n_channels_per_stream = n_channels_total // n_engines
         heap_accumulation_threshold = 4
         n_accumulations = 3
 
@@ -436,7 +410,7 @@ class TestEngine:
             f"--channels={n_channels_total}",
             f"--channels-per-substream={n_channels_per_stream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
-            f"--channel-offset-value={n_channels_per_stream * 4}",  # Arbitrary value for now
+            f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             f"--heap-accumulation-threshold={heap_accumulation_threshold}",
