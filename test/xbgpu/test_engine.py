@@ -191,7 +191,7 @@ class TestEngine:
                 # 2.1.1 Determine the sign modifier value
                 sign = 1 if batch_index % 2 == 0 else -1
 
-                def clamp_to_127(input: int):
+                def clamp_to_127(input: int) -> np.int8:
                     """Clamp the output to [-127, 127] to support Tensor Cores."""
                     retval = np.int8(input)
                     if retval == -128:
