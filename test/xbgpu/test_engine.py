@@ -241,17 +241,7 @@ class TestEngine:
             # data is received from the MeerKAT SKARAB F-Engines.
             heap.repeat_pointers = True
 
-            # NOTE: The substream_index is set to zero as the SPEAD BytesStream
-            # transport has not had the concept of substreams introduced. It has
-            # not been updated along with the rest of the transports. As such the
-            # unit test cannot yet test that packet interleaving works correctly. I
-            # am not sure if this feature is planning to be added. If it is, then
-            # set `substream_index=ant_index`. If this starts becoming an issue,
-            # then we will need to look at using the inproc transport. The inproc
-            # transport supports substreams, but requires porting a bunch of things
-            # from SPEAD2 python to xbgpu python. This will require much more
-            # work.
-            heaps.append(spead2.send.HeapReference(heap, cnt=-1, substream_index=0))
+            heaps.append(spead2.send.HeapReference(heap))
         return heaps
 
     @staticmethod
