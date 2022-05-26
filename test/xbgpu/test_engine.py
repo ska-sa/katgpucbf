@@ -84,8 +84,8 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     what is expected from the specific input generated in
     :func:`create_heaps`.
     """
-    baselines = antennas * (antennas + 1) // 2
-    output_array = np.zeros((channels, baselines, N_POLS, N_POLS, COMPLEX), dtype=np.int32)
+    baselines = antennas * (antennas + 1) * 2
+    output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         sign = pow(-1, b)
         for c in range(channels):
@@ -102,10 +102,10 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
-                    output_array[c, bl_idx, 0, 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
-                    output_array[c, bl_idx, 1, 0, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
-                    output_array[c, bl_idx, 0, 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
-                    output_array[c, bl_idx, 1, 1, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
+                    output_array[c, 4 * bl_idx + 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
+                    output_array[c, 4 * bl_idx + 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
+                    output_array[c, 4 * bl_idx + 2, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
+                    output_array[c, 4 * bl_idx + 3, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
 
     return output_array
 
@@ -304,14 +304,7 @@ class TestEngine:
                 n_spectra_per_heap,
             )
 
-            # We reshape this to match the current output of the X-engine. The
-            # expected output is generated the old way, and if I naively change
-            # it, things break. For some reason, this way, they work.
-            # TODO: I'd rather re-examine this unit test in its entirety than
-            # fix this particular little oddity, especially since the new
-            # correlator test works so well.
             gpu_result = ig_recv["xeng_raw"].value
-            expected_output = expected_output.reshape(gpu_result.shape)
             np.testing.assert_equal(expected_output, gpu_result)
 
     @pytest.mark.combinations(
