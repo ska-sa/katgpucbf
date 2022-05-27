@@ -1,5 +1,6 @@
 """Fixtures and options for qualification testing of the correlator."""
 import asyncio
+import inspect
 import json
 import logging
 import subprocess
@@ -83,7 +84,7 @@ def int_time() -> float:  # noqa: D104
 @pytest.fixture
 def pdf_report(request) -> Reporter:
     """Fixture for logging steps in a test."""
-    data = [{"$msg_type": "test_info", "blurb": request.node.function.__doc__, "test_start": time.time()}]
+    data = [{"$msg_type": "test_info", "blurb": inspect.getdoc(request.node.function), "test_start": time.time()}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
