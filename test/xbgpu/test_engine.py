@@ -27,11 +27,11 @@ import spead2.send.asyncio
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.main import make_engine, parse_args
 
 from . import test_parameters
+from .test_recv import gen_heap
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
@@ -120,7 +120,6 @@ class TestEngine:
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        ig: spead2.send.ItemGroup,
     ) -> List[spead2.send.HeapReference]:
         """Generate a deterministic input for sending to the XBEngine.
 
@@ -162,10 +161,6 @@ class TestEngine:
             The number of frequency channels contained in a heap.
         n_spectra_per_heap
             The number of time samples per frequency channel.
-        ig
-            The ig is used to generate heaps that will be passed to the source
-            stream. This ig is expected to have been configured correctly using the
-            create_test_objects function.
 
         Returns
         -------
@@ -225,23 +220,10 @@ class TestEngine:
             sample_array = sample_array.view(np.int8)
             sample_array = np.reshape(sample_array, heap_shape)
 
-            # 2.3 Assign all values to the heap fields.
-            ig["timestamp"].value = timestamp
-            ig["feng_id"].value = ant_index
-            ig["frequency"].value = n_channels_per_stream * CHANNEL_OFFSET
-            ig["feng_raw"].value = sample_array
-
-            # 2.4 Create the heap, configure it to send pointers in each packet and
-            # create the heap reference object required by the sender object.
-            heap = ig.get_heap(descriptors="none", data="all")  # We dont want to deal with descriptors
-
-            # This function makes sure that the immediate values in each heap are
-            # transmitted per packet in the heap. By default these values are only
-            # transmitted once. These immediate values are required as this is how
-            # data is received from the MeerKAT SKARAB F-Engines.
-            heap.repeat_pointers = True
-
+            # Create the heap, add it to a list of HeapReferences.
+            heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
+
         return heaps
 
     @staticmethod
@@ -347,7 +329,6 @@ class TestEngine:
 
         # Header is 12 fields of 8 bytes each: So 96 bytes of header
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
-        heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         # Create source stream object - simulates received data.
@@ -355,32 +336,6 @@ class TestEngine:
             max_packet_size=max_packet_size, max_heaps=n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         )
         feng_stream = spead2.send.asyncio.InprocStream(spead2.ThreadPool(), mock_recv_streams, feng_stream_config)
-
-        # Create ItemGroup and add all the required fields.
-        ig_send = spead2.send.ItemGroup(flavour=FLAVOUR)
-        ig_send.add_item(
-            TIMESTAMP_ID,
-            "timestamp",
-            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        ig_send.add_item(
-            FENG_ID_ID,
-            "feng_id",
-            "F-Engine heap is received from.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        ig_send.add_item(
-            FREQUENCY_ID,
-            "frequency",
-            "Value of first channel in collections stored here.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        ig_send.add_item(FENG_RAW_ID, "feng_raw", "Raw Channelised data", shape=heap_shape, dtype=np.int8)
-
         queue = spead2.InprocQueue()
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
@@ -426,9 +381,7 @@ class TestEngine:
             # heap_accumulation_threshold * timestamp_step
             batch_index = i + (heap_accumulation_threshold - 1)
             timestamp = batch_index * timestamp_step
-            heaps = self._create_heaps(
-                timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap, ig_send
-            )
+            heaps = self._create_heaps(timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         for q in mock_recv_streams:
             q.stop()
