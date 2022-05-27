@@ -560,10 +560,8 @@ class XBEngine(DeviceServer):
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
 
-        # NOTE: The very first heap sent out the X-Engine will have a timestamp
-        # of zero which is meaningless, every other heap will have the correct
-        # timestamp.
-        tx_item.timestamp = 0
+        # Indicate that the timestamp still needs to be filled in.
+        tx_item.timestamp = -1
         self.correlation.bind(out_visibilities=tx_item.buffer_device)
         self.correlation.zero_visibilities()
 
@@ -576,6 +574,14 @@ class XBEngine(DeviceServer):
                 break
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
+            if tx_item.timestamp < 0:
+                # First heap seen. Round the timestamp down to the previous
+                # accumulation boundary
+                tx_item.timestamp = (
+                    current_timestamp
+                    // self.timestamp_increment_per_accumulation
+                    * self.timestamp_increment_per_accumulation
+                )
 
             # If we don't return the chunk to the stream, eventually no more
             # data can be received.
