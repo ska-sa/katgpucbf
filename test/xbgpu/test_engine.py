@@ -220,10 +220,8 @@ class TestEngine:
             sample_array = sample_array.view(np.int8)
             sample_array = np.reshape(sample_array, heap_shape)
 
-            # Create the heap, configure it to send immediate values in each
-            # packet, add it to a list of HeapReferences.
+            # Create the heap, add it to a list of HeapReferences.
             heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
-            heap.repeat_pointers = True
             heaps.append(spead2.send.HeapReference(heap))
 
         return heaps
