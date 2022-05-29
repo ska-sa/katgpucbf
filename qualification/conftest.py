@@ -9,14 +9,13 @@ from typing import AsyncGenerator
 
 import aiokatcp
 import pytest
-import spead2.recv
 from async_timeout import timeout
 from katsdpservices import get_interface_address
 
 from katgpucbf import N_POLS
 from katgpucbf.meerkat import BANDS
 
-from . import CorrelatorRemoteControl, create_baseline_correlation_product_receive_stream, get_dsim_endpoint
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_dsim_endpoint
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -199,23 +198,18 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
 
 
 @pytest.fixture
-async def receive_baseline_correlation_products_stream(
+async def receive_baseline_correlation_products(
     pytestconfig, correlator: CorrelatorRemoteControl
-) -> spead2.recv.ChunkRingStream:
+) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
 
-    return create_baseline_correlation_product_receive_stream(
+    receiver = BaselineCorrelationProductsReceiver(
+        correlator=correlator,
         interface_address=interface_address,
-        multicast_endpoints=correlator.multicast_endpoints,  # type: ignore
-        n_bls=correlator.n_bls,
-        n_chans=correlator.n_chans,
-        n_chans_per_substream=correlator.n_chans_per_substream,
-        n_bits_per_sample=correlator.n_bits_per_sample,
-        n_spectra_per_acc=correlator.n_spectra_per_acc,
-        int_time=correlator.int_time,
-        n_samples_between_spectra=correlator.n_samples_between_spectra,
         use_ibv=use_ibv,
     )
+    yield receiver
+    receiver.stream.stop()

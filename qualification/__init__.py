@@ -9,7 +9,7 @@
 import ast
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import AsyncGenerator, List, Literal, Optional, Tuple, overload
 
 import aiokatcp
 import numba
@@ -63,6 +63,7 @@ class CorrelatorRemoteControl:
 
     product_controller_client: aiokatcp.Client
     dsim_client: aiokatcp.Client
+    n_ants: int
     n_chans: int
     n_bls: int
     n_chans_per_substream: int
@@ -72,7 +73,7 @@ class CorrelatorRemoteControl:
     n_samples_between_spectra: int
     bls_ordering: List[Tuple[str, str]]
     sync_time: float
-    timestamp_scale_factor: float
+    scale_factor_timestamp: float
     bandwidth: float
     multicast_endpoints: List[Tuple[str, int]]
 
@@ -87,6 +88,7 @@ class CorrelatorRemoteControl:
         done.
         """
         # Some metadata we know already from the config.
+        n_ants = len(correlator_config["outputs"]["antenna_channelised_voltage"]["src_streams"]) // 2
         n_chans = correlator_config["outputs"]["antenna_channelised_voltage"]["n_chans"]
 
         # But some can't.
@@ -98,7 +100,7 @@ class CorrelatorRemoteControl:
         n_samples_between_spectra = await get_sensor_val(pcc, "antenna_channelised_voltage-n-samples-between-spectra")
         bls_ordering = ast.literal_eval(await get_sensor_val(pcc, "baseline_correlation_products-bls-ordering"))
         sync_time = await get_sensor_val(pcc, "antenna_channelised_voltage-sync-time")
-        timestamp_scale_factor = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
+        scale_factor_timestamp = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
         bandwidth = await get_sensor_val(pcc, "antenna_channelised_voltage-bandwidth")
         multicast_endpoints = [
             (endpoint.host, endpoint.port)
@@ -110,6 +112,7 @@ class CorrelatorRemoteControl:
         return CorrelatorRemoteControl(
             product_controller_client=pcc,
             dsim_client=dsim_client,
+            n_ants=n_ants,
             n_chans=n_chans,
             n_bls=n_bls,
             n_chans_per_substream=n_chans_per_substream,
@@ -119,10 +122,98 @@ class CorrelatorRemoteControl:
             n_samples_between_spectra=n_samples_between_spectra,
             bls_ordering=bls_ordering,
             sync_time=sync_time,
-            timestamp_scale_factor=timestamp_scale_factor,
+            scale_factor_timestamp=scale_factor_timestamp,
             bandwidth=bandwidth,
             multicast_endpoints=multicast_endpoints,
         )
+
+
+class BaselineCorrelationProductsReceiver:
+    """Wrap a receive stream with helper functions."""
+
+    def __init__(self, correlator: CorrelatorRemoteControl, interface_address: str, use_ibv: bool = False) -> None:
+        self.stream = create_baseline_correlation_product_receive_stream(
+            interface_address,
+            multicast_endpoints=correlator.multicast_endpoints,
+            n_bls=correlator.n_bls,
+            n_chans=correlator.n_chans,
+            n_chans_per_substream=correlator.n_chans_per_substream,
+            n_bits_per_sample=correlator.n_bits_per_sample,
+            n_spectra_per_acc=correlator.n_spectra_per_acc,
+            int_time=correlator.int_time,
+            n_samples_between_spectra=correlator.n_samples_between_spectra,
+            use_ibv=use_ibv,
+        )
+        self.timestamp_step = correlator.n_samples_between_spectra * correlator.n_spectra_per_acc
+
+    # The overloads ensure that when all_timestamps is known to be False, the
+    # returned chunks are inferred to not be optional.
+    @overload
+    async def complete_chunks(
+        self,
+        min_timestamp: Optional[int] = None,
+        all_timestamps: Literal[False] = False,
+    ) -> AsyncGenerator[Tuple[int, spead2.recv.Chunk], None]:  # noqa: D102
+        yield ...  # type: ignore
+
+    @overload
+    async def complete_chunks(
+        self,
+        min_timestamp: Optional[int] = None,
+        all_timestamps: Optional[bool] = False,
+    ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:  # noqa: D102
+        yield ...  # type: ignore
+
+    async def complete_chunks(
+        self,
+        min_timestamp=None,
+        all_timestamps=False,
+    ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:
+        """Iterate over the complete chunks of the stream.
+
+        Each yielded value is a ``(timestamp, chunk)`` pair.
+
+        Parameters
+        ----------
+        min_timestamp
+            If specified, chunks with a timestamp less then this value are
+            discarded.
+        all_timestamps
+            If set to true (the default is false), discarded chunks still
+            yield a ``(timestamp, None)`` pair.
+        """
+        data_ringbuffer = self.stream.data_ringbuffer
+        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+        async for chunk in data_ringbuffer:
+            assert isinstance(chunk.present, np.ndarray)  # keeps mypy happy
+            timestamp = chunk.chunk_id * self.timestamp_step
+            if min_timestamp is not None and timestamp < min_timestamp:
+                logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
+            elif not np.all(chunk.present):
+                logger.debug("Incomplete chunk %d", chunk.chunk_id)
+            else:
+                yield timestamp, chunk
+                continue
+            # If we get here, the chunk is ignored
+            self.stream.add_free_chunk(chunk)
+            if all_timestamps:
+                yield timestamp, None
+        return
+
+    async def next_complete_chunk(self, min_timestamp: Optional[int] = None) -> Tuple[int, spead2.recv.Chunk]:
+        """Return the next complete chunk from the stream.
+
+        The return value includes the timestamp.
+
+        Parameters
+        ----------
+        min_timestamp
+            If specified, chunks with a timestamp less then this value are
+            discarded.
+        """
+        async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp):
+            return timestamp, chunk
+        assert False  # noqa: B011  # Tells mypy that this isn't reachable
 
 
 def create_baseline_correlation_product_receive_stream(
