@@ -132,7 +132,7 @@ class TestKatcpRequests:
             await engine_client.request("gain", 0, "1", "2")
 
     async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
-        """Test that ``?gain-all`` works correctly with a scalar value."""
+        """Test that ``?gain-all`` works correctly with a vector of values."""
         reply, _informs = await engine_client.request("gain-all", "0.2-3j")
         assert reply == []
         for pol in range(N_POLS):
