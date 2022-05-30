@@ -131,6 +131,24 @@ class CombinedSignal(Signal):
 
 
 @dataclass
+class Constant(Signal):
+    """Fixed value."""
+
+    value: complex
+
+    @staticmethod
+    def _sample_chunk(offset: np.int64, *, value: complex, chunk_size: int) -> np.ndarray:
+        """Compute a single chunk."""
+        return np.full(chunk_size, value, np.complex64)
+
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
+        return da.full((n,), self.value, np.complex64)
+
+    def __str__(self) -> str:
+        return f"{self.value}"
+
+
+@dataclass
 class CW(Signal):
     """Continuous wave.
 
@@ -303,10 +321,10 @@ def parse_signals(prog: str) -> List[Signal]:
 
     2. Return values consist solely of an expression.
 
-    An expression may consist of function calls, parentheses, the operators
-    ``+``, ``-`` and ``*``, and previously-defined variables. The following
-    functions are available (parameters must be integer or floating-point
-    literals).
+    An expression may consist of floating-point constants, function calls,
+    parentheses, the operators ``+``, ``-`` and ``*``, and previously-defined
+    variables. The following functions are available (parameters must be
+    integer or floating-point literals).
 
     cw(amplitude, frequency)
         See :class:`CW`.
@@ -345,8 +363,10 @@ def parse_signals(prog: str) -> List[Signal]:
     wgn.set_parse_action(lambda s, loc, tokens: WGN(tokens[1], tokens.get("entropy")))
     variable_expr = variable.copy()
     variable_expr.set_parse_action(get_variable)
+    real_expr = real.copy()
+    real_expr.set_parse_action(lambda s, loc, tokens: Constant(complex(tokens[0])))
 
-    atom = cw | wgn | variable_expr
+    atom = real_expr | cw | wgn | variable_expr
     expr = pp.infix_notation(
         atom, [("*", 2, pp.OpAssoc.LEFT, _apply_operator), (pp.one_of("+ -"), 2, pp.OpAssoc.LEFT, _apply_operator)]
     )
