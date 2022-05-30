@@ -30,7 +30,6 @@ async def test_accum_length(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     """Test that accumulations are set to the correct length.
 
@@ -50,7 +49,7 @@ async def test_accum_length(
     pdf_report.step("Retrieve the reported accumulation time and check it.")
     pdf_report.detail(f"Integration time is {correlator.int_time * 1000:.3f} ms.")
     # Requirement doesn't list an upper bound, but assume a symmetric limit
-    expect(0.48 <= correlator.int_time <= 0.52)
+    assert 0.48 <= correlator.int_time <= 0.52
 
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
@@ -77,7 +76,7 @@ async def test_accum_length(
     delta = chunks[1][0] - chunks[0][0]
     delta_s = delta / correlator.scale_factor_timestamp
     pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms.")
-    expect(delta_s == correlator.int_time)
+    assert delta_s == correlator.int_time
 
     pdf_report.step("Compare power against expected value.")
     # Sum over channels, but use only one baseline and real part because
