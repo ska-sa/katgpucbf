@@ -21,7 +21,7 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Tuple
 
 import aiokatcp
 import pytest
@@ -64,16 +64,25 @@ def pytest_report_collectionfinish(config):  # noqa: D103
     )
 
 
-@pytest.fixture(params=[4, 8, 14])
+# Need to redefine this from pytest-asyncio to have it at session scope
+@pytest.fixture(scope="session")
+def event_loop():  # noqa: D103
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="session", params=[4, 8, 14])
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param
 
 
 @pytest.fixture(
+    scope="session",
     params=[
         8192,
-    ]
+    ],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -81,16 +90,17 @@ def n_channels(request):  # noqa: D401
 
 
 @pytest.fixture(
+    scope="session",
     params=[
         "l",
-    ]
+    ],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""
     return request.param
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
     return 0.5
@@ -104,7 +114,7 @@ def pdf_report(request) -> Reporter:
     return Reporter(data)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band: str, int_time: float) -> dict:
     """Produce the configuration dict from the given parameters."""
     # Adapted from `sim_correlator.py` but with logic for using multiple dsims
@@ -156,11 +166,16 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
     return config
 
 
-@pytest.fixture
-async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerator[CorrelatorRemoteControl, None]:
+@pytest.fixture(scope="session")
+async def session_correlator(
+    pytestconfig, correlator_config, band: str
+) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
     Shut the correlator down afterwards also.
+
+    Generally this fixture should not be used directly. Use :meth:`correlator`
+    instead, which will reuse the same correlator across multiple tests.
     """
     host = pytestconfig.getini("master_controller_host")
     port = int(pytestconfig.getini("master_controller_port"))
@@ -214,8 +229,42 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
 
 
 @pytest.fixture
+async def _correlator(
+    session_correlator: CorrelatorRemoteControl,
+) -> AsyncGenerator[Tuple[CorrelatorRemoteControl, int], None]:
+    """Implement :meth:`correlator` and :meth:`first_timestamp`."""
+    # Reset the correlator to default state
+    pcc = session_correlator.product_controller_client
+    await pcc.request("gain-all", "antenna_channelised_voltage", "default")
+    await pcc.request("delays", "antenna_channelised_voltage", 0, *(["0,0:0,0"] * session_correlator.n_inputs))
+    reply, _ = await session_correlator.dsim_client.request("signals", "0;0;")
+    timestamp = int(reply[0])
+    await pcc.request("capture-start", "baseline_correlation_products")
+
+    yield session_correlator, timestamp
+
+    await pcc.request("capture-stop", "baseline_correlation_products")
+
+
+@pytest.fixture
+def correlator(_correlator: Tuple[CorrelatorRemoteControl, int]) -> CorrelatorRemoteControl:
+    """Set up a correlator for a single test.
+
+    The returned correlator might not be specific to this test, but it will have
+    been reset to a default state, with the dsim outputting zeros.
+    """
+    return _correlator[0]
+
+
+@pytest.fixture
+def first_timestamp(_correlator: Tuple[CorrelatorRemoteControl, int]) -> int:
+    """ADC timestamp at which the dsim has been reset to output zeros."""
+    return _correlator[1]
+
+
+@pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig, correlator: CorrelatorRemoteControl
+    pytestconfig, correlator: CorrelatorRemoteControl, first_timestamp: int
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -227,5 +276,10 @@ async def receive_baseline_correlation_products(
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
+    # Ensure that the data is flowing, and that we throw away any data that
+    # predates the start of this test (to prevent any state leaks from previous
+    # tests).
+    _, chunk = await receiver.next_complete_chunk(first_timestamp)
+    receiver.stream.add_free_chunk(chunk)
     yield receiver
     receiver.stream.stop()
