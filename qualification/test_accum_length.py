@@ -47,23 +47,23 @@ async def test_accum_length(
     when set to 500ms. Inject a noise signal and check that the measured
     signal has the expected power.
     """
-    pdf_report.step("Retrieve the reported accumulation time and check it")
-    pdf_report.detail(f"Integration time is {correlator.int_time * 1000:.3f} ms")
+    pdf_report.step("Retrieve the reported accumulation time and check it.")
+    pdf_report.detail(f"Integration time is {correlator.int_time * 1000:.3f} ms.")
     # Requirement doesn't list an upper bound, but assume a symmetric limit
-    assert 0.48 <= correlator.int_time <= 0.52
+    expect(0.48 <= correlator.int_time <= 0.52)
 
-    pdf_report.step("Inject a white noise signal")
+    pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
     reply, _ = await correlator.dsim_client.request("signals", f"common=wgn({input_std});common;common;")
     expected_timestamp = int(reply[0])
 
-    pdf_report.step("Collect two dumps and check the timestamp difference")
+    pdf_report.step("Collect two dumps and check the timestamp difference.")
     chunks: List[Tuple[int, spead2.recv.Chunk]] = []
     receiver = receive_baseline_correlation_products
     async for timestamp, chunk in receiver.complete_chunks(expected_timestamp, all_timestamps=True):
         if chunk is None:
-            # Throw away any attempt to getting an adjacent pair
+            # Throw away failed attempt at getting an adjacent pair
             for _, old_chunk in chunks:
                 receiver.stream.add_free_chunk(old_chunk)
             chunks.clear()
@@ -73,23 +73,23 @@ async def test_accum_length(
             break
 
     assert len(chunks) == 2
-    pdf_report.detail(f"Timestamps are {chunks[0][0]}, {chunks[1][0]}")
+    pdf_report.detail(f"Timestamps are {chunks[0][0]}, {chunks[1][0]}.")
     delta = chunks[1][0] - chunks[0][0]
     delta_s = delta / correlator.scale_factor_timestamp
-    pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms")
-    assert delta_s == correlator.int_time
+    pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms.")
+    expect(delta_s == correlator.int_time)
 
-    pdf_report.step("Compare power against expected value")
+    pdf_report.step("Compare power against expected value.")
     # Sum over channels, but use only one baseline and real part because
     # the input signals are the same for all antennas.
     assert isinstance(chunks[1][1].data, np.ndarray)
     total_power = np.sum(chunks[1][1].data[:, 0, 0], dtype=np.int64)
     acc_len = round(correlator.int_time * correlator.scale_factor_timestamp / (2 * correlator.n_chans))
     expected_power = acc_len * correlator.n_chans * (level * level)
-    pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}")
+    pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}.")
     # Statistical analysis of total_power is quite tricky because there is
     # quantisation and saturation in both the time and frequency domain, and
     # the values are not fully independent in either time or channel. But 1%
     # variation seems safe.
     assert total_power == pytest.approx(expected_power, rel=0.01)
-    pdf_report.detail("Power agrees to within 1%")
+    pdf_report.detail("Power agrees to within 1%.")
