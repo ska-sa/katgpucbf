@@ -62,6 +62,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
     )
+    parser.add_argument("--dither-seed", type=int, help="Fixed seed for reproducible dithering [random]")
     parser.add_argument(
         "--katcp-host",
         type=str,
@@ -154,7 +155,12 @@ async def async_main() -> None:
 
     async with signal.SignalService([heap_sets[0].data["payload"]]) as signal_service:
         await signal_service.sample(
-            args.signals, 0, args.adc_sample_rate, args.sample_bits, heap_sets[0].data["payload"]
+            args.signals,
+            0,
+            args.adc_sample_rate,
+            args.sample_bits,
+            heap_sets[0].data["payload"],
+            dither_seed=args.dither_seed,
         )
 
     stream = send.make_stream(
@@ -195,6 +201,7 @@ async def async_main() -> None:
         spare=heap_sets[1],
         adc_sample_rate=args.adc_sample_rate,
         first_timestamp=timestamp,
+        dither_seed=args.dither_seed,
         sample_bits=args.sample_bits,
         signals_str=args.signals_orig,
         signals=args.signals,
