@@ -63,8 +63,9 @@ async def test_baseline_correlation_products(
 
     pdf_report.step("Configure the D-sim with Gaussian noise.")
 
-    await correlator.dsim_client.request("signals", "common=wgn(0.2);common;common;")
-    pdf_report.detail("Set D-sim with wgn amplitude=0.2 on both pols.")
+    amplitude = 0.2
+    await correlator.dsim_client.request("signals", f"common=wgn({amplitude});common;common;")
+    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
     # Some helper functions:
     async def zero_all_gains():
