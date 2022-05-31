@@ -26,7 +26,7 @@ import pyparsing as pp
 import pytest
 
 from katgpucbf.dsim import signal
-from katgpucbf.dsim.signal import CW, WGN, Signal
+from katgpucbf.dsim.signal import CW, WGN, Constant, Signal
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +36,18 @@ def small_chunks(monkeypatch) -> None:
     This allows testing with multiple chunks without needing a huge array.
     """
     monkeypatch.setattr(signal, "CHUNK_SIZE", 512)
+
+
+class TestConstant:
+    """Tests for :class:`katgpucbf.dsim.signal.Constant`."""
+
+    @pytest.mark.parametrize("n", [123, 4096, 12345])
+    def test_sample(self, n: int) -> None:
+        """Test basic functionality."""
+        n = 12345
+        sig = Constant(3 + 4j)
+        expected = np.full(n, 3 + 4j, np.complex64)
+        np.testing.assert_equal(sig.sample(n, 1e9), expected)
 
 
 class TestCW:
@@ -116,6 +128,7 @@ class TestParseSignals:
             ("c = cw(1.5, +2.5e0); c + cw(1, 2);", [CW(1.5, 2.5) + CW(1, 2)]),
             ("cw(1, 2) - cw(3, 4) * cw(5, 6);", [CW(1, 2) - CW(3, 4) * CW(5, 6)]),
             ("wgn(0.5);", [WGN(0.5, mock.ANY)]),
+            ("cw(1, 2) + 0.25;", [CW(1, 2) + Constant(0.25)]),
         ],
     )
     def test_success(self, text: str, expected: Signal) -> None:
