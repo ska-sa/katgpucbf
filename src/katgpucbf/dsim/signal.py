@@ -196,9 +196,11 @@ class Random(Signal):
     """
 
     entropy: int  #: entropy used to populate a :class:`np.random.SeedSequence`
+    spawn_key: Sequence[int] = ()
 
-    def __init__(self, entropy: Optional[int] = None) -> None:
+    def __init__(self, entropy: Optional[int] = None, spawn_key: Sequence[int] = ()) -> None:
         self.entropy = entropy if entropy is not None else self._generate_entropy()
+        self.spawn_key = spawn_key
 
     def _generate_entropy(self) -> int:
         """Generate a random seed.
@@ -223,7 +225,7 @@ class Random(Signal):
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
         n_chunks = (n + CHUNK_SIZE - 1) // CHUNK_SIZE
-        seed_seqs = np.random.SeedSequence(self.entropy).spawn(n_chunks)
+        seed_seqs = np.random.SeedSequence(self.entropy, spawn_key=self.spawn_key).spawn(n_chunks)
         # Chunk size of 1 so that we can map each SeedSequence to an output chunk
         seed_seqs_dask = da.from_array(np.array(seed_seqs, dtype=object), 1)
         return self._sample_helper(n, seed_seqs_dask, self._sample_chunk)
@@ -247,7 +249,7 @@ class WGN(Random):
         If provided, used to seed the random number generator
     """
 
-    std: float  #: standard deviation
+    std: float = 1.0  #: standard deviation
 
     def __init__(self, std: float, entropy: Optional[int] = None) -> None:
         # __init__ is overridden to change the argument order
@@ -261,6 +263,7 @@ class WGN(Random):
         return rng.standard_normal(size=chunk_size, dtype=np.float32) * self.std
 
     def __str__(self) -> str:
+        assert self.spawn_key == ()  # spawn_key is only intended for use with Dither
         return f"wgn({self.std}, {self.entropy})"
 
 
@@ -371,7 +374,13 @@ def format_signals(signals: Sequence[Signal]) -> str:
     return "; ".join(str(s) for s in signals) + ";"
 
 
-def quantise(data: da.Array, bits: int, dither: bool = True) -> da.Array:
+def quantise(
+    data: da.Array,
+    bits: int,
+    dither: bool = True,
+    dither_seed: Optional[int] = None,
+    dither_spawn_key: Sequence[int] = (),
+) -> da.Array:
     """Convert floating-point data to fixed-point.
 
     Parameters
@@ -385,12 +394,16 @@ def quantise(data: da.Array, bits: int, dither: bool = True) -> da.Array:
     dither
         If true, add uniform random values in the range [-0.5, 0.5) after
         scaling to reduce artefacts.
+    dither_seed
+        Random seed used to generate the dither.
+    dither_spawn_key
+        Unique key to allow a single `dither_seed` to be used to seed several
+        independent dithers (see :class:`np.random.SeedSequence`).
     """
     scale = 2 ** (bits - 1) - 1
     scaled = data * scale
     if dither:
-        # TODO: should it be seeded in some controllable way?
-        scaled += Dither().sample(scaled.size, 0)
+        scaled += Dither(dither_seed, dither_spawn_key).sample(scaled.size, 0)
     return da.rint(da.clip(scaled, -scale, scale)).astype(np.int32)
 
 
@@ -429,7 +442,15 @@ def packbits(data: da.Array, bits: int) -> da.Array:
     return da.map_blocks(_packbits, data, dtype=np.uint8, chunks=out_chunks, bits=bits)
 
 
-def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray) -> None:
+def sample(
+    signals: Sequence[Signal],
+    timestamp: int,
+    sample_rate: float,
+    sample_bits: int,
+    out: xr.DataArray,
+    *,
+    dither_seed: Optional[int] = None,
+) -> None:
     """Sample, quantise and pack a set of signals.
 
     The number of samples to generate is determined from the output array.
@@ -448,14 +469,17 @@ def sample(signals: Sequence[Signal], timestamp: int, sample_rate: float, sample
     out
         Output array, with a dimension called ``pol`` (which must match the
         number of signals). The other dimensions are flattened.
+    dither_seed
+        Fixed seed for generating the random dither. If not provided, a random
+        seed will be used.
     """
     if len(signals) != out.sizes["pol"]:
         raise ValueError(f"Expected {out.sizes['pol']} signals, received {len(signals)}")
     n = out.isel(pol=0).data.size * BYTE_BITS // sample_bits
     sampled = []
-    for sig in signals:
+    for i, sig in enumerate(signals):
         data = sig.sample(n, sample_rate)
-        data = quantise(data, sample_bits)
+        data = quantise(data, sample_bits, dither_seed=dither_seed, dither_spawn_key=(i,))
         data = da.roll(data, -timestamp)
         data = packbits(data, sample_bits)
         sampled.append(data)
@@ -487,6 +511,7 @@ class SignalService:
         sample_rate: float
         sample_bits: int
         out_idx: int  #: Index of the array in the list of valid arrays
+        dither_seed: Optional[int]
 
     @staticmethod
     def _run(
@@ -513,7 +538,14 @@ class SignalService:
             except EOFError:
                 return  # Caller has shut down the pipe
             try:
-                sample(req.signals, req.timestamp, req.sample_rate, req.sample_bits, arrays[req.out_idx])
+                sample(
+                    req.signals,
+                    req.timestamp,
+                    req.sample_rate,
+                    req.sample_bits,
+                    arrays[req.out_idx],
+                    dither_seed=req.dither_seed,
+                )
             except Exception as exc:
                 pipe.send(exc)
             else:
@@ -537,7 +569,14 @@ class SignalService:
             raise reply
 
     async def sample(
-        self, signals: Sequence[Signal], timestamp: int, sample_rate: float, sample_bits: int, out: xr.DataArray
+        self,
+        signals: Sequence[Signal],
+        timestamp: int,
+        sample_rate: float,
+        sample_bits: int,
+        out: xr.DataArray,
+        *,
+        dither_seed: Optional[int] = None,
     ) -> None:
         """Perform signal sampling in the remote process.
 
@@ -554,7 +593,7 @@ class SignalService:
         else:
             raise ValueError("output was not registered with the constructor")
         loop = asyncio.get_running_loop()
-        req = SignalService._Request(signals, timestamp, sample_rate, sample_bits, out_idx)
+        req = SignalService._Request(signals, timestamp, sample_rate, sample_bits, out_idx, dither_seed)
         await loop.run_in_executor(None, self._make_request, req)
 
     async def __aenter__(self) -> "SignalService":
