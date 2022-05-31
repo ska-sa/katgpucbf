@@ -1,5 +1,22 @@
+################################################################################
+# Copyright (c) 2022, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Fixtures and options for qualification testing of the correlator."""
 import asyncio
+import inspect
 import json
 import logging
 import subprocess
@@ -8,14 +25,13 @@ from typing import AsyncGenerator
 
 import aiokatcp
 import pytest
-import spead2.recv
 from async_timeout import timeout
 from katsdpservices import get_interface_address
 
 from katgpucbf import N_POLS
 from katgpucbf.meerkat import BANDS
 
-from . import CorrelatorRemoteControl, create_baseline_correlation_product_receive_stream, get_dsim_endpoint
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_dsim_endpoint
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -83,7 +99,7 @@ def int_time() -> float:  # noqa: D104
 @pytest.fixture
 def pdf_report(request) -> Reporter:
     """Fixture for logging steps in a test."""
-    data = [{"$msg_type": "test_info", "blurb": request.node.function.__doc__, "test_start": time.time()}]
+    data = [{"$msg_type": "test_info", "blurb": inspect.getdoc(request.node.function), "test_start": time.time()}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
@@ -198,23 +214,18 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
 
 
 @pytest.fixture
-async def receive_baseline_correlation_products_stream(
+async def receive_baseline_correlation_products(
     pytestconfig, correlator: CorrelatorRemoteControl
-) -> spead2.recv.ChunkRingStream:
+) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
 
-    return create_baseline_correlation_product_receive_stream(
+    receiver = BaselineCorrelationProductsReceiver(
+        correlator=correlator,
         interface_address=interface_address,
-        multicast_endpoints=correlator.multicast_endpoints,  # type: ignore
-        n_bls=correlator.n_bls,
-        n_chans=correlator.n_chans,
-        n_chans_per_substream=correlator.n_chans_per_substream,
-        n_bits_per_sample=correlator.n_bits_per_sample,
-        n_spectra_per_acc=correlator.n_spectra_per_acc,
-        int_time=correlator.int_time,
-        n_samples_between_spectra=correlator.n_samples_between_spectra,
         use_ibv=use_ibv,
     )
+    yield receiver
+    receiver.stream.stop()

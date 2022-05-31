@@ -39,7 +39,6 @@ import asyncio
 import logging
 import math
 import time
-from itertools import groupby
 from typing import List, Optional, Tuple
 
 import katsdpsigproc
@@ -374,7 +373,7 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
-            rx_item = RxQueueItem(buffer_device, present)
+            rx_item = RxQueueItem(buffer_device, present.copy())
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
@@ -580,10 +579,8 @@ class XBEngine(DeviceServer):
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
 
-        # NOTE: The very first heap sent out the X-Engine will have a timestamp
-        # of zero which is meaningless, every other heap will have the correct
-        # timestamp.
-        tx_item.timestamp = 0
+        # Indicate that the timestamp still needs to be filled in.
+        tx_item.timestamp = -1
         self.correlation.bind(out_visibilities=tx_item.buffer_device)
         self.correlation.zero_visibilities()
         while True:
@@ -595,6 +592,14 @@ class XBEngine(DeviceServer):
                 break
             await rx_item.async_wait_for_events()
             current_timestamp = rx_item.timestamp
+            if tx_item.timestamp < 0:
+                # First heap seen. Round the timestamp down to the previous
+                # accumulation boundary
+                tx_item.timestamp = (
+                    current_timestamp
+                    // self.timestamp_increment_per_accumulation
+                    * self.timestamp_increment_per_accumulation
+                )
 
             # If we don't return the chunk to the stream, eventually no more
             # data can be received.
@@ -620,7 +625,7 @@ class XBEngine(DeviceServer):
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
                     self.correlation()
                     # Update the missing ants tracker one last time
-                    self.next_accum_missing_ants[: i + 1] &= rx_item.present.all(axis=1)[: i + 1]
+                    self.next_accum_missing_ants[:] &= rx_item.present[:, : i + 1].all(axis=1)
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
@@ -633,9 +638,9 @@ class XBEngine(DeviceServer):
                     self.correlation.first_batch = i + 1
 
                     self.curr_accum_missing_ants = self.next_accum_missing_ants.copy()
-                    # Reset the 'Missing Antenna data' tracker list
-                    self.next_accum_missing_ants[: i + 1] = 1
-                    self.next_accum_missing_ants[i + 1 :] = rx_item.present.all(axis=1)[i + 1 :]
+
+                    # Update list using any heaps not used for this accumulation
+                    self.next_accum_missing_ants[:] = rx_item.present[:, i + 1 :].all(axis=1)
 
                 current_timestamp += self.rx_heap_timestamp_step
 
@@ -691,13 +696,6 @@ class XBEngine(DeviceServer):
             new_time_s = time.time()
             time_difference_between_heaps_s = new_time_s - old_time_s
 
-            # There's a situation where a break in input data for up to two minutes
-            # is still handled gracefully/well by the spead2 receiver.
-            # - The receiver waits for more data, and
-            # - Still uses the next-logical-increment for the chunk_id, etc
-            # So in terms of chunks received
-            # - It seems as if there was never a break in data reception,
-            # - But in reality, there were a number of seconds between dumps
             logger.debug(
                 "Current output heap timestamp: %#x, difference between timestamps: %#x, "
                 "wall time between dumps %.2f s",
@@ -739,7 +737,7 @@ class XBEngine(DeviceServer):
 
             if np.all(self.curr_accum_missing_ants == 0):
                 # All Antennas have missed data at some point, zero the entire dump
-                logger.warn("All Antennas had a break in data during this accumulation")
+                logger.warning("All Antennas had a break in data during this accumulation")
                 buffer_wrapper.buffer.fill(0)
                 incomplete_accum_counter.inc(1)
             elif not self.curr_accum_missing_ants.all():
@@ -750,18 +748,15 @@ class XBEngine(DeviceServer):
                         missing_ants_baselines = Correlation.get_baselines_for_antenna(
                             ant_idx, self.correlation.template.n_ants
                         )
-                        for baseline in missing_ants_baselines:
-                            all_affected_baselines.append(baseline)
+                        all_affected_baselines += missing_ants_baselines
 
-                all_affected_baselines.sort()
-                unique_baselines_list = list(baseline for baseline, _ in groupby(all_affected_baselines))
-                for affected_baseline in unique_baselines_list:
-                    buffer_wrapper.buffer[:, affected_baseline : affected_baseline + 4, :] = 0
+                unique_baselines_set = set(all_affected_baselines)
+                for affected_baseline in unique_baselines_set:
+                    affected_baseline_index = affected_baseline * 4
+                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = 0
 
                 incomplete_accum_counter.inc(1)
-            else:
-                # No F-Engine has had a break in data Tx, this probably isn't needed
-                pass
+            # else: No F-Engine's had a break in data for this accumulation
 
             self.send_stream.send_heap(item.timestamp, buffer_wrapper)
             item.reset()

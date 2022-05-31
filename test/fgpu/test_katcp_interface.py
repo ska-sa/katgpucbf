@@ -131,6 +131,40 @@ class TestKatcpRequests:
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain", 0, "1", "2")
 
+    async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+        """Test that ``?gain-all`` works correctly with a vector of values."""
+        reply, _informs = await engine_client.request("gain-all", "0.2-3j")
+        assert reply == []
+        for pol in range(N_POLS):
+            sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+            assert_valid_complex_list(sensor_value)
+            assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
+            np.testing.assert_equal(engine_server._processor.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
+
+    async def test_gain_all_set_vector(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+        """Test that ``?gain-all`` works correctly with a scalar value."""
+        gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
+        reply, _informs = await engine_client.request("gain-all", *(str(gain) for gain in gains))
+        assert reply == []
+        for pol in range(N_POLS):
+            np.testing.assert_equal(engine_server._processor.gains[:, pol], gains)
+            sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+            assert_valid_complex_list(sensor_value)
+            np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)
+
+    async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+        """Test ``?gain-all default``."""
+        await engine_client.request("gain-all", "2+3j")
+        await engine_client.request("gain-all", "default")
+        for pol in range(N_POLS):
+            sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+            assert sensor_value == "[0.125+0.0j]"
+
+    async def test_gain_all_empty(self, engine_client: aiokatcp.Client) -> None:
+        """Test that an error is raised if ``?gain-all`` is used with no values."""
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("gain-all")
+
     @pytest.mark.parametrize("correct_delay_strings", [("3.76,0.12:7.322,1.91", "2.67,0.02:5.678,1.81")])
     async def test_delay_model_update_correct(self, engine_client, correct_delay_strings):
         """Test correctly-formed delay strings and validate the updates.
