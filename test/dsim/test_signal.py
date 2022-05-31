@@ -44,9 +44,8 @@ class TestConstant:
     @pytest.mark.parametrize("n", [123, 4096, 12345])
     def test_sample(self, n: int) -> None:
         """Test basic functionality."""
-        n = 12345
-        sig = Constant(3 + 4j)
-        expected = np.full(n, 3 + 4j, np.complex64)
+        sig = Constant(3.5)
+        expected = np.full(n, 3.5, np.float32)
         np.testing.assert_equal(sig.sample(n, 1e9), expected)
 
 
