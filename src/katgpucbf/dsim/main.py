@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import logging
 import math
+import os
 import time
 from typing import List, Optional, Sequence, Tuple
 
@@ -59,6 +60,9 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
     parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
     parser.add_argument("--affinity", type=int, default=-1, help="Core affinity for the sending thread [not bound]")
+    parser.add_argument(
+        "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
+    )
     parser.add_argument(
         "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
     )
@@ -208,6 +212,10 @@ async def async_main() -> None:
         host=args.katcp_host,
         port=args.katcp_port,
     )
+    # Only set this affinity after constructing DeviceServer, which creates
+    # a separate process for the signal service that shouldn't inherit this.
+    if args.main_affinity >= 0:
+        os.sched_setaffinity(0, [args.main_affinity])
     await server.start()
 
     add_signal_handlers(server)
