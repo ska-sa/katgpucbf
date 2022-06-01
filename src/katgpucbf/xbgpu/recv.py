@@ -217,9 +217,10 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
 
         # Check if we've missed any chunks
         if chunk.chunk_id != (prev_chunk_id + 1):
-            missed_chunks = chunk.chunk_id - prev_chunk_id
-            logger.warn(
-                f"Receiver missed {missed_chunks} chunks. Expected ID {(prev_chunk_id + 1)}, received {chunk.chunk_id}"
+            missed_chunks = chunk.chunk_id - (prev_chunk_id + 1)
+            logger.warning(
+                f"Receiver missed {missed_chunks} chunks. "
+                f"Expected ID: {(prev_chunk_id + 1)}, received ID: {chunk.chunk_id}."
             )
             dropped_heaps += missed_chunks * expected_heaps
         missing_heaps_counter.inc(dropped_heaps)

@@ -17,9 +17,10 @@
 """Unit tests for :mod:`katgpucbf.xbgpu.recv`."""
 
 import itertools
+import logging
 import random
-from test import PromDiff
 from typing import Generator, Iterator, List
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -29,6 +30,8 @@ from numpy.typing import ArrayLike
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
 from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
+
+from .. import PromDiff
 
 
 @pytest.fixture
@@ -263,3 +266,93 @@ class TestStream:
         expected = np.ones_like(chunk.present)
         expected[missing] = 0
         np.testing.assert_equal(chunk.present, expected)
+
+    async def test_missing_chunks(
+        self,
+        layout: Layout,
+        caplog,
+    ) -> None:
+        """Test that that the receiver accounts for missing chunks.
+
+        Heavily inspired by fgpu/test_recv.
+
+        .. todo::
+            This doesn't necessarily test the adding of free chunks back to
+            the Ringbuffer. That logic lives in the XBEngine's gpu_proc_loop.
+            We might want to bring that functionality to parity with fgpu's
+            receiver.
+        """
+        mock_stream = Mock()  # We don't need a full-blown spead2 stream
+
+        # Reality can be whatever we want
+        config = spead2.recv.StreamConfig()
+        # config.add_stat("incomplete_heaps_evicted")  # Odd, this one doesn't need to be added
+        config.add_stat("too_old_heaps")
+        config.add_stat("katgpucbf.metadata_heaps")
+        config.add_stat("katgpucbf.bad_timestamp_heaps")
+        config.add_stat("katgpucbf.bad_feng_id_heaps")
+        mock_stream.config = config
+
+        mock_stream.stats = {}
+        mock_stream.stats[config.get_stat_index("too_old_heaps")] = 1010
+        mock_stream.stats[config.get_stat_index("incomplete_heaps_evicted")] = 2020
+        mock_stream.stats[config.get_stat_index("katgpucbf.metadata_heaps")] = 3030
+        mock_stream.stats[config.get_stat_index("katgpucbf.bad_timestamp_heaps")] = 4040
+        mock_stream.stats[config.get_stat_index("katgpucbf.bad_feng_id_heaps")] = 5050
+
+        ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)
+        mock_stream.data_ringbuffer = ringbuffer
+
+        rng = np.random.default_rng(seed=1)
+
+        def add_chunk(chunk_id: int) -> None:
+            data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
+            # We're not testing missing heaps specifically
+            present = np.ones(layout.chunk_heaps, np.uint8)
+            chunk = Chunk(data=data, present=present, chunk_id=chunk_id)
+            ringbuffer.put_nowait(chunk)
+
+        # Receiver will naturally expect Chunk ID 0 first
+        add_chunk(10)
+        add_chunk(11)
+        add_chunk(12)
+        # Skip a few more
+        add_chunk(20)
+        ringbuffer.stop()
+
+        with caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"), PromDiff(
+            namespace=METRIC_NAMESPACE
+        ) as prom_diff:
+            # Register the stream with the StatsCollector manually
+            recv.stats_collector.add_stream(mock_stream)
+
+            # Need to actually grab the chunks
+            chunks = [chunk async for chunk in recv_chunks(mock_stream)]
+
+        # Double check the Chunk IDs received
+        assert chunks[0].chunk_id == 10
+        assert chunks[1].chunk_id == 11
+        assert chunks[2].chunk_id == 12
+        assert chunks[3].chunk_id == 20
+
+        # TODO: Perhaps wrap this into a for-loop (somehow)
+        assert caplog.record_tuples[0] == (
+            "katgpucbf.xbgpu.recv",
+            logging.WARNING,
+            f"Receiver missed 10 chunks. Expected ID: 0, received ID: {chunks[0].chunk_id}.",
+        )
+        assert caplog.record_tuples[1] == (
+            "katgpucbf.xbgpu.recv",
+            logging.WARNING,
+            f"Receiver missed 7 chunks. Expected ID: {chunks[2].chunk_id + 1}, received ID: {chunks[3].chunk_id}.",
+        )
+
+        # TODO: There must be a better way to phrase this calculation
+        expected_missing_chunks = chunks[0].chunk_id - 0 + chunks[3].chunk_id - (chunks[2].chunk_id + 1)
+
+        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 1010
+        assert prom_diff.get_sample_diff("input_incomplete_heaps_total") == 2020
+        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 3030
+        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == 4040
+        assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 5050
+        assert prom_diff.get_sample_diff("input_missing_heaps_total") == expected_missing_chunks * layout.chunk_heaps
