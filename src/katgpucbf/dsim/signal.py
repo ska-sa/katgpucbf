@@ -134,15 +134,10 @@ class CombinedSignal(Signal):
 class Constant(Signal):
     """Fixed value."""
 
-    value: complex
-
-    @staticmethod
-    def _sample_chunk(offset: np.int64, *, value: complex, chunk_size: int) -> np.ndarray:
-        """Compute a single chunk."""
-        return np.full(chunk_size, value, np.complex64)
+    value: float
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
-        return da.full((n,), self.value, np.complex64)
+        return da.full((n,), self.value, dtype=np.float32, chunks=CHUNK_SIZE)
 
     def __str__(self) -> str:
         return f"{self.value}"
@@ -367,7 +362,7 @@ def parse_signals(prog: str) -> List[Signal]:
     variable_expr = variable.copy()
     variable_expr.set_parse_action(get_variable)
     real_expr = real.copy()
-    real_expr.set_parse_action(lambda s, loc, tokens: Constant(complex(tokens[0])))
+    real_expr.set_parse_action(lambda s, loc, tokens: Constant(float(tokens[0])))
 
     atom = real_expr | cw | wgn | variable_expr
     expr = pp.infix_notation(
