@@ -428,7 +428,7 @@ def quantise(
     return da.rint(da.clip(scaled, -scale, scale)).astype(np.int32)
 
 
-@numba.njit
+@numba.njit(nogil=True)
 def _packbits(data: np.ndarray, bits: int) -> np.ndarray:  # pragma: nocover
     # Note: needs lots of explicit casting to np.uint64, as otherwise
     # numba seems to want to infer double precision.
