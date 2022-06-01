@@ -193,6 +193,7 @@ class CW(Signal):
             self._sample_chunk,
             amplitude=np.float32(self.amplitude),
             scale=scale,
+            meta=np.array((), np.float32),
         )
 
     def __str__(self) -> str:
@@ -241,7 +242,12 @@ class Random(Signal):
         seed_seqs = np.random.SeedSequence(self.entropy, spawn_key=self.spawn_key).spawn(n_chunks)
         # Chunk size of 1 so that we can map each SeedSequence to an output chunk
         seed_seqs_dask = da.from_array(np.array(seed_seqs, dtype=object), 1)
-        return self._sample_helper(n, seed_seqs_dask, self._sample_chunk)
+        return self._sample_helper(
+            n,
+            seed_seqs_dask,
+            self._sample_chunk,
+            meta=np.array((), np.float32),
+        )
 
 
 @dataclass
