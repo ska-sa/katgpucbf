@@ -108,6 +108,7 @@ def gen_heap(timestamp: int, feng_id: int, frequency: int, feng_raw: np.ndarray)
     heap.add_item(spead2.Item(FENG_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=feng_id))
     heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=frequency))
     heap.add_item(spead2.Item(FENG_RAW_ID, "", "", shape=feng_raw.shape, dtype=feng_raw.dtype, value=feng_raw))
+    heap.repeat_pointers = True
     return heap
 
 

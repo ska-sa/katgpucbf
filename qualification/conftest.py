@@ -1,21 +1,37 @@
+################################################################################
+# Copyright (c) 2022, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Fixtures and options for qualification testing of the correlator."""
 import asyncio
+import inspect
 import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Tuple
 
 import aiokatcp
 import pytest
-import spead2.recv
 from async_timeout import timeout
 from katsdpservices import get_interface_address
 
 from katgpucbf import N_POLS
 from katgpucbf.meerkat import BANDS
 
-from . import CorrelatorRemoteControl, create_baseline_correlation_product_receive_stream, get_dsim_endpoint
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_dsim_endpoint
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -48,16 +64,25 @@ def pytest_report_collectionfinish(config):  # noqa: D103
     )
 
 
-@pytest.fixture(params=[4, 8, 14])
+# Need to redefine this from pytest-asyncio to have it at session scope
+@pytest.fixture(scope="session")
+def event_loop():  # noqa: D103
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="session", params=[4, 8, 14])
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param
 
 
 @pytest.fixture(
+    scope="session",
     params=[
         8192,
-    ]
+    ],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -65,16 +90,17 @@ def n_channels(request):  # noqa: D401
 
 
 @pytest.fixture(
+    scope="session",
     params=[
         "l",
-    ]
+    ],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""
     return request.param
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
     return 0.5
@@ -83,12 +109,12 @@ def int_time() -> float:  # noqa: D104
 @pytest.fixture
 def pdf_report(request) -> Reporter:
     """Fixture for logging steps in a test."""
-    data = [{"$msg_type": "test_info", "blurb": request.node.function.__doc__, "test_start": time.time()}]
+    data = [{"$msg_type": "test_info", "blurb": inspect.getdoc(request.node.function), "test_start": time.time()}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band: str, int_time: float) -> dict:
     """Produce the configuration dict from the given parameters."""
     # Adapted from `sim_correlator.py` but with logic for using multiple dsims
@@ -140,11 +166,16 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
     return config
 
 
-@pytest.fixture
-async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerator[CorrelatorRemoteControl, None]:
+@pytest.fixture(scope="session")
+async def session_correlator(
+    pytestconfig, correlator_config, band: str
+) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
     Shut the correlator down afterwards also.
+
+    Generally this fixture should not be used directly. Use :meth:`correlator`
+    instead, which will reuse the same correlator across multiple tests.
     """
     host = pytestconfig.getini("master_controller_host")
     port = int(pytestconfig.getini("master_controller_port"))
@@ -198,23 +229,57 @@ async def correlator(pytestconfig, correlator_config, band: str) -> AsyncGenerat
 
 
 @pytest.fixture
-async def receive_baseline_correlation_products_stream(
-    pytestconfig, correlator: CorrelatorRemoteControl
-) -> spead2.recv.ChunkRingStream:
+async def _correlator(
+    session_correlator: CorrelatorRemoteControl,
+) -> AsyncGenerator[Tuple[CorrelatorRemoteControl, int], None]:
+    """Implement :meth:`correlator` and :meth:`first_timestamp`."""
+    # Reset the correlator to default state
+    pcc = session_correlator.product_controller_client
+    await pcc.request("gain-all", "antenna_channelised_voltage", "default")
+    await pcc.request("delays", "antenna_channelised_voltage", 0, *(["0,0:0,0"] * session_correlator.n_inputs))
+    reply, _ = await session_correlator.dsim_client.request("signals", "0;0;")
+    timestamp = int(reply[0])
+    await pcc.request("capture-start", "baseline_correlation_products")
+
+    yield session_correlator, timestamp
+
+    await pcc.request("capture-stop", "baseline_correlation_products")
+
+
+@pytest.fixture
+def correlator(_correlator: Tuple[CorrelatorRemoteControl, int]) -> CorrelatorRemoteControl:
+    """Set up a correlator for a single test.
+
+    The returned correlator might not be specific to this test, but it will have
+    been reset to a default state, with the dsim outputting zeros.
+    """
+    return _correlator[0]
+
+
+@pytest.fixture
+def first_timestamp(_correlator: Tuple[CorrelatorRemoteControl, int]) -> int:
+    """ADC timestamp at which the dsim has been reset to output zeros."""
+    return _correlator[1]
+
+
+@pytest.fixture
+async def receive_baseline_correlation_products(
+    pytestconfig, correlator: CorrelatorRemoteControl, first_timestamp: int
+) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
 
-    return create_baseline_correlation_product_receive_stream(
+    receiver = BaselineCorrelationProductsReceiver(
+        correlator=correlator,
         interface_address=interface_address,
-        multicast_endpoints=correlator.multicast_endpoints,  # type: ignore
-        n_bls=correlator.n_bls,
-        n_chans=correlator.n_chans,
-        n_chans_per_substream=correlator.n_chans_per_substream,
-        n_bits_per_sample=correlator.n_bits_per_sample,
-        n_spectra_per_acc=correlator.n_spectra_per_acc,
-        int_time=correlator.int_time,
-        n_samples_between_spectra=correlator.n_samples_between_spectra,
         use_ibv=use_ibv,
     )
+    # Ensure that the data is flowing, and that we throw away any data that
+    # predates the start of this test (to prevent any state leaks from previous
+    # tests).
+    _, chunk = await receiver.next_complete_chunk(first_timestamp)
+    receiver.stream.add_free_chunk(chunk)
+    yield receiver
+    receiver.stream.stop()

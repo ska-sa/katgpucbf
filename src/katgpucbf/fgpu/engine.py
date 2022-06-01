@@ -225,11 +225,10 @@ class Engine(aiokatcp.DeviceServer):
         self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
+        self.default_gain = gain
         self.delay_models = []
 
         for pol in range(N_POLS):
-            self.sensors[f"input{pol}-eq"].value = str([gain])
-
             delay_model = MultiDelayModel(
                 callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}-delay"])
             )
@@ -394,6 +393,34 @@ class Engine(aiokatcp.DeviceServer):
             gains = gains[:1]
         self.sensors[f"input{input}-eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
 
+    def _parse_gains(self, *values: str, allow_default: bool) -> np.ndarray:
+        """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.
+
+        If a single value is given it is expanded to a value per channel. If
+        `allow_default` is true, the string "default" may be given to restore
+        the default gains set via command line.
+
+        The caller must ensure that `values` contains either 1 or `channels`
+        items. :meth:`request_gain` handles the case where no values are given
+        for querying existing gains.
+
+        Failures are reported by raising an appropriate
+        :exc:`aiokatcp.FailReply`.
+        """
+        channels = self._processor.channels
+        if allow_default and values == ("default",):
+            gains = np.full(channels, self.default_gain, dtype=np.complex64)
+        else:
+            try:
+                gains = np.array([complex(v) for v in values], dtype=np.complex64)
+            except ValueError:
+                raise aiokatcp.FailReply("invalid formatting of complex number")
+        if not np.all(np.isfinite(gains)):
+            raise aiokatcp.FailReply("non-finite gains are not permitted")
+        if len(gains) == 1:
+            gains = gains.repeat(channels)
+        return gains
+
     async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
         """Set or query the eq gains.
 
@@ -412,24 +439,34 @@ class Engine(aiokatcp.DeviceServer):
         channels = self._processor.channels
         if len(values) not in {0, 1, channels}:
             raise aiokatcp.FailReply(f"invalid number of values provided (must be 0, 1 or {channels})")
-        try:
-            gains = np.array([complex(v) for v in values], dtype=np.complex64)
-        except ValueError:
-            raise aiokatcp.FailReply("invalid formatting of complex number")
-        if not np.all(np.isfinite(gains)):
-            raise aiokatcp.FailReply("non-finite gains are not permitted")
-        if len(gains) == 1:
-            gains = gains.repeat(channels)
-        if len(gains) > 0:
-            self.set_gains(input, gains)
-        else:
+        if not values:
             gains = self._processor.gains[:, input]
+        else:
+            gains = self._parse_gains(*values, allow_default=False)
+            self.set_gains(input, gains)
 
         # Return the current values.
         # If they're all the same, we can return just a single value.
         if np.all(gains == gains[0]):
             gains = gains[:1]
         return tuple(format_complex(gain) for gain in gains)
+
+    async def request_gain_all(self, ctx, *values: str) -> None:
+        """Set or query the eq gains for all inputs.
+
+        Parameters
+        ----------
+        values
+            Complex values. There must either be a single value (used for all
+            channels), or a value per channel, or ``"default"`` to reset gains
+            to the default.
+        """
+        channels = self._processor.channels
+        if len(values) not in {1, channels}:
+            raise aiokatcp.FailReply(f"invalid number of values provided (must be 1 or {channels})")
+        gains = self._parse_gains(*values, allow_default=True)
+        for i in range(N_POLS):
+            self.set_gains(i, gains)
 
     async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model.

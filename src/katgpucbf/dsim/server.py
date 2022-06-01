@@ -18,7 +18,7 @@
 
 import asyncio
 import logging
-from typing import Sequence
+from typing import Optional, Sequence
 
 import aiokatcp
 import pyparsing as pp
@@ -68,6 +68,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         adc_sample_rate: float,
         sample_bits: int,
         first_timestamp: int,
+        dither_seed: Optional[int],
         signals_str: str,
         signals: Sequence[Signal],
         *args,
@@ -80,6 +81,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
         self.first_timestamp = first_timestamp
+        self.dither_seed = dither_seed
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
         self._signal_service = SignalService([self.sender.heap_set.data["payload"], self.spare.data["payload"]])
 
@@ -159,7 +161,12 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         async with self._signals_lock:
             await self._signal_service.sample(
-                signals, self.first_timestamp, self.adc_sample_rate, self.sample_bits, self.spare.data["payload"]
+                signals,
+                self.first_timestamp,
+                self.adc_sample_rate,
+                self.sample_bits,
+                self.spare.data["payload"],
+                dither_seed=self.dither_seed,
             )
             spare = self.sender.heap_set
             timestamp = await self.sender.set_heaps(self.spare)

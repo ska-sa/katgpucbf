@@ -1,3 +1,19 @@
+################################################################################
+# Copyright (c) 2022, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Baseline verification tests."""
 
 import logging
@@ -5,24 +21,19 @@ import time
 from typing import Tuple
 
 import numpy as np
-import spead2
-import spead2.recv
-import spead2.recv.asyncio
 
-from . import CorrelatorRemoteControl
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 
 
 async def test_baseline_correlation_products(
-    n_antennas: int,
-    n_channels: int,
     correlator: CorrelatorRemoteControl,
-    receive_baseline_correlation_products_stream: spead2.recv.ChunkRingStream,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     expect,
-):
+) -> None:
     """Test that the baseline ordering indicated in the sensor matches the output data.
 
     Requirements verified:
@@ -46,78 +57,69 @@ async def test_baseline_correlation_products(
     signal on or off. Iterate through all combinations and verify that the
     expected output appears in the correct baseline product.
     """
+    receiver = receive_baseline_correlation_products  # Just to reduce typing
     pdf_report.step("Connect to correlator's product controller to retrieve configuration for the running correlator.")
     pc_client = correlator.product_controller_client
 
-    timestamp_step = correlator.n_samples_between_spectra * correlator.n_spectra_per_acc
+    pdf_report.step("Configure the D-sim with Gaussian noise.")
 
-    pdf_report.step("Select and configure the D-sim with a strong tone.")
-    # Get dsim ready with a tone in a known channel that we can check for on the output.
-    channel = n_channels // 3  # picked fairly arbitrarily. We just need to know where to set and look for the tone.
-    channel_width = correlator.bandwidth / n_channels
-    channel_centre_freq = channel * channel_width
-    pdf_report.detail(f"Tone frequency of {channel_centre_freq} Hz selected, in the centre of channel {channel}.")
-
-    await correlator.dsim_client.request("signals", f"common=cw(0.15,{channel_centre_freq});common;common;")
-    pdf_report.detail(
-        "Set D-sim with {channel_centre_freq} Hz tone, amplitude=0.15, with wgn amplitude 0.01 on both pols."
-    )
+    amplitude = 0.2
+    await correlator.dsim_client.request("signals", f"common=wgn({amplitude});common;common;")
+    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
     # Some helper functions:
     async def zero_all_gains():
         pdf_report.detail("Setting all F-engine gains to zero.")
-        for ant in range(n_antennas):
-            for pol in ["v", "h"]:
-                # This may be useful debug info but we don't need it in the PDF report.
-                logger.debug(f"Setting gain to zero on m{800 + ant}{pol}")
-                await pc_client.request("gain", "antenna_channelised_voltage", f"m{800 + ant}{pol}", "0")
+        await pc_client.request("gain-all", "antenna_channelised_voltage", "0")
 
     async def unzero_a_baseline(baseline_tuple: Tuple[str, str]):
         pdf_report.detail(f"Unzeroing gain on {baseline_tuple}")
-        for ant in baseline_tuple:
-            await pc_client.request("gain", "antenna_channelised_voltage", ant, "1")
+        for inp in baseline_tuple:
+            await pc_client.request("gain", "antenna_channelised_voltage", inp, "1")
 
-    for idx, bl in enumerate(correlator.bls_ordering):
-        pdf_report.step(f"Check baseline {bl} ({idx+1}/{len(correlator.bls_ordering)})")
+    for start_idx in range(0, correlator.n_bls, correlator.n_chans - 1):
+        end_idx = min(start_idx + correlator.n_chans - 1, correlator.n_bls)
+        pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
         await zero_all_gains()
-        await unzero_a_baseline(bl)
-        expected_timestamp = (time.time() + 1 - correlator.sync_time) * correlator.timestamp_scale_factor
+        pdf_report.detail("Compute gains to enable one baseline per channel.")
+        gains = {}
+        for i in range(start_idx, end_idx):
+            channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
+            for inp in correlator.bls_ordering[i]:
+                if inp not in gains:
+                    gains[inp] = np.zeros(correlator.n_chans, np.float32)
+                gains[inp][channel] = 1.0
+        pdf_report.detail("Set gains.")
+        for inp, g in gains.items():
+            await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
+
+        expected_timestamp = round((time.time() + 1 - correlator.sync_time) * correlator.scale_factor_timestamp)
         # Note that we are making an assumption that nothing is straying too far
         # from wall time here. I don't have a way other than adjusting the dsim
         # signal of ensuring that we get going after a specific timestamp in the
         # DSP pipeline itself. See NGC-549
-        data_ringbuffer = receive_baseline_correlation_products_stream.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
-        async for chunk in data_ringbuffer:
-            # These asserts aren't particularly important, but they keep mypy happy.
-            assert isinstance(chunk.present, np.ndarray)
-            assert isinstance(chunk.data, np.ndarray)
-            recvd_timestamp = chunk.chunk_id * timestamp_step
-            if not np.all(chunk.present):
-                logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                receive_baseline_correlation_products_stream.add_free_chunk(chunk)
-
-            elif recvd_timestamp <= expected_timestamp:
-                logger.debug("Skipping chunk with timestamp %d", recvd_timestamp)
-                receive_baseline_correlation_products_stream.add_free_chunk(chunk)
-
-            else:
-                loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
-                pdf_report.detail(
-                    f"{len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
-                    f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
-                )
+        _, chunk = await receiver.next_complete_chunk(expected_timestamp)
+        # These asserts aren't particularly important, but they keep mypy happy.
+        assert isinstance(chunk.present, np.ndarray)
+        assert isinstance(chunk.data, np.ndarray)
+        for i in range(start_idx, end_idx):
+            channel = i - start_idx + 1
+            bl = correlator.bls_ordering[i]
+            loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
+            pdf_report.detail(
+                f"Checking {bl}: {len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
+                f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
+            )
+            expect(
+                i in loud_bls,
+                f"{bl} ({i}) doesn't show up in the list ({loud_bls})!",
+            )
+            for loud_bl in loud_bls:
                 expect(
-                    correlator.bls_ordering.index(bl) in loud_bls,
-                    f"{bl} ({correlator.bls_ordering.index(bl)}) doesn't show up in the list ({loud_bls})!",
+                    is_signal_expected_in_baseline(bl, correlator.bls_ordering[loud_bl], pdf_report),
+                    "Signal found in unexpected baseline.",
                 )
-                for loud_bl in loud_bls:
-                    expect(
-                        is_signal_expected_in_baseline(bl, correlator.bls_ordering[loud_bl], pdf_report),
-                        "Signal found in unexpected baseline.",
-                    )
-                receive_baseline_correlation_products_stream.add_free_chunk(chunk)
-                break
+        receiver.stream.add_free_chunk(chunk)
 
 
 def is_signal_expected_in_baseline(
