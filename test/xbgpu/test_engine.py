@@ -43,7 +43,7 @@ SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
 SKIP_ANT: Final[bool] = False  # TODO: Potentially move this, placed here for convenience
-MISSING_ANT: Final[int] = 0  # TODO: Add this to test_paramters, or even randomise
+MISSING_ANT: Final[int] = 0  # TODO: Add this to test_parameters, or even randomise
 
 
 @njit
@@ -317,7 +317,6 @@ class TestEngine:
             )
 
             gpu_result = ig_recv["xeng_raw"].value
-            expected_output = expected_output.reshape(gpu_result.shape)
             np.testing.assert_equal(expected_output, gpu_result)
 
     @pytest.mark.combinations(
@@ -383,7 +382,6 @@ class TestEngine:
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             f"--heap-accumulation-threshold={heap_accumulation_threshold}",
-            f"--rx-reorder-tol={2**21}",
             "--src-interface=lo",
             "--dst-interface=lo",
             "239.10.11.4:7149",  # src

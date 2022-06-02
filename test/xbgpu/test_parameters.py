@@ -20,14 +20,11 @@
 # 19 are just there to test that various non-power-of-two array sizes will
 # run.
 array_size = [5, 23, 61, 19, 4, 8, 16, 32, 64, 84]
-# array_size = [5]
 
 # This is always set to 256 for the MeerKAT case. There is a chance that for
 # the MeerKAT extension this could be configured to other values. All these
 # cases need to be tested.
 num_spectra_per_heap = [256, 512, 1024]
-# num_spectra_per_heap = [256] # Or even [16]
 
 # Number of FFT channels out of the F-Engine
 num_channels = [1024, 4096, 8192, 32768]
-# num_channels = [1024]

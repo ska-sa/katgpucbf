@@ -761,6 +761,7 @@ class XBEngine(DeviceServer):
             # else: No F-Engine's had a break in data for this accumulation
 
             self.send_stream.send_heap(item.timestamp, buffer_wrapper)
+
             item.reset()
             self.curr_accum_missing_ants.fill(0)
             await self._tx_free_item_queue.put(item)

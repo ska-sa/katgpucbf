@@ -272,10 +272,8 @@ class Correlation(accel.Operation):
         Intended to be used when the req_ant has missing data during an accumulation period,
         the Engine will zero data for the affected baselines.
 
-        .. todo:: Figure out a way to get this njit-compatible.
         """
         baseline_list = []
-        # The one-line list comprehension did look a bit untidy
         for a2 in range(n_ants):
             for a1 in range(a2 + 1):
                 if a1 == req_ant or a2 == req_ant:
