@@ -18,7 +18,7 @@
 
 import asyncio
 import logging
-from typing import Optional, Sequence
+from typing import Sequence
 
 import aiokatcp
 import pyparsing as pp
@@ -68,7 +68,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         adc_sample_rate: float,
         sample_bits: int,
         first_timestamp: int,
-        dither_seed: Optional[int],
+        dither_seed: int,
         signals_str: str,
         signals: Sequence[Signal],
         *args,
@@ -102,6 +102,15 @@ class DeviceServer(aiokatcp.DeviceServer):
         )
         self.sensors.add(self._signals_orig_sensor)
         self.sensors.add(self._signals_sensor)
+        self.sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "dither-seed",
+                "Random seed used in dithering for quantisation",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                default=dither_seed,
+            )
+        )
         self.sensors.add(
             aiokatcp.Sensor(
                 int,

@@ -157,6 +157,8 @@ async def async_main() -> None:
     descriptor_sender = descriptors.DescriptorSender(stream=descriptor_stream, descriptor_heap=descriptor_heap)
     descriptor_task = asyncio.create_task(descriptor_sender.run())
 
+    if args.dither_seed is None:
+        args.dither_seed = np.random.SeedSequence().entropy  # Generate a random seed
     async with signal.SignalService([heap_sets[0].data["payload"]]) as signal_service:
         await signal_service.sample(
             args.signals,
