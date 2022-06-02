@@ -407,21 +407,10 @@ def _clip(a, a_min, a_max):
 
 
 @numba.njit(nogil=True)
-def _quantise_chunk_dither(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:
+def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:
     out = np.empty_like(chunk, dtype=np.int32)
     for i in range(chunk.shape[0]):
         scaled = chunk[i] * scale + dither[i]
-        out[i] = np.rint(_clip(scaled, -scale, scale))
-    return out
-
-
-@numba.njit(nogil=True)
-def _quantise_chunk_no_dither(chunk: np.ndarray, scale: np.float32) -> np.ndarray:
-    # This is a lot of copy-paste from _quantise_chunk_dither, which is done
-    # for performance.
-    out = np.empty_like(chunk, dtype=np.int32)
-    for i in range(chunk.shape[0]):
-        scaled = chunk[i] * scale
         out[i] = np.rint(_clip(scaled, -scale, scale))
     return out
 
@@ -454,13 +443,12 @@ def quantise(
     """
     scale = np.float32(2 ** (bits - 1) - 1)
     if dither:
-        dither = Dither(dither_seed, dither_spawn_key).sample(data.size, 0)
-        func = _quantise_chunk_dither
-        arrays = [data, dither]
+        dither_signal = Dither(dither_seed, dither_spawn_key).sample(data.size, 0)
     else:
-        func = _quantise_chunk_no_dither
-        arrays = [data]
-    return da.map_blocks(func, *arrays, scale=scale, meta=np.array((), np.int32))
+        # Not the most efficient solution, but disabling dither is only done
+        # for some unit tests.
+        dither_signal = da.zeros(data.size, np.float32, chunks=CHUNK_SIZE)
+    return da.map_blocks(_quantise_chunk, data, dither_signal, scale=scale, meta=np.array((), np.int32))
 
 
 @numba.njit(nogil=True)
