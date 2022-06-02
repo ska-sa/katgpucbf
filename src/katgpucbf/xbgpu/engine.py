@@ -370,14 +370,14 @@ class XBEngine(DeviceServer):
         self._tx_item_queue: asyncio.Queue[Optional[QueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
-        present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
                 self.context,
                 self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
-            rx_item = RxQueueItem(buffer_device, present.copy())
+            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
+            rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
@@ -395,6 +395,7 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
                 context=self.context,
             )
+            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
 
