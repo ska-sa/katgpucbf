@@ -395,6 +395,26 @@ def format_signals(signals: Sequence[Signal]) -> str:
     return "; ".join(str(s) for s in signals) + ";"
 
 
+@numba.njit
+def _clip(a, a_min, a_max):
+    """Like np.clip, but for scalars (which is currently broken in numba)."""
+    if a < a_min:
+        return a_min
+    elif a > a_max:
+        return a_max
+    else:
+        return a
+
+
+@numba.njit(nogil=True)
+def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:
+    out = np.empty_like(chunk, dtype=np.int32)
+    for i in range(chunk.shape[0]):
+        scaled = chunk[i] * scale + dither[i]
+        out[i] = np.rint(_clip(scaled, -scale, scale))
+    return out
+
+
 def quantise(
     data: da.Array,
     bits: int,
@@ -421,11 +441,14 @@ def quantise(
         Unique key to allow a single `dither_seed` to be used to seed several
         independent dithers (see :class:`np.random.SeedSequence`).
     """
-    scale = 2 ** (bits - 1) - 1
-    scaled = data * scale
+    scale = np.float32(2 ** (bits - 1) - 1)
     if dither:
-        scaled += Dither(dither_seed, dither_spawn_key).sample(scaled.size, 0)
-    return da.rint(da.clip(scaled, -scale, scale)).astype(np.int32)
+        dither_signal = Dither(dither_seed, dither_spawn_key).sample(data.size, 0)
+    else:
+        # Not the most efficient solution, but disabling dither is only done
+        # for some unit tests.
+        dither_signal = da.zeros(data.size, np.float32, chunks=CHUNK_SIZE)
+    return da.map_blocks(_quantise_chunk, data, dither_signal, scale=scale, meta=np.array((), np.int32))
 
 
 @numba.njit(nogil=True)
