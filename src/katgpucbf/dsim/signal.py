@@ -1,3 +1,19 @@
+################################################################################
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Synthesis of simulated signals."""
 
 import asyncio
@@ -535,10 +551,9 @@ def sample(
 class SignalService:
     """Compute signals in a separate process.
 
-    This only works with the fork model of multiprocessing, as it depends on
-    inheriting the arrays across the :meth:`os.fork`. Additionally, the arrays
-    must be allocated in such a way that they are shared rather than
-    copy-on-write, for example, using :mod:`multiprocessing.sharedctypes`.
+    The provided arrays must be backed by :class:`.SharedArray`, and each must
+    have an xarray attribute called ``"shared_array"`` which holds the backing
+    :class:`.SharedArray`.
 
     Parameters
     ----------
@@ -558,11 +573,7 @@ class SignalService:
         dither_seed: Optional[int]
 
     @staticmethod
-    def _run(
-        arrays: Sequence[xr.DataArray],
-        pipe: multiprocessing.connection.Connection,
-        parent_pipe: multiprocessing.connection.Connection,
-    ) -> None:
+    def _run(array_schemas: List[dict], pipe: multiprocessing.connection.Connection) -> None:
         """Run the main service loop for the separate process.
 
         It receives a _Request on the pipe, and replies with either ``None``
@@ -571,16 +582,19 @@ class SignalService:
         """
         # Avoid catching Ctrl-C meant for the parent
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        # This runs in the child, so doesn't need to hold a handle to the
-        # parent close. Closing it ensures that we get the EOFError when
-        # the parent closes the pipe and we try to read.
-        parent_pipe.close()
         os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+
+        # Load the arrays by fetching the shared array out of the special attribute
+        arrays = [
+            xr.DataArray.from_dict({**schema, "data": schema["attrs"]["shared_array"].buffer})
+            for schema in array_schemas
+        ]
+
         while True:
             try:
                 req: SignalService._Request = pipe.recv()
             except EOFError:
-                return  # Caller has shut down the pipe
+                break  # Caller has shut down the pipe
             try:
                 sample(
                     req.signals,
@@ -595,11 +609,31 @@ class SignalService:
             else:
                 pipe.send(None)
 
+        # Not strictly necessary since the process is about to die anyway,
+        # but might help prevent warnings about leaking file descriptors in
+        # future.
+        for array in arrays:
+            array.attrs["shared_array"].close()
+
     def __init__(self, arrays: Sequence[xr.DataArray]) -> None:
         self.arrays = arrays
-        self._pipe, remote_pipe = multiprocessing.Pipe()
-        self._process = multiprocessing.Process(target=self._run, args=(arrays, remote_pipe, self._pipe))
+        # These contain the `shared_array` attribute, which carries the
+        # reference to the shared memory into the child process.
+        array_schemas = [array.to_dict(data=False) for array in arrays]
+        # The default "fork" method seems to cause problems with the unit
+        # tests (NGC-637). Spawning is slower but ensures we share nothing
+        # other than what we wish to share explicitly.
+        ctx = multiprocessing.get_context("spawn")
+        self._pipe, remote_pipe = ctx.Pipe()
+        self._process = ctx.Process(
+            target=self._run,
+            args=(
+                array_schemas,
+                remote_pipe,
+            ),
+        )
         self._process.start()
+        remote_pipe.close()  # Ensures the child holds the only reference
 
     async def stop(self) -> None:
         """Shut down the process."""
