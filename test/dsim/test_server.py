@@ -48,6 +48,7 @@ async def katcp_server(
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=DIG_SAMPLE_BITS,
         first_timestamp=0,
+        dither_seed=42,
         signals_str=signals_str,
         signals=parse_signals(signals_str),
         host="127.0.0.1",

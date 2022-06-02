@@ -80,6 +80,7 @@ class CorrelatorRemoteControl:
     product_controller_client: aiokatcp.Client
     dsim_client: aiokatcp.Client
     n_ants: int
+    n_inputs: int
     n_chans: int
     n_bls: int
     n_chans_per_substream: int
@@ -104,7 +105,8 @@ class CorrelatorRemoteControl:
         done.
         """
         # Some metadata we know already from the config.
-        n_ants = len(correlator_config["outputs"]["antenna_channelised_voltage"]["src_streams"]) // 2
+        n_inputs = len(correlator_config["outputs"]["antenna_channelised_voltage"]["src_streams"])
+        n_ants = n_inputs // 2
         n_chans = correlator_config["outputs"]["antenna_channelised_voltage"]["n_chans"]
 
         # But some can't.
@@ -129,6 +131,7 @@ class CorrelatorRemoteControl:
             product_controller_client=pcc,
             dsim_client=dsim_client,
             n_ants=n_ants,
+            n_inputs=n_inputs,
             n_chans=n_chans,
             n_bls=n_bls,
             n_chans_per_substream=n_chans_per_substream,
