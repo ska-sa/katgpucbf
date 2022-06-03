@@ -83,7 +83,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.first_timestamp = first_timestamp
         self.dither_seed = dither_seed
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
-        self._signal_service = SignalService([self.sender.heap_set.data["payload"], self.spare.data["payload"]])
+        self._signal_service = SignalService(
+            [self.sender.heap_set.data["payload"], self.spare.data["payload"]],
+            sample_bits,
+            dither_seed,
+        )
 
         self._signals_orig_sensor = aiokatcp.Sensor(
             str,
@@ -173,9 +177,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 signals,
                 self.first_timestamp,
                 self.adc_sample_rate,
-                self.sample_bits,
                 self.spare.data["payload"],
-                dither_seed=self.dither_seed,
             )
             spare = self.sender.heap_set
             timestamp = await self.sender.set_heaps(self.spare)
