@@ -24,7 +24,7 @@ import os
 import signal
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Union
 
 import dask.array as da
 import numba
@@ -39,46 +39,60 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 2**20
 
 
+def _sample_helper(n: int, chunk_data: da.Array, sample_chunk: Callable, **kwargs) -> da.Array:
+    """Help implement :meth:`sample` in subclasses of :class:`Signal`.
+
+    This can be used when each chunk can be generated from a single value
+    per chunk (plus some chunk-independent state).
+
+    Currently the call to `sample_chunk` for the final chunk will use the
+    full chunk size, unless `n` is less than CHUNK_SIZE. In future it may
+    take care of truncating the final chunk.
+
+    Parameters
+    ----------
+    n
+        Number of samples to generate
+    chunk_data
+        Array holding per-chunk data. It must have the same number of
+        chunks as the output.
+    sample_chunk
+        Callback to generate a single chunk. It is passed a chunk from
+        `chunk_data` as a positional argument, and `chunk_size` as a
+        keyword argument.
+    kwargs
+        Additional keyword arguments forwarded to `sample_chunk`.
+    """
+    chunk_size = min(n, CHUNK_SIZE)
+    n_chunks = (n + chunk_size - 1) // chunk_size
+    return da.map_blocks(
+        sample_chunk,
+        chunk_data,
+        chunks=((chunk_size,) * n_chunks,),
+        chunk_size=chunk_size,
+        **kwargs,
+    )[:n]
+
+
+def _sample_helper_random(n: int, seed_seq: np.random.SeedSequence, sample_chunk: Callable, **kwargs) -> da.Array:
+    """Generate a 1D dask array of random data.
+
+    The random generators are seeded from `seed_seq`. Other parameters are
+    passed to :func:`_sample_helper`.
+    """
+    n_chunks = (n + CHUNK_SIZE - 1) // CHUNK_SIZE
+    seed_seqs = seed_seq.spawn(n_chunks)
+    # Chunk size of 1 so that we can map each SeedSequence to an output chunk
+    seed_seqs_dask = da.from_array(np.array(seed_seqs, dtype=object), 1)
+    return _sample_helper(n, seed_seqs_dask, sample_chunk, **kwargs)
+
+
 class Signal(ABC):
     """Abstract base class for signals.
 
     An instance is simply a real-valued function of time, for a single
     polarisation.
     """
-
-    def _sample_helper(self, n: int, chunk_data: da.Array, sample_chunk: Callable, **kwargs) -> da.Array:
-        """Help implement :meth:`sample` in subclasses.
-
-        This can be used when each chunk can be generated from a single value
-        per chunk (plus some chunk-independent state).
-
-        Currently the call to `sample_chunk` for the final chunk will use the
-        full chunk size, unless `n` is less than CHUNK_SIZE. In future it may
-        take care of truncating the final chunk.
-
-        Parameters
-        ----------
-        n
-            Number of samples to generate
-        chunk_data
-            Array holding per-chunk data. It must have the same number of
-            chunks as the output.
-        sample_chunk
-            Callback to generate a single chunk. It is passed a chunk from
-            `chunk_data` as a positional argument, and `chunk_size` as a
-            keyword argument.
-        kwargs
-            Additional keyword arguments forwarded to `sample_chunk`.
-        """
-        chunk_size = min(n, CHUNK_SIZE)
-        n_chunks = (n + chunk_size - 1) // chunk_size
-        return da.map_blocks(
-            sample_chunk,
-            chunk_data,
-            chunks=((chunk_size,) * n_chunks,),
-            chunk_size=chunk_size,
-            **kwargs,
-        )[:n]
 
     @abstractmethod
     def sample(self, n: int, sample_rate: float) -> da.Array:
@@ -203,7 +217,7 @@ class CW(Signal):
 
         # Index of the first element of each chunk
         offsets = da.arange(0, n, CHUNK_SIZE, chunks=1, dtype=np.int64)
-        return self._sample_helper(
+        return _sample_helper(
             n,
             offsets,
             self._sample_chunk,
@@ -226,11 +240,9 @@ class Random(Signal):
     """
 
     entropy: int  #: entropy used to populate a :class:`np.random.SeedSequence`
-    spawn_key: Sequence[int] = ()
 
-    def __init__(self, entropy: Optional[int] = None, spawn_key: Sequence[int] = ()) -> None:
+    def __init__(self, entropy: Optional[int] = None) -> None:
         self.entropy = entropy if entropy is not None else self._generate_entropy()
-        self.spawn_key = spawn_key
 
     def _generate_entropy(self) -> int:
         """Generate a random seed.
@@ -254,16 +266,8 @@ class Random(Signal):
         """
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
-        n_chunks = (n + CHUNK_SIZE - 1) // CHUNK_SIZE
-        seed_seqs = np.random.SeedSequence(self.entropy, spawn_key=self.spawn_key).spawn(n_chunks)
-        # Chunk size of 1 so that we can map each SeedSequence to an output chunk
-        seed_seqs_dask = da.from_array(np.array(seed_seqs, dtype=object), 1)
-        return self._sample_helper(
-            n,
-            seed_seqs_dask,
-            self._sample_chunk,
-            meta=np.array((), np.float32),
-        )
+        seed_seq = np.random.SeedSequence(self.entropy)
+        return _sample_helper_random(n, seed_seq, self._sample_chunk, meta=np.array((), np.float32))
 
 
 @dataclass
@@ -298,25 +302,7 @@ class WGN(Random):
         return rng.standard_normal(size=chunk_size, dtype=np.float32) * self.std
 
     def __str__(self) -> str:
-        assert self.spawn_key == ()  # spawn_key is only intended for use with Dither
         return f"wgn({self.std}, {self.entropy})"
-
-
-class Dither(Random):
-    """Random signal to add as part of quantisation, for dithering.
-
-    Unlike other signals, this is scaled such that the quantisation bin size is
-    1.0.
-
-    The implementation currently uses a uniform distribution, but that is
-    subject to change.
-    """
-
-    def _sample_chunk(self, seed_seq: Sequence[np.random.SeedSequence], *, chunk_size: int) -> np.ndarray:
-        # The RNG is initialised every time this is called so that it will
-        # produce the same results.
-        rng = np.random.default_rng(seed_seq[0])
-        return rng.random(size=chunk_size, dtype=np.float32) - np.float32(0.5)
 
 
 def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
@@ -411,9 +397,37 @@ def format_signals(signals: Sequence[Signal]) -> str:
     return "; ".join(str(s) for s in signals) + ";"
 
 
+def _dither_sample_chunk(seed_seq: Sequence[np.random.SeedSequence], *, chunk_size: int) -> np.ndarray:
+    """Produce one chunk for :func:`dither`."""
+    rng = np.random.default_rng(seed_seq[0])
+    return rng.random(size=chunk_size, dtype=np.float32) - np.float32(0.5)
+
+
+def make_dither(n_pols: int, n: int, entropy: Optional[int] = None) -> xr.DataArray:
+    """Create a set of dither signals to use with :func:`quantise`.
+
+    The returned array has ``pol`` and ``data`` axes, and is backed by a Dask
+    array.
+
+    The implementation currently uses a uniform distribution, but that is
+    subject to change.
+    """
+    seed_seqs = np.random.SeedSequence(entropy).spawn(n_pols)
+    d = da.stack(
+        [
+            _sample_helper_random(n, seed_seq, _dither_sample_chunk, meta=np.array((), np.float32))
+            for seed_seq in seed_seqs
+        ]
+    )
+    return xr.DataArray(d, dims=["pol", "data"])
+
+
 @numba.njit
-def _clip(a, a_min, a_max):
-    """Like np.clip, but for scalars (which is currently broken in numba)."""
+def _clip(a, a_min, a_max):  # pragma: nocover
+    """Like np.clip, but for scalars.
+
+    It's not working in numba: https://github.com/numba/numba/issues/3469.
+    """
     if a < a_min:
         return a_min
     elif a > a_max:
@@ -423,7 +437,7 @@ def _clip(a, a_min, a_max):
 
 
 @numba.njit(nogil=True)
-def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:
+def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:  # pragma: nocover
     out = np.empty_like(chunk, dtype=np.int32)
     for i in range(chunk.shape[0]):
         scaled = chunk[i] * scale + dither[i]
@@ -434,9 +448,7 @@ def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) ->
 def quantise(
     data: da.Array,
     bits: int,
-    dither: bool = True,
-    dither_seed: Optional[int] = None,
-    dither_spawn_key: Sequence[int] = (),
+    dither: da.Array,
 ) -> da.Array:
     """Convert floating-point data to fixed-point.
 
@@ -449,22 +461,10 @@ def quantise(
         Total number of bits per output sample (including the sign bit). The
         input values are scaled by :math:`2^{bits-1} - 1`.
     dither
-        If true, add uniform random values in the range [-0.5, 0.5) after
-        scaling to reduce artefacts.
-    dither_seed
-        Random seed used to generate the dither.
-    dither_spawn_key
-        Unique key to allow a single `dither_seed` to be used to seed several
-        independent dithers (see :class:`np.random.SeedSequence`).
+        Values to add to the data after scaling.
     """
     scale = np.float32(2 ** (bits - 1) - 1)
-    if dither:
-        dither_signal = Dither(dither_seed, dither_spawn_key).sample(data.size, 0)
-    else:
-        # Not the most efficient solution, but disabling dither is only done
-        # for some unit tests.
-        dither_signal = da.zeros(data.size, np.float32, chunks=CHUNK_SIZE)
-    return da.map_blocks(_quantise_chunk, data, dither_signal, scale=scale, meta=np.array((), np.int32))
+    return da.blockwise(_quantise_chunk, "i", data, "i", dither, "i", scale=scale, meta=np.array((), np.int32))
 
 
 @numba.njit(nogil=True)
@@ -509,6 +509,7 @@ def sample(
     sample_bits: int,
     out: xr.DataArray,
     *,
+    dither: Union[bool, xr.DataArray] = True,
     dither_seed: Optional[int] = None,
 ) -> None:
     """Sample, quantise and pack a set of signals.
@@ -529,17 +530,28 @@ def sample(
     out
         Output array, with a dimension called ``pol`` (which must match the
         number of signals). The other dimensions are flattened.
-    dither_seed
-        Fixed seed for generating the random dither. If not provided, a random
-        seed will be used.
+    dither
+        If true (default), add uniform random values in the range [-0.5, 0.5)
+        after scaling to reduce artefacts. It may also be a :class:`xr.DataArray`
+        with an axis called ``pol`` (which must match the number of signals).
     """
-    if len(signals) != out.sizes["pol"]:
-        raise ValueError(f"Expected {out.sizes['pol']} signals, received {len(signals)}")
+    n_pols = out.sizes["pol"]
+    if len(signals) != n_pols:
+        raise ValueError(f"Expected {n_pols} signals, received {len(signals)}")
     n = out.isel(pol=0).data.size * BYTE_BITS // sample_bits
+
+    if dither is True:
+        dither = make_dither(len(signals), n)
+    elif dither is False:
+        dither = xr.DataArray(da.zeros((n_pols, n), np.float32, chunks=CHUNK_SIZE), dims=["pol", "data"])
+    else:
+        if dither.sizes["pol"] != n_pols:
+            raise ValueError(f"Expected {n_pols} dither signals, received {dither.sizes['pol']}")
+
     sampled = []
     for i, sig in enumerate(signals):
         data = sig.sample(n, sample_rate)
-        data = quantise(data, sample_bits, dither_seed=dither_seed, dither_spawn_key=(i,))
+        data = quantise(data, sample_bits, dither.isel(pol=i).data)
         data = da.roll(data, -timestamp)
         data = packbits(data, sample_bits)
         sampled.append(data)
@@ -559,6 +571,10 @@ class SignalService:
     ----------
     arrays
         All the arrays that might be passed to :meth:`sample`.
+    sample_bits
+        Number of bits per sample for all queries.
+    dither_seed
+        Seed used to generate a fixed dither.
     """
 
     @dataclass
@@ -568,12 +584,15 @@ class SignalService:
         signals: Sequence[Signal]
         timestamp: int
         sample_rate: float
-        sample_bits: int
         out_idx: int  #: Index of the array in the list of valid arrays
-        dither_seed: Optional[int]
 
     @staticmethod
-    def _run(array_schemas: List[dict], pipe: multiprocessing.connection.Connection) -> None:
+    def _run(
+        array_schemas: List[dict],
+        sample_bits: int,
+        dither_seed: Optional[int],
+        pipe: multiprocessing.connection.Connection,
+    ) -> None:
         """Run the main service loop for the separate process.
 
         It receives a _Request on the pipe, and replies with either ``None``
@@ -590,6 +609,12 @@ class SignalService:
             for schema in array_schemas
         ]
 
+        # Generate and pre-compute the dither
+        n_pols = arrays[0].sizes["pol"]
+        n = arrays[0].isel(pol=0).data.size * BYTE_BITS // sample_bits
+        dither = make_dither(n_pols, n, dither_seed)
+        dither = dither.persist()  # Compute now and store results
+
         while True:
             try:
                 req: SignalService._Request = pipe.recv()
@@ -600,9 +625,9 @@ class SignalService:
                     req.signals,
                     req.timestamp,
                     req.sample_rate,
-                    req.sample_bits,
+                    sample_bits,
                     arrays[req.out_idx],
-                    dither_seed=req.dither_seed,
+                    dither=dither,
                 )
             except Exception as exc:
                 pipe.send(exc)
@@ -615,7 +640,7 @@ class SignalService:
         for array in arrays:
             array.attrs["shared_array"].close()
 
-    def __init__(self, arrays: Sequence[xr.DataArray]) -> None:
+    def __init__(self, arrays: Sequence[xr.DataArray], sample_bits: int, dither_seed: Optional[int] = None) -> None:
         self.arrays = arrays
         # These contain the `shared_array` attribute, which carries the
         # reference to the shared memory into the child process.
@@ -629,6 +654,8 @@ class SignalService:
             target=self._run,
             args=(
                 array_schemas,
+                sample_bits,
+                dither_seed,
                 remote_pipe,
             ),
         )
@@ -651,10 +678,7 @@ class SignalService:
         signals: Sequence[Signal],
         timestamp: int,
         sample_rate: float,
-        sample_bits: int,
         out: xr.DataArray,
-        *,
-        dither_seed: Optional[int] = None,
     ) -> None:
         """Perform signal sampling in the remote process.
 
@@ -671,7 +695,7 @@ class SignalService:
         else:
             raise ValueError("output was not registered with the constructor")
         loop = asyncio.get_running_loop()
-        req = SignalService._Request(signals, timestamp, sample_rate, sample_bits, out_idx, dither_seed)
+        req = SignalService._Request(signals, timestamp, sample_rate, out_idx)
         await loop.run_in_executor(None, self._make_request, req)
 
     async def __aenter__(self) -> "SignalService":

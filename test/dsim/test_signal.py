@@ -158,28 +158,50 @@ class TestParseSignals:
             signal.parse_signals("cw(1, foo);")
 
 
+class TestMakeDither:
+    """Tests for :func:`katgpucbf.dsim.signal.make_dither`."""
+
+    def test_no_seed(self) -> None:
+        """Test operation with no seed given."""
+        dither = signal.make_dither(2, 5000)
+        assert dither.sizes["pol"] == 2
+        assert dither.sizes["data"] == 5000
+        assert dither.dtype == np.float32
+        assert dither.chunks[1][0] == signal.CHUNK_SIZE
+        computed = dither.values
+        # Very simple test that it's generating the distribution we expect.
+        assert np.all(-0.5 <= computed)
+        assert np.all(computed <= 0.5)
+        assert np.any(computed < -0.4)
+        assert np.any(computed > 0.4)
+        # Since no seed was used, must get a different result next time
+        dither2 = signal.make_dither(2, 5000)
+        assert not np.all(computed == dither2.values)
+
+    def test_seed(self) -> None:
+        """Test that using a seed gives reproducible results."""
+        dither1 = signal.make_dither(2, 5000, 12345).values
+        dither2 = signal.make_dither(2, 5000, 12345).values
+        np.testing.assert_equal(dither1, dither2)
+
+
 class TestQuantise:
     """Tests for :func:`katgpucbf.dsim.signal.quantise`."""
 
     DATA = [0.1, -0.2, 0.05, 1.0, -1.0, 1.5, -1.5]
-    DATA_DASK = da.from_array(DATA)
+    DATA_DASK = da.from_array(DATA, chunks=3)
+    DITHER = [0.5, -0.4, 0.3, -0.4, -0.4, 0.1, 0.2]
+    DITHER_DASK = da.from_array(DITHER, chunks=4)  # Different chunk size to exercise that
 
     def test_no_dither(self) -> None:
         """Test without dithering, so that values are exact."""
-        out = signal.quantise(self.DATA_DASK, 10, dither=False).compute()
+        out = signal.quantise(self.DATA_DASK, 10, dither=self.DITHER_DASK * 0).compute()
         np.testing.assert_equal(out, [51, -102, 26, 511, -511, 511, -511])
 
     def test_dither(self) -> None:
-        """Test with dithering.
-
-        The random nature of the dithering is not tested; just that the
-        output values are in the expected range.
-        """
-        out = signal.quantise(self.DATA_DASK, 10).compute()
-        low = [51, -103, 25, 510, -511, 511, -511]
-        high = [52, -102, 26, 511, -510, 511, -511]
-        for i in range(len(self.DATA)):
-            assert low[i] <= out[i] <= high[i]
+        """Test with dithering."""
+        out = signal.quantise(self.DATA_DASK, 10, dither=self.DITHER_DASK).compute()
+        np.testing.assert_equal(out, [52, -103, 26, 511, -511, 511, -511])
 
 
 class TestPackbits:
