@@ -22,8 +22,8 @@ import numpy as np
 import pytest
 import spead2.recv
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
-from .reporter import Reporter
+from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from ..reporter import Reporter
 
 
 async def test_accum_length(

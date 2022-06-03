@@ -15,6 +15,7 @@
 ################################################################################
 
 """Fixtures and options for qualification testing of the correlator."""
+
 import asyncio
 import inspect
 import json
@@ -72,10 +73,10 @@ def event_loop():  # noqa: D103
     loop.close()
 
 
-@pytest.fixture(scope="session", params=[4, 8, 14])
-def n_antennas(request):  # noqa: D401
+@pytest.fixture(scope="session")
+def n_antennas():  # noqa: D401
     """Number of antennas, i.e. size of the array."""
-    return request.param
+    return 8
 
 
 @pytest.fixture(
