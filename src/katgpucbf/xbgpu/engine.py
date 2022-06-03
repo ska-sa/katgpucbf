@@ -112,7 +112,29 @@ class RxQueueItem(QueueItem):
         """Reset the timestamp, events, chunk and heap presence."""
         super().reset(timestamp=timestamp)
         self.chunk: Optional[recv.Chunk] = None
-        self.present.fill(0)
+        self.present.fill(0)  # Assume they're all missing until told otherwise
+
+
+class TxQueueItem(QueueItem):
+    """
+    Extension of the QueueItem to track antennas that have missed data.
+
+    The TxQueueItem between the gpu-proc and sender loops needs to carry a record
+    of which antennas have missed data at any point in the accumulation being
+    processed. This is used to decipher if any baselines were affected, and have
+    their data zeroed accordingly.
+    """
+
+    def __init__(
+        self, buffer_device: katsdpsigproc.accel.DeviceArray, missing_ants: np.ndarray, timestamp: int = 0
+    ) -> None:
+        self.missing_ants = missing_ants
+        super().__init__(buffer_device, timestamp)
+
+    def reset(self, timestamp: int = 0) -> None:
+        """Reset the timestamp, events and missing antenna tracker."""
+        super().reset(timestamp=timestamp)
+        self.missing_ants.fill(0)  # Assume they all had problems until told otherwise
 
 
 class XBEngine(DeviceServer):
@@ -367,8 +389,8 @@ class XBEngine(DeviceServer):
         # all allocated buffers are in continuous circulation.
         self._rx_item_queue: asyncio.Queue[Optional[RxQueueItem]] = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue: asyncio.Queue[Optional[QueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
-        self._tx_free_item_queue: asyncio.Queue[QueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
+        self._tx_item_queue: asyncio.Queue[Optional[TxQueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
             buffer_device = katsdpsigproc.accel.DeviceArray(
@@ -386,7 +408,8 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["out_visibilities"].shape,  # type: ignore
                 self.correlation.slots["out_visibilities"].dtype,  # type: ignore
             )
-            tx_item = QueueItem(buffer_device)
+            missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
+            tx_item = TxQueueItem(buffer_device, missing_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
@@ -403,7 +426,6 @@ class XBEngine(DeviceServer):
         # - This is simply to show if an antenna has had any missing heaps
         #   during an accumulation period
         self.curr_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
-        self.next_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
 
     def add_udp_sender_transport(
         self,
@@ -625,7 +647,8 @@ class XBEngine(DeviceServer):
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
                     self.correlation()
                     # Update the missing ants tracker one last time
-                    self.next_accum_missing_ants[:] &= rx_item.present[:, : i + 1].all(axis=1)
+                    self.curr_accum_missing_ants[:] &= rx_item.present[:, : i + 1].all(axis=1)
+                    tx_item.missing_ants[:] = self.curr_accum_missing_ants.copy()
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
@@ -637,15 +660,13 @@ class XBEngine(DeviceServer):
                     self.correlation.zero_visibilities()
                     self.correlation.first_batch = i + 1
 
-                    self.curr_accum_missing_ants = self.next_accum_missing_ants.copy()
-
                     # Update list using any heaps not used for this accumulation
-                    self.next_accum_missing_ants[:] = rx_item.present[:, i + 1 :].all(axis=1)
+                    self.curr_accum_missing_ants[:] = rx_item.present[:, i + 1 :].all(axis=1)
 
                 current_timestamp += self.rx_heap_timestamp_step
 
             if self.correlation.first_batch < self.correlation.last_batch:
-                self.next_accum_missing_ants[:] &= rx_item.present.all(axis=1)
+                self.curr_accum_missing_ants[:] &= rx_item.present.all(axis=1)
                 self.correlation()
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
@@ -735,12 +756,12 @@ class XBEngine(DeviceServer):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            if np.all(self.curr_accum_missing_ants == 0):
+            if np.all(item.missing_ants == 0):
                 # All Antennas have missed data at some point, zero the entire dump
                 logger.warning("All Antennas had a break in data during this accumulation")
                 buffer_wrapper.buffer.fill(0)
                 incomplete_accum_counter.inc(1)
-            elif not self.curr_accum_missing_ants.all():
+            elif not item.missing_ants.all():
                 all_affected_baselines = []
                 # At least one Antenna has had consistent data
                 for ant_idx, missing_ant in enumerate(self.curr_accum_missing_ants):
@@ -761,7 +782,6 @@ class XBEngine(DeviceServer):
             self.send_stream.send_heap(item.timestamp, buffer_wrapper)
 
             item.reset()
-            self.curr_accum_missing_ants.fill(0)
             await self._tx_free_item_queue.put(item)
 
         await self.send_stream.send_stop_heap()
