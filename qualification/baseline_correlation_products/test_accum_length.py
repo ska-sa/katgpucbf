@@ -54,7 +54,7 @@ async def test_accum_length(
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
-    reply, _ = await correlator.dsim_client.request("signals", f"common=wgn({input_std});common;common;")
+    reply, _ = await correlator.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
     expected_timestamp = int(reply[0])
 
     pdf_report.step("Collect two dumps and check the timestamp difference.")

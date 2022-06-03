@@ -25,7 +25,7 @@
 import ast
 import logging
 from dataclasses import dataclass
-from typing import AsyncGenerator, List, Literal, Optional, Tuple, overload
+from typing import AsyncGenerator, Iterable, List, Literal, Optional, Tuple, overload
 
 import aiokatcp
 import numba
@@ -42,7 +42,6 @@ from spead2.recv.numba import chunk_place_data
 from katgpucbf import COMPLEX
 
 logger = logging.getLogger(__name__)
-DSIM_NAME = "sim.m800"
 
 
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
@@ -62,14 +61,10 @@ async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
             continue
 
 
-async def get_dsim_endpoint(product_controller_client: aiokatcp.Client, adc_sample_rate: float) -> Endpoint:
-    """Get the katcp address for a dsim on a product controller.
-
-    The assumption is made that a single dsim is used, with its name suffixed
-    with the ADC sample rate.
-    """
+async def get_dsim_endpoint(product_controller_client: aiokatcp.Client, adc_sample_rate: float, index: int) -> Endpoint:
+    """Get the katcp address for a dsim on a product controller."""
     return endpoint_parser(None)(
-        await get_sensor_val(product_controller_client, f"{DSIM_NAME}.{int(adc_sample_rate)}.0.port")  # type: ignore
+        await get_sensor_val(product_controller_client, f"sim.dsim{index:03}.{int(adc_sample_rate)}.0.port")
     )
 
 
@@ -78,7 +73,7 @@ class CorrelatorRemoteControl:
     """A container class for katcp clients needed by qualification tests."""
 
     product_controller_client: aiokatcp.Client
-    dsim_client: aiokatcp.Client
+    dsim_clients: List[aiokatcp.Client]
     n_ants: int
     n_inputs: int
     n_chans: int
@@ -96,7 +91,7 @@ class CorrelatorRemoteControl:
 
     @classmethod
     async def connect(
-        cls, pcc: aiokatcp.Client, dsim_client: aiokatcp.Client, correlator_config: dict
+        cls, pcc: aiokatcp.Client, dsim_clients: Iterable[aiokatcp.Client], correlator_config: dict
     ) -> "CorrelatorRemoteControl":
         """Connect to a correlator's product controller.
 
@@ -129,7 +124,7 @@ class CorrelatorRemoteControl:
 
         return CorrelatorRemoteControl(
             product_controller_client=pcc,
-            dsim_client=dsim_client,
+            dsim_clients=list(dsim_clients),
             n_ants=n_ants,
             n_inputs=n_inputs,
             n_chans=n_chans,
