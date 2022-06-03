@@ -79,6 +79,12 @@ def n_antennas():  # noqa: D401
     return 8
 
 
+@pytest.fixture(scope="session")
+def n_dsims():  # noqa: D401
+    """Number of simulated digitisers."""
+    return 1
+
+
 @pytest.fixture(
     scope="session",
     params=[
@@ -116,7 +122,9 @@ def pdf_report(request) -> Reporter:
 
 
 @pytest.fixture(scope="session")
-async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band: str, int_time: float) -> dict:
+async def correlator_config(
+    pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
+) -> dict:
     """Produce the configuration dict from the given parameters."""
     # Adapted from `sim_correlator.py` but with logic for using multiple dsims
     # removed. For the time being, we're going to use a single dsim for
@@ -136,24 +144,26 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
         config["config"]["image_overrides"] = image_overrides
 
     dig_names = []
-    antenna_name = "m800"  # Avoid confusion with real antennas
 
     adc_sample_rate = BANDS[band].adc_sample_rate
     centre_frequency = BANDS[band].centre_frequency
 
-    for pol in ["v", "h"]:
-        name = f"{antenna_name}{pol}"
-        dig_names.append(name)
-        config["outputs"][name] = {
-            "type": "sim.dig.raw_antenna_voltage",
-            "band": band,
-            "adc_sample_rate": adc_sample_rate,
-            "centre_frequency": centre_frequency,
-            "antenna": f"{antenna_name}, 0:0:0, 0:0:0, 0, 0",
-        }
+    for i in range(n_dsims):
+        dsim_name = f"dsim{i:03}"
+        for pol in ["v", "h"]:
+            name = f"{dsim_name}{pol}"
+            dig_names.append(name)
+            config["outputs"][name] = {
+                "type": "sim.dig.raw_antenna_voltage",
+                "band": band,
+                "adc_sample_rate": adc_sample_rate,
+                "centre_frequency": centre_frequency,
+                "antenna": f"{dsim_name}, 0:0:0, 0:0:0, 0, 0",
+            }
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
         "src_streams": [dig_names[i % N_POLS] for i in range(2 * n_antennas)],
+        # m8xx is used to avoid possible confusion with real antennas
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
     }
@@ -169,7 +179,7 @@ async def correlator_config(pytestconfig, n_antennas: int, n_channels: int, band
 
 @pytest.fixture(scope="session")
 async def session_correlator(
-    pytestconfig, correlator_config, band: str
+    pytestconfig, correlator_config, band: str, n_dsims: int
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -210,16 +220,19 @@ async def session_correlator(
     )
     try:
         pcc = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
-        dsim_host, dsim_port = await get_dsim_endpoint(pcc, BANDS[band].adc_sample_rate)
-        dsim_client = await aiokatcp.Client.connect(dsim_host, dsim_port)
+        dsim_clients = []
+        for i in range(n_dsims):
+            dsim_host, dsim_port = await get_dsim_endpoint(pcc, BANDS[band].adc_sample_rate, i)
+            dsim_clients.append(await aiokatcp.Client.connect(dsim_host, dsim_port))
 
-        remote_control = await CorrelatorRemoteControl.connect(pcc, dsim_client, correlator_config)
+        remote_control = await CorrelatorRemoteControl.connect(pcc, dsim_clients, correlator_config)
         yield remote_control
 
         logger.info("Tearing down correlator.")
-        dsim_client.close()
-        pcc.close()
-        await asyncio.gather(pcc.wait_closed(), dsim_client.wait_closed())
+        clients = dsim_clients + [pcc]
+        for client in clients:
+            client.close()
+        await asyncio.gather(*[client.wait_closed() for client in clients])
 
     finally:
         # In case anything does go wrong, we want to make sure that we the
@@ -238,8 +251,10 @@ async def _correlator(
     pcc = session_correlator.product_controller_client
     await pcc.request("gain-all", "antenna_channelised_voltage", "default")
     await pcc.request("delays", "antenna_channelised_voltage", 0, *(["0,0:0,0"] * session_correlator.n_inputs))
-    reply, _ = await session_correlator.dsim_client.request("signals", "0;0;")
-    timestamp = int(reply[0])
+    replies = await asyncio.gather(*[client.request("signals", "0;0;") for client in session_correlator.dsim_clients])
+    # System is stable once the largest of the update timestamps is reached.
+    # TODO: doesn't account for gains/delays (NGC-642).
+    timestamp = max(int(reply[0][0]) for reply in replies)
     await pcc.request("capture-start", "baseline_correlation_products")
 
     yield session_correlator, timestamp
