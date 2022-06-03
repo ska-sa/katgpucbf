@@ -28,6 +28,7 @@
 """
 
 import importlib.resources
+from typing import List
 
 import numpy as np
 from katsdpsigproc import accel, cuda
@@ -244,7 +245,7 @@ class Correlation(accel.Operation):
         self.buffer("mid_visibilities").zero(self.command_queue)
 
     @staticmethod
-    def get_baseline_index(ant1, ant2) -> int:
+    def get_baseline_index(ant1: int, ant2: int) -> int:
         r"""Get index in the visibilities matrix for baseline (ant1, ant2).
 
         The visibilities matrix indexing is as follows:
@@ -266,13 +267,8 @@ class Correlation(accel.Operation):
         return ant2 * (ant2 + 1) // 2 + ant1
 
     @staticmethod
-    def get_baselines_for_antenna(req_ant, n_ants):
-        """Get all basellines for a single antenna.
-
-        Intended to be used when the req_ant has missing data during an accumulation period,
-        the Engine will zero data for the affected baselines.
-
-        """
+    def get_baselines_indices_for_antenna(req_ant: int, n_ants: int) -> List[int]:
+        """Get all baseline indices for a single antenna."""
         baseline_list = []
         for a2 in range(n_ants):
             for a1 in range(a2 + 1):

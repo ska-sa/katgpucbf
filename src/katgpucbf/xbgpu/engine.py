@@ -61,7 +61,7 @@ from .xsend import XSend, incomplete_accum_counter, make_stream
 logger = logging.getLogger(__name__)
 
 # TODO: Not quite sure this is necessary
-get_baselines_for_antenna = njit(Correlation.get_baselines_for_antenna)
+get_baselines_indices_for_antenna = njit(Correlation.get_baselines_indices_for_antenna)
 
 
 class QueueItem:
@@ -376,7 +376,7 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
-            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
+            present = np.zeros(shape=(n_ants, self.heaps_per_fengine_per_chunk), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
@@ -402,9 +402,8 @@ class XBEngine(DeviceServer):
         # To track antennas that have missing data during an accumulation
         # - This is simply to show if an antenna has had any missing heaps
         #   during an accumulation period
-        # - Much like the Chunk.present array, 0 = False and 1 = True
-        self.curr_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=np.uint8)
-        self.next_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=np.uint8)
+        self.curr_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
+        self.next_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
 
     def add_udp_sender_transport(
         self,
@@ -540,11 +539,7 @@ class XBEngine(DeviceServer):
             item.chunk = chunk
             # Need to reshape chunk.present to get Antennas in one dimension
             # - Can't readily access n_ants from here
-            item.present = (
-                chunk.present.copy()
-                .reshape((self.heaps_per_fengine_per_chunk, self.correlation.template.n_ants))
-                .transpose()
-            )
+            item.present[:] = chunk.present.copy().reshape((self.heaps_per_fengine_per_chunk, self.n_ants)).transpose()
 
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
@@ -750,16 +745,18 @@ class XBEngine(DeviceServer):
                 # At least one Antenna has had consistent data
                 for ant_idx, missing_ant in enumerate(self.curr_accum_missing_ants):
                     if not missing_ant:
-                        missing_ants_baselines = get_baselines_for_antenna(ant_idx, self.correlation.template.n_ants)
+                        missing_ants_baselines = get_baselines_indices_for_antenna(ant_idx, self.n_ants)
                         all_affected_baselines += missing_ants_baselines
 
                 unique_baselines_set = set(all_affected_baselines)
                 for affected_baseline in unique_baselines_set:
+                    # Multiply by four as each baseline (antenna pair) has four
+                    # correlation components associated, two per polarisation.
                     affected_baseline_index = affected_baseline * 4
                     buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = 0
 
                 incomplete_accum_counter.inc(1)
-            # else: No F-Engine's had a break in data for this accumulation
+            # else: No F-Engines had a break in data for this accumulation
 
             self.send_stream.send_heap(item.timestamp, buffer_wrapper)
 

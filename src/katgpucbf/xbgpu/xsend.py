@@ -31,13 +31,13 @@ from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
 from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
 
-output_heaps_counter = Counter("output_heaps_x", "number of X-engine heaps transmitted", namespace=METRIC_NAMESPACE)
+output_heaps_counter = Counter("output_x_heaps", "number of X-engine heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter(
-    "output_bytes_x", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
+    "output_x_bytes", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
 # TODO: Perhaps find a better name for this Counter
 incomplete_accum_counter = Counter(
-    "output_incomplete_accum_counter",
+    "output_x_incomplete_accs",
     "incomplete output accumulations because input data was incomplete",
     namespace=METRIC_NAMESPACE,
 )
