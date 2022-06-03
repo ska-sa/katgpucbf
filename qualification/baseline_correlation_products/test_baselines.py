@@ -22,8 +22,8 @@ from typing import Tuple
 
 import numpy as np
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
-from .reporter import Reporter
+from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from ..reporter import Reporter
 
 logger = logging.getLogger(__name__)
 
