@@ -35,7 +35,6 @@ output_heaps_counter = Counter("output_x_heaps", "number of X-engine heaps trans
 output_bytes_counter = Counter(
     "output_x_bytes", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
-# TODO: Perhaps find a better name for this Counter
 incomplete_accum_counter = Counter(
     "output_x_incomplete_accs",
     "incomplete output accumulations because input data was incomplete",
