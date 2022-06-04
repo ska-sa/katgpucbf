@@ -764,7 +764,7 @@ class XBEngine(DeviceServer):
             elif not item.missing_ants.all():
                 all_affected_baselines = []
                 # At least one Antenna has had consistent data
-                for ant_idx, missing_ant in enumerate(self.curr_accum_missing_ants):
+                for ant_idx, missing_ant in enumerate(item.missing_ants):
                     if not missing_ant:
                         missing_ants_baselines = get_baselines_indices_for_antenna(ant_idx, self.n_ants)
                         all_affected_baselines += missing_ants_baselines
