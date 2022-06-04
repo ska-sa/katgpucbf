@@ -48,7 +48,6 @@ import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
-from numba import njit
 
 from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
 from .. import recv as base_recv
@@ -59,9 +58,6 @@ from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
-
-# TODO: Not quite sure this is necessary
-get_baselines_indices_for_antenna = njit(Correlation.get_baselines_indices_for_antenna)
 
 
 class QueueItem:
@@ -766,7 +762,7 @@ class XBEngine(DeviceServer):
                 # At least one Antenna has had consistent data
                 for ant_idx, missing_ant in enumerate(item.missing_ants):
                     if not missing_ant:
-                        missing_ants_baselines = get_baselines_indices_for_antenna(ant_idx, self.n_ants)
+                        missing_ants_baselines = Correlation.get_baselines_indices_for_antenna(ant_idx, self.n_ants)
                         all_affected_baselines += missing_ants_baselines
 
                 unique_baselines_set = set(all_affected_baselines)
