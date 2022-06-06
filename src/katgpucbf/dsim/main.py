@@ -159,15 +159,15 @@ async def async_main() -> None:
 
     if args.dither_seed is None:
         args.dither_seed = np.random.SeedSequence().entropy  # Generate a random seed
-    async with signal.SignalService(
-        [heap_sets[0].data["payload"]], args.sample_bits, args.dither_seed
-    ) as signal_service:
-        await signal_service.sample(
-            args.signals,
-            0,
-            args.adc_sample_rate,
-            heap_sets[0].data["payload"],
-        )
+    signal_service = signal.SignalService(
+        [heap_set.data["payload"] for heap_set in heap_sets], args.sample_bits, args.dither_seed
+    )
+    await signal_service.sample(
+        args.signals,
+        0,
+        args.adc_sample_rate,
+        heap_sets[0].data["payload"],
+    )
 
     stream = send.make_stream(
         endpoints=endpoints,
@@ -211,6 +211,7 @@ async def async_main() -> None:
         sample_bits=args.sample_bits,
         signals_str=args.signals_orig,
         signals=args.signals,
+        signal_service=signal_service,
         host=args.katcp_host,
         port=args.katcp_port,
     )

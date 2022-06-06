@@ -27,7 +27,7 @@ from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
 from katgpucbf.dsim.descriptors import DescriptorSender
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
-from katgpucbf.dsim.signal import parse_signals
+from katgpucbf.dsim.signal import SignalService, parse_signals
 
 from .. import get_sensor
 from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
@@ -41,6 +41,8 @@ async def katcp_server(
     # Make up a bogus signal. It's not actually populated in heap_sets
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
 
+    dither_seed = 42
+    signal_service = SignalService([heap_set.data["payload"] for heap_set in heap_sets], DIG_SAMPLE_BITS, dither_seed)
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
@@ -48,9 +50,10 @@ async def katcp_server(
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=DIG_SAMPLE_BITS,
         first_timestamp=0,
-        dither_seed=42,
+        dither_seed=dither_seed,
         signals_str=signals_str,
         signals=parse_signals(signals_str),
+        signal_service=signal_service,
         host="127.0.0.1",
         port=0,
     )

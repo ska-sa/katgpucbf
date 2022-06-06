@@ -46,11 +46,18 @@ class DeviceServer(aiokatcp.DeviceServer):
         Number of bits per output sample
     first_timestamp
         The timestamp associated with the first output sample
+    dither_seed
+        Dither seed (used only to populate a sensor).
     signals_str
         String that was parsed to produce `signals`.
     signals
         User-requested signals. Note that these must have already been loaded
         into the sender; it is provided here purely to populate sensors.
+    signal_service
+        Helper process for generating new signals. It must be constructed
+        consistent with the other arguments (in particular,
+        ``sender.heap_set.data["payload"]`` and ``spare.data["payload"]`` must
+        be passed to the constructor).
     *args, **kwargs
         Passed to base class
     """
@@ -71,6 +78,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         dither_seed: int,
         signals_str: str,
         signals: Sequence[Signal],
+        signal_service: SignalService,
         *args,
         **kwargs,
     ) -> None:
@@ -81,13 +89,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
         self.first_timestamp = first_timestamp
-        self.dither_seed = dither_seed
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
-        self._signal_service = SignalService(
-            [self.sender.heap_set.data["payload"], self.spare.data["payload"]],
-            sample_bits,
-            dither_seed,
-        )
+        self._signal_service = signal_service
 
         self._signals_orig_sensor = aiokatcp.Sensor(
             str,
