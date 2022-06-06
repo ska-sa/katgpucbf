@@ -556,7 +556,6 @@ class XBEngine(DeviceServer):
             item.timestamp += timestamp
             item.chunk = chunk
             # Need to reshape chunk.present to get Antennas in one dimension
-            # - Can't readily access n_ants from here
             item.present[:] = chunk.present.copy().reshape((self.heaps_per_fengine_per_chunk, self.n_ants)).transpose()
 
             # Initiate transfer from received chunk to rx_item buffer.
@@ -638,7 +637,6 @@ class XBEngine(DeviceServer):
                 # chunk though, this is why this check has to happen for each
                 # batch. This check is the equivalent of the MeerKAT SKARAB
                 # X-Engine auto-resync logic.
-                # TODO: Perhaps introduce the timestamp check here
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
                     self.correlation()
