@@ -44,7 +44,7 @@ HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
-SKIP_ANT: Final[bool] = False  # TODO: Potentially move this, placed here for convenience
+SKIP_ANT: Final[bool] = True  # TODO: Potentially move this, placed here for convenience
 MISSING_ANT: Final[int] = 0  # TODO: Add this to test_parameters, or even randomise
 
 
@@ -256,11 +256,20 @@ class TestEngine:
 
         return heaps
 
+    def _make_feng(
+        self, queues: List[spead2.InprocQueue], max_packet_size: int, max_heaps: int
+    ) -> "spead2.send.asyncio.AsyncStream":
+        """Create send stream for a fake F-Engine."""
+        feng_stream_config = spead2.send.StreamConfig(
+            max_packet_size=max_packet_size,
+            max_heaps=max_heaps,
+        )
+        return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, feng_stream_config)
+
     async def _send_data(
         self,
-        feng_stream,
-        recv_stream,
         mock_recv_streams,
+        recv_stream,
         *,
         heap_accumulation_threshold: int,
         n_accumulations: int,
@@ -269,7 +278,33 @@ class TestEngine:
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
     ) -> np.ndarray:
-        """Send a contiguous stream of data and retrieve the results."""
+        """Send a contiguous stream of data to the engine and retrieve the results.
+
+        Parameters
+        ----------
+        mock_recv_streams
+            Fixture
+        recv_stream
+            InprocStream to receive data output by XBEngine.
+        heap_accumulation_threshold
+            Number of consecutive heaps to process in a single accumulation.
+        n_accumulations
+            Number of accumulations this test aims to process.
+        timestamp_step
+            Timestamp step between each received heap processed.
+        n_ants, n_channels_per_stream, n_spectra_per_heap
+            See :meth:`_create_heaps` for more info.
+
+        Returns
+        -------
+        gpu_results
+            Array of all GPU-generated data of shape
+            - ((n_accumulations + 1), channels_per_stream, baselines, COMPLEX)
+        """
+        # Header is 12 fields of 8 bytes each = 96 bytes
+        max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
+        max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
+        feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
         # Generate Data to be sent to the receiver. We are performing
         # <n_accumulations> full accumulations. Each accumulation requires
         # heap_accumulation_threshold batches of heaps. Additionally, we generate
@@ -362,6 +397,11 @@ class TestEngine:
 
         This test simulates an incomplete accumulation at the start of transmission
         to ensure that the auto-resync logic works correctly.
+
+        .. todo::
+            The queue used for the XBEngine's sender transport and the final
+            recv_stream need to be abstracted into a fixture, similar to
+            test/fgpu's mock_send_stream.
         """
         n_samples_between_spectra = 2 * n_channels_total
 
@@ -373,15 +413,8 @@ class TestEngine:
         heap_accumulation_threshold = 4
         n_accumulations = 3
 
-        # Header is 12 fields of 8 bytes each: So 96 bytes of header
-        max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        # Create source stream object - simulates received data.
-        feng_stream_config = spead2.send.StreamConfig(
-            max_packet_size=max_packet_size, max_heaps=n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
-        )
-        feng_stream = spead2.send.asyncio.InprocStream(spead2.ThreadPool(), mock_recv_streams, feng_stream_config)
         queue = spead2.InprocQueue()
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
@@ -414,9 +447,8 @@ class TestEngine:
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             gpu_results = await self._send_data(
-                feng_stream,
-                recv_stream,
                 mock_recv_streams,
+                recv_stream,
                 heap_accumulation_threshold=heap_accumulation_threshold,
                 n_accumulations=n_accumulations,
                 timestamp_step=timestamp_step,
@@ -452,6 +484,11 @@ class TestEngine:
 
             np.testing.assert_equal(expected_output, gpu_results[i])
 
-        # TODO: Likely need to add checks for other Stats
         assert prom_diff.get_sample_diff("output_x_incomplete_accs_total") == incomplete_accums_counter
+        assert prom_diff.get_sample_diff("output_x_heaps_total") == n_accumulations + 1
+        # Could manually calculate it here, but it's available inside the send_stream
+        assert prom_diff.get_sample_diff("output_x_bytes_total") == xbengine.send_stream.heap_payload_size_bytes * (
+            n_accumulations + 1
+        )
+
         await xbengine.stop()
