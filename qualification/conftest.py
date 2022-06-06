@@ -29,7 +29,6 @@ import pytest
 from async_timeout import timeout
 from katsdpservices import get_interface_address
 
-from katgpucbf import N_POLS
 from katgpucbf.meerkat import BANDS
 
 from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_dsim_endpoint
@@ -162,7 +161,7 @@ async def correlator_config(
             }
     config["outputs"]["antenna_channelised_voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
-        "src_streams": [dig_names[i % N_POLS] for i in range(2 * n_antennas)],
+        "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * n_antennas)],
         # m8xx is used to avoid possible confusion with real antennas
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
