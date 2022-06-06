@@ -169,6 +169,16 @@ async def async_main() -> None:
         heap_sets[0].data["payload"],
     )
 
+    # Enable real-time scheduling after creating signal_service (which spawns a
+    # bunch of processes we don't want to have it) but before creating the send
+    # stream (which we do want to have it).
+    try:
+        os.sched_setscheduler(0, os.SCHED_RR, os.sched_param(1))
+    except PermissionError:
+        logger.info("Real-time scheduling could not be enabled (permission denied)")
+    else:
+        logger.info("Real-time scheduling enabled")
+
     stream = send.make_stream(
         endpoints=endpoints,
         heap_sets=heap_sets,
