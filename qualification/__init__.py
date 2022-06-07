@@ -83,6 +83,7 @@ class CorrelatorRemoteControl:
     n_spectra_per_acc: int
     int_time: float
     n_samples_between_spectra: int
+    input_labels: List[str]
     bls_ordering: List[Tuple[str, str]]
     sync_time: float
     scale_factor_timestamp: float
@@ -103,6 +104,7 @@ class CorrelatorRemoteControl:
         n_inputs = len(correlator_config["outputs"]["antenna_channelised_voltage"]["src_streams"])
         n_ants = n_inputs // 2
         n_chans = correlator_config["outputs"]["antenna_channelised_voltage"]["n_chans"]
+        input_labels = correlator_config["outputs"]["antenna_channelised_voltage"]["input_labels"]
 
         # But some can't.
         n_bls = await get_sensor_val(pcc, "baseline_correlation_products-n-bls")
@@ -134,6 +136,7 @@ class CorrelatorRemoteControl:
             n_spectra_per_acc=n_spectra_per_acc,
             int_time=int_time,
             n_samples_between_spectra=n_samples_between_spectra,
+            input_labels=input_labels,
             bls_ordering=bls_ordering,
             sync_time=sync_time,
             scale_factor_timestamp=scale_factor_timestamp,
