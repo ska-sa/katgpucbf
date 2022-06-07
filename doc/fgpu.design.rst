@@ -178,9 +178,9 @@ Postprocessing
 The remaining steps are to
 
  1. Apply gains and fine delays.
- 2. Do a partial transpose, so that *acc_len* (256) spectra are stored
-    contiguously for each channel (the Nyquist frequencies are also discarded
-    at this point).
+ 2. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
+    are stored contiguously for each channel (the Nyquist frequencies are also
+    discarded at this point).
  3. Convert to int8.
  4. Interleave the polarisations.
 
@@ -190,7 +190,7 @@ operations are all straightforward. While C++ doesn't have a convert with
 saturation function, we can access the CUDA functionality through inline PTX
 assembly (OpenCL C has an equivalent function).
 
-Fine delays are computed using the `sincospi` function, which saves both a
+Fine delays are computed using the ``sincospi`` function, which saves both a
 multiplication by :math:`\pi` and a range reduction.
 
 Coarse delays
