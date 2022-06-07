@@ -19,11 +19,9 @@
 
 .. todo::
 
-    - Fix the floating close brace in ``tensor_core_correlation_kernel.cu``. The
-      reasons for it are described in that file.
-    - Eventually modify the classes to support 4 and 16 bit input samples. The
-      kernel supports this, but it is not exposed to the reader. There is no use
-      case for this at the moment, so this is a low priority.
+    Eventually modify the classes to support 4 and 16 bit input samples. The
+    kernel supports this, but it is not exposed to the reader. There is no use
+    case for this at the moment, so this is a low priority.
 
 """
 
