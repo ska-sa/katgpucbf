@@ -2,9 +2,9 @@ Implementation details of tensor-core correlator
 ================================================
 
 For an overview of the tensor-core correlator, see the `GTC presentation`_.
-This document gets into the low-level details of the implementation,
-specifically version 0.5. Familiarity with CUDA (including warp matrix
-multiplies) as well as the function of a correlator are assumed.
+This document gets into the low-level details of the implementation. Familiarity
+with CUDA (including warp matrix multiplies) as well as the function of a
+correlator are assumed.
 
 .. _GTC presentation: https://developer.nvidia.com/gtc/2019/video/s9306
 
@@ -47,7 +47,7 @@ the lower component doesn't cause a carry that affects the higher component.
 The other two bytes of the result are not relevant. Next, :c:func:`__byte_perm`
 selects the four desired bytes in the appropriate order.
 
-It should be noted that this transformation will map -128 to -128 rather than
+It should be noted that this transformation will map -128 to itself rather than
 +128, because +128 cannot be represented in a two's-complement int8. The
 caller is responsible for ensuring that this input value is not used.
 
