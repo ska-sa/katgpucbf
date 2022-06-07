@@ -110,7 +110,7 @@ The colour key is at the top of the page, but briefly, lines marked in green
 were executed by the tests, red were not. Yellow lines indicate branches which
 were only partially covered, i.e. all possible ways to branch were not tested.
 In the cases shown, it is because only expected values were passed to the
-function in question, the unit tests didn't pass invalid inputs in order to
+function in question: the unit tests didn't pass invalid inputs in order to
 check that exceptions were raised appropriately.
 
 On the right hand side, a context is shown for the lines that were executed, as
