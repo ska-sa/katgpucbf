@@ -557,7 +557,6 @@ class XBEngine(DeviceServer):
             item.chunk = chunk
             # Need to reshape chunk.present to get Antennas in one dimension
             item.present[:] = chunk.present.copy().reshape((self.heaps_per_fengine_per_chunk, self.n_ants)).transpose()
-
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
@@ -628,6 +627,7 @@ class XBEngine(DeviceServer):
             # this stage, so the kernel needs to be run on each different batch
             # in the chunk.
             self.correlation.first_batch = 0
+            start_heap_idx = 0
             for i in range(self.heaps_per_fengine_per_chunk):
                 self.correlation.last_batch = i + 1
 
@@ -640,9 +640,29 @@ class XBEngine(DeviceServer):
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
                     self.correlation()
-                    # Update the missing ants tracker one last time
-                    self.curr_accum_missing_ants[:] &= rx_item.present[:, : i + 1].all(axis=1)
-                    tx_item.missing_ants[:] = self.curr_accum_missing_ants.copy()
+                    # Update the missing ants tracker one last time,
+                    # Then using any heaps not used for this accumulation
+                    crossover_heap_idx = i + 1
+                    if self.heap_accumulation_threshold <= (self.heaps_per_fengine_per_chunk - i):
+                        # This is in place should a Chunk's heaps span across multiple accumulations
+                        # e.g. Short, fast accumulation dumps.
+                        self.curr_accum_missing_ants[:] &= rx_item.present[:, start_heap_idx:crossover_heap_idx].all(
+                            axis=1
+                        )
+                        tx_item.missing_ants[:] = self.curr_accum_missing_ants.copy()
+
+                        end_heap_idx = crossover_heap_idx + self.heap_accumulation_threshold
+                        self.curr_accum_missing_ants[:] = rx_item.present[:, crossover_heap_idx:end_heap_idx].all(
+                            axis=1
+                        )
+                    else:
+                        self.curr_accum_missing_ants[:] &= rx_item.present[:, :crossover_heap_idx].all(axis=1)
+                        tx_item.missing_ants[:] = self.curr_accum_missing_ants.copy()
+
+                        self.curr_accum_missing_ants[:] = rx_item.present[:, crossover_heap_idx:].all(axis=1)
+
+                    start_heap_idx = crossover_heap_idx
+
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
                     await self._tx_item_queue.put(tx_item)
@@ -654,13 +674,10 @@ class XBEngine(DeviceServer):
                     self.correlation.zero_visibilities()
                     self.correlation.first_batch = i + 1
 
-                    # Update list using any heaps not used for this accumulation
-                    self.curr_accum_missing_ants[:] = rx_item.present[:, i + 1 :].all(axis=1)
-
                 current_timestamp += self.rx_heap_timestamp_step
 
             if self.correlation.first_batch < self.correlation.last_batch:
-                self.curr_accum_missing_ants[:] &= rx_item.present.all(axis=1)
+                self.curr_accum_missing_ants[:] &= rx_item.present[:, self.correlation.first_batch :].all(axis=1)
                 self.correlation()
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()

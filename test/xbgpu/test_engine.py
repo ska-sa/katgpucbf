@@ -44,7 +44,7 @@ HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
-SKIP_ANT: Final[bool] = True  # TODO: Potentially move this, placed here for convenience
+SKIP_ANT: Final[bool] = False  # TODO: Potentially move this, placed here for convenience
 MISSING_ANT: Final[int] = 0  # TODO: Add this to test_parameters, or even randomise
 
 
