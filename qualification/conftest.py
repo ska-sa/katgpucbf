@@ -51,6 +51,7 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     # forget.
     parser.addini("interface", "Name of network to use for ingest.", type="string")
     parser.addini("use_ibv", "Use ibverbs", type="bool", default="false")
+    parser.addini("product_name", "Name of subarray product", type="string", default="qualification_correlator")
 
 
 def pytest_report_collectionfinish(config):  # noqa: D103
@@ -197,10 +198,7 @@ async def session_correlator(
         logger.exception("unable to connect to master controller!")
         raise
 
-    # We'll always name the correlator the same thing, so that if there are
-    # zombies left behind from past runs, it'll bail straight away and alert
-    # the user that there's a problem.
-    product_name = "qualification_correlator"
+    product_name = pytestconfig.getini("product_name")
     try:
         reply, _ = await master_controller_client.request(
             "product-configure", product_name, json.dumps(correlator_config)
