@@ -1,5 +1,7 @@
 -r ../requirements-dev.txt
 async-timeout
+matplotlib
 pytest-expectr
 pytest-reportlog
 spead2>=3.9.1
+tikzplotlib
