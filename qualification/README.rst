@@ -37,6 +37,7 @@ you're deploying on, and it'll look something like this:
    asyncio_mode = auto
    master_controller_host = lab5.sdp.kat.ac.za
    master_controller_port = 5001
+   product_name = bobs_qualification_correlator  # Use your own name
    interface = enp193s0f0
    use_ibv = true
    log_cli = true
