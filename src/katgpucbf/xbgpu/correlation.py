@@ -267,11 +267,31 @@ class Correlation(accel.Operation):
         return ant2 * (ant2 + 1) // 2 + ant1
 
     @staticmethod
-    def get_baselines_indices_for_antenna(req_ant: int, n_ants: int) -> List[int]:
-        """Get all baseline indices for a single antenna."""
+    def get_baseline_for_missing_ants(present_ants: np.ndarray, n_ants: int) -> List[int]:
+        """Get all baselines for ants indicated as missing in `present_ants`.
+
+        Parameters
+        ----------
+        present_ants
+            Boolean array indicating whether an antenna had data present or not
+            during an accumulation period.
+        n_ants
+            The number of antennas used for this correlator configuration.
+
+        Returns
+        -------
+        baseline_list
+            List of baselines whose indices match the missing antennas.
+        """
         baseline_list = []
+        # np.where returns a tuple with the matches in the first element
+        # - Marked with a 'noqa' as flake8 insists on element-wise comparison,
+        #   which does not work (yet).
+        # - https://github.com/PyCQA/pycodestyle/issues/450
+        missing_ant_indices = np.where(present_ants == False)[0]  # noqa: E712
         for a2 in range(n_ants):
             for a1 in range(a2 + 1):
-                if a1 == req_ant or a2 == req_ant:
+                if np.any(missing_ant_indices == [a1, a2]):
                     baseline_list.append(Correlation.get_baseline_index(a1, a2))
+
         return baseline_list

@@ -108,7 +108,6 @@ class RxQueueItem(QueueItem):
         """Reset the timestamp, events, chunk and heap presence."""
         super().reset(timestamp=timestamp)
         self.chunk: Optional[recv.Chunk] = None
-        self.present.fill(0)  # Assume they're all missing until told otherwise
 
 
 class TxQueueItem(QueueItem):
@@ -117,20 +116,20 @@ class TxQueueItem(QueueItem):
 
     The TxQueueItem between the gpu-proc and sender loops needs to carry a record
     of which antennas have missed data at any point in the accumulation being
-    processed. This is used to decipher if any baselines were affected, and have
+    processed. This is used to determine whether any baselines were affected, and have
     their data zeroed accordingly.
     """
 
     def __init__(
-        self, buffer_device: katsdpsigproc.accel.DeviceArray, missing_ants: np.ndarray, timestamp: int = 0
+        self, buffer_device: katsdpsigproc.accel.DeviceArray, present_ants: np.ndarray, timestamp: int = 0
     ) -> None:
-        self.missing_ants = missing_ants
+        self.present_ants = present_ants
         super().__init__(buffer_device, timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events and missing antenna tracker."""
+        """Reset the timestamp, events and present antenna tracker."""
         super().reset(timestamp=timestamp)
-        self.missing_ants.fill(0)  # Assume they all had problems until told otherwise
+        self.present_ants.fill(True)  # Assume they're fine until told otherwise
 
 
 class XBEngine(DeviceServer):
@@ -404,8 +403,8 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["out_visibilities"].shape,  # type: ignore
                 self.correlation.slots["out_visibilities"].dtype,  # type: ignore
             )
-            missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, missing_ants)
+            present_ants = np.zeros(shape=(n_ants,), dtype=bool)
+            tx_item = TxQueueItem(buffer_device, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
@@ -417,11 +416,6 @@ class XBEngine(DeviceServer):
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
-
-        # To track antennas that have missing data during an accumulation
-        # - This is simply to show if an antenna has had any missing heaps
-        #   during an accumulation period
-        self.curr_accum_missing_ants = np.zeros(shape=(n_ants,), dtype=bool)
 
     def add_udp_sender_transport(
         self,
@@ -556,7 +550,7 @@ class XBEngine(DeviceServer):
             item.timestamp += timestamp
             item.chunk = chunk
             # Need to reshape chunk.present to get Antennas in one dimension
-            item.present[:] = chunk.present.copy().reshape((self.heaps_per_fengine_per_chunk, self.n_ants)).transpose()
+            item.present[:] = chunk.present.reshape((self.heaps_per_fengine_per_chunk, self.n_ants)).transpose()
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
@@ -627,7 +621,6 @@ class XBEngine(DeviceServer):
             # this stage, so the kernel needs to be run on each different batch
             # in the chunk.
             self.correlation.first_batch = 0
-            start_heap_idx = 0
             for i in range(self.heaps_per_fengine_per_chunk):
                 self.correlation.last_batch = i + 1
 
@@ -640,28 +633,10 @@ class XBEngine(DeviceServer):
                 next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
                 if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
                     self.correlation()
-                    # Update the missing ants tracker one last time,
-                    # Then using any heaps not used for this accumulation
-                    crossover_heap_idx = i + 1
-                    if self.heap_accumulation_threshold <= (self.heaps_per_fengine_per_chunk - i):
-                        # This is in place should a Chunk's heaps span across multiple accumulations
-                        # e.g. Short, fast accumulation dumps.
-                        self.curr_accum_missing_ants[:] &= rx_item.present[:, start_heap_idx:crossover_heap_idx].all(
-                            axis=1
-                        )
-                        tx_item.missing_ants[:] = self.curr_accum_missing_ants.copy()
-
-                        end_heap_idx = crossover_heap_idx + self.heap_accumulation_threshold
-                        self.curr_accum_missing_ants[:] = rx_item.present[:, crossover_heap_idx:end_heap_idx].all(
-                            axis=1
-                        )
-                    else:
-                        self.curr_accum_missing_ants[:] &= rx_item.present[:, :crossover_heap_idx].all(axis=1)
-                        tx_item.missing_ants[:] = self.curr_accum_missing_ants.copy()
-
-                        self.curr_accum_missing_ants[:] = rx_item.present[:, crossover_heap_idx:].all(axis=1)
-
-                    start_heap_idx = crossover_heap_idx
+                    # Update the present ants tracker one last time
+                    tx_item.present_ants[:] &= rx_item.present[
+                        :, self.correlation.first_batch : self.correlation.last_batch
+                    ].all(axis=1)
 
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
@@ -677,7 +652,9 @@ class XBEngine(DeviceServer):
                 current_timestamp += self.rx_heap_timestamp_step
 
             if self.correlation.first_batch < self.correlation.last_batch:
-                self.curr_accum_missing_ants[:] &= rx_item.present[:, self.correlation.first_batch :].all(axis=1)
+                tx_item.present_ants[:] &= rx_item.present[
+                    :, self.correlation.first_batch : self.correlation.last_batch
+                ].all(axis=1)
                 self.correlation()
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
@@ -767,23 +744,16 @@ class XBEngine(DeviceServer):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            if np.all(item.missing_ants == 0):
+            if np.all(item.present_ants == 0):
                 # All Antennas have missed data at some point, zero the entire dump
                 logger.warning("All Antennas had a break in data during this accumulation")
                 buffer_wrapper.buffer.fill(0)
                 incomplete_accum_counter.inc(1)
-            elif not item.missing_ants.all():
-                all_affected_baselines = []
-                # At least one Antenna has had consistent data
-                for ant_idx, missing_ant in enumerate(item.missing_ants):
-                    if not missing_ant:
-                        missing_ants_baselines = Correlation.get_baselines_indices_for_antenna(ant_idx, self.n_ants)
-                        all_affected_baselines += missing_ants_baselines
-
-                unique_baselines_set = set(all_affected_baselines)
-                for affected_baseline in unique_baselines_set:
+            elif not item.present_ants.all():
+                affected_baselines = Correlation.get_baseline_for_missing_ants(item.present_ants, self.n_ants)
+                for affected_baseline in affected_baselines:
                     # Multiply by four as each baseline (antenna pair) has four
-                    # correlation components associated, two per polarisation.
+                    # associated correlation components (polarisation pairs).
                     affected_baseline_index = affected_baseline * 4
                     buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = 0
 
