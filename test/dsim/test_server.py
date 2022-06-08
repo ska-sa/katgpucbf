@@ -90,6 +90,8 @@ async def test_signals(
     set_heaps = mocker.patch.object(sender, "set_heaps", autospec=True, return_value=1234567)
     reply, _ = await katcp_client.request("signals", signals_str)
     assert reply == [b"1234567"]
+    _, informs = await katcp_client.request("sensor-value", "steady-state-timestamp")
+    assert informs[0].arguments[4] == b"1234567"
     set_heaps.assert_called_once_with(heap_sets[1])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
     np.testing.assert_equal(heap_sets[1].data["payload"].isel(pol=0).data, 0)
