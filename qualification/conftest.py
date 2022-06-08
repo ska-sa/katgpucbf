@@ -22,9 +22,10 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, Generator, Tuple
 
 import aiokatcp
+import matplotlib.style
 import pytest
 from async_timeout import timeout
 from katsdpservices import get_interface_address
@@ -119,6 +120,13 @@ def pdf_report(request) -> Reporter:
     data = [{"$msg_type": "test_info", "blurb": inspect.getdoc(request.node.function), "test_start": time.time()}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
+
+
+@pytest.fixture(autouse=True)
+def matplotlib_report_style() -> Generator[None, None, None]:
+    """Set the style of all matplotlib plots."""
+    with matplotlib.style.context("ggplot"):
+        yield
 
 
 @pytest.fixture(scope="session")

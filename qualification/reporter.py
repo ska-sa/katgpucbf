@@ -17,10 +17,13 @@
 """Mechanism for logging Pytest's output to a PDF."""
 import logging
 import time
-from typing import List, Optional, Union
+from typing import Any, List, Mapping, Optional, Union
 
+import matplotlib.figure
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+import tikzplotlib
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,41 @@ class Reporter:
         logger.debug(message)
         self._cur_step.append({"$msg_type": "detail", "message": message, "timestamp": time.time()})
 
+    def raw_figure(self, code: str) -> None:
+        """Add raw LaTeX to the document.
+
+        It will be set inside a minipage and is intended for figures, but could
+        potentially contain tables too.
+        """
+        if self._cur_step is None:
+            raise ValueError("Cannot have figure without a current step")
+        self._cur_step.append({"$msg_type": "figure", "code": code})
+
+    def figure(
+        self,
+        figure: matplotlib.figure.Figure,
+        clean_figure: bool = True,
+        tikzplotlib_kwargs: Mapping[str, Any] = {},  # noqa: B006
+    ) -> None:
+        """Add a matplotlib figure to the report.
+
+        Parameters
+        ----------
+        figure
+            The figure to plot
+        clean_figure
+            If true (default), use :func:`tikzplotlib.clean_figure` on the
+            figure to remove points outside the axis limits, etc.
+            Note that this may *modify* the figure.
+        tikzplotlib_kwargs
+            Extra keyword arguments to pass to :func:`tikzplotlib.get_tikz_code`.
+        """
+        if clean_figure:
+            tikzplotlib.clean_figure(figure)
+        kwargs = dict(tikzplotlib_kwargs)
+        kwargs.setdefault("table_row_sep", r"\\")
+        self.raw_figure(tikzplotlib.get_tikz_code(figure, **kwargs))
+
     def plot(
         self,
         x: npt.ArrayLike,
@@ -59,9 +97,12 @@ class Reporter:
         caption: Optional[str] = "",
         xlabel: Optional[str] = "",
         ylabel: Optional[str] = "",
-        legend_labels: Optional[Union[str, List[str]]] = "",
+        legend_labels: Union[str, List[str]] = "",
     ) -> None:
         """Capture numerical data for plotting.
+
+        This is kept only for backwards compatibility. Prefer to use
+        :meth:`figure` instead.
 
         Parameters
         ----------
@@ -96,21 +137,20 @@ class Reporter:
         assert x.ndim == 1, f"x has {x.ndim} dimensions, expected 1!"
         assert y.ndim <= 2, "Can't have y with more than 2 dimensions!"
         assert x.size == y.shape[-1], "x and y must have same length for plotting!"
-        if y.ndim > 1 and legend_labels is not None:
+
+        fig, ax = plt.subplots()
+        if y.ndim > 1:
             assert len(legend_labels) == y.shape[0], "If y is 2-dimensional, we need legend labels."
-
-        # Moving swiftly along.
-        if self._cur_step is None:
-            raise ValueError("Cannot have a plot without a current step")
-
-        self._cur_step.append(
-            {
-                "$msg_type": "plot",
-                "y": y.tolist(),
-                "x": x.tolist(),
-                "caption": caption,
-                "xlabel": xlabel,
-                "ylabel": ylabel,
-                "legend_labels": legend_labels,
-            }
+            for y0, legend_label in zip(y, legend_labels):
+                ax.plot(x, y0, label=legend_label)
+        else:
+            ax.plot(x, y, label=legend_labels)
+        ax.set(
+            title=caption,
+            xlabel=xlabel,
+            ylabel=ylabel,
         )
+        ax.legend()
+        ax.grid()
+
+        self.figure(fig)
