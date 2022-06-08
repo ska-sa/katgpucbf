@@ -99,7 +99,6 @@ class DeviceServer(aiokatcp.DeviceServer):
             initial_status=aiokatcp.Sensor.Status.NOMINAL,
             default=signals_str,
         )
-        # TODO: it's not reproducible because the random dither is not captured
         self._signals_sensor = aiokatcp.Sensor(
             str,
             "signals",
@@ -107,8 +106,16 @@ class DeviceServer(aiokatcp.DeviceServer):
             initial_status=aiokatcp.Sensor.Status.NOMINAL,
             default=format_signals(signals),
         )
+        self._steady_state_sensor = aiokatcp.Sensor(
+            int,
+            "steady-state-timestamp",
+            "Heaps with this timestamp or greater are guaranteed to reflect the effects of previous katcp requests.",
+            default=0,
+            initial_status=aiokatcp.Sensor.Status.NOMINAL,
+        )
         self.sensors.add(self._signals_orig_sensor)
         self.sensors.add(self._signals_sensor)
+        self.sensors.add(self._steady_state_sensor)
         self.sensors.add(
             aiokatcp.Sensor(
                 int,
@@ -187,4 +194,5 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.spare = spare
             self._signals_orig_sensor.value = signals_str
             self._signals_sensor.value = format_signals(signals)
+            self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
             return timestamp
