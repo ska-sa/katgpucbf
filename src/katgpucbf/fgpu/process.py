@@ -812,7 +812,11 @@ class Processor:
                 # TODO: should maybe also do this if _in_items[1] would work
                 # just as well and we've filled the output buffer.
                 self._pop_in(streams)
-        await self._flush_out(0)  # Timestamp doesn't matter since we're finished
+        # Timestamp mostly doesn't matter because we're finished, but if a
+        # katcp request arrives at this point we want to ensure the
+        # steady-state-timestamp sensor is updated to a later timestamp than
+        # anything we'll actually send.
+        await self._flush_out(self._out_item.end_timestamp)
         logger.debug("run_processing completed")
         self.out_queue.put_nowait(None)
 
@@ -1017,3 +1021,24 @@ class Processor:
             See :meth:`~fgpu.send.make_descriptor_heaps` for more information.
         """
         return stream.async_send_heaps(heaps=descriptor_heap_reflist, mode=spead2.send.GroupMode.ROUND_ROBIN)
+
+    def set_gains(self, input: int, gains: np.ndarray) -> int:
+        """Update the gains.
+
+        Returns
+        -------
+        steady_state_timestamp
+            A timestamp by which the gains are guaranteed to be applied
+        """
+        self.gains[:, input] = gains
+        # This timestamp is conservative: self._out_item.timestamp is almost
+        # always valid, except while _flush_out is waiting to update
+        # self._out_item. If a less conservative answer is needed, one would
+        # need to track a separate timestamp in the class that is updated
+        # as gains are copied to the OutItem.
+        return self._out_item.end_timestamp
+
+    def delay_update_timestamp(self) -> int:
+        """Return a timestamp by which an update to the delay model will take effect."""
+        # end_timestamp is updated whenever delays are written into the out_item
+        return self._out_item.end_timestamp

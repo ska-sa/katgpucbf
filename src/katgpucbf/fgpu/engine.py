@@ -339,24 +339,35 @@ class Engine(aiokatcp.DeviceServer):
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
         """Define the sensors for an engine."""
         for pol in range(N_POLS):
-            sensor = aiokatcp.Sensor(
-                str,
-                f"input{pol}-eq",
-                "For this input, the complex, unitless, per-channel digital scaling factors "
-                "implemented prior to requantisation",
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"input{pol}-eq",
+                    "For this input, the complex, unitless, per-channel digital scaling factors "
+                    "implemented prior to requantisation",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
             )
-            sensors.add(sensor)
-
-            sensor = aiokatcp.Sensor(
-                str,
-                f"input{pol}-delay",
-                "The delay settings for this input: (loadmcnt <ADC sample "
-                "count when model was loaded>, delay <in seconds>, "
-                "delay-rate <unit-less or, seconds-per-second>, "
-                "phase <radians>, phase-rate <radians per second>).",
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"input{pol}-delay",
+                    "The delay settings for this input: (loadmcnt <ADC sample "
+                    "count when model was loaded>, delay <in seconds>, "
+                    "delay-rate <unit-less or, seconds-per-second>, "
+                    "phase <radians>, phase-rate <radians per second>).",
+                )
             )
-            sensors.add(sensor)
+            sensors.add(
+                aiokatcp.Sensor(
+                    int,
+                    "steady-state-timestamp",
+                    "Heaps with this timestamp or greater are guaranteed to "
+                    "reflect the effects of previous katcp requests.",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
 
     def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
         """Update the delay sensor upon loading of a new model.
@@ -381,13 +392,18 @@ class Engine(aiokatcp.DeviceServer):
             f"{orig_phase_rate})"
         )
 
+    def _update_steady_state_timestamp(self, timestamp: int) -> None:
+        """Update the ``steady-state-timestamp`` sensor to at least a given value."""
+        sensor = self.sensors["steady-state-timestamp"]
+        sensor.value = max(sensor.value, timestamp)
+
     def set_gains(self, input: int, gains: np.ndarray) -> None:
         """Set the eq gains for one polarisation and update the sensor.
 
         The `gains` must contain one entry per channel; the shortcut of
         supplying a single value is handled by :meth:`request_gain`.
         """
-        self._processor.gains[:, input] = gains
+        self._update_steady_state_timestamp(self._processor.set_gains(input, gains))
         if np.all(gains == gains[0]):
             # All the values are the same, so it can be reported as a single value
             gains = gains[:1]
@@ -526,6 +542,7 @@ class Engine(aiokatcp.DeviceServer):
 
         for delay_model, new_linear_model in zip(self.delay_models, new_linear_models):
             delay_model.add(new_linear_model)
+        self._update_steady_state_timestamp(self._processor.delay_update_timestamp())
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
