@@ -87,10 +87,8 @@ async def sample_tone_response(
             for j in range(N_POLS):
                 signal += tasks[i * N_POLS + j][1]
             requests.append(asyncio.create_task(correlator.dsim_clients[i].request("signals", signal)))
-        replies = await asyncio.gather(*requests)
-        # Take largest update timestamp of any reply
-        timestamp = max(int(reply[0][0]) for reply in replies)
-        _, chunk = await receiver.next_complete_chunk(timestamp)
+        await asyncio.gather(*requests)
+        _, chunk = await receiver.next_complete_chunk()
         assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
         for task, bl_idx in zip(tasks, autos):
             out[task[0]] = chunk.data[:, bl_idx, 0]  # Only keep real part

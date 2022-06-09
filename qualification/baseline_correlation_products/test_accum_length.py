@@ -54,13 +54,12 @@ async def test_accum_length(
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
-    reply, _ = await correlator.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
-    expected_timestamp = int(reply[0])
+    await correlator.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
 
     pdf_report.step("Collect two dumps and check the timestamp difference.")
     chunks: List[Tuple[int, spead2.recv.Chunk]] = []
     receiver = receive_baseline_correlation_products
-    async for timestamp, chunk in receiver.complete_chunks(expected_timestamp, all_timestamps=True):
+    async for timestamp, chunk in receiver.complete_chunks(all_timestamps=True):
         if chunk is None:
             # Throw away failed attempt at getting an adjacent pair
             for _, old_chunk in chunks:

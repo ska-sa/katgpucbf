@@ -17,7 +17,6 @@
 """Baseline verification tests."""
 
 import logging
-import time
 from typing import Tuple
 
 import numpy as np
@@ -93,14 +92,8 @@ async def test_baseline_correlation_products(
         for inp, g in gains.items():
             await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
 
-        expected_timestamp = round((time.time() + 1 - correlator.sync_time) * correlator.scale_factor_timestamp)
-        # Note that we are making an assumption that nothing is straying too far
-        # from wall time here. I don't have a way other than adjusting the dsim
-        # signal of ensuring that we get going after a specific timestamp in the
-        # DSP pipeline itself. See NGC-549
-        _, chunk = await receiver.next_complete_chunk(expected_timestamp)
-        # These asserts aren't particularly important, but they keep mypy happy.
-        assert isinstance(chunk.present, np.ndarray)
+        _, chunk = await receiver.next_complete_chunk()
+        # This assert isn't particularly important, but keeps mypy happy.
         assert isinstance(chunk.data, np.ndarray)
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
