@@ -23,6 +23,7 @@
     Maybe just a ``utils.py`` or something like that would be better.
 """
 import ast
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import AsyncGenerator, Iterable, List, Literal, Optional, Tuple, overload
@@ -42,6 +43,7 @@ from spead2.recv.numba import chunk_place_data
 from katgpucbf import COMPLEX
 
 logger = logging.getLogger(__name__)
+DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
 
 
 async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
@@ -144,6 +146,40 @@ class CorrelatorRemoteControl:
             multicast_endpoints=multicast_endpoints,
         )
 
+    async def steady_state_timestamp(self, *, max_delay: int = DEFAULT_MAX_DELAY) -> int:
+        """Get a timestamp by which the system will be in a steady state.
+
+        In other words, the effects of previous commands will be in place for
+        data with this timestamp.
+
+        Because delays affect timestamps, the caller must provide an upper
+        bound on the delay of any F-engine. The default for this should be
+        acceptable for most cases.
+        """
+        timestamp = 0
+        # Although the dsim sensors will also appear in the product controller,
+        # we can't rely on that due to a race condition: if we make a change
+        # directly on the dsim, the subscription update it sends to the product
+        # controller might not be received before we ask the product controller
+        # for the sensor value. So we have to query every device server that we
+        # make state changes though.
+        clients = [self.product_controller_client] + self.dsim_clients
+        responses = await asyncio.gather(
+            *(client.request("sensor-value", r"/.*steady-state-timestamp$/") for client in clients)
+        )
+        for client, (_, informs) in zip(clients, responses):
+            for inform in informs:
+                # In theory there could be multiple sensors per inform, but aiokatcp
+                # never does this because timestamps are seldom shared.
+                sensor_value = int(inform.arguments[4])
+                if client is not self.product_controller_client:
+                    # values returned from the dsim do not account for delay,
+                    # so need to be offset to get an output timestamp.
+                    sensor_value += max_delay
+                timestamp = max(timestamp, sensor_value)
+        logger.debug("steady_state_timestamp: %d", timestamp)
+        return timestamp
+
 
 class BaselineCorrelationProductsReceiver:
     """Wrap a receive stream with helper functions."""
@@ -161,6 +197,7 @@ class BaselineCorrelationProductsReceiver:
             n_samples_between_spectra=correlator.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
+        self.correlator = correlator
         self.timestamp_step = correlator.n_samples_between_spectra * correlator.n_spectra_per_acc
 
     # The overloads ensure that when all_timestamps is known to be False, the
@@ -169,7 +206,9 @@ class BaselineCorrelationProductsReceiver:
     async def complete_chunks(
         self,
         min_timestamp: Optional[int] = None,
+        *,
         all_timestamps: Literal[False] = False,
+        max_delay: int = DEFAULT_MAX_DELAY,
     ) -> AsyncGenerator[Tuple[int, spead2.recv.Chunk], None]:  # noqa: D102
         yield ...  # type: ignore
 
@@ -177,14 +216,18 @@ class BaselineCorrelationProductsReceiver:
     async def complete_chunks(
         self,
         min_timestamp: Optional[int] = None,
-        all_timestamps: Optional[bool] = False,
+        *,
+        all_timestamps: bool = False,
+        max_delay: int = DEFAULT_MAX_DELAY,
     ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:  # noqa: D102
         yield ...  # type: ignore
 
     async def complete_chunks(
         self,
         min_timestamp=None,
+        *,
         all_timestamps=False,
+        max_delay=DEFAULT_MAX_DELAY,
     ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:
         """Iterate over the complete chunks of the stream.
 
@@ -193,12 +236,19 @@ class BaselineCorrelationProductsReceiver:
         Parameters
         ----------
         min_timestamp
-            If specified, chunks with a timestamp less then this value are
-            discarded.
+            Chunks with a timestamp less then this value are discarded. If the
+            default of ``None`` is used, a value is computed via
+            :meth:`CorrelatorRemoteControl.steady_state_timestamp`.
         all_timestamps
             If set to true (the default is false), discarded chunks still
             yield a ``(timestamp, None)`` pair.
+        max_delay
+            An upper bound on the delay set on any F-engine. This is used in
+            the calculation of `min_timestamp` when no value is provided.
         """
+        if min_timestamp is None:
+            min_timestamp = await self.correlator.steady_state_timestamp(max_delay=max_delay)
+
         data_ringbuffer = self.stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         async for chunk in data_ringbuffer:
@@ -217,18 +267,19 @@ class BaselineCorrelationProductsReceiver:
                 yield timestamp, None
         return
 
-    async def next_complete_chunk(self, min_timestamp: Optional[int] = None) -> Tuple[int, spead2.recv.Chunk]:
+    async def next_complete_chunk(
+        self, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
+    ) -> Tuple[int, spead2.recv.Chunk]:
         """Return the next complete chunk from the stream.
 
         The return value includes the timestamp.
 
         Parameters
         ----------
-        min_timestamp
-            If specified, chunks with a timestamp less then this value are
-            discarded.
+        min_timestamp, max_delay
+            See :meth:`complete_chunks`
         """
-        async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp):
+        async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
             return timestamp, chunk
         assert False  # noqa: B011  # Tells mypy that this isn't reachable
 
