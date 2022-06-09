@@ -275,10 +275,10 @@ def create_baseline_correlation_product_receive_stream(
 
     stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK)
 
-    # Assuming X-engines are at most 1 second out of sync with each other, with
+    # Assuming X-engines are at most 500ms out of sync with each other, with
     # one extra chunk for luck. May need to revisit that assumption for much
     # larger array sizes.
-    max_chunks = round(1 / int_time) + 1
+    max_chunks = max(round(0.5 / int_time), 1) + 1
     n_extra_chunks = 2  # A couple extra to make sure we have breathing room.
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
