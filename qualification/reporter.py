@@ -17,12 +17,9 @@
 """Mechanism for logging Pytest's output to a PDF."""
 import logging
 import time
-from typing import Any, List, Mapping, Optional, Union
+from typing import Any, Mapping, Optional
 
 import matplotlib.figure
-import matplotlib.pyplot as plt
-import numpy as np
-import numpy.typing as npt
 import tikzplotlib
 
 logger = logging.getLogger(__name__)
@@ -88,69 +85,3 @@ class Reporter:
         kwargs = dict(tikzplotlib_kwargs)
         kwargs.setdefault("table_row_sep", r"\\")
         self.raw_figure(tikzplotlib.get_tikz_code(figure, **kwargs))
-
-    def plot(
-        self,
-        x: npt.ArrayLike,
-        y: npt.ArrayLike,
-        *,
-        caption: Optional[str] = "",
-        xlabel: Optional[str] = "",
-        ylabel: Optional[str] = "",
-        legend_labels: Union[str, List[str]] = "",
-    ) -> None:
-        """Capture numerical data for plotting.
-
-        This is kept only for backwards compatibility. Prefer to use
-        :meth:`figure` instead.
-
-        Parameters
-        ----------
-        x
-            X-data for plotting. Must be one-dimensional.
-        y
-            Y-data for plotting. Can be up to two-dimensional, but the length
-            of the second dimension must agree with the length of `x`.
-        caption
-            Title for the graph.
-        xlabel
-            Label for the X-axis.
-        ylabel
-            Label for the Y-axis.
-        legend_labels
-            Legend labels for the various sets of data plotted. Optional only
-            in single-dimension plots, if a 2D `y` is given, a list of labels
-            must be passed.
-
-        Raises
-        ------
-        ValueError
-            If called before :func:`Report.step`, as the plot must be associated
-            with a step in the test procedure.
-        """
-        # Coerce to np.ndarray for data validation.
-        x = np.asarray(x)
-        y = np.asarray(y)
-
-        # I must admit that I'm nervous about using `assert` for this but I
-        # guess that we're unlikely ever to run a test suite with `-O`.
-        assert x.ndim == 1, f"x has {x.ndim} dimensions, expected 1!"
-        assert y.ndim <= 2, "Can't have y with more than 2 dimensions!"
-        assert x.size == y.shape[-1], "x and y must have same length for plotting!"
-
-        fig, ax = plt.subplots()
-        if y.ndim > 1:
-            assert len(legend_labels) == y.shape[0], "If y is 2-dimensional, we need legend labels."
-            for y0, legend_label in zip(y, legend_labels):
-                ax.plot(x, y0, label=legend_label)
-        else:
-            ax.plot(x, y, label=legend_labels)
-        ax.set(
-            title=caption,
-            xlabel=xlabel,
-            ylabel=ylabel,
-        )
-        ax.legend()
-        ax.grid()
-
-        self.figure(fig)
