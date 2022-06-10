@@ -12,6 +12,7 @@ Welcome to katgpucbf's documentation!
    :caption: Development
 
    dev-guide
+   qualification
    spead
 
 .. toctree::
