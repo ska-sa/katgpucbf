@@ -1,10 +1,10 @@
-Guidelines for Development
-==========================
-
 .. _getting-started:
 
 Getting Started
----------------
+===============
+
+Setting up a development environment
+------------------------------------
 
 First, clone the repo from Github.
 

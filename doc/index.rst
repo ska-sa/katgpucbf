@@ -7,9 +7,11 @@ Welcome to katgpucbf's documentation!
    :maxdepth: 3
    :caption: Contents:
 
+   introduction
+
 .. toctree::
    :maxdepth: 2
-   :caption: Development
+   :caption: Guidelines for Development
 
    dev-guide
    unit-testing
