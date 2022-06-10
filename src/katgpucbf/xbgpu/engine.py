@@ -105,7 +105,7 @@ class RxQueueItem(QueueItem):
         super().__init__(buffer_device, timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events, chunk and heap presence."""
+        """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
         self.chunk: Optional[recv.Chunk] = None
 
@@ -652,10 +652,10 @@ class XBEngine(DeviceServer):
                 current_timestamp += self.rx_heap_timestamp_step
 
             if self.correlation.first_batch < self.correlation.last_batch:
+                self.correlation()
                 tx_item.present_ants[:] &= rx_item.present[
                     :, self.correlation.first_batch : self.correlation.last_batch
                 ].all(axis=1)
-                self.correlation()
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
             rx_item.add_event(proc_event)
@@ -744,13 +744,13 @@ class XBEngine(DeviceServer):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            if np.all(item.present_ants == 0):
+            if not np.any(item.present_ants):
                 # All Antennas have missed data at some point, zero the entire dump
                 logger.warning("All Antennas had a break in data during this accumulation")
                 buffer_wrapper.buffer.fill(0)
                 incomplete_accum_counter.inc(1)
             elif not item.present_ants.all():
-                affected_baselines = Correlation.get_baseline_for_missing_ants(item.present_ants, self.n_ants)
+                affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.n_ants)
                 for affected_baseline in affected_baselines:
                     # Multiply by four as each baseline (antenna pair) has four
                     # associated correlation components (polarisation pairs).
