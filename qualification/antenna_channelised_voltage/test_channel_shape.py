@@ -120,9 +120,12 @@ async def test_channel_shape(
 
     # The maximum is to avoid errors when data is 0
     db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak)
-    x = np.linspace(-2, 2, len(hdr_data))
+    x = np.linspace(-2.5, 2.5, len(hdr_data))
 
-    for xmax, ymin, title in [(2, -100, "Channel response"), (0.5, -1.5, "Channel response (zoomed)")]:
+    for xticks, ymin, title in [
+        (np.arange(-2.5, 2.6, 0.5), -100, "Channel response"),
+        (np.arange(-0.5, 0.55, 0.1), -1.5, "Channel response (zoomed)"),
+    ]:
         fig = Figure()
         ax = fig.subplots()
         # pgfplots seems to struggle if data is too far outside ylim
@@ -130,10 +133,18 @@ async def test_channel_shape(
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
-        ax.set_xlim(-xmax, xmax)
+        ax.set_xticks(xticks)
+        ax.set_xlim(xticks[0], xticks[-1])
         ax.set_ylim(ymin, 0)
+
+        for y in [-3, -53]:
+            if ymin < y:
+                ax.axhline(y, dashes=(1, 1), color="black")
+                ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
         # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-        pdf_report.figure(fig, clean_figure=False)
+        pdf_report.figure(
+            fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
+        )
 
     pdf_report.step("Check attenuation bandwidth.")
     width_3db = cutoff_bandwidth(db, -3, 1 / resolution)
