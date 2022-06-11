@@ -27,12 +27,44 @@ from ..reporter import Reporter
 from . import sample_tone_response
 
 
+def cutoff_bandwidth_half(data: np.ndarray, cutoff: float, step: float) -> float:
+    """One-sided version of :func:`cutoff_bandwidth`.
+
+    Here the first element of `data` must represent the centre.
+    """
+    assert data[0] > cutoff
+    assert data[-1] < cutoff
+    right = np.nonzero(data < cutoff)[0][0]
+    left = right - 1
+    interp = left + (data[left] - cutoff) / (data[left] - data[right])
+    return interp * step
+
+
+def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
+    """Measure width of the response at a given power level.
+
+    Estimate the width of the central portion where `data` is below `cutoff`,
+    in units of channels. If there are sidelobes that rise about `cutoff`,
+    they're included in the width.
+    """
+    assert len(data) % 2 == 1  # Must be symmetrical
+    mid = len(data) // 2
+    return cutoff_bandwidth_half(data[mid:], cutoff, step) + cutoff_bandwidth_half(data[mid::-1], cutoff, step)
+
+
 async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
-    """TODO."""
+    r"""Test the shape of the response to a single channel.
+
+    Requirements verified:
+
+    CBF-REQ-0126
+        The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
+        is :math:`\le 2\times` (twice) the pass band width.
+    """
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
     base_channel = correlator.n_chans // 3
@@ -68,7 +100,6 @@ async def test_channel_shape(
         return data
 
     pdf_report.step("Measure channel shape.")
-    # We also need to avoid overflowing the X-engine accumulation
     gain_step = 100.0
     for i in range(3):
         pdf_report.detail(f"Set gain to {gain}.")
@@ -94,12 +125,21 @@ async def test_channel_shape(
     for xmax, ymin, title in [(2, -100, "Channel response"), (0.5, -1.5, "Channel response (zoomed)")]:
         fig = Figure()
         ax = fig.subplots()
-        # pgfplots seems to struggle if data is too far out ylim
+        # pgfplots seems to struggle if data is too far outside ylim
         ax.plot(x, np.maximum(db, ymin - 10))
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
         ax.set_xlim(-xmax, xmax)
         ax.set_ylim(ymin, 0)
-        # tikzplotlib.clean_figure doesn't like data outside the ylim
+        # tikzplotlib.clean_figure doesn't like data outside the ylim at all
         pdf_report.figure(fig, clean_figure=False)
+
+    pdf_report.step("Check attenuation bandwidth.")
+    width_3db = cutoff_bandwidth(db, -3, 1 / resolution)
+    width_53db = cutoff_bandwidth(db, -53, 1 / resolution)
+    pdf_report.detail(f"-3 dB bandwidth is {width_3db:.3f} channels.")
+    pdf_report.detail(
+        f"-53 dB bandwidth is {width_53db:.3f} channels ({width_53db / width_3db:.3f}x the pass bandwidth)."
+    )
+    assert width_53db <= 2 * width_3db
