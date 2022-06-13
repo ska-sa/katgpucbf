@@ -378,7 +378,7 @@ class TestEngine:
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
-        missing_antenna: Optional[int],
+        missing_antenna: Optional[int] = None,
     ):
         """
         End-to-end test for the XBEngine.
