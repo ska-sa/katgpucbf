@@ -74,7 +74,7 @@ async def test_channel_shape(
 
     # Determine the ideal F-engine output leak at the peak
     target_voltage = 110  # Maximum is 127, but some headroom is good
-    # We need to avoid overflowing the signed 32-bit X-engine accumulation as
+    # We need to avoid saturating the signed 32-bit X-engine accumulation as
     # well (2e9 is comfortably less than 2^31).
     target_voltage = min(target_voltage, np.sqrt(2e9 / correlator.n_spectra_per_acc))
     # The PFB is scaled for fixed incoherent gain, but we need to be concerned
