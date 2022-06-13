@@ -135,7 +135,7 @@ class TestEngine:
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        missing_antenna: Optional[int],
+        missing_antenna: Optional[int] = None,
     ) -> List[spead2.send.HeapReference]:
         """Generate a deterministic input for sending to the XBEngine.
 
@@ -269,7 +269,7 @@ class TestEngine:
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        missing_antenna: Optional[int],
+        missing_antenna: Optional[int] = None,
     ) -> np.ndarray:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
@@ -378,7 +378,7 @@ class TestEngine:
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
-        missing_antenna: Optional[int] = None,
+        missing_antenna: Optional[int],
     ):
         """
         End-to-end test for the XBEngine.
