@@ -16,7 +16,7 @@
 
 """Unit tests for XBEngine module."""
 
-from typing import Final, List
+from typing import Final, List, Optional
 
 import numpy as np
 import pytest
@@ -24,6 +24,7 @@ import spead2
 import spead2.recv.asyncio
 import spead2.send
 import spead2.send.asyncio
+from katsdpsigproc.abc import AbstractContext
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
@@ -134,7 +135,7 @@ class TestEngine:
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        missing_antenna: int,
+        missing_antenna: Optional[int],
     ) -> List[spead2.send.HeapReference]:
         """Generate a deterministic input for sending to the XBEngine.
 
@@ -259,8 +260,8 @@ class TestEngine:
 
     async def _send_data(
         self,
-        mock_recv_streams,
-        recv_stream,
+        mock_recv_streams: List[spead2.InprocQueue],
+        recv_stream: spead2.recv.asyncio.Stream,
         *,
         heap_accumulation_threshold: int,
         n_accumulations: int,
@@ -268,7 +269,7 @@ class TestEngine:
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        missing_antenna: int,
+        missing_antenna: Optional[int],
     ) -> np.ndarray:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
@@ -368,16 +369,16 @@ class TestEngine:
         test_parameters.array_size,
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
-        [None, 0, 3],  # TODO: Eventually migrate this to test_parameters.py
+        [None, 0, 3],
     )
     async def test_xengine_end_to_end(
         self,
-        context,
-        n_ants,
-        n_spectra_per_heap,
-        n_channels_total,
-        missing_antenna,
-        mock_recv_streams,
+        context: AbstractContext,
+        mock_recv_streams: List[spead2.InprocQueue],
+        n_ants: int,
+        n_spectra_per_heap: int,
+        n_channels_total: int,
+        missing_antenna: Optional[int],
     ):
         """
         End-to-end test for the XBEngine.
