@@ -393,7 +393,7 @@ class XBEngine(DeviceServer):
                 self.correlation.slots["in_samples"].shape,  # type: ignore
                 self.correlation.slots["in_samples"].dtype,  # type: ignore
             )
-            present = np.zeros(shape=(n_ants, self.heaps_per_fengine_per_chunk), dtype=np.uint8)
+            present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
@@ -549,8 +549,8 @@ class XBEngine(DeviceServer):
             item = await self._rx_free_item_queue.get()
             item.timestamp += timestamp
             item.chunk = chunk
-            # Need to reshape chunk.present to get Antennas in one dimension
-            item.present[:] = chunk.present.reshape((self.heaps_per_fengine_per_chunk, self.n_ants)).transpose()
+            # Need to reshape chunk.present to get Heaps in one dimension
+            item.present[:] = chunk.present.reshape((self.heaps_per_fengine_per_chunk, self.n_ants))
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
@@ -635,8 +635,8 @@ class XBEngine(DeviceServer):
                     self.correlation()
                     # Update the present ants tracker one last time
                     tx_item.present_ants[:] &= rx_item.present[
-                        :, self.correlation.first_batch : self.correlation.last_batch
-                    ].all(axis=1)
+                        self.correlation.first_batch : self.correlation.last_batch, :
+                    ].all(axis=0)
 
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
@@ -654,8 +654,8 @@ class XBEngine(DeviceServer):
             if self.correlation.first_batch < self.correlation.last_batch:
                 self.correlation()
                 tx_item.present_ants[:] &= rx_item.present[
-                    :, self.correlation.first_batch : self.correlation.last_batch
-                ].all(axis=1)
+                    self.correlation.first_batch : self.correlation.last_batch, :
+                ].all(axis=0)
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
             rx_item.add_event(proc_event)
