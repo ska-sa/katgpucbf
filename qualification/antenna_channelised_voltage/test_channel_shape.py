@@ -43,7 +43,7 @@ def cutoff_bandwidth_half(data: np.ndarray, cutoff: float, step: float) -> float
 def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     """Measure width of the response at a given power level.
 
-    Estimate the width of the central portion where `data` is below `cutoff`,
+    Estimate the width of the central portion where `data` is above `cutoff`,
     in units of channels. If there are sidelobes that rise about `cutoff`,
     they're included in the width.
     """
@@ -101,6 +101,9 @@ async def test_channel_shape(
 
     pdf_report.step("Measure channel shape.")
     gain_step = 100.0
+    # Get a high dynamic range result (hdr_data) by using several gain settings
+    # and using the high-gain results to more accurately measure the samples
+    # whose power is low enough not to saturate.
     for i in range(3):
         pdf_report.detail(f"Set gain to {gain}.")
         await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
