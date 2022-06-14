@@ -32,7 +32,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_dsim_endpoint
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ async def correlator_config(
 
 @pytest.fixture(scope="package")
 async def session_correlator(
-    pytestconfig, correlator_config, band: str, n_dsims: int
+    pytestconfig, correlator_config: dict, band: str
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -224,20 +224,13 @@ async def session_correlator(
         product_controller_port,
     )
     try:
-        pcc = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
-        dsim_clients = []
-        for i in range(n_dsims):
-            dsim_host, dsim_port = await get_dsim_endpoint(pcc, BANDS[band].adc_sample_rate, i)
-            dsim_clients.append(await aiokatcp.Client.connect(dsim_host, dsim_port))
-
-        remote_control = await CorrelatorRemoteControl.connect(pcc, dsim_clients, correlator_config)
+        remote_control = await CorrelatorRemoteControl.connect(
+            product_controller_host, product_controller_port, correlator_config
+        )
         yield remote_control
 
         logger.info("Tearing down correlator.")
-        clients = dsim_clients + [pcc]
-        for client in clients:
-            client.close()
-        await asyncio.gather(*[client.wait_closed() for client in clients])
+        await remote_control.close()
 
     finally:
         # In case anything does go wrong, we want to make sure that we the
@@ -258,14 +251,20 @@ async def correlator(
     """
     # Reset the correlator to default state
     pcc = session_correlator.product_controller_client
-    await pcc.request("gain-all", "antenna_channelised_voltage", "default")
-    await pcc.request("delays", "antenna_channelised_voltage", 0, *(["0,0:0,0"] * session_correlator.n_inputs))
     await asyncio.gather(*[client.request("signals", "0;0;") for client in session_correlator.dsim_clients])
-    await pcc.request("capture-start", "baseline_correlation_products")
+    for name, conf in session_correlator.config["outputs"].items():
+        if conf["type"] == "gpucbf.antenna_channelised_voltage":
+            n_inputs = len(conf["src_streams"])
+            await pcc.request("gain-all", name, "default")
+            await pcc.request("delays", name, 0, *(["0,0:0,0"] * n_inputs))
+        elif conf["type"] == "gpucbf.baseline_correlation_products":
+            await pcc.request("capture-start", name)
 
     yield session_correlator
 
-    await pcc.request("capture-stop", "baseline_correlation_products")
+    for name, conf in session_correlator.config["outputs"].items():
+        if conf["type"] == "gpucbf.baseline_correlation_products":
+            await pcc.request("capture-stop", name)
 
 
 @pytest.fixture
@@ -279,6 +278,7 @@ async def receive_baseline_correlation_products(
 
     receiver = BaselineCorrelationProductsReceiver(
         correlator=correlator,
+        stream_name="baseline_correlation_products",
         interface_address=interface_address,
         use_ibv=use_ibv,
     )

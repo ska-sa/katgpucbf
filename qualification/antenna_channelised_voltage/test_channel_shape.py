@@ -67,7 +67,7 @@ async def test_channel_shape(
     """
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
-    base_channel = correlator.n_chans // 3
+    base_channel = receiver.n_chans // 3
     resolution = 128  # Number of samples per channel
     offsets = np.arange(resolution) / resolution - 0.5
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
@@ -76,12 +76,12 @@ async def test_channel_shape(
     target_voltage = 110  # Maximum is 127, but some headroom is good
     # We need to avoid saturating the signed 32-bit X-engine accumulation as
     # well (2e9 is comfortably less than 2^31).
-    target_voltage = min(target_voltage, np.sqrt(2e9 / correlator.n_spectra_per_acc))
+    target_voltage = min(target_voltage, np.sqrt(2e9 / receiver.n_spectra_per_acc))
     # The PFB is scaled for fixed incoherent gain, but we need to be concerned
     # about coherent gain to avoid overflowing the F-engine output. Coherent gain
-    # scales approximately with np.sqrt(correlator.n_chans / 2).
+    # scales approximately with np.sqrt(receiver.n_chans / 2).
     dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    gain = target_voltage / (amplitude * dig_max * np.sqrt(correlator.n_chans / 2))
+    gain = target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans / 2))
 
     async def sample(offsets: ArrayLike) -> np.ndarray:
         """Measure response when frequency is offset from channel centre.
@@ -92,7 +92,7 @@ async def test_channel_shape(
             Offset of the frequency, in units of channels
         """
         rel_freq = base_channel - np.asarray(offsets)
-        data = await sample_tone_response(rel_freq, amplitude, correlator, receiver)
+        data = await sample_tone_response(rel_freq, amplitude, receiver)
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
         data = data.ravel(order="F")
         # Slice out 5 channels, centred on the chosen one
@@ -118,7 +118,7 @@ async def test_channel_shape(
             hdr_data = np.where(hdr_data >= peak / power_scale, hdr_data, data / power_scale)
         gain *= gain_step
 
-    rms_voltage = np.sqrt(peak / correlator.n_spectra_per_acc)
+    rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 
     # The maximum is to avoid errors when data is 0
