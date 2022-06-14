@@ -65,7 +65,7 @@ pipeline {
 
         stage('Install katgpucbf package') {
           steps {
-            sh 'pip install --no-deps . && pip check'
+            sh 'pip install --no-deps ".[test]" && pip check'
           }
         }
 
