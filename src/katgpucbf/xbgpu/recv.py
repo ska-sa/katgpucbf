@@ -207,20 +207,35 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
     """
     ringbuffer = stream.data_ringbuffer
     prev_chunk_id = -1
+    valid_chunk_received = False
     assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
     async for chunk in ringbuffer:
         assert isinstance(chunk, Chunk)
+        # Need to check which is the first "proper" Chunk
+        if not np.any(chunk.present):
+            # It's not impossible for there to be a completely
+            # empty chunk during normal operation.
+            if not valid_chunk_received:
+                continue
+        elif not valid_chunk_received and prev_chunk_id < 0:
+            # TODO: I'm not sure this dual-condition is necessary
+            valid_chunk_received = True
+            prev_chunk_id = chunk.chunk_id - 1
+
         # Update metrics
         expected_heaps = len(chunk.present)
         received_heaps = int(np.sum(chunk.present))
         dropped_heaps = expected_heaps - received_heaps
 
         # Check if we've missed any chunks
-        if chunk.chunk_id != (prev_chunk_id + 1):
-            missed_chunks = chunk.chunk_id - (prev_chunk_id + 1)
+        expected_chunk_id = prev_chunk_id + 1
+        if chunk.chunk_id != expected_chunk_id:
+            missed_chunks = chunk.chunk_id - expected_chunk_id
             logger.warning(
-                f"Receiver missed {missed_chunks} chunks. "
-                f"Expected ID: {(prev_chunk_id + 1)}, received ID: {chunk.chunk_id}."
+                "Receiver missed %d chunks. Expected ID: %d, received ID: %d.",
+                missed_chunks,
+                expected_chunk_id,
+                chunk.chunk_id,
             )
             dropped_heaps += missed_chunks * expected_heaps
         missing_heaps_counter.inc(dropped_heaps)
