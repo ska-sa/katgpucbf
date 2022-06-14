@@ -20,7 +20,6 @@ import itertools
 import logging
 import random
 from typing import Generator, Iterator, List
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -43,7 +42,7 @@ def layout() -> Layout:
         n_spectra_per_heap=32,
         timestamp_step=2 * 1024 * 32,
         sample_bits=8,
-        heaps_per_fengine_per_chunk=5,
+        heaps_per_fengine_per_chunk=10,
     )
 
 
@@ -53,8 +52,8 @@ class TestLayout:
     def test_properties(self, layout: Layout) -> None:
         """Test the properties of :class:`.Layout`."""
         assert layout.heap_bytes == 32768
-        assert layout.chunk_heaps == 20
-        assert layout.chunk_bytes == 655360
+        assert layout.chunk_heaps == 4 * 10
+        assert layout.chunk_bytes == 1310720
 
 
 @pytest.fixture
@@ -241,119 +240,84 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
         queue: spead2.InprocQueue,
-    ) -> None:
-        """Test that the chunk placement sets heap indices correctly."""
-        rng = np.random.default_rng(seed=1)
-        data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
-        expected_chunk_id = 123
-        first_timestamp = expected_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-        heaps = list(gen_heaps(layout, data, first_timestamp))
-        # Create some gaps in the heaps
-        missing = [0, 5, 7]
-        for idx in reversed(missing):  # Have to go backwards, otherwise indices shift up
-            del heaps[idx]
-
-        for heap in heaps:
-            await send_stream.async_send_heap(heap)
-        queue.stop()  # Flushes out the receive streams
-        # Get just the chunks that actually have some data. We needn't worry
-        # about returning chunks to the free ring as we don't expect to deplete
-        # it.
-        chunks = [chunk async for chunk in recv_chunks(stream) if np.any(chunk.present)]
-        assert len(chunks) == 1
-        chunk = chunks[0]
-        assert isinstance(chunk, Chunk)
-        assert chunk.chunk_id == expected_chunk_id
-        expected = np.ones_like(chunk.present)
-        expected[missing] = 0
-        np.testing.assert_equal(chunk.present, expected)
-
-    async def test_missing_chunks(
-        self,
-        layout: Layout,
         caplog,
     ) -> None:
-        """Test that that the receiver accounts for missing chunks.
+        """Test that the receiver handles missing heaps and Chunks.
 
-        Heavily inspired by fgpu/test_recv.
-
-        .. todo::
-            This doesn't necessarily test the adding of free chunks back to
-            the Ringbuffer. That logic lives in the XBEngine's gpu_proc_loop.
-            We might want to bring that functionality to parity with fgpu's
-            receiver.
+        Start from a non-zero Chunk ID to check the receiving logic doesn't
+        assume we missed Chunks up to that point.
         """
-        mock_stream = Mock()  # We don't need a full-blown spead2 stream
-
-        # Reality can be whatever we want
-        config = spead2.recv.StreamConfig()
-        # config.add_stat("incomplete_heaps_evicted")  # Odd, this one doesn't need to be added
-        config.add_stat("too_old_heaps")
-        config.add_stat("katgpucbf.metadata_heaps")
-        config.add_stat("katgpucbf.bad_timestamp_heaps")
-        config.add_stat("katgpucbf.bad_feng_id_heaps")
-        mock_stream.config = config
-
-        mock_stream.stats = {}
-        mock_stream.stats[config.get_stat_index("too_old_heaps")] = 1010
-        mock_stream.stats[config.get_stat_index("incomplete_heaps_evicted")] = 2020
-        mock_stream.stats[config.get_stat_index("katgpucbf.metadata_heaps")] = 3030
-        mock_stream.stats[config.get_stat_index("katgpucbf.bad_timestamp_heaps")] = 4040
-        mock_stream.stats[config.get_stat_index("katgpucbf.bad_feng_id_heaps")] = 5050
-
-        ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)
-        mock_stream.data_ringbuffer = ringbuffer
-
         rng = np.random.default_rng(seed=1)
+        data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
+        start_chunk_id = 123
+        n_chunks_to_send = 20
+        heaps_to_send = []
 
-        def add_chunk(chunk_id: int) -> None:
-            data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
-            # We're not testing missing heaps specifically
-            present = np.ones(layout.chunk_heaps, np.uint8)
-            chunk = Chunk(data=data, present=present, chunk_id=chunk_id)
-            ringbuffer.put_nowait(chunk)
+        for i in range(n_chunks_to_send):
+            timestamp = (start_chunk_id + i) * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+            heaps_to_send += list(gen_heaps(layout, data, timestamp))
 
-        # Receiver will naturally expect Chunk ID 0 first
-        add_chunk(10)
-        add_chunk(11)
-        add_chunk(12)
-        # Skip a few more
-        add_chunk(20)
-        ringbuffer.stop()
+        # Create a gap in the heaps to send, enough to make the receiver
+        # 'fast forward' in the Chunk IDs received, but also test the
+        # case of a single heap missing every now and then.
+        missing_heap_ids = [7, 7 + layout.chunk_heaps, 7 + 2 * layout.chunk_heaps]
+        missing_chunk_ids = [i for i in range(8, 14)]
+        for missing_chunk_id in missing_chunk_ids:
+            start_heap_id = missing_chunk_id * layout.chunk_heaps
+            end_heap_id = (missing_chunk_id + 1) * layout.chunk_heaps
+            missing_heap_ids += [i for i in range(start_heap_id, end_heap_id)]
+        # This is done in reverse as the indices would otherwise shift up
+        for heap_idx in reversed(missing_heap_ids):
+            del heaps_to_send[heap_idx]
 
+        for heap in heaps_to_send:
+            await send_stream.async_send_heap(heap)
+        queue.stop()
+
+        received_chunk_ids = []
         with caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"), PromDiff(
             namespace=METRIC_NAMESPACE
         ) as prom_diff:
-            # Register the stream with the StatsCollector manually
-            recv.stats_collector.add_stream(mock_stream)
+            # Manually register the receiving stream with the StatsCollector,
+            # as we haven't used the `recv.make_stream` utility.
+            recv.stats_collector.add_stream(stream)
 
-            # Need to actually grab the chunks
-            chunks = [chunk async for chunk in recv_chunks(mock_stream)]
+            async for chunk in recv_chunks(stream):
+                if not np.any(chunk.present):
+                    # NOTE: Due to the 'receiving window' (max_active_chunks) being wide,
+                    # the receiver catches up with the missed Chunk IDs easily enough.
+                    # recv_chunks accounts for any empty chunks received before the first
+                    # 'proper' Chunk. This check is here to account for Chunks received in
+                    # the middle of normal operation, whose heaps we have purposefully
+                    # deleted, but the Receiver marks them as empty to keep the receiving
+                    # window contiguous.
+                    continue
 
-        # Double check the Chunk IDs received
-        assert chunks[0].chunk_id == 10
-        assert chunks[1].chunk_id == 11
-        assert chunks[2].chunk_id == 12
-        assert chunks[3].chunk_id == 20
+                received_chunk_ids.append(chunk.chunk_id)
+                stream.add_free_chunk(chunk)
 
-        # TODO: Perhaps wrap this into a for-loop (somehow)
-        assert caplog.record_tuples[0] == (
-            "katgpucbf.xbgpu.recv",
-            logging.WARNING,
-            f"Receiver missed 10 chunks. Expected ID: 0, received ID: {chunks[0].chunk_id}.",
-        )
-        assert caplog.record_tuples[1] == (
-            "katgpucbf.xbgpu.recv",
-            logging.WARNING,
-            f"Receiver missed 7 chunks. Expected ID: {chunks[2].chunk_id + 1}, received ID: {chunks[3].chunk_id}.",
-        )
+        assert caplog.record_tuples == [
+            (
+                "katgpucbf.xbgpu.recv",
+                logging.WARNING,
+                f"Receiver missed 2 chunks. Expected ID: {start_chunk_id + missing_chunk_ids[0]}, "
+                f"received ID: {start_chunk_id + missing_chunk_ids[0] + 2}.",
+            )
+        ]
 
-        # TODO: There must be a better way to phrase this calculation
-        expected_missing_chunks = chunks[0].chunk_id - 0 + chunks[3].chunk_id - (chunks[2].chunk_id + 1)
+        # Have to expand this list as the `range` generator doesn't support item deletion
+        expected_chunk_ids = [i for i in range(start_chunk_id, start_chunk_id + n_chunks_to_send)]
+        for missing_chunk_id in reversed(missing_chunk_ids):
+            del expected_chunk_ids[missing_chunk_id]
+        np.testing.assert_equal(received_chunk_ids, expected_chunk_ids)
 
-        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 1010
-        assert prom_diff.get_sample_diff("input_incomplete_heaps_total") == 2020
-        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 3030
-        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == 4040
-        assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 5050
-        assert prom_diff.get_sample_diff("input_missing_heaps_total") == expected_missing_chunks * layout.chunk_heaps
+        # Check StatsCollector's values
+        assert prom_diff.get_sample_diff("input_missing_heaps_total") == len(missing_chunk_ids) * layout.chunk_heaps + 3
+        # TODO: After manually inspecting the rest of the Counters,
+        #       there wasn't much interesting to report/that hasn't
+        #       been tested elsewhere.
+        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 0
+        assert prom_diff.get_sample_diff("input_incomplete_heaps_total") == 0
+        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 0
+        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == 0
+        assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 0
