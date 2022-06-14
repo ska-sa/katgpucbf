@@ -19,7 +19,7 @@
 import pytest
 
 
-@pytest.fixture(scope="session", params=[4, 8])
+@pytest.fixture(scope="package", params=[4, 8])
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param

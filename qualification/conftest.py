@@ -67,27 +67,27 @@ def pytest_report_collectionfinish(config):  # noqa: D103
 
 
 # Need to redefine this from pytest-asyncio to have it at session scope
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def event_loop():  # noqa: D103
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def n_antennas():  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return 8
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def n_dsims():  # noqa: D401
     """Number of simulated digitisers."""
     return 1
 
 
 @pytest.fixture(
-    scope="session",
+    scope="package",
     params=[
         8192,
     ],
@@ -98,7 +98,7 @@ def n_channels(request):  # noqa: D401
 
 
 @pytest.fixture(
-    scope="session",
+    scope="package",
     params=[
         "l",
     ],
@@ -108,7 +108,7 @@ def band(request) -> str:  # noqa: D104
     return request.param
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
     return 0.5
@@ -129,7 +129,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
         yield
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 async def correlator_config(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
 ) -> dict:
@@ -185,7 +185,7 @@ async def correlator_config(
     return config
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 async def session_correlator(
     pytestconfig, correlator_config, band: str, n_dsims: int
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
