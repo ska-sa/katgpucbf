@@ -31,6 +31,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine
+from katgpucbf.fgpu.process import InItem, Processor
 
 from .. import PromDiff
 from .test_recv import gen_heaps
@@ -700,3 +701,91 @@ class TestEngine:
         frame_size = channels * spectra_per_heap * N_POLS * COMPLEX * np.dtype(np.int8).itemsize
         assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
         assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
+
+    def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> List[int]:
+        """Patch :meth:`.Processor._next_in` to make a request partway through the stream.
+
+        The returned list will be populated with the value of the
+        ``steady-state-timestamp`` sensor immediately after executing the
+        request.
+        """
+        counter = 0
+        timestamp = []
+
+        async def next_in(self) -> Optional[InItem]:
+            nonlocal counter
+            counter += 1
+            if counter == 6:
+                await engine_client.request(*request)
+                _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
+                timestamp.append(int(informs[0].arguments[4]))
+            return await orig_next_in(self)
+
+        orig_next_in = Processor._next_in
+        monkeypatch.setattr(Processor, "_next_in", next_in)
+        return timestamp
+
+    async def test_steady_state_gain(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        monkeypatch,
+    ) -> None:
+        """Test that the ``steady-state-timestamp`` is updated correctly after ``?gain``."""
+        n_samples = 8 * CHUNK_SAMPLES
+        rng = np.random.default_rng(1)
+        dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
+
+        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "gain-all", 0)
+        out_data, timestamps = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            dig_data,
+        )
+
+        steady_state_timestamp = timestamp_list[0]
+        # The steady state timestamp must fall somewhere in the middle of the
+        # data for the test to be meaningful.
+        assert timestamps[1] <= steady_state_timestamp <= timestamps[-2]
+        # After the steady state timestamp, all the data much be zero.
+        after = timestamps >= steady_state_timestamp
+        assert np.all(out_data[:, after, :] == 0)
+        # The effect may take effect earlier than the indicated timestamp.
+        # Check that it doesn't affect the first timestamp, which would suggest
+        # we've messed up the test setup.
+        assert not np.all(out_data[:, 0, :] == 0)
+
+    async def test_steady_state_delay(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        monkeypatch,
+    ) -> None:
+        """Test that the ``steady-state-timestamp`` is updated correctly after ``?delays``."""
+        n_samples = 8 * CHUNK_SAMPLES
+        dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
+
+        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "delays", 0, "0,0:3,0", "0,0:3,0")
+        out_data, timestamps = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            dig_data,
+        )
+
+        steady_state_timestamp = timestamp_list[0]
+        # The steady state timestamp must fall somewhere in the middle of the
+        # data for the test to be meaningful.
+        assert timestamps[1] <= steady_state_timestamp <= timestamps[-2]
+        # After the steady state timestamp, all the data have the phase applied.
+        after = timestamps >= steady_state_timestamp
+        assert np.angle(out_data[CHANNELS // 2, after, 0]) == pytest.approx(3, abs=0.1)
+        # The effect may take effect earlier than the indicated timestamp.
+        # Check that it doesn't affect the first timestamp, which would suggest
+        # we've messed up the test setup.
+        assert np.angle(out_data[CHANNELS // 2, 0, 0]) == pytest.approx(0, abs=0.1)

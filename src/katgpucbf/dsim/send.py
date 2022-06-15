@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,7 +18,6 @@
 
 import asyncio
 import itertools
-import multiprocessing.sharedctypes
 import time
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -29,6 +28,7 @@ from prometheus_client import Counter, Gauge
 
 from .. import BYTE_BITS, spead
 from . import METRIC_NAMESPACE
+from .shared_array import SharedArray
 
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
@@ -92,8 +92,8 @@ class HeapSet:
         # TODO: make sure that this uses huge pages, as that is more
         # efficient for ibverbs.
         n = len(timestamps)
-        raw_payload = multiprocessing.sharedctypes.RawArray("b", n_pols * n * heap_size)
-        payload = np.frombuffer(raw_payload, np.uint8).reshape(n_pols, n, heap_size)
+        shared_payload = SharedArray.create("dsim_payload", (n_pols, n, heap_size), np.uint8)
+        payload = shared_payload.buffer
         heaps = []
         substream_offset = list(itertools.accumulate(n_substreams, initial=0))
         digitiser_id_items = [spead.make_immediate(spead.DIGITISER_ID_ID, dig_id) for dig_id in digitiser_id]
@@ -127,7 +127,7 @@ class HeapSet:
         data = xr.Dataset(
             {
                 "timestamps": (["time"], timestamps),
-                "payload": (["pol", "time", "data"], payload),
+                "payload": (["pol", "time", "data"], payload, {"shared_array": shared_payload}),
                 "heaps": (["time", "pol"], heaps),
             }
         )

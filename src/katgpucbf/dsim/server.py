@@ -18,7 +18,7 @@
 
 import asyncio
 import logging
-from typing import Optional, Sequence
+from typing import Sequence
 
 import aiokatcp
 import pyparsing as pp
@@ -46,11 +46,18 @@ class DeviceServer(aiokatcp.DeviceServer):
         Number of bits per output sample
     first_timestamp
         The timestamp associated with the first output sample
+    dither_seed
+        Dither seed (used only to populate a sensor).
     signals_str
         String that was parsed to produce `signals`.
     signals
         User-requested signals. Note that these must have already been loaded
         into the sender; it is provided here purely to populate sensors.
+    signal_service
+        Helper process for generating new signals. It must be constructed
+        consistent with the other arguments (in particular,
+        ``sender.heap_set.data["payload"]`` and ``spare.data["payload"]`` must
+        be passed to the constructor).
     *args, **kwargs
         Passed to base class
     """
@@ -68,9 +75,10 @@ class DeviceServer(aiokatcp.DeviceServer):
         adc_sample_rate: float,
         sample_bits: int,
         first_timestamp: int,
-        dither_seed: Optional[int],
+        dither_seed: int,
         signals_str: str,
         signals: Sequence[Signal],
+        signal_service: SignalService,
         *args,
         **kwargs,
     ) -> None:
@@ -81,9 +89,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
         self.first_timestamp = first_timestamp
-        self.dither_seed = dither_seed
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
-        self._signal_service = SignalService([self.sender.heap_set.data["payload"], self.spare.data["payload"]])
+        self._signal_service = signal_service
 
         self._signals_orig_sensor = aiokatcp.Sensor(
             str,
@@ -92,7 +99,6 @@ class DeviceServer(aiokatcp.DeviceServer):
             initial_status=aiokatcp.Sensor.Status.NOMINAL,
             default=signals_str,
         )
-        # TODO: it's not reproducible because the random dither is not captured
         self._signals_sensor = aiokatcp.Sensor(
             str,
             "signals",
@@ -100,8 +106,25 @@ class DeviceServer(aiokatcp.DeviceServer):
             initial_status=aiokatcp.Sensor.Status.NOMINAL,
             default=format_signals(signals),
         )
+        self._steady_state_sensor = aiokatcp.Sensor(
+            int,
+            "steady-state-timestamp",
+            "Heaps with this timestamp or greater are guaranteed to reflect the effects of previous katcp requests.",
+            default=0,
+            initial_status=aiokatcp.Sensor.Status.NOMINAL,
+        )
         self.sensors.add(self._signals_orig_sensor)
         self.sensors.add(self._signals_sensor)
+        self.sensors.add(self._steady_state_sensor)
+        self.sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "dither-seed",
+                "Random seed used in dithering for quantisation",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                default=dither_seed,
+            )
+        )
         self.sensors.add(
             aiokatcp.Sensor(
                 int,
@@ -164,13 +187,12 @@ class DeviceServer(aiokatcp.DeviceServer):
                 signals,
                 self.first_timestamp,
                 self.adc_sample_rate,
-                self.sample_bits,
                 self.spare.data["payload"],
-                dither_seed=self.dither_seed,
             )
             spare = self.sender.heap_set
             timestamp = await self.sender.set_heaps(self.spare)
             self.spare = spare
             self._signals_orig_sensor.value = signals_str
             self._signals_sensor.value = format_signals(signals)
+            self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
             return timestamp

@@ -17,13 +17,12 @@
 """Baseline verification tests."""
 
 import logging
-import time
 from typing import Tuple
 
 import numpy as np
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
-from .reporter import Reporter
+from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from ..reporter import Reporter
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ async def test_baseline_correlation_products(
     pdf_report.step("Configure the D-sim with Gaussian noise.")
 
     amplitude = 0.2
-    await correlator.dsim_client.request("signals", f"common=wgn({amplitude});common;common;")
+    await correlator.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
     # Some helper functions:
@@ -77,34 +76,28 @@ async def test_baseline_correlation_products(
         for inp in baseline_tuple:
             await pc_client.request("gain", "antenna_channelised_voltage", inp, "1")
 
-    for start_idx in range(0, correlator.n_bls, correlator.n_chans - 1):
-        end_idx = min(start_idx + correlator.n_chans - 1, correlator.n_bls)
+    for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
+        end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
         await zero_all_gains()
         pdf_report.detail("Compute gains to enable one baseline per channel.")
         gains = {}
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
-            for inp in correlator.bls_ordering[i]:
+            for inp in receiver.bls_ordering[i]:
                 if inp not in gains:
-                    gains[inp] = np.zeros(correlator.n_chans, np.float32)
+                    gains[inp] = np.zeros(receiver.n_chans, np.float32)
                 gains[inp][channel] = 1.0
         pdf_report.detail("Set gains.")
         for inp, g in gains.items():
             await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
 
-        expected_timestamp = round((time.time() + 1 - correlator.sync_time) * correlator.scale_factor_timestamp)
-        # Note that we are making an assumption that nothing is straying too far
-        # from wall time here. I don't have a way other than adjusting the dsim
-        # signal of ensuring that we get going after a specific timestamp in the
-        # DSP pipeline itself. See NGC-549
-        _, chunk = await receiver.next_complete_chunk(expected_timestamp)
-        # These asserts aren't particularly important, but they keep mypy happy.
-        assert isinstance(chunk.present, np.ndarray)
+        _, chunk = await receiver.next_complete_chunk()
+        # This assert isn't particularly important, but keeps mypy happy.
         assert isinstance(chunk.data, np.ndarray)
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
-            bl = correlator.bls_ordering[i]
+            bl = receiver.bls_ordering[i]
             loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
             pdf_report.detail(
                 f"Checking {bl}: {len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
@@ -116,7 +109,7 @@ async def test_baseline_correlation_products(
             )
             for loud_bl in loud_bls:
                 expect(
-                    is_signal_expected_in_baseline(bl, correlator.bls_ordering[loud_bl], pdf_report),
+                    is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl], pdf_report),
                     "Signal found in unexpected baseline.",
                 )
         receiver.stream.add_free_chunk(chunk)

@@ -11,6 +11,7 @@ Submodules
    katgpucbf.dsim.main
    katgpucbf.dsim.send
    katgpucbf.dsim.server
+   katgpucbf.dsim.shared_array
    katgpucbf.dsim.signal
 
 Module contents

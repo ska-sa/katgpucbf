@@ -55,3 +55,10 @@ source = [
 	"src",
 	"*/site-packages",
 ]
+
+[tool.coverage.report]
+exclude_lines = [
+	'#\s*(pragma|PRAGMA)[:\s]?\s*(no|NO)\s*(cover|COVER)',  # Default from coverage
+	'@(?:numba\.)?(?:njit|cfunc)',  # Compiled so coverage can't see the code being executed
+	'@(abc\.)?abstractmethod',
+]

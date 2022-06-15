@@ -8,7 +8,7 @@ Usage
 -----
 The dsim process generates an arbitrary number of single-pol data streams.
 However, it only uses a single sending thread, so in practice it does not
-scale well beyond two streams (a dual-pol antennas) for typical MeerKAT
+scale well beyond two streams (a dual-pol antenna) for typical MeerKAT
 bandwidths. Instead, one can use multiple instances.
 It also relies heavily on the ibverbs support in spead2 for performance at
 typical MeerKAT bandwidths. It can nevertheless be used without it, but the

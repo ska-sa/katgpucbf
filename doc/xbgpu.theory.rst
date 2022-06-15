@@ -14,9 +14,7 @@ The general flow of data through the system is shown in the the image below:
 The X-Engine processing pipeline can be broken into three different stages:
 
   1. Receive data from the network and assemble it into a chunk. This chunk is
-     then transferred to the GPU. This receiver has been implemented using
-     SPEAD2 in C++ and bound into Python. See the "SPEAD2 Network Side Software"
-     section below for more information.
+     then transferred to the GPU.
   2. The data is then correlated using a modified version of the ASTRON Tensor
      Core Kernel. This is done by the
      :class:`~katgpucbf.xbgpu.correlation.Correlation` class. This correlated
@@ -65,15 +63,14 @@ the different asyncio functions. However the GPU requires a separate type of
 coordination. The GPU has three different command queues that manage the
 coordination.
 
-A command queue is an OpenCL term — within katsdpsigproc, this is still called a
-command queue even though it can be implemented as a CUDA stream. One command
-queue is for processing and the other two are for transferring data from host
-memory to the GPU and back. Events are put onto the command queue and the async
-processing loops can :keyword:`await` for these events to be complete. Often one async
-function will enqueue some commands followed by an event onto the GPU command
-queue and the next async function will :keyword:`await` for this event to complete as it
-is the function that needs to work with this data. Tracking the different events
-across functions requires a bit of care to prevent race conditions and deadlock.
+One command queue is for processing and the other two are for transferring data
+from host memory to the GPU and back. Events are put onto the command queue and
+the async processing loops can :keyword:`await` for these events to be complete.
+Often one async function will enqueue some commands followed by an event onto
+the GPU command queue and the next async function will :keyword:`await` for this
+event to complete as it is the function that needs to work with this data.
+Tracking the different events across functions requires a bit of care to prevent
+race conditions and deadlock.
 
 The image below shows the interaction between the processing loops and the
 command queues:

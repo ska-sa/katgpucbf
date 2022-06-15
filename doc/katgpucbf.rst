@@ -17,6 +17,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.meerkat
    katgpucbf.monitor
    katgpucbf.recv
    katgpucbf.ringbuffer
