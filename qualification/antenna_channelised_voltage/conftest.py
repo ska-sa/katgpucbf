@@ -23,3 +23,9 @@ import pytest
 def n_dsims(n_antennas: int):
     """Give every simulated antenna its own dsim."""
     return n_antennas
+
+
+@pytest.fixture(scope="session", params=[1])
+def n_antennas(request):  # noqa: D401
+    """Number of antennas, i.e. size of the array."""
+    return request.param

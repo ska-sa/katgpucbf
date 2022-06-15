@@ -26,9 +26,38 @@ from typing import List, Tuple
 import numpy as np
 from numpy.typing import ArrayLike
 
-from katgpucbf import N_POLS
+from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+
+
+def compute_gain(
+    correlator: CorrelatorRemoteControl,
+    amplitude: float = 0.99,
+    target_voltage: int = 110,
+) -> float:
+    """Compute F-Engine gain.
+
+    Compute gain to be applied to the F-Engine to maximise output dynamic range.
+    The output is 8 bit signed (max 127).
+
+    Parameters
+    ----------
+    correlator
+        Connection to the correlator.
+    amplitude
+        Amplitude of the tones, on a scale of 0 to 1.
+    target_voltage
+        Maximum is 127, but some headroom is good. Default 110.
+    """
+    # We need to avoid saturating the signed 32-bit X-engine accumulation as
+    # well (2e9 is comfortably less than 2^31).
+    # The PFB is scaled for fixed incoherent gain, but we need to be concerned
+    # about coherent gain to avoid overflowing the F-engine output. Coherent gain
+    # scales approximately with np.sqrt(correlator.n_chans / 2).
+    target_voltage = min(target_voltage, np.sqrt(2e9 / correlator.n_spectra_per_acc))
+    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+    return target_voltage / (amplitude * dig_max * np.sqrt(correlator.n_chans / 2))
 
 
 async def sample_tone_response(

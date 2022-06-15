@@ -17,7 +17,6 @@
 """CBF linearity test."""
 import matplotlib.pyplot as plt
 import numpy as np
-import pytest
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, antenna_channelised_voltage
 from ..reporter import Reporter
@@ -50,7 +49,12 @@ async def test_linearity(
     pdf_report.detail(f"Channel frequency: {(sel_chan_center*(correlator.bandwidth/correlator.n_chans))/1e6:.2f} MHz")
 
     pdf_report.step("Set EQ gain.")
-    gain = 0.003
+    gain = antenna_channelised_voltage.compute_gain(
+        correlator=correlator,
+        amplitude=0.99,
+        target_voltage=110,
+    )
+
     pdf_report.detail(f"Setting gain to: {gain}")
     await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
 
@@ -64,10 +68,13 @@ async def test_linearity(
     linear_scale_result = base_corr_prod[:, sel_chan_center]
     linear_test_result = np.sqrt(linear_scale_result / np.max(linear_scale_result))
 
+    rms_voltage = np.sqrt(np.max(linear_scale_result) / correlator.n_spectra_per_acc)
+    pdf_report.step("Compute RMS Voltage.")
+    pdf_report.detail(f"RMS voltage: {rms_voltage:.3f}).")
+
     pdf_report.step("Compute Mean Square Error (MSE).")
     mse = np.sum(np.square(cw_scales - linear_test_result)) / len(cw_scales)
     pdf_report.detail(f"MSE is: {mse}")
-    assert mse == pytest.approx(mse, rel=0.01)
 
     # Generate plot with reference
     # TODO: This plot should be automagically added into the report. Not yet sure how to do that.
@@ -78,14 +85,6 @@ async def test_linearity(
     plt.xlabel("CW Scale")
     plt.ylabel("dB")
     plt.title("CBF Linearity Test")
-    plt.text(0, -50, f"Channel Under Test: {sel_chan_center}", color="green", style="italic")
-    plt.text(
-        0,
-        -53,
-        f"Channel Frequency: {(sel_chan_center*(correlator.bandwidth/correlator.n_chans))/1e6:.2f} MHz",
-        color="green",
-        style="italic",
-    )
     labels = [f"$2^{{-{i}}}$" for i in range(len(cw_scales))]
     plt.xticks(np.arange(len(linear_test_result)), labels=labels)
     plt.savefig("linearity.png")
