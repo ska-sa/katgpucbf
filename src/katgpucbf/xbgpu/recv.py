@@ -217,8 +217,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
             # empty chunk during normal operation.
             if not valid_chunk_received:
                 continue
-        elif not valid_chunk_received and prev_chunk_id < 0:
-            # TODO: I'm not sure this dual-condition is necessary
+        elif not valid_chunk_received:
             valid_chunk_received = True
             prev_chunk_id = chunk.chunk_id - 1
 
@@ -239,7 +238,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
             )
             dropped_heaps += missed_chunks * expected_heaps
         missing_heaps_counter.inc(dropped_heaps)
-        heaps_counter.inc(expected_heaps)
+        heaps_counter.inc(received_heaps)
         chunks_counter.inc(1)
         bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
         prev_chunk_id = chunk.chunk_id
