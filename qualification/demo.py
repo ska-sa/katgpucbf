@@ -27,8 +27,8 @@ def test_passes(pdf_report: Reporter) -> None:
     Here is some maths: :math:`e^{\pi j} + 1 = 0`.
     """
     pdf_report.step("Do things")
-    pdf_report.detail("Thing step 1")
-    pdf_report.detail("Thing step 2")
+    pdf_report.detail("Thing implementation detail 1")
+    pdf_report.detail("Thing implementation detail 2")
 
 
 def test_assert_failure(pdf_report: Reporter) -> None:
