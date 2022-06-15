@@ -125,6 +125,16 @@ def generate_expected_output(
     return output_array
 
 
+def valid_end_to_end_combination(combo: dict) -> bool:
+    """Check whether a combination for :meth:`TestEngine.test_xengine_end_to_end` is valid."""
+    n_ants = combo["n_ants"]
+    missing_antenna = combo["missing_antenna"]
+    if missing_antenna is None:
+        return True
+    # Don't want to delete all the data, or an out-of-range antenna
+    return n_ants > 1 and missing_antenna < n_ants
+
+
 class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
@@ -370,6 +380,7 @@ class TestEngine:
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
         [None, 0, 3],
+        filter=valid_end_to_end_combination,
     )
     async def test_xengine_end_to_end(
         self,
