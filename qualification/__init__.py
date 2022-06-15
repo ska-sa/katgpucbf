@@ -174,7 +174,7 @@ class BaselineCorrelationProductsReceiver:
         self.n_chans = correlator.config["outputs"][acv_name]["n_chans"]
         self.input_labels = correlator.config["outputs"][acv_name]["input_labels"]
 
-        # But some can't. Note: these could be properties. But copying them up
+        # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
         self.n_bls = correlator.sensors[f"{stream_name}-n-bls"].value
         self.n_chans_per_substream = correlator.sensors[f"{stream_name}-n-chans-per-substream"].value
