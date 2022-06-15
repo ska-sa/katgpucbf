@@ -76,17 +76,17 @@ async def test_baseline_correlation_products(
         for inp in baseline_tuple:
             await pc_client.request("gain", "antenna_channelised_voltage", inp, "1")
 
-    for start_idx in range(0, correlator.n_bls, correlator.n_chans - 1):
-        end_idx = min(start_idx + correlator.n_chans - 1, correlator.n_bls)
+    for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
+        end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
         await zero_all_gains()
         pdf_report.detail("Compute gains to enable one baseline per channel.")
         gains = {}
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
-            for inp in correlator.bls_ordering[i]:
+            for inp in receiver.bls_ordering[i]:
                 if inp not in gains:
-                    gains[inp] = np.zeros(correlator.n_chans, np.float32)
+                    gains[inp] = np.zeros(receiver.n_chans, np.float32)
                 gains[inp][channel] = 1.0
         pdf_report.detail("Set gains.")
         for inp, g in gains.items():
@@ -97,7 +97,7 @@ async def test_baseline_correlation_products(
         assert isinstance(chunk.data, np.ndarray)
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
-            bl = correlator.bls_ordering[i]
+            bl = receiver.bls_ordering[i]
             loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
             pdf_report.detail(
                 f"Checking {bl}: {len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
@@ -109,7 +109,7 @@ async def test_baseline_correlation_products(
             )
             for loud_bl in loud_bls:
                 expect(
-                    is_signal_expected_in_baseline(bl, correlator.bls_ordering[loud_bl], pdf_report),
+                    is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl], pdf_report),
                     "Signal found in unexpected baseline.",
                 )
         receiver.stream.add_free_chunk(chunk)
