@@ -251,29 +251,44 @@ class TestStream:
         data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
         start_chunk_id = 123
         n_chunks_to_send = 20
+        n_single_heaps_to_delete = 7
+        n_chunks_to_delete = 6
         heaps_to_send = []
 
         for i in range(n_chunks_to_send):
             timestamp = (start_chunk_id + i) * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
             heaps_to_send += list(gen_heaps(layout, data, timestamp))
 
+        expected_chunk_presence_flat = np.ones(
+            shape=((n_chunks_to_send - n_chunks_to_delete) * layout.chunk_heaps,), dtype=np.uint8
+        )
+
         # Create a gap in the heaps to send, enough to make the receiver
         # 'fast forward' in the Chunk IDs received, but also test the
         # case of a single heap missing every now and then.
-        missing_heap_ids = [7, 7 + layout.chunk_heaps, 7 + 2 * layout.chunk_heaps]
-        missing_chunk_ids = [i for i in range(8, 14)]
+        missing_heap_ids = [7 + i * layout.chunk_heaps for i in range(n_single_heaps_to_delete)]
+        # Update these heap indices now, as the following removes entire Chunks
+        for missing_heap_id in missing_heap_ids:
+            expected_chunk_presence_flat[missing_heap_id] = 0
+
+        missing_chunk_ids = [i for i in range(9, 9 + n_chunks_to_delete)]
         for missing_chunk_id in missing_chunk_ids:
             start_heap_id = missing_chunk_id * layout.chunk_heaps
             end_heap_id = (missing_chunk_id + 1) * layout.chunk_heaps
             missing_heap_ids += [i for i in range(start_heap_id, end_heap_id)]
+        missing_heap_ids.sort()  # Just to be sure
         # This is done in reverse as the indices would otherwise shift up
         for heap_idx in reversed(missing_heap_ids):
             del heaps_to_send[heap_idx]
 
         for heap in heaps_to_send:
             await send_stream.async_send_heap(heap)
-        queue.stop()
+        queue.stop()  # Flushes out the receive stream
 
+        # Need to compare present arrays during the handling of Chunks
+        received_chunk_presence = np.zeros(
+            shape=(n_chunks_to_send - n_chunks_to_delete, layout.chunk_heaps), dtype=np.uint8
+        )
         received_chunk_ids = []
         with caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"), PromDiff(
             namespace=METRIC_NAMESPACE
@@ -282,6 +297,9 @@ class TestStream:
             # as we haven't used the `recv.make_stream` utility.
             recv.stats_collector.add_stream(stream)
 
+            # NOTE: We have to use a 'manual' counter as there is a jump in
+            # received Chunk IDs - due to the deletions earlier.
+            seen = 0
             async for chunk in recv_chunks(stream):
                 if not np.any(chunk.present):
                     # NOTE: Due to the 'receiving window' (max_active_chunks) being wide,
@@ -294,7 +312,9 @@ class TestStream:
                     continue
 
                 received_chunk_ids.append(chunk.chunk_id)
+                received_chunk_presence[seen, :] = chunk.present
                 stream.add_free_chunk(chunk)
+                seen += 1
 
         assert caplog.record_tuples == [
             (
@@ -310,14 +330,11 @@ class TestStream:
         for missing_chunk_id in reversed(missing_chunk_ids):
             del expected_chunk_ids[missing_chunk_id]
         np.testing.assert_equal(received_chunk_ids, expected_chunk_ids)
+        np.testing.assert_array_equal(received_chunk_presence.flatten(), expected_chunk_presence_flat)
 
         # Check StatsCollector's values
-        assert prom_diff.get_sample_diff("input_missing_heaps_total") == len(missing_chunk_ids) * layout.chunk_heaps + 3
-        # TODO: After manually inspecting the rest of the Counters,
-        #       there wasn't much interesting to report/that hasn't
-        #       been tested elsewhere.
-        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 0
-        assert prom_diff.get_sample_diff("input_incomplete_heaps_total") == 0
-        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 0
-        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == 0
-        assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 0
+        assert prom_diff.get_sample_diff("input_heaps_total") == seen * layout.chunk_heaps - n_single_heaps_to_delete
+        assert (
+            prom_diff.get_sample_diff("input_missing_heaps_total")
+            == len(missing_chunk_ids) * layout.chunk_heaps + n_single_heaps_to_delete
+        )
