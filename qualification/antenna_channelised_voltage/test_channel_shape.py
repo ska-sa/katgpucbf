@@ -56,6 +56,7 @@ async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    expect,
 ) -> None:
     r"""Test the shape of the response to a single channel.
 
@@ -156,4 +157,4 @@ async def test_channel_shape(
     pdf_report.detail(
         f"-53 dB bandwidth is {width_53db:.3f} channels ({width_53db / width_3db:.3f}x the pass bandwidth)."
     )
-    assert width_53db <= 2 * width_3db
+    expect(width_53db <= 2 * width_3db)
