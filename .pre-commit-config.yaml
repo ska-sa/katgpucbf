@@ -49,17 +49,18 @@ repos:
         types: []
         types_or: [python, pyi]
         additional_dependencies: [
-            'aiokatcp==1.2.0',
-            'dask==2021.11.2',
+            'aiokatcp==1.3.0',
+            'dask==2022.05.0',
             'katsdpsigproc==1.4.2',
             'katsdptelstate==0.11',
-            'numpy==1.21.0',
-            'pyparsing==3.0.6',
+            'numpy==1.21.6',
+            'pyparsing==3.0.8',
             'spead2==3.9.1',
-            'types-decorator==0.1.5',
-            'types-redis==3.5.4',
+            'types-decorator==5.1.1',
+            'types-docutils==0.17.1',
+            'types-redis==4.2.2',
             'types-setuptools==57.0.0',
-            'types-six==0.1.7',
+            'types-six==1.16.0',
         ]
   - repo: https://github.com/jazzband/pip-tools
     rev: 6.6.0

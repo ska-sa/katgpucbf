@@ -13,8 +13,12 @@
 #
 import os
 import sys
+import unittest.mock
 import warnings
 from importlib.metadata import distribution
+
+# Allow docs to be built even if pycuda is not installed
+sys.modules["katsdpsigproc.cuda"] = unittest.mock.Mock()
 
 sys.path.insert(0, os.path.abspath("."))
 

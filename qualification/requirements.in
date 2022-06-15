@@ -1,5 +1,12 @@
 -r ../requirements-dev.txt
 async-timeout
+docutils
+matplotlib
+numpy
+pylatex
+pytest
 pytest-expectr
 pytest-reportlog
+python-dotenv
 spead2>=3.9.1
+tikzplotlib

@@ -26,7 +26,7 @@ The script will perform the following actions:
   - Install all the requirements for running, developing and building this
     documentation.
   - Install the :mod:`katgpucbf` package itself, in editable mode.
-  - Compile the ``.so`` files needed to run the :mod:`.xbgpu` unit tests.
+  - Build this documentation.
   - Install :program:`pre-commit` to help with keeping things tidy.
 
 Sourcing the script instead of executing it directly will keep your virtual
@@ -44,8 +44,8 @@ And you are ready to start developing with :mod:`katgpucbf`!
   I don't recommend using the  ``dev-setup.sh`` for anything other than initial
   setup. If you run it again, the requirements will be re-installed, and the
   module will be re-installed in editable mode. It's unlikely that any of this
-  will be harmful in any way, but it will use up a few minutes for getting it
-  all compiled and installed. Usually you probably won't want to do that.
+  will be harmful in any way, but it will use up a few minutes. You probably
+  won't want to do that every time.
 
 
 Pre-commit
@@ -110,15 +110,15 @@ The colour key is at the top of the page, but briefly, lines marked in green
 were executed by the tests, red were not. Yellow lines indicate branches which
 were only partially covered, i.e. all possible ways to branch were not tested.
 In the cases shown, it is because only expected values were passed to the
-function in question, the unit tests didn't try to break to test for whether
-it would fail.
+function in question: the unit tests didn't pass invalid inputs in order to
+check that exceptions were raised appropriately.
 
 On the right hand side, a context is shown for the lines that were executed, as
 shown in this image:
 
 .. image:: images/coverage_screenshot_contexts.png
 
-On the left side of the `|` is the static context - in this case showing
+On the left side of the ``|`` is the static context - in this case showing
 information regarding the git commit that I ran the test on. The right side
 shows the dynamic context - in this case, two different tests both executed this
 code during the course of their run.
@@ -140,7 +140,7 @@ code during the course of their run.
 
   .. code-block:: bash
 
-    coverage run --context=$(git describe --tags --dirty)
+    coverage run --context=$(git describe --tags --dirty --always)
 
   This gives more useful information about exactly what code was run, and whether
   it's committed or dirty. Unfortunately, doing things this way you miss out on
@@ -170,6 +170,22 @@ code during the course of their run.
   .. _suggests: https://github.com/nedbat/coveragepy/issues/1190
 
 
+Light-weight installation
+-------------------------
+
+There are a few cases where it is unnecessary (and inconvenient) to install
+CUDA, such as for building the documentation or launching a correlator on a
+remote system. If one does not use :program:`dev-setup.sh` but installs
+manually (in a virtual environment) using ``pip install -e .``, then only a
+subset of dependencies are installed. There are also some optional extras that
+can be installed, such as ``pip install -e ".[doc]"`` to install necessary
+dependencies for building the documentation. Refer to ``setup.cfg`` to see what
+extras are available.
+
+This is not recommended for day-to-day development, because it will install
+whatever is the latest version at the time, rather than the known-good versions
+pinned in requirements.txt.
+
 TODOs
 -----
 
@@ -179,10 +195,10 @@ something to keep yourself busy, this is a good place to start.
 .. tip::
 
   This list only includes TODOs formatted in a way that Sphinx understands.
-  There are likely others formatted as comments in Python or C++ throughout the
-  code which don't appear listed here. ``grep`` can help you find them!
+  There are likely others formatted as comments throughout the code which don't
+  appear listed here. ``grep`` can help you find them!
 
-  The ``test/`` folder is not pulled in by Sphinx, and so any TODOs there will
-  also not be included in this list.
+  The ``test``  and ``qualification`` folders are not pulled in by Sphinx, and
+  so any TODOs there will also not be included in this list.
 
 .. todolist::
