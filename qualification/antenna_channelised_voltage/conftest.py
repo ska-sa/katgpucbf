@@ -19,7 +19,7 @@
 import pytest
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def n_dsims(n_antennas: int):
     """Give every simulated antenna its own dsim."""
     return n_antennas

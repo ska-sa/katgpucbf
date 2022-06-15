@@ -61,6 +61,7 @@ distlib==0.3.4
 docutils==0.17.1
     # via
     #   -r ../requirements-dev.txt
+    #   -r requirements.in
     #   pybtex-docutils
     #   sphinx
     #   sphinx-rtd-theme
@@ -140,10 +141,13 @@ numba==0.55.1
 numpy==1.21.6
     # via
     #   -r ../requirements-dev.txt
+    #   -r requirements.in
     #   matplotlib
     #   numba
     #   spead2
     #   tikzplotlib
+ordered-set==4.1.0
+    # via pylatex
 packaging==21.3
     # via
     #   -r ../requirements-dev.txt
@@ -215,6 +219,8 @@ pygments==2.12.0
     #   -r ../requirements-dev.txt
     #   ipython
     #   sphinx
+pylatex==1.4.1
+    # via -r requirements.in
 pyparsing==3.0.8
     # via
     #   -r ../requirements-dev.txt
@@ -223,6 +229,7 @@ pyparsing==3.0.8
 pytest==7.1.2
     # via
     #   -r ../requirements-dev.txt
+    #   -r requirements.in
     #   pytest-asyncio
     #   pytest-cov
     #   pytest-expectr
@@ -248,6 +255,8 @@ pytest-xdist==2.5.0
     # via -r ../requirements-dev.txt
 python-dateutil==2.8.2
     # via matplotlib
+python-dotenv==0.20.0
+    # via -r requirements.in
 pytz==2022.1
     # via
     #   -r ../requirements-dev.txt

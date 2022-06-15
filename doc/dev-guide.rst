@@ -170,6 +170,22 @@ code during the course of their run.
   .. _suggests: https://github.com/nedbat/coveragepy/issues/1190
 
 
+Light-weight installation
+-------------------------
+
+There are a few cases where it is unnecessary (and inconvenient) to install
+CUDA, such as for building the documentation or launching a correlator on a
+remote system. If one does not use :program:`dev-setup.sh` but installs
+manually (in a virtual environment) using ``pip install -e .``, then only a
+subset of dependencies are installed. There are also some optional extras that
+can be installed, such as ``pip install -e ".[doc]"`` to install necessary
+dependencies for building the documentation. Refer to ``setup.cfg`` to see what
+extras are available.
+
+This is not recommended for day-to-day development, because it will install
+whatever is the latest version at the time, rather than the known-good versions
+pinned in requirements.txt.
+
 TODOs
 -----
 

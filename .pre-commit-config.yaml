@@ -57,6 +57,7 @@ repos:
             'pyparsing==3.0.8',
             'spead2==3.9.1',
             'types-decorator==5.1.1',
+            'types-docutils==0.17.1',
             'types-redis==4.2.2',
             'types-setuptools==57.0.0',
             'types-six==1.16.0',

@@ -70,7 +70,21 @@ stop after the first failed test instead of continuing, etc.
 Post-processing
 ---------------
 
-I've been using the same ``generate_pdf_test_report`` currently living
-in ``dc_sand/test_report`` - so copy the ``report.json`` output from the
-test run to a local machine, and this should be all you need to generate
-a PDF report for your general reading pleasure.
+The steps above produce a ``report.json`` file. To turn that into a usable PDF,
+run
+
+::
+
+   qualification/report/generate_pdf.py report.json report.pdf
+
+This requires at least ``texlive-base``, ``texlive-latex-extra`` and
+``latexmk``. This step doesn't interact with the live system at all, so it is
+possible to copy/mount the JSON file to another machine to run this step.
+
+Some values are taken from the environment (or if present, a ``.env`` file—see
+`python-dotenv`_). In particular, these are
+
+TESTER_NAME
+    Used as the author of the document.
+
+.. _python-dotenv: https://github.com/theskumar/python-dotenv
