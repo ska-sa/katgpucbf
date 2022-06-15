@@ -28,7 +28,7 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver
 
 
 def compute_tone_gain(
@@ -67,7 +67,6 @@ def compute_tone_gain(
 async def sample_tone_response(
     rel_freqs: ArrayLike,
     amplitude: ArrayLike,
-    correlator: CorrelatorRemoteControl,
     receiver: BaselineCorrelationProductsReceiver,
 ) -> np.ndarray:
     """Measure power response to tones.
@@ -82,8 +81,6 @@ async def sample_tone_response(
         of frequency bins).
     amplitude
         Amplitude of the tones, on a scale of 0 to 1.
-    correlator
-        Connection to the correlator.
     receiver
         Receiver for obtaining the output data.
     """
@@ -92,15 +89,15 @@ async def sample_tone_response(
     # katsdpcontroller ensures that the dsim is started with V pol first and
     # the fixtures put V pol first in the axis ordering, so this is fairly
     # straightforward.
-    assert len(correlator.input_labels) == N_POLS * len(correlator.dsim_clients)
+    assert len(receiver.input_labels) == N_POLS * len(receiver.correlator.dsim_clients)
     autos = []
-    for inp in correlator.input_labels:
-        autos.append(correlator.bls_ordering.index((inp, inp)))
+    for inp in receiver.input_labels:
+        autos.append(receiver.bls_ordering.index((inp, inp)))
 
-    channel_width = correlator.bandwidth / correlator.n_chans
+    channel_width = receiver.bandwidth / receiver.n_chans
     freqs = np.asarray(rel_freqs) * channel_width  # Baseband, which is what dsims work on
     amplitude = np.asarray(amplitude)
-    out_shape = np.broadcast_shapes(freqs.shape, amplitude.shape) + (correlator.n_chans,)
+    out_shape = np.broadcast_shapes(freqs.shape, amplitude.shape) + (receiver.n_chans,)
     out = np.empty(out_shape, np.int32)
     # Each element is an (out_index, signal_spec) pair. When it fills up to the
     # number of inputs available, `flush` is called.
@@ -119,7 +116,7 @@ async def sample_tone_response(
             signal = ""
             for j in range(N_POLS):
                 signal += tasks[i * N_POLS + j][1]
-            requests.append(asyncio.create_task(correlator.dsim_clients[i].request("signals", signal)))
+            requests.append(asyncio.create_task(receiver.correlator.dsim_clients[i].request("signals", signal)))
         await asyncio.gather(*requests)
         _, chunk = await receiver.next_complete_chunk()
         assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
@@ -130,7 +127,7 @@ async def sample_tone_response(
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
             tasks.append((it.multi_index, f"cw({a}, {f});"))
-            if len(tasks) == correlator.n_inputs:
+            if len(tasks) == receiver.n_inputs:
                 await flush()
                 tasks = []
     if tasks:

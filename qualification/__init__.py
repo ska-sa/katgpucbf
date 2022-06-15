@@ -25,8 +25,9 @@
 import ast
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
-from typing import AsyncGenerator, Iterable, List, Literal, Optional, Tuple, overload
+from typing import AsyncGenerator, List, Literal, Mapping, Optional, Tuple, overload
 
 import aiokatcp
 import numba
@@ -35,7 +36,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
+from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
@@ -63,87 +64,59 @@ async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
             continue
 
 
-async def get_dsim_endpoint(product_controller_client: aiokatcp.Client, adc_sample_rate: float, index: int) -> Endpoint:
-    """Get the katcp address for a dsim on a product controller."""
-    return endpoint_parser(None)(
-        await get_sensor_val(product_controller_client, f"sim.dsim{index:03}.{int(adc_sample_rate)}.0.port")
-    )
-
-
 @dataclass
 class CorrelatorRemoteControl:
     """A container class for katcp clients needed by qualification tests."""
 
     product_controller_client: aiokatcp.Client
     dsim_clients: List[aiokatcp.Client]
-    n_ants: int
-    n_inputs: int
-    n_chans: int
-    n_bls: int
-    n_chans_per_substream: int
-    n_bits_per_sample: int
-    n_spectra_per_acc: int
-    int_time: float
-    n_samples_between_spectra: int
-    input_labels: List[str]
-    bls_ordering: List[Tuple[str, str]]
-    sync_time: float
-    scale_factor_timestamp: float
-    bandwidth: float
-    multicast_endpoints: List[Tuple[str, int]]
+    config: dict  # JSON dictionary used to configure the correlator
+    sensor_watcher: aiokatcp.SensorWatcher
+
+    @property
+    def sensors(self) -> aiokatcp.SensorSet:  # noqa: D401
+        """Current sensor values from the product controller.
+
+        Note that if a command is issued to a dsim, there will be an unknown
+        delay before any sensors that change as a result are visible in this
+        sensor set, because it comes via the product controller. In such
+        cases it may be necessary to directly query the dsim for the sensor
+        value.
+        """
+        return self.sensor_watcher.sensors
 
     @classmethod
-    async def connect(
-        cls, pcc: aiokatcp.Client, dsim_clients: Iterable[aiokatcp.Client], correlator_config: dict
-    ) -> "CorrelatorRemoteControl":
+    async def connect(cls, host: str, port: int, config: Mapping) -> "CorrelatorRemoteControl":
         """Connect to a correlator's product controller.
 
         The function connects and gathers sufficient metadata in order for the
         user to know how to use the correlator for whatever testing needs to be
         done.
         """
-        # Some metadata we know already from the config.
-        n_inputs = len(correlator_config["outputs"]["antenna_channelised_voltage"]["src_streams"])
-        n_ants = n_inputs // 2
-        n_chans = correlator_config["outputs"]["antenna_channelised_voltage"]["n_chans"]
-        input_labels = correlator_config["outputs"]["antenna_channelised_voltage"]["input_labels"]
+        pcc = aiokatcp.Client(host, port)
+        sensor_watcher = aiokatcp.SensorWatcher(pcc)
+        pcc.add_sensor_watcher(sensor_watcher)
+        await sensor_watcher.synced.wait()  # Implicitly waits for connection too
 
-        # But some can't.
-        n_bls = await get_sensor_val(pcc, "baseline_correlation_products-n-bls")
-        n_chans_per_substream = await get_sensor_val(pcc, "baseline_correlation_products-n-chans-per-substream")
-        n_bits_per_sample = await get_sensor_val(pcc, "baseline_correlation_products-xeng-out-bits-per-sample")
-        n_spectra_per_acc = await get_sensor_val(pcc, "baseline_correlation_products-n-accs")
-        int_time = await get_sensor_val(pcc, "baseline_correlation_products-int-time")
-        n_samples_between_spectra = await get_sensor_val(pcc, "antenna_channelised_voltage-n-samples-between-spectra")
-        bls_ordering = ast.literal_eval(await get_sensor_val(pcc, "baseline_correlation_products-bls-ordering"))
-        sync_time = await get_sensor_val(pcc, "antenna_channelised_voltage-sync-time")
-        scale_factor_timestamp = await get_sensor_val(pcc, "antenna_channelised_voltage-scale-factor-timestamp")
-        bandwidth = await get_sensor_val(pcc, "antenna_channelised_voltage-bandwidth")
-        multicast_endpoints = [
-            (endpoint.host, endpoint.port)
-            for endpoint in endpoint_list_parser(7148)(
-                await get_sensor_val(pcc, "baseline_correlation_products-destination")
-            )
-        ]
+        dsim_endpoints = []
+        for name, sensor in sensor_watcher.sensors.items():
+            if match := re.fullmatch(r"sim\.dsim(\d+)\.\d+\.0\.port", name):
+                idx = int(match.group(1))
+                dsim_endpoints.append((idx, sensor.value))
+        assert dsim_endpoints
+        dsim_endpoints.sort()  # sorts by index
+
+        dsim_clients = []
+        for _, endpoint in dsim_endpoints:
+            dsim_clients.append(await aiokatcp.Client.connect(str(endpoint.host), endpoint.port))
+
+        logger.info("Sensors synchronised; %d dsims found", len(dsim_clients))
 
         return CorrelatorRemoteControl(
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
-            n_ants=n_ants,
-            n_inputs=n_inputs,
-            n_chans=n_chans,
-            n_bls=n_bls,
-            n_chans_per_substream=n_chans_per_substream,
-            n_bits_per_sample=n_bits_per_sample,
-            n_spectra_per_acc=n_spectra_per_acc,
-            int_time=int_time,
-            n_samples_between_spectra=n_samples_between_spectra,
-            input_labels=input_labels,
-            bls_ordering=bls_ordering,
-            sync_time=sync_time,
-            scale_factor_timestamp=scale_factor_timestamp,
-            bandwidth=bandwidth,
-            multicast_endpoints=multicast_endpoints,
+            config=dict(config),
+            sensor_watcher=sensor_watcher,
         )
 
     async def steady_state_timestamp(self, *, max_delay: int = DEFAULT_MAX_DELAY) -> int:
@@ -180,25 +153,58 @@ class CorrelatorRemoteControl:
         logger.debug("steady_state_timestamp: %d", timestamp)
         return timestamp
 
+    async def close(self) -> None:
+        """Shut down all the connections."""
+        clients = self.dsim_clients + [self.product_controller_client]
+        for client in clients:
+            client.close()
+        await asyncio.gather(*[client.wait_closed() for client in clients])
+
 
 class BaselineCorrelationProductsReceiver:
     """Wrap a receive stream with helper functions."""
 
-    def __init__(self, correlator: CorrelatorRemoteControl, interface_address: str, use_ibv: bool = False) -> None:
+    def __init__(
+        self, correlator: CorrelatorRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False
+    ) -> None:
+        # Some metadata we know already from the config.
+        acv_name = correlator.config["outputs"][stream_name]["src_streams"][0]
+        self.n_inputs = len(correlator.config["outputs"][acv_name]["src_streams"])
+        self.n_ants = self.n_inputs // 2
+        self.n_chans = correlator.config["outputs"][acv_name]["n_chans"]
+        self.input_labels = correlator.config["outputs"][acv_name]["input_labels"]
+
+        # But some we don't. Note: these could be properties. But copying them up
+        # front ensures we get an exception early if the sensor is missing.
+        self.n_bls = correlator.sensors[f"{stream_name}-n-bls"].value
+        self.n_chans_per_substream = correlator.sensors[f"{stream_name}-n-chans-per-substream"].value
+        self.n_bits_per_sample = correlator.sensors[f"{stream_name}-xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc = correlator.sensors[f"{stream_name}-n-accs"].value
+        self.int_time = correlator.sensors[f"{stream_name}-int-time"].value
+        self.n_samples_between_spectra = correlator.sensors[f"{acv_name}-n-samples-between-spectra"].value
+        self.bls_ordering = ast.literal_eval(correlator.sensors[f"{stream_name}-bls-ordering"].value.decode())
+        self.sync_time = correlator.sensors[f"{acv_name}-sync-time"].value
+        self.scale_factor_timestamp = correlator.sensors[f"{acv_name}-scale-factor-timestamp"].value
+        self.bandwidth = correlator.sensors[f"{acv_name}-bandwidth"].value
+        self.multicast_endpoints = [
+            (endpoint.host, endpoint.port)
+            for endpoint in endpoint_list_parser(7148)(correlator.sensors[f"{stream_name}-destination"].value.decode())
+        ]
+        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
+
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
-            multicast_endpoints=correlator.multicast_endpoints,
-            n_bls=correlator.n_bls,
-            n_chans=correlator.n_chans,
-            n_chans_per_substream=correlator.n_chans_per_substream,
-            n_bits_per_sample=correlator.n_bits_per_sample,
-            n_spectra_per_acc=correlator.n_spectra_per_acc,
-            int_time=correlator.int_time,
-            n_samples_between_spectra=correlator.n_samples_between_spectra,
+            multicast_endpoints=self.multicast_endpoints,
+            n_bls=self.n_bls,
+            n_chans=self.n_chans,
+            n_chans_per_substream=self.n_chans_per_substream,
+            n_bits_per_sample=self.n_bits_per_sample,
+            n_spectra_per_acc=self.n_spectra_per_acc,
+            int_time=self.int_time,
+            n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
         self.correlator = correlator
-        self.timestamp_step = correlator.n_samples_between_spectra * correlator.n_spectra_per_acc
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.

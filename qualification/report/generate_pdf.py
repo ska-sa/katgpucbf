@@ -18,9 +18,9 @@
 
 """Generate a PDF based on the intermediate JSON output."""
 import argparse
-import importlib.resources
 import json
 import os
+import pathlib
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -44,6 +44,8 @@ from pylatex.base_classes import Environment
 from pylatex.labelref import Hyperref
 from pylatex.package import Package
 from pylatex.utils import bold
+
+RESOURCE_PATH = pathlib.Path(__file__).parent
 
 
 class LstListing(Environment):
@@ -249,7 +251,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
     today = date.today()  # TODO: should store inside the JSON
     doc.set_variable("theAuthor", config.get("TESTER_NAME", "Unknown"))
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
-    doc.preamble.append(NoEscape(importlib.resources.read_text("test_report", "preamble.tex")))
+    doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
 
@@ -355,14 +357,13 @@ def main():
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
     with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
-        with importlib.resources.path("test_report", "katdoc.sty") as katdoc_sty_path:
-            # TODO: latexmk uses Perl, which has different string parsing to
-            # Python. If the path contains both a single quote and a special
-            # symbol it will not produce a valid Perl string.
-            parent_dir = str(katdoc_sty_path.parent)
-            latexmkrc.write(f"ensure_path('TEXINPUTS', {parent_dir!r})\n")
-            latexmkrc.flush()
-            doc.generate_pdf(args.pdf, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
+        # TODO: latexmk uses Perl, which has different string parsing to
+        # Python. If the path contains both a single quote and a special
+        # symbol it will not produce a valid Perl string.
+        parent_dir = str(RESOURCE_PATH)
+        latexmkrc.write(f"ensure_path('TEXINPUTS', {parent_dir!r})\n")
+        latexmkrc.flush()
+        doc.generate_pdf(args.pdf, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
 
 
 if __name__ == "__main__":
