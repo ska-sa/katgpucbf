@@ -21,11 +21,13 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import List, Literal, Optional, Tuple, Union
 
+import pytest
 from docutils.core import publish_parts
 from dotenv import dotenv_values
 from pylatex import (
@@ -112,7 +114,7 @@ class Result:
     blurb: str
     steps: List[Step] = field(default_factory=list)
     outcome: Literal["passed", "failed", "skipped"] = "failed"
-    failure_message: Optional[str] = None
+    failure_messages: List[str] = field(default_factory=list)
     start_time: Optional[float] = None
     duration: float = 0.0
     config: dict = field(default_factory=dict)
@@ -182,32 +184,30 @@ def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
             continue
         if line["$report_type"] != "TestReport":
             continue
-        nodeid = line["nodeid"]
+        # _from_json is an "experimental" function.
+        report = pytest.TestReport._from_json(line)
+        nodeid = report.nodeid
         if not results or results[-1].nodeid != nodeid:
             # It's the first time we've seen this nodeid (otherwise we merge
             # with the existing Result).
-            results.append(Result(nodeid, line["location"][2], ""))
+            results.append(Result(nodeid, report.location[2], ""))
         result = results[-1]
         # The teardown phase has all the log messages, so we ignore the setup and call phases.
-        if line["when"] == "teardown":
-            for prop in line["user_properties"]:
+        if report.when == "teardown":
+            for prop in report.user_properties:
                 if prop[0] == "pdf_report_data":
                     for msg in prop[1][:]:
                         assert isinstance(msg, dict)
                         _parse_report_data(result, msg)
         # If teardown fails, the whole test should be seen as failing
-        if line["outcome"] != "passed" or line["when"] == "call":
-            result.outcome = line["outcome"]
+        if report.outcome != "passed" or report.when == "call":
+            result.outcome = report.outcome
         # The test duration will be the sum of setup, call and teardown.
-        result.duration += line["duration"]
-        try:
-            failure_message = line["longrepr"]["reprcrash"]["message"]
-        except (KeyError, TypeError):
-            pass
-        else:
-            # TODO: if multiple phases have failure messages, we probably want to
-            # collect them all. We could also collect the more detailed messages.
-            result.failure_message = failure_message
+        result.duration += report.duration
+        if report.longrepr is not None:
+            # Strip out ANSI color escape sequences
+            failure_message = re.sub("\x1b\\[.*?m", "", report.longreprtext)
+            result.failure_messages.append(failure_message)
     return test_configuration, results
 
 
@@ -340,9 +340,10 @@ def document_from_json(input_data: Union[str, list]) -> Document:
                                     procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
                                 procedure_table.add_hline()
 
-                    if result.failure_message:
+                    if result.failure_messages:
                         with procedure.create(LstListing()) as failure_message:
-                            failure_message.append(result.failure_message)
+                            for message in result.failure_messages:
+                                failure_message.append(message)
 
     return doc
 
