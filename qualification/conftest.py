@@ -114,10 +114,13 @@ def int_time() -> float:  # noqa: D104
     return 0.5
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def pdf_report(request) -> Reporter:
     """Fixture for logging steps in a test."""
-    data = [{"$msg_type": "test_info", "blurb": inspect.getdoc(request.node.function), "test_start": time.time()}]
+    blurb = inspect.getdoc(request.node.function)
+    if blurb is None:
+        raise AssertionError(f"Test {request.node.name} has no docstring")
+    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time()}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
