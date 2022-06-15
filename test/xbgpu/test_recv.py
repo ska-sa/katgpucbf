@@ -17,8 +17,8 @@
 """Unit tests for :mod:`katgpucbf.xbgpu.recv`."""
 
 import itertools
+import logging
 import random
-from test import PromDiff
 from typing import Generator, Iterator, List
 
 import numpy as np
@@ -30,6 +30,8 @@ from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMME
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
 from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
 
+from .. import PromDiff
+
 
 @pytest.fixture
 def layout() -> Layout:
@@ -40,7 +42,7 @@ def layout() -> Layout:
         n_spectra_per_heap=32,
         timestamp_step=2 * 1024 * 32,
         sample_bits=8,
-        heaps_per_fengine_per_chunk=5,
+        heaps_per_fengine_per_chunk=10,
     )
 
 
@@ -50,8 +52,8 @@ class TestLayout:
     def test_properties(self, layout: Layout) -> None:
         """Test the properties of :class:`.Layout`."""
         assert layout.heap_bytes == 32768
-        assert layout.chunk_heaps == 20
-        assert layout.chunk_bytes == 655360
+        assert layout.chunk_heaps == 4 * 10
+        assert layout.chunk_bytes == 1310720
 
 
 @pytest.fixture
@@ -238,29 +240,103 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
         queue: spead2.InprocQueue,
+        caplog,
     ) -> None:
-        """Test that the chunk placement sets heap indices correctly."""
+        """Test that the receiver handles missing heaps and Chunks.
+
+        Start from a non-zero Chunk ID to check the receiving logic doesn't
+        assume we missed Chunks up to that point.
+        """
         rng = np.random.default_rng(seed=1)
         data = rng.integers(-127, 127, size=layout.chunk_bytes, dtype=np.int8)
-        expected_chunk_id = 123
-        first_timestamp = expected_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-        heaps = list(gen_heaps(layout, data, first_timestamp))
-        # Create some gaps in the heaps
-        missing = [0, 5, 7]
-        for idx in reversed(missing):  # Have to go backwards, otherwise indices shift up
-            del heaps[idx]
+        start_chunk_id = 123
+        n_chunks_to_send = 20
+        n_single_heaps_to_delete = 7
+        n_chunks_to_delete = 6
+        heaps_to_send = []
 
-        for heap in heaps:
+        for i in range(n_chunks_to_send):
+            timestamp = (start_chunk_id + i) * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+            heaps_to_send += list(gen_heaps(layout, data, timestamp))
+
+        expected_chunk_presence_flat = np.ones(
+            shape=((n_chunks_to_send - n_chunks_to_delete) * layout.chunk_heaps,), dtype=np.uint8
+        )
+
+        # Create a gap in the heaps to send, enough to make the receiver
+        # 'fast forward' in the Chunk IDs received, but also test the
+        # case of a single heap missing every now and then.
+        missing_heap_ids = [7 + i * layout.chunk_heaps for i in range(n_single_heaps_to_delete)]
+        # Update these heap indices now, as the following removes entire Chunks
+        for missing_heap_id in missing_heap_ids:
+            expected_chunk_presence_flat[missing_heap_id] = 0
+
+        missing_chunk_ids = [i for i in range(9, 9 + n_chunks_to_delete)]
+        for missing_chunk_id in missing_chunk_ids:
+            start_heap_id = missing_chunk_id * layout.chunk_heaps
+            end_heap_id = (missing_chunk_id + 1) * layout.chunk_heaps
+            missing_heap_ids += [i for i in range(start_heap_id, end_heap_id)]
+        missing_heap_ids.sort()  # Just to be sure
+        # This is done in reverse as the indices would otherwise shift up
+        for heap_idx in reversed(missing_heap_ids):
+            del heaps_to_send[heap_idx]
+
+        for heap in heaps_to_send:
             await send_stream.async_send_heap(heap)
-        queue.stop()  # Flushes out the receive streams
-        # Get just the chunks that actually have some data. We needn't worry
-        # about returning chunks to the free ring as we don't expect to deplete
-        # it.
-        chunks = [chunk async for chunk in recv_chunks(stream) if np.any(chunk.present)]
-        assert len(chunks) == 1
-        chunk = chunks[0]
-        assert isinstance(chunk, Chunk)
-        assert chunk.chunk_id == expected_chunk_id
-        expected = np.ones_like(chunk.present)
-        expected[missing] = 0
-        np.testing.assert_equal(chunk.present, expected)
+        queue.stop()  # Flushes out the receive stream
+
+        # Need to compare present arrays during the handling of Chunks
+        # - Initialise to zeroes to automatically catch mismatches,
+        #   but this array should be completely overwritten anyway.
+        received_chunk_presence = np.zeros(
+            shape=(n_chunks_to_send - n_chunks_to_delete, layout.chunk_heaps), dtype=np.uint8
+        )
+        received_chunk_ids = []
+        with caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"), PromDiff(
+            namespace=METRIC_NAMESPACE
+        ) as prom_diff:
+            # Manually register the receiving stream with the StatsCollector,
+            # as we haven't used the `recv.make_stream` utility.
+            recv.stats_collector.add_stream(stream)
+
+            # NOTE: We have to use a 'manual' counter as there is a jump in
+            # received Chunk IDs - due to the deletions earlier.
+            seen = 0
+            async for chunk in recv_chunks(stream):
+                if not np.any(chunk.present):
+                    # NOTE: Due to the 'receiving window' (max_active_chunks) being wide,
+                    # the receiver catches up with the missed Chunk IDs easily enough.
+                    # recv_chunks accounts for any empty chunks received before the first
+                    # 'proper' Chunk. This check is here to account for Chunks received in
+                    # the middle of normal operation, whose heaps we have purposefully
+                    # deleted, but the Receiver marks them as empty to keep the receiving
+                    # window contiguous.
+                    continue
+
+                received_chunk_ids.append(chunk.chunk_id)
+                received_chunk_presence[seen, :] = chunk.present
+                stream.add_free_chunk(chunk)
+                seen += 1
+
+        assert caplog.record_tuples == [
+            (
+                "katgpucbf.xbgpu.recv",
+                logging.WARNING,
+                f"Receiver missed 2 chunks. Expected ID: {start_chunk_id + missing_chunk_ids[0]}, "
+                f"received ID: {start_chunk_id + missing_chunk_ids[0] + 2}.",
+            )
+        ]
+
+        # Have to expand this list as the `range` generator doesn't support item deletion
+        expected_chunk_ids = [i for i in range(start_chunk_id, start_chunk_id + n_chunks_to_send)]
+        for missing_chunk_id in reversed(missing_chunk_ids):
+            del expected_chunk_ids[missing_chunk_id]
+        np.testing.assert_equal(received_chunk_ids, expected_chunk_ids)
+        np.testing.assert_array_equal(received_chunk_presence.flatten(), expected_chunk_presence_flat)
+
+        # Check StatsCollector's values
+        assert prom_diff.get_sample_diff("input_heaps_total") == seen * layout.chunk_heaps - n_single_heaps_to_delete
+        assert (
+            prom_diff.get_sample_diff("input_missing_heaps_total")
+            == n_chunks_to_delete * layout.chunk_heaps + n_single_heaps_to_delete
+        )
