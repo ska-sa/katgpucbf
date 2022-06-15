@@ -18,7 +18,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, antenna_channelised_voltage
+from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from ..antenna_channelised_voltage import compute_tone_gain, sample_tone_response
 from ..reporter import Reporter
 
 
@@ -39,26 +40,24 @@ async def test_linearity(
     """
     pdf_report.step("Capture channelised data for various input CW scales and check linearity.")
 
-    pdf_report.step("CW scales selection.")
+    pdf_report.step("Select a range of CW scales for testing.")
     cw_scales = [0.5**i for i in range(10)]
     pdf_report.detail(f"CW scales: {cw_scales}")
 
-    pdf_report.step("Channel selection. Compute desired channel frequency for Dsim.")
+    pdf_report.step("Select a channel and compute the channel center frequency for the D-sim.")
     sel_chan_center = correlator.n_chans // 3
-    pdf_report.detail(f"Random channel selected: {sel_chan_center}")
-    pdf_report.detail(f"Channel frequency: {(sel_chan_center*(correlator.bandwidth/correlator.n_chans))/1e6:.2f} MHz")
+    pdf_report.detail(
+        f"Channel {sel_chan_center} selected, with center frequency"
+        + f"{(sel_chan_center*(correlator.bandwidth/correlator.n_chans))/1e6:.2f} MHz."
+    )
 
     pdf_report.step("Set EQ gain.")
-    gain = antenna_channelised_voltage.compute_gain(
-        correlator=correlator,
-        amplitude=0.99,
-        target_voltage=110,
-    )
+    gain = compute_tone_gain(correlator=correlator)
 
     pdf_report.detail(f"Setting gain to: {gain}")
     await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
 
-    base_corr_prod = await antenna_channelised_voltage.sample_tone_response(
+    base_corr_prod = await sample_tone_response(
         rel_freqs=sel_chan_center,
         amplitude=cw_scales,
         correlator=correlator,

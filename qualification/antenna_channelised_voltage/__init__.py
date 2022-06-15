@@ -31,15 +31,16 @@ from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 
 
-def compute_gain(
+def compute_tone_gain(
     correlator: CorrelatorRemoteControl,
     amplitude: float = 0.99,
     target_voltage: int = 110,
 ) -> float:
     """Compute F-Engine gain.
 
-    Compute gain to be applied to the F-Engine to maximise output dynamic range.
-    The output is 8 bit signed (max 127).
+    Compute gain to be applied to the F-Engine to maximise output dynamic range
+    when the input is a tone (for example, for use with :func:``sample_tone_response``).
+    The F-Engine output is 8-bit signed (max 127).
 
     Parameters
     ----------
@@ -48,7 +49,10 @@ def compute_gain(
     amplitude
         Amplitude of the tones, on a scale of 0 to 1.
     target_voltage
-        Maximum is 127, but some headroom is good. Default 110.
+        Desired magnitude of F-engine output values. The calculation uses
+        an approximation, so the actual value may be slightly higher than
+        the target. The target may also be reduced if necessary to avoid
+        saturating the X-engine output.
     """
     # We need to avoid saturating the signed 32-bit X-engine accumulation as
     # well (2e9 is comfortably less than 2^31).
