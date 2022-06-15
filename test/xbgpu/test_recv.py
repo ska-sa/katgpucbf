@@ -286,6 +286,8 @@ class TestStream:
         queue.stop()  # Flushes out the receive stream
 
         # Need to compare present arrays during the handling of Chunks
+        # - Initialise to zeroes to automatically catch mismatches,
+        #   but this array should be completely overwritten anyway.
         received_chunk_presence = np.zeros(
             shape=(n_chunks_to_send - n_chunks_to_delete, layout.chunk_heaps), dtype=np.uint8
         )
@@ -336,5 +338,5 @@ class TestStream:
         assert prom_diff.get_sample_diff("input_heaps_total") == seen * layout.chunk_heaps - n_single_heaps_to_delete
         assert (
             prom_diff.get_sample_diff("input_missing_heaps_total")
-            == len(missing_chunk_ids) * layout.chunk_heaps + n_single_heaps_to_delete
+            == n_chunks_to_delete * layout.chunk_heaps + n_single_heaps_to_delete
         )
