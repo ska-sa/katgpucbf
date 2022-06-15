@@ -550,7 +550,7 @@ class XBEngine(DeviceServer):
             item.timestamp += timestamp
             item.chunk = chunk
             # Need to reshape chunk.present to get Heaps in one dimension
-            item.present[:] = chunk.present.reshape((self.heaps_per_fengine_per_chunk, self.n_ants))
+            item.present[:] = chunk.present.reshape(item.present.shape)
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
             self._upload_command_queue.enqueue_wait_for_events(item.events)
