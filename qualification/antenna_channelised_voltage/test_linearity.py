@@ -15,8 +15,8 @@
 ################################################################################
 
 """CBF linearity test."""
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..antenna_channelised_voltage import compute_tone_gain, sample_tone_response
@@ -45,14 +45,16 @@ async def test_linearity(
     pdf_report.detail(f"CW scales: {cw_scales}")
 
     pdf_report.step("Select a channel and compute the channel center frequency for the D-sim.")
-    sel_chan_center = correlator.n_chans // 3
+    sel_chan_center = receive_baseline_correlation_products.n_chans // 3
+    channel_frequency = sel_chan_center * (
+        receive_baseline_correlation_products.bandwidth / receive_baseline_correlation_products.n_chans
+    )
     pdf_report.detail(
-        f"Channel {sel_chan_center} selected, with center frequency"
-        + f"{(sel_chan_center*(correlator.bandwidth/correlator.n_chans))/1e6:.2f} MHz."
+        f"Channel {sel_chan_center} selected, with center frequency " + f"{channel_frequency/1e6:.2f} MHz."
     )
 
     pdf_report.step("Set EQ gain.")
-    gain = compute_tone_gain(correlator=correlator)
+    gain = compute_tone_gain(receiver=receive_baseline_correlation_products)
 
     pdf_report.detail(f"Setting gain to: {gain}")
     await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
@@ -60,30 +62,44 @@ async def test_linearity(
     base_corr_prod = await sample_tone_response(
         rel_freqs=sel_chan_center,
         amplitude=cw_scales,
-        correlator=correlator,
         receiver=receive_baseline_correlation_products,
     )
 
     linear_scale_result = base_corr_prod[:, sel_chan_center]
     linear_test_result = np.sqrt(linear_scale_result / np.max(linear_scale_result))
 
-    rms_voltage = np.sqrt(np.max(linear_scale_result) / correlator.n_spectra_per_acc)
+    rms_voltage = np.sqrt(np.max(linear_scale_result) / receive_baseline_correlation_products.n_spectra_per_acc)
     pdf_report.step("Compute RMS Voltage.")
-    pdf_report.detail(f"RMS voltage: {rms_voltage:.3f}).")
+    pdf_report.detail(f"RMS voltage: {rms_voltage:.3f}.")
 
     pdf_report.step("Compute Mean Square Error (MSE).")
     mse = np.sum(np.square(cw_scales - linear_test_result)) / len(cw_scales)
     pdf_report.detail(f"MSE is: {mse}")
 
     # Generate plot with reference
-    # TODO: This plot should be automagically added into the report. Not yet sure how to do that.
-    plt.figure()
-    plt.plot(10 * np.log10(np.square(cw_scales)), label="Reference")
-    plt.plot(10 * np.log10(np.square(linear_test_result)), label="Measured")
-    plt.legend()
-    plt.xlabel("CW Scale")
-    plt.ylabel("dB")
-    plt.title("CBF Linearity Test")
     labels = [f"$2^{{-{i}}}$" for i in range(len(cw_scales))]
-    plt.xticks(np.arange(len(linear_test_result)), labels=labels)
-    plt.savefig("linearity.png")
+    for xticks, ymin, title in [
+        (np.arange(len(cw_scales)), -100, "CBF Linearity Test"),
+    ]:
+        fig = Figure()
+        ax = fig.subplots()
+        # pgfplots seems to struggle if data is too far outside ylim
+        ax.plot(10 * np.log10(np.square(cw_scales)), label="Reference")
+        ax.plot(10 * np.log10(np.square(linear_test_result)), label="Measured")
+        ax.set_title(title)
+        ax.set_xlabel("CW Scale")
+        ax.set_ylabel("dB")
+        ax.legend()
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(labels)
+        ax.set_xlim(xticks[0], xticks[-1])
+        ax.set_ylim(ymin, 0)
+
+        for y in [-3, -53]:
+            if ymin < y:
+                ax.axhline(y, dashes=(1, 1), color="black")
+                ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
+        # tikzplotlib.clean_figure doesn't like data outside the ylim at all
+        pdf_report.figure(
+            fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
+        )
