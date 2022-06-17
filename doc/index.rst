@@ -40,6 +40,8 @@ Welcome to katgpucbf's documentation!
    :maxdepth: 2
    :caption: Controlling the Controller
 
+   controlling
+
 .. toctree::
    :maxdepth: 2
    :caption: Installation and Operation
