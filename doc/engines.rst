@@ -16,6 +16,13 @@ GPU DSP engines
 SPEAD protocol
 --------------
 
+.. todo::
+
+    Now that I'm seeing it in this context, this subsection doesn't feel so
+    naturally that it belongs with the other things here.
+
+    Maybe it can be promoted to live by itself?
+
 The Streaming Protocol for Exchanging Astronomical Data (`SPEAD`_) is a
 lightweight streaming protocol, primarily UDP-based, designed for components
 of a radio astronomy signal-chain to transmit data to each other over Ethernet
