@@ -39,3 +39,4 @@ Controller
 .. todo::
 
     - Relationship with katsdpcontroller
+    - reference to a later section which will describe it more thoroughly.
