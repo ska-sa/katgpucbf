@@ -1,7 +1,15 @@
 Katgpucbf prototype qualification framework
 ===========================================
 
-The software in this folder is intended for use with pytest in order to
+.. todo::
+
+   This document needs a bit of an introduction distinguishing it from normal
+   unit-testing.
+
+   The wording could also be cleaned up somewhat, and the "Requirements" section
+   can mention the "optional extras" now included in the setup.
+
+The ``qualification`` folder is intended for use with pytest in order to
 run qualification tests on a correlator run using ``katgpucbf``.
 
 A connection is made to an SDP Master Controller, an
@@ -52,7 +60,7 @@ this directory:
 
 ::
 
-   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:main-20220328
+   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest
 
 Explanation:
 
@@ -61,14 +69,19 @@ Explanation:
    low, but for larger ones it will be an issue.
 -  ``--image-override`` is designed to work in exactly the same way as
    that in ``sim_correlator.py``, specifying exactly which Docker image
-   to use for the tests. This is just the example that I've been using,
-   update accordingly.
+   to use for the tests.
 
 The general pytest options apply, so for instance with ``-x`` you can
 stop after the first failed test instead of continuing, etc.
 
 Post-processing
 ---------------
+
+.. todo::
+
+   Bruce moved the report generator to this repo, this section will need to be
+   updated according to what he's written. I'll do that once I merge ``main``
+   back into this branch because there'll be conflicts, probably.
 
 I've been using the same ``generate_pdf_test_report`` currently living
 in ``dc_sand/test_report`` - so copy the ``report.json`` output from the
