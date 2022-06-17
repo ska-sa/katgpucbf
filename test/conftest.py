@@ -34,9 +34,16 @@ This will run :func:`!my_test` multiple times, with `a` spanning the values
 (enough to ensure that each individual value gets tested). By passing a
 command-line option :option:`!--all-combinations` to pytest one can instead
 run all 12 possible combinations.
+
+Additional, a ``filter`` kwarg can be passed with a predicate function that can
+decide whether any particular combination should be considered for testing. It
+is given a dictionary mapping names to values, and returns true if that
+combination is a candidate.
 """
 
-from typing import List, Optional, Tuple, Union
+import itertools
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytest
 import spead2
@@ -53,6 +60,13 @@ def pytest_addoption(parser) -> None:
     """Register new command-line options."""
     group = parser.getgroup("combinations")
     group.addoption("--all-combinations", action="store_true", help="Test the full Cartesian product of parameters")
+
+
+@dataclass
+class _CombinationsCandidate:
+    indices: Tuple[int, ...]  # Index into the list of options for each position
+    values: tuple  # Actual value, organised by position
+    by_name: Dict[str, Any]  # Lookup by argument name (for filtering)
 
 
 def pytest_generate_tests(metafunc) -> None:
@@ -75,25 +89,44 @@ def pytest_generate_tests(metafunc) -> None:
             )
         if not names:
             continue  # Nothing to do if there are zero names
+        candidates = []
+        filter = marker.kwargs.get("filter", lambda combo: True)
+        for indices in itertools.product(*(range(len(value_list)) for value_list in values)):
+            candidate = _CombinationsCandidate(
+                indices=indices,
+                values=tuple(value_list[i] for value_list, i in zip(values, indices)),
+                by_name={name: value_list[i] for name, value_list, i in zip(names, values, indices)},
+            )
+            if filter(candidate.by_name):
+                candidates.append(candidate)
         if all_combinations:
-            for name, value_list in zip(names, values):
-                metafunc.parametrize(name, value_list)
+            combos = candidates
         else:
-            # Determine the total number of combinations to test, which will be
-            # the longest of the value lists.
-            n = max(len(value_list) for value_list in values)
+            # Repeatly take the candidate with the least coverage, until every
+            # individual value is tested at least once. Tie-breaking is
+            # selected to favour the last elements: if the lists contain tests
+            # of increasing complexity, then this ensures that most complex
+            # combination gets tested.
+            cover = [[0] * len(value_list) for value_list in values]
             combos = []
-            for i in range(n):
-                if i == n - 1:
-                    # Ensure that the last test uses the last item from each
-                    # list. If the lists contain tests of increasing
-                    # complexity, then this ensures that most complex
-                    # combination gets tested.
-                    combo = tuple(value_list[-1] for value_list in values)
-                else:
-                    combo = tuple(value_list[i % len(value_list)] for value_list in values)
-                combos.append(combo)
-            metafunc.parametrize(names, combos)
+            while any(0 in c for c in cover):
+                best: Optional[_CombinationsCandidate] = None
+                best_score = 0
+                for candidate in candidates:
+                    score = sum(c[idx] for c, idx in zip(cover, candidate.indices))
+                    if best is None or score <= best_score:
+                        best = candidate
+                        best_score = score
+                if not best:
+                    raise RuntimeError("Filter is too strict: not all values can be tested")
+                combos.append(best)
+                candidates.remove(best)
+                for c, idx in zip(cover, best.indices):
+                    c[idx] += 1
+            # First combo will have last element of each list. Make that the
+            # last test rather than the first.
+            combos.reverse()
+        metafunc.parametrize(names, [combo.values for combo in combos])
 
 
 @pytest.fixture
