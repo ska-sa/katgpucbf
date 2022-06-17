@@ -29,7 +29,7 @@ echo "Installing requirements for running and development"
 pip install -r requirements.txt -r requirements-dev.txt
 
 echo "Installing module in editable mode for development"
-pip install -e .
+pip install -e '.[test,doc]'
 
 echo "Building documentation for your convenience"
 make -C doc html

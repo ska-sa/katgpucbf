@@ -59,3 +59,36 @@ various places.
 .. todo:: Merge the readme from the pre-commit repo into this section?
 
 .. _documentation: https://pre-commit.com/
+
+Light-weight installation
+-------------------------
+
+There are a few cases where it is unnecessary (and inconvenient) to install
+CUDA, such as for building the documentation or launching a correlator on a
+remote system. If one does not use :program:`dev-setup.sh` but installs
+manually (in a virtual environment) using ``pip install -e .``, then only a
+subset of dependencies are installed. There are also some optional extras that
+can be installed, such as ``pip install -e ".[doc]"`` to install necessary
+dependencies for building the documentation. Refer to ``setup.cfg`` to see what
+extras are available.
+
+This is not recommended for day-to-day development, because it will install
+whatever is the latest version at the time, rather than the known-good versions
+pinned in requirements.txt.
+
+TODOs
+-----
+
+This list is assembled from throughout the documentation. If you're looking for
+something to keep yourself busy, this is a good place to start.
+
+.. tip::
+
+  This list only includes TODOs formatted in a way that Sphinx understands.
+  There are likely others formatted as comments throughout the code which don't
+  appear listed here. ``grep`` can help you find them!
+
+  The ``test``  and ``qualification`` folders are not pulled in by Sphinx, and
+  so any TODOs there will also not be included in this list.
+
+.. todolist::

@@ -125,10 +125,10 @@ class TestSend:
         ig = spead2.ItemGroup()
 
         # 5.1 Wait for the first packet to arrive - it is expected to be the
-        # SPEAD descriptor. Without the desciptor the recv_stream cannot
+        # SPEAD descriptor. Without the descriptor the recv_stream cannot
         # interpret the heaps correctly.
         heap = await recv_stream.get()
-        assert heap.cnt % n_engines == 4, "The heap IDs are not correctly strided"
+        assert heap.cnt % n_engines == 4 % n_engines, "The heap IDs are not correctly strided"
         items = ig.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 

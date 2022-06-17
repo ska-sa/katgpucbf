@@ -423,7 +423,7 @@ def make_dither(n_pols: int, n: int, entropy: Optional[int] = None) -> xr.DataAr
 
 
 @numba.njit
-def _clip(a, a_min, a_max):  # pragma: nocover
+def _clip(a, a_min, a_max):
     """Like np.clip, but for scalars.
 
     It's not working in numba: https://github.com/numba/numba/issues/3469.
@@ -437,7 +437,7 @@ def _clip(a, a_min, a_max):  # pragma: nocover
 
 
 @numba.njit(nogil=True)
-def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:  # pragma: nocover
+def _quantise_chunk(chunk: np.ndarray, dither: np.ndarray, scale: np.float32) -> np.ndarray:
     out = np.empty_like(chunk, dtype=np.int32)
     for i in range(chunk.shape[0]):
         scaled = chunk[i] * scale + dither[i]
@@ -468,7 +468,7 @@ def quantise(
 
 
 @numba.njit(nogil=True)
-def _packbits(data: np.ndarray, bits: int) -> np.ndarray:  # pragma: nocover
+def _packbits(data: np.ndarray, bits: int) -> np.ndarray:
     # Note: needs lots of explicit casting to np.uint64, as otherwise
     # numba seems to want to infer double precision.
     out = np.zeros(data.size * bits // BYTE_BITS, np.uint8)

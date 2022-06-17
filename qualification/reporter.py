@@ -84,4 +84,5 @@ class Reporter:
             tikzplotlib.clean_figure(figure)
         kwargs = dict(tikzplotlib_kwargs)
         kwargs.setdefault("table_row_sep", r"\\")
+        kwargs.setdefault("strict", True)
         self.raw_figure(tikzplotlib.get_tikz_code(figure, **kwargs))

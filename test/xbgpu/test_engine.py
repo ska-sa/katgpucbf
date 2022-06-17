@@ -16,7 +16,7 @@
 
 """Unit tests for XBEngine module."""
 
-from typing import Final, List
+from typing import Final, List, Optional
 
 import numpy as np
 import pytest
@@ -24,12 +24,15 @@ import spead2
 import spead2.recv.asyncio
 import spead2.send
 import spead2.send.asyncio
+from katsdpsigproc.abc import AbstractContext
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
+from katgpucbf.xbgpu import METRIC_NAMESPACE
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.main import make_engine, parse_args
 
+from .. import PromDiff
 from . import test_parameters
 from .test_recv import gen_heap
 
@@ -77,7 +80,14 @@ def cmult_and_scale(a, b, c):
 
 
 @njit
-def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n_spectra_per_heap):
+def generate_expected_output(
+    batch_start_idx,
+    num_batches,
+    channels,
+    antennas,
+    n_spectra_per_heap,
+    missing_antenna,
+):
     """Calculate the expected correlator output.
 
     This doesn't do a full correlator. It calculates the results according to
@@ -86,6 +96,10 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
     """
     baselines = antennas * (antennas + 1) * 2
     output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
+    if num_batches == 1:
+        # The first accumulation is incomplete, and therefore completely zeroed
+        # by the XBEngine
+        return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         sign = pow(-1, b)
         for c in range(channels):
@@ -102,12 +116,23 @@ def generate_expected_output(batch_start_idx, num_batches, channels, antennas, n
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
-                    output_array[c, 4 * bl_idx + 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
-                    output_array[c, 4 * bl_idx + 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
-                    output_array[c, 4 * bl_idx + 2, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
-                    output_array[c, 4 * bl_idx + 3, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
+                    if a1 != missing_antenna and a2 != missing_antenna:
+                        output_array[c, 4 * bl_idx + 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
+                        output_array[c, 4 * bl_idx + 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
+                        output_array[c, 4 * bl_idx + 2, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
+                        output_array[c, 4 * bl_idx + 3, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
 
     return output_array
+
+
+def valid_end_to_end_combination(combo: dict) -> bool:
+    """Check whether a combination for :meth:`TestEngine.test_xengine_end_to_end` is valid."""
+    n_ants = combo["n_ants"]
+    missing_antenna = combo["missing_antenna"]
+    if missing_antenna is None:
+        return True
+    # Don't want to delete all the data, or an out-of-range antenna
+    return n_ants > 1 and missing_antenna < n_ants
 
 
 class TestEngine:
@@ -120,6 +145,7 @@ class TestEngine:
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
+        missing_antenna: Optional[int] = None,
     ) -> List[spead2.send.HeapReference]:
         """Generate a deterministic input for sending to the XBEngine.
 
@@ -161,13 +187,16 @@ class TestEngine:
             The number of frequency channels contained in a heap.
         n_spectra_per_heap
             The number of time samples per frequency channel.
+        missing_antenna
+            The desired antenna's heaps to be removed from the created list, indexed
+            from zero (0).
 
         Returns
         -------
         heaps
             A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
-        # 1. Define heap shapes that will be needed to generate simulated data.
+        # 1. Define heap shapes needed to generate simulated data.
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
         # The heaps shape has been modified with the COMPLEX dimension and n_pols
         # dimension equal to 1 instead of 2. This is because we treat the two
@@ -224,42 +253,105 @@ class TestEngine:
             heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
 
+        if missing_antenna is not None:
+            del heaps[missing_antenna]
+
         return heaps
 
-    @staticmethod
-    async def _recv_process(
+    def _make_feng(
+        self, queues: List[spead2.InprocQueue], max_packet_size: int, max_heaps: int
+    ) -> "spead2.send.asyncio.AsyncStream":
+        """Create send stream for a fake F-Engine."""
+        feng_stream_config = spead2.send.StreamConfig(
+            max_packet_size=max_packet_size,
+            max_heaps=max_heaps,
+        )
+        return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, feng_stream_config)
+
+    async def _send_data(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
         recv_stream: spead2.recv.asyncio.Stream,
+        *,
+        heap_accumulation_threshold: int,
+        n_accumulations: int,
+        timestamp_step: int,
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-        n_accumulations: int,
-        heap_accumulation_threshold: int,
-        timestamp_step,
-    ) -> None:
-        """Receive and verify XBEngine output data."""
+        missing_antenna: Optional[int] = None,
+    ) -> np.ndarray:
+        """Send a contiguous stream of data to the engine and retrieve the results.
+
+        Data is generated and sent to the receiver. We are performing
+        <n_accumulations> full accumulations. Each accumulation requires
+        heap_accumulation_threshold batches of heaps. Additionally, we generate
+        one extra batch to simulate an incomplete accumulation to check that
+        dumps are aligned correctly even if the first received batch is from the
+        middle of an accumulation.
+
+        Parameters
+        ----------
+        mock_recv_streams
+            Fixture
+        recv_stream
+            InprocStream to receive data output by XBEngine.
+        heap_accumulation_threshold
+            Number of consecutive heaps to process in a single accumulation.
+        n_accumulations
+            Number of accumulations this test aims to process.
+        timestamp_step
+            Timestamp step between each received heap processed.
+        n_ants, n_channels_per_stream, n_spectra_per_heap, missing_antenna
+            See :meth:`_create_heaps` for more info.
+
+        Returns
+        -------
+        device_results
+            Array of all GPU-generated data of shape
+            - ((n_accumulations + 1), n_channels_per_stream, n_baselines, COMPLEX)
+        """
+        # Header is 12 fields of 8 bytes each = 96 bytes
+        max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
+        max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
+        feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
+        for i in range(heap_accumulation_threshold * n_accumulations + 1):
+            # Generate the batch index. By setting the first batch timestamp
+            # value to timestamp_step * (heap_accumulation_threshold - 1) we
+            # generate only a single batch for the first accumulation as the
+            # accumulations are aligned to integer multiples of
+            # heap_accumulation_threshold * timestamp_step
+            batch_index = i + (heap_accumulation_threshold - 1)
+            timestamp = batch_index * timestamp_step
+            heaps = self._create_heaps(
+                timestamp,
+                batch_index,
+                n_ants,
+                n_channels_per_stream,
+                n_spectra_per_heap,
+                missing_antenna=missing_antenna,
+            )
+            await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+        for q in mock_recv_streams:
+            q.stop()
+
         # It is expected that the first packet will be a descriptor.
         ig_recv = spead2.ItemGroup()
         heap = await recv_stream.get()
         items = ig_recv.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-        # We expect to receive (n_accumulations + 1) output heaps. Each of
-        # these heaps is verified for correctness
+        n_baselines = n_ants * (n_ants + 1) * 2
+        device_results = np.zeros(
+            shape=(n_accumulations + 1, n_channels_per_stream, n_baselines, COMPLEX), dtype=np.int32
+        )
+        # We expect to receive (n_accumulations + 1) output heaps.
         for i in range(n_accumulations + 1):
             # Wait for heap to be ready and then update out item group
             # with the new values.
             heap = await recv_stream.get()
             items = ig_recv.update(heap)
-
-            # The first heap is an incomplete accumulation containing a
-            # single batch, we need to make sure that this is taken into
-            # account by the verification function.
-            if i == 0:
-                num_batches_in_current_accumulation = 1
-                base_batch_index = heap_accumulation_threshold - 1
-            else:
-                num_batches_in_current_accumulation = heap_accumulation_threshold
-                base_batch_index = i * heap_accumulation_threshold
 
             # Ensure that the timestamp from the heap is what we expect.
             assert (
@@ -278,30 +370,26 @@ class TestEngine:
                 f"actual: {ig_recv['frequency'].value}."
             )
 
-            expected_output = generate_expected_output(
-                base_batch_index,
-                num_batches_in_current_accumulation,
-                n_channels_per_stream,
-                n_ants,
-                n_spectra_per_heap,
-            )
+            device_results[i] = ig_recv["xeng_raw"].value
 
-            gpu_result = ig_recv["xeng_raw"].value
-            np.testing.assert_equal(expected_output, gpu_result)
+        return device_results
 
     @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_spectra_per_heap",
+        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna",
         test_parameters.array_size,
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
+        [None, 0, 3],
+        filter=valid_end_to_end_combination,
     )
     async def test_xengine_end_to_end(
         self,
-        context,
-        n_ants,
-        n_spectra_per_heap,
-        n_channels_total,
-        mock_recv_streams,
+        context: AbstractContext,
+        mock_recv_streams: List[spead2.InprocQueue],
+        n_ants: int,
+        n_spectra_per_heap: int,
+        n_channels_total: int,
+        missing_antenna: Optional[int],
     ):
         """
         End-to-end test for the XBEngine.
@@ -316,6 +404,11 @@ class TestEngine:
 
         This test simulates an incomplete accumulation at the start of transmission
         to ensure that the auto-resync logic works correctly.
+
+        .. todo::
+            The queue used for the XBEngine's sender transport and the final
+            recv_stream need to be abstracted into a fixture, similar to
+            test/fgpu's mock_send_stream.
         """
         n_samples_between_spectra = 2 * n_channels_total
 
@@ -326,16 +419,8 @@ class TestEngine:
         n_channels_per_stream = n_channels_total // n_engines
         heap_accumulation_threshold = 4
         n_accumulations = 3
-
-        # Header is 12 fields of 8 bytes each: So 96 bytes of header
-        max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        # Create source stream object - simulates received data.
-        feng_stream_config = spead2.send.StreamConfig(
-            max_packet_size=max_packet_size, max_heaps=n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
-        )
-        feng_stream = spead2.send.asyncio.InprocStream(spead2.ThreadPool(), mock_recv_streams, feng_stream_config)
         queue = spead2.InprocQueue()
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
@@ -361,38 +446,55 @@ class TestEngine:
         args = parse_args(arglist)
         xbengine, _ = make_engine(context, args)
 
-        # 7. Add transports to xbengine.
         xbengine.add_inproc_sender_transport(queue)
         await xbengine.send_stream.send_descriptor_heap()
 
         await xbengine.start()
 
-        # Generate Data to be sent to the receiver. We are performing
-        # <n_accumulations> full accumulations. Each accumulation requires
-        # heap_accumulation_threshold batches of heaps. Additionally, we generate
-        # one extra batch to simulate an incomplete accumulation to check that
-        # dumps are aligned correctly even if the first received batch is from the
-        # middle of an accumulation.
-        for i in range(heap_accumulation_threshold * n_accumulations + 1):
-            # 6.1. Generate the batch index. By setting the first batch timestamp
-            # value to timestamp_step * (heap_accumulation_threshold - 1) we
-            # generate only a single batch for the first accumulation as the
-            # accumulations are aligned to integer multiples of
-            # heap_accumulation_threshold * timestamp_step
-            batch_index = i + (heap_accumulation_threshold - 1)
-            timestamp = batch_index * timestamp_step
-            heaps = self._create_heaps(timestamp, batch_index, n_ants, n_channels_per_stream, n_spectra_per_heap)
-            await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
-        for q in mock_recv_streams:
-            q.stop()
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            device_results = await self._send_data(
+                mock_recv_streams,
+                recv_stream,
+                heap_accumulation_threshold=heap_accumulation_threshold,
+                n_accumulations=n_accumulations,
+                timestamp_step=timestamp_step,
+                n_ants=n_ants,
+                n_channels_per_stream=n_channels_per_stream,
+                n_spectra_per_heap=n_spectra_per_heap,
+                missing_antenna=missing_antenna,
+            )
 
-        await self._recv_process(
-            recv_stream,
-            n_ants,
-            n_channels_per_stream,
-            n_spectra_per_heap,
-            n_accumulations,
-            heap_accumulation_threshold,
-            timestamp_step,
+        incomplete_accums_counter = 0
+        for i in range(n_accumulations + 1):
+            # The first heap is an incomplete accumulation containing a
+            # single batch, we need to make sure that this is taken into
+            # account by the verification function.
+            if i == 0:
+                num_batches_in_current_accumulation = 1
+                base_batch_index = heap_accumulation_threshold - 1
+                incomplete_accums_counter += 1
+            else:
+                num_batches_in_current_accumulation = heap_accumulation_threshold
+                base_batch_index = i * heap_accumulation_threshold
+                if missing_antenna is not None:
+                    incomplete_accums_counter += 1
+
+            expected_output = generate_expected_output(
+                base_batch_index,
+                num_batches_in_current_accumulation,
+                n_channels_per_stream,
+                n_ants,
+                n_spectra_per_heap,
+                missing_antenna,
+            )
+
+            np.testing.assert_equal(expected_output, device_results[i])
+
+        assert prom_diff.get_sample_diff("output_x_incomplete_accs_total") == incomplete_accums_counter
+        assert prom_diff.get_sample_diff("output_x_heaps_total") == n_accumulations + 1
+        # Could manually calculate it here, but it's available inside the send_stream
+        assert prom_diff.get_sample_diff("output_x_bytes_total") == xbengine.send_stream.heap_payload_size_bytes * (
+            n_accumulations + 1
         )
+
         await xbengine.stop()

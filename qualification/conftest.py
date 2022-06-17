@@ -22,7 +22,7 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator, Generator, Tuple
+from typing import AsyncGenerator, Generator
 
 import aiokatcp
 import matplotlib.style
@@ -32,7 +32,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_dsim_endpoint
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -67,27 +67,27 @@ def pytest_report_collectionfinish(config):  # noqa: D103
 
 
 # Need to redefine this from pytest-asyncio to have it at session scope
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def event_loop():  # noqa: D103
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def n_antennas():  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return 8
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def n_dsims():  # noqa: D401
     """Number of simulated digitisers."""
     return 1
 
 
 @pytest.fixture(
-    scope="session",
+    scope="package",
     params=[
         8192,
     ],
@@ -98,7 +98,7 @@ def n_channels(request):  # noqa: D401
 
 
 @pytest.fixture(
-    scope="session",
+    scope="package",
     params=[
         "l",
     ],
@@ -108,16 +108,19 @@ def band(request) -> str:  # noqa: D104
     return request.param
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
     return 0.5
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def pdf_report(request) -> Reporter:
     """Fixture for logging steps in a test."""
-    data = [{"$msg_type": "test_info", "blurb": inspect.getdoc(request.node.function), "test_start": time.time()}]
+    blurb = inspect.getdoc(request.node.function)
+    if blurb is None:
+        raise AssertionError(f"Test {request.node.name} has no docstring")
+    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time()}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
@@ -129,7 +132,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
         yield
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 async def correlator_config(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
 ) -> dict:
@@ -185,9 +188,9 @@ async def correlator_config(
     return config
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")
 async def session_correlator(
-    pytestconfig, correlator_config, band: str, n_dsims: int
+    pytestconfig, correlator_config: dict, band: str
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -224,20 +227,13 @@ async def session_correlator(
         product_controller_port,
     )
     try:
-        pcc = await aiokatcp.Client.connect(product_controller_host, product_controller_port)
-        dsim_clients = []
-        for i in range(n_dsims):
-            dsim_host, dsim_port = await get_dsim_endpoint(pcc, BANDS[band].adc_sample_rate, i)
-            dsim_clients.append(await aiokatcp.Client.connect(dsim_host, dsim_port))
-
-        remote_control = await CorrelatorRemoteControl.connect(pcc, dsim_clients, correlator_config)
+        remote_control = await CorrelatorRemoteControl.connect(
+            product_controller_host, product_controller_port, correlator_config
+        )
         yield remote_control
 
         logger.info("Tearing down correlator.")
-        clients = dsim_clients + [pcc]
-        for client in clients:
-            client.close()
-        await asyncio.gather(*[client.wait_closed() for client in clients])
+        await remote_control.close()
 
     finally:
         # In case anything does go wrong, we want to make sure that we the
@@ -248,44 +244,35 @@ async def session_correlator(
 
 
 @pytest.fixture
-async def _correlator(
+async def correlator(
     session_correlator: CorrelatorRemoteControl,
-) -> AsyncGenerator[Tuple[CorrelatorRemoteControl, int], None]:
-    """Implement :meth:`correlator` and :meth:`first_timestamp`."""
-    # Reset the correlator to default state
-    pcc = session_correlator.product_controller_client
-    await pcc.request("gain-all", "antenna_channelised_voltage", "default")
-    await pcc.request("delays", "antenna_channelised_voltage", 0, *(["0,0:0,0"] * session_correlator.n_inputs))
-    replies = await asyncio.gather(*[client.request("signals", "0;0;") for client in session_correlator.dsim_clients])
-    # System is stable once the largest of the update timestamps is reached.
-    # TODO: doesn't account for gains/delays (NGC-642).
-    timestamp = max(int(reply[0][0]) for reply in replies)
-    await pcc.request("capture-start", "baseline_correlation_products")
-
-    yield session_correlator, timestamp
-
-    await pcc.request("capture-stop", "baseline_correlation_products")
-
-
-@pytest.fixture
-def correlator(_correlator: Tuple[CorrelatorRemoteControl, int]) -> CorrelatorRemoteControl:
+) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Set up a correlator for a single test.
 
     The returned correlator might not be specific to this test, but it will have
     been reset to a default state, with the dsim outputting zeros.
     """
-    return _correlator[0]
+    # Reset the correlator to default state
+    pcc = session_correlator.product_controller_client
+    await asyncio.gather(*[client.request("signals", "0;0;") for client in session_correlator.dsim_clients])
+    for name, conf in session_correlator.config["outputs"].items():
+        if conf["type"] == "gpucbf.antenna_channelised_voltage":
+            n_inputs = len(conf["src_streams"])
+            await pcc.request("gain-all", name, "default")
+            await pcc.request("delays", name, 0, *(["0,0:0,0"] * n_inputs))
+        elif conf["type"] == "gpucbf.baseline_correlation_products":
+            await pcc.request("capture-start", name)
 
+    yield session_correlator
 
-@pytest.fixture
-def first_timestamp(_correlator: Tuple[CorrelatorRemoteControl, int]) -> int:
-    """ADC timestamp at which the dsim has been reset to output zeros."""
-    return _correlator[1]
+    for name, conf in session_correlator.config["outputs"].items():
+        if conf["type"] == "gpucbf.baseline_correlation_products":
+            await pcc.request("capture-stop", name)
 
 
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig, correlator: CorrelatorRemoteControl, first_timestamp: int
+    pytestconfig, correlator: CorrelatorRemoteControl
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -294,13 +281,14 @@ async def receive_baseline_correlation_products(
 
     receiver = BaselineCorrelationProductsReceiver(
         correlator=correlator,
+        stream_name="baseline_correlation_products",
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
-    _, chunk = await receiver.next_complete_chunk(first_timestamp)
+    _, chunk = await receiver.next_complete_chunk(max_delay=0)
     receiver.stream.add_free_chunk(chunk)
     yield receiver
     receiver.stream.stop()
