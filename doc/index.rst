@@ -17,7 +17,6 @@ Welcome to katgpucbf's documentation!
    unit-testing
    qualification
    todo
-   spead
 
 .. toctree::
    :maxdepth: 2
