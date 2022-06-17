@@ -4,7 +4,7 @@ Welcome to katgpucbf's documentation!
 =====================================
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: Contents:
 
    introduction
@@ -16,31 +16,35 @@ Welcome to katgpucbf's documentation!
    dev-guide
    unit-testing
    qualification
+   todo
    spead
 
 .. toctree::
    :maxdepth: 2
-   :caption: F engine
+   :caption: Design
+
+   engines
+
+   dsim
+   fsim
 
    fgpu.design
    fgpu.networking
    fgpu.ddc
    fgpu.glossary
 
-.. toctree::
-   :maxdepth: 2
-   :caption: X and B engines
-
    xbgpu.theory
    xbgpu.networking
    xbgpu.tcc
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Tools
+   :maxdepth: 2
+   :caption: Controlling the Controller
 
-   dsim
-   fsim
+.. toctree::
+   :maxdepth: 2
+   :caption: Installation and Operation
+
 
 .. toctree::
    :maxdepth: 3
