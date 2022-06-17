@@ -1,6 +1,12 @@
 Design
 ======
 
+.. todo::
+
+   Most of this needs to be folded into the higher-level GPU "Design" document.
+   Whatever remains will probably need re-naming under and "F-engine" sub-
+   heading or some such.
+
 The actual GPU kernels are reasonably straight-forward, because they're
 generally memory-bound rather than compute-bound. The main challenges are in
 data movement through the system.
