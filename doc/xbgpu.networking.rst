@@ -3,6 +3,10 @@
 Networking
 ==========
 
+.. todo::
+
+  Work this section into the greater Design one.
+
 Input
 -----
 The X-engine receives antenna channelised data from the output of the F-engines,

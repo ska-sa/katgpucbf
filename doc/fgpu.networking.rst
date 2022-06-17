@@ -3,6 +3,10 @@
 Networking
 ==========
 
+.. todo::
+
+  Work this section into the greater Design one.
+
 Input
 -----
 The F-engine receives dual-polarisation input from a digitiser (raw antenna)
