@@ -216,6 +216,9 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
             # It's not impossible for there to be a completely
             # empty chunk during normal operation.
             if not valid_chunk_received:
+                # Give the Chunk back to the Stream as the receiver
+                # loop doesn't take care of this.
+                stream.add_free_chunk(chunk)
                 continue
         elif not valid_chunk_received:
             valid_chunk_received = True
