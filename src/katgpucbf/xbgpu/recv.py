@@ -195,6 +195,7 @@ def make_stream(
         affinity=src_affinity,
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
+        stop_on_stop_item=False,  # By default, a heap containing a stream control stop item will terminate the stream
     )
     stats_collector.add_stream(stream)
     return stream
