@@ -33,8 +33,8 @@ from .. import BaselineCorrelationProductsReceiver
 
 def compute_tone_gain(
     receiver: BaselineCorrelationProductsReceiver,
-    amplitude: float = 0.99,
-    target_voltage: int = 110,
+    amplitude: float,
+    target_voltage: int,
 ) -> float:
     """Compute F-Engine gain.
 

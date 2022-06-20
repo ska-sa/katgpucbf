@@ -20,11 +20,9 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
-from katgpucbf import DIG_SAMPLE_BITS
-
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-from . import sample_tone_response
+from . import compute_tone_gain, sample_tone_response
 
 
 def cutoff_bandwidth_half(data: np.ndarray, cutoff: float, step: float) -> float:
@@ -73,15 +71,7 @@ async def test_channel_shape(
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
 
     # Determine the ideal F-engine output leak at the peak
-    target_voltage = 110  # Maximum is 127, but some headroom is good
-    # We need to avoid saturating the signed 32-bit X-engine accumulation as
-    # well (2e9 is comfortably less than 2^31).
-    target_voltage = min(target_voltage, np.sqrt(2e9 / receiver.n_spectra_per_acc))
-    # The PFB is scaled for fixed incoherent gain, but we need to be concerned
-    # about coherent gain to avoid overflowing the F-engine output. Coherent gain
-    # scales approximately with np.sqrt(receiver.n_chans / 2).
-    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    gain = target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans / 2))
+    gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
 
     async def sample(offsets: ArrayLike) -> np.ndarray:
         """Measure response when frequency is offset from channel centre.
