@@ -18,7 +18,7 @@ In order to run the tests, use the following command:
 as part of this project's ``requirements-dev.txt`` are :mod:`.coverage` and
 :mod:`.pytest-cov`. As currently configured, running the unit tests as described
 above will execute a subset of the parameterised tests (see the docstring for
-``test/conftest.py``), while every combination of parameters won't always be
+``test/conftest.py``). While every combination of parameters won't always be
 tested, each individual parameter will be tested at least once.
 
 If you'd like an HTML test-coverage report (at the expense of a slightly longer
@@ -101,7 +101,7 @@ code during the course of their run.
 
     .. code-block:: bash
 
-      made develop  # to set up the environment
+      make develop  # to set up the environment
       make test     # to actually run the tests
 
 

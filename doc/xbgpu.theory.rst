@@ -4,7 +4,7 @@ Theory Of Operation
 .. todo::
 
    Most of this needs to be folded into the higher-level GPU "Design" document.
-   Whatever remains will probably need re-naming under and "F-engine" sub-
+   Whatever remains will probably need re-naming under an "XB-engine" sub-
    heading or some such.
 
 Signal Flow

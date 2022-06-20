@@ -40,8 +40,8 @@ Shutting down the correlator
 
 .. todo::
 
-    Describe how to shut the correlator down. Product or master controller pass
-    pass requests on to individual running instances.
+    Describe how to shut the correlator down. Product or master controller
+    passes requests on to individual running instances.
 
 Monitoring
 ----------

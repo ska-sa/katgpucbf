@@ -1,4 +1,4 @@
-Katgpucbf prototype qualification framework
+Qualification framework
 ===========================================
 
 .. todo::
