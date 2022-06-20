@@ -53,7 +53,7 @@ async def test_linearity(
     )
 
     pdf_report.step("Set EQ gain.")
-    gain = compute_tone_gain(receiver=receiver, amplitude=np.max(cw_scales), target_voltage=110)
+    gain = compute_tone_gain(receiver=receiver, amplitude=max(cw_scales), target_voltage=110)
 
     pdf_report.detail(f"Setting gain to: {gain}")
     await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
@@ -65,10 +65,12 @@ async def test_linearity(
     )
 
     linear_scale_result = base_corr_prod[:, sel_chan_center]
+
+    # Normalise and compute the effective received voltage value (from power) for comparison to the requested value.
     linear_test_result = np.sqrt(linear_scale_result / np.max(linear_scale_result))
 
-    rms_voltage = np.sqrt(np.max(linear_scale_result) / receiver.n_spectra_per_acc)
     pdf_report.step("Compute RMS Voltage.")
+    rms_voltage = np.sqrt(np.max(linear_scale_result) / receiver.n_spectra_per_acc)
     pdf_report.detail(f"RMS voltage: {rms_voltage:.3f}.")
 
     pdf_report.step("Compute Mean Square Error (MSE).")
@@ -77,19 +79,16 @@ async def test_linearity(
 
     # Generate plot with reference
     labels = [f"$2^{{-{i}}}$" for i in range(len(cw_scales))]
-    for xticks, title in [
-        (np.arange(len(cw_scales)), "CBF Linearity Test"),
-    ]:
-        fig = Figure()
-        ax = fig.subplots()
-        ax.plot(20 * np.log10(cw_scales), label="Reference")
-        ax.plot(20 * np.log10(linear_test_result), label="Measured")
-        ax.set_title(title)
-        ax.set_xlabel("CW Scale")
-        ax.set_ylabel("dB")
-        ax.legend()
-        ax.set_xticks(xticks)
-        ax.set_xticklabels(labels)
-
-        # # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-        pdf_report.figure(fig, clean_figure=False)
+    xticks, title = (np.arange(len(cw_scales)), "CBF Linearity Test")
+    fig = Figure()
+    ax = fig.subplots()
+    ax.plot(20 * np.log10(cw_scales), label="Reference")
+    ax.plot(20 * np.log10(linear_test_result), label="Measured")
+    ax.set_title(title)
+    ax.set_xlabel("CW Scale")
+    ax.set_ylabel("dB")
+    ax.legend()
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(labels)
+    # # tikzplotlib.clean_figure doesn't like data outside the ylim at all
+    pdf_report.figure(fig, clean_figure=False)
