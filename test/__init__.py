@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,7 +19,11 @@
 from typing import Any, Dict, List, Optional
 
 import aiokatcp
+import numpy as np
 import prometheus_client
+from numpy.typing import ArrayLike
+
+from katgpucbf import DIG_SAMPLE_BITS
 
 
 class PromDiff:
@@ -113,3 +117,26 @@ async def get_sensor(client: aiokatcp.Client, name: str) -> Any:
     assert len(informs) == 1
     assert informs[0].arguments[3] in {b"nominal", b"warn", b"error"}
     return aiokatcp.decode(sensor_type, informs[0].arguments[4])
+
+
+def unpackbits(data: ArrayLike, sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:
+    """Unpack a bit-packed array of signed big-endian integers.
+
+    Typically `sample_bits` will be DIG_SAMPLE_BITS, but can be up to 64. The
+    dtype of the result depends on the number of bits.
+    """
+    dtype: np.dtype
+    if sample_bits <= 16:
+        dtype = np.dtype(np.int16)
+    elif sample_bits <= 32:
+        dtype = np.dtype(np.int32)
+    elif sample_bits <= 64:
+        dtype = np.dtype(np.int64)
+    else:
+        raise ValueError("sample_bits is too large")
+    bits = np.unpackbits(data).reshape(-1, sample_bits)
+    # Replicate the high (sign) bit
+    extra = np.tile(bits[:, 0:1], (1, 8 * dtype.itemsize - sample_bits))
+    combined = np.hstack([extra, bits])
+    packed = np.packbits(combined)
+    return packed.view(dtype.newbyteorder(">")).astype(dtype)

@@ -20,7 +20,6 @@ import asyncio
 import itertools
 from typing import Optional, Sequence
 
-import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
@@ -30,41 +29,8 @@ from katgpucbf import DIG_HEAP_SAMPLES
 from katgpucbf.dsim import send
 from katgpucbf.dsim.descriptors import DescriptorSender
 
-from .. import PromDiff
+from .. import PromDiff, unpackbits
 from .conftest import N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
-
-
-@numba.njit
-def unpackbits(packed_data: np.ndarray) -> np.ndarray:
-    """Unpack 8b data words to 10b data words.
-
-    Parameters
-    ----------
-    packed_data
-        A numpy ndarray of packed 8b data words.
-    """
-    unpacked_data = np.zeros((DIG_HEAP_SAMPLES,), dtype=np.int16)
-    data_sample = np.int16(0)
-    pack_idx = 0
-    unpack_idx = 0
-
-    for pack_idx in range(0, len(packed_data), 5):
-        tmp_40b_word = np.uint64(
-            packed_data[pack_idx] << (8 * 4)
-            | packed_data[pack_idx + 1] << (8 * 3)
-            | packed_data[pack_idx + 2] << (8 * 2)
-            | packed_data[pack_idx + 3] << 8
-            | packed_data[pack_idx + 4]
-        )
-
-        for data_idx in range(4):
-            data_sample = np.int16((tmp_40b_word & np.uint64(0xFFC0000000)) >> np.uint64(30))
-            if data_sample > 511:
-                data_sample = data_sample - 1024
-            unpacked_data[unpack_idx + data_idx] = np.int16(data_sample)
-            tmp_40b_word = tmp_40b_word << np.uint8(10)
-        unpack_idx += 4
-    return unpacked_data
 
 
 async def descriptor_recv(

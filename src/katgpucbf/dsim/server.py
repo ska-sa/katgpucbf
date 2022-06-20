@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -53,6 +53,8 @@ class DeviceServer(aiokatcp.DeviceServer):
     signals
         User-requested signals. Note that these must have already been loaded
         into the sender; it is provided here purely to populate sensors.
+    period
+        Initial period used to generate the signal loaded into the sender.
     signal_service
         Helper process for generating new signals. It must be constructed
         consistent with the other arguments (in particular,
@@ -78,6 +80,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         dither_seed: int,
         signals_str: str,
         signals: Sequence[Signal],
+        period: int,
         signal_service: SignalService,
         *args,
         **kwargs,
@@ -106,6 +109,13 @@ class DeviceServer(aiokatcp.DeviceServer):
             initial_status=aiokatcp.Sensor.Status.NOMINAL,
             default=format_signals(signals),
         )
+        self._period_sensor = aiokatcp.Sensor(
+            int,
+            "period",
+            "Number of samples after which the signals will be repeated",
+            initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            default=period,
+        )
         self._steady_state_sensor = aiokatcp.Sensor(
             int,
             "steady-state-timestamp",
@@ -115,6 +125,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         )
         self.sensors.add(self._signals_orig_sensor)
         self.sensors.add(self._signals_sensor)
+        self.sensors.add(self._period_sensor)
         self.sensors.add(self._steady_state_sensor)
         self.sensors.add(
             aiokatcp.Sensor(
@@ -128,8 +139,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(
             aiokatcp.Sensor(
                 int,
-                "period",
-                "Number of samples after which the signals will be repeated",
+                "max-period",
+                "Maximum period that may be passed to ?signals",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 default=spare.data["payload"].isel(pol=0).size * BYTE_BITS // sample_bits,
             )
@@ -159,7 +170,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.descriptor_sender.halt()
         await self._signal_service.stop()
 
-    async def request_signals(self, ctx, signals_str: str) -> int:
+    async def request_signals(self, ctx, signals_str: str, period: int = None) -> int:
         """Update the signals that are generated.
 
         Parameters
@@ -168,6 +179,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             Textural description of the signals. See the docstring for
             parse_signals for the language description. The description
             must produce one signal per polarisation.
+
+        period
+            Period for the generated signal. It must divide into the value
+            indicated by the ``max-period`` sensor. If not specified, the
+            value of ``max-period`` is used.
 
         Returns
         -------
@@ -181,11 +197,14 @@ class DeviceServer(aiokatcp.DeviceServer):
         n_pol = self.spare.data.dims["pol"]
         if len(signals) != n_pol:
             raise aiokatcp.FailReply(f"expected {n_pol} signals, received {len(signals)}")
+        if period is None:
+            period = self.sensors["max-period"].value
 
         async with self._signals_lock:
             await self._signal_service.sample(
                 signals,
                 self.first_timestamp,
+                period,
                 self.adc_sample_rate,
                 self.spare.data["payload"],
             )
@@ -194,5 +213,6 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.spare = spare
             self._signals_orig_sensor.value = signals_str
             self._signals_sensor.value = format_signals(signals)
+            self._period_sensor.value = period
             self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
             return timestamp
