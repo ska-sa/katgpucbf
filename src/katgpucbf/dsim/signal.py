@@ -551,7 +551,7 @@ def sample(
         raise ValueError(f"period {period} does not divide into total samples {n}")
 
     if dither is True:
-        dither = make_dither(len(signals), period)
+        dither = make_dither(len(signals), period, entropy=dither_seed)
     elif dither is False:
         dither = xr.DataArray(da.zeros((n_pols, period), np.float32, chunks=CHUNK_SIZE), dims=["pol", "data"])
     else:
