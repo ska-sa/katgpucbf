@@ -17,16 +17,19 @@
 """Unit tests for signal generation functions."""
 
 import operator
-from typing import Any, Callable, Sequence, cast
+from typing import Any, Callable, List, Sequence, cast
 from unittest import mock
 
 import dask.array as da
 import numpy as np
 import pyparsing as pp
 import pytest
+import xarray as xr
 
 from katgpucbf.dsim import signal
 from katgpucbf.dsim.signal import CW, WGN, Constant, Signal
+
+from .. import unpackbits
 
 
 @pytest.fixture(autouse=True)
@@ -214,19 +217,14 @@ class TestPackbits:
         expected = [0b10110010, 0b11111111, 0b01010011, 0b00001011, 0b01111000]
         np.testing.assert_equal(signal.packbits(data, 5).compute(), expected)
 
-    @pytest.mark.parametrize("bits", range(1, 32))
+    @pytest.mark.parametrize("bits", range(2, 32))
     def test_bits(self, bits: int) -> None:
         """Test with a variety of bit counts."""
         rng = np.random.default_rng(1)
-        data = da.from_array(rng.integers(0, 2**bits, dtype=np.int32, size=200), chunks=64)
+        data = da.from_array(rng.integers(-(2 ** (bits - 1)), 2 ** (bits - 1) - 1, dtype=np.int32, size=200), chunks=64)
         packed = signal.packbits(data, bits).compute()
         # Unpack and check that the original data is returned
-        big_int = int.from_bytes(packed, byteorder="big")
-        unpacked = []
-        for _ in range(len(data)):
-            unpacked.append(big_int & (2**bits - 1))
-            big_int >>= bits
-        unpacked.reverse()
+        unpacked = unpackbits(packed, bits)
         np.testing.assert_equal(data.compute(), unpacked)
 
     def test_partial_bytes(self) -> None:
@@ -239,3 +237,43 @@ class TestPackbits:
         data = da.from_array(np.zeros(16, np.int32), chunks=11)
         with pytest.raises(ValueError):
             signal.packbits(data, 10)
+
+
+class TestSample:
+    """Tests for :func:`katgpucbf.dsim.signal.sample`.
+
+    These are mostly smoke tests for the integration of the pieces and the
+    different ways it can be called, since most of the functionality is tested
+    at lower levels.
+    """
+
+    @pytest.fixture
+    def out(self) -> xr.DataArray:
+        """Output array with 2 pols, 4 heaps and 4096 samples per heap."""
+        raw = np.zeros((2, 4, 5120), np.uint8)
+        return xr.DataArray(raw, dims=["pol", "time", "data"])
+
+    @pytest.fixture
+    def signals(self) -> List[Signal]:
+        """Dual-pol signals."""
+        return signal.parse_signals("wgn(0.2, 1); wgn(0.5, 2);")
+
+    def test_bad_period(self, signals: List[Signal], out: xr.DataArray) -> None:
+        """Test that an error is raised if `period` does not divide into data size."""
+        with pytest.raises(ValueError):
+            signal.sample(signals, 0, 17, 1.0, 10, out)
+
+    def test_period(self, signals: List[Signal], out: xr.DataArray) -> None:
+        """Test that a short period is respected."""
+        signal.sample(signals, 0, 4096, 1.0, 10, out)
+        # Each heap should be identical
+        for i in range(out.sizes["time"]):
+            np.testing.assert_array_equal(out.isel(time=i), out.isel(time=0))
+        # Period shouldn't be shorter then requested
+        assert not (out.isel(time=0, data=np.s_[:2560]) == out.isel(time=0, data=np.s_[2560:])).all()
+
+    def test_period_none(self, signals: List[Signal], out: xr.DataArray) -> None:
+        """Test that specifying the period as None works."""
+        signal.sample(signals, 0, None, 1.0, 10, out)
+        # Must not have a shorter period
+        assert not (out.isel(time=np.s_[:2]) == out.isel(time=np.s_[2:])).all()

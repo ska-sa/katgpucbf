@@ -505,6 +505,7 @@ def packbits(data: da.Array, bits: int) -> da.Array:
 def sample(
     signals: Sequence[Signal],
     timestamp: int,
+    period: Optional[int],
     sample_rate: float,
     sample_bits: int,
     out: xr.DataArray,
@@ -523,6 +524,10 @@ def sample(
     timestamp
         Timestamp for the first element to return. The signal is rotated by
         this amount.
+    period
+        Number of samples after which to repeat. This must divide into the
+        total number of samples to generate. If not specified, uses the
+        total number of samples.
     sample_rate
         Passed to :meth:`Signal.sample`
     sample_bits
@@ -533,27 +538,37 @@ def sample(
     dither
         If true (default), add uniform random values in the range [-0.5, 0.5)
         after scaling to reduce artefacts. It may also be a :class:`xr.DataArray`
-        with an axis called ``pol`` (which must match the number of signals).
+        with axes called ``pol`` (which must match the number of signals) and
+        ``data`` (which must have length at least equal to ``period``).
     """
     n_pols = out.sizes["pol"]
     if len(signals) != n_pols:
         raise ValueError(f"Expected {n_pols} signals, received {len(signals)}")
     n = out.isel(pol=0).data.size * BYTE_BITS // sample_bits
+    if period is None:
+        period = n
+    if n % period:
+        raise ValueError(f"period {period} does not divide into total samples {n}")
 
     if dither is True:
-        dither = make_dither(len(signals), n, entropy=dither_seed)
+        dither = make_dither(len(signals), period, entropy=dither_seed)
     elif dither is False:
-        dither = xr.DataArray(da.zeros((n_pols, n), np.float32, chunks=CHUNK_SIZE), dims=["pol", "data"])
+        dither = xr.DataArray(da.zeros((n_pols, period), np.float32, chunks=CHUNK_SIZE), dims=["pol", "data"])
     else:
         if dither.sizes["pol"] != n_pols:
             raise ValueError(f"Expected {n_pols} dither signals, received {dither.sizes['pol']}")
+        if dither.sizes["data"] < period:
+            raise ValueError(f"Expected at least {period} dither samples, only found {dither.sizes['data']}")
+        dither = dither.isel(data=np.s_[:period])
 
     sampled = []
     for i, sig in enumerate(signals):
-        data = sig.sample(n, sample_rate)
+        data = sig.sample(period, sample_rate)
         data = quantise(data, sample_bits, dither.isel(pol=i).data)
         data = da.roll(data, -timestamp)
         data = packbits(data, sample_bits)
+        if period < n:
+            data = da.tile(data, n // period)
         sampled.append(data)
     # Compute all the pols together, so that common signals are only computed
     # once.
@@ -583,6 +598,7 @@ class SignalService:
 
         signals: Sequence[Signal]
         timestamp: int
+        period: Optional[int]
         sample_rate: float
         out_idx: int  #: Index of the array in the list of valid arrays
 
@@ -624,6 +640,7 @@ class SignalService:
                 sample(
                     req.signals,
                     req.timestamp,
+                    req.period,
                     req.sample_rate,
                     sample_bits,
                     arrays[req.out_idx],
@@ -677,12 +694,15 @@ class SignalService:
         self,
         signals: Sequence[Signal],
         timestamp: int,
+        period: Optional[int],
         sample_rate: float,
         out: xr.DataArray,
     ) -> None:
         """Perform signal sampling in the remote process.
 
-        `out` must be one of the arrays passed to the constructor.
+        `out` must be one of the arrays passed to the constructor. Only the
+        first `n` samples will be populated (and this will be taken as the
+        period).
         """
         for i, array in enumerate(self.arrays):
             # Object identity doesn't work well, I think because fetching one
@@ -695,7 +715,7 @@ class SignalService:
         else:
             raise ValueError("output was not registered with the constructor")
         loop = asyncio.get_running_loop()
-        req = SignalService._Request(signals, timestamp, sample_rate, out_idx)
+        req = SignalService._Request(signals, timestamp, period, sample_rate, out_idx)
         await loop.run_in_executor(None, self._make_request, req)
 
     async def __aenter__(self) -> "SignalService":

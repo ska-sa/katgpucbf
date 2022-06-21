@@ -23,17 +23,9 @@ from katsdpsigproc import accel
 from katgpucbf import BYTE_BITS
 from katgpucbf.fgpu import SAMPLE_BITS, pfb
 
+from .. import unpackbits
+
 pytestmark = [pytest.mark.cuda_only]
-
-
-def decode_10bit_host(data):
-    """Convert an array of signed 10-bit integers to signed 16-bit representation."""
-    bits = np.unpackbits(data).reshape(-1, 10)
-    # Replicate the high (sign) bit
-    extra = np.tile(bits[:, 0:1], (1, 6))
-    combined = np.hstack([extra, bits])
-    packed = np.packbits(combined)
-    return packed.view(">i2").astype("i2")
 
 
 def pfb_fir_host(data, channels, weights):
@@ -41,7 +33,7 @@ def pfb_fir_host(data, channels, weights):
     step = 2 * channels
     assert len(weights) % step == 0
     taps = len(weights) // step
-    decoded = decode_10bit_host(data)
+    decoded = unpackbits(data)
     window_size = 2 * channels * taps
     out = np.empty((len(decoded) // step - taps + 1, step), np.float32)
     for i in range(0, len(out)):
