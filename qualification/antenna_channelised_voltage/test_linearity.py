@@ -79,7 +79,8 @@ async def test_linearity(
 
     # Generate plot with reference
     labels = [f"$2^{{-{i}}}$" for i in range(len(cw_scales))]
-    xticks, title = (np.arange(len(cw_scales)), "CBF Linearity Test")
+    title = "Power relative to input CW level"
+    xticks = np.arange(len(cw_scales))
     fig = Figure()
     ax = fig.subplots()
     ax.plot(20 * np.log10(cw_scales), label="Reference")
@@ -90,5 +91,5 @@ async def test_linearity(
     ax.legend()
     ax.set_xticks(xticks)
     ax.set_xticklabels(labels)
-    # # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-    pdf_report.figure(fig, clean_figure=False)
+    # tikzplotlib.clean_figure doesn't like data outside the ylim at all
+    pdf_report.figure(fig)
