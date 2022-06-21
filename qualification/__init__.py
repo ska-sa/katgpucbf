@@ -181,6 +181,7 @@ class BaselineCorrelationProductsReceiver:
         self.n_bits_per_sample = correlator.sensors[f"{stream_name}-xeng-out-bits-per-sample"].value
         self.n_spectra_per_acc = correlator.sensors[f"{stream_name}-n-accs"].value
         self.int_time = correlator.sensors[f"{stream_name}-int-time"].value
+        self.spectra_per_heap = correlator.sensors[f"{acv_name}-spectra-per-heap"].value
         self.n_samples_between_spectra = correlator.sensors[f"{acv_name}-n-samples-between-spectra"].value
         self.bls_ordering = ast.literal_eval(correlator.sensors[f"{stream_name}-bls-ordering"].value.decode())
         self.sync_time = correlator.sensors[f"{acv_name}-sync-time"].value
