@@ -541,7 +541,7 @@ def sample(
     n = out.isel(pol=0).data.size * BYTE_BITS // sample_bits
 
     if dither is True:
-        dither = make_dither(len(signals), n)
+        dither = make_dither(len(signals), n, entropy=dither_seed)
     elif dither is False:
         dither = xr.DataArray(da.zeros((n_pols, n), np.float32, chunks=CHUNK_SIZE), dims=["pol", "data"])
     else:
