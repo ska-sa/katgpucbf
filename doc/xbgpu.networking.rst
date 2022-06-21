@@ -1,7 +1,7 @@
 .. _xengine-networking:
 
-Networking
-==========
+XB-Engine Networking
+====================
 
 .. todo::
 

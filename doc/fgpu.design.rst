@@ -1,5 +1,5 @@
-Design
-======
+F-Engine Design
+===============
 
 .. todo::
 
@@ -96,15 +96,6 @@ for this, which can severely limit the chunk size.
 GPU Processing
 --------------
 
-.. _gpu-terminology:
-
-Terminology
-^^^^^^^^^^^
-We will use OpenCL terminology, as it is more generic. An OpenCL *workitem*
-corresponds to a CUDA *thread*. Each workitem logically executes the same
-program but with different parameters, and can share data through *local
-memory* (shared memory in CUDA) with other workitems in the same
-*workgroup* (thread block in CUDA).
 
 Narrowband
 ^^^^^^^^^^
