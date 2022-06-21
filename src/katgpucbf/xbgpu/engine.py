@@ -41,6 +41,7 @@ import math
 import time
 from typing import List, Optional, Tuple
 
+import aiokatcp
 import katsdpsigproc
 import katsdpsigproc.abc
 import katsdpsigproc.accel
@@ -274,6 +275,7 @@ class XBEngine(DeviceServer):
         context: katsdpsigproc.abc.AbstractContext,
     ):
         super(XBEngine, self).__init__(katcp_host, katcp_port)
+        self.populate_sensors(self.sensors)
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -416,6 +418,20 @@ class XBEngine(DeviceServer):
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present)
             self.receiver_stream.add_free_chunk(chunk)
+
+    @staticmethod
+    def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
+        """Define the sensors for an XBEngine."""
+        sensors.add(
+            aiokatcp.Sensor(
+                bool,
+                "synchronised",
+                "For the latest accumulation, was data present from all F-Engines.",
+                default=True,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
+            )
+        )
 
     def add_udp_sender_transport(
         self,
@@ -637,6 +653,9 @@ class XBEngine(DeviceServer):
                     tx_item.present_ants[:] &= rx_item.present[
                         self.correlation.first_batch : self.correlation.last_batch, :
                     ].all(axis=0)
+
+                    # Update the sync sensor
+                    self.sensors["synchronised"].value = tx_item.present_ants.all()
 
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())
