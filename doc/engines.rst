@@ -31,9 +31,9 @@ within the source code.
 
 Stream
 ^^^^^^
- - In the katgpucbf.fgpu sense, this is derived from a spead2 recv or send stream.
+ - In the katgpucbf sense, this is derived from a spead2 recv or send stream.
  - Not to be confused with a CUDA stream, which is here encapsulated as a
-   command queue. CUDA streams aren't referred to directly in katgpucbf.fgpu.
+   command queue. CUDA streams aren't referred to directly in katgpucbf.
 
 Queue
 ^^^^^
