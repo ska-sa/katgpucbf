@@ -70,7 +70,7 @@ async def test_channel_shape(
     offsets = np.arange(resolution) / resolution - 0.5
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
 
-    # Determine the ideal F-engine output level at the peak
+    # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
     gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
 
     async def sample(offsets: ArrayLike) -> np.ndarray:

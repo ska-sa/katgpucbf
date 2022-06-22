@@ -91,5 +91,4 @@ async def test_linearity(
     ax.legend()
     ax.set_xticks(xticks)
     ax.set_xticklabels(labels)
-    # tikzplotlib.clean_figure doesn't like data outside the ylim at all
     pdf_report.figure(fig)
