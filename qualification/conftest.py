@@ -57,15 +57,23 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addini("product_name", "Name of subarray product", type="string", default="qualification_correlator")
 
 
-def pytest_report_collectionfinish(config):  # noqa: D103
+def custom_report_log(pytestconfig: pytest.Config, data) -> None:
+    """Log a custom JSON line in the report log."""
+    # There doesn't seem to be an easy way to avoid using these private interfaces
+    try:
+        report_log_plugin = pytestconfig._report_log_plugin
+    except AttributeError:
+        pytest.fail("pytest_reportlog plugin not found (possibly you forgot to specify --report-log)")
+    report_log_plugin._write_json_data(data)
+
+
+def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     # Using this hook to collect configuration information, because it's run
     # once, after collection but before the actual tests. Couldn't really find a
     # better place, and I did look around quite a bit.
     git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
     logger.info("Git information: %s", git_information)
-    config._report_log_plugin._write_json_data(
-        {"$report_type": "TestConfiguration", "Test Suite Git Info": git_information}
-    )
+    custom_report_log(config, {"$report_type": "TestConfiguration", "Test Suite Git Info": git_information})
 
 
 # Need to redefine this from pytest-asyncio to have it at session scope
@@ -199,7 +207,7 @@ async def correlator_config(
 
 @pytest.fixture(scope="package")
 async def session_correlator(
-    pytestconfig, request, host_config_querier: HostConfigQuerier, correlator_config: dict, band: str
+    pytestconfig, host_config_querier: HostConfigQuerier, correlator_config: dict, band: str
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -241,12 +249,14 @@ async def session_correlator(
         )
         _, informs = await remote_control.product_controller_client.request("sensor-value", r"/.*\.host$/")
         for inform in informs:
-            if inform.arguments[4] == b"nominal":
-                hostname = inform.arguments[5].decode()
+            logger.info(inform.arguments)
+            if inform.arguments[3] == b"nominal":
+                hostname = inform.arguments[4].decode()
                 host_config = host_config_querier.get_config(hostname)
                 if host_config is not None:
-                    request.node.user_properties.append(
-                        ("pdf_report_data", [{"$msg_type": "host_config", "hostname": hostname, "config": host_config}])
+                    logger.info("Logging host config for %s", hostname)
+                    custom_report_log(
+                        pytestconfig, {"$msg_type": "host_config", "hostname": hostname, "config": host_config}
                     )
 
         yield remote_control
