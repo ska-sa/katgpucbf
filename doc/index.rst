@@ -22,12 +22,8 @@ Welcome to katgpucbf's documentation!
    :caption: Design
 
    engines
-
    fgpu.design
-   fgpu.ddc
-
    xbgpu.theory
-   xbgpu.tcc
 
 .. toctree::
    :maxdepth: 2
