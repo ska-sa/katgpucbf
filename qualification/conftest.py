@@ -256,7 +256,7 @@ async def session_correlator(
                 if host_config is not None:
                     logger.info("Logging host config for %s", hostname)
                     custom_report_log(
-                        pytestconfig, {"$msg_type": "host_config", "hostname": hostname, "config": host_config}
+                        pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
                     )
 
         yield remote_control
