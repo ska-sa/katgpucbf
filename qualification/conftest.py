@@ -249,7 +249,6 @@ async def session_correlator(
         )
         _, informs = await remote_control.product_controller_client.request("sensor-value", r"/.*\.host$/")
         for inform in informs:
-            logger.info(inform.arguments)
             if inform.arguments[3] == b"nominal":
                 hostname = inform.arguments[4].decode()
                 host_config = host_config_querier.get_config(hostname)
