@@ -24,6 +24,7 @@ QUERIES = [
     'node_cpu_info{instance="%h", cpu="0"}',
     'node_ethtool_info{instance="%h"}',
     'node_dmi_info{instance="%h"}',
+    'node_uname_info{instance="%h"}',
 ]
 
 

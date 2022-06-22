@@ -25,7 +25,7 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import pytest
 from docutils.core import publish_parts
@@ -48,6 +48,7 @@ from pylatex.package import Package
 from pylatex.utils import bold
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
+UNKNOWN = "unknown"
 
 
 class LstListing(Environment):
@@ -121,11 +122,42 @@ class Result:
 
 
 @dataclass
+class Interface:
+    """A network interface."""
+
+    name: str
+    driver: str
+    firmware_version: str
+    version: str
+
+
+@dataclass
+class Host:
+    """Configuration information for a host."""
+
+    hostname: str
+    kernel: str = UNKNOWN
+    cpus: List[str] = field(default_factory=list)
+    interfaces: List[Interface] = field(default_factory=list)
+    product_name: str = UNKNOWN
+    board_name: str = UNKNOWN
+    bios_version: str = UNKNOWN
+
+
+@dataclass
 class ConfigParam:
     """A configuration parameter describing software / hardware used in the test run."""
 
     name: str
     value: str
+
+
+@dataclass
+class TestConfiguration:
+    """Global configuration of the test."""
+
+    params: List[ConfigParam] = field(default_factory=list)
+    hosts: List[Host] = field(default_factory=list)
 
 
 def _parse_detail(detail: dict) -> Union[Detail, Figure]:
@@ -159,7 +191,41 @@ def _parse_report_data(result: Result, msg: dict) -> None:
         raise ValueError(f"Do not know how to parse $msg_type of {msg_type!r}")
 
 
-def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
+def _parse_interface(labels: dict) -> Interface:
+    """Parse a single network interface from ``node_ethtool_info`` labels."""
+    return Interface(
+        name=labels["device"],
+        driver=labels.get("driver", UNKNOWN),
+        firmware_version=labels.get("firmware_version", UNKNOWN),
+        version=labels.get("version", UNKNOWN),
+    )
+
+
+def _parse_host(msg: dict) -> Host:
+    """Parse a single host configuration line."""
+    host = Host(hostname=msg["hostname"])
+    cpus: Dict[int, str] = {}  # Indexed by package
+    for metric in msg["config"]:
+        labels = metric["metric"]
+        metric_name = labels["__name__"]
+        if metric_name == "node_dmi_info":
+            for label, label_value in labels.items():
+                if label in {"product_name", "board_name", "bios_version"}:
+                    setattr(host, label, label_value)
+        elif metric_name == "node_cpu_info" and "model_name" in labels:
+            # The check for model_name is because older versions of
+            # node-exporter didn't provide it.
+            cpus[int(labels["package"])] = labels["model_name"]
+        elif metric_name == "node_ethtool_info":
+            host.interfaces.append(_parse_interface(labels))
+        elif metric_name == "node_uname_info":
+            host.kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
+    for _, model_name in sorted(cpus.items()):
+        host.cpus.append(model_name)
+    return host
+
+
+def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     """Parse the data written by pytest-reportlog.
 
     Parameters
@@ -173,15 +239,18 @@ def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
     Lists of :class:`ConfigParam` and :class:`Result` objects representing the
     test configuration and the results of all the tests logged in the JSON input.
     """
-    test_configuration: List[ConfigParam] = []
+    test_configuration = TestConfiguration()
     results: List[Result] = []
     for line in input_data:
         if line["$report_type"] == "TestConfiguration":
             # Tabulate this somehow. It'll need to modify the return.
             line.pop("$report_type")
             for config_param_name, config_param_value in line.items():
-                test_configuration.append(ConfigParam(config_param_name, config_param_value))
-            continue
+                test_configuration.params.append(ConfigParam(config_param_name, config_param_value))
+            continue  # We've removed $report_type, which would break later code
+        elif line["$report_type"] == "HostConfiguration":
+            test_configuration.hosts.append(_parse_host(line))
+
         if line["$report_type"] != "TestReport":
             continue
         # _from_json is an "experimental" function.
@@ -214,6 +283,40 @@ def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
 def fix_test_name(test_name: str) -> str:
     """Change a test's name from a pytest one to a more human-friendly one."""
     return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
+
+
+def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration):
+    with doc.create(Section("Test Configuration")) as config_section:
+        with config_section.create(LongTable(r"|r|l|")) as config_table:
+            config_table.add_hline()
+            config_table.add_row([bold("Configuration Parameter"), bold("Value")])
+            config_table.add_hline()
+            for config_param in test_configuration.params:
+                config_table.add_row([config_param.name, config_param.value])
+                config_table.add_hline()
+            config_table.add_row(["Some other software version", "x.y.ZZ"])
+            config_table.add_hline()
+
+    with doc.create(Section("Hosts")) as hosts_section:
+        for host in sorted(test_configuration.hosts, key=lambda host: host.hostname):
+            with hosts_section.create(Subsection(host.hostname)) as host_section:
+                with host_section.create(LongTable(r"|r|l|")) as host_table:
+                    host_table.add_hline()
+                    host_table.add_row([MultiColumn(2, align="|c|", data=bold("System"))])
+                    host_table.add_hline()
+                    assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
+                    host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
+                    host_table.add_row("Product name", host.product_name)
+                    host_table.add_row("Board name", host.board_name)
+                    host_table.add_row("BIOS version", host.bios_version)
+                    host_table.add_row("Kernel", host.kernel)
+                    host_table.add_hline()
+                    for interface in sorted(host.interfaces, key=lambda interface: interface.name):
+                        host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
+                        host_table.add_hline()
+                        host_table.add_row("Driver", interface.driver + " " + interface.version)
+                        host_table.add_row("Firmware", interface.firmware_version)
+                        host_table.add_hline()
 
 
 def document_from_json(input_data: Union[str, list]) -> Document:
@@ -255,16 +358,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
 
-    with doc.create(Section("Test Configuration")) as config_section:
-        with config_section.create(LongTable(r"|r|l|")) as config_table:
-            config_table.add_hline()
-            config_table.add_row([bold("Configuration Parameter"), bold("Value")])
-            config_table.add_hline()
-            for config_param in test_configuration:
-                config_table.add_row([config_param.name, config_param.value])
-                config_table.add_hline()
-            config_table.add_row(["Some other software version", "x.y.ZZ"])
-            config_table.add_hline()
+    _doc_test_configuration(doc, test_configuration)
 
     with doc.create(Section("Result Summary")) as summary_section:
         with summary_section.create(LongTable(r"|r|l|r|")) as summary_table:
