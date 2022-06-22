@@ -33,6 +33,7 @@ from katsdpservices import get_interface_address
 from katgpucbf.meerkat import BANDS
 
 from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     # an INI file is probably appropriate.
     parser.addini("master_controller_host", "Hostname (or IP address) of the SDP master controller", type="string")
     parser.addini("master_controller_port", "TCP port of the SDP master controller", type="string", default="5001")
+    parser.addini("prometheus_url", "URL to Prometheus server for querying hardware configuration", type="string")
     # I'm on the fence about these. Probably on a given machine, you'd set and
     # forget.
     parser.addini("interface", "Name of network to use for ingest.", type="string")
@@ -125,6 +127,13 @@ def pdf_report(request) -> Reporter:
     return Reporter(data)
 
 
+@pytest.fixture(scope="session")
+def host_config_querier(pytestconfig) -> HostConfigQuerier:
+    """Querier for getting host config."""
+    url = pytestconfig.getini("prometheus_url")
+    return HostConfigQuerier(url)
+
+
 @pytest.fixture(autouse=True)
 def matplotlib_report_style() -> Generator[None, None, None]:
     """Set the style of all matplotlib plots."""
@@ -190,7 +199,7 @@ async def correlator_config(
 
 @pytest.fixture(scope="package")
 async def session_correlator(
-    pytestconfig, correlator_config: dict, band: str
+    pytestconfig, request, host_config_querier: HostConfigQuerier, correlator_config: dict, band: str
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -230,6 +239,16 @@ async def session_correlator(
         remote_control = await CorrelatorRemoteControl.connect(
             product_controller_host, product_controller_port, correlator_config
         )
+        _, informs = await remote_control.product_controller_client.request("sensor-value", r"/.*\.host$/")
+        for inform in informs:
+            if inform.arguments[4] == b"nominal":
+                hostname = inform.arguments[5].decode()
+                host_config = host_config_querier.get_config(hostname)
+                if host_config is not None:
+                    request.node.user_properties.append(
+                        ("pdf_report_data", [{"$msg_type": "host_config", "hostname": hostname, "config": host_config}])
+                    )
+
         yield remote_control
 
         logger.info("Tearing down correlator.")
