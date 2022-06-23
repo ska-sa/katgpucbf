@@ -47,7 +47,7 @@ The numbers in the above image correspond to the following actions:
   6. Transfer baselines from host memory to the NIC and onto the network.
 
 Synchronization and Coordination
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 The :mod:`~katgpucbf.xbgpu.engine` module does the work of assembling all
