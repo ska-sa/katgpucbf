@@ -23,6 +23,7 @@ import os
 import pathlib
 import re
 import tempfile
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Dict, List, Literal, Optional, Tuple, Union
@@ -121,7 +122,7 @@ class Result:
     config: dict = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Interface:
     """A network interface."""
 
@@ -131,7 +132,7 @@ class Interface:
     version: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class GPU:
     """Information about a GPU."""
 
@@ -139,23 +140,20 @@ class GPU:
     model_name: str
     driver: str
     vbios: str
-    serial: str
-    uuid: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class Host:
     """Configuration information for a host."""
 
-    hostname: str
-    kernel: str = UNKNOWN
-    cpus: List[str] = field(default_factory=list)
-    interfaces: List[Interface] = field(default_factory=list)
-    gpus: List[GPU] = field(default_factory=list)
+    kernel: str
+    cpus: Tuple[str, ...]
+    interfaces: Tuple[Interface, ...]
+    gpus: Tuple[GPU, ...]
+    ram: Optional[int]
     product_name: str = UNKNOWN
     board_name: str = UNKNOWN
     bios_version: str = UNKNOWN
-    ram: Optional[int] = None
 
 
 @dataclass
@@ -171,7 +169,7 @@ class TestConfiguration:
     """Global configuration of the test."""
 
     params: List[ConfigParam] = field(default_factory=list)
-    hosts: List[Host] = field(default_factory=list)
+    hosts: Dict[Host, List[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
 
 
 def _parse_detail(detail: dict) -> Union[Detail, Figure]:
@@ -222,15 +220,18 @@ def _parse_gpu(labels: dict) -> GPU:
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
-        serial=labels.get("DCGM_FI_DEV_SERIAL", UNKNOWN),
-        uuid=labels.get("UUID", UNKNOWN),
     )
 
 
-def _parse_host(msg: dict) -> Host:
+def _parse_host(msg: dict) -> Tuple[str, Host]:
     """Parse a single host configuration line."""
-    host = Host(hostname=msg["hostname"])
+    kernel = UNKNOWN
     cpus: Dict[int, str] = {}  # Indexed by package
+    interfaces = []
+    gpus = []
+    kwargs = {}
+    ram: Optional[int] = None
+
     for metric in msg["config"]:
         labels = metric["metric"]
         value = float(metric["value"][1])
@@ -238,24 +239,30 @@ def _parse_host(msg: dict) -> Host:
         if metric_name == "node_dmi_info":
             for label, label_value in labels.items():
                 if label in {"product_name", "board_name", "bios_version"}:
-                    setattr(host, label, label_value)
+                    kwargs[label] = label_value
         elif metric_name == "node_cpu_info" and "model_name" in labels:
             # The check for model_name is because older versions of
             # node-exporter didn't provide it.
             cpus[int(labels["package"])] = labels["model_name"]
         elif metric_name == "node_memory_MemTotal_bytes":
-            host.ram = int(value)
+            ram = int(value)
         elif metric_name == "node_ethtool_info":
-            host.interfaces.append(_parse_interface(labels))
+            interfaces.append(_parse_interface(labels))
         elif metric_name == "dcgm_exporter_info":
-            host.gpus.append(_parse_gpu(labels))
+            gpus.append(_parse_gpu(labels))
         elif metric_name == "node_uname_info":
-            host.kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
-    for _, model_name in sorted(cpus.items()):
-        host.cpus.append(model_name)
-    host.interfaces.sort(key=lambda interface: interface.name)
-    host.gpus.sort(key=lambda gpu: gpu.number)
-    return host
+            kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
+    interfaces.sort(key=lambda interface: interface.name)
+    gpus.sort(key=lambda gpu: gpu.number)
+    host = Host(
+        kernel=kernel,
+        cpus=tuple(model_name for _, model_name in sorted(cpus.items())),
+        interfaces=tuple(interfaces),
+        gpus=tuple(gpus),
+        ram=ram,
+        **kwargs,
+    )
+    return msg["hostname"], host
 
 
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
@@ -282,7 +289,8 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
                 test_configuration.params.append(ConfigParam(config_param_name, config_param_value))
             continue  # We've removed $report_type, which would break later code
         elif line["$report_type"] == "HostConfiguration":
-            test_configuration.hosts.append(_parse_host(line))
+            hostname, host = _parse_host(line)
+            test_configuration.hosts[host].append(hostname)
 
         if line["$report_type"] != "TestReport":
             continue
@@ -331,38 +339,38 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
             config_table.add_hline()
 
     with doc.create(Section("Hosts")) as hosts_section:
-        for host in sorted(test_configuration.hosts, key=lambda host: host.hostname):
-            with hosts_section.create(Subsection(host.hostname)) as host_section:
-                with host_section.create(LongTable(r"|r|l|")) as host_table:
+        for host, hostnames in test_configuration.hosts.items():
+            with hosts_section.create(LongTable(r"|r|l|")) as host_table:
+                host_table.add_hline()
+                for hostname in sorted(hostnames):
+                    host_table.add_row([MultiColumn(2, align="|l|", data=hostname)])
+                host_table.add_hline()
+                host_table.add_row([MultiColumn(2, align="|c|", data=bold("System"))])
+                host_table.add_hline()
+                assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
+                host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
+                if host.ram is not None:
+                    host_table.add_row("RAM", f"{host.ram / 2**30:.3f} GiB")
+                else:
+                    host_table.add_row("RAM", "unknown")
+                host_table.add_row("Product name", host.product_name)
+                host_table.add_row("Board name", host.board_name)
+                host_table.add_row("BIOS version", host.bios_version)
+                host_table.add_row("Kernel", host.kernel)
+                host_table.add_hline()
+                for interface in host.interfaces:
+                    host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
                     host_table.add_hline()
-                    host_table.add_row([MultiColumn(2, align="|c|", data=bold("System"))])
+                    host_table.add_row("Driver", interface.driver + " " + interface.version)
+                    host_table.add_row("Firmware", interface.firmware_version)
                     host_table.add_hline()
-                    assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
-                    host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
-                    if host.ram is not None:
-                        host_table.add_row("RAM", f"{host.ram / 2**30:.3f} GiB")
-                    else:
-                        host_table.add_row("RAM", "unknown")
-                    host_table.add_row("Product name", host.product_name)
-                    host_table.add_row("Board name", host.board_name)
-                    host_table.add_row("BIOS version", host.bios_version)
-                    host_table.add_row("Kernel", host.kernel)
+                for gpu in host.gpus:
+                    host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
                     host_table.add_hline()
-                    for interface in host.interfaces:
-                        host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
-                        host_table.add_hline()
-                        host_table.add_row("Driver", interface.driver + " " + interface.version)
-                        host_table.add_row("Firmware", interface.firmware_version)
-                        host_table.add_hline()
-                    for gpu in host.gpus:
-                        host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
-                        host_table.add_hline()
-                        host_table.add_row("Model", gpu.model_name)
-                        host_table.add_row("Driver", gpu.driver)
-                        host_table.add_row("VBIOS", gpu.vbios)
-                        host_table.add_row("Serial #", gpu.serial)
-                        host_table.add_row("UUID", gpu.uuid)
-                        host_table.add_hline()
+                    host_table.add_row("Model", gpu.model_name)
+                    host_table.add_row("Driver", gpu.driver)
+                    host_table.add_row("VBIOS", gpu.vbios)
+                    host_table.add_hline()
 
 
 def document_from_json(input_data: Union[str, list]) -> Document:
