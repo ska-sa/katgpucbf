@@ -21,11 +21,12 @@ from typing import Optional, Set
 from prometheus_api_client.prometheus_connect import PrometheusConnect
 
 QUERIES = [
-    'node_cpu_info{instance="%h", cpu="0"}',
-    'node_ethtool_info{instance="%h"}',
-    'node_dmi_info{instance="%h"}',
-    'node_uname_info{instance="%h"}',
     'dcgm_exporter_info{instance="%h"}',
+    'node_cpu_info{instance="%h", cpu="0"}',
+    'node_dmi_info{instance="%h"}',
+    'node_ethtool_info{instance="%h"}',
+    'node_memory_MemTotal_bytes{instance="%h"}',
+    'node_uname_info{instance="%h"}',
 ]
 
 
