@@ -132,6 +132,18 @@ class Interface:
 
 
 @dataclass
+class GPU:
+    """Information about a GPU."""
+
+    number: int
+    model_name: str
+    driver: str
+    vbios: str
+    serial: str
+    uuid: str
+
+
+@dataclass
 class Host:
     """Configuration information for a host."""
 
@@ -139,6 +151,7 @@ class Host:
     kernel: str = UNKNOWN
     cpus: List[str] = field(default_factory=list)
     interfaces: List[Interface] = field(default_factory=list)
+    gpus: List[GPU] = field(default_factory=list)
     product_name: str = UNKNOWN
     board_name: str = UNKNOWN
     bios_version: str = UNKNOWN
@@ -201,6 +214,18 @@ def _parse_interface(labels: dict) -> Interface:
     )
 
 
+def _parse_gpu(labels: dict) -> GPU:
+    """Parse a single GPU from ``dcgm_exporter_info`` labels."""
+    return GPU(
+        number=int(labels["gpu"]),
+        model_name=labels["modelName"],
+        driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
+        vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
+        serial=labels.get("DCGM_FI_DEV_SERIAL", UNKNOWN),
+        uuid=labels.get("UUID", UNKNOWN),
+    )
+
+
 def _parse_host(msg: dict) -> Host:
     """Parse a single host configuration line."""
     host = Host(hostname=msg["hostname"])
@@ -218,10 +243,14 @@ def _parse_host(msg: dict) -> Host:
             cpus[int(labels["package"])] = labels["model_name"]
         elif metric_name == "node_ethtool_info":
             host.interfaces.append(_parse_interface(labels))
+        elif metric_name == "dcgm_exporter_info":
+            host.gpus.append(_parse_gpu(labels))
         elif metric_name == "node_uname_info":
             host.kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
     for _, model_name in sorted(cpus.items()):
         host.cpus.append(model_name)
+    host.interfaces.sort(key=lambda interface: interface.name)
+    host.gpus.sort(key=lambda gpu: gpu.number)
     return host
 
 
@@ -311,11 +340,20 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
                     host_table.add_row("BIOS version", host.bios_version)
                     host_table.add_row("Kernel", host.kernel)
                     host_table.add_hline()
-                    for interface in sorted(host.interfaces, key=lambda interface: interface.name):
+                    for interface in host.interfaces:
                         host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
                         host_table.add_hline()
                         host_table.add_row("Driver", interface.driver + " " + interface.version)
                         host_table.add_row("Firmware", interface.firmware_version)
+                        host_table.add_hline()
+                    for gpu in host.gpus:
+                        host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
+                        host_table.add_hline()
+                        host_table.add_row("Model", gpu.model_name)
+                        host_table.add_row("Driver", gpu.driver)
+                        host_table.add_row("VBIOS", gpu.vbios)
+                        host_table.add_row("Serial #", gpu.serial)
+                        host_table.add_row("UUID", gpu.uuid)
                         host_table.add_hline()
 
 
