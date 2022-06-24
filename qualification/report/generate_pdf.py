@@ -155,6 +155,7 @@ class Host:
     product_name: str = UNKNOWN
     board_name: str = UNKNOWN
     bios_version: str = UNKNOWN
+    ram: Optional[int] = None
 
 
 @dataclass
@@ -232,6 +233,7 @@ def _parse_host(msg: dict) -> Host:
     cpus: Dict[int, str] = {}  # Indexed by package
     for metric in msg["config"]:
         labels = metric["metric"]
+        value = float(metric["value"][1])
         metric_name = labels["__name__"]
         if metric_name == "node_dmi_info":
             for label, label_value in labels.items():
@@ -241,6 +243,8 @@ def _parse_host(msg: dict) -> Host:
             # The check for model_name is because older versions of
             # node-exporter didn't provide it.
             cpus[int(labels["package"])] = labels["model_name"]
+        elif metric_name == "node_memory_MemTotal_bytes":
+            host.ram = int(value)
         elif metric_name == "node_ethtool_info":
             host.interfaces.append(_parse_interface(labels))
         elif metric_name == "dcgm_exporter_info":
@@ -335,6 +339,10 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
                     host_table.add_hline()
                     assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
                     host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
+                    if host.ram is not None:
+                        host_table.add_row("RAM", f"{host.ram / 2**30:.3f} GiB")
+                    else:
+                        host_table.add_row("RAM", "unknown")
                     host_table.add_row("Product name", host.product_name)
                     host_table.add_row("Board name", host.board_name)
                     host_table.add_row("BIOS version", host.bios_version)
