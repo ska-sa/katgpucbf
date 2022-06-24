@@ -25,6 +25,7 @@ QUERIES = [
     'node_ethtool_info{instance="%h"}',
     'node_dmi_info{instance="%h"}',
     'node_uname_info{instance="%h"}',
+    'dcgm_exporter_info{instance="%h"}',
 ]
 
 
