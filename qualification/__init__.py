@@ -26,8 +26,9 @@ import ast
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, List, Literal, Mapping, Optional, Tuple, overload
+from uuid import UUID, uuid4
 
 import aiokatcp
 import numba
@@ -72,6 +73,7 @@ class CorrelatorRemoteControl:
     dsim_clients: List[aiokatcp.Client]
     config: dict  # JSON dictionary used to configure the correlator
     sensor_watcher: aiokatcp.SensorWatcher
+    uuid: UUID = field(default_factory=uuid4)
 
     @property
     def sensors(self) -> aiokatcp.SensorSet:  # noqa: D401

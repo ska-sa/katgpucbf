@@ -221,7 +221,9 @@ async def _report_correlator_config(
                 custom_report_log(
                     pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
                 )
-    custom_report_log(pytestconfig, {"$report_type": "CorrelatorConfiguration", "task_map": task_map})
+    custom_report_log(
+        pytestconfig, {"$report_type": "CorrelatorConfiguration", "uuid": str(correlator.uuid), "task_map": task_map}
+    )
 
 
 @pytest.fixture(scope="package")
@@ -284,6 +286,7 @@ async def session_correlator(
 @pytest.fixture
 async def correlator(
     session_correlator: CorrelatorRemoteControl,
+    pdf_report: Reporter,
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Set up a correlator for a single test.
 
@@ -301,6 +304,7 @@ async def correlator(
         elif conf["type"] == "gpucbf.baseline_correlation_products":
             await pcc.request("capture-start", name)
 
+    pdf_report.config(correlator=str(session_correlator.uuid))
     yield session_correlator
 
     for name, conf in session_correlator.config["outputs"].items():
