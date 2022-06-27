@@ -26,8 +26,9 @@ import ast
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, List, Literal, Mapping, Optional, Tuple, overload
+from uuid import UUID, uuid4
 
 import aiokatcp
 import numba
@@ -71,7 +72,9 @@ class CorrelatorRemoteControl:
     product_controller_client: aiokatcp.Client
     dsim_clients: List[aiokatcp.Client]
     config: dict  # JSON dictionary used to configure the correlator
+    description: str  # Human-readable description
     sensor_watcher: aiokatcp.SensorWatcher
+    uuid: UUID = field(default_factory=uuid4)
 
     @property
     def sensors(self) -> aiokatcp.SensorSet:  # noqa: D401
@@ -86,7 +89,7 @@ class CorrelatorRemoteControl:
         return self.sensor_watcher.sensors
 
     @classmethod
-    async def connect(cls, host: str, port: int, config: Mapping) -> "CorrelatorRemoteControl":
+    async def connect(cls, host: str, port: int, config: Mapping, description: str) -> "CorrelatorRemoteControl":
         """Connect to a correlator's product controller.
 
         The function connects and gathers sufficient metadata in order for the
@@ -116,6 +119,7 @@ class CorrelatorRemoteControl:
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
             config=dict(config),
+            description=description,
             sensor_watcher=sensor_watcher,
         )
 
