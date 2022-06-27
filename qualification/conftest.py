@@ -22,7 +22,7 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator, Generator, Tuple
 
 import aiokatcp
 import matplotlib.style
@@ -87,7 +87,7 @@ def event_loop():  # noqa: D103
 @pytest.fixture(scope="package")
 def n_antennas():  # noqa: D401
     """Number of antennas, i.e. size of the array."""
-    return 8
+    return 4
 
 
 @pytest.fixture(scope="package")
@@ -150,10 +150,9 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="package")
-async def correlator_config(
+async def _correlator_config_and_description(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
-) -> dict:
-    """Produce the configuration dict from the given parameters."""
+) -> Tuple[dict, str]:
     # Adapted from `sim_correlator.py` but with logic for using multiple dsims
     # removed. For the time being, we're going to use a single dsim for
     # consistency with MeerKAT's qualification testing.
@@ -201,8 +200,24 @@ async def correlator_config(
         "int_time": int_time,
     }
 
-    logger.info(f"Config for {n_antennas}-A, {n_channels}-chan {band}-band correlator generated.")
-    return config
+    description = (
+        f"{n_antennas} antennas, {n_channels} channels, "
+        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
+    )
+    logger.info("Config for correlator generation: %s.", description)
+    return config, description
+
+
+@pytest.fixture(scope="package")
+async def correlator_config(_correlator_config_and_description: Tuple[dict, str]) -> dict:
+    """Produce the configuration dict from the given parameters."""
+    return _correlator_config_and_description[0]
+
+
+@pytest.fixture(scope="package")
+async def correlator_description(_correlator_config_and_description: Tuple[dict, str]) -> str:
+    """Produce a short human-readable description of the correlator config."""
+    return _correlator_config_and_description[1]
 
 
 async def _report_correlator_config(
@@ -222,13 +237,22 @@ async def _report_correlator_config(
                     pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
                 )
     custom_report_log(
-        pytestconfig, {"$report_type": "CorrelatorConfiguration", "uuid": str(correlator.uuid), "task_map": task_map}
+        pytestconfig,
+        {
+            "$report_type": "CorrelatorConfiguration",
+            "description": correlator.description,
+            "uuid": str(correlator.uuid),
+            "task_map": task_map,
+        },
     )
 
 
 @pytest.fixture(scope="package")
 async def session_correlator(
-    pytestconfig: pytest.Config, host_config_querier: HostConfigQuerier, correlator_config: dict, band: str
+    pytestconfig: pytest.Config,
+    host_config_querier: HostConfigQuerier,
+    correlator_config: dict,
+    correlator_description: str,
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -266,7 +290,7 @@ async def session_correlator(
     )
     try:
         remote_control = await CorrelatorRemoteControl.connect(
-            product_controller_host, product_controller_port, correlator_config
+            product_controller_host, product_controller_port, correlator_config, correlator_description
         )
         await _report_correlator_config(pytestconfig, host_config_querier, remote_control)
 
