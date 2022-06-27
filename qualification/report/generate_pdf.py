@@ -131,6 +131,7 @@ class Interface:
     driver: str
     firmware_version: str
     version: str
+    bus_id: str
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class GPU:
     model_name: str
     driver: str
     vbios: str
+    bus_id: str
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,7 @@ def _parse_interface(labels: dict) -> Interface:
         driver=labels.get("driver", UNKNOWN),
         firmware_version=labels.get("firmware_version", UNKNOWN),
         version=labels.get("version", UNKNOWN),
+        bus_id=labels.get("bus_info", UNKNOWN),
     )
 
 
@@ -231,6 +234,7 @@ def _parse_gpu(labels: dict) -> GPU:
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
+        bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
     )
 
 
@@ -381,6 +385,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_hline()
                 host_table.add_row("Driver", interface.driver + " " + interface.version)
                 host_table.add_row("Firmware", interface.firmware_version)
+                host_table.add_row("Bus ID", interface.bus_id)
                 host_table.add_hline()
             for gpu in host.gpus:
                 host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
@@ -388,6 +393,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_row("Model", gpu.model_name)
                 host_table.add_row("Driver", gpu.driver)
                 host_table.add_row("VBIOS", gpu.vbios)
+                host_table.add_row("Bus ID", gpu.bus_id)
                 host_table.add_hline()
 
 
