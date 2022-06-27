@@ -205,9 +205,28 @@ async def correlator_config(
     return config
 
 
+async def _report_correlator_config(
+    pytestconfig: pytest.Config, host_config_querier: HostConfigQuerier, correlator: CorrelatorRemoteControl
+) -> None:
+    _, informs = await correlator.product_controller_client.request("sensor-value", r"/.*\.host$/")
+    task_map = {}
+    for inform in informs:
+        if inform.arguments[3] == b"nominal":
+            task = inform.arguments[2].decode()[:-5]  # Strip off ".host" suffix
+            hostname = inform.arguments[4].decode()
+            task_map[task] = hostname
+            host_config = host_config_querier.get_config(hostname)
+            if host_config is not None:
+                logger.info("Logging host config for %s", hostname)
+                custom_report_log(
+                    pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
+                )
+    custom_report_log(pytestconfig, {"$report_type": "CorrelatorConfiguration", "task_map": task_map})
+
+
 @pytest.fixture(scope="package")
 async def session_correlator(
-    pytestconfig, host_config_querier: HostConfigQuerier, correlator_config: dict, band: str
+    pytestconfig: pytest.Config, host_config_querier: HostConfigQuerier, correlator_config: dict, band: str
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -247,16 +266,7 @@ async def session_correlator(
         remote_control = await CorrelatorRemoteControl.connect(
             product_controller_host, product_controller_port, correlator_config
         )
-        _, informs = await remote_control.product_controller_client.request("sensor-value", r"/.*\.host$/")
-        for inform in informs:
-            if inform.arguments[3] == b"nominal":
-                hostname = inform.arguments[4].decode()
-                host_config = host_config_querier.get_config(hostname)
-                if host_config is not None:
-                    logger.info("Logging host config for %s", hostname)
-                    custom_report_log(
-                        pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
-                    )
+        await _report_correlator_config(pytestconfig, host_config_querier, remote_control)
 
         yield remote_control
 
