@@ -732,17 +732,6 @@ class XBEngine(DeviceServer):
                 time_difference_between_heaps_s,
             )
 
-            # NOTE: Not sure under which conditions that this would fail to
-            # occur. Something funny would have to happen at the receiver.
-            # This check is here pre-emptively - this issue has not been
-            # detected (yet).
-            if item.timestamp - old_timestamp != self.timestamp_increment_per_accumulation:
-                logger.warning(
-                    "Timestamp between heaps equal to %#x, expected %#x",
-                    item.timestamp - old_timestamp,
-                    self.timestamp_increment_per_accumulation,
-                )
-
             # NOTE: As the output packets are rate limited in
             # such a way to match the dump rate, receiving data too quickly
             # will result in data bottlenecking at the sender, the pipeline
