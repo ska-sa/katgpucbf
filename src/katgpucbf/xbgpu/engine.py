@@ -427,8 +427,8 @@ class XBEngine(DeviceServer):
                 bool,
                 "synchronised",
                 "For the latest accumulation, was data present from all F-Engines.",
-                default=True,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                default=False,
+                initial_status=aiokatcp.Sensor.Status.ERROR,
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
             )
         )
