@@ -26,7 +26,8 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Mapping, Optional, Sequence, Tuple, Union
+from uuid import UUID
 
 import pytest
 from docutils.core import publish_parts
@@ -43,8 +44,8 @@ from pylatex import (
     Subsubsection,
     TextColor,
 )
-from pylatex.base_classes import Environment
-from pylatex.labelref import Hyperref
+from pylatex.base_classes import Container, Environment
+from pylatex.labelref import Hyperref, Label, Marker
 from pylatex.package import Package
 from pylatex.utils import bold
 
@@ -157,6 +158,14 @@ class Host:
 
 
 @dataclass
+class CorrelatorConfiguration:
+    """Configuration information for a correlator instance."""
+
+    uuid: UUID
+    tasks: Dict[str, str]  # Maps task name to host where it is run
+
+
+@dataclass
 class ConfigParam:
     """A configuration parameter describing software / hardware used in the test run."""
 
@@ -170,6 +179,7 @@ class TestConfiguration:
 
     params: List[ConfigParam] = field(default_factory=list)
     hosts: Dict[Host, List[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
+    correlators: List[CorrelatorConfiguration] = field(default_factory=list)
 
 
 def _parse_detail(detail: dict) -> Union[Detail, Figure]:
@@ -291,6 +301,10 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
         elif line["$report_type"] == "HostConfiguration":
             hostname, host = _parse_host(line)
             test_configuration.hosts[host].append(hostname)
+        elif line["$report_type"] == "CorrelatorConfiguration":
+            test_configuration.correlators.append(
+                CorrelatorConfiguration(uuid=UUID(line["uuid"]), tasks=line["task_map"])
+            )
 
         if line["$report_type"] != "TestReport":
             continue
@@ -326,51 +340,115 @@ def fix_test_name(test_name: str) -> str:
     return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
 
 
-def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration):
-    with doc.create(Section("Test Configuration")) as config_section:
-        with config_section.create(LongTable(r"|r|l|")) as config_table:
+def _doc_test_configuration_global(section: Container, test_configuration: TestConfiguration) -> None:
+    with section.create(LongTable(r"|r|l|")) as config_table:
+        config_table.add_hline()
+        config_table.add_row([bold("Configuration Parameter"), bold("Value")])
+        config_table.add_hline()
+        for config_param in test_configuration.params:
+            config_table.add_row([config_param.name, config_param.value])
             config_table.add_hline()
-            config_table.add_row([bold("Configuration Parameter"), bold("Value")])
-            config_table.add_hline()
-            for config_param in test_configuration.params:
-                config_table.add_row([config_param.name, config_param.value])
-                config_table.add_hline()
-            config_table.add_row(["Some other software version", "x.y.ZZ"])
-            config_table.add_hline()
+        config_table.add_row(["Some other software version", "x.y.ZZ"])
+        config_table.add_hline()
 
+
+def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
+    for host, hostnames in hosts.items():
+        with section.create(LongTable(r"|r|l|")) as host_table:
+            host_table.add_hline()
+            for hostname in sorted(hostnames):
+                label = Label(Marker(hostname, prefix="host"))
+                host_table.add_row([MultiColumn(2, align="|l|", data=[label, hostname])])
+            host_table.add_hline()
+            host_table.add_row([MultiColumn(2, align="|c|", data=bold("System"))])
+            host_table.add_hline()
+            assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
+            host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
+            if host.ram is not None:
+                host_table.add_row("RAM", f"{host.ram / 2**30:.3f} GiB")
+            else:
+                host_table.add_row("RAM", "unknown")
+            host_table.add_row("Product name", host.product_name)
+            host_table.add_row("Board name", host.board_name)
+            host_table.add_row("BIOS version", host.bios_version)
+            host_table.add_row("Kernel", host.kernel)
+            host_table.add_hline()
+            for interface in host.interfaces:
+                host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
+                host_table.add_hline()
+                host_table.add_row("Driver", interface.driver + " " + interface.version)
+                host_table.add_row("Firmware", interface.firmware_version)
+                host_table.add_hline()
+            for gpu in host.gpus:
+                host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
+                host_table.add_hline()
+                host_table.add_row("Model", gpu.model_name)
+                host_table.add_row("Driver", gpu.driver)
+                host_table.add_row("VBIOS", gpu.vbios)
+                host_table.add_hline()
+
+
+def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfiguration]) -> None:
+    patterns = [
+        ("DSim {}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
+        ("F-engine {}", re.compile(r"f\.antenna_channelised_voltage\.(\d+)")),
+        ("XB-engine {}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
+    ]
+    for i, correlator in enumerate(correlators, start=1):
+        with section.create(Subsection(f"Configuration {i}")) as subsec:
+            subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
+            with subsec.create(LongTable(r"|l|l|")) as table:
+                table.add_hline()
+                for name, pattern in patterns:
+                    hosts = []
+                    for task, host in correlator.tasks.items():
+                        if match := pattern.fullmatch(task):
+                            hosts.append((int(match.group(1)), host))
+                    hosts.sort()
+                    for idx, host in hosts:
+                        table.add_row(name.format(idx), Hyperref(Marker(host, prefix="host"), host))
+                    table.add_hline()
+
+
+def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration) -> None:
+    with doc.create(Section("Test Configuration")) as config_section:
+        _doc_test_configuration_global(config_section, test_configuration)
     with doc.create(Section("Hosts")) as hosts_section:
-        for host, hostnames in test_configuration.hosts.items():
-            with hosts_section.create(LongTable(r"|r|l|")) as host_table:
-                host_table.add_hline()
-                for hostname in sorted(hostnames):
-                    host_table.add_row([MultiColumn(2, align="|l|", data=hostname)])
-                host_table.add_hline()
-                host_table.add_row([MultiColumn(2, align="|c|", data=bold("System"))])
-                host_table.add_hline()
-                assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
-                host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
-                if host.ram is not None:
-                    host_table.add_row("RAM", f"{host.ram / 2**30:.3f} GiB")
-                else:
-                    host_table.add_row("RAM", "unknown")
-                host_table.add_row("Product name", host.product_name)
-                host_table.add_row("Board name", host.board_name)
-                host_table.add_row("BIOS version", host.bios_version)
-                host_table.add_row("Kernel", host.kernel)
-                host_table.add_hline()
-                for interface in host.interfaces:
-                    host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
-                    host_table.add_hline()
-                    host_table.add_row("Driver", interface.driver + " " + interface.version)
-                    host_table.add_row("Firmware", interface.firmware_version)
-                    host_table.add_hline()
-                for gpu in host.gpus:
-                    host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
-                    host_table.add_hline()
-                    host_table.add_row("Model", gpu.model_name)
-                    host_table.add_row("Driver", gpu.driver)
-                    host_table.add_row("VBIOS", gpu.vbios)
-                    host_table.add_hline()
+        _doc_hosts(hosts_section, test_configuration.hosts)
+    with doc.create(Section("Correlators")) as correlators_section:
+        _doc_correlators(correlators_section, test_configuration.correlators)
+
+
+def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
+    with section.create(LongTable(r"|r|l|r|")) as summary_table:
+        total_duration: float = 0.0
+        passed = 0
+        failed = 0
+        summary_table.add_hline()
+        summary_table.add_row(
+            [
+                bold("Test"),
+                bold("Result"),
+                bold("Duration"),
+            ]
+        )
+        summary_table.add_hline()
+        for result in results:
+            summary_table.add_row(
+                [
+                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
+                    TextColor("green" if result.outcome == "passed" else "red", result.outcome),
+                    readable_duration(result.duration),
+                ]
+            )
+            summary_table.add_hline()
+            total_duration += result.duration
+            if result.outcome == "passed":
+                passed += 1
+            else:
+                failed += 1
+    section.append(f"{len(results)} tests run, with {passed} passing and {failed} failing.\n")
+    section.append(f"Total test duration: {readable_duration(total_duration)}")
 
 
 def document_from_json(input_data: Union[str, list]) -> Document:
@@ -415,37 +493,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
     _doc_test_configuration(doc, test_configuration)
 
     with doc.create(Section("Result Summary")) as summary_section:
-        with summary_section.create(LongTable(r"|r|l|r|")) as summary_table:
-            total_duration: float = 0.0
-            passed = 0
-            failed = 0
-            summary_table.add_hline()
-            summary_table.add_row(
-                [
-                    bold("Test"),
-                    bold("Result"),
-                    bold("Duration"),
-                ]
-            )
-            summary_table.add_hline()
-            for result in results:
-                summary_table.add_row(
-                    # PyLatex strips (among other things) underscores from label names, apparently they're dangerous.
-                    # See: https://jeltef.github.io/PyLaTeX/latest/pylatex/pylatex.labelref.html#pylatex.labelref.Marker
-                    [
-                        Hyperref(f"subsec:{result.name.replace('_', '')}", fix_test_name(result.name)),
-                        TextColor("green" if result.outcome == "passed" else "red", result.outcome),
-                        readable_duration(result.duration),
-                    ]
-                )
-                summary_table.add_hline()
-                total_duration += result.duration
-                if result.outcome == "passed":
-                    passed += 1
-                else:
-                    failed += 1
-        summary_section.append(f"{len(results)} tests run, with {passed} passing and {failed} failing.\n")
-        summary_section.append(f"Total test duration: {readable_duration(total_duration)}")
+        _doc_result_summary(summary_section, results)
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
@@ -464,6 +512,13 @@ def document_from_json(input_data: Union[str, list]) -> Document:
                     config_table.add_row((MultiColumn(2, align="|c|", data=bold("Test Configuration")),))
                     config_table.add_hline()
                     for key, value in result.config.items():
+                        if key == "correlator":
+                            # Turn the raw UUID into a section reference
+                            for i, correlator in enumerate(test_configuration.correlators, start=1):
+                                if correlator.uuid == UUID(value):
+                                    marker = Marker(value, prefix="correlator")
+                                    value = Hyperref(marker, f"Configuration {i}")
+                                    break
                         config_table.add_row([key.capitalize(), value])
                         config_table.add_hline()
 
