@@ -161,6 +161,7 @@ class Host:
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
+    description: str
     uuid: UUID
     tasks: Dict[str, str]  # Maps task name to host where it is run
 
@@ -303,7 +304,9 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
             test_configuration.hosts[host].append(hostname)
         elif line["$report_type"] == "CorrelatorConfiguration":
             test_configuration.correlators.append(
-                CorrelatorConfiguration(uuid=UUID(line["uuid"]), tasks=line["task_map"])
+                CorrelatorConfiguration(
+                    description=line["description"], uuid=UUID(line["uuid"]), tasks=line["task_map"]
+                )
             )
 
         if line["$report_type"] != "TestReport":
@@ -397,6 +400,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
     for i, correlator in enumerate(correlators, start=1):
         with section.create(Subsection(f"Configuration {i}")) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
+            subsec.append(correlator.description)
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
