@@ -5,7 +5,11 @@ F-Engine Networking
 
 .. todo::
 
-  Work this section into the greater Design one.
+    Most of this will need to be worked into the Operation -> Data Interfaces
+    section underneath the generic data packet description. There may be some
+    leftover information that will need to go into the DSP Engine Design section
+    but I think this will likely be minimal.
+
 
 Input
 -----
