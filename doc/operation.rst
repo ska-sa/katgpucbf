@@ -1,8 +1,7 @@
 Installation and Operation
 ==========================
 
-.. todo::
-
+.. todo::  ``NGC-681``
     Make an "installation" section. It'll need to focus on the following points:
 
     - Installing module using setuptools, if you must
@@ -11,8 +10,7 @@ Installation and Operation
     - If you want to poke around at it, then refer to the dev-guide section.
       (There'll need to be a proper cross-reference.)
 
-.. todo::
-
+.. todo::  ``NGC-682``
     Move the following sections here from the fgpu sections:
 
     - Packet Size
@@ -37,8 +35,7 @@ Controlling the Correlator
 katsdpcontroller
 ^^^^^^^^^^^^^^^^
 
-.. todo::
-
+.. todo::  ``NGC-683``
     Describe katsdpcontroller, its role, note that the module can be used
     without it and whatever is used in its place will need to implement the
     functionality described in this "chapter".
@@ -51,8 +48,7 @@ katsdpcontroller
 Starting the correlator
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-.. todo::
-
+.. todo::  ``NGC-684``
     Describe how a correlator should be started. Master controller figures out
     based on a set of input parameters, how to invoke a few instances of
     katgpucbf as dsim, fgpu or xbgpu.
@@ -61,8 +57,7 @@ Starting the correlator
 Controlling the correlator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. todo::
-
+.. todo::  ``NGC-685``
     Describe how the correlator is controlled. This will mostly be delays and
     gains. Product controller passes almost identical requests on to relevant
     instances of katgpucbf.
@@ -71,16 +66,14 @@ Controlling the correlator
 Shutting down the correlator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. todo::
-
+.. todo::  ``NGC-686``
     Describe how to shut the correlator down. Product or master controller
     passes requests on to individual running instances.
 
 Monitoring
 ^^^^^^^^^^
 
-.. todo::
-
+.. todo:: ``NGC-687``
     - Describe KATCP sensors.
     - Describe Prometheus monitoring capabilities.
     - Probably also a good idea to mention the general logic distinguishing
@@ -161,7 +154,6 @@ The values contained in the immediate items may change from heap to heap, or
 they may be static, with the data payload being the only changing thing,
 depending on the nature of the stream.
 
-.. todo::
-
+.. todo::  ``NGC-676``
     Consolidate ``fgpu.networking`` and ``xbgpu.networking`` (i.e. input and
     output packet format sections) here.

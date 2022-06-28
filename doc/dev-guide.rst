@@ -56,7 +56,8 @@ configuration is located in ``.pre-commit-config.yaml``, though the various
 other modules which are loaded in this repo will have their configuration in
 various places.
 
-.. todo:: Merge the readme from the pre-commit repo into this section?
+.. todo:: ``NGC-672``
+    Merge the readme from the pre-commit repo into this section?
 
 .. _documentation: https://pre-commit.com/
 

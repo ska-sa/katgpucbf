@@ -1,8 +1,7 @@
 Qualification framework
 =======================
 
-.. todo::
-
+.. todo::  ``NGC-688``
    This document needs a bit of an introduction distinguishing it from normal
    unit-testing.
 

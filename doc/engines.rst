@@ -7,8 +7,7 @@ DSP Engine Design
 Terminology
 -----------
 
-.. todo::
-
+.. todo:: ``NGC-673``
     Update katsdpsigproc documentation with proper explanations of terminology
     (if what's there already isn't sufficient) and then remove this paragraph,
     which was lifted from fgpu's earlier documentation.
@@ -22,8 +21,7 @@ memory* (shared memory in CUDA) with other workitems in the same
 Glossary
 --------
 
-.. todo::
-
+.. todo::  ``NGC-674``
     Update Glossary section.
 
 This section serves (hopefully) to clarify some potentially confusing terms used
@@ -73,8 +71,7 @@ Event
 
 
 
-.. todo::
-
+.. todo:: ``NGC-675``
     Explanation of network receive, GPU processing and network transmit "loops".
     There'll be a few merges from the existing F- and XBgpu sections, and the
     Glossary as well.
