@@ -1,5 +1,5 @@
-GPU DSP engines
-===============
+DSP Engine Design
+=================
 
 
 .. _gpu-terminology:

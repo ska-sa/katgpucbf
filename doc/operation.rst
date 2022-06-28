@@ -3,6 +3,16 @@ Installation and Operation
 
 .. todo::
 
+    Make an "installation" section. It'll need to focus on the following points:
+
+    - Installing module using setuptools, if you must
+    - But we'd rather you didn't, it's better to use the Dockerfile and deploy
+      it that way
+    - If you want to poke around at it, then refer to the dev-guide section.
+      (There'll need to be a proper cross-reference.)
+
+.. todo::
+
     Move the following sections here from the fgpu sections:
 
     - Packet Size
