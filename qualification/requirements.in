@@ -3,6 +3,7 @@ async-timeout
 docutils
 matplotlib
 numpy
+prometheus-api-client
 pylatex
 pytest
 pytest-expectr

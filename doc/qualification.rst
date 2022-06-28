@@ -18,6 +18,13 @@ and then shut down afterwards. Facilities are provided for the test to
 interact with the correlator, both by sending it KATCP requests and by
 ingesting the output data.
 
+Additionally, the hosts in the cluster must be monitored by Prometheus, so that
+the qualification report can include information on the hardware and software
+configuration. They must run `node-exporter`_ with the arguments
+``--collector.cpu.info`` and ``--collector.ethtool``.
+
+.. _node-exporter: https://github.com/prometheus/node_exporter
+
 Requirements
 ------------
 
@@ -45,6 +52,7 @@ you're deploying on, and it'll look something like this:
    asyncio_mode = auto
    master_controller_host = lab5.sdp.kat.ac.za
    master_controller_port = 5001
+   prometheus_url = http://lab5.sdp.kat.ac.za:9090
    product_name = bobs_qualification_correlator  # Use your own name
    interface = enp193s0f0
    use_ibv = true

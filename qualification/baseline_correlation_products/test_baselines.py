@@ -16,15 +16,12 @@
 
 """Baseline verification tests."""
 
-import logging
 from typing import Tuple
 
 import numpy as np
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-
-logger = logging.getLogger(__name__)
 
 
 async def test_baseline_correlation_products(

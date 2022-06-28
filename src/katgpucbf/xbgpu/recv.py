@@ -195,6 +195,7 @@ def make_stream(
         affinity=src_affinity,
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
+        stop_on_stop_item=False,  # By default, a heap containing a stream control stop item will terminate the stream
     )
     stats_collector.add_stream(stream)
     return stream
@@ -216,6 +217,9 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
             # It's not impossible for there to be a completely
             # empty chunk during normal operation.
             if not valid_chunk_received:
+                # Return the chunk to the stream since we are not going to
+                # yield it.
+                stream.add_free_chunk(chunk)
                 continue
         elif not valid_chunk_received:
             valid_chunk_received = True

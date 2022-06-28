@@ -26,9 +26,42 @@ from typing import List, Tuple
 import numpy as np
 from numpy.typing import ArrayLike
 
-from katgpucbf import N_POLS
+from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 
 from .. import BaselineCorrelationProductsReceiver
+
+
+def compute_tone_gain(
+    receiver: BaselineCorrelationProductsReceiver,
+    amplitude: float,
+    target_voltage: int,
+) -> float:
+    """Compute F-Engine gain.
+
+    Compute gain to be applied to the F-Engine to maximise output dynamic range
+    when the input is a tone (for example, for use with :func:``sample_tone_response``).
+    The F-Engine output is 8-bit signed (max 127).
+
+    Parameters
+    ----------
+    correlator
+        Connection to the correlator.
+    amplitude
+        Amplitude of the tones, on a scale of 0 to 1.
+    target_voltage
+        Desired magnitude of F-engine output values. The calculation uses
+        an approximation, so the actual value may be slightly higher than
+        the target. The target may also be reduced if necessary to avoid
+        saturating the X-engine output.
+    """
+    # We need to avoid saturating the signed 32-bit X-engine accumulation as
+    # well (2e9 is comfortably less than 2^31).
+    # The PFB is scaled for fixed incoherent gain, but we need to be concerned
+    # about coherent gain to avoid overflowing the F-engine output. Coherent gain
+    # scales approximately with np.sqrt(correlator.n_chans / 2).
+    target_voltage = min(target_voltage, np.sqrt(2e9 / receiver.n_spectra_per_acc))
+    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+    return target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans / 2))
 
 
 async def sample_tone_response(

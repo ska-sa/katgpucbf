@@ -16,7 +16,7 @@
 
 """Unit tests for katcp server."""
 
-from typing import AsyncGenerator, Sequence
+from typing import AsyncGenerator, Optional, Sequence
 
 import aiokatcp
 import async_timeout
@@ -53,6 +53,7 @@ async def katcp_server(
         dither_seed=dither_seed,
         signals_str=signals_str,
         signals=parse_signals(signals_str),
+        period=SIGNAL_HEAPS,  # Bogus value to test the sensor
         signal_service=signal_service,
         host="127.0.0.1",
         port=0,
@@ -79,16 +80,26 @@ async def test_sensors(katcp_server: DeviceServer, katcp_client: aiokatcp.Client
     assert await get_sensor(katcp_client, "signals") == "cw(0.2, 123); cw(0.3, 456);"
     assert await get_sensor(katcp_client, "adc-sample-rate") == ADC_SAMPLE_RATE
     assert await get_sensor(katcp_client, "sample-bits") == DIG_SAMPLE_BITS
-    assert await get_sensor(katcp_client, "period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
+    assert await get_sensor(katcp_client, "max-period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
+    assert await get_sensor(katcp_client, "period") == SIGNAL_HEAPS
 
 
+@pytest.mark.parametrize("period", [8192, None])
 async def test_signals(
-    katcp_server: DeviceServer, katcp_client: aiokatcp.Client, sender: Sender, heap_sets: Sequence[HeapSet], mocker
+    katcp_server: DeviceServer,
+    katcp_client: aiokatcp.Client,
+    sender: Sender,
+    heap_sets: Sequence[HeapSet],
+    period: Optional[int],
+    mocker,
 ) -> None:
     """Test the ``?signals`` katcp command."""
     signals_str = "cw(0.0, 1000.0); cw(1.0, 1000.0);"
     set_heaps = mocker.patch.object(sender, "set_heaps", autospec=True, return_value=1234567)
-    reply, _ = await katcp_client.request("signals", signals_str)
+    args: list = [signals_str]
+    if period is not None:
+        args.append(period)
+    reply, _ = await katcp_client.request("signals", *args)
     assert reply == [b"1234567"]
     _, informs = await katcp_client.request("sensor-value", "steady-state-timestamp")
     assert informs[0].arguments[4] == b"1234567"
@@ -98,6 +109,7 @@ async def test_signals(
     assert not np.all(heap_sets[1].data["payload"].isel(pol=1).data == 0)
     # Check that sensors were updated
     assert await get_sensor(katcp_client, "signals-orig") == signals_str
+    assert await get_sensor(katcp_client, "period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
     assert parse_signals(await get_sensor(katcp_client, "signals")) == parse_signals(signals_str)
 
 

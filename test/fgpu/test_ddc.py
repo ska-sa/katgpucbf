@@ -26,13 +26,13 @@ from katgpucbf import BYTE_BITS
 from katgpucbf.fgpu import SAMPLE_BITS
 from katgpucbf.fgpu.ddc import DDCTemplate, _TuningDict
 
-from .test_pfb import decode_10bit_host
+from .. import unpackbits
 
 
 def ddc_host(samples: np.ndarray, weights: np.ndarray, decimation: int, mix_frequency: float) -> np.ndarray:
     """Implement the DDC calculation simply in numpy."""
     # Calculation is done in double precision for better accuracy
-    samples = decode_10bit_host(samples).astype(np.complex128)
+    samples = unpackbits(samples).astype(np.complex128)
     mix_angle = 2 * np.pi * mix_frequency * np.arange(0, len(samples), dtype=np.float64)
     mix = np.cos(mix_angle) + 1j * np.sin(mix_angle)
     samples *= mix

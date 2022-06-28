@@ -16,8 +16,9 @@
 
 """Unit tests for XBEngine module."""
 
-from typing import Final, List, Optional
+from typing import Final, List, Optional, Tuple
 
+import aiokatcp
 import numpy as np
 import pytest
 import spead2
@@ -446,6 +447,16 @@ class TestEngine:
         args = parse_args(arglist)
         xbengine, _ = make_engine(context, args)
 
+        # Need a method of capturing synchronised aiokatcp.Sensor updates
+        # as they happen in the XBEngine
+        actual_sensor_updates: List[Tuple[bool, aiokatcp.Sensor.Status]] = []
+
+        def sensor_observer(sync_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading):
+            """Record sensor updates in a list for later comparison."""
+            actual_sensor_updates.append((sensor_reading.value, sensor_reading.status))
+
+        xbengine.sensors["synchronised"].attach(sensor_observer)
+
         xbengine.add_inproc_sender_transport(queue)
         await xbengine.send_stream.send_descriptor_heap()
 
@@ -496,5 +507,18 @@ class TestEngine:
         assert prom_diff.get_sample_diff("output_x_bytes_total") == xbengine.send_stream.heap_payload_size_bytes * (
             n_accumulations + 1
         )
+
+        expected_sensor_updates: List[Tuple[bool, aiokatcp.Sensor.Status]] = []
+        # As per the explanation in :func:`~send_data`, the first accumulation
+        # is expected to be incomplete.
+        expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))
+        # Depending on the `missing_antenna` parameter, the full accumulations
+        # will either be all complete or incomplete.
+        if missing_antenna is not None:
+            expected_sensor_updates += [(False, aiokatcp.Sensor.Status.ERROR)] * n_accumulations
+        else:
+            expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * n_accumulations
+
+        np.testing.assert_equal(actual_sensor_updates, expected_sensor_updates)
 
         await xbengine.stop()

@@ -64,7 +64,10 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
     )
     parser.add_argument(
-        "--signal-heaps", type=int, default=32768, help="Length of pre-computed signal in heaps [%(default)s]"
+        "--period", type=int, default=2**27, help="Period of pre-computed signal in samples [%(default)s]"
+    )
+    parser.add_argument(
+        "--max-period", type=int, help="Maximum supported period for pre-computed signals [same as --period]"
     )
     parser.add_argument("--dither-seed", type=int, help="Fixed seed for reproducible dithering [random]")
     parser.add_argument(
@@ -93,8 +96,20 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
 
     args = parser.parse_args()
-    if args.signal_heaps < 2:
-        parser.error("--signal-heaps must be at least 2")
+    if args.period <= 0:
+        parser.error("--period must be positive")
+
+    if args.max_period is None:
+        args.max_period = args.period
+    if args.max_period <= 0:
+        parser.error("--max-period must be positive")
+    if args.max_period % args.period:
+        parser.error("--max-period must be a multiple of --period")
+    if args.max_period % args.heap_samples:
+        parser.error("--max-period must be a multiple of --heap-samples")
+    if args.max_period < 2 * args.heap_samples:
+        parser.error("--max-period must be at least 2 heaps")
+
     for dest in args.dest:
         for ep in dest:
             if ep.port is None:
@@ -134,7 +149,7 @@ async def async_main() -> None:
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
-    timestamps = np.zeros(args.signal_heaps, dtype=">u8")
+    timestamps = np.zeros(args.max_period // args.heap_samples, dtype=">u8")
     heap_sets = [
         send.HeapSet.create(timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest)))
         for _ in range(2)
@@ -165,6 +180,7 @@ async def async_main() -> None:
     await signal_service.sample(
         args.signals,
         0,
+        args.period,
         args.adc_sample_rate,
         heap_sets[0].data["payload"],
     )
@@ -195,9 +211,7 @@ async def async_main() -> None:
 
     timestamp = 0
     if args.sync_time is not None:
-        timestamp, start_time = first_timestamp(
-            args.sync_time, time.time(), args.adc_sample_rate, args.signal_heaps * args.heap_samples
-        )
+        timestamp, start_time = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.max_period)
         # Sleep until start_time. Python doesn't seem to have an interface
         # for sleeping until an absolute time, so this will be wrong by the
         # time that elapsed from calling time.time until calling time.sleep,
@@ -221,6 +235,7 @@ async def async_main() -> None:
         sample_bits=args.sample_bits,
         signals_str=args.signals_orig,
         signals=args.signals,
+        period=args.period,
         signal_service=signal_service,
         host=args.katcp_host,
         port=args.katcp_port,
