@@ -1,7 +1,7 @@
-.. _getting-started:
+.. _dev-environment:
 
-Getting Started
-===============
+Development Environment
+=======================
 
 Setting up a development environment
 ------------------------------------

@@ -6,7 +6,7 @@ Unit testing for this module is performed using :mod:`.pytest` with support from
 Additionally, :mod:`.coverage` is used to give the developer insight into what
 the unit tests are actually testing, and what code remains untested. Both of
 these packages are installed if the ``dev-setup.sh`` script is used as described
-in :ref:`getting-started`.
+in :ref:`dev-environment`.
 
 In order to run the tests, use the following command:
 
