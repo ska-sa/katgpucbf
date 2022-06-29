@@ -26,7 +26,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, List, Literal, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
 import pytest
@@ -40,6 +40,7 @@ from pylatex import (
     MultiColumn,
     NoEscape,
     Section,
+    SmallText,
     Subsection,
     Subsubsection,
     TextColor,
@@ -47,7 +48,7 @@ from pylatex import (
 from pylatex.base_classes import Container, Environment
 from pylatex.labelref import Hyperref, Label, Marker
 from pylatex.package import Package
-from pylatex.utils import bold
+from pylatex.utils import bold, escape_latex
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
@@ -158,11 +159,20 @@ class Host:
 
 
 @dataclass
+class Task:
+    """A single Mesos task within a correlator."""
+
+    host: str
+    version: str  # Docker image
+    git_version: str
+
+
+@dataclass
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
     uuid: UUID
-    tasks: Dict[str, str]  # Maps task name to host where it is run
+    tasks: Dict[str, Task]
 
 
 @dataclass
@@ -275,6 +285,15 @@ def _parse_host(msg: dict) -> Tuple[str, Host]:
     return msg["hostname"], host
 
 
+def _parse_task(msg: dict) -> Task:
+    return Task(host=msg["host"], version=msg["version"], git_version=msg["git_version"])
+
+
+def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
+    tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
+    return CorrelatorConfiguration(uuid=UUID(msg["uuid"]), tasks=tasks)
+
+
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     """Parse the data written by pytest-reportlog.
 
@@ -302,9 +321,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
             hostname, host = _parse_host(line)
             test_configuration.hosts[host].append(hostname)
         elif line["$report_type"] == "CorrelatorConfiguration":
-            test_configuration.correlators.append(
-                CorrelatorConfiguration(uuid=UUID(line["uuid"]), tasks=line["task_map"])
-            )
+            test_configuration.correlators.append(_parse_correlator_configuration(line))
 
         if line["$report_type"] != "TestReport":
             continue
@@ -340,15 +357,44 @@ def fix_test_name(test_name: str) -> str:
     return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
 
 
+def collapse_versions(versions: Set[str]) -> str:
+    """Reduce a set of versions to a single string.
+
+    This is appropriate to use when it is expected that there will be at most one.
+    """
+    if len(versions) == 0:
+        return "N/A"
+    elif len(versions) == 1:
+        return next(iter(versions))
+    else:
+        return "multiple versions"
+
+
 def _doc_test_configuration_global(section: Container, test_configuration: TestConfiguration) -> None:
+    # Identify versions running on the correlator. Ideally it should be unique
+    images = set()
+    git_versions = set()
+    for correlator in test_configuration.correlators:
+        for task in correlator.tasks.values():
+            images.add(task.version)
+            git_versions.add(task.git_version)
+
     with section.create(LongTable(r"|r|l|")) as config_table:
         config_table.add_hline()
-        config_table.add_row([bold("Configuration Parameter"), bold("Value")])
+        config_table.add_row([bold("Parameter"), bold("Value")])
         config_table.add_hline()
         for config_param in test_configuration.params:
             config_table.add_row([config_param.name, config_param.value])
             config_table.add_hline()
-        config_table.add_row(["Some other software version", "x.y.ZZ"])
+        image = collapse_versions(images)
+        # It tends to be a very long string. Breaking the word helps to prevent
+        # it going off the page. The \strut's ensure a bit more space around
+        # this row.
+        image = escape_latex(image)
+        image = image.replace("@sha256:", r"@sha256:\\ ")
+        image = r"\begin{Bflushleft}[t]\strut " + image + r"\strut\end{Bflushleft}"
+        config_table.add_row("Image", SmallText(NoEscape(image)))
+        config_table.add_row("Version", collapse_versions(git_versions))
         config_table.add_hline()
 
 
@@ -400,13 +446,16 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
-                    hosts = []
-                    for task, host in correlator.tasks.items():
-                        if match := pattern.fullmatch(task):
-                            hosts.append((int(match.group(1)), host))
-                    hosts.sort()
-                    for idx, host in hosts:
-                        table.add_row(name.format(idx), Hyperref(Marker(host, prefix="host"), host))
+                    tasks = []
+                    for task_name, task in correlator.tasks.items():
+                        if match := pattern.fullmatch(task_name):
+                            tasks.append((int(match.group(1)), task))
+                    tasks.sort()
+                    for idx, task in tasks:
+                        table.add_row(
+                            name.format(idx),
+                            Hyperref(Marker(task.host, prefix="host"), task.host),
+                        )
                     table.add_hline()
 
 
