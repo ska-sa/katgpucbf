@@ -281,12 +281,11 @@ class TestEngine:
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
         first_accumulation_index: int = 1,
-        n_total_accumulations: Optional[int] = None,
         missing_antenna: Optional[int] = None,
     ) -> np.ndarray:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
-        Each full accumulation requires <heap_accumulation_threshold> batches of
+        Each full accumulation requires `heap_accumulation_threshold` batches of
         heaps. Additionally, we generate one extra batch to simulate an incomplete
         accumulation to check that dumps are aligned correctly - even if the first
         received batch is from the middle of an accumulation.
@@ -308,18 +307,15 @@ class TestEngine:
             This dictates the timestamp of data generated and transmitted.
             It is required to be >= 1 in order to test the output packet
             timestamps more accurately.
+        timestamp_step
+            Timestamp step between each received heap processed.
+        n_ants, n_channels_per_stream, n_spectra_per_heap, missing_antenna
+            See :meth:`_create_heaps` for more info.
         n_full_accumulations
             Number of full accumulations this test aims to process.
             i.e. While an antenna or several might have missing data, the
             data sent still has batches present throughout the accumulation
             period.
-        n_total_accumulations
-            Total number of accumulations this test aims to process, both
-            full and partial (1).
-        timestamp_step
-            Timestamp step between each received heap processed.
-        n_ants, n_channels_per_stream, n_spectra_per_heap, missing_antenna
-            See :meth:`_create_heaps` for more info.
 
         Returns
         -------
@@ -329,22 +325,24 @@ class TestEngine:
         """
         if first_accumulation_index < 1:
             raise ValueError("Need a first accumulation index >= 1 to test output packet timestamps accurately")
-        if n_total_accumulations is None:
-            n_total_accumulations = n_full_accumulations + 1
+        # This test aims to test only one partial accumulation - in addition to
+        # `n_full_accumulations` - and its affect on the processing chain.
+        n_total_accumulations = n_full_accumulations + 1
+
         # Header is 12 fields of 8 bytes each = 96 bytes
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + 96
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        batch_start_index = first_accumulation_index * heap_accumulation_threshold
-        batch_end_index = (first_accumulation_index + n_full_accumulations) * heap_accumulation_threshold + 1
-        for i in range(batch_start_index, batch_end_index):
-            # Generate the batch index. By setting the first batch timestamp
-            # value to timestamp_step * (heap_accumulation_threshold - 1) we
-            # generate only a single batch for the first accumulation as the
-            # accumulations are aligned to integer multiples of
+        batch_start_index = (first_accumulation_index + 1) * heap_accumulation_threshold - 1
+        batch_end_index = (first_accumulation_index + n_full_accumulations + 1) * heap_accumulation_threshold
+        for batch_index in range(batch_start_index, batch_end_index):
+            # NOTE: In starting from a batch index after `first_accumulation_index`,
+            # but just before a further full `heap_accumulation_threshold`, we are
+            # able to generate a timestamp which dictates a single batch of heaps
+            # be present in the first accumulation processed. This is further due
+            # to the accumulations being aligned to integer multiples of
             # heap_accumulation_threshold * timestamp_step
-            batch_index = i + (heap_accumulation_threshold - 1)
             timestamp = batch_index * timestamp_step
             heaps = self._create_heaps(
                 timestamp,
@@ -496,7 +494,6 @@ class TestEngine:
                 heap_accumulation_threshold=heap_accumulation_threshold,
                 first_accumulation_index=first_accumulation_idx,
                 n_full_accumulations=n_full_accumulations,
-                n_total_accumulations=n_total_accumulations,
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
                 n_channels_per_stream=n_channels_per_stream,
