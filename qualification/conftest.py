@@ -22,7 +22,7 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator, Generator, Tuple
+from typing import AsyncGenerator, Dict, Generator, Tuple, Type, TypeVar
 
 import aiokatcp
 import matplotlib.style
@@ -37,6 +37,7 @@ from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 def pytest_addoption(parser, pluginmanager):  # noqa: D103
@@ -76,7 +77,7 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     custom_report_log(config, {"$report_type": "TestConfiguration", "Test Suite Git Info": git_information})
 
 
-# Need to redefine this from pytest-asyncio to have it at session scope
+# Need to redefine this from pytest-asyncio to have it at package scope
 @pytest.fixture(scope="package")
 def event_loop():  # noqa: D103
     loop = asyncio.get_event_loop_policy().new_event_loop()
@@ -220,29 +221,54 @@ async def correlator_description(_correlator_config_and_description: Tuple[dict,
     return _correlator_config_and_description[1]
 
 
+async def _get_git_version(host: str, port: int) -> str:
+    """Query a katcp server for the katcp-device build-info."""
+    async with await aiokatcp.Client.connect(host, port) as conn:
+        _, informs = await conn.request("version-list")
+        for inform in informs:
+            if aiokatcp.decode(str, inform.arguments[0]) == "katcp-device":
+                return aiokatcp.decode(str, inform.arguments[2])
+    return "unknown"
+
+
 async def _report_correlator_config(
     pytestconfig: pytest.Config, host_config_querier: HostConfigQuerier, correlator: CorrelatorRemoteControl
 ) -> None:
-    _, informs = await correlator.product_controller_client.request("sensor-value", r"/.*\.host$/")
-    task_map = {}
-    for inform in informs:
-        if inform.arguments[3] == b"nominal":
-            task = inform.arguments[2].decode()[:-5]  # Strip off ".host" suffix
-            hostname = inform.arguments[4].decode()
-            task_map[task] = hostname
-            host_config = host_config_querier.get_config(hostname)
-            if host_config is not None:
-                logger.info("Logging host config for %s", hostname)
-                custom_report_log(
-                    pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
-                )
+    async def get_task_details(suffix: str, type: Type[_T]) -> Dict[str, _T]:
+        """Get value of a task-specific sensor for all tasks."""
+        _, informs = await correlator.product_controller_client.request("sensor-value", rf"/.*\.{suffix}$/")
+        result: Dict[str, _T] = {}
+        for inform in informs:
+            if inform.arguments[3] == b"nominal":
+                task = aiokatcp.decode(str, inform.arguments[2]).rsplit(".", 1)[0]  # Strip off suffix
+                result[task] = aiokatcp.decode(type, inform.arguments[4])
+        return result
+
+    ports = await get_task_details("port", aiokatcp.Address)
+    git_version_futures = {}
+    for task, address in ports.items():
+        assert address.port is not None
+        git_version_futures[task] = asyncio.create_task(_get_git_version(str(address.host), address.port))
+
+    versions = await get_task_details("version", str)
+    hosts = await get_task_details("host", str)
+    tasks = {}
+    for task, hostname in hosts.items():
+        tasks[task] = {"host": hostname, "version": versions[task], "git_version": await git_version_futures[task]}
+        host_config = host_config_querier.get_config(hostname)
+        if host_config is not None:
+            logger.info("Logging host config for %s", hostname)
+            custom_report_log(
+                pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
+            )
+
     custom_report_log(
         pytestconfig,
         {
             "$report_type": "CorrelatorConfiguration",
             "description": correlator.description,
             "uuid": str(correlator.uuid),
-            "task_map": task_map,
+            "tasks": tasks,
         },
     )
 
@@ -281,8 +307,8 @@ async def session_correlator(
         logger.exception("Something went wrong with starting the correlator!")
         raise
 
-    product_controller_host = reply[1].decode()
-    product_controller_port = int(reply[2].decode())
+    product_controller_host = aiokatcp.decode(str, reply[1])
+    product_controller_port = aiokatcp.decode(int, reply[2])
     logger.info(
         "Correlator created, connecting to product controller at %s:%d",
         product_controller_host,
