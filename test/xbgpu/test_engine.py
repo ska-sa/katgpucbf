@@ -302,20 +302,20 @@ class TestEngine:
             InprocStream to receive data output by XBEngine.
         heap_accumulation_threshold
             Number of consecutive heaps to process in a single accumulation.
-        first_accumulation_index
-            Index of the first accumulation we intend to start processing.
-            This dictates the timestamp of data generated and transmitted.
-            It is required to be >= 1 in order to test the output packet
-            timestamps more accurately.
-        timestamp_step
-            Timestamp step between each received heap processed.
-        n_ants, n_channels_per_stream, n_spectra_per_heap, missing_antenna
-            See :meth:`_create_heaps` for more info.
         n_full_accumulations
             Number of full accumulations this test aims to process.
             i.e. While an antenna or several might have missing data, the
             data sent still has batches present throughout the accumulation
             period.
+        timestamp_step
+            Timestamp step between each received heap processed.
+        n_ants, n_channels_per_stream, n_spectra_per_heap, missing_antenna
+            See :meth:`_create_heaps` for more info.
+        first_accumulation_index
+            Index of the first accumulation we intend to start processing.
+            This dictates the timestamp of data generated and transmitted.
+            It is required to be >= 1 in order to test the output packet
+            timestamps more accurately.
 
         Returns
         -------
