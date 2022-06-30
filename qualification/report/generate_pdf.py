@@ -132,6 +132,7 @@ class Interface:
     driver: str
     firmware_version: str
     version: str
+    bus_id: str
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,7 @@ class GPU:
     model_name: str
     driver: str
     vbios: str
+    bus_id: str
 
 
 @dataclass(frozen=True)
@@ -171,6 +173,7 @@ class Task:
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
+    description: str
     uuid: UUID
     tasks: Dict[str, Task]
 
@@ -230,6 +233,7 @@ def _parse_interface(labels: dict) -> Interface:
         driver=labels.get("driver", UNKNOWN),
         firmware_version=labels.get("firmware_version", UNKNOWN),
         version=labels.get("version", UNKNOWN),
+        bus_id=labels.get("bus_info", UNKNOWN),
     )
 
 
@@ -240,6 +244,7 @@ def _parse_gpu(labels: dict) -> GPU:
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
+        bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
     )
 
 
@@ -291,7 +296,7 @@ def _parse_task(msg: dict) -> Task:
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CorrelatorConfiguration(uuid=UUID(msg["uuid"]), tasks=tasks)
+    return CorrelatorConfiguration(description=msg["description"], uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
@@ -424,6 +429,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_hline()
                 host_table.add_row("Driver", interface.driver + " " + interface.version)
                 host_table.add_row("Firmware", interface.firmware_version)
+                host_table.add_row("Bus ID", interface.bus_id)
                 host_table.add_hline()
             for gpu in host.gpus:
                 host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
@@ -431,6 +437,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_row("Model", gpu.model_name)
                 host_table.add_row("Driver", gpu.driver)
                 host_table.add_row("VBIOS", gpu.vbios)
+                host_table.add_row("Bus ID", gpu.bus_id)
                 host_table.add_hline()
 
 
@@ -443,6 +450,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
     for i, correlator in enumerate(correlators, start=1):
         with section.create(Subsection(f"Configuration {i}")) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
+            subsec.append(correlator.description)
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
