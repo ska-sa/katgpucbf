@@ -32,7 +32,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
 from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
@@ -221,18 +221,26 @@ async def correlator_description(_correlator_config_and_description: Tuple[dict,
     return _correlator_config_and_description[1]
 
 
-async def _get_git_version(host: str, port: int) -> str:
+async def _get_git_version_conn(conn: aiokatcp.Client) -> str:
     """Query a katcp server for the katcp-device build-info."""
-    async with await aiokatcp.Client.connect(host, port) as conn:
-        _, informs = await conn.request("version-list")
-        for inform in informs:
-            if aiokatcp.decode(str, inform.arguments[0]) == "katcp-device":
-                return aiokatcp.decode(str, inform.arguments[2])
+    _, informs = await conn.request("version-list")
+    for inform in informs:
+        if aiokatcp.decode(str, inform.arguments[0]) == "katcp-device":
+            return aiokatcp.decode(str, inform.arguments[2])
     return "unknown"
 
 
+async def _get_git_version(host: str, port: int) -> str:
+    """Query a katcp server for the katcp-device build-info."""
+    async with await aiokatcp.Client.connect(host, port) as conn:
+        return await _get_git_version_conn(conn)
+
+
 async def _report_correlator_config(
-    pytestconfig: pytest.Config, host_config_querier: HostConfigQuerier, correlator: CorrelatorRemoteControl
+    pytestconfig: pytest.Config,
+    host_config_querier: HostConfigQuerier,
+    correlator: CorrelatorRemoteControl,
+    master_controller_client: aiokatcp.Client,
 ) -> None:
     async def get_task_details(suffix: str, type: Type[_T]) -> Dict[str, _T]:
         """Get value of a task-specific sensor for all tasks."""
@@ -246,20 +254,31 @@ async def _report_correlator_config(
 
     ports = await get_task_details("port", aiokatcp.Address)
     git_version_futures = {}
-    for task, address in ports.items():
+    for task_name, address in ports.items():
         assert address.port is not None
-        git_version_futures[task] = asyncio.create_task(_get_git_version(str(address.host), address.port))
+        git_version_futures[task_name] = asyncio.create_task(_get_git_version(str(address.host), address.port))
 
     versions = await get_task_details("version", str)
     hosts = await get_task_details("host", str)
     tasks = {}
-    for task, hostname in hosts.items():
-        tasks[task] = {"host": hostname, "version": versions[task], "git_version": await git_version_futures[task]}
-        host_config = host_config_querier.get_config(hostname)
+    for task_name, hostname in hosts.items():
+        tasks[task_name] = {
+            "host": hostname,
+            "version": versions[task_name],
+            "git_version": await git_version_futures[task_name],
+        }
+    tasks["product_controller"] = {
+        "host": await get_sensor_val(master_controller_client, f"{correlator.name}.host"),
+        "version": await get_sensor_val(master_controller_client, f"{correlator.name}.version"),
+        "git_version": await _get_git_version_conn(correlator.product_controller_client),
+    }
+
+    for task in tasks.values():
+        host_config = host_config_querier.get_config(task["host"])
         if host_config is not None:
-            logger.info("Logging host config for %s", hostname)
+            logger.info("Logging host config for %s", task["host"])
             custom_report_log(
-                pytestconfig, {"$report_type": "HostConfiguration", "hostname": hostname, "config": host_config}
+                pytestconfig, {"$report_type": "HostConfiguration", "hostname": task["host"], "config": host_config}
             )
 
     custom_report_log(
@@ -274,9 +293,25 @@ async def _report_correlator_config(
 
 
 @pytest.fixture(scope="package")
+async def master_controller_client(pytestconfig: pytest.Config) -> AsyncGenerator[aiokatcp.Client, None]:
+    """Connect to the master controller."""
+    host = pytestconfig.getini("master_controller_host")
+    port = int(pytestconfig.getini("master_controller_port"))
+    try:
+        logger.debug("Connecting to master controller at %s:%d.", host, port)
+        async with timeout(10):
+            async with await aiokatcp.Client.connect(host, port) as master_controller_client:
+                yield master_controller_client
+    except (ConnectionError, asyncio.TimeoutError):
+        logger.exception("unable to connect to master controller!")
+        raise
+
+
+@pytest.fixture(scope="package")
 async def session_correlator(
     pytestconfig: pytest.Config,
     host_config_querier: HostConfigQuerier,
+    master_controller_client: aiokatcp.Client,
     correlator_config: dict,
     correlator_description: str,
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
@@ -287,16 +322,6 @@ async def session_correlator(
     Generally this fixture should not be used directly. Use :meth:`correlator`
     instead, which will reuse the same correlator across multiple tests.
     """
-    host = pytestconfig.getini("master_controller_host")
-    port = int(pytestconfig.getini("master_controller_port"))
-    try:
-        logger.debug("Connecting to master controller at %s:%d to try and create a correlator.", host, port)
-        async with timeout(10):
-            master_controller_client = await aiokatcp.Client.connect(host, port)
-    except (ConnectionError, asyncio.TimeoutError):
-        logger.exception("unable to connect to master controller!")
-        raise
-
     product_name = pytestconfig.getini("product_name")
     try:
         reply, _ = await master_controller_client.request(
@@ -316,9 +341,9 @@ async def session_correlator(
     )
     try:
         remote_control = await CorrelatorRemoteControl.connect(
-            product_controller_host, product_controller_port, correlator_config, correlator_description
+            product_name, product_controller_host, product_controller_port, correlator_config, correlator_description
         )
-        await _report_correlator_config(pytestconfig, host_config_querier, remote_control)
+        await _report_correlator_config(pytestconfig, host_config_querier, remote_control, master_controller_client)
 
         yield remote_control
 
@@ -329,8 +354,6 @@ async def session_correlator(
         # In case anything does go wrong, we want to make sure that we the
         # deconfigure the product.
         await master_controller_client.request("product-deconfigure", product_name)
-        master_controller_client.close()
-        await master_controller_client.wait_closed()
 
 
 @pytest.fixture

@@ -69,6 +69,7 @@ async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
 class CorrelatorRemoteControl:
     """A container class for katcp clients needed by qualification tests."""
 
+    name: str
     product_controller_client: aiokatcp.Client
     dsim_clients: List[aiokatcp.Client]
     config: dict  # JSON dictionary used to configure the correlator
@@ -89,7 +90,9 @@ class CorrelatorRemoteControl:
         return self.sensor_watcher.sensors
 
     @classmethod
-    async def connect(cls, host: str, port: int, config: Mapping, description: str) -> "CorrelatorRemoteControl":
+    async def connect(
+        cls, name: str, host: str, port: int, config: Mapping, description: str
+    ) -> "CorrelatorRemoteControl":
         """Connect to a correlator's product controller.
 
         The function connects and gathers sufficient metadata in order for the
@@ -102,8 +105,8 @@ class CorrelatorRemoteControl:
         await sensor_watcher.synced.wait()  # Implicitly waits for connection too
 
         dsim_endpoints = []
-        for name, sensor in sensor_watcher.sensors.items():
-            if match := re.fullmatch(r"sim\.dsim(\d+)\.\d+\.0\.port", name):
+        for sensor_name, sensor in sensor_watcher.sensors.items():
+            if match := re.fullmatch(r"sim\.dsim(\d+)\.\d+\.0\.port", sensor_name):
                 idx = int(match.group(1))
                 dsim_endpoints.append((idx, sensor.value))
         assert dsim_endpoints
@@ -116,6 +119,7 @@ class CorrelatorRemoteControl:
         logger.info("Sensors synchronised; %d dsims found", len(dsim_clients))
 
         return CorrelatorRemoteControl(
+            name=name,
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
             config=dict(config),
