@@ -90,7 +90,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
     sinc = np.sinc((idx + 0.5) / step - taps / 2)
     weights = hann * sinc
-    # Seems to be some bug causing mypy to think weights is an array of bool
+    # Work around https://github.com/numpy/numpy/issues/21898
     weights /= np.sqrt(np.sum(np.square(weights)))  # type: ignore[misc]
     return weights.astype(np.float32)
 
