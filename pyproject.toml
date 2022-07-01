@@ -35,9 +35,6 @@ testpaths = "test"
 addopts = "--cov-context=test --cov-report html --import-mode=prepend"
 markers = ["mask_timestamp", "use_vkgdr", "cmdline_args"]
 asyncio_mode = "auto"
-filterwarnings = [
-	'ignore:`np\..*` is a deprecated alias::pycuda\.compyte\.dtypes',
-]
 
 [tool.coverage.run]
 branch = true
