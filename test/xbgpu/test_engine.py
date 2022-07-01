@@ -290,10 +290,6 @@ class TestEngine:
         accumulation to check that dumps are aligned correctly - even if the first
         received batch is from the middle of an accumulation.
 
-        Data is also generated from a timestamp starting after the first accumulation
-        boundary to more accurately test the setting of the first output packet's
-        timestamp (to be non-zero).
-
         Parameters
         ----------
         mock_recv_streams
@@ -314,8 +310,6 @@ class TestEngine:
         first_accumulation_index
             Index of the first accumulation we intend to start processing.
             This dictates the timestamp of data generated and transmitted.
-            It is required to be >= 1 in order to test the output packet
-            timestamps more accurately.
 
         Returns
         -------
@@ -417,8 +411,8 @@ class TestEngine:
         """
         End-to-end test for the XBEngine.
 
-        Simulated input data is generated and passed to the XBEngine, which
-        produces an output which is then verified.
+        Simulated input data is generated and passed to the XBEngine, yielding
+        output results which are then verified.
 
         The simulated data is not random, it is encoded based on certain
         parameters, this allows the verification function to generate the
@@ -426,7 +420,10 @@ class TestEngine:
         correlation algorithm, greatly improving processing time.
 
         This test simulates an incomplete accumulation at the start of transmission
-        to ensure that the auto-resync logic works correctly.
+        to ensure that the auto-resync logic works correctly. Data is also
+        generated from a timestamp starting after the first accumulation
+        boundary to more accurately test the setting of the first output
+        packet's timestamp (to be non-zero).
 
         .. todo::
             The queue used for the XBEngine's sender transport and the final
@@ -487,8 +484,6 @@ class TestEngine:
         await xbengine.start()
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
-            if first_accumulation_idx < 1:
-                raise AssertionError("Need a first accumulation index >= 1 to test output packet timestamps accurately")
             device_results = await self._send_data(
                 mock_recv_streams,
                 recv_stream,
