@@ -323,10 +323,9 @@ class TestEngine:
             Array of all GPU-generated data of shape
             - (n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
         """
-        if first_accumulation_index < 1:
-            raise ValueError("Need a first accumulation index >= 1 to test output packet timestamps accurately")
-        # This test aims to test only one partial accumulation - in addition to
-        # `n_full_accumulations` - and its affect on the processing chain.
+        # In real world conditions we anticipate the first accumulation to be
+        # incomplete. As a result, the total number of accumulations we see is
+        # one more than the number of 'full' accumulations.
         n_total_accumulations = n_full_accumulations + 1
 
         # Header is 12 fields of 8 bytes each = 96 bytes
@@ -335,7 +334,7 @@ class TestEngine:
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
         batch_start_index = (first_accumulation_index + 1) * heap_accumulation_threshold - 1
-        batch_end_index = (first_accumulation_index + n_full_accumulations + 1) * heap_accumulation_threshold
+        batch_end_index = (first_accumulation_index + 1 + n_full_accumulations) * heap_accumulation_threshold
         for batch_index in range(batch_start_index, batch_end_index):
             # NOTE: In starting from a batch index after `first_accumulation_index`,
             # but just before a further full `heap_accumulation_threshold`, we are
@@ -488,6 +487,8 @@ class TestEngine:
         await xbengine.start()
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+            if first_accumulation_idx < 1:
+                raise AssertionError("Need a first accumulation index >= 1 to test output packet timestamps accurately")
             device_results = await self._send_data(
                 mock_recv_streams,
                 recv_stream,
@@ -507,14 +508,17 @@ class TestEngine:
             # single batch, we need to make sure that this is taken into
             # account by the verification function.
             if i == 0:
-                # This is to handle the first accumulation processed. The
-                # value checked here is simply the first in the range.
+                # This is to handle the first accumulation processed. The value
+                # checked here is simply the first in the range.
+                # - Even though :meth:`generate_expected_output` returns a
+                #   zeroed array for a `num_batches` of 1, we still need to
+                #   maintain programmatic sense in the values generated here.
                 num_batches_in_current_accumulation = 1
-                base_batch_index = heap_accumulation_threshold - 1
+                base_batch_index = (first_accumulation_idx + 1) * heap_accumulation_threshold - 1
                 incomplete_accums_counter += 1
             else:
                 num_batches_in_current_accumulation = heap_accumulation_threshold
-                base_batch_index = (i + first_accumulation_idx) * heap_accumulation_threshold
+                base_batch_index = (first_accumulation_idx + i) * heap_accumulation_threshold
                 if missing_antenna is not None:
                     incomplete_accums_counter += 1
 
