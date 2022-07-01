@@ -343,9 +343,10 @@ class TestEngine:
                 await stream.get()
 
         # Convert to complex for analysis
-        data = data[..., 0] + 1j * data[..., 1]
-        timestamps = np.arange(data.shape[1], dtype=np.int64) * (channels * 2) + expected_first_timestamp
-        return data, timestamps
+        data_cplx = data[..., 0] + 1j * data[..., 1]
+        assert expected_first_timestamp is not None
+        timestamps = np.arange(data_cplx.shape[1], dtype=np.int64) * (channels * 2) + expected_first_timestamp
+        return data_cplx, timestamps
 
     # One delay value is tested with vkgdr, another with smaller output chunks
     @pytest.mark.parametrize(
@@ -688,9 +689,9 @@ class TestEngine:
         middle = (n_samples // 2) // (channels * 2 * spectra_per_heap)
         for i, p in enumerate(dst_present):
             if p and i + middle < len(dst_present):
-                a = out_data[:, i * spectra_per_heap : (i + 1) * spectra_per_heap]
-                b = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
-                np.testing.assert_equal(a, b)
+                x = out_data[:, i * spectra_per_heap : (i + 1) * spectra_per_heap]
+                y = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
+                np.testing.assert_equal(x, y)
 
         for pol in range(N_POLS):
             input_missing_heaps = np.sum(~src_present[pol])

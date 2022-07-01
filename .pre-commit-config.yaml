@@ -55,6 +55,7 @@ repos:
             'katsdptelstate==0.11',
             'numpy==1.22.4',
             'pyparsing==3.0.9',
+            'pytest==7.1.2',
             'spead2==3.9.1',
             'types-decorator==5.1.1',
             'types-docutils==0.17.1',

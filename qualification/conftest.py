@@ -62,7 +62,7 @@ def custom_report_log(pytestconfig: pytest.Config, data) -> None:
     """Log a custom JSON line in the report log."""
     # There doesn't seem to be an easy way to avoid using these private interfaces
     try:
-        report_log_plugin = pytestconfig._report_log_plugin
+        report_log_plugin = pytestconfig._report_log_plugin  # type: ignore
     except AttributeError:
         pytest.fail("pytest_reportlog plugin not found (possibly you forgot to specify --report-log)")
     report_log_plugin._write_json_data(data)

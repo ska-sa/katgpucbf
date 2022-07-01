@@ -170,6 +170,7 @@ class TestMakeDither:
         assert dither.sizes["pol"] == 2
         assert dither.sizes["data"] == 5000
         assert dither.dtype == np.float32
+        assert dither.chunks is not None
         assert dither.chunks[1][0] == signal.CHUNK_SIZE
         computed = dither.values
         # Very simple test that it's generating the distribution we expect.

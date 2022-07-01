@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 import aiokatcp
 import numpy as np
 import prometheus_client
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 
 from katgpucbf import DIG_SAMPLE_BITS
 
@@ -119,7 +119,7 @@ async def get_sensor(client: aiokatcp.Client, name: str) -> Any:
     return aiokatcp.decode(sensor_type, informs[0].arguments[4])
 
 
-def unpackbits(data: ArrayLike, sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:
+def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:
     """Unpack a bit-packed array of signed big-endian integers.
 
     Typically `sample_bits` will be DIG_SAMPLE_BITS, but can be up to 64. The
