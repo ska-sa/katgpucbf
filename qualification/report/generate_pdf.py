@@ -382,7 +382,7 @@ def _format_image(image: str) -> LatexObject:
     These tends to be a very long string, which needs to be wrapped to avoid
     going off the page.
     """
-    # The \strut's ensure a bit more space around this row.
+    # The `\strut`s ensure a bit more space around this row.
     image = escape_latex(image)
     image = image.replace("@sha256:", r"@sha256:\\ ")  # Break into two lines
     image = r"\begin{Bflushleft}[t]\strut " + image + r"\strut\end{Bflushleft}"
