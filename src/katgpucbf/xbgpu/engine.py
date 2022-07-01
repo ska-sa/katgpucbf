@@ -617,6 +617,9 @@ class XBEngine(DeviceServer):
             if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
+            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
+            self.receiver_stream.add_free_chunk(rx_item.chunk)
+
             current_timestamp = rx_item.timestamp
             if tx_item.timestamp < 0:
                 # First heap seen. Round the timestamp down to the previous
@@ -626,11 +629,6 @@ class XBEngine(DeviceServer):
                     // self.timestamp_increment_per_accumulation
                     * self.timestamp_increment_per_accumulation
                 )
-
-            # If we don't return the chunk to the stream, eventually no more
-            # data can be received.
-            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
-            self.receiver_stream.add_free_chunk(rx_item.chunk)
 
             self.correlation.bind(in_samples=rx_item.buffer_device)
             # The correlation kernel does not have the concept of a batch at
