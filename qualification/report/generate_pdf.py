@@ -46,6 +46,7 @@ from pylatex import (
     TextColor,
 )
 from pylatex.base_classes import Container, Environment
+from pylatex.base_classes.latex_object import LatexObject
 from pylatex.labelref import Hyperref, Label, Marker
 from pylatex.package import Package
 from pylatex.utils import bold, escape_latex
@@ -375,31 +376,53 @@ def collapse_versions(versions: Set[str]) -> str:
         return "multiple versions"
 
 
+def _format_image(image: str) -> LatexObject:
+    """Format a Docker image name for a table.
+
+    These tends to be a very long string, which needs to be wrapped to avoid
+    going off the page.
+    """
+    # The `\strut`s ensure a bit more space around this row.
+    image = escape_latex(image)
+    image = image.replace("@sha256:", r"@sha256:\\ ")  # Break into two lines
+    image = r"\begin{Bflushleft}[t]\strut " + image + r"\strut\end{Bflushleft}"
+    return SmallText(NoEscape(image))
+
+
 def _doc_test_configuration_global(section: Container, test_configuration: TestConfiguration) -> None:
     # Identify versions running on the correlator. Ideally it should be unique
     images = set()
     git_versions = set()
+    product_controller_image = "unknown"
+    product_controller_git_version = "unknown"
     for correlator in test_configuration.correlators:
-        for task in correlator.tasks.values():
-            images.add(task.version)
-            git_versions.add(task.git_version)
+        for task_name, task in correlator.tasks.items():
+            if task_name == "product_controller":
+                product_controller_image = task.version
+                product_controller_git_version = task.git_version
+            else:
+                images.add(task.version)
+                git_versions.add(task.git_version)
 
     with section.create(LongTable(r"|r|l|")) as config_table:
         config_table.add_hline()
-        config_table.add_row([bold("Parameter"), bold("Value")])
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Test suite"))])
         config_table.add_hline()
         for config_param in test_configuration.params:
             config_table.add_row([config_param.name, config_param.value])
             config_table.add_hline()
+
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Correlator"))])
+        config_table.add_hline()
         image = collapse_versions(images)
-        # It tends to be a very long string. Breaking the word helps to prevent
-        # it going off the page. The \strut's ensure a bit more space around
-        # this row.
-        image = escape_latex(image)
-        image = image.replace("@sha256:", r"@sha256:\\ ")
-        image = r"\begin{Bflushleft}[t]\strut " + image + r"\strut\end{Bflushleft}"
-        config_table.add_row("Image", SmallText(NoEscape(image)))
+        config_table.add_row("Image", _format_image(image))
         config_table.add_row("Version", collapse_versions(git_versions))
+        config_table.add_hline()
+
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Product Controller"))])
+        config_table.add_hline()
+        config_table.add_row("Image", _format_image(product_controller_image))
+        config_table.add_row("Version", product_controller_git_version)
         config_table.add_hline()
 
 
@@ -443,9 +466,10 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
 
 def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfiguration]) -> None:
     patterns = [
-        ("DSim {}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
-        ("F-engine {}", re.compile(r"f\.antenna_channelised_voltage\.(\d+)")),
-        ("XB-engine {}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
+        ("Product controller", re.compile("product_controller")),
+        ("DSim {i}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
+        ("F-engine {i}", re.compile(r"f\.antenna_channelised_voltage\.(\d+)")),
+        ("XB-engine {i}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
     ]
     for i, correlator in enumerate(correlators, start=1):
         with section.create(Subsection(f"Configuration {i}")) as subsec:
@@ -457,11 +481,14 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
                     tasks = []
                     for task_name, task in correlator.tasks.items():
                         if match := pattern.fullmatch(task_name):
-                            tasks.append((int(match.group(1)), task))
+                            try:
+                                tasks.append((int(match.group(1)), task))
+                            except IndexError:  # Pattern has no group 1
+                                tasks.append((0, task))
                     tasks.sort()
                     for idx, task in tasks:
                         table.add_row(
-                            name.format(idx),
+                            name.format(i=idx),
                             Hyperref(Marker(task.host, prefix="host"), task.host),
                         )
                     table.add_hline()
