@@ -81,7 +81,7 @@ async def test_channel_shape(
         The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
         is :math:`\le 2\times` (twice) the pass band width.
 
-    TODO: Include channelisation test (NGC-612)
+    TODO: Include channelisation test (NGC-612).
     """
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
@@ -121,40 +121,50 @@ async def test_channel_shape(
         pdf_report.detail(f"Set gain to {gain}.")
         await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
         pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
-        data = await sample(offsets)
-        data = data.astype(np.float64)
+        data_chan_shape = await sample(offsets)
+        data_chan_shape = data_chan_shape.astype(np.float64)
 
         data_sfdr = await sample(offsets=[0])
         data_sfdr = data_sfdr.astype(np.float64)
 
         if i == 0:
-            peak = np.max(data)
-            hdr_data = data
+            peak_chan_shape = np.max(data_chan_shape)
+            hdr_data_chan_shape = data_chan_shape
 
             peak_data_sfdr = np.max(data_sfdr)
-            hdr_sfdr_data = data_sfdr
+            hdr_data_sfdr = data_sfdr
         else:
             power_scale = gain_step ** (i * 2)
-            hdr_data = np.where(hdr_data >= peak / power_scale, hdr_data, data / power_scale)
-            hdr_sfdr_data = np.where(hdr_sfdr_data >= peak / power_scale, hdr_sfdr_data, data_sfdr / power_scale)
+            hdr_data_chan_shape = np.where(
+                hdr_data_chan_shape >= peak_chan_shape / power_scale, hdr_data_chan_shape, data_chan_shape / power_scale
+            )
+            hdr_data_sfdr = np.where(
+                hdr_data_sfdr >= peak_chan_shape / power_scale, hdr_data_sfdr, data_sfdr / power_scale
+            )
         gain *= gain_step
 
-    rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
-    pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
+    rms_voltage = np.sqrt(peak_chan_shape / receiver.n_spectra_per_acc)
+    pdf_report.detail(f"Peak power is {int(peak_chan_shape)} (RMS voltage {rms_voltage:.3f}).")
 
     # The maximum is to avoid errors when data is 0
-    db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak)
-    db_sfdr = 10 * np.log10(np.maximum(hdr_sfdr_data, 1e-100) / peak_data_sfdr)
+    db = 10 * np.log10(np.maximum(hdr_data_chan_shape, 1e-100) / peak_chan_shape)
+    db_sfdr = 10 * np.log10(np.maximum(hdr_data_sfdr, 1e-100) / peak_data_sfdr)
     db_sfdr = np.round(db_sfdr, 3)
 
     for xticks, ymin, title, x, db_plot in [
-        (np.arange(-2.5, 2.6, 0.5), -100, "Channel response", np.linspace(-2.5, 2.5, len(hdr_data)), db),
-        (np.arange(-0.5, 0.55, 0.1), -1.5, "Channel response (zoomed)", np.linspace(-2.5, 2.5, len(hdr_data)), db),
+        (np.arange(-2.5, 2.6, 0.5), -100, "Channel response", np.linspace(-2.5, 2.5, len(hdr_data_chan_shape)), db),
+        (
+            np.arange(-0.5, 0.55, 0.1),
+            -1.5,
+            "Channel response (zoomed)",
+            np.linspace(-2.5, 2.5, len(hdr_data_chan_shape)),
+            db,
+        ),
         (
             np.arange(0, (8192 + 1024), 1024),
             -100,
             "SFDR for all channels",
-            np.linspace(0, 8191, len(hdr_sfdr_data)),
+            np.linspace(0, 8191, len(hdr_data_sfdr)),
             db_sfdr,
         ),
     ]:
