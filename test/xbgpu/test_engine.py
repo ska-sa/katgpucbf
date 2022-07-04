@@ -277,7 +277,7 @@ class TestEngine:
         recv_stream: spead2.recv.asyncio.Stream,
         *,
         heap_accumulation_threshold: int,
-        batches: Iterable[int],
+        batch_indices: Iterable[int],
         timestamp_step: int,
         n_ants: int,
         n_channels_per_stream: int,
@@ -287,7 +287,8 @@ class TestEngine:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
         Each full accumulation requires `heap_accumulation_threshold` batches of
-        heaps. However, `batches` is not required to contain full accumulations.
+        heaps. However, `batch_indices` is not required to contain full
+        accumulations.
 
         Parameters
         ----------
@@ -297,7 +298,7 @@ class TestEngine:
             InprocStream to receive data output by XBEngine.
         heap_accumulation_threshold
             Number of consecutive heaps to process in a single accumulation.
-        batches
+        batch_indices
             Indices of the batches to send. These must be strictly increasing,
             but need not be contiguous.
         timestamp_step
@@ -310,15 +311,13 @@ class TestEngine:
         device_results
             Array of all GPU-generated data of shape
             - (n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
-        accumulations
-            Indices of the accumulations in `device_results`
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        accumulations_set = set()
-        for batch_index in batches:
+        accumulation_indices_set = set()
+        for batch_index in batch_indices:
             timestamp = batch_index * timestamp_step
             heaps = self._create_heaps(
                 timestamp,
@@ -328,7 +327,7 @@ class TestEngine:
                 n_spectra_per_heap,
                 missing_antennas=missing_antennas,
             )
-            accumulations_set.add(batch_index // heap_accumulation_threshold)
+            accumulation_indices_set.add(batch_index // heap_accumulation_threshold)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
         for q in mock_recv_streams:
@@ -340,12 +339,12 @@ class TestEngine:
         items = ig_recv.update(heap)
         assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-        accumulations = sorted(accumulations_set)
+        accumulation_indices = sorted(accumulation_indices_set)
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
-            shape=(len(accumulations), n_channels_per_stream, n_baselines, COMPLEX), dtype=np.int32
+            shape=(len(accumulation_indices), n_channels_per_stream, n_baselines, COMPLEX), dtype=np.int32
         )
-        for i, accum in enumerate(accumulations):
+        for i, accumulation_index in enumerate(accumulation_indices):
             # Wait for heap to be ready and then update out item group
             # with the new values.
             heap = await recv_stream.get()
@@ -356,9 +355,9 @@ class TestEngine:
                 ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
             ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
 
-            assert ig_recv["timestamp"].value == accum * timestamp_step * heap_accumulation_threshold, (
+            assert ig_recv["timestamp"].value == accumulation_index * timestamp_step * heap_accumulation_threshold, (
                 "Output timestamp is not correct. "
-                f"Expected: {hex(accum * timestamp_step * heap_accumulation_threshold)}, "
+                f"Expected: {hex(accumulation_index * timestamp_step * heap_accumulation_threshold)}, "
                 f"actual: {hex(ig_recv['timestamp'].value)}."
             )
 
@@ -419,7 +418,7 @@ class TestEngine:
             n_engines *= 2
         n_channels_per_stream = n_channels_total // n_engines
         heap_accumulation_threshold = 4
-        first_accumulation_idx = 123
+        first_accumulation_index = 123
         n_full_accumulations = 3
         n_total_accumulations = n_full_accumulations + 1
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
@@ -468,13 +467,15 @@ class TestEngine:
             # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
             # received batch is from the middle of an accumulation.
-            batch_start_index = (first_accumulation_idx + 1) * heap_accumulation_threshold - HEAPS_PER_FENGINE_PER_CHUNK
-            batch_end_index = (first_accumulation_idx + 1 + n_full_accumulations) * heap_accumulation_threshold
+            batch_start_index = (
+                first_accumulation_index + 1
+            ) * heap_accumulation_threshold - HEAPS_PER_FENGINE_PER_CHUNK
+            batch_end_index = (first_accumulation_index + 1 + n_full_accumulations) * heap_accumulation_threshold
             device_results = await self._send_data(
                 mock_recv_streams,
                 recv_stream,
                 heap_accumulation_threshold=heap_accumulation_threshold,
-                batches=range(batch_start_index, batch_end_index),
+                batch_indices=range(batch_start_index, batch_end_index),
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
                 n_channels_per_stream=n_channels_per_stream,
