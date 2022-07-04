@@ -85,6 +85,7 @@ def cmult_and_scale(a, b, c):
 def generate_expected_output(
     batch_start_idx,
     num_batches,
+    heap_accumulation_threshold,
     channels,
     antennas,
     n_spectra_per_heap,
@@ -98,8 +99,8 @@ def generate_expected_output(
     """
     baselines = antennas * (antennas + 1) * 2
     output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
-    if num_batches == 1:
-        # The first accumulation is incomplete, and therefore completely zeroed
+    if num_batches < heap_accumulation_threshold:
+        # The accumulation is incomplete, and therefore completely zeroed
         # by the XBEngine
         return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
@@ -464,10 +465,10 @@ class TestEngine:
         await xbengine.start()
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
-            # Generate one extra batch to simulate an incomplete accumulation
+            # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
             # received batch is from the middle of an accumulation.
-            batch_start_index = (first_accumulation_idx + 1) * heap_accumulation_threshold - 1
+            batch_start_index = (first_accumulation_idx + 1) * heap_accumulation_threshold - HEAPS_PER_FENGINE_PER_CHUNK
             batch_end_index = (first_accumulation_idx + 1 + n_full_accumulations) * heap_accumulation_threshold
             device_results = await self._send_data(
                 mock_recv_streams,
@@ -482,6 +483,7 @@ class TestEngine:
             )
 
         incomplete_accums_counter = 0
+        base_batch_index = batch_start_index
         for i in range(n_total_accumulations):
             # The first heap is an incomplete accumulation containing a
             # single batch, we need to make sure that this is taken into
@@ -490,25 +492,25 @@ class TestEngine:
                 # This is to handle the first accumulation processed. The value
                 # checked here is simply the first in the range.
                 # - Even though :meth:`generate_expected_output` returns a
-                #   zeroed array for a `num_batches` of 1, we still need to
-                #   maintain programmatic sense in the values generated here.
-                num_batches_in_current_accumulation = 1
-                base_batch_index = (first_accumulation_idx + 1) * heap_accumulation_threshold - 1
+                #   zeroed array for an incomplete accumulation, we still need
+                #   to maintain programmatic sense in the values generated here.
+                num_batches_in_current_accumulation = HEAPS_PER_FENGINE_PER_CHUNK
                 incomplete_accums_counter += 1
             else:
                 num_batches_in_current_accumulation = heap_accumulation_threshold
-                base_batch_index = (first_accumulation_idx + i) * heap_accumulation_threshold
                 if missing_antenna is not None:
                     incomplete_accums_counter += 1
 
             expected_output = generate_expected_output(
                 base_batch_index,
                 num_batches_in_current_accumulation,
+                heap_accumulation_threshold,
                 n_channels_per_stream,
                 n_ants,
                 n_spectra_per_heap,
                 missing_antenna,
             )
+            base_batch_index += num_batches_in_current_accumulation
 
             np.testing.assert_equal(expected_output, device_results[i])
 
