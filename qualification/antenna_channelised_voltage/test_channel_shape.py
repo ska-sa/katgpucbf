@@ -52,12 +52,17 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     return cutoff_bandwidth_half(data[mid:], cutoff, step) + cutoff_bandwidth_half(data[mid::-1], cutoff, step)
 
 
-def sfdr(data: np.ndarray, base_channel: int) -> Tuple[float, float, int]:
+def measure_sfdr(data: np.ndarray, base_channel: int) -> Tuple[float, float, int]:
     """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
 
     Estimate the SFDR by measuring the power (dB) of the next strongest
     tone in the spectrum (ignoring the fundamental tone). The SFDR is the
     difference in these two values.
+
+    Returns
+    -------
+    A tuplue with difference, height of next peak, and the index.
+
     """
     peak = data[base_channel]
     below_peak_idxs = np.nonzero(data < peak)
@@ -149,7 +154,9 @@ async def test_channel_shape(
     # The maximum is to avoid errors when data is 0
     db = 10 * np.log10(np.maximum(hdr_data_chan_shape, 1e-100) / peak_chan_shape)
     db_sfdr = 10 * np.log10(np.maximum(hdr_data_sfdr, 1e-100) / peak_data_sfdr)
-    db_sfdr = np.round(db_sfdr, 3)
+    db_sfdr = np.round(
+        db_sfdr, 3
+    )  # rounded to 3 places to present serialisation of long numbers causing issues for LaTeX
 
     for xticks, ymin, title, x, db_plot in [
         (np.arange(-2.5, 2.6, 0.5), -100, "Channel response", np.linspace(-2.5, 2.5, len(hdr_data_chan_shape)), db),
@@ -200,7 +207,7 @@ async def test_channel_shape(
 
     # SFDR
     pdf_report.step("Check SFDR attenuation.")
-    sfdr_db, next_peak_db, next_peak_idx = sfdr(db_sfdr, base_channel)
+    sfdr_db, next_peak_db, next_peak_idx = measure_sfdr(db_sfdr, base_channel)
     pdf_report.detail(f"SFDR is {sfdr_db:.3f}dB for base channel {base_channel}.")
     pdf_report.detail(f"Next channel peak is in channel {next_peak_idx} with value {next_peak_db:.3f}dB.")
     expect(sfdr_db >= 53)
