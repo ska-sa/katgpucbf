@@ -100,8 +100,10 @@ def generate_expected_output(
     baselines = antennas * (antennas + 1) * 2
     output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
     if num_batches < heap_accumulation_threshold:
-        # The accumulation is incomplete, and therefore completely zeroed
+        # The accumulation is incomplete, and therefore completely marked
         # by the XBEngine
+        output_array[..., 0] = -(2**31)
+        output_array[..., 1] = 1
         return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         sign = pow(-1, b)
@@ -124,6 +126,14 @@ def generate_expected_output(
                         output_array[c, 4 * bl_idx + 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
                         output_array[c, 4 * bl_idx + 2, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
                         output_array[c, 4 * bl_idx + 3, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
+
+    # Flag missing data
+    for a2 in range(antennas):
+        for a1 in range(a2 + 1):
+            bl_idx = get_baseline_index(a1, a2)
+            if a1 == missing_antenna or a2 == missing_antenna:
+                output_array[:, 4 * bl_idx : 4 * bl_idx + 4, 0] = -(2**31)
+                output_array[:, 4 * bl_idx : 4 * bl_idx + 4, 1] = 1
 
     return output_array
 

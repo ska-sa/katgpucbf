@@ -273,6 +273,8 @@ class BaselineCorrelationProductsReceiver:
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
             elif not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
+            elif np.any(chunk.data == -(2**31)):
+                logger.debug("Chunk with missing antenna(s)", chunk.chunk_id)
             else:
                 yield timestamp, chunk
                 continue
