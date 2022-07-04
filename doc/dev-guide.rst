@@ -51,15 +51,87 @@ And you are ready to start developing with :mod:`katgpucbf`!
 Pre-commit
 ----------
 
-Pre-commit's `documentation`_ describes what it does in sufficient detail. The
-configuration is located in ``.pre-commit-config.yaml``, though the various
-other modules which are loaded in this repo will have their configuration in
-various places.
+As alluded to in the previous section, :mod:`katgpucbf` contains a pre-commit
+workflow for auto-formatting Python code. This workflow checks for
+inconsistencies in style, design and complexity according to `PEP8`_ guidelines.
+It also checks for compliance with Python docstring conventions according to
+`PEP257`_ and supports `mypy`_ type-checking if type hints are used in the code.
 
-.. todo:: ``NGC-672``
-    Merge the readme from the pre-commit repo into this section?
+The workflow runs whenever Python code is committed to :mod:`katgpucbf`.
+
+This section discusses a high-level view of the pre-commit flow and its
+constituent parts. For more detailed information, please consult its
+`documentation`_. The inclusion of the ``pre-commit`` library requirement,
+subsequent installation and initialisation of the pre-commit flow is carried
+out for you in the execution of ``dev-setup.sh``. The following steps are
+discussed should you be interested, or even required, to update various
+aspects of the pre-commit flow.
+
+Initial Setup
+^^^^^^^^^^^^^
+
+This repo contains the following configuration files for the pre-commit flow
+to monitor Python development.
+
+- ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
+  be run before committing to the repo.
+- ``pyproject.toml`` contains configuration for `black`_, The Uncompromising
+  Python Code Formatter. This can also contain configuration if more advanced
+  build systems such as C++ compilation (e.g. `pybind11`_) are used.
+- ``.flake8`` for `flake8`_, a tool for enforcing PEP8-based style guide for
+  Python.
+- ``.pydocstyle.ini`` for `pydocstyle`_, a tool for enforcing PEP257-based
+  doc-string style guides for Python.
+- ``mypy.ini`` file for `mypy`_, a static type checker (or lint-like tool)
+  for type annotations in the Python code - according to `PEP484`_ and
+  `PEP526`_ notation.
+
+Install Prerequisites
+^^^^^^^^^^^^^^^^^^^^^
+
+Although ``black``, ``flake8``, ``mypy`` and ``pydocstyle`` are used, the only
+prerequisite is the **pre-commit**  Python library. That is, the YAML
+configuration file is set up so that when the pre-commit hooks are installed,
+all dependencies are automatically installed. (Note, they won't be available to
+you in Python, they will be used only by pre-commit. If you want to use them
+separately, you will need to install them individually with pip.)
+
+**pre-commit** is essentially a framework for managing git hooks and can be
+installed by running:
+
+  .. code-block:: bash
+
+    $ pip install pre-commit
+
+
+A reminder that the **pre-commit** library is already listed as a development
+requirement for :mod:`katgpucbf`.
+
+Generate pre-commit Git Hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To generate the git hooks themselves, the following command is run in the
+project directory. Note that the ``.pre-commit-config.yaml`` file must be in
+the project directory **before** generating the git hooks.
+
+  .. code-block:: bash
+
+    $ pre-commit install
+
+After this, ``pre-commit`` will run automatically on the execution of the
+``git commit`` command with the installed hooks.
 
 .. _documentation: https://pre-commit.com/
+.. _PEP8: https://www.python.org/dev/peps/pep-0008/
+.. _PEP257: https://www.python.org/dev/peps/pep-0257/
+.. _PEP484: https://www.python.org/dev/peps/pep-0484/
+.. _PEP526: https://www.python.org/dev/peps/pep-0526/
+.. _pre-commit: https://pre-commit.com/
+.. _black: https://github.com/psf/black
+.. _flake8: https://flake8.pycqa.org/en/latest/
+.. _pydocstyle: http://www.pydocstyle.org/
+.. _mypy: https://mypy.readthedocs.io/en/stable/index.html
+.. _pybind11: https://pybind11.readthedocs.io/
 
 Light-weight installation
 -------------------------
