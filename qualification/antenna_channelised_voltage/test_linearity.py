@@ -77,6 +77,10 @@ async def test_linearity(
     mse = np.square(cw_scales - linear_test_result).mean()
     pdf_report.detail(f"MSE is: {mse}")
 
+    # Check for any zeros at the end of the sequence prior to plotting. Remove if so.
+    zero_locations = np.where(linear_test_result == 0)
+    linear_test_result = linear_test_result[: np.max(zero_locations[0]) - len(zero_locations[0])]
+
     # Generate plot with reference
     labels = [f"$2^{{-{i}}}$" for i in range(len(cw_scales))]
     title = "Power relative to input CW level"
