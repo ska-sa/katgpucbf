@@ -654,8 +654,8 @@ class XBEngine(DeviceServer):
                         self.correlation.first_batch : self.correlation.last_batch, :
                     ].all(axis=0)
 
-                    # Update the sync sensor
-                    self.sensors["synchronised"].value = tx_item.present_ants.all()
+                    # Update the sync sensor (converting np.bool_ to Python bool)
+                    self.sensors["synchronised"].value = bool(tx_item.present_ants.all())
 
                     self.correlation.reduce()
                     tx_item.add_event(self._proc_command_queue.enqueue_marker())

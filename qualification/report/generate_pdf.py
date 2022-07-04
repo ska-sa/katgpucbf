@@ -343,7 +343,8 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
         if report.when == "teardown":
             for prop in report.user_properties:
                 if prop[0] == "pdf_report_data":
-                    for msg in prop[1][:]:
+                    assert isinstance(prop[1], list)
+                    for msg in prop[1]:
                         assert isinstance(msg, dict)
                         _parse_report_data(result, msg)
         # If teardown fails, the whole test should be seen as failing

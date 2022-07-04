@@ -132,8 +132,8 @@ async def test_sender(
             assert updated["digitiser_status"].value == 0
             side = int(i >= switch_heap)
             expected = orig_payload[side].isel(time=i % SIGNAL_HEAPS, pol=pol)
-            expected = unpackbits(expected.to_numpy())
-            np.testing.assert_equal(updated["adc_samples"].value, expected)
+            expected_unpacked = unpackbits(expected.to_numpy())
+            np.testing.assert_equal(updated["adc_samples"].value, expected_unpacked)
         assert i == SIGNAL_HEAPS * repeats  # Check that all the data arrived
     assert switch_task is not None
     assert (await switch_task) == switch_heap * DIG_HEAP_SAMPLES
