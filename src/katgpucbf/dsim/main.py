@@ -212,13 +212,9 @@ async def async_main() -> None:
     timestamp = 0
     if args.sync_time is not None:
         timestamp, start_time = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.max_period)
-        # Sleep until start_time. Python doesn't seem to have an interface
-        # for sleeping until an absolute time, so this will be wrong by the
-        # time that elapsed from calling time.time until calling time.sleep,
-        # but that's small change.
-        await asyncio.sleep(max(0, start_time - time.time()))
     else:
         args.sync_time = time.time()
+        start_time = args.sync_time
     logger.info("First timestamp will be %#x", timestamp)
 
     # Set spead stream to have heap id in even numbers for dsim data.
@@ -248,6 +244,11 @@ async def async_main() -> None:
 
     add_signal_handlers(server)
 
+    # Sleep until start_time. Python doesn't seem to have an interface
+    # for sleeping until an absolute time, so this will be wrong by the
+    # time that elapsed from calling time.time until calling
+    # asyncio.sleep, but that's small change.
+    await asyncio.sleep(max(0, start_time - time.time()))
     logger.info("Starting transmission")
     await asyncio.gather(sender.run(), descriptor_task, server.join())
 
