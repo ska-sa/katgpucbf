@@ -16,17 +16,17 @@
 
 """CBF Channel test."""
 
-from typing import Tuple
+from typing import List
 
 import numpy as np
 from matplotlib.figure import Figure
-from numpy.typing import ArrayLike
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
 from . import compute_tone_gain, sample_tone_response
 
-def measure_sfdr(data: np.ndarray, base_channel: int) -> Tuple[int, float, float, int]:
+
+def measure_sfdr(data: np.ndarray, base_channel: np.ndarray) -> List:
     """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
 
     Estimate the SFDR by measuring the power (dB) of the next strongest
@@ -35,21 +35,21 @@ def measure_sfdr(data: np.ndarray, base_channel: int) -> Tuple[int, float, float
 
     Returns
     -------
-    A tuple with difference, height of next peak, and the index.
+    A list of tuples with channel, difference, height of next peak, and the index.
 
     """
     sfdr_measurements = []
 
     for idx, channel in enumerate(base_channel):
-        # breakpoint()
         peak = np.max(data[idx, channel])
-        below_peak_idxs = np.nonzero(data[idx,:] < peak)
+        below_peak_idxs = np.nonzero(data[idx, :] < peak)
         next_peak = np.max(data[idx, below_peak_idxs])
-        next_peak_idx = np.where(data[idx,:] == next_peak)[0][0]
+        next_peak_idx = np.where(data[idx, :] == next_peak)[0][0]
         peak_diff = peak - next_peak
-        sfdr_measurements.append((channel, peak_diff, next_peak_idx, next_peak))
- 
+        sfdr_measurements.append([channel, peak_diff, next_peak_idx, next_peak])
+
     return sfdr_measurements
+
 
 async def test_channel(
     correlator: CorrelatorRemoteControl,
@@ -68,42 +68,43 @@ async def test_channel(
     TODO: Include channelisation test (NGC-612).
     """
     receiver = receive_baseline_correlation_products
-    
-    channel_skip = 256
 
-    # Arbitrary channels, not too near the edges
-    selected_channels = np.arange(16,receiver.n_chans,channel_skip)
-    
+    channel_skip = 32
+
+    # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
+    selected_channels = np.arange(8, receiver.n_chans, channel_skip)
+
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
     # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
     gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
 
-    pdf_report.step("Measure channel position.")            
+    pdf_report.step("Set gain and measure channel position.")
     gain_step = 100.0
     # Get a high dynamic range result (hdr_data) by using several gain settings
     # and using the high-gain results to more accurately measure the samples
     # whose power is low enough not to saturate.
-    hdr_data = np.zeros((len(selected_channels),receiver.n_chans))
+
+    # Pre-allocate to hold prior hdr_data for each next iteration for each spectrum
+    hdr_data = np.zeros((len(selected_channels), receiver.n_chans))
+
     for i in range(3):
 
         pdf_report.detail(f"Set gain to {gain}.")
         await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
 
-        # data = await sample(selected_channels)
-        # pdf_report.detail(f"Collect power measurements for {len(selected_channels)} channels.")
+        pdf_report.detail(f"Collect power measurements for {len(selected_channels)} channels.")
         data = await sample_tone_response(selected_channels, amplitude, receiver)
         data = data.astype(np.float64)
 
-        # Iterate through all selected channels (per gain setting) and check if the position is correct and SFDR is within range.
+        # Iterate through all selected channels (per gain setting) and check if the position is correct.
+        # Store gain adjusted data for SFDR measurement.
         for idx, spectrum in enumerate(data):
             # Use current gain to capture spikes, then adjust gain
-            # spectrum = data
             if i == 0:
                 peak_data = np.max(spectrum)
-
                 peak_channel = np.where(spectrum == peak_data)[0][0]
-
                 hdr_data[idx] = spectrum
+
                 # Extract which channel we are interested in checking
                 expected_channel = selected_channels[idx]
 
@@ -122,26 +123,27 @@ async def test_channel(
     db_sfdr = np.round(
         db_sfdr, 3
     )  # rounded to 3 places to present serialisation of long numbers causing issues for LaTeX
-    
-    # breakpoint()
+
     # Measure SFDR per captured spectrum
     pdf_report.step("Check SFDR attenuation.")
     sfdr_measurements = measure_sfdr(db_sfdr, selected_channels)
 
     for entry in sfdr_measurements:
-        pdf_report.detail(f"SFDR: {entry[1]:.3f}dB for base channel {entry[0]}. Next peak channel {entry[2]} with value {entry[3]:.3f}dB.")
+        pdf_report.detail(
+            f"SFDR: {entry[1]:.3f}dB for base channel {entry[0]}. Next peak channel {entry[2]} value {entry[3]:.3f}dB."
+        )
         expect(entry[1] >= 53)
 
-    # Arbitrary channel, not too near the edges
-    selected_plot_idx = len(selected_channels)//2
+    # Select an arbitrary channel, not too near the edges for plotting
+    selected_plot_idx = len(selected_channels) // 2
     plot_channel = selected_channels[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
     xticks = np.arange(0, (8192 + 1024), 1024)
     ymin = -100
     title = f"SFDR for channel {plot_channel}"
-    x = np.linspace(0, 8191, len(db_sfdr[selected_plot_idx,:]))
-    db_plot = db_sfdr[selected_plot_idx,:]
+    x = np.linspace(0, 8191, len(db_sfdr[selected_plot_idx, :]))
+    db_plot = db_sfdr[selected_plot_idx, :]
 
     fig = Figure()
     ax = fig.subplots()
@@ -161,33 +163,3 @@ async def test_channel(
     pdf_report.figure(
         fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
     )
-
-    # for xticks, ymin, title, x, db_plot in [
-    #     (
-    #         np.arange(0, (8192 + 1024), 1024),
-    #         -100,
-    #         "SFDR for all channels",
-    #         np.linspace(0, 8191, len(db_sfdr[plot_channel,:])),
-    #         db_sfdr[plot_channel,:],
-    #     ),
-    # ]:
-    #     fig = Figure()
-    #     ax = fig.subplots()
-    #     # pgfplots seems to struggle if data is too far outside ylim
-    #     ax.plot(x, np.maximum(db_plot, ymin - 10))
-    #     ax.set_title(title)
-    #     ax.set_xlabel("Channel")
-    #     ax.set_ylabel("dB")
-    #     ax.set_xticks(xticks)
-    #     ax.set_xlim(xticks[0], xticks[-1])
-    #     ax.set_ylim(ymin, 0)
-    #     for y in [-3, -53]:
-    #         if ymin < y:
-    #             ax.axhline(y, dashes=(1, 1), color="black")
-    #             ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
-    #     # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-    #     pdf_report.figure(
-    #         fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
-    #     )
-
-
