@@ -16,8 +16,9 @@
 
 """Delay and phase compensation tests."""
 
+import asyncio
 import math
-from typing import Optional
+from typing import List, Optional
 
 import aiokatcp
 import numpy as np
@@ -101,3 +102,84 @@ async def test_delay_application_time(
     delta = load_time - target
     pdf_report.detail(f"Estimated load time error: {delta * 1000:.3f}ms.")
     expect(delta < 0.01)
+
+
+async def test_delay_enable_disable(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+    expect,
+) -> None:
+    """Test that delay and phase compensation can be enabled and disabled.
+
+    Requirements verified:
+
+    CBF-REQ-0066
+        The CBF shall, on request via the CAM interface, enable or disable
+        delay compensation.
+
+    CBF-REQ-0110
+        The CBF shall, on request via the CAM interface, enable or disable
+        phase compensation.
+
+    CBF-REQ-0200
+        The CBF shall receive and apply a complete set of phase-up coefficients
+        from SP at a rate of up to once a second.
+
+    Verification method:
+
+    Verified by means of test. Insert a signal with a tone. Enable delay/phase
+    compensation and check that it is applied, then disable and check again.
+    Check that all requests complete within 1s.
+    """
+
+    async def measure_phase() -> float:
+        """Retrieve the phase of the chosen channel from the next chunk."""
+        _, chunk = await receiver.next_complete_chunk()
+        assert isinstance(chunk.data, np.ndarray)
+        value = chunk.data[channel, bl_idx, :]
+        phase = np.arctan2(value[1], value[0])
+        receiver.stream.add_free_chunk(chunk)
+        return phase
+
+    async def set_delays(delays: List[str]) -> None:
+        start = asyncio.get_running_loop().time()
+        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
+        finish = asyncio.get_running_loop().time()
+        elapsed.append(finish - start)
+
+    receiver = receive_baseline_correlation_products
+    channel = receiver.n_chans // 2
+    freq = receiver.bandwidth / 2
+    signal = f"cw(0.01, {freq})"
+    bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
+    elapsed: List[float] = []
+
+    pdf_report.step("Inject tone.")
+    pdf_report.detail(f"Set signal to {signal} on both pols.")
+    await correlator.dsim_clients[0].request("signals", f"common={signal}; common; common;")
+
+    pdf_report.step("Check that phase compensation can be enabled.")
+    pdf_report.detail("Apply 90 degree phase to one pol")
+    await set_delays(["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants)
+    phase = await measure_phase()
+    pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
+    expect(phase == pytest.approx(-math.pi / 2, np.deg2rad(1)))
+
+    pdf_report.step("Check that delay compensation can be enabled.")
+    pdf_report.detail("Apply 1/4 cycle delay to one pol.")
+    await set_delays(["0,0:0,0", f"{0.25 / freq},0:0,0"] * receiver.n_ants)
+    phase = await measure_phase()
+    pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
+    expect(phase == pytest.approx(-math.pi / 2, np.deg2rad(1)))
+
+    pdf_report.step("Check that compensation can be disabled.")
+    await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
+    phase = await measure_phase()
+    pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
+    expect(phase == pytest.approx(0, np.deg2rad(1)))
+
+    pdf_report.step("Check update time.")
+    max_elapsed = max(elapsed)
+    pdf_report.detail(f"Maximum time for ?delays request is {max_elapsed:.3f}s.")
+    expect(max_elapsed < 1.0)
