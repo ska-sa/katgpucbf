@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Sequence
 
 import aiokatcp
@@ -216,3 +217,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self._period_sensor.value = period
             self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
             return timestamp
+
+    async def request_time(self, ctx) -> float:
+        """Return the current UNIX timestamp."""
+        return time.time()
