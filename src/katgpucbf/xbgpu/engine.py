@@ -59,6 +59,7 @@ from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
+MISSING = np.array([-(2**31), 1], dtype=np.int32)
 
 
 class QueueItem:
@@ -784,7 +785,7 @@ class XBEngine(DeviceServer):
             if not np.any(item.present_ants):
                 # All Antennas have missed data at some point, zero the entire dump
                 logger.warning("All Antennas had a break in data during this accumulation")
-                buffer_wrapper.buffer.fill(0)
+                buffer_wrapper.buffer[...] = MISSING
                 incomplete_accum_counter.inc(1)
             elif not item.present_ants.all():
                 affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.n_ants)
@@ -792,7 +793,7 @@ class XBEngine(DeviceServer):
                     # Multiply by four as each baseline (antenna pair) has four
                     # associated correlation components (polarisation pairs).
                     affected_baseline_index = affected_baseline * 4
-                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = 0
+                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
 
                 incomplete_accum_counter.inc(1)
             # else: No F-Engines had a break in data for this accumulation
