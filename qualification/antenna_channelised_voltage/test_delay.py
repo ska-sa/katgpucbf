@@ -17,7 +17,7 @@
 """Delay and phase compensation tests."""
 
 import math
-from typing import List
+from typing import Optional
 
 import aiokatcp
 import numpy as np
@@ -47,61 +47,57 @@ async def test_delay_application_time(
     Verification method:
 
     Verification by means of test. A 90 degree phase change is loaded for one
-    polarisation at a chosen time. The accumulation spanning the load time is
-    checked to ensure that it contains the appropriate ratio of real and
-    imaginary component.
+    polarisation at a chosen time. The actual application time is estimated by
+    checking the ratio of real to imaginary components in the corresponding
+    accumulation.
     """
     receiver = receive_baseline_correlation_products
 
     pdf_report.step("Inject correlated white noise signal")
     pdf_report.detail("Setting signal")
-    await correlator.dsim_clients[0].request("signal", "common=wgn(0.1); common; common;")
+    await correlator.dsim_clients[0].request("signals", "common=wgn(0.1); common; common;")
     pdf_report.detail("Waiting for updated signal to propagate through the pipeline")
     _, chunk = await receiver.next_complete_chunk()
     receiver.stream.add_free_chunk(chunk)
 
     attempts = 5
     advance = 0.2
-    accs: List[np.ndarray] = []
+    acc: Optional[np.ndarray] = None
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
     for attempt in range(attempts):
-        pdf_report.step(f"Set delay {advance * 1000:d}ms in the future (attempt {attempt + 1} / {attempts})")
+        pdf_report.step(f"Set delay {advance * 1000:.0f}ms in the future (attempt {attempt + 1} / {attempts})")
         pdf_report.detail("Get current time according to the dsim")
         now = aiokatcp.decode(float, (await correlator.dsim_clients[0].request("time"))[0][0])
         target = now + advance
         delays = ["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants
         pdf_report.detail("Set delays")
-        await correlator.product_controller_client.request("delays", target, *delays)
-        pdf_report.step("Receive data for the corresponding dump plus one either side")
+        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", target, *delays)
+        pdf_report.step("Receive data for the corresponding dump")
         target_ts = receiver.unix_to_timestamp(target)
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
-        accs = []
+        acc = None
         async for timestamp, chunk in receiver.complete_chunks(max_delay=0):
-            if target_acc_ts - receiver.timestamp_step <= timestamp <= target_acc_ts + receiver.timestamp_step:
-                assert isinstance(chunk.data, np.ndarray)
-                accs.append(np.sum(chunk.data[:, bl_idx, :], axis=0))  # Sum over channels
+            pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}")
+            assert isinstance(chunk.data, np.ndarray)  # Keeps mypy happy
+            total = np.sum(chunk.data[:, bl_idx, :], axis=0)  # Sum over channels
             receiver.stream.add_free_chunk(chunk)
-            if timestamp > target_acc_ts + receiver.timestamp_step:
+            if timestamp == target_acc_ts:
+                acc = total
+            if timestamp >= target_acc_ts:
                 break
-        if len(accs) == 3:
+        if acc is not None:
             break
 
         pdf_report.detail("Didn't receive all the expected chunks, reseting delay and trying again")
         delays = ["0,0:0,0", "0,0:0,0"] * receiver.n_ants
-        await correlator.product_controller_client.request("delays", 0, *delays)
+        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
     else:
         pytest.fail(f"Giving up after {attempts} attempts")
 
     pdf_report.step("Check the received data")
-    # First chunk won't be perfectly real due to uncorrelated dithering.
-    pdf_report.detail("Check that accumulation prior to load time had no phase compensation")
-    expect(abs(accs[0][1]) < 1e-5 * abs(accs[0][0]))
-    # Similarly last chunk should be almost but not exactly imaginary.
-    pdf_report.detail("Check that accumulation after load time had phase compensation")
-    expect(abs(accs[2][0]) < 1e-5 * abs(accs[2][1]))
     # Estimate time at which delay was applied based on real:imaginary
-    total = np.sum(np.abs(accs[1]))
-    load_frac = abs(accs[1][1]) / total  # Load time as fraction of the accumulation
+    total = np.sum(np.abs(acc))
+    load_frac = abs(acc[0]) / total  # Load time as fraction of the accumulation
     load_time = receiver.timestamp_to_unix(target_acc_ts) + load_frac * receiver.int_time
     delta = load_time - target
     pdf_report.detail(f"Estimated load time error: {delta * 1000:.3f}ms")
