@@ -87,7 +87,7 @@ async def test_delay_application_time(
         if acc is not None:
             break
 
-        pdf_report.detail("Did not receive all the expected chunks; reset delay and trying again.")
+        pdf_report.detail("Did not receive all the expected chunks; reset delay and try again.")
         delays = ["0,0:0,0", "0,0:0,0"] * receiver.n_ants
         await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
     else:
