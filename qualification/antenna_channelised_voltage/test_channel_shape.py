@@ -16,8 +16,6 @@
 
 """Channel shape tests."""
 
-from typing import Tuple
-
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
@@ -52,26 +50,6 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     return cutoff_bandwidth_half(data[mid:], cutoff, step) + cutoff_bandwidth_half(data[mid::-1], cutoff, step)
 
 
-def measure_sfdr(data: np.ndarray, base_channel: int) -> Tuple[float, float, int]:
-    """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
-
-    Estimate the SFDR by measuring the power (dB) of the next strongest
-    tone in the spectrum (ignoring the fundamental tone). The SFDR is the
-    difference in these two values.
-
-    Returns
-    -------
-    A tuplue with difference, height of next peak, and the index.
-
-    """
-    peak = data[base_channel]
-    below_peak_idxs = np.nonzero(data < peak)
-    next_peak = np.max(data[below_peak_idxs])
-    next_peak_idx = np.where(data == next_peak)
-    peak_diff = peak - next_peak
-    return (peak_diff, next_peak, next_peak_idx[0][0])
-
-
 async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -85,8 +63,6 @@ async def test_channel_shape(
     CBF-REQ-0126
         The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
         is :math:`\le 2\times` (twice) the pass band width.
-
-    TODO: Include channelisation test (NGC-612).
     """
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
@@ -110,12 +86,9 @@ async def test_channel_shape(
         data = await sample_tone_response(rel_freq, amplitude, receiver)
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
         data = data.ravel(order="F")
-        # Test if channel shape test or SFDR. Channel shape requires offsets.
-        if len(np.array(offsets)) == 1:
-            return data
-        else:
-            # Slice out 5 channels, centred on the chosen one
-            return data[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
+        # Slice out 5 channels, centred on the chosen one
+        data = data[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
+        return data
 
     pdf_report.step("Measure channel shape.")
     gain_step = 100.0
@@ -126,59 +99,31 @@ async def test_channel_shape(
         pdf_report.detail(f"Set gain to {gain}.")
         await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
         pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
-        data_chan_shape = await sample(offsets)
-        data_chan_shape = data_chan_shape.astype(np.float64)
-
-        data_sfdr = await sample(offsets=[0])
-        data_sfdr = data_sfdr.astype(np.float64)
-
+        data = await sample(offsets)
+        data = data.astype(np.float64)
         if i == 0:
-            peak_chan_shape = np.max(data_chan_shape)
-            hdr_data_chan_shape = data_chan_shape
-
-            peak_data_sfdr = np.max(data_sfdr)
-            hdr_data_sfdr = data_sfdr
+            peak = np.max(data)
+            hdr_data = data
         else:
             power_scale = gain_step ** (i * 2)
-            hdr_data_chan_shape = np.where(
-                hdr_data_chan_shape >= peak_chan_shape / power_scale, hdr_data_chan_shape, data_chan_shape / power_scale
-            )
-            hdr_data_sfdr = np.where(
-                hdr_data_sfdr >= peak_chan_shape / power_scale, hdr_data_sfdr, data_sfdr / power_scale
-            )
+            hdr_data = np.where(hdr_data >= peak / power_scale, hdr_data, data / power_scale)
         gain *= gain_step
 
-    rms_voltage = np.sqrt(peak_chan_shape / receiver.n_spectra_per_acc)
-    pdf_report.detail(f"Peak power is {int(peak_chan_shape)} (RMS voltage {rms_voltage:.3f}).")
+    rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
+    pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 
     # The maximum is to avoid errors when data is 0
-    db = 10 * np.log10(np.maximum(hdr_data_chan_shape, 1e-100) / peak_chan_shape)
-    db_sfdr = 10 * np.log10(np.maximum(hdr_data_sfdr, 1e-100) / peak_data_sfdr)
-    db_sfdr = np.round(
-        db_sfdr, 3
-    )  # rounded to 3 places to present serialisation of long numbers causing issues for LaTeX
+    db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak)
+    x = np.linspace(-2.5, 2.5, len(hdr_data))
 
-    for xticks, ymin, title, x, db_plot in [
-        (np.arange(-2.5, 2.6, 0.5), -100, "Channel response", np.linspace(-2.5, 2.5, len(hdr_data_chan_shape)), db),
-        (
-            np.arange(-0.5, 0.55, 0.1),
-            -1.5,
-            "Channel response (zoomed)",
-            np.linspace(-2.5, 2.5, len(hdr_data_chan_shape)),
-            db,
-        ),
-        (
-            np.arange(0, (8192 + 1024), 1024),
-            -100,
-            "SFDR for all channels",
-            np.linspace(0, 8191, len(hdr_data_sfdr)),
-            db_sfdr,
-        ),
+    for xticks, ymin, title in [
+        (np.arange(-2.5, 2.6, 0.5), -100, "Channel response"),
+        (np.arange(-0.5, 0.55, 0.1), -1.5, "Channel response (zoomed)"),
     ]:
         fig = Figure()
         ax = fig.subplots()
         # pgfplots seems to struggle if data is too far outside ylim
-        ax.plot(x, np.maximum(db_plot, ymin - 10))
+        ax.plot(x, np.maximum(db, ymin - 10))
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
@@ -195,8 +140,7 @@ async def test_channel_shape(
             fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
         )
 
-    # Channel Shape
-    pdf_report.step("Check channel shape attenuation bandwidth.")
+    pdf_report.step("Check attenuation bandwidth.")
     width_3db = cutoff_bandwidth(db, -3, 1 / resolution)
     width_53db = cutoff_bandwidth(db, -53, 1 / resolution)
     pdf_report.detail(f"-3 dB bandwidth is {width_3db:.3f} channels.")
@@ -204,10 +148,3 @@ async def test_channel_shape(
         f"-53 dB bandwidth is {width_53db:.3f} channels ({width_53db / width_3db:.3f}x the pass bandwidth)."
     )
     expect(width_53db <= 2 * width_3db)
-
-    # SFDR
-    pdf_report.step("Check SFDR attenuation.")
-    sfdr_db, next_peak_db, next_peak_idx = measure_sfdr(db_sfdr, base_channel)
-    pdf_report.detail(f"SFDR is {sfdr_db:.3f}dB for base channel {base_channel}.")
-    pdf_report.detail(f"Next channel peak is in channel {next_peak_idx} with value {next_peak_db:.3f}dB.")
-    expect(sfdr_db >= 53)
