@@ -298,6 +298,14 @@ class BaselineCorrelationProductsReceiver:
             return timestamp, chunk
         assert False  # noqa: B011  # Tells mypy that this isn't reachable
 
+    def timestamp_to_unix(self, timestamp: int) -> float:
+        """Convert an ADC timestamp to a UNIX time."""
+        return timestamp / self.scale_factor_timestamp + self.sync_time
+
+    def unix_to_timestamp(self, time: float) -> int:
+        """Convert a UNIX time to an ADC timestamp (rounding to nearest)."""
+        return round((time - self.sync_time) * self.scale_factor_timestamp)
+
 
 def create_baseline_correlation_product_receive_stream(
     interface_address: str,
