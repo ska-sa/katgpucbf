@@ -57,15 +57,13 @@ async def test_channel(
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test the shape of the response to a single channel.
+    r"""Test channel position and measure SFDR per channel under test.
 
     Requirements verified:
 
     CBF-REQ-0126
         The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
         is :math:`\le 2\times` (twice) the pass band width.
-
-    TODO: Include channelisation test (NGC-612).
     """
     receiver = receive_baseline_correlation_products
 
