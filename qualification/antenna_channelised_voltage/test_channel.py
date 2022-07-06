@@ -16,7 +16,7 @@
 
 """CBF Channel test."""
 
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -26,7 +26,7 @@ from ..reporter import Reporter
 from . import compute_tone_gain, sample_tone_response
 
 
-def measure_sfdr(data: np.ndarray, base_channel: np.ndarray) -> List:
+def measure_sfdr(data: np.ndarray, base_channel: np.ndarray) -> List[Tuple[int, float, int, float]]:
     """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
 
     Estimate the SFDR by measuring the power (dB) of the next strongest
@@ -46,12 +46,12 @@ def measure_sfdr(data: np.ndarray, base_channel: np.ndarray) -> List:
         next_peak = np.max(data[idx, below_peak_idxs])
         next_peak_idx = np.where(data[idx, :] == next_peak)[0][0]
         peak_diff = peak - next_peak
-        sfdr_measurements.append([channel, peak_diff, next_peak_idx, next_peak])
+        sfdr_measurements.append((channel, peak_diff, next_peak_idx, next_peak))
 
     return sfdr_measurements
 
 
-async def test_channel(
+async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
@@ -61,16 +61,21 @@ async def test_channel(
 
     Requirements verified:
 
-    CBF-REQ-0126
-        The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
-        is :math:`\le 2\times` (twice) the pass band width.
+    CBF-REQ-0046
+    The channel spacing shall not be less than half of that which is specified for that configuration.
+
+    CBF-REQ-TDB
+    The CBF, when configured for Wideband intermediate resolution channelisation, shall channelise
+    the L-band pass band into equispaced frequency channels with a channel spacing of delta frequency <= 105kHz.
     """
     receiver = receive_baseline_correlation_products
 
+    required_sfdr_db = 53.0
+    channel_range_start = 8
     channel_skip = 32
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
-    selected_channels = np.arange(8, receiver.n_chans, channel_skip)
+    selected_channels = np.arange(channel_range_start, receiver.n_chans, channel_skip)
 
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
     # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
@@ -82,7 +87,7 @@ async def test_channel(
     # and using the high-gain results to more accurately measure the samples
     # whose power is low enough not to saturate.
 
-    # Pre-allocate to hold prior hdr_data for each next iteration for each spectrum
+    # Pre-allocate to hold prior hdr_data for next iteration for each spectrum
     hdr_data = np.zeros((len(selected_channels), receiver.n_chans))
 
     for i in range(3):
@@ -94,22 +99,30 @@ async def test_channel(
         data = await sample_tone_response(selected_channels, amplitude, receiver)
         data = data.astype(np.float64)
 
+        # Seed next_expected_channel if test just starting.
+        if i == 0:
+            next_expected_channel = channel_range_start
+
         # Iterate through all selected channels (per gain setting) and check if the position is correct.
         # Store gain adjusted data for SFDR measurement.
         for idx, spectrum in enumerate(data):
-            # Use current gain to capture spikes, then adjust gain
+            # Use current gain to capture spikes, then adjust gain.
             if i == 0:
                 peak_data = np.max(spectrum)
                 peak_channel = np.where(spectrum == peak_data)[0][0]
                 hdr_data[idx] = spectrum
 
-                # Extract which channel we are interested in checking
+                # Test1: Test if channel with tone received is correct based on channel skip and detected channel.
+                expect(peak_channel == next_expected_channel)
+                next_expected_channel = peak_channel + channel_skip
+
+                # Test2: Channel test based on known requested channels.
                 expected_channel = selected_channels[idx]
 
-                # Check if tone captured is in the correct channel
-                pdf_report.detail(f"Expected channel: {expected_channel}. Actual channel: {peak_channel}")
-                assert peak_channel == expected_channel
+                # Check if tone captured is in the correct channel.
+                expect(peak_channel == expected_channel)
             else:
+                # Compute HDR data
                 power_scale = gain_step ** (i * 2)
                 hdr_data[idx] = np.where(
                     hdr_data[idx] >= peak_data / power_scale, hdr_data[idx], spectrum / power_scale
@@ -126,21 +139,23 @@ async def test_channel(
     pdf_report.step("Check SFDR attenuation.")
     sfdr_measurements = measure_sfdr(db_sfdr, selected_channels)
 
+    sfdr_mean = 0.0
     for entry in sfdr_measurements:
-        pdf_report.detail(
-            f"SFDR: {entry[1]:.3f}dB for base channel {entry[0]}. Next peak channel {entry[2]} value {entry[3]:.3f}dB."
-        )
-        expect(entry[1] >= 53)
+        sfdr_mean += entry[1]
+        expect(entry[1] >= required_sfdr_db)
+    sfdr_mean = sfdr_mean / len(selected_channels)
+
+    pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(selected_channels)} channels.")
 
     # Select an arbitrary channel, not too near the edges for plotting
     selected_plot_idx = len(selected_channels) // 2
     plot_channel = selected_channels[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
-    xticks = np.arange(0, (8192 + 1024), 1024)
+    xticks = np.arange(0, (receiver.n_chans + 1024), 1024)
     ymin = -100
     title = f"SFDR for channel {plot_channel}"
-    x = np.linspace(0, 8191, len(db_sfdr[selected_plot_idx, :]))
+    x = np.linspace(0, receiver.n_chans - 1, len(db_sfdr[selected_plot_idx, :]))
     db_plot = db_sfdr[selected_plot_idx, :]
 
     fig = Figure()
@@ -153,7 +168,7 @@ async def test_channel(
     ax.set_xticks(xticks)
     ax.set_xlim(xticks[0], xticks[-1])
     ax.set_ylim(ymin, 0)
-    for y in [-3, -53]:
+    for y in [-3, -required_sfdr_db]:
         if ymin < y:
             ax.axhline(y, dashes=(1, 1), color="black")
             ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
