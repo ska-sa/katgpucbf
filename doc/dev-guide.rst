@@ -12,7 +12,7 @@ First, clone the repo from Github.
 
   git clone git@github.com:ska-sa/katgpucbf.git
 
-A setup script (:program:`dev-setup.sh`) is included for your convenience to
+A setup script (``dev-setup.sh``) is included for your convenience to
 get going.
 
 .. code-block:: bash
@@ -51,21 +51,13 @@ And you are ready to start developing with :mod:`katgpucbf`!
 Pre-commit
 ----------
 
-As alluded to in the previous section, :mod:`katgpucbf` contains a pre-commit
-workflow for auto-formatting Python code. This workflow checks for
-inconsistencies in style, design and complexity according to `PEP8`_ guidelines.
-It also checks for compliance with Python docstring conventions according to
-`PEP257`_ and supports `mypy`_ type-checking if type hints are used in the code.
+:mod:`katgpucbf` is configured with pre-commit for auto-formatting Python code.
+Pre-commit runs whenever Python code is committed to :mod:`katgpucbf`.
 
-The workflow runs whenever Python code is committed to :mod:`katgpucbf`.
+For more detailed information, please consult the `pre-commit`_ documentation. The
+installation and initialisation of the pre-commit flow is handled in ``dev-setup.sh``.
 
-This section discusses a high-level view of the pre-commit flow and its
-constituent parts. For more detailed information, please consult its
-`documentation`_. The inclusion of the ``pre-commit`` library requirement,
-subsequent installation and initialisation of the pre-commit flow is carried
-out for you in the execution of ``dev-setup.sh``. The following steps are
-discussed should you be interested, or even required, to update various
-aspects of the pre-commit flow.
+.. _pre-commit: https://pre-commit.com/
 
 Initial Setup
 ^^^^^^^^^^^^^
@@ -75,70 +67,45 @@ to monitor Python development.
 
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
-- ``pyproject.toml`` contains configuration for `black`_, The Uncompromising
-  Python Code Formatter. This can also contain configuration if more advanced
-  build systems such as C++ compilation (e.g. `pybind11`_) are used.
-- ``.flake8`` for `flake8`_, a tool for enforcing PEP8-based style guide for
-  Python.
-- ``.pydocstyle.ini`` for `pydocstyle`_, a tool for enforcing PEP257-based
+- ``pyproject.toml`` contains build system requirements and information, which
+  are used by pip to build the package. The `pyproject-toml`_ documentation outline
+  its possible configurations very well.
+- ``.flake8`` for :mod:`flake8`, a tool for enforcing :pep:`8`-based style guide
+  for Python.
+- ``.pydocstyle.ini`` for :mod:`pydocstyle`, a tool for enforcing :pep:`257`-based
   doc-string style guides for Python.
-- ``mypy.ini`` file for `mypy`_, a static type checker (or lint-like tool)
-  for type annotations in the Python code - according to `PEP484`_ and
-  `PEP526`_ notation.
+- ``mypy.ini`` file for :mod:`mypy`, a static type checker (or lint-like tool)
+  for type annotations in the Python code - according to :pep:`484` and
+  :pep:`526` notation.
+
+.. _pyproject-toml: https://pip.pypa.io/en/stable/reference/build-system/pyproject-toml/
 
 Install Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^
 
-Although ``black``, ``flake8``, ``mypy`` and ``pydocstyle`` are used, the only
-prerequisite is the **pre-commit**  Python library. That is, the YAML
+Although :mod:`black`, :mod:`flake8`, :mod:`mypy` and :mod:`pydocstyle` are used,
+the only prerequisite is the **pre-commit**  Python library. That is, the YAML
 configuration file is set up so that when the pre-commit hooks are installed,
 all dependencies are automatically installed. (Note, they won't be available to
-you in Python, they will be used only by pre-commit. If you want to use them
-separately, you will need to install them individually with pip.)
+you in your Python environment, they will be used only by pre-commit. If you want
+to use them separately, you will need to install them individually with pip.)
 
-**pre-commit** is essentially a framework for managing git hooks and can be
-installed by running:
+.. todo:: ``NGC-693``
+    Explain why :mod:`katgpucbf` has a ``requirements-dev.txt`` (in addition to ``requirements.txt``).
 
-  .. code-block:: bash
+Should you wish to develop for :mod:`katgpucbf` without the pre-commit checks enabled,
+you can do so by executing the installation commands in ``dev-setup.sh`` separately
+and bypassing the ``pre-commit install``.
 
-    $ pip install pre-commit
-
-
-A reminder that the **pre-commit** library is already listed as a development
-requirement for :mod:`katgpucbf`.
-
-Generate pre-commit Git Hooks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To generate the git hooks themselves, the following command is run in the
-project directory. Note that the ``.pre-commit-config.yaml`` file must be in
-the project directory **before** generating the git hooks.
-
-  .. code-block:: bash
-
-    $ pre-commit install
-
-After this, ``pre-commit`` will run automatically on the execution of the
-``git commit`` command with the installed hooks.
-
-.. _documentation: https://pre-commit.com/
-.. _PEP8: https://www.python.org/dev/peps/pep-0008/
-.. _PEP257: https://www.python.org/dev/peps/pep-0257/
-.. _PEP484: https://www.python.org/dev/peps/pep-0484/
-.. _PEP526: https://www.python.org/dev/peps/pep-0526/
-.. _pre-commit: https://pre-commit.com/
-.. _black: https://github.com/psf/black
-.. _flake8: https://flake8.pycqa.org/en/latest/
-.. _pydocstyle: http://www.pydocstyle.org/
-.. _mypy: https://mypy.readthedocs.io/en/stable/index.html
-.. _pybind11: https://pybind11.readthedocs.io/
+.. note::
+    Contributions (i.e. pull-requests) will not be accepted/merged until all the checks pass.
 
 Light-weight installation
 -------------------------
 
 There are a few cases where it is unnecessary (and inconvenient) to install
 CUDA, such as for building the documentation or launching a correlator on a
-remote system. If one does not use :program:`dev-setup.sh` but installs
+remote system. If one does not use ``dev-setup.sh`` but installs
 manually (in a virtual environment) using ``pip install -e .``, then only a
 subset of dependencies are installed. There are also some optional extras that
 can be installed, such as ``pip install -e ".[doc]"`` to install necessary
