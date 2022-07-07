@@ -143,7 +143,7 @@ async def test_channelisation_and_sfdr(
     for entry in sfdr_measurements:
         sfdr_mean += entry[1]
         expect(entry[1] >= required_sfdr_db)
-    sfdr_mean = sfdr_mean / len(selected_channels)
+    sfdr_mean /= len(selected_channels)
 
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(selected_channels)} channels.")
 
@@ -168,10 +168,14 @@ async def test_channelisation_and_sfdr(
     ax.set_xticks(xticks)
     ax.set_xlim(xticks[0], xticks[-1])
     ax.set_ylim(ymin, 0)
-    for y in [-3, -required_sfdr_db]:
-        if ymin < y:
-            ax.axhline(y, dashes=(1, 1), color="black")
-            ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
+    if ymin < -required_sfdr_db:
+        ax.axhline(-required_sfdr_db, dashes=(1, 1), color="black")
+        ax.annotate(
+            f"{-required_sfdr_db} dB",
+            (xticks[-1], -required_sfdr_db),
+            horizontalalignment="right",
+            verticalalignment="top",
+        )
     # tikzplotlib.clean_figure doesn't like data outside the ylim at all
     pdf_report.figure(
         fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
