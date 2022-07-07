@@ -102,6 +102,7 @@ def n_dsims():  # noqa: D401
     params=[
         8192,
     ],
+    ids=["8192 C"],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -113,6 +114,7 @@ def n_channels(request):  # noqa: D401
     params=[
         "l",
     ],
+    ids=["856_L B"],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""

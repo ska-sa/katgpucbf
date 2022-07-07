@@ -16,10 +16,14 @@
 
 """Fixtures and options for testing of baseline-correlation-products streams."""
 
+from typing import Final, List
+
 import pytest
 
+ANTENNAS: Final[List[int]] = [4, 8]
 
-@pytest.fixture(scope="package", params=[4, 8])
+
+@pytest.fixture(scope="package", params=ANTENNAS, ids=[f"{x} A" for x in ANTENNAS])
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param

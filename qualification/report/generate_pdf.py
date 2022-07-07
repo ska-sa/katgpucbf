@@ -26,7 +26,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Callable, Dict, Final, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
 import pytest
@@ -53,6 +53,11 @@ from pylatex.utils import bold, escape_latex
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
+UNIT_TRANSLATION_DICT: Final[Dict[str, Callable[[int], str]]] = {
+    "A": lambda ants: f"{ants*2}n",
+    "B": lambda bw: f"{bw}M",
+    "C": lambda chans: f"{chans//1000}k",
+}
 
 
 class LstListing(Environment):
@@ -359,9 +364,46 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     return test_configuration, results
 
 
-def fix_test_name(test_name: str) -> str:
-    """Change a test's name from a pytest one to a more human-friendly one."""
-    return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
+def fix_test_name(test_name_full: str) -> str:
+    """Change a test's name from a pytest one to the expected report format.
+
+    The test name doesn't change much, but the parameters need to be translated
+    into the MeerKAT Convention of
+    - `<mode><num ant-pols>n<bandwidth>M<channelisation mode>k`,
+    Where,
+    - <mode> is E {beamformer (b), correlator (c), both (bc)}
+
+    For example,
+    - 14-8192-l would be c28n856M8k
+
+    .. todo::
+        <mode> isn't exactly 'used' at the moment, so it has been purposefully
+        left out of the current implementation, pending review/feedback.
+    """
+    test_name, test_params = test_name_full.split("[")
+    test_name_pretty = " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
+
+    param_dict = {}
+    for test_param_pair in test_params[:-1].split("-"):
+        # TODO: Throw some different test cases at this to see how it could cope
+        #       if/when it doesn't receive a parameter set satisfying the
+        #       "Antennas", "Bandwidth" or "Channels" expectation.
+        param_value, param_unit = test_param_pair.split(" ")
+        if param_unit == "B":
+            # TODO: Band parameter is saved as e.g. 856_L B,
+            #       perhaps this can be updated to a `<value> <unit>`
+            #       combo like the other parameters.
+            param_value = param_value.split("_")[0]
+        param_dict[param_unit] = int(param_value)
+    # Needs to be sorted in order to generate the full mode string
+    # according to the required format.
+    param_dict = dict(sorted(param_dict.items()))
+
+    test_params_pretty = ""
+    for param_unit, param_value_int in param_dict.items():
+        test_params_pretty += UNIT_TRANSLATION_DICT.get(param_unit, lambda param_value_int: "")(param_value_int)
+
+    return f"{test_name_pretty}: {test_params_pretty}"
 
 
 def collapse_versions(versions: Set[str]) -> str:
@@ -519,6 +561,7 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         )
         summary_table.add_hline()
         for result in results:
+            # TODO: Add updates to handling test parameters here
             summary_table.add_row(
                 [
                     Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
@@ -582,6 +625,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
+            # TODO: Somehow alter result.name here for a prettier heading
             with section.create(Subsection(fix_test_name(result.name), label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 section.append("Outcome: ")
