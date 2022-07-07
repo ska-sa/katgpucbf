@@ -561,7 +561,6 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         )
         summary_table.add_hline()
         for result in results:
-            # TODO: Add updates to handling test parameters here
             summary_table.add_row(
                 [
                     Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
@@ -625,7 +624,6 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
-            # TODO: Somehow alter result.name here for a prettier heading
             with section.create(Subsection(fix_test_name(result.name), label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 section.append("Outcome: ")
