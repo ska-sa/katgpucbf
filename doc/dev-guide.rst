@@ -68,22 +68,26 @@ to monitor Python development.
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
 - ``pyproject.toml`` contains build system requirements and information, which
-  are used by pip to build the package. The `pyproject-toml`_ documentation outline
-  its possible configurations very well.
-- ``.flake8`` for :mod:`flake8`, a tool for enforcing :pep:`8`-based style guide
+  are used by pip to build and use the package - e.g. `black`_, :mod:`pytest`.
+  The `pyproject-toml`_ documentation outlines the potential for configuration very well.
+- ``.flake8`` for `flake8`_, a tool for enforcing :pep:`8`-based style guide
   for Python.
-- ``.pydocstyle.ini`` for :mod:`pydocstyle`, a tool for enforcing :pep:`257`-based
+- ``.pydocstyle.ini`` for `pydocstyle`_, a tool for enforcing :pep:`257`-based
   doc-string style guides for Python.
-- ``mypy.ini`` file for :mod:`mypy`, a static type checker (or lint-like tool)
+- ``mypy.ini`` file for `mypy`_, a static type checker (or lint-like tool)
   for type annotations in the Python code - according to :pep:`484` and
   :pep:`526` notation.
 
+.. _black: https://github.com/psf/black
 .. _pyproject-toml: https://pip.pypa.io/en/stable/reference/build-system/pyproject-toml/
+.. _flake8: https://flake8.pycqa.org/en/latest/
+.. _pydocstyle: http://www.pydocstyle.org/
+.. _mypy: https://mypy.readthedocs.io/en/stable/index.html
 
 Install Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^
 
-Although :mod:`black`, :mod:`flake8`, :mod:`mypy` and :mod:`pydocstyle` are used,
+Although `black`_, `flake8`_, `mypy`_ and `pydocstyle`_ are used,
 the only prerequisite is the **pre-commit**  Python library. That is, the YAML
 configuration file is set up so that when the pre-commit hooks are installed,
 all dependencies are automatically installed. (Note, they won't be available to
