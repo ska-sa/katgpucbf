@@ -26,12 +26,20 @@ from ..reporter import Reporter
 from . import compute_tone_gain, sample_tone_response
 
 
-def measure_sfdr(db: np.ndarray, base_channel: np.ndarray) -> List[float]:
+def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[float]:
     """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
 
     Estimate the SFDR by measuring the power (dB) of the next strongest
     tone in the spectrum (ignoring the fundamental tone). The SFDR is the
     difference in these two values.
+
+    Parameters
+    ----------
+    hdr_data_db: np.ndarray
+        A 2-dimensional array where axis=0 represents the different captured spectra,
+        and axis=1 represents the samples in a sprectrum.
+    base_channel: np.ndarray
+        This represents the channels used is the channelisation test.
 
     Returns
     -------
@@ -39,10 +47,10 @@ def measure_sfdr(db: np.ndarray, base_channel: np.ndarray) -> List[float]:
     """
     sfdr_measurements = []
 
-    for idx, channel in enumerate(base_channel):
-        peak_value = np.max(db[idx, channel])
-        below_peak_idxs = np.nonzero(db[idx, :] < peak_value)
-        next_peak_value = np.max(db[idx, below_peak_idxs])
+    for spectrum, channel in zip(hdr_data_db, base_channel):
+        peak_value = np.max(spectrum[channel])
+        below_peak_idxs = np.nonzero(spectrum < peak_value)
+        next_peak_value = np.max(spectrum[below_peak_idxs])
         peak_diff = peak_value - next_peak_value
         sfdr_measurements.append(peak_diff)
 
@@ -62,6 +70,9 @@ async def test_channelisation_and_sfdr(
     CBF-REQ-0046
         The channel spacing shall not be less than half of that which is specified for that configuration.
 
+    CBF-REQ-0126
+        The CBF shall perform channelisation such that the 53dB attenuation bandwidth is <= 2x the pass band width.
+
     CBF-REQ-TDB
         The CBF, when configured for Wideband intermediate resolution channelisation, shall channelise
         the L-band pass band into equispaced frequency channels with a channel spacing of delta frequency <= 105kHz.
@@ -70,7 +81,7 @@ async def test_channelisation_and_sfdr(
 
     required_sfdr_db = 53.0
     channel_range_start = 8
-    channel_skip = 32
+    channel_skip = 31
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
     selected_channels = np.arange(channel_range_start, receiver.n_chans, channel_skip)
@@ -129,7 +140,7 @@ async def test_channelisation_and_sfdr(
         gain *= gain_step
 
     # The maximum is to avoid errors when data is 0
-    hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data)
+    hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data_hist[:, None])
 
     # Measure SFDR per captured spectrum
     pdf_report.step("Check SFDR attenuation.")
@@ -144,12 +155,12 @@ async def test_channelisation_and_sfdr(
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(selected_channels)} channels.")
 
     # Figure out worst SFDR measurement and plot that one.
-    pdf_report.step("Worst SFDR measurement.")
+    pdf_report.step("Show worst SFDR measurement.")
     worst_sfdr_measurement_value = np.min(sfdr_measurements)
     selected_plot_idx = np.where(sfdr_measurements == worst_sfdr_measurement_value)[0][0]
     pdf_report.detail(f"{worst_sfdr_measurement_value:.3f}dB for channel {selected_channels[selected_plot_idx]}.")
 
-    # Round to 3 places to present serialisation of long numbers causing issues for LaTeX
+    # Round to 3 places to prevent serialisation of long numbers causing issues for LaTeX
     hdr_data_db = np.round(hdr_data_db, 3)
 
     plot_channel = selected_channels[selected_plot_idx]
