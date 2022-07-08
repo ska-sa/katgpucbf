@@ -87,7 +87,7 @@ async def test_channelisation_and_sfdr(
 
     # Pre-allocate to hold prior hdr_data for next iteration for each spectrum
     hdr_data = np.zeros((len(selected_channels), receiver.n_chans))
-    peak_data_hist = []
+    peak_data_hist = np.zeros(len(selected_channels))
     for i in range(3):
 
         pdf_report.detail(f"Set gain to {gain}.")
@@ -108,7 +108,7 @@ async def test_channelisation_and_sfdr(
             if i == 0:
                 peak_data = np.max(spectrum)
                 peak_channel = np.where(spectrum == peak_data)[0][0]
-                peak_data_hist.append(peak_data)
+                peak_data_hist[idx] = peak_data
                 hdr_data[idx] = spectrum
 
                 # Test1: Test if channel with tone received is correct based on channel skip and detected channel.
