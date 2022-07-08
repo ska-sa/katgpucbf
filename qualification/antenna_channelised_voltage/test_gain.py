@@ -17,7 +17,6 @@
 """Gain tests."""
 
 import asyncio
-import logging
 
 import numpy as np
 from numpy.typing import NDArray
@@ -70,8 +69,6 @@ async def test_gains(
 
     pdf_report.step("Measure response with default gain.")
     orig = await next_chunk_data()
-    logging.info("Mean abs value: %s", np.mean(np.abs(orig)))
-    logging.info("Min abs value: %s", np.min(np.abs(orig)))
 
     pdf_report.step("Set random gains.")
     shape = (receiver.n_inputs, receiver.n_chans)
@@ -108,4 +105,9 @@ async def test_gains(
         rel_error = np.abs(data[:, i] - expected) / np.abs(expected)
         max_rel_error = max(max_rel_error, np.max(rel_error))
     pdf_report.detail(f"Maximum relative error: {max_rel_error}.")
-    expect(max_rel_error < 0.2, "Error exceeds 1 dB")
+    # 10^-0.05 ~= 0.9, so a relative error of <0.1 implies that the gain is
+    # accurate to 0.5 dB (in power - there is no spec for phase), and hence
+    # must have a resolution of 1 dB or better.
+    # In reality the limit on accuracy is likely to be the F-engine output
+    # quantisation, since gain is handled as single-precision float.
+    expect(max_rel_error < 0.1, "Maximum error exceeds 0.5 dB")
