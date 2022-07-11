@@ -12,7 +12,7 @@ First, clone the repo from Github.
 
   git clone git@github.com:ska-sa/katgpucbf.git
 
-A setup script (``dev-setup.sh``) is included for your convenience to
+A setup script (:program:`dev-setup.sh`) is included for your convenience to
 get going.
 
 .. code-block:: bash
@@ -41,23 +41,33 @@ And you are ready to start developing with :mod:`katgpucbf`!
 
 .. tip::
 
-  I don't recommend using the  ``dev-setup.sh`` for anything other than initial
-  setup. If you run it again, the requirements will be re-installed, and the
-  module will be re-installed in editable mode. It's unlikely that any of this
-  will be harmful in any way, but it will use up a few minutes. You probably
-  won't want to do that every time.
+  I don't recommend using the  :program:`dev-setup.sh` for anything other than
+  initial setup. If you run it again, the requirements will be re-installed, and
+  the module will be re-installed in editable mode. It's unlikely that any of
+  this will be harmful in any way, but it will use up a few minutes. You
+  probably won't want to do that every time.
 
 
 Pre-commit
 ----------
 
 :mod:`katgpucbf` is configured with pre-commit for auto-formatting Python code.
-Pre-commit runs whenever Python code is committed to :mod:`katgpucbf`.
+Pre-commit runs whenever anything is committed to the repository.
 
-For more detailed information, please consult the `pre-commit`_ documentation. The
-installation and initialisation of the pre-commit flow is handled in ``dev-setup.sh``.
+For more detailed information, please consult the `pre-commit`_ documentation.
+The installation and initialisation of the pre-commit flow is handled in
+:program:`dev-setup.sh`.
 
 .. _pre-commit: https://pre-commit.com/
+
+.. note::
+    Contributors who prefer to develop without pre-commit enabled will be required
+    to ensure that any submissions (i.e. pull-requests) pass all the checks
+    described here before they can be accepted and merged.
+
+    No judgement, we know pre-commit can be annoying if you're not used to it.
+    This is in place in order to keep the code-base consistent so we can focus
+    on the work at hand - rather than maintaining code readability and appearance.
 
 Initial Setup
 ^^^^^^^^^^^^^
@@ -67,49 +77,41 @@ to monitor Python development.
 
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
-- ``pyproject.toml`` contains build system requirements and information, which
-  are used by pip to build and use the package - e.g. `black`_, :mod:`pytest`.
-  The `pyproject-toml`_ documentation outlines the potential for configuration very well.
-- ``.flake8`` for `flake8`_, a tool for enforcing :pep:`8`-based style guide
-  for Python.
-- ``.pydocstyle.ini`` for `pydocstyle`_, a tool for enforcing :pep:`257`-based
-  doc-string style guides for Python.
-- ``mypy.ini`` file for `mypy`_, a static type checker (or lint-like tool)
-  for type annotations in the Python code - according to :pep:`484` and
-  :pep:`526` notation.
+- ``pyproject.toml`` dictates the configuration of utilities such as
+  :external+black:doc:`black <getting_started>` and `isort`_.
+- ``.flake8`` for :external+flake8:doc:`flake8 <user/index>`, a tool for enforcing
+  :pep:`8`-based style guide for Python.
+- ``.pydocstyle.ini`` for :external+pydocstyle:doc:`pydocstyle <usage>`, a tool
+  for enforcing :pep:`257`-based docstring style guides for Python.
+- ``mypy.ini`` file for :external+mypy:doc:`mypy <getting_started>`, a static type checker
+  (or lint-like tool) for type annotations in the Python code - according to
+  :pep:`484` and :pep:`526` notation.
 
-.. _black: https://github.com/psf/black
-.. _pyproject-toml: https://pip.pypa.io/en/stable/reference/build-system/pyproject-toml/
-.. _flake8: https://flake8.pycqa.org/en/latest/
-.. _pydocstyle: http://www.pydocstyle.org/
-.. _mypy: https://mypy.readthedocs.io/en/stable/index.html
+.. todo:: ``NGC-694``
+  Document these boilerplate files in the repository.
+
+.. _isort: https://pycqa.github.io/isort/
 
 Install Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^
 
-Although `black`_, `flake8`_, `mypy`_ and `pydocstyle`_ are used,
-the only prerequisite is the **pre-commit**  Python library. That is, the YAML
-configuration file is set up so that when the pre-commit hooks are installed,
-all dependencies are automatically installed. (Note, they won't be available to
-you in your Python environment, they will be used only by pre-commit. If you want
-to use them separately, you will need to install them individually with pip.)
+Although :external+black:doc:`black <getting_started>`, :external+flake8:doc:`flake8 <user/index>`,
+:external+pydocstyle:doc:`pydocstyle <usage>` and :external+mypy:doc:`mypy <getting_started>`
+are used, the only prerequisite is the **pre-commit**  Python library. That is,
+the YAML configuration file is set up so that when the pre-commit hooks are
+installed, all dependencies are automatically installed. (Note, they won't be
+available to you in your Python environment, they will be used only by pre-commit.
+If you want to use them separately, you will need to install them separately with pip.)
 
 .. todo:: ``NGC-693``
     Explain why :mod:`katgpucbf` has a ``requirements-dev.txt`` (in addition to ``requirements.txt``).
-
-Should you wish to develop for :mod:`katgpucbf` without the pre-commit checks enabled,
-you can do so by executing the installation commands in ``dev-setup.sh`` separately
-and bypassing the ``pre-commit install``.
-
-.. note::
-    Contributions (i.e. pull-requests) will not be accepted/merged until all the checks pass.
 
 Light-weight installation
 -------------------------
 
 There are a few cases where it is unnecessary (and inconvenient) to install
 CUDA, such as for building the documentation or launching a correlator on a
-remote system. If one does not use ``dev-setup.sh`` but installs
+remote system. If one does not use :program:`dev-setup.sh` but installs
 manually (in a virtual environment) using ``pip install -e .``, then only a
 subset of dependencies are installed. There are also some optional extras that
 can be installed, such as ``pip install -e ".[doc]"`` to install necessary
