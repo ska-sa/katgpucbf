@@ -1,27 +1,74 @@
 Installation and Operation
 ==========================
 
-.. todo::  ``NGC-681``
-    Make an "installation" section. It'll need to focus on the following points:
+System requirements
+-------------------
+For basic operation (such as for development or proof-of-concept) the only
+hardware requirement is an NVIDIA GPU with tensor cores. The rest of this
+section describes recommended setup for high-performance operation.
 
-    - Installing module using setuptools, if you must
-    - But we'd rather you didn't, it's better to use the Dockerfile and deploy
-      it that way
-    - If you want to poke around at it, then refer to the dev-guide section.
-      (There'll need to be a proper cross-reference.)
+Networking
+^^^^^^^^^^
+An NVIDIA NIC (ConnectX or Bluefield) should be used, as katgpucbf can bypass
+the kernel networking stack when using one of these NICs. See the spead2
+:external+spead2:doc:`documentation <py-ibverbs>` for details on setting up and
+tuning the ibverbs support. Pay particular attention to disabling multicast
+loopback.
 
-.. todo::  ``NGC-682``
-    Move the following sections here from the fgpu sections:
+The correlator uses multicast packets to communicate between the individual
+engines. Your network needs to be set up to handle multicast, and to do so
+efficiently (i.e., not falling back to broadcasting). Note that the
+out-of-the-box configuration for Spectrum switches running Onyx allocates very
+little buffer space to multicast traffic, which can easily lead to lost
+packets. Refer to the manual for your switch to adjust the buffer allocations.
 
-    - Packet Size
-    - Simultaneous receive and transmit
-    - Hardware / BIOS configuration
-        The NUMA section should go under here, and be accompanied by other
-        relevant stuff.
+The engines also default to using large packets (8 KiB of payload, plus some
+headers), so your network needs to be configured to support jumbo frames. While
+there are command-line options to reduce the packet sizes, this will
+significantly reduce performance.
 
-    Update the contents in case something has become outdated. Some things may
-    rightly belong in spead2's documentation, and we can make references to it
-    here if necessary.
+BIOS settings
+^^^^^^^^^^^^^
+See the system tuning guidance in the :external+spead2:doc:`spead2
+documentation <perf>`. In particular, we've found that when running multiple
+F-engines per host on an AMD Epyc (Milan) system, we get best performance with
+
+- NPS1 setting for NUMA per socket (NPS2 might work too, but NPS4 tends to
+  cause sporadic lost packets);
+- the GPU and the NIC in slots attached to different host bridges.
+
+Installation
+------------
+
+Installation with Docker
+^^^^^^^^^^^^^^^^^^^^^^^^
+The recommended way to use katgpucbf is via Docker. There is currently no
+published Docker image, so it is necessary to build your own. To do so, change
+to the root directory of the repository and run
+
+.. code:: sh
+
+   DOCKER_BUILDKIT=1 docker build --ssh default -t NAME .
+
+where :samp:`{NAME}` is the name to assign to the image.
+
+.. todo:: Document how to get private access to vkgdr, or just open it up
+
+You will need to have the NVIDIA container runtime installed to provide Docker
+with access to the GPU.
+
+Installation with pip
+^^^^^^^^^^^^^^^^^^^^^
+It is also possible to install katgpucbf with pip. In this case, you will need
+to have CUDA already installed. Change to the root directory of the repository
+and run
+
+.. code:: sh
+
+   pip install ".[gpu]"
+
+Note that if you are planning to do development on katgpucbf, you should refer
+to the :doc:`Developers' guide <dev-guide>`.
 
 
 Controlling the Correlator

@@ -273,6 +273,8 @@ class BaselineCorrelationProductsReceiver:
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
             elif not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
+            elif np.any(chunk.data == -(2**31)):
+                logger.debug("Chunk with missing antenna(s)", chunk.chunk_id)
             else:
                 yield timestamp, chunk
                 continue
@@ -297,6 +299,14 @@ class BaselineCorrelationProductsReceiver:
         async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
             return timestamp, chunk
         assert False  # noqa: B011  # Tells mypy that this isn't reachable
+
+    def timestamp_to_unix(self, timestamp: int) -> float:
+        """Convert an ADC timestamp to a UNIX time."""
+        return timestamp / self.scale_factor_timestamp + self.sync_time
+
+    def unix_to_timestamp(self, time: float) -> int:
+        """Convert a UNIX time to an ADC timestamp (rounding to nearest)."""
+        return round((time - self.sync_time) * self.scale_factor_timestamp)
 
 
 def create_baseline_correlation_product_receive_stream(
