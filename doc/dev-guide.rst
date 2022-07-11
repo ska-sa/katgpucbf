@@ -69,8 +69,8 @@ The installation and initialisation of the pre-commit flow is handled in
     This is in place in order to keep the code-base consistent so we can focus
     on the work at hand - rather than maintaining code readability and appearance.
 
-Initial Setup
-^^^^^^^^^^^^^
+Configuration Files
+^^^^^^^^^^^^^^^^^^^
 
 This repo contains the following configuration files for the pre-commit flow
 to monitor Python development.
@@ -92,8 +92,8 @@ to monitor Python development.
 
 .. _isort: https://pycqa.github.io/isort/
 
-Install Prerequisites
-^^^^^^^^^^^^^^^^^^^^^
+Installation Prerequisites
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Although :external+black:doc:`black <getting_started>`, :external+flake8:doc:`flake8 <user/index>`,
 :external+pydocstyle:doc:`pydocstyle <usage>` and :external+mypy:doc:`mypy <getting_started>`
