@@ -1,17 +1,39 @@
+DSP Engine Design
+=================
+
+
+.. _gpu-terminology:
+
+Terminology
+-----------
+
+We will use OpenCL terminology, as it is more generic. If you're more familiar
+with CUDA terminology, katsdpsigproc's
+:external+katsdpsigproc:doc:`introduction <user/intro>` has a table mapping the
+most important concepts. For definitions of the concepts, refer to chapter 2 of
+the `OpenCL specification`_. A summary of the most relevant concepts can also
+be found `here`_.
+
+.. _OpenCL specification: https://www.khronos.org/registry/OpenCL/specs/3.0-unified/pdf/OpenCL_API.pdf
+.. _here: http://downloads.ti.com/mctools/esd/docs/opencl/execution/terminology.html
+
 Glossary
-========
+--------
+
+.. todo::  ``NGC-674``
+    Update Glossary section.
 
 This section serves (hopefully) to clarify some potentially confusing terms used
 within the source code.
 
 Stream
-------
- - In the katgpucbf.fgpu sense, this is derived from a spead2 recv or send stream.
+^^^^^^
+ - In the katgpucbf sense, this is derived from a spead2 recv or send stream.
  - Not to be confused with a CUDA stream, which is here encapsulated as a
-   command queue. CUDA streams aren't referred to directly in katgpucbf.fgpu.
+   command queue. CUDA streams aren't referred to directly in katgpucbf.
 
 Queue
------
+^^^^^
 
 - asyncio.Queue
 
@@ -34,7 +56,7 @@ Queue
     model and prevents accidentally submitting to the default CUDA queue.
 
 Event
------
+^^^^^
 
 - The thing used to synchronise GPU command_queues.
 - EventItems though, are containers that assist in transferring stuff between
@@ -45,3 +67,10 @@ Event
   - They get populated then put on Queues, so that the next stage in the
     pipeline can wait for the events so that it knows the memory is ready for
     copying.
+
+
+
+.. todo:: ``NGC-675``
+    Explanation of network receive, GPU processing and network transmit "loops".
+    There'll be a few merges from the existing F- and XBgpu sections, and the
+    Glossary as well.

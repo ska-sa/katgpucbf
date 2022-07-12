@@ -23,9 +23,11 @@ import os
 import pathlib
 import re
 import tempfile
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
+from uuid import UUID
 
 import pytest
 from docutils.core import publish_parts
@@ -38,16 +40,19 @@ from pylatex import (
     MultiColumn,
     NoEscape,
     Section,
+    SmallText,
     Subsection,
     Subsubsection,
     TextColor,
 )
-from pylatex.base_classes import Environment
-from pylatex.labelref import Hyperref
+from pylatex.base_classes import Container, Environment
+from pylatex.base_classes.latex_object import LatexObject
+from pylatex.labelref import Hyperref, Label, Marker
 from pylatex.package import Package
-from pylatex.utils import bold
+from pylatex.utils import bold, escape_latex
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
+UNKNOWN = "unknown"
 
 
 class LstListing(Environment):
@@ -120,12 +125,75 @@ class Result:
     config: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Interface:
+    """A network interface."""
+
+    name: str
+    driver: str
+    firmware_version: str
+    version: str
+    bus_id: str
+
+
+@dataclass(frozen=True)
+class GPU:
+    """Information about a GPU."""
+
+    number: int
+    model_name: str
+    driver: str
+    vbios: str
+    bus_id: str
+
+
+@dataclass(frozen=True)
+class Host:
+    """Configuration information for a host."""
+
+    kernel: str
+    cpus: Tuple[str, ...]
+    interfaces: Tuple[Interface, ...]
+    gpus: Tuple[GPU, ...]
+    ram: Optional[int]
+    product_name: str = UNKNOWN
+    board_name: str = UNKNOWN
+    bios_version: str = UNKNOWN
+
+
+@dataclass
+class Task:
+    """A single Mesos task within a correlator."""
+
+    host: str
+    version: str  # Docker image
+    git_version: str
+
+
+@dataclass
+class CorrelatorConfiguration:
+    """Configuration information for a correlator instance."""
+
+    description: str
+    uuid: UUID
+    tasks: Dict[str, Task]
+
+
 @dataclass
 class ConfigParam:
     """A configuration parameter describing software / hardware used in the test run."""
 
     name: str
     value: str
+
+
+@dataclass
+class TestConfiguration:
+    """Global configuration of the test."""
+
+    params: List[ConfigParam] = field(default_factory=list)
+    hosts: Dict[Host, List[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
+    correlators: List[CorrelatorConfiguration] = field(default_factory=list)
 
 
 def _parse_detail(detail: dict) -> Union[Detail, Figure]:
@@ -159,7 +227,80 @@ def _parse_report_data(result: Result, msg: dict) -> None:
         raise ValueError(f"Do not know how to parse $msg_type of {msg_type!r}")
 
 
-def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
+def _parse_interface(labels: dict) -> Interface:
+    """Parse a single network interface from ``node_ethtool_info`` labels."""
+    return Interface(
+        name=labels["device"],
+        driver=labels.get("driver", UNKNOWN),
+        firmware_version=labels.get("firmware_version", UNKNOWN),
+        version=labels.get("version", UNKNOWN),
+        bus_id=labels.get("bus_info", UNKNOWN),
+    )
+
+
+def _parse_gpu(labels: dict) -> GPU:
+    """Parse a single GPU from ``dcgm_exporter_info`` labels."""
+    return GPU(
+        number=int(labels["gpu"]),
+        model_name=labels["modelName"],
+        driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
+        vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
+        bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
+    )
+
+
+def _parse_host(msg: dict) -> Tuple[str, Host]:
+    """Parse a single host configuration line."""
+    kernel = UNKNOWN
+    cpus: Dict[int, str] = {}  # Indexed by package
+    interfaces = []
+    gpus = []
+    kwargs = {}
+    ram: Optional[int] = None
+
+    for metric in msg["config"]:
+        labels = metric["metric"]
+        value = float(metric["value"][1])
+        metric_name = labels["__name__"]
+        if metric_name == "node_dmi_info":
+            for label, label_value in labels.items():
+                if label in {"product_name", "board_name", "bios_version"}:
+                    kwargs[label] = label_value
+        elif metric_name == "node_cpu_info" and "model_name" in labels:
+            # The check for model_name is because older versions of
+            # node-exporter didn't provide it.
+            cpus[int(labels["package"])] = labels["model_name"]
+        elif metric_name == "node_memory_MemTotal_bytes":
+            ram = int(value)
+        elif metric_name == "node_ethtool_info":
+            interfaces.append(_parse_interface(labels))
+        elif metric_name == "dcgm_exporter_info":
+            gpus.append(_parse_gpu(labels))
+        elif metric_name == "node_uname_info":
+            kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
+    interfaces.sort(key=lambda interface: interface.name)
+    gpus.sort(key=lambda gpu: gpu.number)
+    host = Host(
+        kernel=kernel,
+        cpus=tuple(model_name for _, model_name in sorted(cpus.items())),
+        interfaces=tuple(interfaces),
+        gpus=tuple(gpus),
+        ram=ram,
+        **kwargs,
+    )
+    return msg["hostname"], host
+
+
+def _parse_task(msg: dict) -> Task:
+    return Task(host=msg["host"], version=msg["version"], git_version=msg["git_version"])
+
+
+def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
+    tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
+    return CorrelatorConfiguration(description=msg["description"], uuid=UUID(msg["uuid"]), tasks=tasks)
+
+
+def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     """Parse the data written by pytest-reportlog.
 
     Parameters
@@ -173,15 +314,21 @@ def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
     Lists of :class:`ConfigParam` and :class:`Result` objects representing the
     test configuration and the results of all the tests logged in the JSON input.
     """
-    test_configuration: List[ConfigParam] = []
+    test_configuration = TestConfiguration()
     results: List[Result] = []
     for line in input_data:
         if line["$report_type"] == "TestConfiguration":
             # Tabulate this somehow. It'll need to modify the return.
             line.pop("$report_type")
             for config_param_name, config_param_value in line.items():
-                test_configuration.append(ConfigParam(config_param_name, config_param_value))
-            continue
+                test_configuration.params.append(ConfigParam(config_param_name, config_param_value))
+            continue  # We've removed $report_type, which would break later code
+        elif line["$report_type"] == "HostConfiguration":
+            hostname, host = _parse_host(line)
+            test_configuration.hosts[host].append(hostname)
+        elif line["$report_type"] == "CorrelatorConfiguration":
+            test_configuration.correlators.append(_parse_correlator_configuration(line))
+
         if line["$report_type"] != "TestReport":
             continue
         # _from_json is an "experimental" function.
@@ -196,7 +343,8 @@ def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
         if report.when == "teardown":
             for prop in report.user_properties:
                 if prop[0] == "pdf_report_data":
-                    for msg in prop[1][:]:
+                    assert isinstance(prop[1], list)
+                    for msg in prop[1]:
                         assert isinstance(msg, dict)
                         _parse_report_data(result, msg)
         # If teardown fails, the whole test should be seen as failing
@@ -214,6 +362,178 @@ def parse(input_data: List[dict]) -> Tuple[List[ConfigParam], List[Result]]:
 def fix_test_name(test_name: str) -> str:
     """Change a test's name from a pytest one to a more human-friendly one."""
     return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
+
+
+def collapse_versions(versions: Set[str]) -> str:
+    """Reduce a set of versions to a single string.
+
+    This is appropriate to use when it is expected that there will be at most one.
+    """
+    if len(versions) == 0:
+        return "N/A"
+    elif len(versions) == 1:
+        return next(iter(versions))
+    else:
+        return "multiple versions"
+
+
+def _format_image(image: str) -> LatexObject:
+    """Format a Docker image name for a table.
+
+    These tends to be a very long string, which needs to be wrapped to avoid
+    going off the page.
+    """
+    # The `\strut`s ensure a bit more space around this row.
+    image = escape_latex(image)
+    image = image.replace("@sha256:", r"@sha256:\\ ")  # Break into two lines
+    image = r"\begin{Bflushleft}[t]\strut " + image + r"\strut\end{Bflushleft}"
+    return SmallText(NoEscape(image))
+
+
+def _doc_test_configuration_global(section: Container, test_configuration: TestConfiguration) -> None:
+    # Identify versions running on the correlator. Ideally it should be unique
+    images = set()
+    git_versions = set()
+    product_controller_image = "unknown"
+    product_controller_git_version = "unknown"
+    for correlator in test_configuration.correlators:
+        for task_name, task in correlator.tasks.items():
+            if task_name == "product_controller":
+                product_controller_image = task.version
+                product_controller_git_version = task.git_version
+            else:
+                images.add(task.version)
+                git_versions.add(task.git_version)
+
+    with section.create(LongTable(r"|r|l|")) as config_table:
+        config_table.add_hline()
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Test suite"))])
+        config_table.add_hline()
+        for config_param in test_configuration.params:
+            config_table.add_row([config_param.name, config_param.value])
+            config_table.add_hline()
+
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Correlator"))])
+        config_table.add_hline()
+        image = collapse_versions(images)
+        config_table.add_row("Image", _format_image(image))
+        config_table.add_row("Version", collapse_versions(git_versions))
+        config_table.add_hline()
+
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Product Controller"))])
+        config_table.add_hline()
+        config_table.add_row("Image", _format_image(product_controller_image))
+        config_table.add_row("Version", product_controller_git_version)
+        config_table.add_hline()
+
+
+def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
+    for host, hostnames in hosts.items():
+        with section.create(LongTable(r"|r|l|")) as host_table:
+            host_table.add_hline()
+            for hostname in sorted(hostnames):
+                label = Label(Marker(hostname, prefix="host"))
+                host_table.add_row([MultiColumn(2, align="|l|", data=[label, hostname])])
+            host_table.add_hline()
+            host_table.add_row([MultiColumn(2, align="|c|", data=bold("System"))])
+            host_table.add_hline()
+            assert len(host.cpus) <= 1, "Need to extend to handle multiple CPUs"
+            host_table.add_row("CPU", host.cpus[0] if host.cpus else UNKNOWN)
+            if host.ram is not None:
+                host_table.add_row("RAM", f"{host.ram / 2**30:.3f} GiB")
+            else:
+                host_table.add_row("RAM", "unknown")
+            host_table.add_row("Product name", host.product_name)
+            host_table.add_row("Board name", host.board_name)
+            host_table.add_row("BIOS version", host.bios_version)
+            host_table.add_row("Kernel", host.kernel)
+            host_table.add_hline()
+            for interface in host.interfaces:
+                host_table.add_row([MultiColumn(2, align="|c|", data=bold(interface.name))])
+                host_table.add_hline()
+                host_table.add_row("Driver", interface.driver + " " + interface.version)
+                host_table.add_row("Firmware", interface.firmware_version)
+                host_table.add_row("Bus ID", interface.bus_id)
+                host_table.add_hline()
+            for gpu in host.gpus:
+                host_table.add_row([MultiColumn(2, align="|c|", data=bold(f"GPU {gpu.number}"))])
+                host_table.add_hline()
+                host_table.add_row("Model", gpu.model_name)
+                host_table.add_row("Driver", gpu.driver)
+                host_table.add_row("VBIOS", gpu.vbios)
+                host_table.add_row("Bus ID", gpu.bus_id)
+                host_table.add_hline()
+
+
+def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfiguration]) -> None:
+    patterns = [
+        ("Product controller", re.compile("product_controller")),
+        ("DSim {i}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
+        ("F-engine {i}", re.compile(r"f\.antenna_channelised_voltage\.(\d+)")),
+        ("XB-engine {i}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
+    ]
+    for i, correlator in enumerate(correlators, start=1):
+        with section.create(Subsection(f"Configuration {i}")) as subsec:
+            subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
+            subsec.append(correlator.description)
+            with subsec.create(LongTable(r"|l|l|")) as table:
+                table.add_hline()
+                for name, pattern in patterns:
+                    tasks = []
+                    for task_name, task in correlator.tasks.items():
+                        if match := pattern.fullmatch(task_name):
+                            try:
+                                tasks.append((int(match.group(1)), task))
+                            except IndexError:  # Pattern has no group 1
+                                tasks.append((0, task))
+                    tasks.sort()
+                    for idx, task in tasks:
+                        table.add_row(
+                            name.format(i=idx),
+                            Hyperref(Marker(task.host, prefix="host"), task.host),
+                        )
+                    table.add_hline()
+
+
+def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration) -> None:
+    with doc.create(Section("Test Configuration")) as config_section:
+        _doc_test_configuration_global(config_section, test_configuration)
+    with doc.create(Section("Hosts")) as hosts_section:
+        _doc_hosts(hosts_section, test_configuration.hosts)
+    with doc.create(Section("Correlators")) as correlators_section:
+        _doc_correlators(correlators_section, test_configuration.correlators)
+
+
+def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
+    with section.create(LongTable(r"|r|l|r|")) as summary_table:
+        total_duration: float = 0.0
+        passed = 0
+        failed = 0
+        summary_table.add_hline()
+        summary_table.add_row(
+            [
+                bold("Test"),
+                bold("Result"),
+                bold("Duration"),
+            ]
+        )
+        summary_table.add_hline()
+        for result in results:
+            summary_table.add_row(
+                [
+                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
+                    TextColor("green" if result.outcome == "passed" else "red", result.outcome),
+                    readable_duration(result.duration),
+                ]
+            )
+            summary_table.add_hline()
+            total_duration += result.duration
+            if result.outcome == "passed":
+                passed += 1
+            else:
+                failed += 1
+    section.append(f"{len(results)} tests run, with {passed} passing and {failed} failing.\n")
+    section.append(f"Total test duration: {readable_duration(total_duration)}")
 
 
 def document_from_json(input_data: Union[str, list]) -> Document:
@@ -255,49 +575,10 @@ def document_from_json(input_data: Union[str, list]) -> Document:
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
 
-    with doc.create(Section("Test Configuration")) as config_section:
-        with config_section.create(LongTable(r"|r|l|")) as config_table:
-            config_table.add_hline()
-            config_table.add_row([bold("Configuration Parameter"), bold("Value")])
-            config_table.add_hline()
-            for config_param in test_configuration:
-                config_table.add_row([config_param.name, config_param.value])
-                config_table.add_hline()
-            config_table.add_row(["Some other software version", "x.y.ZZ"])
-            config_table.add_hline()
+    _doc_test_configuration(doc, test_configuration)
 
     with doc.create(Section("Result Summary")) as summary_section:
-        with summary_section.create(LongTable(r"|r|l|r|")) as summary_table:
-            total_duration: float = 0.0
-            passed = 0
-            failed = 0
-            summary_table.add_hline()
-            summary_table.add_row(
-                [
-                    bold("Test"),
-                    bold("Result"),
-                    bold("Duration"),
-                ]
-            )
-            summary_table.add_hline()
-            for result in results:
-                summary_table.add_row(
-                    # PyLatex strips (among other things) underscores from label names, apparently they're dangerous.
-                    # See: https://jeltef.github.io/PyLaTeX/latest/pylatex/pylatex.labelref.html#pylatex.labelref.Marker
-                    [
-                        Hyperref(f"subsec:{result.name.replace('_', '')}", fix_test_name(result.name)),
-                        TextColor("green" if result.outcome == "passed" else "red", result.outcome),
-                        readable_duration(result.duration),
-                    ]
-                )
-                summary_table.add_hline()
-                total_duration += result.duration
-                if result.outcome == "passed":
-                    passed += 1
-                else:
-                    failed += 1
-        summary_section.append(f"{len(results)} tests run, with {passed} passing and {failed} failing.\n")
-        summary_section.append(f"Total test duration: {readable_duration(total_duration)}")
+        _doc_result_summary(summary_section, results)
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
@@ -316,6 +597,13 @@ def document_from_json(input_data: Union[str, list]) -> Document:
                     config_table.add_row((MultiColumn(2, align="|c|", data=bold("Test Configuration")),))
                     config_table.add_hline()
                     for key, value in result.config.items():
+                        if key == "correlator":
+                            # Turn the raw UUID into a section reference
+                            for i, correlator in enumerate(test_configuration.correlators, start=1):
+                                if correlator.uuid == UUID(value):
+                                    marker = Marker(value, prefix="correlator")
+                                    value = Hyperref(marker, f"Configuration {i}")
+                                    break
                         config_table.add_row([key.capitalize(), value])
                         config_table.add_hline()
 
@@ -364,6 +652,10 @@ def main():
         parent_dir = str(RESOURCE_PATH)
         latexmkrc.write(f"ensure_path('TEXINPUTS', {parent_dir!r})\n")
         latexmkrc.flush()
+        # Give TeX an order of magnitude more memory than usual. This is needed
+        # to handle the reams of text generated by tikzplotlib.
+        os.environ.setdefault("buf_size", "2000000")
+        os.environ.setdefault("extra_mem_top", "50000000")
         doc.generate_pdf(args.pdf, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
 
 

@@ -1,7 +1,14 @@
-Katgpucbf prototype qualification framework
-===========================================
+Qualification framework
+=======================
 
-The software in this folder is intended for use with pytest in order to
+.. todo::  ``NGC-688``
+   This document needs a bit of an introduction distinguishing it from normal
+   unit-testing.
+
+   The wording could also be cleaned up somewhat, and the "Requirements" section
+   can mention the "optional extras" now included in the setup.
+
+The ``qualification`` folder is intended for use with pytest in order to
 run qualification tests on a correlator run using ``katgpucbf``.
 
 A connection is made to an SDP Master Controller, an
@@ -9,6 +16,13 @@ appropriately-specced correlator product is requested, interacted with,
 and then shut down afterwards. Facilities are provided for the test to
 interact with the correlator, both by sending it KATCP requests and by
 ingesting the output data.
+
+Additionally, the hosts in the cluster must be monitored by Prometheus, so that
+the qualification report can include information on the hardware and software
+configuration. They must run `node-exporter`_ with the arguments
+``--collector.cpu.info`` and ``--collector.ethtool``.
+
+.. _node-exporter: https://github.com/prometheus/node_exporter
 
 Requirements
 ------------
@@ -37,6 +51,7 @@ you're deploying on, and it'll look something like this:
    asyncio_mode = auto
    master_controller_host = lab5.sdp.kat.ac.za
    master_controller_port = 5001
+   prometheus_url = http://lab5.sdp.kat.ac.za:9090
    product_name = bobs_qualification_correlator  # Use your own name
    interface = enp193s0f0
    use_ibv = true
@@ -52,7 +67,7 @@ this directory:
 
 ::
 
-   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:main-20220328
+   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest
 
 Explanation:
 
@@ -61,8 +76,7 @@ Explanation:
    low, but for larger ones it will be an issue.
 -  ``--image-override`` is designed to work in exactly the same way as
    that in ``sim_correlator.py``, specifying exactly which Docker image
-   to use for the tests. This is just the example that I've been using,
-   update accordingly.
+   to use for the tests.
 
 The general pytest options apply, so for instance with ``-x`` you can
 stop after the first failed test instead of continuing, etc.

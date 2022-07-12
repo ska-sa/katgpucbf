@@ -303,16 +303,9 @@ class TestStream:
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
             async for chunk in recv_chunks(stream):
-                if not np.any(chunk.present):
-                    # NOTE: Due to the 'receiving window' (max_active_chunks) being wide,
-                    # the receiver catches up with the missed Chunk IDs easily enough.
-                    # recv_chunks accounts for any empty chunks received before the first
-                    # 'proper' Chunk. This check is here to account for Chunks received in
-                    # the middle of normal operation, whose heaps we have purposefully
-                    # deleted, but the Receiver marks them as empty to keep the receiving
-                    # window contiguous.
-                    continue
-
+                # recv_chunks should filter out the phantom chunks created by
+                # spead2.
+                assert np.any(chunk.present)
                 received_chunk_ids.append(chunk.chunk_id)
                 received_chunk_presence[seen, :] = chunk.present
                 stream.add_free_chunk(chunk)
@@ -322,8 +315,8 @@ class TestStream:
             (
                 "katgpucbf.xbgpu.recv",
                 logging.WARNING,
-                f"Receiver missed 2 chunks. Expected ID: {start_chunk_id + missing_chunk_ids[0]}, "
-                f"received ID: {start_chunk_id + missing_chunk_ids[0] + 2}.",
+                f"Receiver missed {n_chunks_to_delete} chunks. Expected ID: {start_chunk_id + missing_chunk_ids[0]}, "
+                f"received ID: {start_chunk_id + missing_chunk_ids[0] + n_chunks_to_delete}.",
             )
         ]
 

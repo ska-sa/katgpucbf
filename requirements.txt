@@ -8,7 +8,7 @@ aioconsole==0.4.1
     # via aiomonitor
 aiohttp==3.8.1
     # via -r requirements.in
-aiokatcp==1.3.0
+aiokatcp==1.3.1
     # via -r requirements.in
 aiomonitor==0.4.5
     # via katsdpservices
@@ -25,13 +25,13 @@ async-timeout==4.0.2
     #   redis
 attrs==21.4.0
     # via aiohttp
-cffi==1.15.0
+cffi==1.15.1
     # via vkgdr
-charset-normalizer==2.0.12
+charset-normalizer==2.1.0
     # via aiohttp
-cloudpickle==2.0.0
+cloudpickle==2.1.0
     # via dask
-dask==2022.5.0
+dask==2022.6.1
     # via -r requirements.in
 decorator==5.1.1
     # via
@@ -43,7 +43,7 @@ frozenlist==1.3.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2022.3.0
+fsspec==2022.5.0
     # via dask
 hiredis==2.0.0
     # via katsdptelstate
@@ -55,17 +55,17 @@ katsdpsigproc[cuda]==1.4.2
     # via -r requirements.in
 katsdptelstate==0.11
     # via -r requirements.in
-llvmlite==0.38.0
+llvmlite==0.38.1
     # via numba
 locket==1.0.0
     # via partd
-mako==1.2.0
+mako==1.2.1
     # via
     #   katsdpsigproc
     #   pycuda
 markupsafe==2.1.1
     # via mako
-msgpack==1.0.3
+msgpack==1.0.4
     # via katsdptelstate
 multidict==6.0.2
     # via
@@ -75,16 +75,15 @@ netifaces==0.11.0
     # via
     #   katsdpservices
     #   katsdptelstate
-numba==0.55.1
+numba==0.55.2
     # via katsdpsigproc
-numpy==1.21.6
+numpy==1.22.4
     # via
     #   -r requirements.in
     #   katsdpsigproc
     #   katsdptelstate
     #   numba
     #   pandas
-    #   pytools
     #   scipy
     #   spead2
     #   xarray
@@ -93,7 +92,7 @@ packaging==21.3
     #   dask
     #   redis
     #   xarray
-pandas==1.4.2
+pandas==1.4.3
     # via
     #   katsdpsigproc
     #   xarray
@@ -101,35 +100,35 @@ partd==1.2.0
     # via dask
 platformdirs==2.5.2
     # via pytools
-prometheus-async==22.1.0
+prometheus-async==22.2.0
     # via -r requirements.in
 prometheus-client==0.14.1
     # via prometheus-async
-psutil==5.9.0
+psutil==5.9.1
     # via -r requirements.in
 pycparser==2.21
     # via cffi
-pycuda==2021.1
+pycuda==2022.1
     # via
     #   -r requirements.in
     #   katsdpsigproc
 pygelf==0.4.2
     # via katsdpservices
-pyparsing==3.0.8
+pyparsing==3.0.9
     # via
     #   -r requirements.in
     #   packaging
 python-dateutil==2.8.2
     # via pandas
-pytools==2022.1.7
+pytools==2022.1.12
     # via pycuda
 pytz==2022.1
     # via pandas
 pyyaml==6.0
     # via dask
-redis==4.2.2
+redis==4.3.4
     # via katsdptelstate
-scipy==1.8.0
+scipy==1.8.1
     # via katsdpsigproc
 six==1.16.0
     # via

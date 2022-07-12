@@ -1,5 +1,10 @@
-Design
-======
+F-Engine Design
+===============
+
+.. todo::  ``NGC-675``
+   Most of this needs to be folded into the higher-level GPU "Design" document.
+   Whatever remains will probably need re-naming under and "F-engine" sub-
+   heading or some such.
 
 The actual GPU kernels are reasonably straight-forward, because they're
 generally memory-bound rather than compute-bound. The main challenges are in
@@ -90,22 +95,13 @@ for this, which can severely limit the chunk size.
 GPU Processing
 --------------
 
-.. _gpu-terminology:
-
-Terminology
-^^^^^^^^^^^
-We will use OpenCL terminology, as it is more generic. An OpenCL *workitem*
-corresponds to a CUDA *thread*. Each workitem logically executes the same
-program but with different parameters, and can share data through *local
-memory* (shared memory in CUDA) with other workitems in the same
-*workgroup* (thread block in CUDA).
 
 Narrowband
 ^^^^^^^^^^
 In narrow-band modes, the first step is a down-conversion filter that produces
 a new sample stream with a lower bandwidth and sampling rate. The kernel
 implementing this is particularly complex, and is discussed separately in
-:doc:`fgpu.ddc`.
+`fgpu.ddc`_.
 
 .. note::
 
@@ -274,66 +270,159 @@ From there a number of transformations occur:
 4. When an output chunk is ready to be sent, the per-spectrum flags are
    reduced to per-frame flags.
 
-Challenges and lessons learnt
------------------------------
+.. _fgpu.ddc:
 
-Packet size
+Narrowband down-conversion kernel
+---------------------------------
+
+To provide efficient operation on a narrowband region, several logical steps are
+performed:
+
+1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
+   :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
+   signal. The centre of the desired band is placed at the DC frequency.
+
+2. The signal is convolved with a low-pass filter. This eliminates the
+   unwanted parts of the band, to the extent possible with a FIR filter.
+
+3. The signal is decimated (every Nth sample is retained), reducing the data
+   rate. The low-pass filter above limits aliasing.
+
+For efficiency, all three operations are implemented in the same kernel. In
+particular, the filtered samples that would be removed by decimation are never
+actually computed.
+
+The kernel is one of the more complex in katgpucbf. Simpler implementations
+tend to have low performance because the target GPUs (NVIDIA Ampere
+architecture, particularly those based on GA-102) have far more throughput for
+flops than for the load-store pipeline or local memory (recall that we're
+using OpenCL :ref:`gpu-terminology`), and attempts to allievate this can also
+easily consume a lot of local memory and thus reduce occupancy.
+
+Work groups
 ^^^^^^^^^^^
-The FPGA F-engine outputs packets with 1 KiB of payload. Matching this in
-software is challenging as the packet rate is high (over 3 million per
-second). The transmit code can still be optimised, but we were not able to
-make transmission reliable even with multiple threads (see more details
-below). The small packets (together with the padding needed by the X-engines)
-also increases the bandwidth significantly: 27.4 Gb/s of payload requires 31.2
-Gb/s total bandwidth.
+Each work group is responsible for producing a contiguous set of output
+samples (given by the constant :c:macro:`GROUP_OUT_SIZE`). To do so, it needs
+to load data from :c:macro:`LOAD_SIZE` input samples, which includes the extra
+samples needed to cater for the footprint of the low-pass filter.
 
-Simultaneous receive and transmit
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The Mellanox ConnectX-5 exhibits some performance anomalies when
-simultaneously receiving and transmitting at high speed. When running two
-antennas (four polarisations) with a 100 Gb/s, packets were occasionally
-dropped by the NIC. This seems to be caused by PCIe bottlenecks, possibly
-exacerbated by heavy memory traffic on the host. It seems to be triggered by
-micro-second scale jitter rather than a lack of throughput: upgrading to a
-faster CPU and RAM did not mitigate the problem.
+To maximise the arithmetic intensity and minimise the number of load/store
+operations, it's necessary for the kernel to hold a lot of data in registers.
+To avoid needing all the data at the same time, it has an outer loop that
+alternates between firstly, loading, decoding and mixing some data, and
+secondly, applying the low-pass filter. These two stages use different
+mappings of work items to work, and communicate through local memory.
 
-This problem seems to be exacerbated by memory thrashing. There are a few ways
-the memory traffic can be reduced:
+.. _ddc-load:
 
-1. Don't do SPEAD decoding on the CPU. Receive packets directly into CUDA
-   pinned memory and transfer it to the GPU, and sort it out on the GPU. If
-   the packet structure is hard-coded it would also be possible to use memory
-   scatter to split off the timestamps from the samples.
-2. Do transfers to the GPU in smaller increments. PCI devices do DMA directly
-   into the last-level cache, and if the data can be moved out again before
-   it is flushed the GPU can read it from cache without touching memory.
-   Ideally it would also be overwritten again by the NIC before it is
-   flushed, but that would require the buffer to fit entirely in the LLC.
-3. Similarly to the above, transfer data from the GPU in small pieces, and
-   transmit them directly from where they're placed rather than copying the
-   data into packets.
+Loading and unpacking
+^^^^^^^^^^^^^^^^^^^^^
+Initially (prior to the outer loop mentioned above), each work item loads the
+packed 10-bit samples for some number of input samples into registers (between
+them they load all :c:macro:`LOAD_SIZE` samples). To save space, these are
+unpacked only as needed.
 
-A second anomaly is that if the receiver does not make buffers available to
-the NIC in time, then not only are packets dropped, but the multicast transmit
-stalls every few seconds. This in turn prevents the transmit from keeping up
-with the processed data, putting back-pressure on the receiver and causing it
-to run out of buffers.
+To simplify alignment, the input samples are divided
+into :dfn:`segments` of 16 consecutive samples, which consumes 20 bytes or
+five 32-bit words. The segments are distributed amongst the work items in
+round-robin fashion, so that work item :math:`i` holds segments :math:`i + jW`
+where :math:`W` is the work group size (:c:macro:`WGS` in the code). There
+won't be an equal number of segments for each work item, so some work items
+will be holding useless data.
 
-Cases 00690992 and 00699262 were opened with Mellanox for these problems, and
-it has since been fixed in the latest firmware.
+When a sample is required, it is unpacked, given the segment and position
+within the segment. The kernel is designed so that the position in the segment
+is always a compile-time constant (after loop unrolling), which means the
+necessary registers and shift amounts are also known at compile-time.
 
-NUMA
-^^^^
-One machine used for testing had the GPU on a different NUMA node to the NIC.
-The transfers to/from the GPU went across the QPI bus, which limited the
-bandwidth and exacerbated the packet drops. This was an older Haswell Xeon;
-the newer Skylake Xeon used for these tests uses UPI which provides the full
-12-13 GB/s I/O for the GPU, but still exacerbates lost packets. It is
-highly recommended that any system using this design has the GPU and NIC on
-the same NUMA node.
+To cheaply achieve sign extension, the value is first shifted to the top 10
+bits of a 32-bit (signed integer), then shifted right. In standard C/C++ this
+is undefined behaviour, but CUDA implements the common behaviour of performing
+sign extension.
 
-We also found that single-threaded memcpy bandwidth on the Skylake Xeon
-improved from about 4 GB/s to about 7 GB/s when removing the second CPU from
-the system. With better memcpy performance it may be possible to use fewer
-cores (and conversely, fewer cores on a die may reduce the latency to
-memory and hence the memcpy performance).
+In some cases the desired sample is split across a word boundary. CUDA
+provides a (hardware-accelerated) :dfn:`funnel-shift` intrinsic, which allows two
+words to be combined into a 64-bit word and shifted, retaining just the high
+32 bits of the result; this is ideal for our use case.
+
+Mixer signal
+^^^^^^^^^^^^
+Care needs to be taken with the precision of the argument to the mixer signal.
+Simply evaluating the sine and cosine of :math:`2\pi f t` when
+:math:`t` is large can lead to a catastrophic loss of precision, as the
+product :math:`f t` will have a large integer part and leave few bits for
+the fractional part. Even passing :math:`f` in single precision can lead
+to large errors.
+
+To overcome this, a hybrid approach is used. Let the first sample handled by a
+work item be :math:`t_0`, and the kth sample of the ith segment be :math:`t_0
++ t_{i,k}`. Note that :math:`t_{i,k}` is the same for all work items.
+We can write the mixer value as
+:math:`e^{2\pi j f t_0}e^{2\pi j f t_{i,k}}`. The second factor can be
+pre-computed for all :math:`i` and :math:`k` and stored in a small lookup
+table. The former still needs expensive handling, but needs to be performed
+far fewer times. We compute :math:`f t_0` in double precision, subtract
+the nearest integer (to increase the number of fractional mantissa bits
+available) and then proceed in single precision.
+
+FIR filter
+^^^^^^^^^^
+For the FIR filter, a different mapping of work items to samples is used.
+The work items are partitioned into :dfn:`subgroups` each containing
+:c:macro:`SG_SIZE` work items. Each subgroup collaborates to produce
+:c:macro:`COARSEN` consecutive output samples.
+
+The position of each work item within its subgroup is stored in
+:c:var:`sg_rank`). Each work item is responsible only for samples whose index
+modulo :c:macro:`SG_SIZE` equals :c:var:`sg_rank`. It's not entirely clear why
+having this division of labour improves performance, although it does reduce
+the ratio of (input and output) samples to threads and hence allows for
+greater occupancy.
+
+Samples are loaded in an order that processes all input samples with the
+same index modulo :c:macro:`DECIMATION` together, keeping a sliding window of
+:c:macro:`COARSEN` such samples. This allows each subgroup to load each input
+sample from local memory just once, even though each contributes to multiple
+output samples. Note that other subgroups will still retrieve some of the
+same samples (from local memory), but the coarsening mitigates the cost of
+this.
+
+At the end of the kernel, the work items in a subgroup need to sum their
+individual results. This is done using a facility of :mod:`katsdpsigproc`,
+which in practice utilises warp shuffle instructions. While reasonably
+efficient for small values of :c:var:`SG_SIZE`, this rapidly becomes costly as
+it increases: the overhead relative to the per-work item accumulation scales
+as :math:`O(n\log n)`.
+
+Tiles
+^^^^^
+Each segment is further subdivided into :dfn:`tiles`. For each tile,
+:c:macro:`SG_SIZE` decoded and mixed samples are kept in local memory at a
+time; this limitation helps reduce local memory usage. These are written in
+the first phase (decoding and mixing), and read in the second phase (FIR
+filter), and then the next set of :c:macro:`SG_SIZE` samples are written for
+every tile, etc.
+
+The tile size should generally be as large as possible (so that the fraction
+of data held in memory is as small as possible), and in the simplest
+case, tiles correspond exactly to segments. However, the tile
+size must divide into the decimation factor, so when the decimation factor is
+smaller than (or not a multiple of) the segment size, tiles must be smaller
+than segments.
+
+Uncoalesced access
+^^^^^^^^^^^^^^^^^^
+Both the global reads and writes use uncoalesced accesses, meaning that
+adjacent work items do not read from/write to adjacent addresses. This can
+harm performance, and usually it is beneficial to stage copies through local
+memory using coalesced accesses. However, attempts to do so have only reduced
+performance. It's not clear why, but it may be that there is sufficient
+instruction-level parallelism to hide the latency, and the extra work on the
+load-store pipeline when using local memory just slows things down.
+
+Performance tuning
+^^^^^^^^^^^^^^^^^^
+The work group size, subgroup size and coarsening factor can all affect
+performance significantly, and not always in obvious ways. It will likely be
+necessary to implement autotuning to get optimal results across a range of
+problem parameters and hardware devices, but this has not yet been done.

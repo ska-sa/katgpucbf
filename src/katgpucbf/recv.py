@@ -31,6 +31,7 @@ import spead2.recv.asyncio
 from numba import types
 from prometheus_client import REGISTRY, CollectorRegistry, Metric
 from prometheus_client.core import CounterMetricFamily
+from prometheus_client.registry import Collector
 
 user_data_type = types.Record.make_c_struct(
     [
@@ -60,7 +61,7 @@ class Chunk(spead2.recv.Chunk):
         self.timestamp = 0  # Actual value filled in when chunk received
 
 
-class StatsCollector:
+class StatsCollector(Collector):
     """Collect statistics from spead2 streams as Prometheus metrics."""
 
     @dataclass

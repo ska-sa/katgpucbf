@@ -293,13 +293,13 @@ class Engine(aiokatcp.DeviceServer):
             if use_peerdirect:
                 dev = accel.DeviceArray(context, send_shape, send_dtype)
                 dev_buffer = dev.buffer.gpudata.as_buffer(int(np.product(send_shape) * send_dtype.itemsize))
-                buf = np.frombuffer(dev_buffer, dtype=send_dtype).reshape(send_shape)
+                send_buf = np.frombuffer(dev_buffer, dtype=send_dtype).reshape(send_shape)
             else:
                 dev = None
-                buf = accel.HostArray(send_shape, send_dtype, context=context)
+                send_buf = accel.HostArray(send_shape, send_dtype, context=context)
             send_chunks.append(
                 send.Chunk(
-                    buf,
+                    send_buf,
                     device=dev,
                     substreams=len(dst),
                     feng_id=feng_id,

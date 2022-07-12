@@ -123,3 +123,10 @@ async def test_signals_wrong_length(katcp_server: DeviceServer, katcp_client: ai
     """Test that ``?signals`` fails gracefully when given the wrong number of signals."""
     with pytest.raises(aiokatcp.FailReply, match="expected 2 signals, received 1"):
         await katcp_client.request("signals", "cw(0, 0);")
+
+
+async def test_time(katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker) -> None:
+    """Test ?time request."""
+    mocker.patch("time.time", return_value=1234567890.0)
+    reply, _ = await katcp_client.request("time")
+    assert aiokatcp.decode(float, reply[0]) == 1234567890.0
