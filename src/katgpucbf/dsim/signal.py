@@ -522,11 +522,15 @@ def packbits(data: da.Array, bits: int) -> da.Array:
     together in big-endian order, and returned as a sequence of bytes. The
     total number of bits must form a whole number of bytes.
 
-    The chunks in `data` must be aligned to multiples of 8.
+    If the chunks in `data` are not be aligned on byte boundaries then a
+    slower path is used.
     """
     assert data.ndim == 1
-    if not all(c % BYTE_BITS == 0 for c in data.chunks[0]):
-        raise ValueError("Chunks are not aligned to byte boundaries")
+    if data.shape[0] * bits % BYTE_BITS:
+        raise ValueError("Total number of bits is not a multiple of 8")
+    if not all(c * bits % BYTE_BITS == 0 for c in data.chunks[0]):
+        assert CHUNK_SIZE % BYTE_BITS == 0
+        data = data.rechunk(CHUNK_SIZE)
     out_chunks = (tuple(c * bits // BYTE_BITS for c in data.chunks[0]),)
     return da.map_blocks(_packbits, data, dtype=np.uint8, chunks=out_chunks, bits=bits)
 

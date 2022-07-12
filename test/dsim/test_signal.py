@@ -251,10 +251,11 @@ class TestPackbits:
             signal.packbits(da.from_array([0]), 10)
 
     def test_chunk_boundaries(self) -> None:
-        """Test that :exc:`ValueError` is raised if the chunks aren't suitably aligned."""
-        data = da.from_array(np.zeros(16, np.int32), chunks=11)
-        with pytest.raises(ValueError):
-            signal.packbits(data, 10)
+        """Test that correct results are returned even if chunks aren't nicely aligned."""
+        data = da.arange(-512, 512, dtype=np.int32, chunks=32)
+        packed = signal.packbits(data, 10).compute()
+        unpacked = unpackbits(packed, 10)
+        np.testing.assert_equal(data.compute(), unpacked)
 
 
 class TestSample:
