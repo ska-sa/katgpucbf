@@ -16,13 +16,15 @@
 
 """Channel shape tests."""
 
+from typing import Tuple
+
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-from . import compute_tone_gain, sample_tone_response
+from . import compute_hdr_spectra
 
 
 def cutoff_bandwidth_half(data: np.ndarray, cutoff: float, step: float) -> float:
@@ -70,11 +72,10 @@ async def test_channel_shape(
     resolution = 128  # Number of samples per channel
     offsets = np.arange(resolution) / resolution - 0.5
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
+    gain_step = 100.0
+    iterations = 3
 
-    # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
-    gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
-
-    async def sample(offsets: ArrayLike) -> np.ndarray:
+    async def samples(offsets: ArrayLike) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Measure response when frequency is offset from channel centre.
 
         Parameters
@@ -83,32 +84,27 @@ async def test_channel_shape(
             Offset of the frequency, in units of channels
         """
         rel_freq = base_channel - np.asarray(offsets)
-        data = await sample_tone_response(rel_freq, amplitude, receiver)
+        hdr_data, peak_data_hist, peak_chan_hist = await compute_hdr_spectra(
+            correlator=correlator,
+            receiver=receiver,
+            iterations=iterations,
+            gain_step=gain_step,
+            amplitude=amplitude,
+            selected_channels=rel_freq,
+            pdf_report=pdf_report,
+        )
+
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
-        data = data.ravel(order="F")
+        hdr_data = hdr_data.ravel(order="F")
         # Slice out 5 channels, centred on the chosen one
-        data = data[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
-        return data
+        hdr_data = hdr_data[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
+        return hdr_data, peak_data_hist, peak_chan_hist
 
     pdf_report.step("Measure channel shape.")
-    gain_step = 100.0
-    # Get a high dynamic range result (hdr_data) by using several gain settings
-    # and using the high-gain results to more accurately measure the samples
-    # whose power is low enough not to saturate.
-    for i in range(3):
-        pdf_report.detail(f"Set gain to {gain}.")
-        await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
-        pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
-        data = await sample(offsets)
-        data = data.astype(np.float64)
-        if i == 0:
-            peak = np.max(data)
-            hdr_data = data
-        else:
-            power_scale = gain_step ** (i * 2)
-            hdr_data = np.where(hdr_data >= peak / power_scale, hdr_data, data / power_scale)
-        gain *= gain_step
+    hdr_data, peak_data, _ = await samples(offsets)
+    hdr_data = hdr_data.astype(np.float64)
 
+    peak = np.max(peak_data)
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 

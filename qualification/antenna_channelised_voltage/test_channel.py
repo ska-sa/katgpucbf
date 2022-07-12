@@ -23,7 +23,7 @@ from matplotlib.figure import Figure
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-from . import compute_tone_gain, sample_tone_response
+from . import compute_hdr_spectra
 
 
 def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[float]:
@@ -85,10 +85,8 @@ async def test_channelisation_and_sfdr(
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
     selected_channels = np.arange(channel_range_start, receiver.n_chans, channel_skip)
-
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
-    # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
-    gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
+    iterations = 3
 
     pdf_report.step("Set gain and measure channel position.")
     gain_step = 100.0
@@ -96,48 +94,20 @@ async def test_channelisation_and_sfdr(
     # and using the high-gain results to more accurately measure the samples
     # whose power is low enough not to saturate.
 
-    # Pre-allocate to hold prior hdr_data for next iteration for each spectrum
-    hdr_data = np.zeros((len(selected_channels), receiver.n_chans))
-    peak_data_hist = np.zeros(len(selected_channels))
-    for i in range(3):
+    hdr_data, peak_data_hist, peak_chan_hist = await compute_hdr_spectra(
+        correlator=correlator,
+        receiver=receiver,
+        iterations=iterations,
+        gain_step=gain_step,
+        amplitude=amplitude,
+        selected_channels=selected_channels,
+        pdf_report=pdf_report,
+    )
 
-        pdf_report.detail(f"Set gain to {gain}.")
-        await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
-
-        pdf_report.detail(f"Collect power measurements for {len(selected_channels)} channels.")
-        data = await sample_tone_response(selected_channels, amplitude, receiver)
-        data = data.astype(np.float64)
-
-        # Seed next_expected_channel if test just starting.
-        if i == 0:
-            next_expected_channel = channel_range_start
-
-        # Iterate through all selected channels (per gain setting) and check if the position is correct.
-        # Store gain adjusted data for SFDR measurement.
-        for idx, spectrum in enumerate(data):
-            # Use current gain to capture spikes, then adjust gain.
-            if i == 0:
-                peak_data = np.max(spectrum)
-                peak_channel = np.where(spectrum == peak_data)[0][0]
-                peak_data_hist[idx] = peak_data
-                hdr_data[idx] = spectrum
-
-                # Test1: Test if channel with tone received is correct based on channel skip and detected channel.
-                expect(peak_channel == next_expected_channel)
-                next_expected_channel = peak_channel + channel_skip
-
-                # Test2: Channel test based on known requested channels.
-                expected_channel = selected_channels[idx]
-
-                # Check if tone captured is in the correct channel.
-                expect(peak_channel == expected_channel)
-            else:
-                # Compute HDR data
-                power_scale = gain_step ** (i * 2)
-                hdr_data[idx] = np.where(
-                    hdr_data[idx] >= peak_data_hist[idx] / power_scale, hdr_data[idx], spectrum / power_scale
-                )
-        gain *= gain_step
+    # Check tone positions w.r.t. requested channels
+    pdf_report.step("Check tone positions.")
+    for sel_chan, peak_chan in zip(selected_channels, peak_chan_hist):
+        expect(sel_chan == peak_chan)
 
     # The maximum is to avoid errors when data is 0
     hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data_hist[:, None])
