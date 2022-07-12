@@ -160,9 +160,6 @@ async def test_channelisation_and_sfdr(
     selected_plot_idx = np.where(sfdr_measurements == worst_sfdr_measurement_value)[0][0]
     pdf_report.detail(f"{worst_sfdr_measurement_value:.3f}dB for channel {selected_channels[selected_plot_idx]}.")
 
-    # Round to 3 places to prevent serialisation of long numbers causing issues for LaTeX
-    hdr_data_db = np.round(hdr_data_db, 3)
-
     plot_channel = selected_channels[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
