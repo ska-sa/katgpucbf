@@ -27,7 +27,7 @@ import pytest
 import xarray as xr
 
 from katgpucbf.dsim import signal
-from katgpucbf.dsim.signal import CW, WGN, Constant, Signal
+from katgpucbf.dsim.signal import CW, WGN, Constant, Delay, Signal
 
 from .. import unpackbits
 
@@ -103,6 +103,21 @@ class TestWGN:
         assert np.mean(data1 * data2) == pytest.approx(0, abs=0.3)  # 5 sigma
 
 
+class TestDelay:
+    """Tests for :class:`katgpucbf.dsim.signal.Delay`."""
+
+    # Parameter values are all equivalent, but test wraparound
+    @pytest.mark.parametrize("d", [50, 100050, -99950])
+    def test_delay(self, d: int) -> None:
+        """Test basic functionality."""
+        wgn = WGN(3.0, 1)
+        delay = Delay(wgn, d)
+        orig = wgn.sample(100000, 1).compute()
+        delayed = delay.sample(100000, 1).compute()
+        np.testing.assert_equal(orig[:-50], delayed[50:])
+        np.testing.assert_equal(orig[-50:], delayed[:50])
+
+
 @pytest.mark.parametrize("op, name", [(operator.add, "+"), (operator.sub, "-"), (operator.mul, "*")])
 def test_combine(op: Callable[[Any, Any], Any], name: str) -> None:  # noqa: D
     """Test :class:`katgpucbf.dsim.signal.CombinedSignal`."""
@@ -131,6 +146,7 @@ class TestParseSignals:
             ("cw(1, 2) - cw(3, 4) * cw(5, 6);", [CW(1, 2) - CW(3, 4) * CW(5, 6)]),
             ("wgn(0.5);", [WGN(0.5, mock.ANY)]),
             ("cw(1, 2) + 0.25;", [CW(1, 2) + Constant(0.25)]),
+            ("delay(cw(1, 2) - wgn(1.5, 12345), 42);", [Delay(CW(1, 2) - WGN(1.5, 12345), 42)]),
         ],
     )
     def test_success(self, text: str, expected: Signal) -> None:

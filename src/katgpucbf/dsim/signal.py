@@ -305,6 +305,28 @@ class WGN(Random):
         return f"wgn({self.std}, {self.entropy})"
 
 
+@dataclass
+class Delay(Signal):
+    """Delay another signal by an integer number of samples.
+
+    Parameters
+    ----------
+    signal
+        Underlying signal to delay
+    delay
+        Number of samples to delay the signal (may be negative)
+    """
+
+    signal: Signal
+    delay: int
+
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
+        return da.roll(self.signal.sample(n, sample_rate), self.delay)
+
+    def __str__(self) -> str:
+        return f"delay({self.signal}, {self.delay})"
+
+
 def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
     assert len(tokens) == 1
     tokens = tokens[0]  # infix_operator passes the expression with an extra nesting level
@@ -337,6 +359,9 @@ def parse_signals(prog: str) -> List[Signal]:
 
     wgn(std [, entropy])
         See :class:`WGN`.
+
+    delay(signal, delay)
+        See :class:`Delay`.
     """
     var_table = {}
     output = []
@@ -359,6 +384,7 @@ def parse_signals(prog: str) -> List[Signal]:
     variable = pp.pyparsing_common.identifier("variable")
     real = pp.pyparsing_common.number
     integer = pp.pyparsing_common.integer
+    expr = pp.Forward()
     # See https://pyparsing-docs.readthedocs.io/en/latest/HowToUsePyparsing.html#expression-subclasses
     # for an explanation of + versus - in these rules (it helps give more
     # useful errors). I've been conservative with the use of - i.e., there
@@ -367,13 +393,15 @@ def parse_signals(prog: str) -> List[Signal]:
     cw.set_parse_action(lambda s, loc, tokens: CW(tokens[1], tokens[2]))
     wgn = pp.Keyword("wgn") + lpar - real + pp.Opt(comma - integer("entropy")) + rpar
     wgn.set_parse_action(lambda s, loc, tokens: WGN(tokens[1], tokens.get("entropy")))
+    delay = pp.Keyword("delay") + lpar - expr + comma - integer + rpar
+    delay.set_parse_action(lambda s, loc, tokens: Delay(tokens[1], tokens[2]))
     variable_expr = variable.copy()
     variable_expr.set_parse_action(get_variable)
     real_expr = real.copy()
     real_expr.set_parse_action(lambda s, loc, tokens: Constant(float(tokens[0])))
 
-    atom = real_expr | cw | wgn | variable_expr
-    expr = pp.infix_notation(
+    atom = real_expr | cw | wgn | delay | variable_expr
+    expr <<= pp.infix_notation(
         atom, [("*", 2, pp.OpAssoc.LEFT, _apply_operator), (pp.one_of("+ -"), 2, pp.OpAssoc.LEFT, _apply_operator)]
     )
     assignment = variable + eq - expr
