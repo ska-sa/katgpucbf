@@ -384,6 +384,7 @@ def parse_signals(prog: str) -> List[Signal]:
     variable = pp.pyparsing_common.identifier("variable")
     real = pp.pyparsing_common.number
     integer = pp.pyparsing_common.integer
+    signed_integer = pp.pyparsing_common.signed_integer
     expr = pp.Forward()
     # See https://pyparsing-docs.readthedocs.io/en/latest/HowToUsePyparsing.html#expression-subclasses
     # for an explanation of + versus - in these rules (it helps give more
@@ -393,7 +394,7 @@ def parse_signals(prog: str) -> List[Signal]:
     cw.set_parse_action(lambda s, loc, tokens: CW(tokens[1], tokens[2]))
     wgn = pp.Keyword("wgn") + lpar - real + pp.Opt(comma - integer("entropy")) + rpar
     wgn.set_parse_action(lambda s, loc, tokens: WGN(tokens[1], tokens.get("entropy")))
-    delay = pp.Keyword("delay") + lpar - expr + comma - integer + rpar
+    delay = pp.Keyword("delay") + lpar - expr + comma - signed_integer + rpar
     delay.set_parse_action(lambda s, loc, tokens: Delay(tokens[1], tokens[2]))
     variable_expr = variable.copy()
     variable_expr.set_parse_action(get_variable)

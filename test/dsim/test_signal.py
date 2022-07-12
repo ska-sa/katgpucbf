@@ -147,6 +147,7 @@ class TestParseSignals:
             ("wgn(0.5);", [WGN(0.5, mock.ANY)]),
             ("cw(1, 2) + 0.25;", [CW(1, 2) + Constant(0.25)]),
             ("delay(cw(1, 2) - wgn(1.5, 12345), 42);", [Delay(CW(1, 2) - WGN(1.5, 12345), 42)]),
+            ("delay(1, -123);", [Delay(Constant(1), -123)]),
         ],
     )
     def test_success(self, text: str, expected: Signal) -> None:
