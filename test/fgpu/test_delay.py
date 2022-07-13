@@ -101,6 +101,25 @@ def test_linear_invert_range(linear: LinearDelayModel) -> None:
     np.testing.assert_array_almost_equal(forward, np.arange(13000, 14000, 100))
 
 
+def test_linear_stability_delay() -> None:
+    """Test that delay is preserved over large timescales."""
+    model = LinearDelayModel(10**14, 1000000.001, 0.0, 0.0, 0.0)
+    time, residual, phase = model.invert(2 * 10**14)
+    assert time == 2 * 10**14 - 1000000
+    assert residual == pytest.approx(0.001, abs=1e-9)
+    assert phase == 0.0
+
+
+def test_linear_stability_delay_rate() -> None:
+    """Test that delay rate can be accurately applied over long periods."""
+    model = LinearDelayModel(10**14, 0.0, 1e-10, 0.0, 0.0)
+    time, residual, phase = model.invert(2 * 10**14)
+    assert time == 2 * 10**14 - 10**4
+    # Actual value is -1e-6 + 1e-16 - 1e-26 + 1e-36 etc
+    assert residual == pytest.approx(-1e-6 + 1e-16)
+    assert phase == 0.0
+
+
 def test_linear_bad_delay_rate() -> None:
     """Delay rate can't be -1 or less."""
     with pytest.raises(ValueError):
