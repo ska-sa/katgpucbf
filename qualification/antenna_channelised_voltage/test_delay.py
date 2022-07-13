@@ -32,10 +32,6 @@ from katgpucbf.fgpu.delay import wrap_angle
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
 
-DELAY_RATES = [500e-12, 502.5e-12, 1.9e-9]
-PHASES = [-math.pi, math.pi, 0, 0.01]
-PHASE_RATES = [0.0, 186.13]
-
 
 async def test_delay_application_time(
     correlator: CorrelatorRemoteControl,
