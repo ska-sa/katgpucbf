@@ -15,12 +15,12 @@
 ################################################################################
 
 """Mechanism for logging Pytest's output to a PDF."""
+import io
 import logging
 import time
-from typing import Any, Mapping, Optional
+from typing import Optional
 
 import matplotlib.figure
-import tikzplotlib
 
 logger = logging.getLogger(__name__)
 
@@ -61,28 +61,14 @@ class Reporter:
             raise ValueError("Cannot have figure without a current step")
         self._cur_step.append({"$msg_type": "figure", "code": code})
 
-    def figure(
-        self,
-        figure: matplotlib.figure.Figure,
-        clean_figure: bool = True,
-        tikzplotlib_kwargs: Mapping[str, Any] = {},  # noqa: B006
-    ) -> None:
+    def figure(self, figure: matplotlib.figure.Figure) -> None:
         """Add a matplotlib figure to the report.
 
         Parameters
         ----------
         figure
             The figure to plot
-        clean_figure
-            If true (default), use :func:`tikzplotlib.clean_figure` on the
-            figure to remove points outside the axis limits, etc.
-            Note that this may *modify* the figure.
-        tikzplotlib_kwargs
-            Extra keyword arguments to pass to :func:`tikzplotlib.get_tikz_code`.
         """
-        if clean_figure:
-            tikzplotlib.clean_figure(figure)
-        kwargs = dict(tikzplotlib_kwargs)
-        kwargs.setdefault("table_row_sep", r"\\")
-        kwargs.setdefault("strict", True)
-        self.raw_figure(tikzplotlib.get_tikz_code(figure, **kwargs))
+        content = io.StringIO()
+        figure.savefig(content, format="pgf", backend="pgf")
+        self.raw_figure(content.getvalue())

@@ -135,10 +135,7 @@ async def test_channel_shape(
             if ymin < y:
                 ax.axhline(y, dashes=(1, 1), color="black")
                 ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
-        # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-        pdf_report.figure(
-            fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
-        )
+        pdf_report.figure(fig)
 
     pdf_report.step("Check attenuation bandwidth.")
     width_3db = cutoff_bandwidth(db, -3, 1 / resolution)

@@ -289,12 +289,4 @@ async def test_delay(
         ax.set_ylabel("Error (degrees)")
         x = np.arange(1, receiver.n_chans)
         ax.plot(x, np.rad2deg(delta))
-        pdf_report.figure(
-            fig,
-            tikzplotlib_kwargs=dict(
-                extra_axis_parameters=[
-                    "scaled ticks=false",  # Prevent common factor being extracted
-                    "yticklabel style={/pgf/number format/fixed}",  # Prevent scientific notation
-                ]
-            ),
-        )
+        pdf_report.figure(fig)
