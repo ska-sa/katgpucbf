@@ -225,8 +225,8 @@ async def test_delay(
     of the expected value.
     """
     receiver = receive_baseline_correlation_products
-    # Minimum, maximum, small coarse delay, and resolution step
-    delays = [0.0, 2.5e-12, 2.75 / receiver.scale_factor_timestamp, 75e-6]
+    # Minimum, maximum, resolution step, and a small coarse delay
+    delays = [0.0, 75e-6, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
     n_dsims = len(correlator.dsim_clients)
     assert N_POLS * n_dsims > len(delays)  # > rather than >= because we need a reference
 
@@ -280,7 +280,7 @@ async def test_delay(
         rms_error = np.sqrt(np.mean(np.square(delta)))
         pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f} degrees.")
         pdf_report.detail(f"RMS error is {np.rad2deg(rms_error):.5f} degrees.")
-        expect(np.rad2deg(max_error) < 1.0, "Maximum error is more than 1 degree")
+        expect(np.rad2deg(max_error) <= 1.0, "Maximum error is more than 1 degree")
 
         fig = Figure()
         ax = fig.subplots()
