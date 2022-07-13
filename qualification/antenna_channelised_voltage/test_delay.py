@@ -18,6 +18,7 @@
 
 import asyncio
 import math
+from ast import literal_eval
 from typing import List, Optional, cast
 
 import aiokatcp
@@ -31,6 +32,10 @@ from katgpucbf.fgpu.delay import wrap_angle
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
+
+MAX_DELAY = 75e-6  # seconds
+MAX_DELAY_RATE = 1.9e-9
+MAX_PHASE_RATE = 186.13  # rad/second
 
 
 async def test_delay_application_time(
@@ -190,6 +195,58 @@ async def test_delay_enable_disable(
     expect(max_elapsed < 1.0)
 
 
+async def test_delay_sensors(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+    expect,
+) -> None:
+    r"""Test that delay sensors work correctly.
+
+    Requirements verified: none
+
+    Verification method:
+
+    Verified by test. Load a set of random delays with a load time in the
+    future. Once that time arrives, check that the sensors report the correct
+    values.
+    """
+    receiver = receive_baseline_correlation_products
+    delay_tuples = []  # Expected sensor values
+    delay_strs = []  # Strings to load
+    rng = np.random.default_rng(seed=31)
+    now = aiokatcp.decode(float, (await correlator.dsim_clients[0].request("time"))[0][0])
+    load_time = now + 2.0
+    load_ts = receiver.unix_to_timestamp(load_time)
+    for _ in range(receiver.n_inputs):
+        delay = rng.uniform(0.0, MAX_DELAY)
+        delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE)
+        phase = rng.uniform(-np.pi, np.pi)
+        phase_rate = rng.uniform(0.0, MAX_PHASE_RATE)
+        delay_strs.append(f"{delay},{delay_rate}:{phase},{phase_rate}")
+        delay_tuples.append((load_ts, delay, delay_rate, phase, phase_rate))
+
+    def delay_sensor_value(label: str) -> tuple:
+        return literal_eval(correlator.sensors[f"antenna_channelised_voltage-{label}-delay"].value.decode())
+
+    pdf_report.step("Load delays.")
+    pdf_report.detail(f"Set delays to load at {load_time} (timestamp {load_ts}).")
+    await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", load_time, *delay_strs)
+    await asyncio.sleep(0.1)  # Allow time for any invalid sensor updates to propagate
+    pdf_report.detail("Check that sensors do not reflect the future.")
+    for label in receiver.input_labels:
+        value = delay_sensor_value(label)
+        expect(value[1:] == (0.0, 0.0, 0.0, 0.0))
+    pdf_report.step("Wait for load time and check sensors.")
+    pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
+    _, chunk = await receiver.next_complete_chunk(min_timestamp=load_ts)
+    receiver.stream.add_free_chunk(chunk)
+    for expected, label in zip(delay_tuples, receiver.input_labels):
+        value = delay_sensor_value(label)
+        pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
+        expect(value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value")
+
+
 async def test_delay(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -226,7 +283,7 @@ async def test_delay(
     """
     receiver = receive_baseline_correlation_products
     # Minimum, maximum, resolution step, and a small coarse delay
-    delays = [0.0, 75e-6, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
+    delays = [0.0, MAX_DELAY, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
     n_dsims = len(correlator.dsim_clients)
     assert N_POLS * n_dsims > len(delays)  # > rather than >= because we need a reference
 
