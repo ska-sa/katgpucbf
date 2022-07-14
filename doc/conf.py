@@ -75,6 +75,10 @@ intersphinx_mapping = {
     "spead2": ("https://spead2.readthedocs.io/en/latest", None),
     "katsdpsigproc": ("https://katsdpsigproc.readthedocs.io/en/latest", None),
     "katsdptelstate": ("https://katsdptelstate.readthedocs.io/en/latest", None),
+    "black": ("https://black.readthedocs.io/en/stable/", None),
+    "flake8": ("https://flake8.pycqa.org/en/latest/", None),
+    "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
+    "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
 }
 
 
