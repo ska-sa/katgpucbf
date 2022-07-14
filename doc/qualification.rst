@@ -91,7 +91,7 @@ run
 
    qualification/report/generate_pdf.py report.json report.pdf
 
-This requires at least ``texlive-base``, ``texlive-latex-extra`` and
+This requires at least ``texlive-base``, ``texlive-latex-extra``, ``texlive-science`` and
 ``latexmk``. This step doesn't interact with the live system at all, so it is
 possible to copy/mount the JSON file to another machine to run this step.
 
