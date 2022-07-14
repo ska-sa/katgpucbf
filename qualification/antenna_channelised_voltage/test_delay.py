@@ -288,5 +288,6 @@ async def test_delay(
         ax.set_xlabel("Channel")
         ax.set_ylabel("Error (degrees)")
         x = np.arange(1, receiver.n_chans)
-        ax.plot(x, np.rad2deg(delta))
+        # It's very noisy, and a thinner linewidth allows more detail to be seen
+        ax.plot(x, np.rad2deg(delta), linewidth=0.3)
         pdf_report.figure(fig)

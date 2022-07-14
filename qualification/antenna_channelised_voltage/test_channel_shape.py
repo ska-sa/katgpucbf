@@ -112,8 +112,8 @@ async def test_channel_shape(
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 
-    # The maximum is to avoid errors when data is 0
-    db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak)
+    with np.errstate(divide="ignore"):  # Avoid warnings when taking log of 0
+        db = 10 * np.log10(hdr_data / peak)
     x = np.linspace(-2.5, 2.5, len(hdr_data))
 
     for xticks, ymin, title in [
@@ -122,19 +122,25 @@ async def test_channel_shape(
     ]:
         fig = Figure()
         ax = fig.subplots()
-        # pgfplots seems to struggle if data is too far outside ylim
-        ax.plot(x, np.maximum(db, ymin - 10))
+        ax.plot(x, db)
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
         ax.set_xticks(xticks)
         ax.set_xlim(xticks[0], xticks[-1])
-        ax.set_ylim(ymin, 0)
+        ax.set_ylim(ymin, -0.05 * ymin)
 
         for y in [-3, -53]:
             if ymin < y:
                 ax.axhline(y, dashes=(1, 1), color="black")
-                ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
+                ax.annotate(
+                    f"{y} dB",
+                    (xticks[-1], y),
+                    xytext=(-3, -3),
+                    textcoords="offset points",
+                    horizontalalignment="right",
+                    verticalalignment="top",
+                )
         pdf_report.figure(fig)
 
     pdf_report.step("Check attenuation bandwidth.")

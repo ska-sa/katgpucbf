@@ -77,11 +77,6 @@ async def test_linearity(
     mse = np.square(cw_scales - linear_test_result).mean()
     pdf_report.detail(f"MSE is: {mse}")
 
-    # Check for any zeros at the end of the sequence prior to plotting. Remove if so.
-    zero_locations = np.where(linear_test_result == 0)[0]
-    if len(zero_locations):
-        linear_test_result = linear_test_result[: zero_locations[0]]
-
     # Generate plot with reference
     labels = [f"$2^{{-{i}}}$" for i in range(len(cw_scales))]
     title = "Power relative to input CW level"
@@ -89,7 +84,8 @@ async def test_linearity(
     fig = Figure()
     ax = fig.subplots()
     ax.plot(20 * np.log10(cw_scales), label="Reference")
-    ax.plot(20 * np.log10(linear_test_result), label="Measured")
+    with np.errstate(divide="ignore"):  # Avoid warnings when the value is zero
+        ax.plot(20 * np.log10(linear_test_result), label="Measured")
     ax.set_title(title)
     ax.set_xlabel("CW Scale")
     ax.set_ylabel("dB")
