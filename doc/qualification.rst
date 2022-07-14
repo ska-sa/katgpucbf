@@ -48,8 +48,8 @@ correlator network. The data rate can become quite high for larger array sizes.
 
 Configuration
 -------------
-You will need to create a :file:`pytest.ini` file in the root of your
-working copy. It is specific to your test environment, so do not commit it to
+You will need to create a :file:`qualification/pytest.ini` file.
+It is specific to your test environment, so do not commit it to
 git. You'll need to set it up only once per machine that you're deploying on,
 and it'll look something like this:
 
