@@ -70,7 +70,8 @@ async def test_consistency(
     pdf_report.step("Plot spectrum")
     fig = matplotlib.figure.Figure()
     ax = fig.subplots()
-    ax.plot(10 * np.log10(data[0][:, 0, 0, 0] / (2**31 - 1)))
+    # It's very noisy, and a thinner linewidth allows more detail to be seen
+    ax.plot(10 * np.log10(data[0][:, 0, 0, 0] / (2**31 - 1)), linewidth=0.3)
     ax.set_title("Power")
     ax.set_xlabel("Channel")
     ax.set_ylabel("dBfs")

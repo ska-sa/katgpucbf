@@ -146,7 +146,17 @@ def host_config_querier(pytestconfig) -> HostConfigQuerier:
 @pytest.fixture(autouse=True)
 def matplotlib_report_style() -> Generator[None, None, None]:
     """Set the style of all matplotlib plots."""
-    with matplotlib.style.context("ggplot"):
+    with matplotlib.style.context("ggplot"), matplotlib.rc_context(
+        {
+            "pgf.texsystem": "pdflatex",
+            # Serif fonts better match the rest of the document
+            "font.family": "serif",
+            # Clearing these make matplotlib assume the default LaTeX fonts
+            "font.serif": [],
+            "font.sans-serif": [],
+            "font.monospace": [],
+        }
+    ):
         yield
 
 
