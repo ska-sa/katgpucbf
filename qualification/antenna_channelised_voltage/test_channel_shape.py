@@ -33,19 +33,25 @@ def _cutoff_interp(x0: float, y0: float, x1: float, y1: float, cutoff: float) ->
 def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     """Measure width of the response at a given power level.
 
-    Estimate the width of the central portion where `data` is above `cutoff`,
-    in units of channels. If there are sidelobes that rise about `cutoff`,
-    they're included in the width. `step` is the step between samples.
+    Estimate the width of the region where `data` is above `cutoff`. If the
+    cutoff is crossed multiple times, the distance between the two most extreme
+    values is used.
+
+    The return value is in unit of channels, but the `data` may have sub-channel
+    resolution, with a step of `step` channels between samples.
     """
     above = np.nonzero(data >= cutoff)[0]
     assert len(above) > 0
+    # Minimum and maximum index that contain data above the cutoff
     left = above[0]
     right = above[-1]
+    # Use linear interpolation to find fractional index values where the
+    # cutoff is crossed.
     if left > 0:
         left = _cutoff_interp(left - 1, data[left - 1], left, data[left], cutoff)
     if right < len(data) - 1:
         right = _cutoff_interp(right + 1, data[right + 1], right, data[right], cutoff)
-    return (right - left) * step
+    return (right - left) * step  # Scale from indices to channels
 
 
 async def test_channel_shape(
