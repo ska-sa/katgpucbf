@@ -202,10 +202,6 @@ The values contained in the immediate items may change from heap to heap, or
 they may be static, with the data payload being the only changing thing,
 depending on the nature of the stream.
 
-.. todo::  ``NGC-676``
-    Consolidate ``fgpu.networking`` and ``xbgpu.networking`` (i.e. input and
-    output packet format sections) here.
-
 F-Engine Data Format
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -219,23 +215,6 @@ from more or fewer multicast addresses.
 
 The only immediate item in the digitiser's output heap used by the F-engine is
 the ``timestamp``.
-
-
-Output Heap Payload
-"""""""""""""""""""
-
-In the case of an 8192-channel array with 64 X-engines, each heap contains 8192/64 =
-128 channels. By default, there are 256 time samples per channel. Each sample is
-dual-pol complex 8-bit data for a combined sample width of 32 bits or 4 bytes.
-
-The heap payload size in this example is equal to
-
-    channels_per_heap * samples_per_channel * complex_sample_size = 128 * 256 * 4 = 131,072 = 128 KiB.
-
-The payload size defaults to a power of 2, so that packet boundaries in a heap
-align with channel boundaries. This isn't important for the :mod:`spead2`
-receiver used in the X-engine, but it may be useful for potential third party
-consumers of F-engine data.
 
 Output Packet Format
 """""""""""""""""""""
@@ -275,35 +254,12 @@ The immediate items specific to the F-engine output stream are as follows:
 X-Engine Data Format
 ^^^^^^^^^^^^^^^^^^^^^
 
-Input Data Format
-""""""""""""""""""
+Input
+"""""
 The X-Engine receives antenna channelised data from the output of the F-engines,
 as discussed above. Each X-Engine receives data from each F-engine, but only
 from a subset of the channels. Thus the multicast address subscribed to by the
 X-Engine's input stream has a many-to-one relationship.
-
-Output Heap Payload
-"""""""""""""""""""
-
-Each correlation product contains a real and imaginary sample (both 32-bit
-integer) for a combined size of 8 bytes per baseline. The ordering of the
-correlation products is given in the :samp:`{xeng-stream-name}-bls-ordering`
-sensor in the product controller, but can be calculated deterministically:
-:func:`~katgpucbf.xbgpu.correlation.get_baseline_index` indicates the ordering
-of the baselines, and the four individual correlation products are always
-ordered ``aa, ba, ab, bb``, where `a` and `b` can either be vertical or
-horizontal polarisation (``v`` or ``h``), depending on the configuration of the
-instrument.
-
-All the baselines for a single channel are grouped together contiguously in the
-heap, and each X-engine correlates a contiguous subset of the entire spectrum.
-For example, in an 80-antenna, 8192-channel array with 64 X-engines, each X-engine output
-heap contains 8192/64 = 128 channels.
-
-The heap payload size in this example is equal to
-
-  channels_per_heap * correlation_products * complex_sample_size = 128 * 12960 * 8 = 13,271,040 bytes or 12.656 MiB.
-
 
 Output Packet Format
 """""""""""""""""""""

@@ -10,12 +10,10 @@ Welcome to katgpucbf's documentation!
    introduction
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 4
    :caption: Installation and Operation
 
    operation
-   fgpu.networking
-   xbgpu.networking
 
 .. toctree::
    :maxdepth: 2
