@@ -19,6 +19,7 @@
 """Generate a PDF based on the intermediate JSON output."""
 import argparse
 import json
+import logging
 import os
 import pathlib
 import re
@@ -29,6 +30,7 @@ from datetime import date, datetime
 from typing import Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
+import docutils.writers.latex2e
 import pytest
 from docutils.core import publish_parts
 from dotenv import dotenv_values
@@ -48,6 +50,7 @@ from pylatex import (
 from pylatex.base_classes import Container, Environment
 from pylatex.base_classes.latex_object import LatexObject
 from pylatex.labelref import Hyperref, Label, Marker
+from pylatex.lists import Description
 from pylatex.package import Package
 from pylatex.utils import bold, escape_latex
 
@@ -78,9 +81,27 @@ def readable_duration(duration: float) -> str:
             return f"{int(duration)} h {minutes} m {seconds:.3f} s"
 
 
+class DocumentClass(docutils.writers.latex2e.DocumentClass):
+    """Override docutils to demote all sections by two levels."""
+
+    def __init__(self) -> None:
+        super().__init__("article", False)
+        del self.sections[:2]
+
+
+class Translator(docutils.writers.latex2e.LaTeXTranslator):
+    """Override docutils to use :class:`DocumentClass`."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.d_class = DocumentClass()
+
+
 def rst2latex(text: str) -> str:
     """Turn a section of ReStructured Text (like a docstring) into LaTeX."""
-    return publish_parts(source=text, writer_name="latex")["body"]
+    writer = docutils.writers.latex2e.Writer()
+    writer.translator_class = Translator
+    return publish_parts(source=text, writer=writer)["body"]
 
 
 @dataclass
@@ -125,6 +146,7 @@ class Result:
     nodeid: str
     name: str
     blurb: str
+    requirements: List[str] = field(default_factory=list)
     steps: List[Step] = field(default_factory=list)
     outcome: Literal["passed", "failed", "skipped"] = "failed"
     failure_messages: List[str] = field(default_factory=list)
@@ -227,6 +249,7 @@ def _parse_report_data(result: Result, msg: dict) -> None:
             result.blurb = msg["blurb"]
         if result.start_time is None:
             result.start_time = float(msg["test_start"])
+        result.requirements = msg["requirements"]
     elif msg_type == "config":
         msg = dict(msg)  # Avoid mutating the caller's copy
         msg.pop("$msg_type")  # We don't need this.
@@ -383,6 +406,19 @@ def collapse_versions(versions: Set[str]) -> str:
         return next(iter(versions))
     else:
         return "multiple versions"
+
+
+def get_requirement_tex(name: str) -> str:
+    """Get the LaTeX code snippet describing a requirement.
+
+    If the requirement is unknown, it logs an error and returns filler text.
+    """
+    path = RESOURCE_PATH / "requirements_text" / f"{name}.tex"
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        logging.error("Text for requirement %s not found", name)
+        return rf"\textcolor{{red}}{{Text for requirement {name} not found.}}"
 
 
 def _format_image(image: str) -> LatexObject:
@@ -544,6 +580,40 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
     section.append(f"Total test duration: {readable_duration(total_duration)}")
 
 
+def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
+    if requirements:
+        with section.create(Description()) as desc:
+            for requirement in requirements:
+                desc.add_item(requirement, NoEscape(get_requirement_tex(requirement)))
+    else:
+        section.append("None")
+
+
+def _doc_outcome(section: Container, test_configuration: TestConfiguration, result: Result) -> None:
+    section.append("Outcome: ")
+    section.append(TextColor("green" if result.outcome == "passed" else "red", result.outcome.upper()))
+    section.append(Command("hspace", "1cm"))
+    assert result.start_time is not None
+    section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time)).strftime('%T')}")
+    section.append(Command("hspace", "1cm"))
+    section.append(f"Duration: {readable_duration(result.duration)} seconds\n")
+
+    with section.create(LongTable(r"|l|p{0.4\linewidth}|")) as config_table:
+        config_table.add_hline()
+        config_table.add_row((MultiColumn(2, align="|c|", data=bold("Test Configuration")),))
+        config_table.add_hline()
+        for key, value in result.config.items():
+            if key == "correlator":
+                # Turn the raw UUID into a section reference
+                for i, correlator in enumerate(test_configuration.correlators, start=1):
+                    if correlator.uuid == UUID(value):
+                        marker = Marker(value, prefix="correlator")
+                        value = Hyperref(marker, f"Configuration {i}")
+                        break
+            config_table.add_row([key.capitalize(), value])
+            config_table.add_hline()
+
+
 def document_from_json(input_data: Union[str, list]) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
@@ -592,31 +662,13 @@ def document_from_json(input_data: Union[str, list]) -> Document:
         for result in results:
             with section.create(Subsection(fix_test_name(result.name), label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
-                section.append("Outcome: ")
-                section.append(TextColor("green" if result.outcome == "passed" else "red", result.outcome.upper()))
-                section.append(Command("hspace", "1cm"))
-                assert result.start_time is not None
-                section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time)).strftime('%T')}")
-                section.append(Command("hspace", "1cm"))
-                section.append(f"Duration: {readable_duration(result.duration)} seconds\n")
-
-                with section.create(LongTable(r"|l|p{0.4\linewidth}|")) as config_table:
-                    config_table.add_hline()
-                    config_table.add_row((MultiColumn(2, align="|c|", data=bold("Test Configuration")),))
-                    config_table.add_hline()
-                    for key, value in result.config.items():
-                        if key == "correlator":
-                            # Turn the raw UUID into a section reference
-                            for i, correlator in enumerate(test_configuration.correlators, start=1):
-                                if correlator.uuid == UUID(value):
-                                    marker = Marker(value, prefix="correlator")
-                                    value = Hyperref(marker, f"Configuration {i}")
-                                    break
-                        config_table.add_row([key.capitalize(), value])
-                        config_table.add_hline()
-
+                with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
+                    _doc_requirements(requirements_sec, result.requirements)
+                with section.create(Subsubsection("Results")) as results_sec:
+                    _doc_outcome(results_sec, test_configuration, result)
                 with section.create(Subsubsection("Procedure", label=False)) as procedure:
                     with section.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
+                        assert result.start_time is not None
                         for step in result.steps:
                             procedure_table.add_hline()
                             procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
@@ -646,6 +698,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
 def main():
     """Convert a JSON report to a PDF."""
+    logging.basicConfig()
     parser = argparse.ArgumentParser()
     parser.add_argument("input", help="Output of pytest --report-log=...")
     parser.add_argument("pdf", help="PDF file to write")

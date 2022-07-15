@@ -39,6 +39,7 @@ MAX_DELAY_RATE = 1.9e-9
 MAX_PHASE_RATE = 186.13  # rad/second
 
 
+@pytest.mark.requirements("CBF-REQ-0077")
 async def test_delay_application_time(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -47,17 +48,8 @@ async def test_delay_application_time(
 ) -> None:
     """Test that delay/phase changes are applied at the correct time.
 
-    Requirements verified:
-
-    CBF-REQ-0077
-        The CBF shall delay execution of Continuous Parameter Control commands until
-        a UTC time, as received on the CAM interface, with an execution time
-        accuracy of <= 10 ms, provided the command is received at least 200ms
-        before the execution time, and the execution time delay is no more than
-        2 seconds.
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verification by means of test. A 90 degree phase change is loaded for one
     polarisation at a chosen time. The actual application time is estimated by
     checking the ratio of real to imaginary components in the corresponding
@@ -116,6 +108,7 @@ async def test_delay_application_time(
     expect(delta < 0.01)
 
 
+@pytest.mark.requirements("CBF-REQ-0066,CBF-REQ-0110,CBF-REQ-0200")
 async def test_delay_enable_disable(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -124,22 +117,8 @@ async def test_delay_enable_disable(
 ) -> None:
     """Test that delay and phase compensation can be enabled and disabled.
 
-    Requirements verified:
-
-    CBF-REQ-0066
-        The CBF shall, on request via the CAM interface, enable or disable
-        delay compensation.
-
-    CBF-REQ-0110
-        The CBF shall, on request via the CAM interface, enable or disable
-        phase compensation.
-
-    CBF-REQ-0200
-        The CBF shall receive and apply a complete set of phase-up coefficients
-        from SP at a rate of up to once a second.
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verified by means of test. Insert a signal with a tone. Enable delay/phase
     compensation and check that it is applied, then disable and check again.
     Check that all requests complete within 1s.
@@ -210,10 +189,8 @@ async def test_delay_sensors(
 ) -> None:
     r"""Test that delay sensors work correctly.
 
-    Requirements verified: none
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verified by test. Load a set of random delays with a load time in the
     future. Once that time arrives, check that the sensors report the correct
     values.
@@ -253,6 +230,7 @@ async def test_delay_sensors(
         expect(value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value")
 
 
+@pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
 async def test_delay(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -261,27 +239,8 @@ async def test_delay(
 ) -> None:
     r"""Test performance of delay compensation.
 
-    Requirements verified:
-
-    CBF-REQ-0128
-        The CBF shall have an overall per-antenna phase error of
-        :math:`\le \ang{1}` RMS for correlation products, including
-        quantisation effects and imperfect phase tracking.
-
-    CBF-REQ-0185
-        The CBF shall apply the delay polynomial, as provided via the CAM
-        interface, with the following criteria:
-
-        1. range of delay: 0 to :math:`\ge \SI{75}{\micro\second}`.
-        2. resolution of delay: :math:`\le \SI{2.5}{\pico\second}`.
-        3. range of rate of change of delay:
-           :math:`\le \SI{500}{\pico\second\per\second}` to
-           :math:`\ge \SI{1.9}{\nano\second\per\second}`.
-        4. resolution of rate of change of delay:
-           :math:`\le \SI{2.5}{\pico\second\per\second}`.
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verified by test. Set a variety of delays on different inputs. Delay the
     corresponding dsim signal by the same amount, rounded to the nearest 8
     samples. Check that the resulting phases are within :math:`\ang{1}` degree

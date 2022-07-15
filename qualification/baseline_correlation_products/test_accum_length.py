@@ -26,6 +26,7 @@ from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
 
 
+@pytest.mark.requirements("CBF-REQ-0096")
 async def test_accum_length(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -34,15 +35,8 @@ async def test_accum_length(
 ) -> None:
     """Test that accumulations are set to the correct length.
 
-    Requirements verified:
-
-    CBF-REQ-0096
-        The CBF shall set the Baseline Correlation Products accumulation
-        interval to 500ms. The minimum permissible accumulation interval is
-        480ms.
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verify by testing that the accumulation interval is within specification
     when set to 500ms. Inject a noise signal and check that the measured
     signal has the expected power.
