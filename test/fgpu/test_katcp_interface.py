@@ -165,7 +165,7 @@ class TestKatcpRequests:
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain-all")
 
-    @pytest.mark.parametrize("correct_delay_strings", [("3.76,0.12:7.322,1.91", "2.67,0.02:5.678,1.81")])
+    @pytest.mark.parametrize("correct_delay_strings", [("3.76e-9,0.12e-9:7.322,1.91", "2.67e-9,0.02e-9:5.678,1.81")])
     async def test_delay_model_update_correct(self, engine_client, correct_delay_strings):
         """Test correctly-formed delay strings and validate the updates.
 
