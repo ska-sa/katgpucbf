@@ -67,8 +67,7 @@ async def test_delay_application_time(
     pdf_report.step("Inject correlated white noise signal.")
     await correlator.dsim_clients[0].request("signals", "common=wgn(0.1); common; common;")
     pdf_report.detail("Wait for updated signal to propagate through the pipeline.")
-    _, chunk = await receiver.next_complete_chunk()
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk()
 
     attempts = 5
     advance = 0.2
@@ -147,11 +146,9 @@ async def test_delay_enable_disable(
 
     async def measure_phase() -> float:
         """Retrieve the phase of the chosen channel from the next chunk."""
-        _, chunk = await receiver.next_complete_chunk()
-        assert isinstance(chunk.data, np.ndarray)
-        value = chunk.data[channel, bl_idx, :]
+        _, data = await receiver.next_complete_chunk()
+        value = data[channel, bl_idx, :]
         phase = np.arctan2(value[1], value[0])
-        receiver.stream.add_free_chunk(chunk)
         return phase
 
     async def set_delays(delays: List[str]) -> None:
@@ -243,8 +240,7 @@ async def test_delay_sensors(
         expect(value[1:] == (0.0, 0.0, 0.0, 0.0))
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
-    _, chunk = await receiver.next_complete_chunk(min_timestamp=load_ts)
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk(min_timestamp=load_ts)
     for expected, label in zip(delay_tuples, receiver.input_labels):
         value = delay_sensor_value(label)
         pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
@@ -315,13 +311,11 @@ async def test_delay(
 
     pdf_report.step("Verify results")
     pdf_report.detail("Receive an accumulation")
-    _, chunk = await receiver.next_complete_chunk()
-    assert isinstance(chunk.data, np.ndarray)
+    _, chunk_data = await receiver.next_complete_chunk()
     # Convert to floating-point complex values for easier analysis
-    data = chunk.data.astype(np.float64).view(np.complex128)[..., 0]
+    data = chunk_data.astype(np.float64).view(np.complex128)[..., 0]
     # cast to work around https://github.com/numpy/numpy/issues/21972
     phase = cast(NDArray[np.float64], np.angle(data))
-    receiver.stream.add_free_chunk(chunk)
 
     for i, delay in enumerate(delays):
         # The delay is mostly cancelling out the delay applied in the dsim, but

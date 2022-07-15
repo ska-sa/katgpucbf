@@ -48,11 +48,9 @@ async def test_gains(
     """
 
     async def next_chunk_data() -> NDArray[np.complex128]:
-        _, chunk = await receiver.next_complete_chunk()
-        assert isinstance(chunk.data, np.ndarray)  # Keeps mypy happy
+        _, chunk_data = await receiver.next_complete_chunk()
         # Turn 2-element axis into complex number
-        data = chunk.data.astype(np.float64).view(np.complex128)[..., 0]
-        receiver.stream.add_free_chunk(chunk)
+        data = chunk_data.astype(np.float64).view(np.complex128)[..., 0]
         return data
 
     receiver = receive_baseline_correlation_products

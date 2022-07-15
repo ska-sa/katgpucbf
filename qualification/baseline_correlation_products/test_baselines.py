@@ -89,13 +89,11 @@ async def test_baseline_correlation_products(
         for inp, g in gains.items():
             await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
 
-        _, chunk = await receiver.next_complete_chunk()
-        # This assert isn't particularly important, but keeps mypy happy.
-        assert isinstance(chunk.data, np.ndarray)
+        _, data = await receiver.next_complete_chunk()
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
             bl = receiver.bls_ordering[i]
-            loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
+            loud_bls = np.nonzero(data[channel, :, 0])[0]
             pdf_report.detail(
                 f"Checking {bl}: {len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
                 f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
@@ -109,7 +107,6 @@ async def test_baseline_correlation_products(
                     is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl], pdf_report),
                     "Signal found in unexpected baseline.",
                 )
-        receiver.stream.add_free_chunk(chunk)
 
 
 def is_signal_expected_in_baseline(

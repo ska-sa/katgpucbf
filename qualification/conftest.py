@@ -414,7 +414,6 @@ async def receive_baseline_correlation_products(
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
-    _, chunk = await receiver.next_complete_chunk(max_delay=0)
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk(max_delay=0)
     yield receiver
     receiver.stream.stop()
