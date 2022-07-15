@@ -23,7 +23,7 @@ from matplotlib.figure import Figure
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-from . import compute_hdr_spectra
+from . import sample_tone_response_hdr
 
 
 def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[float]:
@@ -35,11 +35,11 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
 
     Parameters
     ----------
-    hdr_data_db: np.ndarray
-        A 2-dimensional array where axis=0 represents the different captured spectra,
-        and axis=1 represents the samples in a sprectrum.
-    base_channel: np.ndarray
-        This represents the channels used is the channelisation test.
+    hdr_data_db:
+        A 2-dimensional array where axis 0 represents the different captured spectra,
+        and axis 1 represents the samples in a sprectrum (in dB).
+    base_channel:
+        Channel numbers corresponding to the first axis of `hdr_data_db`.
 
     Returns
     -------
@@ -49,11 +49,11 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
 
     for spectrum, channel in zip(hdr_data_db, base_channel):
         peak_value = np.max(spectrum[channel])
-        below_peak_idxs = np.nonzero(spectrum < peak_value)
-        next_peak_value = np.max(spectrum[below_peak_idxs])
+        # below_peak_idxs = np.nonzero(spectrum < peak_value)
+        # next_peak_value = np.max(spectrum[below_peak_idxs])
+        next_peak_value = max(np.max(spectrum[:channel]), np.max(spectrum[channel + 1 :]))
         peak_diff = peak_value - next_peak_value
         sfdr_measurements.append(peak_diff)
-
     return sfdr_measurements
 
 
@@ -84,7 +84,7 @@ async def test_channelisation_and_sfdr(
     channel_skip = 31
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
-    selected_channels = np.arange(channel_range_start, receiver.n_chans, channel_skip)
+    rel_freqs = np.arange(channel_range_start, receiver.n_chans, channel_skip)
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
     iterations = 3
 
@@ -94,43 +94,45 @@ async def test_channelisation_and_sfdr(
     # and using the high-gain results to more accurately measure the samples
     # whose power is low enough not to saturate.
 
-    hdr_data, peak_data_hist, peak_chan_hist = await compute_hdr_spectra(
+    pdf_report.detail(f"Collect power measurements for {len(rel_freqs)} channels.")
+    hdr_data, peak_data_hist, peak_chan_hist = await sample_tone_response_hdr(
         correlator=correlator,
         receiver=receiver,
         iterations=iterations,
         gain_step=gain_step,
         amplitude=amplitude,
-        selected_channels=selected_channels,
+        rel_freqs=rel_freqs,
         pdf_report=pdf_report,
     )
 
     # Check tone positions w.r.t. requested channels
     pdf_report.step("Check tone positions.")
-    for sel_chan, peak_chan in zip(selected_channels, peak_chan_hist):
+    for sel_chan, peak_chan in zip(rel_freqs, peak_chan_hist):
         expect(sel_chan == peak_chan)
 
     # The maximum is to avoid errors when data is 0
-    hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data_hist[:, None])
+    hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data_hist[:, np.newaxis])
 
     # Measure SFDR per captured spectrum
     pdf_report.step("Check SFDR attenuation.")
-    sfdr_measurements = measure_sfdr(hdr_data_db, selected_channels)
+    sfdr_measurements = measure_sfdr(hdr_data_db, rel_freqs)
 
-    sfdr_mean = 0.0
+    # sfdr_mean = 0.0
     for sfdr in sfdr_measurements:
-        sfdr_mean += sfdr
+        # sfdr_mean += sfdr
         expect(sfdr >= required_sfdr_db)
-    sfdr_mean /= len(selected_channels)
+    # sfdr_mean /= len(rel_freqs)
+    sfdr_mean = np.mean(sfdr_measurements)
 
-    pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(selected_channels)} channels.")
+    pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(rel_freqs)} channels.")
 
     # Figure out worst SFDR measurement and plot that one.
-    pdf_report.step("Show worst SFDR measurement.")
-    worst_sfdr_measurement_value = np.min(sfdr_measurements)
-    selected_plot_idx = np.where(sfdr_measurements == worst_sfdr_measurement_value)[0][0]
-    pdf_report.detail(f"{worst_sfdr_measurement_value:.3f}dB for channel {selected_channels[selected_plot_idx]}.")
+    pdf_report.step("Minimum SFDR measurement.")
+    sfdr_min = np.min(sfdr_measurements)
+    selected_plot_idx = np.argmin(sfdr_measurements)
+    pdf_report.detail(f"{sfdr_min:.3f}dB for channel {rel_freqs[selected_plot_idx]}.")
 
-    plot_channel = selected_channels[selected_plot_idx]
+    plot_channel = rel_freqs[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
     xticks = np.arange(0, (receiver.n_chans + 1024), 1024)
