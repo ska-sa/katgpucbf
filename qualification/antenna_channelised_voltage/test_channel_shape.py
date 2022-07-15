@@ -111,8 +111,8 @@ async def test_channel_shape(
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 
-    # The maximum is to avoid errors when data is 0
-    db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak)
+    with np.errstate(divide="ignore"):  # Avoid warnings when taking log of 0
+        db = 10 * np.log10(hdr_data / peak)
     # Slice out 5 channels, centred on the chosen one
     db_plot = db[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
     x = np.linspace(-2.5, 2.5, len(db_plot))
@@ -123,23 +123,26 @@ async def test_channel_shape(
     ]:
         fig = Figure()
         ax = fig.subplots()
-        # pgfplots seems to struggle if data is too far outside ylim
-        ax.plot(x, np.maximum(db_plot, ymin - 10))
+        ax.plot(x, db_plot)
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
         ax.set_xticks(xticks)
         ax.set_xlim(xticks[0], xticks[-1])
-        ax.set_ylim(ymin, 0)
+        ax.set_ylim(ymin, -0.05 * ymin)
 
         for y in [-3, -53]:
             if ymin < y:
                 ax.axhline(y, dashes=(1, 1), color="black")
-                ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
-        # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-        pdf_report.figure(
-            fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
-        )
+                ax.annotate(
+                    f"{y} dB",
+                    (xticks[-1], y),
+                    xytext=(-3, -3),
+                    textcoords="offset points",
+                    horizontalalignment="right",
+                    verticalalignment="top",
+                )
+        pdf_report.figure(fig)
 
     pdf_report.step("Check attenuation bandwidth.")
     width_3db = cutoff_bandwidth(db, -3, 1 / resolution)

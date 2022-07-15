@@ -32,6 +32,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
+from . import compute_tone_gain
 
 MAX_DELAY = 75e-6  # seconds
 MAX_DELAY_RATE = 1.9e-9
@@ -67,8 +68,7 @@ async def test_delay_application_time(
     pdf_report.step("Inject correlated white noise signal.")
     await correlator.dsim_clients[0].request("signals", "common=wgn(0.1); common; common;")
     pdf_report.detail("Wait for updated signal to propagate through the pipeline.")
-    _, chunk = await receiver.next_complete_chunk()
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk()
 
     attempts = 5
     advance = 0.2
@@ -100,7 +100,9 @@ async def test_delay_application_time(
 
         pdf_report.detail("Did not receive all the expected chunks; reset delay and try again.")
         delays = ["0,0:0,0", "0,0:0,0"] * receiver.n_ants
-        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
+        await correlator.product_controller_client.request(
+            "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
+        )
     else:
         pytest.fail(f"Give up after {attempts} attempts.")
 
@@ -145,49 +147,54 @@ async def test_delay_enable_disable(
 
     async def measure_phase() -> float:
         """Retrieve the phase of the chosen channel from the next chunk."""
-        _, chunk = await receiver.next_complete_chunk()
-        assert isinstance(chunk.data, np.ndarray)
-        value = chunk.data[channel, bl_idx, :]
+        _, data = await receiver.next_complete_chunk()
+        value = data[channel, bl_idx, :]
         phase = np.arctan2(value[1], value[0])
-        receiver.stream.add_free_chunk(chunk)
         return phase
 
     async def set_delays(delays: List[str]) -> None:
         start = asyncio.get_running_loop().time()
-        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
+        await correlator.product_controller_client.request(
+            "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
+        )
         finish = asyncio.get_running_loop().time()
         elapsed.append(finish - start)
 
     receiver = receive_baseline_correlation_products
-    channel = receiver.n_chans // 2
-    freq = receiver.bandwidth / 2
-    signal = f"cw(0.01, {freq})"
+    channel = 3 * receiver.n_chans // 4
+    freq = 3 * receiver.bandwidth / 4
+    signal = f"cw(0.1, {freq})"
+    gain = compute_tone_gain(receiver, 0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
     elapsed: List[float] = []
 
     pdf_report.step("Inject tone.")
     pdf_report.detail(f"Set signal to {signal} on both pols.")
     await correlator.dsim_clients[0].request("signals", f"common={signal}; common; common;")
+    pdf_report.detail(f"Set gain to {gain} for all inputs.")
+    await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
 
     pdf_report.step("Check that phase compensation can be enabled.")
     pdf_report.detail("Apply 90 degree phase to one pol")
     await set_delays(["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants)
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(-math.pi / 2, np.deg2rad(1)))
+    expect(phase == pytest.approx(-math.pi / 2, abs=np.deg2rad(1)))
 
     pdf_report.step("Check that delay compensation can be enabled.")
-    pdf_report.detail("Apply 1/4 cycle delay to one pol.")
-    await set_delays(["0,0:0,0", f"{0.25 / freq},0:0,0"] * receiver.n_ants)
+    pdf_report.detail("Apply 1/2 cycle delay to one pol.")
+    await set_delays(["0,0:0,0", f"{0.5 / freq},0:0,0"] * receiver.n_ants)
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(-math.pi / 2, np.deg2rad(1)))
+    # One might expect it to be pi radians, but that ignores the implicit
+    # phase adjustment that ensures the centre channel has zero phase.
+    expect(phase == pytest.approx(math.pi / 3, abs=np.deg2rad(1)))
 
     pdf_report.step("Check that compensation can be disabled.")
     await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(0, np.deg2rad(1)))
+    expect(phase == pytest.approx(0, abs=np.deg2rad(1)))
 
     pdf_report.step("Check update time.")
     max_elapsed = max(elapsed)
@@ -239,8 +246,7 @@ async def test_delay_sensors(
         expect(value[1:] == (0.0, 0.0, 0.0, 0.0))
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
-    _, chunk = await receiver.next_complete_chunk(min_timestamp=load_ts)
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk(min_timestamp=load_ts)
     for expected, label in zip(delay_tuples, receiver.input_labels):
         value = delay_sensor_value(label)
         pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
@@ -311,13 +317,11 @@ async def test_delay(
 
     pdf_report.step("Verify results")
     pdf_report.detail("Receive an accumulation")
-    _, chunk = await receiver.next_complete_chunk()
-    assert isinstance(chunk.data, np.ndarray)
+    _, chunk_data = await receiver.next_complete_chunk()
     # Convert to floating-point complex values for easier analysis
-    data = chunk.data.astype(np.float64).view(np.complex128)[..., 0]
+    data = chunk_data.astype(np.float64).view(np.complex128)[..., 0]
     # cast to work around https://github.com/numpy/numpy/issues/21972
     phase = cast(NDArray[np.float64], np.angle(data))
-    receiver.stream.add_free_chunk(chunk)
 
     for i, delay in enumerate(delays):
         # The delay is mostly cancelling out the delay applied in the dsim, but
@@ -345,13 +349,6 @@ async def test_delay(
         ax.set_xlabel("Channel")
         ax.set_ylabel("Error (degrees)")
         x = np.arange(1, receiver.n_chans)
-        ax.plot(x, np.rad2deg(delta))
-        pdf_report.figure(
-            fig,
-            tikzplotlib_kwargs=dict(
-                extra_axis_parameters=[
-                    "scaled ticks=false",  # Prevent common factor being extracted
-                    "yticklabel style={/pgf/number format/fixed}",  # Prevent scientific notation
-                ]
-            ),
-        )
+        # It's very noisy, and a thinner linewidth allows more detail to be seen
+        ax.plot(x, np.rad2deg(delta), linewidth=0.3)
+        pdf_report.figure(fig)

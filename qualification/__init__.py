@@ -39,6 +39,7 @@ import spead2.recv
 import spead2.recv.asyncio
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
+from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
@@ -286,8 +287,8 @@ class BaselineCorrelationProductsReceiver:
 
     async def next_complete_chunk(
         self, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
-    ) -> Tuple[int, spead2.recv.Chunk]:
-        """Return the next complete chunk from the stream.
+    ) -> Tuple[int, NDArray[np.int32]]:
+        """Return the data from the next complete chunk from the stream.
 
         The return value includes the timestamp.
 
@@ -297,8 +298,10 @@ class BaselineCorrelationProductsReceiver:
             See :meth:`complete_chunks`
         """
         async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
-            return timestamp, chunk
-        assert False  # noqa: B011  # Tells mypy that this isn't reachable
+            chunk_data = np.array(chunk.data)  # Makes a copy before we return the chunk
+            self.stream.add_free_chunk(chunk)
+            return timestamp, chunk_data
+        raise RuntimeError("stream was shut down before we received a complete chunk")
 
     def timestamp_to_unix(self, timestamp: int) -> float:
         """Convert an ADC timestamp to a UNIX time."""

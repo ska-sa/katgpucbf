@@ -146,7 +146,17 @@ def host_config_querier(pytestconfig) -> HostConfigQuerier:
 @pytest.fixture(autouse=True)
 def matplotlib_report_style() -> Generator[None, None, None]:
     """Set the style of all matplotlib plots."""
-    with matplotlib.style.context("ggplot"):
+    with matplotlib.style.context("ggplot"), matplotlib.rc_context(
+        {
+            "pgf.texsystem": "pdflatex",
+            # Serif fonts better match the rest of the document
+            "font.family": "serif",
+            # Clearing these make matplotlib assume the default LaTeX fonts
+            "font.serif": [],
+            "font.sans-serif": [],
+            "font.monospace": [],
+        }
+    ):
         yield
 
 
@@ -372,8 +382,9 @@ async def correlator(
     for name, conf in session_correlator.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
+            sync_time = session_correlator.sensors[f"{name}-sync-time"].value
             await pcc.request("gain-all", name, "default")
-            await pcc.request("delays", name, 0, *(["0,0:0,0"] * n_inputs))
+            await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.baseline_correlation_products":
             await pcc.request("capture-start", name)
 
@@ -403,7 +414,6 @@ async def receive_baseline_correlation_products(
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
-    _, chunk = await receiver.next_complete_chunk(max_delay=0)
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk(max_delay=0)
     yield receiver
     receiver.stream.stop()
