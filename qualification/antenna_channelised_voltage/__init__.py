@@ -118,11 +118,9 @@ async def sample_tone_response(
                 signal += tasks[i * N_POLS + j][1]
             requests.append(asyncio.create_task(receiver.correlator.dsim_clients[i].request("signals", signal)))
         await asyncio.gather(*requests)
-        _, chunk = await receiver.next_complete_chunk()
-        assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
+        _, data = await receiver.next_complete_chunk()
         for task, bl_idx in zip(tasks, autos):
-            out[task[0]] = chunk.data[:, bl_idx, 0]  # Only keep real part
-        receiver.stream.add_free_chunk(chunk)
+            out[task[0]] = data[:, bl_idx, 0]  # Only keep real part
 
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
