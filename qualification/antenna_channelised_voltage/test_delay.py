@@ -32,6 +32,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
+from . import compute_tone_gain
 
 MAX_DELAY = 75e-6  # seconds
 MAX_DELAY_RATE = 1.9e-9
@@ -163,35 +164,40 @@ async def test_delay_enable_disable(
         elapsed.append(finish - start)
 
     receiver = receive_baseline_correlation_products
-    channel = receiver.n_chans // 2
-    freq = receiver.bandwidth / 2
-    signal = f"cw(0.01, {freq})"
+    channel = 3 * receiver.n_chans // 4
+    freq = 3 * receiver.bandwidth / 4
+    signal = f"cw(0.1, {freq})"
+    gain = compute_tone_gain(receiver, 0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
     elapsed: List[float] = []
 
     pdf_report.step("Inject tone.")
     pdf_report.detail(f"Set signal to {signal} on both pols.")
     await correlator.dsim_clients[0].request("signals", f"common={signal}; common; common;")
+    pdf_report.detail(f"Set gain to {gain} for all inputs.")
+    await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
 
     pdf_report.step("Check that phase compensation can be enabled.")
     pdf_report.detail("Apply 90 degree phase to one pol")
     await set_delays(["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants)
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(-math.pi / 2, np.deg2rad(1)))
+    expect(phase == pytest.approx(-math.pi / 2, abs=np.deg2rad(1)))
 
     pdf_report.step("Check that delay compensation can be enabled.")
-    pdf_report.detail("Apply 1/4 cycle delay to one pol.")
-    await set_delays(["0,0:0,0", f"{0.25 / freq},0:0,0"] * receiver.n_ants)
+    pdf_report.detail("Apply 1/2 cycle delay to one pol.")
+    await set_delays(["0,0:0,0", f"{0.5 / freq},0:0,0"] * receiver.n_ants)
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(-math.pi / 2, np.deg2rad(1)))
+    # One might expect it to be pi radians, but that ignores the implicit
+    # phase adjustment that ensures the centre channel has zero phase.
+    expect(phase == pytest.approx(math.pi / 3, abs=np.deg2rad(1)))
 
     pdf_report.step("Check that compensation can be disabled.")
     await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(0, np.deg2rad(1)))
+    expect(phase == pytest.approx(0, abs=np.deg2rad(1)))
 
     pdf_report.step("Check update time.")
     max_elapsed = max(elapsed)
