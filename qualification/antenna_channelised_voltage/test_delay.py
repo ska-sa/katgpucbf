@@ -100,7 +100,9 @@ async def test_delay_application_time(
 
         pdf_report.detail("Did not receive all the expected chunks; reset delay and try again.")
         delays = ["0,0:0,0", "0,0:0,0"] * receiver.n_ants
-        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
+        await correlator.product_controller_client.request(
+            "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
+        )
     else:
         pytest.fail(f"Give up after {attempts} attempts.")
 
@@ -154,7 +156,9 @@ async def test_delay_enable_disable(
 
     async def set_delays(delays: List[str]) -> None:
         start = asyncio.get_running_loop().time()
-        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", 0, *delays)
+        await correlator.product_controller_client.request(
+            "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
+        )
         finish = asyncio.get_running_loop().time()
         elapsed.append(finish - start)
 
