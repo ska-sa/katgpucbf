@@ -382,8 +382,9 @@ async def correlator(
     for name, conf in session_correlator.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
+            sync_time = session_correlator.sensors[f"{name}-sync-time"].value
             await pcc.request("gain-all", name, "default")
-            await pcc.request("delays", name, 0, *(["0,0:0,0"] * n_inputs))
+            await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.baseline_correlation_products":
             await pcc.request("capture-start", name)
 

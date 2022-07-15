@@ -509,7 +509,9 @@ class Engine(aiokatcp.DeviceServer):
         # of this delta and the delay_rate (same for phase).
         # This may be too small to be a concern, but if it is a concern,
         # then we'd need to compensate for that here.
-        start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
+        start_sample_count = round((start_time - self.sync_epoch) * self.adc_sample_rate)
+        if start_sample_count < 0:
+            raise aiokatcp.FailReply("Start time cannot be prior to the sync epoch")
 
         # Collect them in a temporary until they're all validated
         new_linear_models = []

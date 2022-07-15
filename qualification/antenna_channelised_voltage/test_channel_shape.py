@@ -25,29 +25,33 @@ from ..reporter import Reporter
 from . import compute_tone_gain, sample_tone_response
 
 
-def cutoff_bandwidth_half(data: np.ndarray, cutoff: float, step: float) -> float:
-    """One-sided version of :func:`cutoff_bandwidth`.
-
-    Here the first element of `data` must represent the centre.
-    """
-    assert data[0] > cutoff
-    assert data[-1] < cutoff
-    right = np.nonzero(data < cutoff)[0][0]
-    left = right - 1
-    interp = left + (data[left] - cutoff) / (data[left] - data[right])
-    return interp * step
+def _cutoff_interp(x0: float, y0: float, x1: float, y1: float, cutoff: float) -> float:
+    """Compute x value where a line crosses a y value (by linear interpolation)."""
+    return x0 + (x1 - x0) * (cutoff - y0) / (y1 - y0)
 
 
 def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     """Measure width of the response at a given power level.
 
-    Estimate the width of the central portion where `data` is above `cutoff`,
-    in units of channels. If there are sidelobes that rise about `cutoff`,
-    they're included in the width.
+    Estimate the width of the region where `data` is above `cutoff`. If the
+    cutoff is crossed multiple times, the distance between the two most extreme
+    values is used.
+
+    The return value is in unit of channels, but the `data` may have sub-channel
+    resolution, with a step of `step` channels between samples.
     """
-    assert len(data) % 2 == 1  # Must be symmetrical
-    mid = len(data) // 2
-    return cutoff_bandwidth_half(data[mid:], cutoff, step) + cutoff_bandwidth_half(data[mid::-1], cutoff, step)
+    above = np.nonzero(data >= cutoff)[0]
+    assert len(above) > 0
+    # Minimum and maximum index that contain data above the cutoff
+    left = above[0]
+    right = above[-1]
+    # Use linear interpolation to find fractional index values where the
+    # cutoff is crossed.
+    if left > 0:
+        left = _cutoff_interp(left - 1, data[left - 1], left, data[left], cutoff)
+    if right < len(data) - 1:
+        right = _cutoff_interp(right + 1, data[right + 1], right, data[right], cutoff)
+    return (right - left) * step  # Scale from indices to channels
 
 
 async def test_channel_shape(
@@ -86,8 +90,6 @@ async def test_channel_shape(
         data = await sample_tone_response(rel_freq, amplitude, receiver)
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
         data = data.ravel(order="F")
-        # Slice out 5 channels, centred on the chosen one
-        data = data[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
         return data
 
     pdf_report.step("Measure channel shape.")
@@ -114,7 +116,9 @@ async def test_channel_shape(
 
     with np.errstate(divide="ignore"):  # Avoid warnings when taking log of 0
         db = 10 * np.log10(hdr_data / peak)
-    x = np.linspace(-2.5, 2.5, len(hdr_data))
+    # Slice out 5 channels, centred on the chosen one
+    db_plot = db[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
+    x = np.linspace(-2.5, 2.5, len(db_plot))
 
     for xticks, ymin, title in [
         (np.arange(-2.5, 2.6, 0.5), -100, "Channel response"),
@@ -122,7 +126,7 @@ async def test_channel_shape(
     ]:
         fig = Figure()
         ax = fig.subplots()
-        ax.plot(x, db)
+        ax.plot(x, db_plot)
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
