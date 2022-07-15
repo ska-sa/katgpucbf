@@ -10,7 +10,7 @@ Welcome to katgpucbf's documentation!
    introduction
 
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 3
    :caption: Installation and Operation
 
    operation
