@@ -105,7 +105,6 @@ async def test_channel_shape(
 
     pdf_report.step("Measure channel shape.")
     hdr_data, peak_data, _ = await sample(offsets)
-    hdr_data = hdr_data.astype(np.float64)
 
     peak = np.max(peak_data)
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)

@@ -49,13 +49,11 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
 
     for spectrum, channel in zip(hdr_data_db, base_channel):
         peak_value = np.max(spectrum[channel])
-        # below_peak_idxs = np.nonzero(spectrum < peak_value)
-        # next_peak_value = np.max(spectrum[below_peak_idxs])
+        # breakpoint()
         next_peak_value = max(np.max(spectrum[:channel]), np.max(spectrum[channel + 1 :]))
         peak_diff = peak_value - next_peak_value
         sfdr_measurements.append(peak_diff)
     return sfdr_measurements
-
 
 async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
@@ -81,7 +79,7 @@ async def test_channelisation_and_sfdr(
 
     required_sfdr_db = 53.0
     channel_range_start = 8
-    channel_skip = 31
+    channel_skip = 511
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
     rel_freqs = np.arange(channel_range_start, receiver.n_chans, channel_skip)
@@ -95,7 +93,8 @@ async def test_channelisation_and_sfdr(
     # whose power is low enough not to saturate.
 
     pdf_report.detail(f"Collect power measurements for {len(rel_freqs)} channels.")
-    hdr_data, peak_data_hist, peak_chan_hist = await sample_tone_response_hdr(
+    # hdr_data, peak_data_hist, peak_chan_hist = await sample_tone_response_hdr(
+    hdr_data = await sample_tone_response_hdr(
         correlator=correlator,
         receiver=receiver,
         iterations=iterations,
@@ -107,21 +106,21 @@ async def test_channelisation_and_sfdr(
 
     # Check tone positions w.r.t. requested channels
     pdf_report.step("Check tone positions.")
-    for sel_chan, peak_chan in zip(rel_freqs, peak_chan_hist):
+    for idx, sel_chan in enumerate(rel_freqs):
+        peak_data = np.max(hdr_data[idx])
+        peak_chan = np.where(hdr_data[idx] == peak_data)[0][0]
         expect(sel_chan == peak_chan)
 
     # The maximum is to avoid errors when data is 0
-    hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data_hist[:, np.newaxis])
+    # hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak_data_hist[:, np.newaxis])
+    hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / np.max(hdr_data))
 
     # Measure SFDR per captured spectrum
     pdf_report.step("Check SFDR attenuation.")
     sfdr_measurements = measure_sfdr(hdr_data_db, rel_freqs)
 
-    # sfdr_mean = 0.0
     for sfdr in sfdr_measurements:
-        # sfdr_mean += sfdr
         expect(sfdr >= required_sfdr_db)
-    # sfdr_mean /= len(rel_freqs)
     sfdr_mean = np.mean(sfdr_measurements)
 
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(rel_freqs)} channels.")
@@ -160,6 +159,4 @@ async def test_channelisation_and_sfdr(
             verticalalignment="top",
         )
     # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-    pdf_report.figure(
-        fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
-    )
+    pdf_report.figure(fig)
