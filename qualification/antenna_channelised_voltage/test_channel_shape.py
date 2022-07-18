@@ -16,8 +16,6 @@
 
 """Channel shape tests."""
 
-from typing import Tuple
-
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
@@ -79,7 +77,7 @@ async def test_channel_shape(
     gain_step = 100.0
     iterations = 3
 
-    async def sample(offsets: ArrayLike) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    async def sample(offsets: ArrayLike) -> np.ndarray:
         """Measure response when frequency is offset from channel centre.
 
         Parameters
@@ -89,7 +87,7 @@ async def test_channel_shape(
         """
         rel_freq = base_channel - np.asarray(offsets)
         pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
-        hdr_data, peak_data_hist, peak_chan_hist = await sample_tone_response_hdr(
+        hdr_data = await sample_tone_response_hdr(
             correlator=correlator,
             receiver=receiver,
             iterations=iterations,
@@ -101,12 +99,12 @@ async def test_channel_shape(
 
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
         hdr_data = hdr_data.ravel(order="F")
-        return hdr_data, peak_data_hist, peak_chan_hist
+        return hdr_data
 
     pdf_report.step("Measure channel shape.")
-    hdr_data, peak_data, _ = await sample(offsets)
+    hdr_data = await sample(offsets)
 
-    peak = np.max(peak_data)
+    peak = np.max(hdr_data)
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 

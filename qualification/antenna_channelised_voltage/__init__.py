@@ -40,10 +40,10 @@ async def sample_tone_response_hdr(
     rel_freqs: ArrayLike,
     iterations: int = 3,
     gain_step: float = 100.0,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """Compute spectra with high dynamic range.
 
-    Compute high dynamic range spectra per requested tone frequency. One spectrum is
+    Compute high dynamic range spectra per requested tone. One spectrum is
     computed per tone. The HDR data is computed by iterating and applying various
     gain values adjuested per iteration by the gain step.
 
@@ -52,11 +52,11 @@ async def sample_tone_response_hdr(
     correlator
         Container for correlator control using katcp.
     receiver
-        Correlation receiver stream
+        Correlation receiver stream.
     pdf_report
         Pytest report logger.
     iterations
-        Number of iterations to loop through when adjusting gain and computing HDR data
+        Number of iterations to loop through when adjusting gain and computing HDR data.
     gain_step
         Step size for gain adjustment per iteration. This is a scaling factor.
     amplitude
@@ -68,19 +68,11 @@ async def sample_tone_response_hdr(
     ----------
     hdr_data
         HDR data per spectrum.
-    peak_data_hist
-        Peak value per spectrum.
-    peak_chan_hist
-        Channel location of the peak value per spectrum.
     """
     # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
     gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
 
     rel_freqs = np.asarray(rel_freqs)
-    # Pre-allocate to hold prior hdr_data for next iteration for each spectrum
-    # hdr_data = np.zeros((len(rel_freqs), receiver.n_chans))
-    # peak_data_hist = np.zeros(len(rel_freqs))
-    # peak_chan_hist = np.zeros(len(rel_freqs))
 
     # Get a high dynamic range result (hdr_data) by using several gain settings
     # and using the high-gain results to more accurately measure the samples
@@ -96,32 +88,12 @@ async def sample_tone_response_hdr(
         # Use current gain to capture spikes, then adjust gain.
         if i == 0:
             peak_data = np.max(data)
-            # peak_chan_hist[idx] = np.where(data == peak_data)[0][0]
-            # peak_data_hist[idx] = peak_data
             hdr_data = data
         else:
             # Compute HDR data
             power_scale = gain_step ** (i * 2)
-            hdr_data = np.where(
-                hdr_data >= peak_data / power_scale, hdr_data, data / power_scale
-            )
-
-        # Store gain adjusted data for SFDR measurement.
-        # for idx, spectrum in enumerate(data):
-        #     # Use current gain to capture spikes, then adjust gain.
-        #     if i == 0:
-        #         peak_data = np.max(spectrum)
-        #         peak_chan_hist[idx] = np.where(spectrum == peak_data)[0][0]
-        #         peak_data_hist[idx] = peak_data
-        #         hdr_data[idx] = spectrum
-        #     else:
-        #         # Compute HDR data
-        #         power_scale = gain_step ** (i * 2)
-        #         hdr_data[idx] = np.where(
-        #             hdr_data[idx] >= peak_data_hist[idx] / power_scale, hdr_data[idx], spectrum / power_scale
-        #         )
+            hdr_data = np.where(hdr_data >= peak_data / power_scale, hdr_data, data / power_scale)
         gain *= gain_step
-    # return hdr_data, peak_data_hist, peak_chan_hist
     return hdr_data
 
 
