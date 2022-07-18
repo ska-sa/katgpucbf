@@ -44,7 +44,7 @@ from .. import recv as base_recv
 from ..monitor import Monitor
 from ..ringbuffer import ChunkRingbuffer
 from . import SAMPLE_BITS, recv, send
-from .delay import LinearDelayModel, MultiDelayModel
+from .delay import LinearDelayModel, MultiDelayModel, wrap_angle
 from .process import Processor
 
 logger = logging.getLogger(__name__)
@@ -383,12 +383,13 @@ class Engine(aiokatcp.DeviceServer):
 
         orig_delay = delay_models[0].delay / self.adc_sample_rate
         phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
+        orig_phase = wrap_angle(delay_models[0].phase - 0.5 * np.pi * delay_models[0].delay)
         orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.adc_sample_rate
         delay_sensor.value = (
             f"({delay_models[0].start}, "
             f"{orig_delay}, "
             f"{delay_models[0].delay_rate}, "
-            f"{delay_models[0].phase}, "
+            f"{orig_phase}, "
             f"{orig_phase_rate})"
         )
 
@@ -508,7 +509,9 @@ class Engine(aiokatcp.DeviceServer):
         # of this delta and the delay_rate (same for phase).
         # This may be too small to be a concern, but if it is a concern,
         # then we'd need to compensate for that here.
-        start_sample_count = int((start_time - self.sync_epoch) * self.adc_sample_rate)
+        start_sample_count = round((start_time - self.sync_epoch) * self.adc_sample_rate)
+        if start_sample_count < 0:
+            raise aiokatcp.FailReply("Start time cannot be prior to the sync epoch")
 
         # Collect them in a temporary until they're all validated
         new_linear_models = []

@@ -140,7 +140,6 @@ matplotlib==3.5.2
     # via
     #   -r requirements.in
     #   prometheus-api-client
-    #   tikzplotlib
 matplotlib-inline==0.1.3
     # via
     #   -r ../requirements-dev.txt
@@ -160,7 +159,6 @@ numpy==1.22.4
     #   pandas
     #   prometheus-api-client
     #   spead2
-    #   tikzplotlib
 ordered-set==4.1.0
     # via pylatex
 packaging==21.3
@@ -170,7 +168,7 @@ packaging==21.3
     #   matplotlib
     #   pytest
     #   sphinx
-pandas==1.4.2
+pandas==1.4.3
     # via prometheus-api-client
 parso==0.8.3
     # via
@@ -189,9 +187,7 @@ pickleshare==0.7.5
     #   -r ../requirements-dev.txt
     #   ipython
 pillow==9.1.1
-    # via
-    #   matplotlib
-    #   tikzplotlib
+    # via matplotlib
 pip-tools==6.8.0
     # via -r ../requirements-dev.txt
 platformdirs==2.5.2
@@ -355,8 +351,6 @@ stack-data==0.3.0
     # via
     #   -r ../requirements-dev.txt
     #   ipython
-tikzplotlib==0.10.1
-    # via -r requirements.in
 toml==0.10.2
     # via
     #   -r ../requirements-dev.txt
@@ -389,8 +383,6 @@ wcwidth==0.2.5
     # via
     #   -r ../requirements-dev.txt
     #   prompt-toolkit
-webcolors==1.12
-    # via tikzplotlib
 wheel==0.37.1
     # via
     #   -r ../requirements-dev.txt

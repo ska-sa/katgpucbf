@@ -17,6 +17,7 @@
 """Transmission of SPEAD data."""
 
 import asyncio
+import functools
 import itertools
 import time
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -241,6 +242,13 @@ class Sender:
         self.halt()
         await self.join()
 
+    def _update_metrics(self, end_timestamp: int, heaps: int, bytes: int, _future: asyncio.Future) -> None:
+        elapsed = time.time() - self.sync_time
+        expected_elapsed = end_timestamp / self.adc_sample_rate
+        time_error_gauge.set(elapsed - expected_elapsed)
+        output_heaps_counter.inc(heaps)
+        output_bytes_counter.inc(bytes)
+
     async def run(self) -> None:
         """Send heaps continuously."""
         while self._running:
@@ -252,16 +260,16 @@ class Sender:
                     # the await, so re-initialise part.
                     part = self.heap_set.parts[i]
                     part["timestamps"] += self.heap_set.data.dims["time"] * self.heap_samples
-                elapsed = time.time() - self.sync_time
-                expected_elapsed = self._next_timestamp / self.adc_sample_rate
-                time_error_gauge.set(elapsed - expected_elapsed)
-                self._futures[i] = self.stream.async_send_heaps(
+                send_future = self.stream.async_send_heaps(
                     part.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
                 )
+                self._futures[i] = send_future
                 self._next_timestamp += part.dims["time"] * self.heap_samples
-                # Not actually sent yet, but close enough for monitoring the transmission speed
-                output_heaps_counter.inc(part["heaps"].size)
-                output_bytes_counter.inc(part["payload"].nbytes)
+                send_future.add_done_callback(
+                    functools.partial(
+                        self._update_metrics, self._next_timestamp, part["heaps"].size, part["payload"].nbytes
+                    )
+                )
 
         for future in self._futures:
             if future is not None:

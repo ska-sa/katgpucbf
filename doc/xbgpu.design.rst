@@ -89,8 +89,8 @@ The numbers in the image above correspond to the following actions:
   2. Correlate chunk
   3. Transfer heap to host memory from GPU
 
-Accumulations, Dumps and Auto-resync
-------------------------------------
+Accumulations, Dumps and Output Data
+-------------------------------------
 
 The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
@@ -136,6 +136,29 @@ when using the MeerKAT 1712 MSps L-band digitisers.
 The dump boundaries are aligned to whole batches, but may fall in the middle of
 a chunk. In this case, each invocation of the correlation kernel will only
 process a subset of the batches in the chunk.
+
+Output Heap Payload Composition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Each correlation product contains a real and imaginary sample (both 32-bit
+integer) for a combined size of 8 bytes per baseline. The ordering of the
+correlation products is given in the :samp:`{xeng-stream-name}-bls-ordering`
+sensor in the product controller, but can be calculated deterministically:
+:func:`~katgpucbf.xbgpu.correlation.get_baseline_index` indicates the ordering
+of the baselines, and the four individual correlation products are always
+ordered ``aa, ba, ab, bb``, where `a` and `b` can either be vertical or
+horizontal polarisation (``v`` or ``h``), depending on the configuration of the
+instrument.
+
+All the baselines for a single channel are grouped together contiguously in the
+heap, and each X-engine correlates a contiguous subset of the entire spectrum.
+For example, in an 80-antenna, 8192-channel array with 64 X-engines, each X-engine output
+heap contains 8192/64 = 128 channels.
+
+The heap payload size in this example is equal to
+
+  `channels_per_heap * correlation_products * complex_sample_size = 128 * 12960 * 8 = 13,271,040 bytes or 12.656 MiB`.
+
 
 Implementation details of tensor-core correlator
 ------------------------------------------------

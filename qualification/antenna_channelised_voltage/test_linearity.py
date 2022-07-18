@@ -30,11 +30,8 @@ async def test_linearity(
 ) -> None:
     """Test that baseline Correlation Products are linear when input CW is scaled.
 
-    Requirements verified:
-        CBF.V.A.IF: CBF Linearity
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verify linearity by checking the channelised output scales linearly with a
     linear change to the CW input amplitude.
     """
@@ -84,7 +81,8 @@ async def test_linearity(
     fig = Figure()
     ax = fig.subplots()
     ax.plot(20 * np.log10(cw_scales), label="Reference")
-    ax.plot(20 * np.log10(linear_test_result), label="Measured")
+    with np.errstate(divide="ignore"):  # Avoid warnings when the value is zero
+        ax.plot(20 * np.log10(linear_test_result), label="Measured")
     ax.set_title(title)
     ax.set_xlabel("CW Scale")
     ax.set_ylabel("dB")

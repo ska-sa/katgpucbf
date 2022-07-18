@@ -59,6 +59,7 @@ from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
+MISSING = np.array([-(2**31), 1], dtype=np.int32)
 
 
 class QueueItem:
@@ -131,6 +132,7 @@ class TxQueueItem(QueueItem):
         """Reset the timestamp, events and present antenna tracker."""
         super().reset(timestamp=timestamp)
         self.present_ants.fill(True)  # Assume they're fine until told otherwise
+        self.batches = 0
 
 
 class XBEngine(DeviceServer):
@@ -580,6 +582,36 @@ class XBEngine(DeviceServer):
         logger.debug("_receiver_loop completed")
         self._rx_item_queue.put_nowait(None)
 
+    async def _flush_accumulation(self, tx_item: TxQueueItem, next_accum: int) -> TxQueueItem:
+        """Emit the current `tx_item` and prepare a new one."""
+        if tx_item.batches == 0:
+            # We never actually started this accumulation. We can just
+            # update the timestamp and continue using it.
+            tx_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
+            return tx_item
+
+        # present_ants only takes into account batches that have
+        # been seen. If some batches went missing entirely, the
+        # whole accumulation is bad.
+        if tx_item.batches != self.heap_accumulation_threshold:
+            tx_item.present_ants.fill(False)
+
+        # Update the sync sensor (converting np.bool_ to Python bool)
+        self.sensors["synchronised"].value = bool(tx_item.present_ants.all())
+
+        self.correlation.reduce()
+        tx_item.add_event(self._proc_command_queue.enqueue_marker())
+        await self._tx_item_queue.put(tx_item)
+
+        # Prepare for the next accumulation (which might not be
+        # contiguous with the previous one).
+        tx_item = await self._tx_free_item_queue.get()
+        await tx_item.async_wait_for_events()
+        tx_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
+        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.zero_visibilities()
+        return tx_item
+
     async def _gpu_proc_loop(self) -> None:
         """
         Perform all GPU processing of received data in a continuous loop.
@@ -602,6 +634,19 @@ class XBEngine(DeviceServer):
 
             Add B-Engine processing in this function.
         """
+
+        def do_correlation() -> None:
+            """Apply correlation kernel to all pending batches."""
+            first_batch = self.correlation.first_batch
+            last_batch = self.correlation.last_batch
+            if first_batch < last_batch:
+                self.correlation()
+                # Update the present ants tracker one last time
+                assert rx_item is not None
+                tx_item.present_ants[:] &= rx_item.present[first_batch:last_batch, :].all(axis=0)
+                tx_item.batches += last_batch - first_batch
+                self.correlation.first_batch = last_batch
+
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
 
@@ -617,6 +662,9 @@ class XBEngine(DeviceServer):
             if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
+            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
+            self.receiver_stream.add_free_chunk(rx_item.chunk)
+
             current_timestamp = rx_item.timestamp
             if tx_item.timestamp < 0:
                 # First heap seen. Round the timestamp down to the previous
@@ -627,54 +675,36 @@ class XBEngine(DeviceServer):
                     * self.timestamp_increment_per_accumulation
                 )
 
-            # If we don't return the chunk to the stream, eventually no more
-            # data can be received.
-            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
-            self.receiver_stream.add_free_chunk(rx_item.chunk)
-
             self.correlation.bind(in_samples=rx_item.buffer_device)
-            # The correlation kernel does not have the concept of a batch at
-            # this stage, so the kernel needs to be run on each different batch
-            # in the chunk.
+            # Initially no work to do; as each batch is examined, last_batch
+            # is extended.
             self.correlation.first_batch = 0
+            self.correlation.last_batch = 0
             for i in range(self.heaps_per_fengine_per_chunk):
-                self.correlation.last_batch = i + 1
-
                 # NOTE: The timestamp representing the end of an
                 # accumulation does not necessarily line up with the chunk
                 # timestamp. It will line up with a specific batch within a
                 # chunk though, this is why this check has to happen for each
                 # batch. This check is the equivalent of the MeerKAT SKARAB
                 # X-Engine auto-resync logic.
-                next_heap_timestamp = current_timestamp + self.rx_heap_timestamp_step
-                if next_heap_timestamp % self.timestamp_increment_per_accumulation == 0:
-                    self.correlation()
-                    # Update the present ants tracker one last time
-                    tx_item.present_ants[:] &= rx_item.present[
-                        self.correlation.first_batch : self.correlation.last_batch, :
-                    ].all(axis=0)
-
-                    # Update the sync sensor (converting np.bool_ to Python bool)
-                    self.sensors["synchronised"].value = bool(tx_item.present_ants.all())
-
-                    self.correlation.reduce()
-                    tx_item.add_event(self._proc_command_queue.enqueue_marker())
-                    await self._tx_item_queue.put(tx_item)
-
-                    tx_item = await self._tx_free_item_queue.get()
-                    await tx_item.async_wait_for_events()
-                    tx_item.timestamp = next_heap_timestamp
-                    self.correlation.bind(out_visibilities=tx_item.buffer_device)
-                    self.correlation.zero_visibilities()
-                    self.correlation.first_batch = i + 1
-
+                current_accum = current_timestamp // self.timestamp_increment_per_accumulation
+                tx_accum = tx_item.timestamp // self.timestamp_increment_per_accumulation
+                if current_accum != tx_accum:
+                    do_correlation()
+                    tx_item = await self._flush_accumulation(tx_item, current_accum)
+                self.correlation.last_batch = i + 1
                 current_timestamp += self.rx_heap_timestamp_step
 
-            if self.correlation.first_batch < self.correlation.last_batch:
-                self.correlation()
-                tx_item.present_ants[:] &= rx_item.present[
-                    self.correlation.first_batch : self.correlation.last_batch, :
-                ].all(axis=0)
+            do_correlation()
+            # If the last batch of the chunk was also the last batch of the
+            # accumulation, we can flush it now without waiting for more data.
+            # This is mostly a convenience for unit tests, since in practice
+            # we'd expect to see more data soon.
+            current_accum = current_timestamp // self.timestamp_increment_per_accumulation
+            tx_accum = tx_item.timestamp // self.timestamp_increment_per_accumulation
+            if current_accum != tx_accum:
+                tx_item = await self._flush_accumulation(tx_item, current_accum)
+
             proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
             rx_item.add_event(proc_event)
@@ -755,7 +785,7 @@ class XBEngine(DeviceServer):
             if not np.any(item.present_ants):
                 # All Antennas have missed data at some point, zero the entire dump
                 logger.warning("All Antennas had a break in data during this accumulation")
-                buffer_wrapper.buffer.fill(0)
+                buffer_wrapper.buffer[...] = MISSING
                 incomplete_accum_counter.inc(1)
             elif not item.present_ants.all():
                 affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.n_ants)
@@ -763,7 +793,7 @@ class XBEngine(DeviceServer):
                     # Multiply by four as each baseline (antenna pair) has four
                     # associated correlation components (polarisation pairs).
                     affected_baseline_index = affected_baseline * 4
-                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = 0
+                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
 
                 incomplete_accum_counter.inc(1)
             # else: No F-Engines had a break in data for this accumulation

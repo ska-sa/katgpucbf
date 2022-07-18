@@ -19,11 +19,13 @@
 from typing import Tuple
 
 import numpy as np
+import pytest
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
 
 
+@pytest.mark.requirements("CBF-REQ-0087,CBF-REQ-0104")
 async def test_baseline_correlation_products(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -32,22 +34,8 @@ async def test_baseline_correlation_products(
 ) -> None:
     """Test that the baseline ordering indicated in the sensor matches the output data.
 
-    Requirements verified:
-
-    CBF-REQ-0087
-        The CBF shall, on request via the CAM interface, compute all cross-
-        correlation and auto-correlation products for all configured baselines
-        in each defined sub-array.
-
-    CBF-REQ-0104
-        The CBF, when requested to produce the Baseline Correlation Products
-        data product, shall transfer the appropriate data continuously to the
-        subscribed user(s) via the interface as specified in the appropriate
-        ICD.
-
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verification by means of test. Verify by testing all correlation product
     combinations. Use gain correction after channelisation to turn the input
     signal on or off. Iterate through all combinations and verify that the
@@ -89,13 +77,11 @@ async def test_baseline_correlation_products(
         for inp, g in gains.items():
             await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
 
-        _, chunk = await receiver.next_complete_chunk()
-        # This assert isn't particularly important, but keeps mypy happy.
-        assert isinstance(chunk.data, np.ndarray)
+        _, data = await receiver.next_complete_chunk()
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
             bl = receiver.bls_ordering[i]
-            loud_bls = np.nonzero(chunk.data[channel, :, 0])[0]
+            loud_bls = np.nonzero(data[channel, :, 0])[0]
             pdf_report.detail(
                 f"Checking {bl}: {len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
                 f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
@@ -109,7 +95,6 @@ async def test_baseline_correlation_products(
                     is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl], pdf_report),
                     "Signal found in unexpected baseline.",
                 )
-        receiver.stream.add_free_chunk(chunk)
 
 
 def is_signal_expected_in_baseline(

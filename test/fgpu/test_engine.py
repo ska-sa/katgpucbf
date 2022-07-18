@@ -771,7 +771,7 @@ class TestEngine:
         n_samples = 8 * CHUNK_SAMPLES
         dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
 
-        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "delays", 0, "0,0:3,0", "0,0:3,0")
+        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "delays", SYNC_EPOCH, "0,0:3,0", "0,0:3,0")
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,

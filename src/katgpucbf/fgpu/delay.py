@@ -25,7 +25,7 @@ by the request handler for the ``?delays`` katcp request.
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -140,28 +140,47 @@ class LinearDelayModel(AbstractDelayModel):
         return rel_time * self.delay_rate + self.delay
 
     def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
-        time = np.arange(start, stop, step)
+        # 1 + y is the inverse of 1 + delay_rate
+        y = -self.delay_rate / (1 + self.delay_rate)
         # Variables with names prefixed rel_ treat start of delay model as t_0.
-        # Makes it easier to apply the rate.
-        rel_time = time - self.start
-        # Solve `rel_time = rel_orig + delay + rel_orig*rate` for rel_orig and
-        # you end up with the following equation.
+        # This makes it easier to apply the rate.
         # rel_time is the (relative) corrected timestamp, i.e. after the delay
         # model has been applied, while rel_orig is the (relative) original
         # timestamp, the one that would have come from the digitiser before
         # correction.
-        rel_orig = (rel_time - self.delay) / (self.delay_rate + 1)
-        rel_orig_rnd = np.rint(rel_orig).astype(np.int64)
+        rel_time = np.arange(start - self.start, stop - self.start, step, dtype=np.dtype(np.int64))
+        # Solve `rel_time = rel_orig + delay + rel_orig*rate` for rel_orig and
+        # you end up with
+        # rel_orig = (rel_time - self.delay) / (1 + self.delay_rate).
+        #          = (rel_time - self.delay) * (1 + y)
+        # Evaluating that naively leads to loss of precision. Instead, it is
+        # expanded into 4 terms. Most of the terms are either integer (no
+        # error) or very small (and hence absolute rounding error is small).
+        # The terms are split into integer and fractional components, which are
+        # added separately.
+        terms: List[Union[np.ndarray, float]] = [rel_time, rel_time * y, -self.delay, -self.delay * y]
+        terms_int = [np.rint(term).astype(np.int64) for term in terms]
+        frac = sum(term - term_int for term, term_int in zip(terms, terms_int))
+        assert isinstance(frac, np.ndarray)  # Tells mypy that sum isn't over an empty list
+        # Summing fractional values may make up a full integer. Extract it so
+        # that frac remains in [-0.5, 0.5].
+        extra = np.rint(frac)
+        frac -= extra
+        terms_int.append(extra.astype(np.int64))
+        rel_orig_rnd = sum(terms_int)
+        assert isinstance(rel_orig_rnd, np.ndarray)  # Tells mypy that sum isn't over an empty list
+        # At this point rel_orig is rel_orig_rnd + frac
         # Prevent coarse delay from becoming negative
-        np.minimum(rel_orig_rnd, rel_time, out=rel_orig_rnd)
-        residual = rel_orig_rnd - rel_orig
+        adjust = np.minimum(rel_time - rel_orig_rnd, 0)
+        rel_orig_rnd += adjust
+        frac -= adjust
 
         # Calculate the phase
-        phase = wrap_angle(rel_orig * self.phase_rate + self.phase)
+        phase = wrap_angle((rel_orig_rnd + frac) * self.phase_rate + self.phase)
 
         # add self.start back again to return the timestamps in the original
         # epoch
-        return rel_orig_rnd + self.start, residual, phase
+        return rel_orig_rnd + self.start, -frac, phase
 
 
 class MultiDelayModel(AbstractDelayModel):

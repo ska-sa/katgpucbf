@@ -17,6 +17,7 @@
 """Channel shape tests."""
 
 import numpy as np
+import pytest
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
@@ -25,45 +26,43 @@ from ..reporter import Reporter
 from . import compute_tone_gain, sample_tone_response
 
 
-def cutoff_bandwidth_half(data: np.ndarray, cutoff: float, step: float) -> float:
-    """One-sided version of :func:`cutoff_bandwidth`.
-
-    Here the first element of `data` must represent the centre.
-    """
-    assert data[0] > cutoff
-    assert data[-1] < cutoff
-    right = np.nonzero(data < cutoff)[0][0]
-    left = right - 1
-    interp = left + (data[left] - cutoff) / (data[left] - data[right])
-    return interp * step
+def _cutoff_interp(x0: float, y0: float, x1: float, y1: float, cutoff: float) -> float:
+    """Compute x value where a line crosses a y value (by linear interpolation)."""
+    return x0 + (x1 - x0) * (cutoff - y0) / (y1 - y0)
 
 
 def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     """Measure width of the response at a given power level.
 
-    Estimate the width of the central portion where `data` is above `cutoff`,
-    in units of channels. If there are sidelobes that rise about `cutoff`,
-    they're included in the width.
+    Estimate the width of the region where `data` is above `cutoff`. If the
+    cutoff is crossed multiple times, the distance between the two most extreme
+    values is used.
+
+    The return value is in unit of channels, but the `data` may have sub-channel
+    resolution, with a step of `step` channels between samples.
     """
-    assert len(data) % 2 == 1  # Must be symmetrical
-    mid = len(data) // 2
-    return cutoff_bandwidth_half(data[mid:], cutoff, step) + cutoff_bandwidth_half(data[mid::-1], cutoff, step)
+    above = np.nonzero(data >= cutoff)[0]
+    assert len(above) > 0
+    # Minimum and maximum index that contain data above the cutoff
+    left = above[0]
+    right = above[-1]
+    # Use linear interpolation to find fractional index values where the
+    # cutoff is crossed.
+    if left > 0:
+        left = _cutoff_interp(left - 1, data[left - 1], left, data[left], cutoff)
+    if right < len(data) - 1:
+        right = _cutoff_interp(right + 1, data[right + 1], right, data[right], cutoff)
+    return (right - left) * step  # Scale from indices to channels
 
 
+@pytest.mark.requirements("CBF-REQ-0126")
 async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test the shape of the response to a single channel.
-
-    Requirements verified:
-
-    CBF-REQ-0126
-        The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
-        is :math:`\le 2\times` (twice) the pass band width.
-    """
+    """Test the shape of the response to a single channel."""
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
     base_channel = receiver.n_chans // 3
@@ -86,8 +85,6 @@ async def test_channel_shape(
         data = await sample_tone_response(rel_freq, amplitude, receiver)
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
         data = data.ravel(order="F")
-        # Slice out 5 channels, centred on the chosen one
-        data = data[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
         return data
 
     pdf_report.step("Measure channel shape.")
@@ -112,9 +109,11 @@ async def test_channel_shape(
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 
-    # The maximum is to avoid errors when data is 0
-    db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / peak)
-    x = np.linspace(-2.5, 2.5, len(hdr_data))
+    with np.errstate(divide="ignore"):  # Avoid warnings when taking log of 0
+        db = 10 * np.log10(hdr_data / peak)
+    # Slice out 5 channels, centred on the chosen one
+    db_plot = db[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
+    x = np.linspace(-2.5, 2.5, len(db_plot))
 
     for xticks, ymin, title in [
         (np.arange(-2.5, 2.6, 0.5), -100, "Channel response"),
@@ -122,23 +121,26 @@ async def test_channel_shape(
     ]:
         fig = Figure()
         ax = fig.subplots()
-        # pgfplots seems to struggle if data is too far outside ylim
-        ax.plot(x, np.maximum(db, ymin - 10))
+        ax.plot(x, db_plot)
         ax.set_title(title)
         ax.set_xlabel("Channel")
         ax.set_ylabel("dB")
         ax.set_xticks(xticks)
         ax.set_xlim(xticks[0], xticks[-1])
-        ax.set_ylim(ymin, 0)
+        ax.set_ylim(ymin, -0.05 * ymin)
 
         for y in [-3, -53]:
             if ymin < y:
                 ax.axhline(y, dashes=(1, 1), color="black")
-                ax.annotate(f"{y} dB", (xticks[-1], y), horizontalalignment="right", verticalalignment="top")
-        # tikzplotlib.clean_figure doesn't like data outside the ylim at all
-        pdf_report.figure(
-            fig, clean_figure=False, tikzplotlib_kwargs=dict(axis_width=r"0.8\textwidth", axis_height=r"0.5\textwidth")
-        )
+                ax.annotate(
+                    f"{y} dB",
+                    (xticks[-1], y),
+                    xytext=(-3, -3),
+                    textcoords="offset points",
+                    horizontalalignment="right",
+                    verticalalignment="top",
+                )
+        pdf_report.figure(fig)
 
     pdf_report.step("Check attenuation bandwidth.")
     width_3db = cutoff_bandwidth(db, -3, 1 / resolution)

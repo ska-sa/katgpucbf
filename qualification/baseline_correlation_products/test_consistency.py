@@ -30,8 +30,8 @@ async def test_consistency(
 ) -> None:
     """Test that repeated calculations give consistent results.
 
-    Verification method:
-
+    Verification method
+    -------------------
     Provide the same simulated digitiser data to every antenna, with a
     period that divides into the accumulation length. Verify that every
     baseline produces the same bit-wise output, and that two successive
@@ -50,15 +50,13 @@ async def test_consistency(
     pdf_report.step("Collect two accumulations of data.")
     data = []
     for _ in range(2):
-        timestamp, chunk = await receiver.next_complete_chunk()
+        timestamp, chunk_data = await receiver.next_complete_chunk()
         pdf_report.detail(f"Received accumulation with timestamp {timestamp}")
-        assert isinstance(chunk.data, np.ndarray)
         # Separate axes into antenna baseline and Jones term. The dsim uses
         # different random dithers for the pols so we don't expect consistency
         # between Jones terms.
-        chunk_data = chunk.data.reshape(chunk.data.shape[0], -1, 4, 2)
-        data.append(chunk_data.copy())  # Copy since we've returning the chunk
-        receiver.stream.add_free_chunk(chunk)
+        chunk_data = chunk_data.reshape(chunk_data.shape[0], -1, 4, 2)
+        data.append(chunk_data)
 
     pdf_report.step("Verify consistency")
     expected = data[0][:, 0:1, ...].repeat(data[0].shape[1], axis=1)
@@ -70,7 +68,8 @@ async def test_consistency(
     pdf_report.step("Plot spectrum")
     fig = matplotlib.figure.Figure()
     ax = fig.subplots()
-    ax.plot(10 * np.log10(data[0][:, 0, 0, 0] / (2**31 - 1)))
+    # It's very noisy, and a thinner linewidth allows more detail to be seen
+    ax.plot(10 * np.log10(data[0][:, 0, 0, 0] / (2**31 - 1)), linewidth=0.3)
     ax.set_title("Power")
     ax.set_xlabel("Channel")
     ax.set_ylabel("dBfs")

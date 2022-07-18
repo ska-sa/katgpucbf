@@ -246,6 +246,22 @@ constructed so that they reference numpy arrays (including for the timestamps),
 rather than copying data into spead2. This allows heaps to be recycled for new
 data without having to create new heap objects.
 
+Output Heap Payload Composition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the case of an 8192-channel array with 64 X-engines, each heap contains 8192/64 =
+128 channels. By default, there are 256 time samples per channel. Each sample is
+dual-pol complex 8-bit data for a combined sample width of 32 bits or 4 bytes.
+
+The heap payload size in this example is equal to
+
+    channels_per_heap * samples_per_channel * complex_sample_size = 128 * 256 * 4 = 131,072 = 128 KiB.
+
+The payload size defaults to a power of 2, so that packet boundaries in a heap
+align with channel boundaries. This isn't important for the :mod:`spead2`
+receiver used in the X-engine, but it may be useful for potential third party
+consumers of F-engine data.
+
 Missing data handling
 ---------------------
 Inevitably some input data will be lost and this needs to be handled. The
@@ -269,70 +285,6 @@ From there a number of transformations occur:
    produce per-spectrum presence flags.
 4. When an output chunk is ready to be sent, the per-spectrum flags are
    reduced to per-frame flags.
-
-Challenges and lessons learnt
------------------------------
-
-Packet size
-^^^^^^^^^^^
-The FPGA F-engine outputs packets with 1 KiB of payload. Matching this in
-software is challenging as the packet rate is high (over 3 million per
-second). The transmit code can still be optimised, but we were not able to
-make transmission reliable even with multiple threads (see more details
-below). The small packets (together with the padding needed by the X-engines)
-also increases the bandwidth significantly: 27.4 Gb/s of payload requires 31.2
-Gb/s total bandwidth.
-
-Simultaneous receive and transmit
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The Mellanox ConnectX-5 exhibits some performance anomalies when
-simultaneously receiving and transmitting at high speed. When running two
-antennas (four polarisations) with a 100 Gb/s, packets were occasionally
-dropped by the NIC. This seems to be caused by PCIe bottlenecks, possibly
-exacerbated by heavy memory traffic on the host. It seems to be triggered by
-micro-second scale jitter rather than a lack of throughput: upgrading to a
-faster CPU and RAM did not mitigate the problem.
-
-This problem seems to be exacerbated by memory thrashing. There are a few ways
-the memory traffic can be reduced:
-
-1. Don't do SPEAD decoding on the CPU. Receive packets directly into CUDA
-   pinned memory and transfer it to the GPU, and sort it out on the GPU. If
-   the packet structure is hard-coded it would also be possible to use memory
-   scatter to split off the timestamps from the samples.
-2. Do transfers to the GPU in smaller increments. PCI devices do DMA directly
-   into the last-level cache, and if the data can be moved out again before
-   it is flushed the GPU can read it from cache without touching memory.
-   Ideally it would also be overwritten again by the NIC before it is
-   flushed, but that would require the buffer to fit entirely in the LLC.
-3. Similarly to the above, transfer data from the GPU in small pieces, and
-   transmit them directly from where they're placed rather than copying the
-   data into packets.
-
-A second anomaly is that if the receiver does not make buffers available to
-the NIC in time, then not only are packets dropped, but the multicast transmit
-stalls every few seconds. This in turn prevents the transmit from keeping up
-with the processed data, putting back-pressure on the receiver and causing it
-to run out of buffers.
-
-Cases 00690992 and 00699262 were opened with Mellanox for these problems, and
-it has since been fixed in the latest firmware.
-
-NUMA
-^^^^
-One machine used for testing had the GPU on a different NUMA node to the NIC.
-The transfers to/from the GPU went across the QPI bus, which limited the
-bandwidth and exacerbated the packet drops. This was an older Haswell Xeon;
-the newer Skylake Xeon used for these tests uses UPI which provides the full
-12-13 GB/s I/O for the GPU, but still exacerbates lost packets. It is
-highly recommended that any system using this design has the GPU and NIC on
-the same NUMA node.
-
-We also found that single-threaded memcpy bandwidth on the Skylake Xeon
-improved from about 4 GB/s to about 7 GB/s when removing the second CPU from
-the system. With better memcpy performance it may be possible to use fewer
-cores (and conversely, fewer cores on a die may reduce the latency to
-memory and hence the memcpy performance).
 
 .. _fgpu.ddc:
 

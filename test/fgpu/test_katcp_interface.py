@@ -165,8 +165,8 @@ class TestKatcpRequests:
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain-all")
 
-    @pytest.mark.parametrize("correct_delay_strings", [("3.76,0.12:7.322,1.91", "2.67,0.02:5.678,1.81")])
-    async def test_delay_model_update_correct(self, engine_client, correct_delay_strings):
+    @pytest.mark.parametrize("correct_delay_strings", [("3.76e-9,0.12e-9:7.322,1.91", "2.67e-9,0.02e-9:5.678,1.81")])
+    async def test_delay_model_update_correct(self, engine_server, engine_client, correct_delay_strings):
         """Test correctly-formed delay strings and validate the updates.
 
         The validation is done by comparing it against the corresponding delay sensor readings.
@@ -178,8 +178,13 @@ class TestKatcpRequests:
             phase, phase_rate = [float(value) for value in phase_str.split(",")]
             return delay, delay_rate, wrap_angle(phase), phase_rate
 
-        start_time = 0
+        start_time = SYNC_EPOCH
         await engine_client.request("delays", start_time, correct_delay_strings[0], correct_delay_strings[1])
+        # The delay model won't become current until some data is received, but
+        # we're not simulating any. Poke the delay model manually to make it
+        # update the sensor.
+        for model in engine_server.delay_models:
+            model(1)
 
         for pol in range(N_POLS):
             sensor_reading = await get_sensor(engine_client, f"input{pol}-delay")
@@ -216,10 +221,15 @@ class TestKatcpRequests:
             await engine_client.request("delays", "3.76,0.12:7.322,1.91")
         with pytest.raises(aiokatcp.FailReply):
             # Only one of the two models
-            await engine_client.request("delays", "123456789.0", "3.76,0.12:7.322,1.91")
+            await engine_client.request("delays", SYNC_EPOCH, "3.76,0.12:7.322,1.91")
 
     async def test_delay_model_update_too_many_arguments(self, engine_client):
         """Test that a delay request with too many arguments is rejected."""
         coeffs = "3.76,0.12:7.322,1.91"
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("delays", "123456789.0", coeffs, coeffs, coeffs)
+            await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs, coeffs)
+
+    async def test_delay_model_update_before_sync_epoch(self, engine_client):
+        """Test that a delay model loaded prior to the sync epoch is rejected."""
+        with pytest.raises(aiokatcp.FailReply):
+            await engine_client.request("delays", SYNC_EPOCH - 1.0, "0,0:0,0", "0,0:0,0")

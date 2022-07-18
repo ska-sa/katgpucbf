@@ -212,23 +212,23 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
     assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
     async for chunk in ringbuffer:
         assert isinstance(chunk, Chunk)
-        # Need to check which is the first "proper" Chunk
-        if not np.any(chunk.present):
-            # It's not impossible for there to be a completely
-            # empty chunk during normal operation.
-            if not valid_chunk_received:
-                # Return the chunk to the stream since we are not going to
-                # yield it.
-                stream.add_free_chunk(chunk)
-                continue
-        elif not valid_chunk_received:
-            valid_chunk_received = True
-            prev_chunk_id = chunk.chunk_id - 1
 
-        # Update metrics
+        # Compute metrics
         expected_heaps = len(chunk.present)
         received_heaps = int(np.sum(chunk.present))
         dropped_heaps = expected_heaps - received_heaps
+
+        if received_heaps == 0:
+            # It's not impossible for there to be a completely empty chunk
+            # during normal operation (caused by spead2's windowing
+            # algorithm). Return the chunk to the stream since we are not
+            # going to yield it.
+            stream.add_free_chunk(chunk)
+            continue
+        elif not valid_chunk_received:
+            # Need to check which is the first "proper" Chunk
+            valid_chunk_received = True
+            prev_chunk_id = chunk.chunk_id - 1
 
         # Check if we've missed any chunks
         expected_chunk_id = prev_chunk_id + 1

@@ -7,16 +7,15 @@ DSP Engine Design
 Terminology
 -----------
 
-.. todo:: ``NGC-673``
-    Update katsdpsigproc documentation with proper explanations of terminology
-    (if what's there already isn't sufficient) and then remove this paragraph,
-    which was lifted from fgpu's earlier documentation.
+We will use OpenCL terminology, as it is more generic. If you're more familiar
+with CUDA terminology, katsdpsigproc's
+:external+katsdpsigproc:doc:`introduction <user/intro>` has a table mapping the
+most important concepts. For definitions of the concepts, refer to chapter 2 of
+the `OpenCL specification`_. A summary of the most relevant concepts can also
+be found `here`_.
 
-We will use OpenCL terminology, as it is more generic. An OpenCL *workitem*
-corresponds to a CUDA *thread*. Each workitem logically executes the same
-program but with different parameters, and can share data through *local
-memory* (shared memory in CUDA) with other workitems in the same
-*workgroup* (thread block in CUDA).
+.. _OpenCL specification: https://www.khronos.org/registry/OpenCL/specs/3.0-unified/pdf/OpenCL_API.pdf
+.. _here: http://downloads.ti.com/mctools/esd/docs/opencl/execution/terminology.html
 
 Glossary
 --------

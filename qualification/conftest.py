@@ -22,7 +22,7 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator, Dict, Generator, Tuple, Type, TypeVar
+from typing import AsyncGenerator, Dict, Generator, List, Tuple, Type, TypeVar
 
 import aiokatcp
 import matplotlib.style
@@ -56,6 +56,11 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addini("interface", "Name of network to use for ingest.", type="string")
     parser.addini("use_ibv", "Use ibverbs", type="bool", default="false")
     parser.addini("product_name", "Name of subarray product", type="string", default="qualification_correlator")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
 
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:
@@ -133,7 +138,13 @@ def pdf_report(request) -> Reporter:
     blurb = inspect.getdoc(request.node.function)
     if blurb is None:
         raise AssertionError(f"Test {request.node.name} has no docstring")
-    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time()}]
+    reqs: List[str] = []
+    for marker in request.node.iter_markers("requirements"):
+        if isinstance(marker.args[0], (tuple, list)):
+            reqs.extend(marker.args[0])
+        else:
+            reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
+    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
@@ -148,7 +159,17 @@ def host_config_querier(pytestconfig) -> HostConfigQuerier:
 @pytest.fixture(autouse=True)
 def matplotlib_report_style() -> Generator[None, None, None]:
     """Set the style of all matplotlib plots."""
-    with matplotlib.style.context("ggplot"):
+    with matplotlib.style.context("ggplot"), matplotlib.rc_context(
+        {
+            "pgf.texsystem": "pdflatex",
+            # Serif fonts better match the rest of the document
+            "font.family": "serif",
+            # Clearing these make matplotlib assume the default LaTeX fonts
+            "font.serif": [],
+            "font.sans-serif": [],
+            "font.monospace": [],
+        }
+    ):
         yield
 
 
@@ -374,8 +395,9 @@ async def correlator(
     for name, conf in session_correlator.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
+            sync_time = session_correlator.sensors[f"{name}-sync-time"].value
             await pcc.request("gain-all", name, "default")
-            await pcc.request("delays", name, 0, *(["0,0:0,0"] * n_inputs))
+            await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.baseline_correlation_products":
             await pcc.request("capture-start", name)
 
@@ -405,7 +427,6 @@ async def receive_baseline_correlation_products(
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
-    _, chunk = await receiver.next_complete_chunk(max_delay=0)
-    receiver.stream.add_free_chunk(chunk)
+    await receiver.next_complete_chunk(max_delay=0)
     yield receiver
     receiver.stream.stop()
