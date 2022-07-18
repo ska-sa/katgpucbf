@@ -169,6 +169,15 @@ class CorrelatorRemoteControl:
             client.close()
         await asyncio.gather(*[client.wait_closed() for client in clients])
 
+    async def dsim_time(self, dsim_idx: int = 0) -> float:
+        """Get the current UNIX time, as reported by a dsim.
+
+        This helps make tests independent of the clock on the machine running
+        the test; it depends only on the dsims to be synchronised with each other.
+        """
+        reply, _ = await self.dsim_clients[dsim_idx].request("time")
+        return aiokatcp.decode(float, reply[0])
+
 
 class BaselineCorrelationProductsReceiver:
     """Wrap a receive stream with helper functions."""
@@ -302,6 +311,31 @@ class BaselineCorrelationProductsReceiver:
             self.stream.add_free_chunk(chunk)
             return timestamp, chunk_data
         raise RuntimeError("stream was shut down before we received a complete chunk")
+
+    async def consecutive_chunks(
+        self, n: int, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
+    ) -> List[Tuple[int, spead2.recv.Chunk]]:
+        """Obtain `n` consecutive complete chunks from the stream.
+
+        .. warning::
+
+           This is not safe to use with large values of `n`, because the chunks
+           are removed from the stream's pool. If you plan to use any value
+           larger than 2 you should check that the free ring is initialised
+           with enough chunks and update this comment.
+        """
+        chunks: List[Tuple[int, spead2.recv.Chunk]] = []
+        async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
+            if chunk is None:
+                # Throw away failed attempt at getting an adjacent set
+                for _, old_chunk in chunks:
+                    self.stream.add_free_chunk(old_chunk)
+                chunks.clear()
+                continue
+            chunks.append((timestamp, chunk))
+            if len(chunks) == n:
+                return chunks
+        raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
 
     def timestamp_to_unix(self, timestamp: int) -> float:
         """Convert an ADC timestamp to a UNIX time."""
