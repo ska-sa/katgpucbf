@@ -38,7 +38,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
     ----------
     hdr_data_db:
         A 2-dimensional array where axis 0 represents the different captured spectra,
-        and axis 1 represents the samples in a sprectrum (in dB).
+        and axis 1 represents the samples in a spectrum (in dB).
     base_channel:
         Channel numbers corresponding to the first axis of `hdr_data_db`.
 
@@ -56,7 +56,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
     return sfdr_measurements
 
 
-@pytest.mark.requirements(["CBF-REQ-0126"])
+@pytest.mark.requirements("CBF-REQ-0126")
 async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -68,15 +68,15 @@ async def test_channelisation_and_sfdr(
 
     required_sfdr_db = 53.0
     channel_range_start = 8
-    channel_skip = 31
+    # Odd number to ensure that the channel indices tested cover a range of least significant bits as
+    # this may influence the performance of the FFT.
+    channel_skip = 511
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
     rel_freqs = np.arange(channel_range_start, receiver.n_chans, channel_skip)
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
-    iterations = 3
 
     pdf_report.step("Set gain and measure channel position.")
-    gain_step = 100.0
     # Get a high dynamic range result (hdr_data) by using several gain settings
     # and using the high-gain results to more accurately measure the samples
     # whose power is low enough not to saturate.
@@ -85,18 +85,15 @@ async def test_channelisation_and_sfdr(
     hdr_data = await sample_tone_response_hdr(
         correlator=correlator,
         receiver=receiver,
-        iterations=iterations,
-        gain_step=gain_step,
+        pdf_report=pdf_report,
         amplitude=amplitude,
         rel_freqs=rel_freqs,
-        pdf_report=pdf_report,
     )
 
     # Check tone positions w.r.t. requested channels
     pdf_report.step("Check tone positions.")
     for idx, sel_chan in enumerate(rel_freqs):
-        peak_data = np.max(hdr_data[idx])
-        peak_chan = np.where(hdr_data[idx] == peak_data)[0][0]
+        peak_chan = np.argmax(hdr_data[idx])
         expect(sel_chan == peak_chan)
 
     # The maximum is to avoid errors when data is 0
@@ -105,23 +102,25 @@ async def test_channelisation_and_sfdr(
     # Measure SFDR per captured spectrum
     pdf_report.step("Check SFDR attenuation.")
     sfdr_measurements = measure_sfdr(hdr_data_db, rel_freqs)
+    # Figure out worst SFDR measurement
+    sfdr_min = np.min(sfdr_measurements)
 
-    for sfdr in sfdr_measurements:
-        expect(sfdr >= required_sfdr_db)
+    # Check that minimum SFDR measurement meets the requirement.
+    expect(sfdr_min >= required_sfdr_db)
     sfdr_mean = np.mean(sfdr_measurements)
 
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(rel_freqs)} channels.")
 
-    # Figure out worst SFDR measurement and plot that one.
+    # Report and plot worst SFDR measurement.
     pdf_report.step("Minimum SFDR measurement.")
-    sfdr_min = np.min(sfdr_measurements)
+
     selected_plot_idx = np.argmin(sfdr_measurements)
     pdf_report.detail(f"{sfdr_min:.3f}dB for channel {rel_freqs[selected_plot_idx]}.")
 
     plot_channel = rel_freqs[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
-    xticks = np.arange(0, (receiver.n_chans + 1024), 1024)
+    xticks = np.linspace(0, receiver.n_chans, 9)
     ymin = -100
     title = f"SFDR for channel {plot_channel}"
     x = np.linspace(0, receiver.n_chans - 1, len(hdr_data_db[selected_plot_idx, :]))
@@ -129,14 +128,12 @@ async def test_channelisation_and_sfdr(
 
     fig = Figure()
     ax = fig.subplots()
-    # pgfplots seems to struggle if data is too far outside ylim
-    ax.plot(x, np.maximum(db_plot, ymin - 10))
+    ax.plot(x, db_plot)
     ax.set_title(title)
     ax.set_xlabel("Channel")
     ax.set_ylabel("dB")
     ax.set_xticks(xticks)
-    ax.set_xlim(xticks[0], xticks[-1])
-    ax.set_ylim(ymin, 0)
+    ax.set_ylim(ymin, -0.05 * ymin)
     if ymin < -required_sfdr_db:
         ax.axhline(-required_sfdr_db, dashes=(1, 1), color="black")
         ax.annotate(

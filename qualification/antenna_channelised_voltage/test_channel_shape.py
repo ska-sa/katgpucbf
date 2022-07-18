@@ -55,7 +55,7 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     return (right - left) * step  # Scale from indices to channels
 
 
-@pytest.mark.requirements(["CBF-REQ-0046", "CBF-REQ-0126"])
+@pytest.mark.requirements("CBF-REQ-0126")
 async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -69,8 +69,6 @@ async def test_channel_shape(
     resolution = 128  # Number of samples per channel
     offsets = np.arange(resolution) / resolution - 0.5
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
-    gain_step = 100.0
-    iterations = 3
 
     async def sample(offsets: ArrayLike) -> np.ndarray:
         """Measure response when frequency is offset from channel centre.
@@ -85,11 +83,9 @@ async def test_channel_shape(
         hdr_data = await sample_tone_response_hdr(
             correlator=correlator,
             receiver=receiver,
-            iterations=iterations,
-            gain_step=gain_step,
+            pdf_report=pdf_report,
             amplitude=amplitude,
             rel_freqs=rel_freq,
-            pdf_report=pdf_report,
         )
 
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)

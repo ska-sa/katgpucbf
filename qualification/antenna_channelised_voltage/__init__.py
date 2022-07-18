@@ -45,7 +45,7 @@ async def sample_tone_response_hdr(
 
     Compute high dynamic range spectra per requested tone. One spectrum is
     computed per tone. The HDR data is computed by iterating and applying various
-    gain values adjuested per iteration by the gain step.
+    gain values adjusted per iteration by the gain step.
 
     Parameters
     ----------
@@ -62,7 +62,7 @@ async def sample_tone_response_hdr(
     amplitude
         Required amplitude for generated CW tone. This is also used in computing initial gain.
     rel_freqs
-        List of channels (can fractional units of channels) which CW will be generated.
+        List of channels (can be fractional units of channels) which CW will be generated.
 
     Returns
     ----------
