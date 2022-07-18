@@ -55,7 +55,7 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     return (right - left) * step  # Scale from indices to channels
 
 
-@pytest.mark.requirements("CBF-REQ-0126")
+@pytest.mark.requirements(["CBF-REQ-0046", "CBF-REQ-0126"])
 async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,

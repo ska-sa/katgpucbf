@@ -19,6 +19,7 @@
 from typing import List
 
 import numpy as np
+import pytest
 from matplotlib.figure import Figure
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
@@ -55,26 +56,14 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
     return sfdr_measurements
 
 
+@pytest.mark.requirements(["CBF-REQ-0126"])
 async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test channel position and measure SFDR per channel under test.
-
-    Requirements verified:
-
-    CBF-REQ-0046
-        The channel spacing shall not be less than half of that which is specified for that configuration.
-
-    CBF-REQ-0126
-        The CBF shall perform channelisation such that the 53dB attenuation bandwidth is <= 2x the pass band width.
-
-    CBF-REQ-TDB
-        The CBF, when configured for Wideband intermediate resolution channelisation, shall channelise
-        the L-band pass band into equispaced frequency channels with a channel spacing of delta frequency <= 105kHz.
-    """
+    r"""Test channel position and measure SFDR per channel under test."""
     receiver = receive_baseline_correlation_products
 
     required_sfdr_db = 53.0
