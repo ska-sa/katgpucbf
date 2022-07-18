@@ -56,11 +56,33 @@ from pylatex.utils import bold, escape_latex
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
-UNIT_TRANSLATION_DICT: Final[Dict[str, Callable[[int], str]]] = {
-    "A": lambda ants: f"{ants*2}n",
+UNIT_TRANSLATION_DICT: Final[Dict[str, Callable[[str], str]]] = {
+    "A": lambda ants: f"{int(ants)*2}n",
     "B": lambda bw: f"{bw}M",
-    "C": lambda chans: f"{chans//1000}k",
+    "C": lambda chans: f"{int(chans)//1000}k",
 }
+
+
+def make_correlator_mode_str(config_keyvalue_str: str) -> str:
+    """Convert a key/value config string into a MeerKAT mode string.
+
+    The input is expected to be in the format of, e.g.:
+    - '4 A-8192 C-856 B'
+    And will return a config mode string of:
+    - 8n856M8k
+    """
+    param_dict = {}
+    for param_pair in config_keyvalue_str.split("-"):
+        param_value, param_unit = param_pair.split(" ")
+        param_dict[param_unit] = param_value
+
+    param_dict = dict(sorted(param_dict.items()))
+
+    config_mode_str = ""
+    for param_unit, param_value in param_dict.items():
+        config_mode_str += UNIT_TRANSLATION_DICT.get(param_unit, lambda param_value: "")(param_value)
+
+    return config_mode_str
 
 
 class LstListing(Environment):
@@ -209,7 +231,8 @@ class Task:
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
-    description: str
+    long_descr: str
+    short_descr: str
     uuid: UUID
     tasks: Dict[str, Task]
 
@@ -333,7 +356,9 @@ def _parse_task(msg: dict) -> Task:
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CorrelatorConfiguration(description=msg["description"], uuid=UUID(msg["uuid"]), tasks=tasks)
+    return CorrelatorConfiguration(
+        long_descr=msg["long_descr"], short_descr=msg["short_descr"], uuid=UUID(msg["uuid"]), tasks=tasks
+    )
 
 
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
@@ -414,27 +439,11 @@ def fix_test_name(test_name_full: str) -> str:
     test_name, test_params = test_name_full.split("[")
     test_name_pretty = " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
 
-    param_dict = {}
-    for test_param_pair in test_params[:-1].split("-"):
-        # TODO: Throw some different test cases at this to see how it could cope
-        #       if/when it doesn't receive a parameter set satisfying the
-        #       "Antennas", "Bandwidth" or "Channels" expectation.
-        param_value, param_unit = test_param_pair.split(" ")
-        if param_unit == "B":
-            # TODO: Band parameter is saved as e.g. 856_L B,
-            #       perhaps this can be updated to a `<value> <unit>`
-            #       combo like the other parameters.
-            param_value = param_value.split("_")[0]
-        param_dict[param_unit] = int(param_value)
-    # Needs to be sorted in order to generate the full mode string
-    # according to the required format.
-    param_dict = dict(sorted(param_dict.items()))
+    # TODO: Throw some different test cases at this to see how it could cope
+    #       if/when it doesn't receive a parameter set satisfying the
+    #       "Antennas", "Bandwidth" or "Channels" expectation.
 
-    test_params_pretty = ""
-    for param_unit, param_value_int in param_dict.items():
-        test_params_pretty += UNIT_TRANSLATION_DICT.get(param_unit, lambda param_value_int: "")(param_value_int)
-
-    return f"{test_name_pretty}: {test_params_pretty}"
+    return f"{test_name_pretty}: {make_correlator_mode_str(test_params[:-1])}"
 
 
 def collapse_versions(versions: Set[str]) -> str:
@@ -559,9 +568,11 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
         ("XB-engine {i}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
     ]
     for i, correlator in enumerate(correlators, start=1):
-        with section.create(Subsection(f"Configuration {i}")) as subsec:
+        with section.create(
+            Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.short_descr)}")
+        ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
-            subsec.append(correlator.description)
+            subsec.append(correlator.long_descr)
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
@@ -650,7 +661,9 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
                 for i, correlator in enumerate(test_configuration.correlators, start=1):
                     if correlator.uuid == UUID(value):
                         marker = Marker(value, prefix="correlator")
-                        value = Hyperref(marker, f"Configuration {i}")
+                        value = Hyperref(
+                            marker, f"Configuration {i}: {make_correlator_mode_str(correlator.short_descr)}"
+                        )
                         break
             config_table.add_row([key.capitalize(), value])
             config_table.add_hline()
