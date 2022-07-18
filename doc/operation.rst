@@ -138,7 +138,7 @@ Data Interfaces
 
 .. _spead-protocol:
 
-SPEAD protocol
+SPEAD Protocol
 ^^^^^^^^^^^^^^
 
 The Streaming Protocol for Exchanging Astronomical Data (`SPEAD`_) is a
@@ -159,6 +159,7 @@ consists of one or more UDP packets. A SPEAD transmitter will decompose a heap
 into packets and the receiver will collect all the packets and reassemble the
 heap.
 
+.. _spead-packet-format:
 
 Packet Format
 ^^^^^^^^^^^^^
@@ -202,6 +203,104 @@ The values contained in the immediate items may change from heap to heap, or
 they may be static, with the data payload being the only changing thing,
 depending on the nature of the stream.
 
-.. todo::  ``NGC-676``
-    Consolidate ``fgpu.networking`` and ``xbgpu.networking`` (i.e. input and
-    output packet format sections) here.
+F-Engine Data Format
+^^^^^^^^^^^^^^^^^^^^
+
+Input
+"""""
+The F-engine receives dual-polarisation input from a digitiser (raw antenna)
+stream. In MeerKAT and MeerKAT Extension, each polarisation's raw digitiser data
+is distributed over eight contiguous multicast addresses, to facilitate load-
+balancing on the network, but the receiver is flexible enough to accept input
+from more or fewer multicast addresses.
+
+The only immediate item in the digitiser's output heap used by the F-engine is
+the ``timestamp``.
+
+Output Packet Format
+"""""""""""""""""""""
+
+In addition to the fields described in SPEAD's :ref:`spead-packet-format`
+above, the F-Engine's have an output data format as follows - formally
+labelled elsewhere as **Channelised Voltage Data SPEAD packets**.
+These immediate items are specific to the F-Engine's output stream.
+
+``timestamp``
+  A number to be scaled by an appropriate scale factor,
+  provided as a KATCP sensor, to get the number of Unix
+  seconds since epoch of the first time sample used to
+  generate data in the current SPEAD heap.
+
+``feng_id``
+  Uniquely identifies the F-engine source for the data.
+  A sensor can be consulted to determine the mapping of
+  F-engine to antenna antenna input. The X-engine uses
+  this field to distinguish data received from multiple
+  F-engines.
+
+``frequency``
+  Identifies the first channel in the band of frequencies in
+  the SPEAD heap. Can be used to reconstruct the full spectrum.
+  Although each packet may represent a different frequency,
+  this value remains constant across a heap and represents
+  only the first frequency channel in the range of channels
+  within the heap. The X-engine does not strictly need this
+  information.
+
+``feng_raw item pointer``
+  Channelised complex data from both polarisations of
+  digitiser associated with F-engine. Real comes before
+  imaginary and input 0 before input 1. A number of
+  consecutive samples from each channel are in the same
+  packet.
+
+The F-engines in an array each transmit a subset of frequency channels to each
+X-engine, with each X-engine receiving from a single multicast group. F-engines
+therefore need to ensure that their heap IDs do not collide.
+
+X-Engine Data Format
+^^^^^^^^^^^^^^^^^^^^^
+
+Input
+"""""
+The X-Engine receives antenna channelised data from the output of the F-engines,
+as discussed above. Each X-Engine receives data from each F-engine, but only
+from a subset of the channels.
+
+Output Packet Format
+""""""""""""""""""""
+
+In addition to the fields described in SPEAD's :ref:`spead-packet-format` above,
+the X-Engine's have an output data format as follows - formally labelled
+elsewhere as **Baseline Correlation Products**. These immediate items are
+specific to the X-Engine's output stream.
+
+``frequency``
+  Identifies the first channel in the band of frequencies
+  in the SPEAD heap. Although each packet represents a
+  different frequency, this value remains constant across
+  a heap and represents only the first frequency channel
+  in the range of channels within the heap.
+
+``timestamp``
+  A number to be scaled by an appropriate scale factor,
+  provided as a KATCP sensor, to get the number of Unix
+  seconds since epoch of the first time sample used to
+  generate data in the current SPEAD heap.
+
+``xeng_raw item pointer``
+  Integrated Baseline Correlation Products; packed in an order
+  described by the KATCP sensor :samp:`{xeng-stream-name}-bls-ordering`.
+  Real values are before imaginary. The bandwidth and centre
+  frequencies of each sub-band are subject to the granularity
+  offered by the X-engines.
+
+In MeerKAT Extension, four correlation products are computed for each baseline,
+namely vv, hv, vh, and hh. Thus, for an 80-antenna correlator, there are
+:math:`\frac{n(n+1)}{2} = 3240` baselines, and 12960 correlation products. The
+parameter ``n-bls`` mentioned under ``xeng_raw`` refers to the latter figure.
+
+Each X-engine sends data to its own multicast group. A receiver can combine data
+from several multicast groups to consume a wider spectrum, using the
+``frequency`` item to place each heap. To facilitate this, X-engine output heap
+IDs are kept unique across all X-engines in an array.
