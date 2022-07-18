@@ -17,6 +17,7 @@
 """Channel shape tests."""
 
 import numpy as np
+import pytest
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
@@ -54,20 +55,14 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     return (right - left) * step  # Scale from indices to channels
 
 
+@pytest.mark.requirements("CBF-REQ-0126")
 async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test the shape of the response to a single channel.
-
-    Requirements verified:
-
-    CBF-REQ-0126
-        The CBF shall perform channelisation such that the 53 dB attenuation bandwidth
-        is :math:`\le 2\times` (twice) the pass band width.
-    """
+    """Test the shape of the response to a single channel."""
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
     base_channel = receiver.n_chans // 3

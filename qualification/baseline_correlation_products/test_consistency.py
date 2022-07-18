@@ -30,8 +30,8 @@ async def test_consistency(
 ) -> None:
     """Test that repeated calculations give consistent results.
 
-    Verification method:
-
+    Verification method
+    -------------------
     Provide the same simulated digitiser data to every antenna, with a
     period that divides into the accumulation length. Verify that every
     baseline produces the same bit-wise output, and that two successive

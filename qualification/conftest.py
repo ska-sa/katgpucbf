@@ -22,7 +22,7 @@ import json
 import logging
 import subprocess
 import time
-from typing import AsyncGenerator, Dict, Generator, Tuple, Type, TypeVar
+from typing import AsyncGenerator, Dict, Generator, List, Tuple, Type, TypeVar
 
 import aiokatcp
 import matplotlib.style
@@ -56,6 +56,11 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addini("interface", "Name of network to use for ingest.", type="string")
     parser.addini("use_ibv", "Use ibverbs", type="bool", default="false")
     parser.addini("product_name", "Name of subarray product", type="string", default="qualification_correlator")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
 
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:
@@ -131,7 +136,13 @@ def pdf_report(request) -> Reporter:
     blurb = inspect.getdoc(request.node.function)
     if blurb is None:
         raise AssertionError(f"Test {request.node.name} has no docstring")
-    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time()}]
+    reqs: List[str] = []
+    for marker in request.node.iter_markers("requirements"):
+        if isinstance(marker.args[0], (tuple, list)):
+            reqs.extend(marker.args[0])
+        else:
+            reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
+    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 

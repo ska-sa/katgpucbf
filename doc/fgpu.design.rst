@@ -246,6 +246,22 @@ constructed so that they reference numpy arrays (including for the timestamps),
 rather than copying data into spead2. This allows heaps to be recycled for new
 data without having to create new heap objects.
 
+Output Heap Payload Composition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the case of an 8192-channel array with 64 X-engines, each heap contains 8192/64 =
+128 channels. By default, there are 256 time samples per channel. Each sample is
+dual-pol complex 8-bit data for a combined sample width of 32 bits or 4 bytes.
+
+The heap payload size in this example is equal to
+
+    channels_per_heap * samples_per_channel * complex_sample_size = 128 * 256 * 4 = 131,072 = 128 KiB.
+
+The payload size defaults to a power of 2, so that packet boundaries in a heap
+align with channel boundaries. This isn't important for the :mod:`spead2`
+receiver used in the X-engine, but it may be useful for potential third party
+consumers of F-engine data.
+
 Missing data handling
 ---------------------
 Inevitably some input data will be lost and this needs to be handled. The

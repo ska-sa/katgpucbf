@@ -14,8 +14,6 @@ Welcome to katgpucbf's documentation!
    :caption: Installation and Operation
 
    operation
-   fgpu.networking
-   xbgpu.networking
 
 .. toctree::
    :maxdepth: 2
@@ -23,7 +21,7 @@ Welcome to katgpucbf's documentation!
 
    engines
    fgpu.design
-   xbgpu.theory
+   xbgpu.design
 
 .. toctree::
    :maxdepth: 2

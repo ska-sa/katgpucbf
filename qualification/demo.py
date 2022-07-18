@@ -17,14 +17,20 @@
 """Example tests helpful in developing the reporting framework."""
 
 import matplotlib.figure
+import pytest
 
 from .reporter import Reporter
 
 
+@pytest.mark.requirements("DEMO-000")
 def test_passes(pdf_report: Reporter) -> None:
     r"""Pass the test.
 
     Here is some maths: :math:`e^{\pi j} + 1 = 0`.
+
+    Verification method
+    -------------------
+    Don't actually test anything.
     """
     pdf_report.step("Do things")
     pdf_report.detail("Thing implementation detail 1")
