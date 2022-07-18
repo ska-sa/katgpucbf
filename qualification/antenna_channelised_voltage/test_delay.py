@@ -34,9 +34,9 @@ from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
 from . import compute_tone_gain
 
-MAX_DELAY = 75e-6  # seconds
-MAX_DELAY_RATE = 1.9e-9
-MAX_PHASE_RATE = 186.13  # rad/second
+MAX_DELAY = 79.53e-6  # seconds
+MAX_DELAY_RATE = 2.56e-9
+MAX_PHASE_RATE = 49.22  # rad/second
 
 
 @pytest.mark.requirements("CBF-REQ-0077")
@@ -108,7 +108,7 @@ async def test_delay_application_time(
     expect(delta < 0.01)
 
 
-@pytest.mark.requirements("CBF-REQ-0066,CBF-REQ-0110,CBF-REQ-0200")
+@pytest.mark.requirements("CBF-REQ-0066,CBF-REQ-0110,CBF-REQ-0187,CBF-REQ-0188")
 async def test_delay_enable_disable(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -117,11 +117,14 @@ async def test_delay_enable_disable(
 ) -> None:
     """Test that delay and phase compensation can be enabled and disabled.
 
+    Additionally, verify that changes to delays/phase can be achieved at the
+    required rate.
+
     Verification method
     -------------------
     Verified by means of test. Insert a signal with a tone. Enable delay/phase
     compensation and check that it is applied, then disable and check again.
-    Check that all requests complete within 1s.
+    Check that all requests complete within the required time.
     """
 
     async def measure_phase() -> float:
@@ -178,7 +181,25 @@ async def test_delay_enable_disable(
     pdf_report.step("Check update time.")
     max_elapsed = max(elapsed)
     pdf_report.detail(f"Maximum time for ?delays request is {max_elapsed:.3f}s.")
-    expect(max_elapsed < 1.0)
+    expect(max_elapsed < 1 / 0.167)
+
+
+@pytest.mark.requirements("CBF-REQ-0187,CBF-REQ-0188")
+async def test_delay_application_rate(correlator: CorrelatorRemoteControl, pdf_report: Reporter) -> None:
+    """Test that delay and phase polynomials are applied at the required rate.
+
+    Verification method
+    -------------------
+    Verified by analysis. The delay and phase are calculated separately for
+    every spectrum. Thus, it is sufficient for the rate of spectra to be high
+    enough.
+    """
+    pdf_report.step("Query rate of spectra.")
+    n_samples_between_spectra = correlator.sensors["antenna_channelised_voltage-n-samples-between-spectra"].value
+    scale_factor_timestamp = correlator.sensors["antenna_channelised_voltage-scale-factor-timestamp"].value
+    rate = scale_factor_timestamp / n_samples_between_spectra
+    pdf_report.detail(f"There are {rate:.3f} spectra per second.")
+    assert rate >= 2500.0
 
 
 async def test_delay_sensors(
@@ -187,7 +208,7 @@ async def test_delay_sensors(
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test that delay sensors work correctly.
+    """Test that delay sensors work correctly.
 
     Verification method
     -------------------
@@ -206,7 +227,7 @@ async def test_delay_sensors(
         delay = rng.uniform(0.0, MAX_DELAY)
         delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE)
         phase = rng.uniform(-np.pi, np.pi)
-        phase_rate = rng.uniform(0.0, MAX_PHASE_RATE)
+        phase_rate = rng.uniform(-MAX_PHASE_RATE, MAX_PHASE_RATE)
         delay_strs.append(f"{delay},{delay_rate}:{phase},{phase_rate}")
         delay_tuples.append((load_ts, delay, delay_rate, phase, phase_rate))
 
