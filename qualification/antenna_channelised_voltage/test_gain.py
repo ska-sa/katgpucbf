@@ -19,12 +19,14 @@
 import asyncio
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
 from ..reporter import Reporter
 
 
+@pytest.mark.requirements("CBF-REQ-0119")
 async def test_gains(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -33,15 +35,8 @@ async def test_gains(
 ) -> None:
     r"""Test that gains can be applied.
 
-    Requirements verified:
-
-    CBF-REQ-0119
-        The CBF shall apply gain correction per antenna, per polarisation, per
-        frequency channel with a range of at least :math:`\pm 6` dB and
-        a resolution of :math:`\le 1` dB.
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verified by test. A repeating white noise signal is injected and the
     response measured with the default gains. The gain is then changed to a
     random set of gains, and the response is compared to this.

@@ -30,11 +30,8 @@ async def test_linearity(
 ) -> None:
     """Test that baseline Correlation Products are linear when input CW is scaled.
 
-    Requirements verified:
-        CBF.V.A.IF: CBF Linearity
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verify linearity by checking the channelised output scales linearly with a
     linear change to the CW input amplitude.
     """

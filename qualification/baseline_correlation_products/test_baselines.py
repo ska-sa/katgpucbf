@@ -19,11 +19,13 @@
 from typing import Tuple
 
 import numpy as np
+import pytest
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
 
 
+@pytest.mark.requirements("CBF-REQ-0087,CBF-REQ-0104")
 async def test_baseline_correlation_products(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -32,22 +34,8 @@ async def test_baseline_correlation_products(
 ) -> None:
     """Test that the baseline ordering indicated in the sensor matches the output data.
 
-    Requirements verified:
-
-    CBF-REQ-0087
-        The CBF shall, on request via the CAM interface, compute all cross-
-        correlation and auto-correlation products for all configured baselines
-        in each defined sub-array.
-
-    CBF-REQ-0104
-        The CBF, when requested to produce the Baseline Correlation Products
-        data product, shall transfer the appropriate data continuously to the
-        subscribed user(s) via the interface as specified in the appropriate
-        ICD.
-
-
-    Verification method:
-
+    Verification method
+    -------------------
     Verification by means of test. Verify by testing all correlation product
     combinations. Use gain correction after channelisation to turn the input
     signal on or off. Iterate through all combinations and verify that the
