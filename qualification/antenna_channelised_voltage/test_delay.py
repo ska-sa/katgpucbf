@@ -56,7 +56,7 @@ async def test_delay_application_time(
     receiver = receive_baseline_correlation_products
 
     pdf_report.step("Inject correlated white noise signal.")
-    await correlator.dsim_clients[0].request("signals", "common=wgn(0.1); common; common;")
+    await correlator.dsim_clients[0].request("signals", "common=nodither(wgn(0.1)); common; common;")
     pdf_report.detail("Wait for updated signal to propagate through the pipeline.")
     await receiver.next_complete_chunk()
 
@@ -102,7 +102,7 @@ async def test_delay_application_time(
     load_frac = abs(acc[0]) / total  # Load time as fraction of the accumulation
     load_time = receiver.timestamp_to_unix(target_acc_ts) + load_frac * receiver.int_time
     delta = load_time - target
-    pdf_report.detail(f"Estimated load time error: {delta * 1000:.3f}ms.")
+    pdf_report.detail(f"Estimated load time error: {delta * 1e6:.3f}µs.")
     expect(delta < 0.01)
 
 
@@ -325,13 +325,13 @@ async def test_delay(
 
     pdf_report.step("Set input signals and delays.")
     base_signal = "wgn(0.05, 1)"
-    signals = [base_signal + ";"] * (N_POLS * n_dsims)
+    signals = [f"nodither({base_signal});"] * (N_POLS * n_dsims)
     delay_spec = ["0,0:0,0"] * receiver.n_inputs
     delay_samples = []
     for i, delay in enumerate(delays):
         # It's more efficient for the dsim to delay by a multiple of 8 samples
         delay_samples.append(round(delay * receiver.scale_factor_timestamp / BYTE_BITS) * BYTE_BITS)
-        signals[i] = f"delay({base_signal}, {-delay_samples[-1]});"
+        signals[i] = f"nodither(delay({base_signal}, {-delay_samples[-1]}));"
         delay_spec[i] = f"{delay},0:0,0"
 
     futures = []
@@ -386,7 +386,7 @@ async def test_delay_rate(
     assert N_POLS * n_dsims > len(rates)  # > rather than >= because we need a reference
 
     pdf_report.step("Set input signals and delays.")
-    signal = "common = wgn(0.05, 1); common; common;"
+    signal = "common = nodither(wgn(0.05, 1)); common; common;"
     max_period = await get_sensor_val(correlator.dsim_clients[0], "max-period")
     # Choose a period that makes all accumulations the same, so that we can
     # compare accumulations without extraneous noise.
