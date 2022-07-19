@@ -83,7 +83,7 @@ async def test_channelisation_and_sfdr(
     channel_range_start = 8
     # Odd number to ensure that the channel indices tested cover a range of least significant bits as
     # this may influence the performance of the FFT.
-    channel_skip = 511
+    channel_skip = 31
 
     # Arbitrary channels, not too near the edges, skipping every 'channel_skip' channels
     rel_freqs = np.arange(channel_range_start, receiver.n_chans, channel_skip)
