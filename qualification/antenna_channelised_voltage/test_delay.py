@@ -378,6 +378,72 @@ async def _test_delay_phase_fixed(
         check_phases(pdf_report, expect, actual[:, bl_idx], expected, caption)
 
 
+async def _test_delay_phase_rate(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+    expect,
+    rates: List[Tuple[float, float]],
+    caption_cb: Callable[[float, float], str],
+) -> None:
+    """Test performance of delay or phase compensation with a rate of change.
+
+    This is the implementation for both :func:`test_delay_rate` and
+    :func:`test_phase_rate`.
+
+    Parameters
+    ----------
+    correlator, receive_baseline_correlation_products, pdf_report, expect
+        Fixtures
+    rates
+        Pairs of (delay_rate, phase_rate) to test
+    caption_cb
+        Callback to generate a figure caption from a delay rate and phase rate
+    """
+    receiver = receive_baseline_correlation_products
+    # Minimum, maximum, resolution step
+    n_dsims = len(correlator.dsim_clients)
+    assert N_POLS * n_dsims > len(rates)  # > rather than >= because we need a reference
+
+    pdf_report.step("Set input signals and delays.")
+    signal = "common = nodither(wgn(0.05, 1)); common; common;"
+    max_period = await get_sensor_val(correlator.dsim_clients[0], "max-period")
+    # Choose a period that makes all accumulations the same, so that we can
+    # compare accumulations without extraneous noise.
+    period = math.gcd(max_period, receiver.n_samples_between_spectra * receiver.n_spectra_per_acc)
+    pdf_report.detail(f"Set signal to {signal!r} on all dsims.")
+    await asyncio.gather(*[client.request("signals", signal, period) for client in correlator.dsim_clients])
+    delay_spec = ["0,0:0,0"] * receiver.n_inputs
+    for i, (delay_rate, phase_rate) in enumerate(rates):
+        delay_spec[i] = f"0,{delay_rate}:0,{phase_rate}"
+        pdf_report.detail(f"Set delay model to {delay_spec[i]} on input {i}")
+    now = await correlator.dsim_time()
+    await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", now, *delay_spec)
+
+    pdf_report.step("Collect two consecutive accumulations.")
+    timestamps = []
+    phases = []
+    for timestamp, chunk in await receiver.consecutive_chunks(2):
+        timestamps.append(timestamp)
+        assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
+        phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
+        receiver.stream.add_free_chunk(chunk)
+    elapsed = timestamps[1] - timestamps[0]
+    elapsed_s = elapsed / receiver.scale_factor_timestamp
+    pdf_report.detail(f"Timestamps are {timestamps[0]}, {timestamps[1]} with difference {elapsed} ({elapsed_s:.3f} s).")
+
+    pdf_report.step("Verify results.")
+    for i, (delay_rate, phase_rate) in enumerate(rates):
+        caption = caption_cb(delay_rate, phase_rate)
+        pdf_report.detail(f"Testing {caption}")
+        input1 = receiver.input_labels[i]
+        input2 = receiver.input_labels[-1]
+        bl_idx = receiver.bls_ordering.index((input1, input2))
+        actual = phases[1][:, bl_idx] - phases[0][:, bl_idx]
+        expected = delay_phase(receiver.n_chans, delay_rate * elapsed) + phase_rate * elapsed_s
+        check_phases(pdf_report, expect, actual, expected, caption)
+
+
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
 async def test_delay(
     correlator: CorrelatorRemoteControl,
@@ -424,46 +490,16 @@ async def test_delay_rate(
     successive accumulations and measure the change in phase between them,
     checking that it is within :math:`\ang{1}` of the expected step.
     """
-    receiver = receive_baseline_correlation_products
     # Minimum, maximum, resolution step
     rates = [-MAX_DELAY_RATE, MAX_DELAY_RATE, 2.5e-12]
-    n_dsims = len(correlator.dsim_clients)
-    assert N_POLS * n_dsims > len(rates)  # > rather than >= because we need a reference
-
-    pdf_report.step("Set input signals and delays.")
-    signal = "common = nodither(wgn(0.05, 1)); common; common;"
-    max_period = await get_sensor_val(correlator.dsim_clients[0], "max-period")
-    # Choose a period that makes all accumulations the same, so that we can
-    # compare accumulations without extraneous noise.
-    period = math.gcd(max_period, receiver.n_samples_between_spectra * receiver.n_spectra_per_acc)
-    pdf_report.detail(f"Set signal to {signal!r} on all dsims.")
-    await asyncio.gather(*[client.request("signals", signal, period) for client in correlator.dsim_clients])
-    delay_spec = ["0,0:0,0"] * receiver.n_inputs
-    for i, rate in enumerate(rates):
-        delay_spec[i] = f"0,{rate}:0,0"
-    pdf_report.detail(f"Set delay rates to {rates}")
-    now = await correlator.dsim_time()
-    await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", now, *delay_spec)
-
-    pdf_report.step("Collect two consecutive accumulations.")
-    timestamps = []
-    phases = []
-    for timestamp, chunk in await receiver.consecutive_chunks(2):
-        timestamps.append(timestamp)
-        assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
-        phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
-        receiver.stream.add_free_chunk(chunk)
-    elapsed = timestamps[1] - timestamps[0]
-    pdf_report.detail(f"Timestamps are {timestamps[0]}, {timestamps[1]} with difference {elapsed}.")
-
-    pdf_report.step("Verify results.")
-    for i, rate in enumerate(rates):
-        input1 = receiver.input_labels[i]
-        input2 = receiver.input_labels[-1]
-        bl_idx = receiver.bls_ordering.index((input1, input2))
-        actual = phases[1][:, bl_idx] - phases[0][:, bl_idx]
-        expected = delay_phase(receiver.n_chans, rate * elapsed)
-        check_phases(pdf_report, expect, actual, expected, f"delay rate={rate}")
+    await _test_delay_phase_rate(
+        correlator,
+        receive_baseline_correlation_products,
+        pdf_report,
+        expect,
+        [(delay_rate, 0.0) for delay_rate in rates],
+        lambda delay_rate, phase_rate: f"delay rate {delay_rate}",
+    )
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0112")
@@ -491,4 +527,32 @@ async def test_delay_phase(
         [(0.0, phase) for phase in phases],
         lambda delay, phase: f"phase {phase:.4f} rad ({np.rad2deg(phase):.2f}°)",
         False,
+    )
+
+
+@pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0112")
+async def test_phase_rate(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+    expect,
+) -> None:
+    r"""Test performance of delay tracking with a phase rate.
+
+    Verification method
+    -------------------
+    Verified by test. Set identical signals on all dsims. Set different phase
+    rates on several inputs (all other coefficients being zero). Collect two
+    successive accumulations and measure the change in phase between them,
+    checking that it is within :math:`\ang{1}` of the expected step.
+    """
+    # Minimum, maximum, resolution step
+    rates = [-MAX_PHASE_RATE, MAX_PHASE_RATE, 0.044]
+    await _test_delay_phase_rate(
+        correlator,
+        receive_baseline_correlation_products,
+        pdf_report,
+        expect,
+        [(0.0, phase_rate) for phase_rate in rates],
+        lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )
