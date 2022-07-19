@@ -67,9 +67,9 @@ async def test_channelisation_and_sfdr(
 
     Verification method
     -------------------
-    Channel Postion:
-    Verification by means of test. The channel position test is verified by pre-selecting a range
-    of channels (frequencies) and producing independent spectra per channel. The position of the
+    Channel Position:
+    Verification by means of test. The expected channel position is verified by pre-selecting a range
+    of channels (frequencies) and producing independent spectra per frequency. The position of the
     tone in each spectrum is determined and compared to the position expected.
 
     Spurious Free Dynamic Range (SFDR):
