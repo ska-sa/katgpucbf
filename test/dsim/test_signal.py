@@ -27,7 +27,7 @@ import pytest
 import xarray as xr
 
 from katgpucbf.dsim import signal
-from katgpucbf.dsim.signal import CW, WGN, Constant, Delay, Signal
+from katgpucbf.dsim.signal import CW, WGN, Constant, Delay, Nodither, Signal, TerminalError
 
 from .. import unpackbits
 
@@ -148,6 +148,8 @@ class TestParseSignals:
             ("cw(1, 2) + 0.25;", [CW(1, 2) + Constant(0.25)]),
             ("delay(cw(1, 2) - wgn(1.5, 12345), 42);", [Delay(CW(1, 2) - WGN(1.5, 12345), 42)]),
             ("delay(1, -123);", [Delay(Constant(1), -123)]),
+            ("nodither(cw(1, 2));", [Nodither(CW(1.0, 2.0))]),
+            ("x = nodither(1); x; x;", [Nodither(Constant(1)), Nodither(Constant(1))]),
         ],
     )
     def test_success(self, text: str, expected: Signal) -> None:
@@ -176,6 +178,20 @@ class TestParseSignals:
         """Test error when expecting a number but something else is found."""
         with pytest.raises(pp.ParseSyntaxException, match="Expected number"):
             signal.parse_signals("cw(1, foo);")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "nodither(1) + 0;",
+            "x = nodither(1); x + 0;",
+            "delay(nodither(1), 1);",
+            "nodither(nodither(1));",
+        ],
+    )
+    def test_nodither_terminal(self, text: str) -> None:
+        """Test that nodither expressions cannot be used in larger expressions."""
+        with pytest.raises(TerminalError, match=r"nodither\(1\.0\)"):
+            signal.parse_signals(text)
 
 
 class TestMakeDither:
@@ -296,3 +312,11 @@ class TestSample:
         signal.sample(signals, 0, None, 1.0, 10, out)
         # Must not have a shorter period
         assert not (out.isel(time=np.s_[:2]) == out.isel(time=np.s_[2:])).all()
+
+    def test_nodither_signals(self, signals: List[Signal], out: xr.DataArray) -> None:
+        """Test that ``nodither()`` signals disable dither."""
+        signal.sample(signals, 0, None, 1.0, 10, out, dither=False)
+        orig = out.copy()
+        out.data.fill(0)  # To ensure that it is actually updated
+        signal.sample([Nodither(signal) for signal in signals], 0, None, 1.0, 10, out)
+        np.testing.assert_equal(orig.data, out.data)

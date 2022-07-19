@@ -87,6 +87,15 @@ def _sample_helper_random(n: int, seed_seq: np.random.SeedSequence, sample_chunk
     return _sample_helper(n, seed_seqs_dask, sample_chunk, **kwargs)
 
 
+class TerminalError(TypeError):
+    """Indicate that a terminal signal has been used in an expression."""
+
+    def __init__(self, signal: "Signal") -> None:
+        self.signal = signal
+        assert signal.terminal
+        super().__init__(f"Signal '{signal}' cannot be used in a larger expression")
+
+
 class Signal(ABC):
     """Abstract base class for signals.
 
@@ -117,6 +126,15 @@ class Signal(ABC):
         samples
             Dask array of samples, float32. The chunk size must be CHUNK_SIZE.
         """
+
+    @property
+    def terminal(self) -> bool:
+        """Indicate whether the signal is terminal.
+
+        Terminal signals cannot be combined into larger expressions, because
+        they contain information about how to handle their postprocessing.
+        """
+        return False
 
     def __add__(self, other) -> "Signal":
         if not isinstance(other, Signal):
@@ -152,6 +170,12 @@ class CombinedSignal(Signal):
     b: Signal
     combine: Callable[[da.Array, da.Array], da.Array]
     op_name: str
+
+    def __post_init__(self):
+        if self.a.terminal:
+            raise TerminalError(self.a)
+        if self.b.terminal:
+            raise TerminalError(self.b)
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
         return self.combine(self.a.sample(n, sample_rate), self.b.sample(n, sample_rate))
@@ -320,11 +344,43 @@ class Delay(Signal):
     signal: Signal
     delay: int
 
+    def __post_init__(self) -> None:
+        if self.signal.terminal:
+            raise TerminalError(self.signal)
+
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
         return da.roll(self.signal.sample(n, sample_rate), self.delay)
 
     def __str__(self) -> str:
         return f"delay({self.signal}, {self.delay})"
+
+
+@dataclass
+class Nodither(Signal):
+    """Mark a signal expression as not needing dither.
+
+    Parameters
+    ----------
+    signal
+        Underlying signal
+    """
+
+    signal: Signal
+
+    def __post_init__(self) -> None:
+        if self.signal.terminal:
+            raise TerminalError(self.signal)
+
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
+        return self.signal.sample(n, sample_rate)
+
+    def __str__(self) -> str:
+        return f"nodither({self.signal})"
+
+    @property
+    def terminal(self) -> bool:
+        """Prevent this signal from being used in expressions."""
+        return True
 
 
 def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
@@ -340,28 +396,7 @@ def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
 def parse_signals(prog: str) -> List[Signal]:
     """Generate a set of signals from a domain-specific language.
 
-    The domain-specific language consists of statements terminated by
-    semi-colons. Two types of statements are available:
-
-    1. Assignments have the form :samp:`{var} = {expr}`. The :samp:`{var}`
-       must be a valid ASCII Python identifier. Expressions are described
-       later.
-
-    2. Return values consist solely of an expression.
-
-    An expression may consist of floating-point constants, function calls,
-    parentheses, the operators ``+``, ``-`` and ``*``, and previously-defined
-    variables. The following functions are available (parameters must be
-    integer or floating-point literals).
-
-    cw(amplitude, frequency)
-        See :class:`CW`.
-
-    wgn(std [, entropy])
-        See :class:`WGN`.
-
-    delay(signal, delay)
-        See :class:`Delay`.
+    See :ref:`dsim-dsl` for a description of the language.
     """
     var_table = {}
     output = []
@@ -396,12 +431,14 @@ def parse_signals(prog: str) -> List[Signal]:
     wgn.set_parse_action(lambda s, loc, tokens: WGN(tokens[1], tokens.get("entropy")))
     delay = pp.Keyword("delay") + lpar - expr + comma - signed_integer + rpar
     delay.set_parse_action(lambda s, loc, tokens: Delay(tokens[1], tokens[2]))
+    nodither = pp.Keyword("nodither") + lpar - expr + rpar
+    nodither.set_parse_action(lambda s, loc, tokens: Nodither(tokens[1]))
     variable_expr = variable.copy()
     variable_expr.set_parse_action(get_variable)
     real_expr = real.copy()
     real_expr.set_parse_action(lambda s, loc, tokens: Constant(float(tokens[0])))
 
-    atom = real_expr | cw | wgn | delay | variable_expr
+    atom = real_expr | cw | wgn | delay | nodither | variable_expr
     expr <<= pp.infix_notation(
         atom, [("*", 2, pp.OpAssoc.LEFT, _apply_operator), (pp.one_of("+ -"), 2, pp.OpAssoc.LEFT, _apply_operator)]
     )
@@ -597,7 +634,11 @@ def sample(
     sampled = []
     for i, sig in enumerate(signals):
         data = sig.sample(period, sample_rate)
-        data = quantise(data, sample_bits, dither.isel(pol=i).data)
+        if sig.terminal:
+            sig_dither = da.zeros(period, np.float32, chunks=CHUNK_SIZE)
+        else:
+            sig_dither = dither.isel(pol=i).data
+        data = quantise(data, sample_bits, sig_dither)
         data = da.roll(data, -timestamp)
         data = packbits(data, sample_bits)
         if period < n:
