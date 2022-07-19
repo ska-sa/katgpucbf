@@ -63,7 +63,20 @@ async def test_channelisation_and_sfdr(
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test channel position and measure SFDR per channel under test."""
+    r"""Test channel position and measure SFDR per channel under test.
+
+    Verification method
+    -------------------
+    Channel Postion:
+    Verification by means of test. The channel position test is verified by pre-selecting a range
+    of channels (frequencies) and producing independent spectra per channel. The position of the
+    tone in each spectrum is determined and compared to the position expected.
+
+    Spurious Free Dynamic Range (SFDR):
+    Verification by means of test. During the execution of the channel position test the minimum
+    SFDR is computed as the difference between the peak detected in the channel and the next strongest
+    peak detected in the spectrum where no intentional tone is positioned. This is reported in dB.
+    """
     receiver = receive_baseline_correlation_products
 
     required_sfdr_db = 53.0
@@ -139,6 +152,8 @@ async def test_channelisation_and_sfdr(
         ax.annotate(
             f"{-required_sfdr_db} dB",
             (xticks[-1], -required_sfdr_db),
+            xytext=(-3, -3),
+            textcoords="offset points",
             horizontalalignment="right",
             verticalalignment="top",
         )
