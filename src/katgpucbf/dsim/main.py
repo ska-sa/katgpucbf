@@ -50,7 +50,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--signals",
         default="cw(1.0, 232101234.0);",
-        help="Specification for the signals to generate (see the docstring for parse_signals). "
+        help="Specification for the signals to generate (see the usage guide). "
         "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
