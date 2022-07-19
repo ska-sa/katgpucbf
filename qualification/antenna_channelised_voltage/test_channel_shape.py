@@ -23,7 +23,7 @@ from numpy.typing import ArrayLike
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-from . import compute_tone_gain, sample_tone_response
+from . import sample_tone_response_hdr
 
 
 def _cutoff_interp(x0: float, y0: float, x1: float, y1: float, cutoff: float) -> float:
@@ -62,16 +62,22 @@ async def test_channel_shape(
     pdf_report: Reporter,
     expect,
 ) -> None:
-    """Test the shape of the response to a single channel."""
+    """Test the shape of the response to a single channel.
+
+    Verification method
+    -------------------
+    Verification by means of test. This test selects a base frequency and generates multiple independent
+    spectra based on the base frequency with offsets above and below the base frequency. The frequency
+    deviations produce differing channel amplitudes in frequency domain which when viewed collectively
+    and in series illustrate a channel shape. These meaurements are used to compute a -3dB and -53dB
+    channel bandwidth.
+    """
     receiver = receive_baseline_correlation_products
     # Arbitrary channel, not too near the edges
     base_channel = receiver.n_chans // 3
     resolution = 128  # Number of samples per channel
     offsets = np.arange(resolution) / resolution - 0.5
     amplitude = 0.99  # dsim amplitude, relative to the maximum (<1.0 to avoid clipping after dithering)
-
-    # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
-    gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
 
     async def sample(offsets: ArrayLike) -> np.ndarray:
         """Measure response when frequency is offset from channel centre.
@@ -82,30 +88,23 @@ async def test_channel_shape(
             Offset of the frequency, in units of channels
         """
         rel_freq = base_channel - np.asarray(offsets)
-        data = await sample_tone_response(rel_freq, amplitude, receiver)
+        pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
+        hdr_data = await sample_tone_response_hdr(
+            correlator=correlator,
+            receiver=receiver,
+            pdf_report=pdf_report,
+            amplitude=amplitude,
+            rel_freqs=rel_freq,
+        )
+
         # Flatten to 1D (Fortran order so that offset is fastest-varying axis)
-        data = data.ravel(order="F")
-        return data
+        hdr_data = hdr_data.ravel(order="F")
+        return hdr_data
 
     pdf_report.step("Measure channel shape.")
-    gain_step = 100.0
-    # Get a high dynamic range result (hdr_data) by using several gain settings
-    # and using the high-gain results to more accurately measure the samples
-    # whose power is low enough not to saturate.
-    for i in range(3):
-        pdf_report.detail(f"Set gain to {gain}.")
-        await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
-        pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
-        data = await sample(offsets)
-        data = data.astype(np.float64)
-        if i == 0:
-            peak = np.max(data)
-            hdr_data = data
-        else:
-            power_scale = gain_step ** (i * 2)
-            hdr_data = np.where(hdr_data >= peak / power_scale, hdr_data, data / power_scale)
-        gain *= gain_step
+    hdr_data = await sample(offsets)
 
+    peak = np.max(hdr_data)
     rms_voltage = np.sqrt(peak / receiver.n_spectra_per_acc)
     pdf_report.detail(f"Peak power is {int(peak)} (RMS voltage {rms_voltage:.3f}).")
 
