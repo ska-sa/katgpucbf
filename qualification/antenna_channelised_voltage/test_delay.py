@@ -375,9 +375,9 @@ async def test_delay_rate(
     Verification method
     -------------------
     Verified by test. Set identical signals on all dsims. Set different delay
-    rates on several inputs. Collect two successive accumulations and measure
-    the change in phase between them, checking that it is within
-    :math:`\ang{1}` of the expected step.
+    rates on several inputs (all other coefficients being zero). Collect two
+    successive accumulations and measure the change in phase between them,
+    checking that it is within :math:`\ang{1}` of the expected step.
     """
     receiver = receive_baseline_correlation_products
     # Minimum, maximum, resolution step
