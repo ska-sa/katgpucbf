@@ -19,18 +19,16 @@
 import asyncio
 import math
 from ast import literal_eval
-from typing import List, Optional, cast
+from typing import List, Optional
 
-import aiokatcp
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
 from katgpucbf import BYTE_BITS, N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
 from ..reporter import Reporter
 from . import compute_tone_gain
 
@@ -69,7 +67,7 @@ async def test_delay_application_time(
     for attempt in range(attempts):
         pdf_report.step(f"Set delay {advance * 1000:.0f}ms in the future (attempt {attempt + 1} / {attempts}).")
         pdf_report.detail("Get current time according to the dsim.")
-        now = aiokatcp.decode(float, (await correlator.dsim_clients[0].request("time"))[0][0])
+        now = await correlator.dsim_time()
         target = now + advance
         delays = ["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants
         pdf_report.detail("Set delays.")
@@ -220,7 +218,7 @@ async def test_delay_sensors(
     delay_tuples = []  # Expected sensor values
     delay_strs = []  # Strings to load
     rng = np.random.default_rng(seed=31)
-    now = aiokatcp.decode(float, (await correlator.dsim_clients[0].request("time"))[0][0])
+    now = await correlator.dsim_time()
     load_time = now + 2.0
     load_ts = receiver.unix_to_timestamp(load_time)
     for _ in range(receiver.n_inputs):
@@ -251,6 +249,58 @@ async def test_delay_sensors(
         expect(value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value")
 
 
+def check_phases(
+    pdf_report: Reporter,
+    expect,
+    actual: np.ndarray,
+    expected: np.ndarray,
+    caption: str,
+) -> None:
+    """Compare expected and actual phases to ensure they're within 1°.
+
+    The error in phase is also plotted.
+    """
+    n_chans = len(actual)
+    # Exclude DC component, because it always has zero phase
+    actual = actual[1:]
+    expected = expected[1:]
+    delta = wrap_angle(actual - expected)
+    max_error = np.max(delta)
+    rms_error = np.sqrt(np.mean(np.square(delta)))
+    pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f} degrees.")
+    pdf_report.detail(f"RMS error is {np.rad2deg(rms_error):.5f} degrees.")
+    expect(np.rad2deg(max_error) <= 1.0, "Maximum error is more than 1 degree")
+
+    fig = Figure(tight_layout=True)
+    ax, ax_err = fig.subplots(2)
+    x = range(1, n_chans)
+
+    ax.set_title(f"Phase with {caption}")
+    ax.set_xlabel("Channel")
+    ax.set_ylabel("Phase (degrees)")
+    # It's very noisy, and a thinner linewidth allows more detail to be seen
+    ax.plot(x, np.rad2deg(wrap_angle(actual)), linewidth=0.3, label="Actual")
+    ax.plot(x, np.rad2deg(wrap_angle(expected)), linewidth=0.3, label="Expected")
+    ax.legend()
+
+    ax_err.set_title(f"Phase error with {caption}")
+    ax_err.set_xlabel("Channel")
+    ax_err.set_ylabel("Error (degrees)")
+    ax_err.plot(x, np.rad2deg(delta), linewidth=0.3)
+
+    pdf_report.figure(fig)
+
+
+def delay_phase(n_chans: int, delay_samples: float) -> np.ndarray:
+    """Calculate expected phase for a given delay.
+
+    The return value is appropriate if the sample signal is provided on both
+    inputs, but the first input in the correlation is configured with a delay
+    of `delay_samples` samples, and no phase compensation.
+    """
+    return np.arange(-n_chans // 2, n_chans // 2) / n_chans * np.pi * -delay_samples
+
+
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
 async def test_delay(
     correlator: CorrelatorRemoteControl,
@@ -258,13 +308,13 @@ async def test_delay(
     pdf_report: Reporter,
     expect,
 ) -> None:
-    r"""Test performance of delay compensation.
+    r"""Test performance of delay compensation with a fixed delay.
 
     Verification method
     -------------------
     Verified by test. Set a variety of delays on different inputs. Delay the
     corresponding dsim signal by the same amount, rounded to the nearest 8
-    samples. Check that the resulting phases are within :math:`\ang{1}` degree
+    samples. Check that the resulting phases are within :math:`\ang{1}`
     of the expected value.
     """
     receiver = receive_baseline_correlation_products
@@ -298,37 +348,74 @@ async def test_delay(
     pdf_report.step("Verify results")
     pdf_report.detail("Receive an accumulation")
     _, chunk_data = await receiver.next_complete_chunk()
-    # Convert to floating-point complex values for easier analysis
-    data = chunk_data.astype(np.float64).view(np.complex128)[..., 0]
-    # cast to work around https://github.com/numpy/numpy/issues/21972
-    phase = cast(NDArray[np.float64], np.angle(data))
+    phase = np.arctan2(chunk_data[..., 1], chunk_data[..., 0])
 
     for i, delay in enumerate(delays):
         # The delay is mostly cancelling out the delay applied in the dsim, but
         # there will be fine delay left over
-        residual = delay_samples[i] - delay * receiver.scale_factor_timestamp
+        residual = delay * receiver.scale_factor_timestamp - delay_samples[i]
         pdf_report.detail(f"Testing delay {delay * 1e12:.2f}ps (residual delay {residual:.6f} samples)")
         input1 = receiver.input_labels[i]
         input2 = receiver.input_labels[-1]
         bl_idx = receiver.bls_ordering.index((input1, input2))
         actual = phase[:, bl_idx]
-        expected = np.arange(-receiver.n_chans // 2, receiver.n_chans // 2) / receiver.n_chans * np.pi * residual
-        # Exclude DC component, because it always has zero phase
-        actual = actual[1:]
-        expected = expected[1:]
-        delta = wrap_angle(actual - expected)
-        max_error = np.max(delta)
-        rms_error = np.sqrt(np.mean(np.square(delta)))
-        pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f} degrees.")
-        pdf_report.detail(f"RMS error is {np.rad2deg(rms_error):.5f} degrees.")
-        expect(np.rad2deg(max_error) <= 1.0, "Maximum error is more than 1 degree")
+        expected = delay_phase(receiver.n_chans, residual)
+        check_phases(pdf_report, expect, actual, expected, f"delay={delay * 1e12:.2f}ps")
 
-        fig = Figure()
-        ax = fig.subplots()
-        ax.set_title(f"Phase error with delay={delay * 1e12:.2f}ps")
-        ax.set_xlabel("Channel")
-        ax.set_ylabel("Error (degrees)")
-        x = np.arange(1, receiver.n_chans)
-        # It's very noisy, and a thinner linewidth allows more detail to be seen
-        ax.plot(x, np.rad2deg(delta), linewidth=0.3)
-        pdf_report.figure(fig)
+
+@pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
+async def test_delay_rate(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+    expect,
+) -> None:
+    r"""Test performance of delay compensation with a delay rate.
+
+    Verification method
+    -------------------
+    Verified by test. Set identical signals on all dsims. Set different delay
+    rates on several inputs (all other coefficients being zero). Collect two
+    successive accumulations and measure the change in phase between them,
+    checking that it is within :math:`\ang{1}` of the expected step.
+    """
+    receiver = receive_baseline_correlation_products
+    # Minimum, maximum, resolution step
+    rates = [-MAX_DELAY_RATE, MAX_DELAY_RATE, 2.5e-12]
+    n_dsims = len(correlator.dsim_clients)
+    assert N_POLS * n_dsims > len(rates)  # > rather than >= because we need a reference
+
+    pdf_report.step("Set input signals and delays.")
+    signal = "common = wgn(0.05, 1); common; common;"
+    max_period = await get_sensor_val(correlator.dsim_clients[0], "max-period")
+    # Choose a period that makes all accumulations the same, so that we can
+    # compare accumulations without extraneous noise.
+    period = math.gcd(max_period, receiver.n_samples_between_spectra * receiver.n_spectra_per_acc)
+    pdf_report.detail(f"Set signal to {signal!r} on all dsims.")
+    await asyncio.gather(*[client.request("signals", signal, period) for client in correlator.dsim_clients])
+    delay_spec = ["0,0:0,0"] * receiver.n_inputs
+    for i, rate in enumerate(rates):
+        delay_spec[i] = f"0,{rate}:0,0"
+    pdf_report.detail(f"Set delay rates to {rates}")
+    now = await correlator.dsim_time()
+    await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", now, *delay_spec)
+
+    pdf_report.step("Collect two consecutive accumulations.")
+    timestamps = []
+    phases = []
+    for timestamp, chunk in await receiver.consecutive_chunks(2):
+        timestamps.append(timestamp)
+        assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
+        phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
+        receiver.stream.add_free_chunk(chunk)
+    elapsed = timestamps[1] - timestamps[0]
+    pdf_report.detail(f"Timestamps are {timestamps[0]}, {timestamps[1]} with difference {elapsed}.")
+
+    pdf_report.step("Verify results.")
+    for i, rate in enumerate(rates):
+        input1 = receiver.input_labels[i]
+        input2 = receiver.input_labels[-1]
+        bl_idx = receiver.bls_ordering.index((input1, input2))
+        actual = phases[1][:, bl_idx] - phases[0][:, bl_idx]
+        expected = delay_phase(receiver.n_chans, rate * elapsed)
+        check_phases(pdf_report, expect, actual, expected, f"delay rate={rate}")

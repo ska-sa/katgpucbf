@@ -16,11 +16,8 @@
 
 """Accumulation length test."""
 
-from typing import List, Tuple
-
 import numpy as np
 import pytest
-import spead2.recv
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
@@ -53,19 +50,7 @@ async def test_accum_length(
     await correlator.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
 
     pdf_report.step("Collect two dumps and check the timestamp difference.")
-    chunks: List[Tuple[int, spead2.recv.Chunk]] = []
-    async for timestamp, chunk in receiver.complete_chunks(all_timestamps=True):
-        if chunk is None:
-            # Throw away failed attempt at getting an adjacent pair
-            for _, old_chunk in chunks:
-                receiver.stream.add_free_chunk(old_chunk)
-            chunks.clear()
-            continue
-        chunks.append((timestamp, chunk))
-        if len(chunks) == 2:
-            break
-
-    assert len(chunks) == 2
+    chunks = await receiver.consecutive_chunks(2)
     pdf_report.detail(f"Timestamps are {chunks[0][0]}, {chunks[1][0]}.")
     delta = chunks[1][0] - chunks[0][0]
     delta_s = delta / receiver.scale_factor_timestamp
