@@ -36,7 +36,7 @@ Signal specification
 --------------------
 
 Basics
-~~~~~~
+^^^^^^
 To specify a signal, one writes an
 expression followed by a semi-colon. This provides the signal for a single
 polarisation, so must be repeated for the number of single-pol streams. For
@@ -78,14 +78,14 @@ The output magnitude is limited to the range -1 to 1, so typically the
 be much less than 1.
 
 Operators
-~~~~~~~~~
+^^^^^^^^^
 In addition to these basic building blocks, signals can be combined with the
 operators ``+``, ``-`` and ``*``. It should be noted that these operators can
 only be used on signals: the scalar arguments like `amplitude` and `std` must
 be literal constants rather than expressions.
 
 Variables
-~~~~~~~~~
+^^^^^^^^^
 As in Python, it is also possible to assign an expression to a variable, and
 use the variable several times later. This has several advantages:
 
@@ -112,7 +112,7 @@ As before, statements that don't define a variable define one of the outputs,
 and there must be exactly one such statement per single-pol stream.
 
 Dithering
-~~~~~~~~~
+^^^^^^^^^
 By default, the signal is dithered as a final step, by adding random values
 uniformly selected from the interval [-0.5, 0.5) least significant bits. The
 dither values are chosen independently for each single-pol stream, so that
@@ -127,7 +127,7 @@ Design
 ------
 
 Signal generation
-~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^
 It would be extremely challenging for a CPU to simulate a signal in real-time,
 particularly given the need to pack the results into 10-bit samples. Instead,
 a window of signal is generated on startup, or on request to change the
@@ -162,7 +162,7 @@ dependent on the chunk size.
 .. _dask: https://dask.org/
 
 Transmission
-~~~~~~~~~~~~
+^^^^^^^^^^^^
 Most of the heavy work of transmission is handled by spead2. To minimise
 overheads, the heaps are pre-defined, and put into a
 :class:`spead2.send.HeapReferenceList` for bulk transmission with
