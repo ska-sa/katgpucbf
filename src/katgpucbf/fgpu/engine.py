@@ -294,10 +294,10 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
 
+        send_dtype = np.dtype(np.int8)
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created by _peerdirect_chunk_factory.
             send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
-            send_dtype = np.dtype(np.int8)
             for _ in range(self._processor.send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
