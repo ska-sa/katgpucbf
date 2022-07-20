@@ -68,34 +68,27 @@ async def test_baseline_correlation_products(
             await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
 
         _, data = await receiver.next_complete_chunk()
+        everything_is_awesome = True
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
             bl = receiver.bls_ordering[i]
             loud_bls = np.nonzero(data[channel, :, 0])[0]
             # Check that the baseline actually appears in the list.
-            expect(
-                appears := i in loud_bls,
-                f"{bl} ({i}) doesn't show up in the list ({loud_bls})!",
+            appears = i in loud_bls
+            expect(appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!")
+            # Check that no unexpected baselines have signal.
+            no_unexpected = all(
+                [is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls]
             )
-            # Check that the others in the list (if any) are expected.
-            expect(
-                all(
-                    all_expected := [
-                        is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls
-                    ]
-                ),
-                "Signal found in unexpected baseline.",
-            )
-            pdf_report.detail(
-                f"{i} {bl}: {len(loud_bls)} bl{'s' if len(loud_bls) != 1 else ''} "
-                f"with signal {tuple(loud_bls)} - {'expected.' if appears and all_expected else 'error!'}"
-            )
+            expect(no_unexpected, "Signal found in unexpected baseline.")
+            if not (appears and no_unexpected):
+                everything_is_awesome = False
+        pdf_report.detail(
+            "All baselines in this range correct." if everything_is_awesome else "Errors detected in this range."
+        )
 
 
-def is_signal_expected_in_baseline(
-    expected_bl: Tuple[str, str],
-    loud_bl: Tuple[str, str],
-) -> bool:
+def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[str, str]) -> bool:
     """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
 
     It isn't possible in the general case to get signal in only a single
@@ -115,13 +108,4 @@ def is_signal_expected_in_baseline(
     bool
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
-    if loud_bl == expected_bl:  # This is the one we're checking
-        return True
-    elif loud_bl == (expected_bl[0], expected_bl[0]):  # ant0 autocorrelation
-        return True
-    elif loud_bl == (expected_bl[1], expected_bl[1]):  # ant1 autocorrelation
-        return True
-    elif loud_bl == (expected_bl[1], expected_bl[0]):  # conjugate
-        return True
-    else:  # baseline was loud where it shouldn't be, indicating problem
-        return False
+    return loud_bl[0] in expected_bl and loud_bl[1] in expected_bl
