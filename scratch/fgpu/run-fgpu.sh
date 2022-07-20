@@ -18,6 +18,7 @@ srcs="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
 dst="239.102.$((200+$1)).0+15:7148"
 katcp_port="$(($1+7140))"
 prom_port="$(($1+7150))"
+feng_id="$1"
 
 case "$1" in
     0|1)
@@ -33,6 +34,7 @@ case "$1" in
         exit 2
         ;;
 esac
+shift
 
 set -x
 exec spead2_net_raw taskset -c $other_affinity fgpu \
@@ -43,8 +45,9 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --channels ${channels:-32768} \
     --spectra-per-heap ${spectra_per_heap:-256} \
-    --gain 0.0001 \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
     --sync-epoch 0 \
-    $srcs $dst
+    --array-size 4 \
+    --feng-id "$feng_id" \
+    $srcs $dst "$@"
