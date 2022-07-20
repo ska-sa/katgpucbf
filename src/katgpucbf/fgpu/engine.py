@@ -238,13 +238,9 @@ class Engine(aiokatcp.DeviceServer):
         if extra_samples > chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
 
-        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
-        send_dtype = np.dtype(np.int8)
         send_chunks: List[send.Chunk] = []
         peerdirect_chunk_factory = partial(
             self._peerdirect_chunk_factory,
-            shape=send_shape,
-            dtype=send_dtype,
             substreams=len(dst),
             feng_id=feng_id,
             chunks=send_chunks,
@@ -299,6 +295,9 @@ class Engine(aiokatcp.DeviceServer):
                 stream.add_free_chunk(chunk)
 
         if not use_peerdirect:
+            # When using PeerDirect, the chunks are created by _peerdirect_chunk_factory.
+            send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
+            send_dtype = np.dtype(np.int8)
             for _ in range(self._processor.send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
@@ -373,14 +372,28 @@ class Engine(aiokatcp.DeviceServer):
     @staticmethod
     def _peerdirect_chunk_factory(
         spectra: accel.DeviceArray,
-        shape: Tuple[int, ...],
-        dtype: np.dtype,
         substreams: int,
         feng_id: int,
         chunks: List[send.Chunk],
     ) -> send.Chunk:
-        dev_buffer = spectra.buffer.gpudata.as_buffer(int(np.product(shape) * dtype.itemsize))
-        buf = np.frombuffer(dev_buffer, dtype=dtype).reshape(shape)
+        """Create a :class:`~katgpucbf.xbgpu.send.Chunk` to wrap on-device array for output spectra.
+
+        This is only used with PeerDirect.
+
+        Parameters
+        ----------
+        spectra
+            The array to wrap
+        substreams, feng_id
+            Passed to the :class:`~katgpucbf.xbgpu.send.Chunk` constructor
+        chunks
+            List to which the generated chunk will be appended
+        """
+        dev_buffer = spectra.buffer.gpudata.as_buffer(spectra.buffer.nbytes)
+        # buf is structurally a numpy array, but the pointer in it is a CUDA
+        # pointer and so actually trying to use it as such will cause a
+        # segfault.
+        buf = np.frombuffer(dev_buffer, dtype=spectra.dtype).reshape(spectra.shape)
         chunk = send.Chunk(
             buf,
             substreams=substreams,

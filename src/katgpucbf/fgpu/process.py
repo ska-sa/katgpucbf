@@ -904,21 +904,22 @@ class Processor:
     async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
 
-        This could be done either with or without GPUDirect. In the
-        non-GPUDirect case, :class:`OutItem` objects are pulled from the
+        This could be done either with or without PeerDirect. In the
+        non-PeerDirect case, :class:`OutItem` objects are pulled from the
         `out_queue`. We wait for the events that mark the end of the processing,
         then copy the data to host memory before turning it over to the
         :obj:`sender` for transmission on the network. The "empty" item is then
-        returned to :func:`run_processing` via the `out_free_queue`.
+        returned to :meth:`run_processing` via the `out_free_queue`, and once
+        the chunk has been transmitted it is returned to `send_free_queue`.
 
-        In the GPUDirect case, <TODO clarify once I understand better>.
+        In the PeerDirect case, the item and the chunk are bound together and
+        share memory. In this case `send_free_queue` is unused. The item is
+        only returned to `out_free_queue` once it has been fully transmitted.
 
         Parameters
         ----------
-        sender
-            This object, written in C++, takes large chunks of data and
-            packages it appropriately in SPEAD heaps for transmission on
-            the network.
+        stream
+            The stream transmitting data.
         """
         task: Optional[asyncio.Future] = None
         last_end_timestamp: Optional[int] = None
@@ -957,7 +958,8 @@ class Processor:
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:
-                # In PeerDirect mode the cleanup callback returns the item
+                # We're not in PeerDirect mode
+                # (when we are the cleanup callback returns the item)
                 self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
             task.add_done_callback(functools.partial(self._chunk_finished, chunk))
