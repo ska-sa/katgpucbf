@@ -18,12 +18,11 @@
 
 import asyncio
 import functools
-from typing import Iterable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import numpy as np
 import spead2.send
 import spead2.send.asyncio
-from katsdpsigproc.accel import DeviceArray
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
@@ -85,7 +84,6 @@ class Chunk:
         self,
         data: np.ndarray,
         *,
-        device: Optional[DeviceArray] = None,
         substreams: int,
         feng_id: int,
     ) -> None:
@@ -95,11 +93,12 @@ class Chunk:
         if channels % substreams != 0:
             raise ValueError("substreams must divide into channels")
         self.data = data
-        self.device = device
         #: Whether each frame has valid data
         self.present = np.zeros(n_frames, dtype=bool)
         #: Timestamp of the first heap
         self._timestamp = 0
+        #: Callback to return the chunk to the appropriate queue
+        self.cleanup: Optional[Callable[[], None]] = None
         timestamp_step = spectra_per_heap * channels * 2
         #: Storage for timestamps in the SPEAD heaps.
         self._timestamps = (np.arange(n_frames) * timestamp_step).astype(">u8")
@@ -164,15 +163,12 @@ def make_stream(
     spectra_per_heap: int,
     channels: int,
     chunks: Sequence[Chunk],
-    extra_memory_regions: Optional[Iterable[object]],
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create an asynchronous SPEAD stream for transmission."""
     dtype = chunks[0].data.dtype
     rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor
     thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     memory_regions: List[object] = [chunk.data for chunk in chunks]
-    if extra_memory_regions:
-        memory_regions.extend(extra_memory_regions)
     # Send a bit faster than nominal rate to account for header overheads
     rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor
     config = spead2.send.StreamConfig(
