@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
 
-# Storeing ini options this way makes pytest.ini easier to validate up-front.
+# Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
 ini_options = [
     IniOption(
