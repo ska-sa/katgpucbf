@@ -237,6 +237,14 @@ class Engine(aiokatcp.DeviceServer):
         extra_samples = max_delay_diff + taps * channels * 2
         if extra_samples > chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
+
+        send_chunks: List[send.Chunk] = []
+        peerdirect_chunk_factory = partial(
+            self._peerdirect_chunk_factory,
+            substreams=len(dst),
+            feng_id=feng_id,
+            chunks=send_chunks,
+        )
         self._processor = Processor(
             context,
             taps,
@@ -247,6 +255,7 @@ class Engine(aiokatcp.DeviceServer):
             channels,
             self.delay_models,
             use_vkgdr,
+            peerdirect_chunk_factory if use_peerdirect else None,
             monitor,
         )
         chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
@@ -285,28 +294,19 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
                 stream.add_free_chunk(chunk)
 
-        send_chunks = []
-        send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
         send_dtype = np.dtype(np.int8)
-        for _ in range(self._processor.send_free_queue.maxsize):
-            dev: Optional[accel.DeviceArray]
-            if use_peerdirect:
-                dev = accel.DeviceArray(context, send_shape, send_dtype)
-                dev_buffer = dev.buffer.gpudata.as_buffer(int(np.product(send_shape) * send_dtype.itemsize))
-                send_buf = np.frombuffer(dev_buffer, dtype=send_dtype).reshape(send_shape)
-            else:
-                dev = None
-                send_buf = accel.HostArray(send_shape, send_dtype, context=context)
-            send_chunks.append(
-                send.Chunk(
-                    send_buf,
-                    device=dev,
-                    substreams=len(dst),
-                    feng_id=feng_id,
+        if not use_peerdirect:
+            # When using PeerDirect, the chunks are created by _peerdirect_chunk_factory.
+            send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
+            for _ in range(self._processor.send_free_queue.maxsize):
+                send_chunks.append(
+                    send.Chunk(
+                        accel.HostArray(send_shape, send_dtype, context=context),
+                        substreams=len(dst),
+                        feng_id=feng_id,
+                    )
                 )
-            )
 
-        extra_memory_regions = self._processor.peerdirect_memory_regions if use_peerdirect else []
         self._send_stream = send.make_stream(
             endpoints=dst,
             interface=dst_interface,
@@ -323,10 +323,10 @@ class Engine(aiokatcp.DeviceServer):
             spectra_per_heap=spectra_per_heap,
             channels=channels,
             chunks=send_chunks,
-            extra_memory_regions=extra_memory_regions,
         )
-        for schunk in send_chunks:
-            self._processor.send_free_queue.put_nowait(schunk)
+        if not use_peerdirect:
+            for schunk in send_chunks:
+                self._processor.send_free_queue.put_nowait(schunk)
 
         self._descriptor_heap_reflist = send.make_descriptor_heaps(
             data_type=send_dtype,
@@ -368,6 +368,39 @@ class Engine(aiokatcp.DeviceServer):
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
+
+    @staticmethod
+    def _peerdirect_chunk_factory(
+        spectra: accel.DeviceArray,
+        substreams: int,
+        feng_id: int,
+        chunks: List[send.Chunk],
+    ) -> send.Chunk:
+        """Create a :class:`~katgpucbf.xbgpu.send.Chunk` to wrap on-device array for output spectra.
+
+        This is only used with PeerDirect.
+
+        Parameters
+        ----------
+        spectra
+            The array to wrap
+        substreams, feng_id
+            Passed to the :class:`~katgpucbf.xbgpu.send.Chunk` constructor
+        chunks
+            List to which the generated chunk will be appended
+        """
+        dev_buffer = spectra.buffer.gpudata.as_buffer(spectra.buffer.nbytes)
+        # buf is structurally a numpy array, but the pointer in it is a CUDA
+        # pointer and so actually trying to use it as such will cause a
+        # segfault.
+        buf = np.frombuffer(dev_buffer, dtype=spectra.dtype).reshape(spectra.shape)
+        chunk = send.Chunk(
+            buf,
+            substreams=substreams,
+            feng_id=feng_id,
+        )
+        chunks.append(chunk)
+        return chunk
 
     def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
         """Update the delay sensor upon loading of a new model.

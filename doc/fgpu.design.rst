@@ -246,6 +246,28 @@ constructed so that they reference numpy arrays (including for the timestamps),
 rather than copying data into spead2. This allows heaps to be recycled for new
 data without having to create new heap objects.
 
+PeerDirect
+^^^^^^^^^^
+When GPUDirect RDMA / PeerDirect is used, the mechanism is altered slightly to
+eliminate the copy from the GPU to the host:
+
+1. Chunks no longer own their memory. Instead, they use CUDA device pointers
+   referencing the memory stored in an OutItem. As a result, Chunks and
+   OutItems are tied tightly together (each OutItem holds a reference to the
+   corresponding Chunk), instead of existing on separate queues.
+
+2. Instead of OutItems being returned to the free queue once the data has been
+   copied to the host, they are only returned after the data they hold has
+   been fully transmitted.
+
+3. More OutItems are allocated to compensate for the increased time required
+   before an OutItem can be reused. This has not yet been tuned.
+
+There may be opportunities for further optimisation, in the sense of reducing
+the amount of memory that is not actively in use, because some parts of an
+OutItem can be recycled sooner than others. Since GPUs that support this
+feature tend to have large amounts of memory, this is not seen as a priority.
+
 Output Heap Payload Composition
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

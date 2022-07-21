@@ -28,7 +28,7 @@ import functools
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Iterable, List, Optional, Sequence, Tuple, cast
+from typing import Callable, Deque, Iterable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import spead2.recv
@@ -320,6 +320,8 @@ class OutItem(EventItem):
         transmitted.
     n_spectra
         Number of spectra contained in :attr:`spectra`.
+    chunk
+        Corresponding chunk for transmission (only used in PeerDirect mode).
 
     Parameters
     ----------
@@ -336,6 +338,7 @@ class OutItem(EventItem):
     gains: accel.HostArray
     present: np.ndarray
     n_spectra: int
+    chunk: Optional[send.Chunk] = None
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
@@ -438,6 +441,10 @@ class Processor:
         The delay models which should be applied to the data.
     use_vkgdr
         Assemble chunks directly in GPU memory (requires supported GPU).
+    peerdirect_chunk_factory
+        Specify this to use PeerDirect to transmit data directly from GPU
+        memory. The value must be a callable that takes
+        :attr:`OutItem.spectra` and returns a chunk that wraps it.
     monitor
         Monitor object to use for generating the :class:`~asyncio.Queue` objects
         and reporting their events.
@@ -454,6 +461,7 @@ class Processor:
         channels: int,
         delay_models: Sequence[AbstractDelayModel],
         use_vkgdr: bool,
+        peerdirect_chunk_factory: Optional[Callable[[accel.DeviceArray], send.Chunk]],
         monitor: Monitor,
     ) -> None:
         compute_queue = context.create_command_queue()
@@ -469,8 +477,8 @@ class Processor:
 
         # TODO: Perhaps declare these as constants at the top? Or Class variables?
         n_in = 3
-        n_out = 2
         n_send = 4
+        n_out = n_send if peerdirect_chunk_factory is not None else 2
 
         # The type annotations have to be in comments because Python 3.8
         # doesn't support the syntax at runtime (Python 3.9 fixes that).
@@ -482,12 +490,12 @@ class Processor:
 
         self.monitor = monitor
         self._src_packet_samples = src_packet_samples
-        self._spectra = []
         for _ in range(n_in):
             self.in_free_queue.put_nowait(InItem(self.compute, packet_samples=src_packet_samples, use_vkgdr=use_vkgdr))
         for _ in range(n_out):
             item = OutItem(self.compute)
-            self._spectra.append(item.spectra)
+            if peerdirect_chunk_factory is not None:
+                item.chunk = peerdirect_chunk_factory(item.spectra)
             self.out_free_queue.put_nowait(item)
         self._in_items: Deque[InItem] = deque()
         self._out_item = self.out_free_queue.get_nowait()
@@ -528,14 +536,6 @@ class Processor:
     def pols(self) -> int:  # noqa: D401
         """Number of polarisations."""
         return N_POLS
-
-    @property
-    def peerdirect_memory_regions(self) -> Sequence[object]:  # noqa D102
-        """GPU memory regions for direct network transmission.
-
-        Python buffer objects encapsulating GPU memory that will be transmitted
-        to the network directly, without copying to the CPU."""
-        return [spectra.buffer.gpudata.as_buffer(spectra.buffer.nbytes) for spectra in self._spectra]
 
     async def _next_in(self) -> Optional[InItem]:
         """Load next InItem for processing.
@@ -623,7 +623,7 @@ class Processor:
                 assert pol_data.chunk is not None
                 chunks.append(pol_data.chunk)
                 pol_data.chunk = None
-            asyncio.create_task(self._push_chunks(streams, chunks, event))
+            asyncio.create_task(self._push_recv_chunks(streams, chunks, event))
         else:
             item.events.append(event)
         self.in_free_queue.put_nowait(item)
@@ -676,7 +676,7 @@ class Processor:
             self._out_item.timestamp = new_timestamp
 
     @staticmethod
-    async def _push_chunks(
+    async def _push_recv_chunks(
         streams: Iterable[spead2.recv.ChunkRingStream], chunks: Iterable[recv.Chunk], event: AbstractEvent
     ) -> None:
         """Return chunks to the streams once `event` has fired.
@@ -891,7 +891,9 @@ class Processor:
 
         This is intended to be used as a callback on an :class:`asyncio.Future`.
         """
-        self.send_free_queue.put_nowait(chunk)
+        if chunk.cleanup is not None:
+            chunk.cleanup()
+            chunk.cleanup = None  # Potentially helps break reference cycles
         try:
             future.result()  # No result, but want the exception
         except asyncio.CancelledError:
@@ -902,21 +904,22 @@ class Processor:
     async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
 
-        This could be done either with or without GPUDirect. In the
-        non-GPUDirect case, :class:`OutItem` objects are pulled from the
+        This could be done either with or without PeerDirect. In the
+        non-PeerDirect case, :class:`OutItem` objects are pulled from the
         `out_queue`. We wait for the events that mark the end of the processing,
         then copy the data to host memory before turning it over to the
         :obj:`sender` for transmission on the network. The "empty" item is then
-        returned to :func:`run_processing` via the `out_free_queue`.
+        returned to :meth:`run_processing` via the `out_free_queue`, and once
+        the chunk has been transmitted it is returned to `send_free_queue`.
 
-        In the GPUDirect case, <TODO clarify once I understand better>.
+        In the PeerDirect case, the item and the chunk are bound together and
+        share memory. In this case `send_free_queue` is unused. The item is
+        only returned to `out_free_queue` once it has been fully transmitted.
 
         Parameters
         ----------
-        sender
-            This object, written in C++, takes large chunks of data and
-            packages it appropriately in SPEAD heaps for transmission on
-            the network.
+        stream
+            The stream transmitting data.
         """
         task: Optional[asyncio.Future] = None
         last_end_timestamp: Optional[int] = None
@@ -925,21 +928,21 @@ class Processor:
                 out_item = await self.out_queue.get()
             if not out_item:
                 break
-            with self.monitor.with_state("run_transmit", "wait send_free_queue"):
-                chunk = await self.send_free_queue.get()
-            # TODO: use get_region since it might be partial
-            if chunk.device:
-                old_spectra = chunk.device
-                chunk.device = out_item.spectra
-                # TODO: this will need to be reworked after conversion of sending to Python
-                chunk.data = chunk.device.buffer.gpudata.as_buffer(chunk.device.buffer.nbytes)
-                out_item.spectra = old_spectra
+            if out_item.chunk is not None:
+                # We're using PeerDirect
+                chunk = out_item.chunk
+                chunk.cleanup = functools.partial(self.out_free_queue.put_nowait, out_item)
                 events = out_item.events
             else:
+                with self.monitor.with_state("run_transmit", "wait send_free_queue"):
+                    chunk = await self.send_free_queue.get()
+                chunk.cleanup = functools.partial(self.send_free_queue.put_nowait, chunk)
                 self._download_queue.enqueue_wait_for_events(out_item.events)
                 assert isinstance(chunk.data, accel.HostArray)
+                # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
                 events = [self._download_queue.enqueue_marker()]
+
             chunk.timestamp = out_item.timestamp
             # Each frame is valid if all spectra in it are valid
             out_item.present.reshape(-1, self.spectra_per_heap).all(axis=-1, out=chunk.present)
@@ -953,8 +956,11 @@ class Processor:
                 skipped_frames = skipped_samples // (self.spectra_per_heap * self.spectra_samples)
                 send.skipped_heaps_counter.inc(skipped_frames * stream.num_substreams)
             last_end_timestamp = out_item.end_timestamp
-            out_item.reset()
-            self.out_free_queue.put_nowait(out_item)
+            out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
+            if out_item.chunk is None:
+                # We're not in PeerDirect mode
+                # (when we are the cleanup callback returns the item)
+                self.out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
             task.add_done_callback(functools.partial(self._chunk_finished, chunk))
 
