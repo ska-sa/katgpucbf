@@ -154,7 +154,7 @@ def host_config_querier(pytestconfig) -> HostConfigQuerier:
     # If getini can't find the corresponding config entry, it returns an empty
     # list. This results in a rather cryptic error message, so this below is
     # to make life less confusing.
-    assert url, "No prometheus_url, have you forgotten to update your pytest.ini?"
+    assert url, "prometheus_url missing from pytest.ini"
     return HostConfigQuerier(url)
 
 
