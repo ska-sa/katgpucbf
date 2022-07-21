@@ -78,7 +78,7 @@ async def test_baseline_correlation_products(
             expect(appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!")
             # Check that no unexpected baselines have signal.
             no_unexpected = all(
-                [is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls]
+                is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls
             )
             expect(no_unexpected, "Signal found in unexpected baseline.")
             if not (appears and no_unexpected):
