@@ -117,6 +117,41 @@ Shutting down the correlator
     Describe how to shut the correlator down. Product or master controller
     passes requests on to individual running instances.
 
+There are two main scenarios which involve the shutdown of a correlator and its
+constituent engines.
+
+#. During normal correlator operation, and
+#. During testing and debugging of individual engines and/or dsims.
+
+Normal correlator operation
+""""""""""""""""""""""""""""
+As previously mentioned, currently :mod:`katgpucbf`'s correlator-wide
+orchestration is done via `katsdpcontroller`_. This, in turn, provides an
+interface to the correlator and its constituent engines based on an
+:external+aiokatcp:doc:`aiokatcp server <server/tutorial>`. For this reason, a
+user can connect to the ``<ip_addr>:<port>`` using a networking utility like
+telnet, netcat or ntsh and issue a ``?product-deconfigure`` command.
+This command triggers the stop procedure of all engines and dsims running
+in the target correlator. The dsim, F- and X-Engine all make use of
+:external+aiokatcp:py:class:`aiokatcp server's <aiokatcp.server.DeviceServer>`'s
+:external+aiokatcp:py:meth:`on_stop <aiokatcp.server.DeviceServer.on_stop>`
+feature which allows for any engine-specific clean-up to take place before
+coming to a final stop.
+
+.. _katsdpcontroller: https://github.com/ska-sa/katsdpcontroller
+.. _docker: https://www.docker.com/
+
+Running individual Engines
+""""""""""""""""""""""""""
+An example of this scenario is running a standalone instance of ``xbgpu`` - along
+with an ``fsim``. Here, you might use one of the handy scripts under e.g. ``scratch/xbgpu/``
+to launch an X-Engine instance. Once you've sufficiently debugged and/or reached
+the desired level of confusion, you can simply ``Ctrl + C`` in your terminal window
+and ``xbgpu`` will shut down cleanly and quietly.
+
+A fair bit of work has gone into ensuring the engines and ``DeviceServer``'s
+they're built on are robust to all forms of exceptions and anomalies.
+
 Monitoring
 ^^^^^^^^^^
 
