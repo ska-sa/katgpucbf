@@ -51,20 +51,10 @@ async def test_baseline_correlation_products(
     await correlator.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
-    # Some helper functions:
-    async def zero_all_gains():
-        pdf_report.detail("Setting all F-engine gains to zero.")
-        await pc_client.request("gain-all", "antenna_channelised_voltage", "0")
-
-    async def unzero_a_baseline(baseline_tuple: Tuple[str, str]):
-        pdf_report.detail(f"Unzeroing gain on {baseline_tuple}")
-        for inp in baseline_tuple:
-            await pc_client.request("gain", "antenna_channelised_voltage", inp, "1")
-
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
-        await zero_all_gains()
+        await pc_client.request("gain-all", "antenna_channelised_voltage", "0")
         pdf_report.detail("Compute gains to enable one baseline per channel.")
         gains = {}
         for i in range(start_idx, end_idx):
@@ -78,28 +68,27 @@ async def test_baseline_correlation_products(
             await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
 
         _, data = await receiver.next_complete_chunk()
+        everything_is_awesome = True
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
             bl = receiver.bls_ordering[i]
             loud_bls = np.nonzero(data[channel, :, 0])[0]
-            pdf_report.detail(
-                f"Checking {bl}: {len(loud_bls)} baseline{'s' if len(loud_bls) != 1 else ''} "
-                f"had signal in {'them' if len(loud_bls) != 1 else 'it'}: {loud_bls}"
+            # Check that the baseline actually appears in the list.
+            appears = i in loud_bls
+            expect(appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!")
+            # Check that no unexpected baselines have signal.
+            no_unexpected = all(
+                is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls
             )
-            expect(
-                i in loud_bls,
-                f"{bl} ({i}) doesn't show up in the list ({loud_bls})!",
-            )
-            for loud_bl in loud_bls:
-                expect(
-                    is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl], pdf_report),
-                    "Signal found in unexpected baseline.",
-                )
+            expect(no_unexpected, "Signal found in unexpected baseline.")
+            if not (appears and no_unexpected):
+                everything_is_awesome = False
+        pdf_report.detail(
+            "All baselines in this range correct." if everything_is_awesome else "Errors detected in this range."
+        )
 
 
-def is_signal_expected_in_baseline(
-    expected_bl: Tuple[str, str], loud_bl: Tuple[str, str], pdf_report: Reporter
-) -> bool:
+def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[str, str]) -> bool:
     """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
 
     It isn't possible in the general case to get signal in only a single
@@ -119,18 +108,4 @@ def is_signal_expected_in_baseline(
     bool
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
-    if loud_bl == expected_bl:
-        pdf_report.detail(f"Signal confirmed in bl {expected_bl} where expected")
-        return True
-    elif loud_bl == (expected_bl[0], expected_bl[0]):
-        pdf_report.detail(f"Signal in {loud_bl} is ok, it's ant0's autocorrelation.")
-        return True
-    elif loud_bl == (expected_bl[1], expected_bl[1]):
-        pdf_report.detail(f"Signal in {loud_bl} is ok, it's ant1's autocorrelation.")
-        return True
-    elif loud_bl == (expected_bl[1], expected_bl[0]):
-        pdf_report.detail(f"Signal in {loud_bl} is ok, it's the conjugate of what we expect.")
-        return True
-    else:
-        pdf_report.detail(f"Signal injected into bl {expected_bl} wasn't expected to show up in {loud_bl}!")
-        return False
+    return loud_bl[0] in expected_bl and loud_bl[1] in expected_bl
