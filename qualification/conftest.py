@@ -22,6 +22,7 @@ import json
 import logging
 import subprocess
 import time
+from collections import namedtuple
 from typing import AsyncGenerator, Dict, Generator, List, Tuple, Type, TypeVar
 
 import aiokatcp
@@ -40,27 +41,44 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
 
+# Storeing ini options this way makes pytest.ini easier to validate up-front.
+IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
+ini_options = [
+    IniOption(
+        name="master_controller_host", help="Hostname (or IP address) of the SDP master controller", type="string"
+    ),
+    IniOption(
+        name="master_controller_port", help="TCP port of the SDP master controller", type="string", default="5001"
+    ),
+    IniOption(
+        name="prometheus_url", help="URL to Prometheus server for querying hardware configuration", type="string"
+    ),
+    IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
+    IniOption(name="use_ibv", help="Use ibverbs", type="bool", default="false"),
+    IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
+]
+
+
 def pytest_addoption(parser, pluginmanager):  # noqa: D103
     # I'm adding the image override as a cmd-line parameter. It seems best (at
     # this stage anyway) that it be explicit which image you're testing.
     parser.addoption(
         "--image-override", action="append", required=True, metavar="NAME:IMAGE:TAG", help="Override a single image"
     )
-    # On the other hand, the MC details aren't likely to change frequently, so
-    # an INI file is probably appropriate.
-    parser.addini("master_controller_host", "Hostname (or IP address) of the SDP master controller", type="string")
-    parser.addini("master_controller_port", "TCP port of the SDP master controller", type="string", default="5001")
-    parser.addini("prometheus_url", "URL to Prometheus server for querying hardware configuration", type="string")
-    # I'm on the fence about these. Probably on a given machine, you'd set and
-    # forget.
-    parser.addini("interface", "Name of network to use for ingest.", type="string")
-    parser.addini("use_ibv", "Use ibverbs", type="bool", default="false")
-    parser.addini("product_name", "Name of subarray product", type="string", default="qualification_correlator")
+    for option in ini_options:
+        parser.addini(*option)
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers."""
+    """Register custom markers and validate the pytest.ini file.
+
+    .. note::
+        This hook checks whether all the expected ini options are there, not
+        whether they're correct or useful.
+    """
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
+    for option in ini_options:
+        assert config.getini(option.name), f"{option.name} missing from pytest.ini"
 
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:
@@ -151,10 +169,6 @@ def pdf_report(request) -> Reporter:
 def host_config_querier(pytestconfig) -> HostConfigQuerier:
     """Querier for getting host config."""
     url = pytestconfig.getini("prometheus_url")
-    # If getini can't find the corresponding config entry, it returns an empty
-    # list. This results in a rather cryptic error message, so this below is
-    # to make life less confusing.
-    assert url, "prometheus_url missing from pytest.ini"
     return HostConfigQuerier(url)
 
 
