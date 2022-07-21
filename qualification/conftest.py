@@ -151,6 +151,10 @@ def pdf_report(request) -> Reporter:
 def host_config_querier(pytestconfig) -> HostConfigQuerier:
     """Querier for getting host config."""
     url = pytestconfig.getini("prometheus_url")
+    # If getini can't find the corresponding config entry, it returns an empty
+    # list. This results in a rather cryptic error message, so this below is
+    # to make life less confusing.
+    assert url, "prometheus_url missing from pytest.ini"
     return HostConfigQuerier(url)
 
 
