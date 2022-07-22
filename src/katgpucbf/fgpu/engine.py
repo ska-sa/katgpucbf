@@ -502,7 +502,7 @@ class Engine(aiokatcp.DeviceServer):
         return tuple(format_complex(gain) for gain in gains)
 
     async def request_gain_all(self, ctx, *values: str) -> None:
-        """Set or query the eq gains for all inputs.
+        """Set the eq gains for all inputs.
 
         Parameters
         ----------
