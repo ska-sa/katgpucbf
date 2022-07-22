@@ -51,6 +51,11 @@ dsim
     results, provided any randomised terms (such as ``wgn``) use fixed
     seeds.
 
+    It returns an ADC timestamp, which indicates the next sample which is
+    generated with the new signals. This is kept for backwards compatibility,
+    but the same information can be found in the ``steady-state-timestamp``
+    sensor.
+
 ``?time``
     Return the current UNIX timestamp on the server running the dsim. This can
     be used to get an approximate idea of which data is in flight, without
