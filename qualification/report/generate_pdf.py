@@ -60,26 +60,49 @@ UNIT_TRANSLATION_DICT: Final[Dict[str, Callable[[str], str]]] = {
     "A": lambda ants: f"{int(ants)*2}n",
     "B": lambda bw: f"{bw}M",
     "C": lambda chans: f"{int(chans)//1000}k",
+    "ZZ": lambda param: f"-{param}",
 }
 
 
-def make_correlator_mode_str(config_keyvalue_str: str) -> str:
+def make_correlator_mode_str(keyvalue_config: str, mode_str_only: bool = True) -> str:
     """Convert a key/value config string into a MeerKAT mode string.
 
     The input is expected to be in the format of, e.g.:
     - '4 A-8192 C-856 B'
     And will return a config mode string of:
     - 8n856M8k
-    """
-    param_dict = {}
-    for param_pair in config_keyvalue_str.split("-"):
-        param_value, param_unit = param_pair.split(" ")
-        param_dict[param_unit] = param_value
 
-    param_dict = dict(sorted(param_dict.items()))
+    Parameters
+    ----------
+    keyvalue_config
+        A string in a format described above.
+    mode_str_only
+        To indicate whether just the mode string should be generated,
+        or all other parameters should be preserved in the translation.
+
+    Returns
+    -------
+    config_mode_str
+        String of translated parameters present in keyvalue_config
+    """
+    # The input keyvalue_config string, in a format of '<value> <unit>',
+    # will be parsed into a list of tuples in the format of '(<unit>, <value>)'
+    # - This is to mimic a dictionary, but to allow any parameters outside of
+    #   the 'Antennas, Channels, Bandwidth' group to be assigned the same
+    #   'formatter', as per the UNIT_TRANSLATION_DICT.
+    param_tuples: List[Tuple[str, str]] = []
+    for param_pair in keyvalue_config.split("-"):
+        param_pair_split = param_pair.strip().split(" ")
+        if param_pair_split[-1].upper() in UNIT_TRANSLATION_DICT.keys():
+            param_tuples.append((param_pair_split[-1], param_pair_split[0]))
+        elif not mode_str_only:
+            param_tuples.append(("ZZ", " ".join(value for value in param_pair_split)))
+        # else: Continue
 
     config_mode_str = ""
-    for param_unit, param_value in param_dict.items():
+    for param_unit, param_value in sorted(param_tuples):
+        # We shouldn't need to provide a default for handling a KeyError,
+        # but it's good practice.
         config_mode_str += UNIT_TRANSLATION_DICT.get(param_unit, lambda param_value: "")(param_value)
 
     return config_mode_str
@@ -420,7 +443,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     return test_configuration, results
 
 
-def fix_test_name(test_name_full: str) -> str:
+def fix_test_name(test_name_full: str, mode_str_only: bool) -> str:
     """Change a test's name from a pytest one to the expected report format.
 
     The test name doesn't change much, but the parameters need to be translated
@@ -435,15 +458,21 @@ def fix_test_name(test_name_full: str) -> str:
     .. todo::
         <mode> isn't exactly 'used' at the moment, so it has been purposefully
         left out of the current implementation, pending review/feedback.
+
+    Parameters
+    ----------
+    test_name_full
+        The pytest-style test name, e.g. 'test_baselines[8 A-8192 C-856 B]'
+    mode_str_only
+        To indicate whether just the MeerKAT-spec mode string should be
+        generated, or all other parameters should be preserved in the
+        translation. Defaulted to False as the unit test-level naming usually
+        needs to preserve the state that the unit test was invoked in.
     """
     test_name, test_params = test_name_full.split("[")
     test_name_pretty = " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
 
-    # TODO: Throw some different test cases at this to see how it could cope
-    #       if/when it doesn't receive a parameter set satisfying the
-    #       "Antennas", "Bandwidth" or "Channels" expectation.
-
-    return f"{test_name_pretty}: {make_correlator_mode_str(test_params[:-1])}"
+    return f"{test_name_pretty}: {make_correlator_mode_str(test_params[:-1], mode_str_only)}"
 
 
 def collapse_versions(versions: Set[str]) -> str:
@@ -618,7 +647,7 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         for result in results:
             summary_table.add_row(
                 [
-                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
+                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name, mode_str_only=True)),
                     TextColor("green" if result.outcome == "passed" else "red", result.outcome),
                     readable_duration(result.duration),
                 ]
@@ -715,7 +744,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
-            with section.create(Subsection(fix_test_name(result.name), label=result.name)):
+            with section.create(Subsection(fix_test_name(result.name, mode_str_only=False), label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
                     _doc_requirements(requirements_sec, result.requirements)
