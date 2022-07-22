@@ -87,11 +87,6 @@ xbgpu
 
     .. todo:: Update after NGC-721 is addressed
 
-.. todo::
-
-   Link to sensor descriptions once they're written in the monitoring section.
-
-
 Shutting down the correlator
 ----------------------------
 
