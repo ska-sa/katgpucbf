@@ -1,135 +1,5 @@
-Installation and Operation
-==========================
-
-System requirements
--------------------
-For basic operation (such as for development or proof-of-concept) the only
-hardware requirement is an NVIDIA GPU with tensor cores. The rest of this
-section describes recommended setup for high-performance operation.
-
-Networking
-^^^^^^^^^^
-An NVIDIA NIC (ConnectX or Bluefield) should be used, as katgpucbf can bypass
-the kernel networking stack when using one of these NICs. See the spead2
-:external+spead2:doc:`documentation <py-ibverbs>` for details on setting up and
-tuning the ibverbs support. Pay particular attention to disabling multicast
-loopback.
-
-The correlator uses multicast packets to communicate between the individual
-engines. Your network needs to be set up to handle multicast, and to do so
-efficiently (i.e., not falling back to broadcasting). Note that the
-out-of-the-box configuration for Spectrum switches running Onyx allocates very
-little buffer space to multicast traffic, which can easily lead to lost
-packets. Refer to the manual for your switch to adjust the buffer allocations.
-
-The engines also default to using large packets (8 KiB of payload, plus some
-headers), so your network needs to be configured to support jumbo frames. While
-there are command-line options to reduce the packet sizes, this will
-significantly reduce performance.
-
-BIOS settings
-^^^^^^^^^^^^^
-See the system tuning guidance in the :external+spead2:doc:`spead2
-documentation <perf>`. In particular, we've found that when running multiple
-F-engines per host on an AMD Epyc (Milan) system, we get best performance with
-
-- NPS1 setting for NUMA per socket (NPS2 might work too, but NPS4 tends to
-  cause sporadic lost packets);
-- the GPU and the NIC in slots attached to different host bridges.
-
-Installation
-------------
-
-Installation with Docker
-^^^^^^^^^^^^^^^^^^^^^^^^
-The recommended way to use katgpucbf is via Docker. There is currently no
-published Docker image, so it is necessary to build your own. To do so, change
-to the root directory of the repository and run
-
-.. code:: sh
-
-   DOCKER_BUILDKIT=1 docker build --ssh default -t NAME .
-
-where :samp:`{NAME}` is the name to assign to the image.
-
-.. todo:: Document how to get private access to vkgdr, or just open it up
-
-You will need to have the NVIDIA container runtime installed to provide Docker
-with access to the GPU.
-
-Installation with pip
-^^^^^^^^^^^^^^^^^^^^^
-It is also possible to install katgpucbf with pip. In this case, you will need
-to have CUDA already installed. Change to the root directory of the repository
-and run
-
-.. code:: sh
-
-   pip install ".[gpu]"
-
-Note that if you are planning to do development on katgpucbf, you should refer
-to the :doc:`Developers' guide <dev-guide>`.
-
-
-Controlling the Correlator
---------------------------
-
-.. todo::
-
-    If this section gets too much, it can possibly make its way into its own
-    ``controlling.rst`` file or some such.
-
-katsdpcontroller
-^^^^^^^^^^^^^^^^
-
-.. todo::  ``NGC-683``
-    Describe katsdpcontroller, its role, note that the module can be used
-    without it and whatever is used in its place will need to implement the
-    functionality described in this "chapter".
-
-    Important to note is that we try to make interacting with katsdpcontroller
-    as similar as possible compared to interacting with the individual engines,
-    for ease of understanding.
-
-
-Starting the correlator
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. todo::  ``NGC-684``
-    Describe how a correlator should be started. Master controller figures out
-    based on a set of input parameters, how to invoke a few instances of
-    katgpucbf as dsim, fgpu or xbgpu.
-
-
-Controlling the correlator
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. todo::  ``NGC-685``
-    Describe how the correlator is controlled. This will mostly be delays and
-    gains. Product controller passes almost identical requests on to relevant
-    instances of katgpucbf.
-
-
-Shutting down the correlator
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. todo::  ``NGC-686``
-    Describe how to shut the correlator down. Product or master controller
-    passes requests on to individual running instances.
-
-Monitoring
-^^^^^^^^^^
-
-.. todo:: ``NGC-687``
-
-    - Describe KATCP sensors.
-    - Describe Prometheus monitoring capabilities.
-    - Probably also a good idea to mention the general logic distinguishing
-      between what goes to katcp and what to prometheus.
-
-
 Data Interfaces
----------------
+===============
 
 .. todo::
 
@@ -139,7 +9,7 @@ Data Interfaces
 .. _spead-protocol:
 
 SPEAD Protocol
-^^^^^^^^^^^^^^
+--------------
 
 The Streaming Protocol for Exchanging Astronomical Data (`SPEAD`_) is a
 lightweight streaming protocol, primarily UDP-based, designed for components
@@ -162,7 +32,7 @@ heap.
 .. _spead-packet-format:
 
 Packet Format
-^^^^^^^^^^^^^
+-------------
 
 A number of metadata fields are included within each packet, to facilitate heap
 reassembly. The SPEAD flavour used in :mod:`katgpucbf` is 64-48, which means that
@@ -204,10 +74,10 @@ they may be static, with the data payload being the only changing thing,
 depending on the nature of the stream.
 
 F-Engine Data Format
-^^^^^^^^^^^^^^^^^^^^
+--------------------
 
 Input
-"""""
+^^^^^
 The F-engine receives dual-polarisation input from a digitiser (raw antenna)
 stream. In MeerKAT and MeerKAT Extension, each polarisation's raw digitiser data
 is distributed over eight contiguous multicast addresses, to facilitate load-
@@ -218,7 +88,7 @@ The only immediate item in the digitiser's output heap used by the F-engine is
 the ``timestamp``.
 
 Output Packet Format
-"""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^
 
 In addition to the fields described in SPEAD's :ref:`spead-packet-format`
 above, the F-Engine's have an output data format as follows - formally
@@ -259,16 +129,16 @@ X-engine, with each X-engine receiving from a single multicast group. F-engines
 therefore need to ensure that their heap IDs do not collide.
 
 X-Engine Data Format
-^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 Input
-"""""
+^^^^^
 The X-Engine receives antenna channelised data from the output of the F-engines,
 as discussed above. Each X-Engine receives data from each F-engine, but only
 from a subset of the channels.
 
 Output Packet Format
-""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^
 
 In addition to the fields described in SPEAD's :ref:`spead-packet-format` above,
 the X-Engine's have an output data format as follows - formally labelled
