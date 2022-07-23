@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -123,11 +123,11 @@ class Compute(accel.OperationSequence):
         fft_template = fft.FftTemplate(
             template.context,
             1,
-            (spectra, 2 * channels),
-            np.float32,
+            (spectra, channels),
             np.complex64,
-            (spectra, 2 * channels),
-            (spectra, channels + 1),
+            np.complex64,
+            (spectra, channels),
+            (spectra, channels),
         )
         self.fft = [fft_template.instantiate(command_queue, fft.FftMode.FORWARD) for pol in range(N_POLS)]
 
@@ -155,11 +155,15 @@ class Compute(accel.OperationSequence):
             "phase": ["postproc:phase"],
             "gains": ["postproc:gains"],
         }
+        aliases = {}
         for pol in range(N_POLS):
             compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
-            compounds[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
+            # pfb_firN:out is an array of real values while fftN:src
+            # reinterprets it as an array of complex values. We thus have to
+            # make them aliases to view the memory as different types.
+            aliases[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
             compounds[f"fft_out{pol}"] = [f"fft{pol}:dest", f"postproc:in{pol}"]
-        super().__init__(command_queue, operations, compounds)
+        super().__init__(command_queue, operations, compounds, aliases)
 
     def run_frontend(
         self, samples: Sequence[accel.DeviceArray], in_offsets: Sequence[int], out_offset: int, spectra: int

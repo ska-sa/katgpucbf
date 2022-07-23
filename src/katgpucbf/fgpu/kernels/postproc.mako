@@ -80,6 +80,7 @@ KERNEL void postproc(
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
     int in_stride,                            // Input stride between successive spectra
+    int channels,                             // Number of frequency channels
     int spectra_per_heap,                     // Number of spectra per output heap
     float delay_scale)                        // Scale factor for delay. 1/channels in magnitude.
 {
@@ -91,14 +92,31 @@ KERNEL void postproc(
     // Load a block of data
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
+        int channel = ${c};
         // Which spectrum within the accumulation.
         int spectrum = z * spectra_per_heap + ${r};
         // Which channel within the spectrum.
-        int addr = spectrum * in_stride + ${c};
+        int addr_p = spectrum * in_stride + channel;
+        int addr_q = spectrum * in_stride + channels - (channel ? channel : channels);
         // Load the data. `float2` type handles both real and imag.
+        float2 p[2], q[2];
+        p[0] = in0[addr_p];
+        q[0] = in0[addr_q];
+        p[1] = in1[addr_p];
+        q[1] = in1[addr_q];
+
+        // Clean up C2C transform to form an R2C transform
         float2 v[2];
-        v[0] = in0[addr];
-        v[1] = in1[addr];
+        // TODO: can probably use __sincos for better efficiency
+        float2 rot;
+        sincospif(delay_scale * channel, &rot.y, &rot.x);
+        for (int pol = 0; pol < 2; pol++)
+        {
+            float2 a = make_float2(p[pol].x + q[pol].x, p[pol].y - q[pol].y);  // p + conj(q)
+            float2 b = make_float2(p[pol].y + q[pol].y, q[pol].x - p[pol].x);  // (p - conj(q)) / j
+            b = cmul(b, rot);
+            v[pol] = make_float2(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
+        }
 
         // Apply fine delay and gain
         // TODO: fine_delay is common across channels and gain is common across
@@ -108,12 +126,12 @@ KERNEL void postproc(
         float4 g = gains[${c}];
         float re[2], im[2];
         /* Fine delay is in fractions of a sample. Gets multiplied by
-         * delay_scale x ${c} to scale appropriately for the channel, and then
+         * delay_scale x channel to scale appropriately for the channel, and then
          * constant phase is added.
          */
         // Note: delay_scale incorporates the minus sign
-        sincospif(delay.x * delay_scale * ${c} + ph.x, &im[0], &re[0]);
-        sincospif(delay.y * delay_scale * ${c} + ph.y, &im[1], &re[1]);
+        sincospif(delay.x * delay_scale * channel + ph.x, &im[0], &re[0]);
+        sincospif(delay.y * delay_scale * channel + ph.y, &im[1], &re[1]);
         for (int pol = 0; pol < 2; pol++)
             v[pol] = apply_delay(v[pol], re[pol], im[pol]);
         v[0] = cmul(make_float2(g.x, g.y), v[0]);

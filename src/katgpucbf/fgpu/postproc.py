@@ -63,9 +63,9 @@ class Postproc(accel.Operation):
 
     .. rubric:: Slots
 
-    **in0** : spectra × channels+1, complex64
+    **in0** : spectra × channels, complex64
         Input channelised data, pol0.
-    **in1** : spectra × channels+1, complex64
+    **in1** : spectra × channels, complex64
         Input channelised data, pol1.
     **out** : (spectra // spectra_per_heap, channels, spectra_per_heap, 2, 2), int8
         Output F-engine data, quantised and corner-turned, ready for
@@ -76,10 +76,6 @@ class Postproc(accel.Operation):
         Fixed phase adjustment in radians (one value per pol).
     **gains** : channels × 2, complex64
         Per-channel gain (one value per pol).
-
-    The inputs need to have dimension `channels+1` because cuFFT calculates
-    N/2+1 output channels, i.e. the Nyquist frequency is included.  The kernel
-    just loads N/2 (channels) values to work on, ignoring the Nyquist (+1).
 
     Parameters
     ----------
@@ -120,7 +116,7 @@ class Postproc(accel.Operation):
         pols = accel.Dimension(N_POLS, exact=True)
         cplx = accel.Dimension(COMPLEX, exact=True)
 
-        in_shape = (accel.Dimension(spectra), accel.Dimension(channels + 1))
+        in_shape = (accel.Dimension(spectra), accel.Dimension(channels))
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, pols, cplx), np.int8)
@@ -149,6 +145,7 @@ class Postproc(accel.Operation):
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(in0.padded_shape[1]),  # in_stride
+                np.int32(self.channels),  # channels
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
                 np.float32(-1 / self.channels),  # delay_scale
             ],
