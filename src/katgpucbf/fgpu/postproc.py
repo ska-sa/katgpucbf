@@ -103,10 +103,9 @@ class Postproc(accel.Operation):
         super().__init__(command_queue)
         if spectra % spectra_per_heap != 0:
             raise ValueError("spectra must be a multiple of spectra_per_heap")
-        block_x = template.block * template.vtx
         block_y = template.block * template.vty
-        if channels % block_x != 0:
-            raise ValueError(f"channels must be a multiple of {block_x}")
+        if channels % 2 != 0:
+            raise ValueError("channels must be even")
         if spectra_per_heap % block_y != 0:
             raise ValueError(f"spectra_per_heap must be a multiple of {block_y}")
         self.template = template
@@ -127,7 +126,7 @@ class Postproc(accel.Operation):
     def _run(self) -> None:
         block_x = self.template.block * self.template.vtx
         block_y = self.template.block * self.template.vty
-        groups_x = self.channels // block_x
+        groups_x = accel.divup(self.channels // 2 + 1, block_x)
         groups_y = self.spectra_per_heap // block_y
         groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
