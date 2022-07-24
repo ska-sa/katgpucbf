@@ -162,23 +162,73 @@ Note that this adds an extra chunk worth of latency to the process.
 
 FFT
 ^^^
-After the FIR above, we can perform the FFT, which is done with a cuFFT
-real-to-complex transformation. This is straightforward, and the built-in
-support for doing multiple FFTs at once means that it can saturate the GPU
-even with small channel counts. cuFFT does write an output for the Nyquist
-frequency (which is discarded in the MeerKAT design), but we take care of that
-in the following step.
+After the FIR above, we can perform the FFT, which is done with cuFFT. The
+built-in support for doing multiple FFTs at once means that it can saturate
+the GPU even with small channel counts.
+
+For performance reasons the FFT is computed in a roundabout way. Instead of
+ask cuFFT to do a real-to-complex transformation, we pass it a pointer to the
+real data but ask it to do a complex-to-complex transformation. We then
+post-process the result to get the actual transformation we needed.
+
+Let's introduce some notation to see how this works. Let :math:`n` be the
+number of channels, :math:`x_i` be the (real) time-domain samples and
+:math:`X_i` be the Fourier transform (we divide by :math:`2n` rather than
+:math:`n` because that's the number of input samples used).
+
+.. math:: X_k = \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i.
+
+Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}` be the even and odd input
+samples, with Fourier transforms :math:`U` and :math:`V` respectively. By
+pretending the data is complex, we're computing the Fourier transform of
+:math:`u + jv`, namely :math:`U + jV`. Let's call it :math:`Z`.
+
+Firstly, we can reconstruct :math:`U` and :math:`V` from :math:`Z` by using
+Hermetian symmetry properties. Both :math:`u` and :math:`v` are real, so
+:math:`U` and :math:`V` are Hermitian symmetric. Let :math:`Z'` be :math:`Z`
+with reversed indices i.e., :math:`Z'_k = Z_{-k}` where indices are taken
+modulo :math:`n`. Then :math:`U' = \overline{U}, V' = \overline{V}` and
+
+.. math:: Z + \overline{Z'} = (U + \overline{U'}) + j(V - \overline{V'}) = 2U.
+
+Thus, :math:`U = \frac{Z + \overline{Z'}}{2}` and similarly
+:math:`V = \frac{Z - \overline{Z'}}{2j}`. Next, we use the Cooley-Tukey
+transform to construct :math:`X` from :math:`U` and :math:`V`. We can also
+re-use some common expressions by computing :math:`X_{n-k}` at the same time:
+
+.. math::
+
+   X_k &= \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i\\
+       &= \sum_{i=0}^n e^{\frac{-2\pi j}{2n}\cdot 2ik} u_i +
+          \sum_{i=0}^n e^{\frac{-2\pi j}{2n}\cdot (2i+1)k} v_i\\
+       &= \sum_{i=0}^n e^{\frac{-2\pi j}{n}\cdot ik} u_i +
+          e^{\frac{-\pi j}{n}\cdot k}\sum_{i=0}^n e^{\frac{-2\pi j}{n}\cdot ik} v_i\\
+       &= U_k + e^{\frac{-\pi j}{n}\cdot k} V_k.\\
+   X_{n-k} &= U_{n-k} + e^{\frac{-pi j}{n}\cdot (n-k)} V_{n-k}\\
+           &= \overline{U_k} - \overline{e^{\frac{-\pi j}{n}\cdot k} V_k}.
+
+Note that when :math:`k = 0` or :math:`k = \frac{n}{2}` the second calculation
+is unnecessary, but it is simpler (and probably cheaper) to just do it anyway
+rather than branch to avoid it.
+
+Why is doing all this work more efficient that letting cuFFT handle the
+real-to-complex transformation? After it, cuFFT most likely does this (or
+something equivalent) internally. The answer is that instead of using a
+separate kernel for it (which would consume memory bandwidth), we built it
+into the postprocessing kernel (see the next section).
 
 Postprocessing
 ^^^^^^^^^^^^^^
 The remaining steps are to
 
- 1. Apply gains and fine delays.
- 2. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
+ 1. Compute the real Fourier transform from a complex-to-complex transform
+    (see the previous section).
+ 2. Apply gains and fine delays.
+ 3. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
     are stored contiguously for each channel (the Nyquist frequencies are also
     discarded at this point).
- 3. Convert to int8.
- 4. Interleave the polarisations.
+ 4. Convert to int8.
+ 5. Interleave the polarisations.
 
 These are all combined into a single kernel to minimise memory traffic. The
 katsdpsigproc package provides a template for transpositions, and the other
@@ -186,8 +236,9 @@ operations are all straightforward. While C++ doesn't have a convert with
 saturation function, we can access the CUDA functionality through inline PTX
 assembly (OpenCL C has an equivalent function).
 
-Fine delays are computed using the ``sincospi`` function, which saves both a
-multiplication by :math:`\pi` and a range reduction.
+Fine delays and the twiddle factor for the Cooley-Tukey transformation are
+computed using the ``sincospi`` function, which saves both a multiplication by
+:math:`\pi` and a range reduction.
 
 Coarse delays
 ^^^^^^^^^^^^^
