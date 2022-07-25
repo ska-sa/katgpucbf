@@ -160,6 +160,8 @@ this, we allocate sufficient space at the end of each chunk for the PFB
 footprint, and copy the start of the next chunk to the end of the current one.
 Note that this adds an extra chunk worth of latency to the process.
 
+.. _fgpu-fft:
+
 FFT
 ^^^
 After the FIR above, we can perform the FFT, which is done with cuFFT. The

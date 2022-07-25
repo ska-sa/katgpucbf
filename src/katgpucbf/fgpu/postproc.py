@@ -63,10 +63,10 @@ class Postproc(accel.Operation):
 
     .. rubric:: Slots
 
-    **in0** : spectra × channels, complex64
-        Input channelised data, pol0.
-    **in1** : spectra × channels, complex64
-        Input channelised data, pol1.
+    **in0**, **in1** : spectra × channels, complex64
+        Input channelised data for the two polarisations. These are formed by
+        taking the complex-to-complex Fourier transform of the input
+        reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
     **out** : (spectra // spectra_per_heap, channels, spectra_per_heap, 2, 2), int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.

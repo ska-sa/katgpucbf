@@ -47,17 +47,21 @@ DEVICE_FN char quant(float value)
 }
 
 /* Kernel that handles:
- * - discard of Nyquist frequency
+ * - Computation of real-to-complex Fourier transform from a complex-to-complex transform
  * - Fine delays
  * - Partial time/channel transposition
  * - 8-bit quantisation
  * - Interleaving of polarisations
  *
- * The kernel assumes that the actual delay (in fractions of a sample?) has been calculated, calculates the per-channel
- * phasor and applies it.
+ * The kernel assumes that the actual delay (in fractions of a sample?) has
+ * been calculated, calculates the per-channel phasor and applies it.
  *
  * Work group sizing:
- * - Each thread handles vtx channels from vty spectra.
+ * - Each thread handles 2 * vtx channels from vty spectra. It handles vtx
+ *   contiguous channels plus their mirror image (i and channels - i).
+ *   Channel 0 and channel channels/2 are special cases because they're their
+ *   own mirror images, so vtx * block * blocks_x must be at least
+ *   channels/2 + 1.
  * - Thread-blocks are block x block x 1.
  * - A set of thread-blocks with the same z coordinate handles transposition of
  *   spectra_per_heap complete spectra.
@@ -82,7 +86,7 @@ KERNEL void postproc(
     int in_stride,                            // Input stride between successive spectra
     int channels,                             // Number of frequency channels
     int spectra_per_heap,                     // Number of spectra per output heap
-    float delay_scale)                        // Scale factor for delay. 1/channels in magnitude.
+    float delay_scale)                        // Scale factor for delay: -1/channels
 {
     LOCAL_DECL scratch_t scratch[2];
     transpose_coords coords;
@@ -97,6 +101,7 @@ KERNEL void postproc(
         ch[0] = ${c};
         if (ch[0] * 2 <= channels)  // Note: <= not <. We need to process channels/2 + 1 times
         {
+            // Compute the mirror channel, making channel 0 its own mirror
             ch[1] = ch[0] ? channels - ch[0] : 0;
             // Which spectrum within the accumulation.
             int spectrum = z * spectra_per_heap + ${r};
@@ -105,6 +110,7 @@ KERNEL void postproc(
             for (int i = 0; i < 2; i++)
                 addr[i] = spectrum * in_stride + ch[i];
             // Load the data. `float2` type handles both real and imag.
+            // p relates to ch[0], q to ch[1]
             float2 p[2], q[2];
             p[0] = in0[addr[0]];
             q[0] = in0[addr[1]];
