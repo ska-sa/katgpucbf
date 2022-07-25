@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -31,8 +31,14 @@ pytestmark = [pytest.mark.cuda_only]
 
 def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, fine_delay, fringe_phase, gains):
     """Calculate postproc steps on the host CPU for a single polarisation."""
+    # Fix up complex-to-complex transform into a real-to-complex transform.
+    # Rather than doing this directly, go back to the time domain and do a
+    # fresh transform, to ensure correctness rather than efficiency.
+    data_time = np.fft.ifft(data, axis=-1)
+    assert data_time.dtype == np.complex128  # numpy only does double-precision FFTs
+    data_rfft = np.fft.rfft(data_time.view(np.float64), axis=-1)
     # Throw out last channel (Nyquist frequency)
-    data = data[:, :channels]
+    data = data_rfft.astype(np.complex64)[:, :channels]
     # Compute delay phases
     channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :]
     m2jpi = np.complex64(-2j * np.pi)
@@ -81,8 +87,8 @@ def test_postproc(context, command_queue, repeat=1):
     spectra_per_heap_out = 256
     spectra = 512
     rng = np.random.default_rng(seed=1)
-    h_in0 = _make_complex(lambda: rng.uniform(-512, 512, (spectra, channels + 1)))
-    h_in1 = _make_complex(lambda: rng.uniform(-512, 512, (spectra, channels + 1)))
+    h_in0 = _make_complex(lambda: rng.uniform(-512, 512, (spectra, channels)))
+    h_in1 = _make_complex(lambda: rng.uniform(-512, 512, (spectra, channels)))
     h_fine_delay = rng.uniform(0.0, 2.0, (spectra, N_POLS)).astype(np.float32)
     h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
     h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (channels, N_POLS)))
