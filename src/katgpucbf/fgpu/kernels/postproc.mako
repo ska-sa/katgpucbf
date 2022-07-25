@@ -37,6 +37,11 @@ DEVICE_FN float2 cmul(float2 a, float2 b)
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
+DEVICE_FN float2 cmul_add(float2 a, float2 b, float2 c)  // a * b + c
+{
+    return make_float2(c.x + a.x * b.x - a.y * b.y, c.y + a.x * b.y + a.y * b.x);
+}
+
 DEVICE_FN char quant(float value)
 {
     int out;
@@ -69,10 +74,7 @@ DEVICE_FN void mini_fft(const float2 in[UF], float2 out[UF])
     {
         float2 sum = make_float2(0.0f, 0.0f);
         for (int j = 0; j < UF; j++)
-        {
-            float2 prod = cmul(exp_table[i * j % UF], in[j]);
-            sum = make_float2(sum.x + prod.x, sum.y + prod.y);
-        }
+            sum = cmul_add(exp_table[i * j % UF], in[j], sum);
         out[i] = sum;
     }
 }
@@ -153,24 +155,22 @@ KERNEL void postproc(
             }
 
             // Apply twiddle factors for Cooley-Tukey
-            // TODO
+            for (int j = 0; j < UF; j++)
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    float angle = ch[i] * j * (-2.0f / CHANNELS);
+                    float2 t;
+                    sincospif(angle, &t.y, &t.x);
+                    for (int pol = 0; pol < 2; pol++)
+                        p[pol][i][j] = cmul(p[pol][i][j], t);
+                }
+            }
 
             // Final pass of C2C transform
             for (int pol = 0; pol < 2; pol++)
                 for (int i = 0; i < 2; i++)
                     mini_fft(p[pol][i], q[pol][i]);
-
-            /* Reverse the mirror channels, so that indexing lines up the way we
-             * want. The compiler should make this all disappear since it's just
-             * relabelling registers.
-             */
-            for (int pol = 0; pol < 2; pol++)
-                for (int i = 0; i < UF / 2; i++)
-                {
-                    float2 tmp = q[pol][1][i];
-                    q[pol][1][i] = q[pol][1][UF - 1 - i];
-                    q[pol][1][UF - 1 - i] = tmp;
-                }
 
             float2 delay = fine_delay[spectrum];
             float2 ph = phase[spectrum];
@@ -187,8 +187,10 @@ KERNEL void postproc(
                 sincospif(delay_scale * chj[0], &rot.y, &rot.x);
                 for (int pol = 0; pol < 2; pol++)
                 {
-                    float2 a = make_float2(q[pol][0][j].x + q[pol][1][j].x, q[pol][0][j].y - q[pol][1][j].y);  // z + conj(z')
-                    float2 b = make_float2(q[pol][0][j].y + q[pol][1][j].y, q[pol][1][j].x - q[pol][0][j].x);  // (z - conj(z')) / j
+                    float2 z = q[pol][0][j];
+                    float2 zp = q[pol][1][UF - 1 - j];
+                    float2 a = make_float2(z.x + zp.x, z.y - zp.y);  // z + conj(z')
+                    float2 b = make_float2(z.y + zp.y, zp.x - z.x);  // (z - conj(z')) / j
                     float2 r = cmul(b, rot);
                     v[pol][0] = make_float2(0.5 * (a.x + r.x), 0.5 * (a.y + r.y));
                     v[pol][1] = make_float2(0.5 * (a.x - r.x), -0.5 * (a.y - r.y));
