@@ -41,7 +41,7 @@ class PostprocTemplate:
 
     def __init__(self, context: AbstractContext) -> None:
         self.block = 32
-        self.vtx = 1
+        self.vtx = 2
         self.vty = 1
         program = accel.build(
             context,
