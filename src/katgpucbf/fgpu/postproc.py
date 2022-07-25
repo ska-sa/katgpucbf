@@ -54,7 +54,7 @@ class PostprocTemplate:
         program = accel.build(
             context,
             "kernels/postproc.mako",
-            {"block": self.block, "vtx": self.vtx, "vty": self.vty, "channels": channels},
+            {"block": self.block, "vtx": self.vtx, "vty": self.vty, "channels": channels, "unzip_factor": unzip_factor},
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("postproc")
@@ -122,7 +122,7 @@ class Postproc(accel.Operation):
 
         in_shape = (
             accel.Dimension(spectra * template.unzip_factor),
-            accel.Dimension(template.channels // template.unzip_factor),
+            accel.Dimension(template.channels // template.unzip_factor, exact=True),
         )
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
@@ -153,7 +153,6 @@ class Postproc(accel.Operation):
                 self.buffer("gains").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
-                np.int32(in0.padded_shape[1]),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),

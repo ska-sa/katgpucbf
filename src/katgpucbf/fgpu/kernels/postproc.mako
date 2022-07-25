@@ -16,8 +16,13 @@
 
 <%include file="/port.mako"/>
 <%namespace name="transpose" file="/transpose_base.mako"/>
+<%!
+    import math
+%>
 
 #define CHANNELS ${channels}
+#define UF ${unzip_factor}
+#define FFT_CHANNELS ${channels // unzip_factor}
 
 <%transpose:transpose_data_class class_name="scratch_t" type="char4" block="${block}" vtx="${vtx}" vty="${vty}"/>
 <%transpose:transpose_coords_class class_name="transpose_coords" block="${block}" vtx="${vtx}" vty="${vty}"/>
@@ -48,6 +53,39 @@ DEVICE_FN char quant(float value)
                 // not to.
 }
 
+DEVICE_FN void mini_fft(const float2 in[UF], float2 out[UF])
+{
+    const float2 exp_table[UF] =
+    {
+% for i in range(unzip_factor):
+        make_float2(
+            ${math.cos(2 * math.pi * i / unzip_factor)},
+            ${math.sin(2 * math.pi * i / unzip_factor)}
+        ),
+% endfor
+    };
+    // TODO: implement this as an FFT, not a naive FT
+    for (int i = 0; i < UF; i++)
+    {
+        float2 sum = make_float2(0.0f, 0.0f);
+        for (int j = 0; j < UF; j++)
+        {
+            float2 prod = cmul(exp_table[i * j % UF], in[j]);
+            sum = make_float2(sum.x + prod.x, sum.y + prod.y);
+        }
+        out[i] = sum;
+    }
+}
+
+DEVICE_FN void load_data(const GLOBAL float2 *base, int ch, float2 out[UF])
+{
+    for (int i = 0; i < UF; i++)
+    {
+        out[i] = base[ch & (CHANNELS - 1)];
+        ch += FFT_CHANNELS;
+    }
+}
+
 /* Kernel that handles:
  * - Computation of real-to-complex Fourier transform from a complex-to-complex transform
  * - Fine delays
@@ -59,11 +97,10 @@ DEVICE_FN char quant(float value)
  * been calculated, calculates the per-channel phasor and applies it.
  *
  * Work group sizing:
- * - Each thread handles 2 * vtx channels from vty spectra. It handles vtx
- *   contiguous channels plus their mirror image (i and channels - i).
+ * - Each thread handles 2 * vtx * unzip_factor channels from vty spectra.
  *   Channel 0 and channel channels/2 are special cases because they're their
- *   own mirror images, so vtx * block * blocks_x must be at least
- *   channels/2 + 1.
+ *   own mirror images, so vtx * unzip_factor * block * blocks_x must be at
+ *   least channels/2 + 1.
  * - Thread-blocks are block x block x 1.
  * - A set of thread-blocks with the same z coordinate handles transposition of
  *   spectra_per_heap complete spectra.
@@ -85,85 +122,106 @@ KERNEL void postproc(
     const GLOBAL float4 * RESTRICT gains,
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
-    int in_stride,                            // Input stride between successive spectra
     int spectra_per_heap)                     // Number of spectra per output heap
 {
-    LOCAL_DECL scratch_t scratch[2];
+    LOCAL_DECL scratch_t scratch[UF][2];
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
-    const int channels = ${channels};
-    const float delay_scale = -1.0f / channels;
+    const float delay_scale = -1.0f / CHANNELS;
 
     // Load a block of data
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
+        // Which spectrum within the accumulation.
+        int spectrum = z * spectra_per_heap + ${r};
         int ch[2];
         ch[0] = ${c};
-        if (ch[0] * 2 <= channels)  // Note: <= not <. We need to process channels/2 + 1 times
+        if (ch[0] * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
-            // Compute the mirror channel, making channel 0 its own mirror
-            ch[1] = ch[0] ? channels - ch[0] : 0;
-            // Which spectrum within the accumulation.
-            int spectrum = z * spectra_per_heap + ${r};
+            // Compute the mirror channel
+            ch[1] = FFT_CHANNELS - ch[0];
             // Which channel within the spectrum.
-            int addr[2];
+            int base_addr = spectrum * CHANNELS;
+            float2 p[2][2][UF];  // Raw data; axes are pol, ch, sub-spectrum
+            float2 q[2][2][UF];  // Fourier transform of p
             for (int i = 0; i < 2; i++)
-                addr[i] = spectrum * in_stride + ch[i];
-            // Load the data. `float2` type handles both real and imag.
-            // p relates to ch[0], q to ch[1]
-            float2 p[2], q[2];
-            p[0] = in0[addr[0]];
-            q[0] = in0[addr[1]];
-            p[1] = in1[addr[0]];
-            q[1] = in1[addr[1]];
-
-            /* Clean up C2C transform to form an R2C transform.
-             * The axes of v are polarisation and channel (index into ch)
-             */
-            float2 v[2][2];
-            // TODO: can probably use __sincos for better efficiency
-            float2 rot;
-            sincospif(delay_scale * ch[0], &rot.y, &rot.x);
-            for (int pol = 0; pol < 2; pol++)
             {
-                float2 a = make_float2(p[pol].x + q[pol].x, p[pol].y - q[pol].y);  // p + conj(q)
-                float2 b = make_float2(p[pol].y + q[pol].y, q[pol].x - p[pol].x);  // (p - conj(q)) / j
-                float2 r = cmul(b, rot);
-                v[pol][0] = make_float2(0.5 * (a.x + r.x), 0.5 * (a.y + r.y));
-                v[pol][1] = make_float2(0.5 * (a.x - r.x), -0.5 * (a.y - r.y));
+                load_data(in0 + base_addr, ch[i], p[0][i]);
+                load_data(in1 + base_addr, ch[i], p[1][i]);
             }
 
-            // Apply fine delay and gain
-            // TODO: fine_delay is common across channels and gain is common across
-            // spectra, so could possibly be loaded more efficiently.
+            // Apply twiddle factors for Cooley-Tukey
+            // TODO
+
+            // Final pass of C2C transform
+            for (int pol = 0; pol < 2; pol++)
+                for (int i = 0; i < 2; i++)
+                    mini_fft(p[pol][i], q[pol][i]);
+
+            /* Reverse the mirror channels, so that indexing lines up the way we
+             * want. The compiler should make this all disappear since it's just
+             * relabelling registers.
+             */
+            for (int pol = 0; pol < 2; pol++)
+                for (int i = 0; i < UF / 2; i++)
+                {
+                    float2 tmp = q[pol][1][i];
+                    q[pol][1][i] = q[pol][1][UF - 1 - i];
+                    q[pol][1][UF - 1 - i] = tmp;
+                }
+
             float2 delay = fine_delay[spectrum];
             float2 ph = phase[spectrum];
-#pragma unroll
-            for (int i = 0; i < 2; i++)
+            /* Clean up C2C transform to form an R2C transform.
+             * The axes of v are polarisation, ch, sub-spectrum
+             */
+            for (int j = 0; j < UF; j++)
             {
-                float4 g = gains[ch[i]];
-                float re[2], im[2];
-                /* Fine delay is in fractions of a sample. Gets multiplied by
-                 * delay_scale x channel to scale appropriately for the channel, and then
-                 * constant phase is added.
-                 */
-                // Note: delay_scale incorporates the minus sign
-                sincospif(delay.x * delay_scale * ch[i] + ph.x, &im[0], &re[0]);
-                sincospif(delay.y * delay_scale * ch[i] + ph.y, &im[1], &re[1]);
+                float2 v[2][2];
+                float2 rot;
+                int chj[2];
+                chj[0] = ch[0] + j * FFT_CHANNELS;
+                chj[1] = CHANNELS - chj[0];
+                sincospif(delay_scale * chj[0], &rot.y, &rot.x);
                 for (int pol = 0; pol < 2; pol++)
-                    v[pol][i] = apply_delay(v[pol][i], re[pol], im[pol]);
-                v[0][i] = cmul(make_float2(g.x, g.y), v[0][i]);
-                v[1][i] = cmul(make_float2(g.z, g.w), v[1][i]);
+                {
+                    float2 a = make_float2(q[pol][0][j].x + q[pol][1][j].x, q[pol][0][j].y - q[pol][1][j].y);  // z + conj(z')
+                    float2 b = make_float2(q[pol][0][j].y + q[pol][1][j].y, q[pol][1][j].x - q[pol][0][j].x);  // (z - conj(z')) / j
+                    float2 r = cmul(b, rot);
+                    v[pol][0] = make_float2(0.5 * (a.x + r.x), 0.5 * (a.y + r.y));
+                    v[pol][1] = make_float2(0.5 * (a.x - r.x), -0.5 * (a.y - r.y));
+                }
 
-                // Interleave polarisations. Quantise at the same time.
-                char4 packed;
-                packed.x = quant(v[0][i].x);
-                packed.y = quant(v[0][i].y);
-                packed.z = quant(v[1][i].x);
-                packed.w = quant(v[1][i].y);
-                scratch[i].arr[${lr}][${lc}] = packed;
+                // Apply fine delay and gain
+                // TODO: fine_delay is common across channels and gain is common across
+                // spectra, so could possibly be loaded more efficiently.
+#pragma unroll
+                for (int i = 0; i < 2; i++)
+                {
+                    float4 g = gains[chj[i]];  // TODO: enforce padding to prevent out-of-bounds
+                    float re[2], im[2];
+                    /* Fine delay is in fractions of a sample. Gets multiplied by
+                     * delay_scale x channel to scale appropriately for the channel, and then
+                     * constant phase is added.
+                     */
+                    // Note: delay_scale incorporates the minus sign
+                    sincospif(delay.x * delay_scale * chj[i] + ph.x, &im[0], &re[0]);
+                    sincospif(delay.y * delay_scale * chj[i] + ph.y, &im[1], &re[1]);
+                    for (int pol = 0; pol < 2; pol++)
+                        v[pol][i] = apply_delay(v[pol][i], re[pol], im[pol]);
+                    v[0][i] = cmul(make_float2(g.x, g.y), v[0][i]);
+                    v[1][i] = cmul(make_float2(g.z, g.w), v[1][i]);
+
+                    // Interleave polarisations. Quantise at the same time.
+                    char4 packed;
+                    packed.x = quant(v[0][i].x);
+                    packed.y = quant(v[0][i].y);
+                    packed.z = quant(v[1][i].x);
+                    packed.w = quant(v[1][i].y);
+                    scratch[j][i].arr[${lr}][${lc}] = packed;
+                }
             }
         }
     }
@@ -174,21 +232,16 @@ KERNEL void postproc(
     // Write it out
     <%transpose:transpose_store coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
-        int ch[2];
-        ch[0] = ${r};
-        if (ch[0] * 2 <= channels)  // Note: <= not <. We need to process channels/2 + 1 times
+        int ch;
+        ch = ${r};
+        char4 *base = out + z * out_stride_z + ${c};
+        if (ch * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
-            ch[1] = ch[0] ? channels - ch[0] : 0;
-            for (int i = 0; i < 2; i++)
+            for (int j = 0; j < UF; j++)
             {
-                // Avoid writing channel 0 twice, because the calculation for
-                // the mirrored value doesn't give the right result.
-                if (i == 0 || ch[0] != 0)
-                {
-                    // Calculate the out address in one step instead of two as previously.
-                    int addr = z * out_stride_z + ch[i] * out_stride + ${c};
-                    out[addr] = scratch[i].arr[${lr}][${lc}];
-                }
+                base[ch] = scratch[j][0].arr[${lr}][${lc}];
+                if (ch != 0)
+                    base[CHANNELS - ch] = scratch[j][1].arr[${lr}][${lc}];
             }
         }
     }
