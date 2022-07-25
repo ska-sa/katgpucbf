@@ -173,9 +173,14 @@ KERNEL void postproc(
             ch[1] = ch[0] ? channels - ch[0] : 0;
             for (int i = 0; i < 2; i++)
             {
-                // Calculate the out address in one step instead of two as previously.
-                int addr = z * out_stride_z + ch[i] * out_stride + ${c};
-                out[addr] = scratch[i].arr[${lr}][${lc}];
+                // Avoid writing channel 0 twice, because the calculation for
+                // the mirrored value doesn't give the right result.
+                if (i == 0 || ch[0] != 0)
+                {
+                    // Calculate the out address in one step instead of two as previously.
+                    int addr = z * out_stride_z + ch[i] * out_stride + ${c};
+                    out[addr] = scratch[i].arr[${lr}][${lc}];
+                }
             }
         }
     }
