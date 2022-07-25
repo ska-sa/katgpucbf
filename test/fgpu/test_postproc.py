@@ -95,8 +95,8 @@ def test_postproc(context, command_queue, repeat=1):
 
     expected = postproc_host(h_in0, h_in1, spectra, spectra_per_heap_out, channels, h_fine_delay, h_phase, h_gains)
 
-    template = postproc.PostprocTemplate(context)
-    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out, channels)
+    template = postproc.PostprocTemplate(context, channels)
+    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
     fn.ensure_all_bound()
     fn.buffer("in0").set(command_queue, h_in0)
     fn.buffer("in1").set(command_queue, h_in1)

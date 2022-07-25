@@ -60,8 +60,8 @@ def test_pfb_fir(context, command_queue, repeat=1):
     weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
     expected = pfb_fir_host(h_in, channels, weights)
 
-    template = pfb.PFBFIRTemplate(context, taps)
-    fn = template.instantiate(command_queue, samples, spectra, channels)
+    template = pfb.PFBFIRTemplate(context, taps, channels)
+    fn = template.instantiate(command_queue, samples, spectra)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("weights").set(command_queue, weights)

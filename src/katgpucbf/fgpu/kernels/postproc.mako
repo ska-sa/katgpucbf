@@ -17,6 +17,8 @@
 <%include file="/port.mako"/>
 <%namespace name="transpose" file="/transpose_base.mako"/>
 
+#define CHANNELS ${channels}
+
 <%transpose:transpose_data_class class_name="scratch_t" type="char4" block="${block}" vtx="${vtx}" vty="${vty}"/>
 <%transpose:transpose_coords_class class_name="transpose_coords" block="${block}" vtx="${vtx}" vty="${vty}"/>
 
@@ -84,14 +86,14 @@ KERNEL void postproc(
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
     int in_stride,                            // Input stride between successive spectra
-    int channels,                             // Number of frequency channels
-    int spectra_per_heap,                     // Number of spectra per output heap
-    float delay_scale)                        // Scale factor for delay: -1/channels
+    int spectra_per_heap)                     // Number of spectra per output heap
 {
     LOCAL_DECL scratch_t scratch[2];
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
+    const int channels = ${channels};
+    const float delay_scale = -1.0f / channels;
 
     // Load a block of data
     // The transpose happens per-accumulation.

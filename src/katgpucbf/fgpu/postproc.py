@@ -37,25 +37,36 @@ class PostprocTemplate:
     ----------
     context: AbstractContext
         The GPU context that we'll operate in.
+    channels: int
+        Number of channels in each spectrum.
     """
 
-    def __init__(self, context: AbstractContext) -> None:
+    def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1) -> None:
         self.block = 32
         self.vtx = 1
         self.vty = 1
+        self.channels = channels
+        self.unzip_factor = unzip_factor
+        if channels <= 0 or channels & (channels - 1):
+            raise ValueError("channels must be a power of 2")
+        if channels % unzip_factor:
+            raise ValueError("channels must be a multiple of unzip_factor")
         program = accel.build(
             context,
             "kernels/postproc.mako",
-            {"block": self.block, "vtx": self.vtx, "vty": self.vty},
+            {"block": self.block, "vtx": self.vtx, "vty": self.vty, "channels": channels},
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("postproc")
 
     def instantiate(
-        self, command_queue: AbstractCommandQueue, spectra: int, spectra_per_heap: int, channels: int
+        self,
+        command_queue: AbstractCommandQueue,
+        spectra: int,
+        spectra_per_heap: int,
     ) -> "Postproc":
         """Generate a :class:`Postproc` object based on this template."""
-        return Postproc(self, command_queue, spectra, spectra_per_heap, channels)
+        return Postproc(self, command_queue, spectra, spectra_per_heap)
 
 
 class Postproc(accel.Operation):
@@ -88,8 +99,6 @@ class Postproc(accel.Operation):
         Number of spectra on which post-prodessing will be performed.
     spectra_per_heap: int
         Number of spectra to send out per heap.
-    channels: int
-        Number of channels in each spectrum.
     """
 
     def __init__(
@@ -98,35 +107,36 @@ class Postproc(accel.Operation):
         command_queue: AbstractCommandQueue,
         spectra: int,
         spectra_per_heap: int,
-        channels: int,
     ) -> None:
         super().__init__(command_queue)
         if spectra % spectra_per_heap != 0:
             raise ValueError("spectra must be a multiple of spectra_per_heap")
         block_y = template.block * template.vty
-        if channels % 2 != 0:
-            raise ValueError("channels must be even")
         if spectra_per_heap % block_y != 0:
             raise ValueError(f"spectra_per_heap must be a multiple of {block_y}")
         self.template = template
-        self.channels = channels
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
         pols = accel.Dimension(N_POLS, exact=True)
         cplx = accel.Dimension(COMPLEX, exact=True)
 
-        in_shape = (accel.Dimension(spectra), accel.Dimension(channels))
+        in_shape = (
+            accel.Dimension(spectra * template.unzip_factor),
+            accel.Dimension(template.channels // template.unzip_factor),
+        )
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["out"] = accel.IOSlot((spectra // spectra_per_heap, channels, spectra_per_heap, pols, cplx), np.int8)
+        self.slots["out"] = accel.IOSlot(
+            (spectra // spectra_per_heap, template.channels, spectra_per_heap, pols, cplx), np.int8
+        )
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
-        self.slots["gains"] = accel.IOSlot((channels, pols), np.complex64)
+        self.slots["gains"] = accel.IOSlot((template.channels, pols), np.complex64)
 
     def _run(self) -> None:
         block_x = self.template.block * self.template.vtx
         block_y = self.template.block * self.template.vty
-        groups_x = accel.divup(self.channels // 2 + 1, block_x)
+        groups_x = accel.divup(self.template.channels // 2 + 1, block_x)
         groups_y = self.spectra_per_heap // block_y
         groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
@@ -144,9 +154,7 @@ class Postproc(accel.Operation):
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(in0.padded_shape[1]),  # in_stride
-                np.int32(self.channels),  # channels
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
-                np.float32(-1 / self.channels),  # delay_scale
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
             local_size=(self.template.block, self.template.block, 1),

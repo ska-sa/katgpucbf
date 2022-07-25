@@ -27,7 +27,7 @@ def test_compute(context, command_queue):
 
     .. todo:: This isn't a proper test, just a smoke test.
     """
-    template = compute.ComputeTemplate(context, 4)
-    fn = template.instantiate(command_queue, 100000000, 1280, 256, 32768)
+    template = compute.ComputeTemplate(context, 4, 32768)
+    fn = template.instantiate(command_queue, 100000000, 1280, 256)
     fn.ensure_all_bound()
     fn()

@@ -468,8 +468,8 @@ class Processor:
         self._upload_queue = context.create_command_queue()
         self._download_queue = context.create_command_queue()
 
-        template = ComputeTemplate(context, taps)
-        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
+        template = ComputeTemplate(context, taps, channels)
+        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
         device_weights = self.compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps))
 
@@ -506,7 +506,7 @@ class Processor:
     @property
     def channels(self) -> int:  # noqa: D401
         """Number of channels into which the incoming signal is decomposed."""
-        return self.compute.channels
+        return self.compute.template.channels
 
     @property
     def taps(self) -> int:  # noqa: D401
