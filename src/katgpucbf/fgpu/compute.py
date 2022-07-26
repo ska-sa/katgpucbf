@@ -51,7 +51,7 @@ class ComputeTemplate:
         self.context = context
         self.taps = taps
         self.channels = channels
-        self.unzip_factor = 2
+        self.unzip_factor = 4 if channels >= 8 else 1
         self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, self.unzip_factor)
         self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor)
 
