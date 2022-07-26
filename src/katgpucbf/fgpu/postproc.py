@@ -42,7 +42,7 @@ class PostprocTemplate:
     """
 
     def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1) -> None:
-        self.block = 32
+        self.block = 16
         self.vtx = 1
         self.vty = 1
         self.channels = channels
@@ -51,6 +51,8 @@ class PostprocTemplate:
             raise ValueError("channels must be a power of 2")
         if channels % unzip_factor:
             raise ValueError("channels must be a multiple of unzip_factor")
+        if unzip_factor not in {1, 2, 4}:
+            raise ValueError("unzip_factor must be 1, 2 or 4")
         program = accel.build(
             context,
             "kernels/postproc.mako",
