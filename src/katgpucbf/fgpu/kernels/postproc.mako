@@ -195,7 +195,7 @@ KERNEL void postproc(
                 float2 rot;
                 int k[2];
                 k[0] = p * m + s[0];
-                k[1] = CHANNELS - k[0];
+                k[1] = (-k[0]) & (CHANNELS - 1);
                 sincospif(delay_scale * k[0], &rot.y, &rot.x);
                 for (int pol = 0; pol < 2; pol++)
                 {
@@ -211,7 +211,6 @@ KERNEL void postproc(
                 // Apply fine delay and gain
                 // TODO: fine_delay is common across channels and gain is common across
                 // spectra, so could possibly be loaded more efficiently.
-#pragma unroll
                 for (int i = 0; i < 2; i++)
                 {
                     float4 g = gains[k[i]];
