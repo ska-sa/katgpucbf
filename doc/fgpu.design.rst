@@ -233,7 +233,7 @@ into the postprocessing kernel (see the next section).
 
 Unzipping the FFT
 ~~~~~~~~~~~~~~~~~
-For here we'll assume all transforms are complex-to-complex unless specified
+From here we'll assume all transforms are complex-to-complex unless specified
 otherwise. The Cooley-Tukey algorithm allows a transform of size :math:`c =
 mn` to be decomposed into :math:`n` transforms of size :math:`m` followed by
 :math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
@@ -260,8 +260,8 @@ The whole expression is a Fourier transform of the expression in brackets
 (the exponential inside the bracket is the so-called "twiddle factor").
 
 An inconvenience of this structure is that :math:`x^r` is not a contiguous
-input samples, but rather of a strided array. While cuFFT does support both
-strided inputs and batched transformations, we couldn't batch over :math:`r`
+set of input samples, but a strided array. While cuFFT does support both
+strided inputs and batched transformations, we cannot batch over :math:`r`
 and over multiple spectra at the same time as it only supports a single batch
 dimension with corresponding stride. We solve this by modifying the PFB kernel
 to reorder its output such that each :math:`x^r` is output contiguously. This
@@ -282,8 +282,8 @@ Postprocessing
 ^^^^^^^^^^^^^^
 The remaining steps are to
 
- 1. Compute the real Fourier transform from a complex-to-complex transform
-    (see the previous section).
+ 1. Compute the real Fourier transform from several complex-to-complex
+    transforms (see the previous section).
  2. Apply gains and fine delays.
  3. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
     are stored contiguously for each channel (the Nyquist frequencies are also
