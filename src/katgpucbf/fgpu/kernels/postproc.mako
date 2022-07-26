@@ -156,7 +156,7 @@ KERNEL void postproc(
         if (ch[0] * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
             // Compute the mirror channel
-            ch[1] = FFT_CHANNELS - ch[0];
+            ch[1] = (-ch[0]) & (FFT_CHANNELS - 1);
             // Which spectrum within the accumulation.
             int spectrum = z * spectra_per_heap + ${r};
             // Which channel within the spectrum.
@@ -168,18 +168,20 @@ KERNEL void postproc(
                 load_data(in0 + base_addr, ch[i], p[0][i]);
                 load_data(in1 + base_addr, ch[i], p[1][i]);
             }
+            // Conjugate the mirror channel
+            for (int pol = 0; pol < 2; pol++)
+                for (int j = 0; j < UF; j++)
+                    p[pol][1][j].y = -p[pol][1][j].y;
 
             // Apply twiddle factors for Cooley-Tukey
             for (int j = 1; j < UF; j++)
             {
-                for (int i = 0; i < 2; i++)
-                {
-                    float angle = ch[i] * j * (-2.0f / CHANNELS);
-                    float2 t;
-                    sincospif(angle, &t.y, &t.x);
-                    for (int pol = 0; pol < 2; pol++)
+                float angle = ch[0] * j * (-2.0f / CHANNELS);
+                float2 t;
+                sincospif(angle, &t.y, &t.x);
+                for (int pol = 0; pol < 2; pol++)
+                    for (int i = 0; i < 2; i++)
                         p[pol][i][j] = cmul(p[pol][i][j], t);
-                }
             }
 
             // Final pass of C2C transform
@@ -203,9 +205,9 @@ KERNEL void postproc(
                 for (int pol = 0; pol < 2; pol++)
                 {
                     float2 z = q[pol][0][j];
-                    float2 zp = q[pol][1][UF - 1 - j];
-                    float2 a = make_float2(z.x + zp.x, z.y - zp.y);  // z + conj(z')
-                    float2 b = make_float2(z.y + zp.y, zp.x - z.x);  // (z - conj(z')) / j
+                    float2 zn = q[pol][1][j];
+                    float2 a = make_float2(z.x + zn.x, z.y + zn.y);  // z + zn
+                    float2 b = make_float2(z.y - zn.y, zn.x - z.x);  // (z - zn) / j
                     float2 r = cmul(b, rot);
                     v[pol][0] = make_float2(0.5 * (a.x + r.x), 0.5 * (a.y + r.y));
                     v[pol][1] = make_float2(0.5 * (a.x - r.x), -0.5 * (a.y - r.y));
