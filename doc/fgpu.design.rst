@@ -168,11 +168,23 @@ After the FIR above, we can perform the FFT, which is done with cuFFT. The
 built-in support for doing multiple FFTs at once means that it can saturate
 the GPU even with small channel counts.
 
-For performance reasons the FFT is computed in a roundabout way. Instead of
-ask cuFFT to do a real-to-complex transformation, we pass it a pointer to the
-real data but ask it to do a complex-to-complex transformation. We then
-post-process the result to get the actual transformation we needed.
+Naïvely using cuFFT for the full real-to-complex transformation can be quite
+slow and require multiple passes over the memory, because
 
+1. There is a maximum number of channels that cuFFT can handle in one pass (it
+   depends on the GPU, but seems to be 16384 for a GeForce RTX 3080 Ti).
+   Larger transforms require at least one more pass.
+
+2. It appears to handle real-to-complex transforms by first doing a
+   complex-to-complex transform and then using an additional pass to fix up
+   the result.
+
+For performance reasons, we move part of the Fourier Transform into the
+post-processing kernel (using the Cooley-Tukey algorithm), and also handle
+fixing up the real-to-complex transformation.
+
+Real-to-complex transform
+~~~~~~~~~~~~~~~~~~~~~~~~~
 Let's introduce some notation to see how this works. Let :math:`n` be the
 number of channels, :math:`x_i` be the (real) time-domain samples and
 :math:`X_i` be the Fourier transform (we divide by :math:`2n` rather than
@@ -200,11 +212,11 @@ re-use some common expressions by computing :math:`X_{n-k}` at the same time:
 
 .. math::
 
-   X_k &= \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i\\
-       &= \sum_{i=0}^n e^{\frac{-2\pi j}{2n}\cdot 2ik} u_i +
-          \sum_{i=0}^n e^{\frac{-2\pi j}{2n}\cdot (2i+1)k} v_i\\
-       &= \sum_{i=0}^n e^{\frac{-2\pi j}{n}\cdot ik} u_i +
-          e^{\frac{-\pi j}{n}\cdot k}\sum_{i=0}^n e^{\frac{-2\pi j}{n}\cdot ik} v_i\\
+   X_k &= \sum_{i=0}^{2n-1} e^{\frac{-2\pi j}{2n}\cdot ik} x_i\\
+       &= \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{2n}\cdot 2ik} u_i +
+          \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{2n}\cdot (2i+1)k} v_i\\
+       &= \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot ik} u_i +
+          e^{\frac{-\pi j}{n}\cdot k}\sum_{i=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot ik} v_i\\
        &= U_k + e^{\frac{-\pi j}{n}\cdot k} V_k.\\
    X_{n-k} &= U_{n-k} + e^{\frac{-pi j}{n}\cdot (n-k)} V_{n-k}\\
            &= \overline{U_k} - \overline{e^{\frac{-\pi j}{n}\cdot k} V_k}.
@@ -218,6 +230,53 @@ real-to-complex transformation? After it, cuFFT most likely does this (or
 something equivalent) internally. The answer is that instead of using a
 separate kernel for it (which would consume memory bandwidth), we built it
 into the postprocessing kernel (see the next section).
+
+Unzipping the FFT
+~~~~~~~~~~~~~~~~~
+For here we'll assume all transforms are complex-to-complex unless specified
+otherwise. The Cooley-Tukey algorithm allows a transform of size :math:`c =
+mn` to be decomposed into :math:`n` transforms of size :math:`m` followed by
+:math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
+"unzipping factor". We will keep it small (typically not more than 4), as the
+implementation requires registers proportional to this factor.
+
+To recap the Cooley-Tukey algorithm: let a time-domain index :math:`i` be
+written as :math:`qn + r` and a frequency-domain index :math:`k` be
+written as :math:`pm + s`. Let :math:`x^r` denote the array :math:`x_r, x_{n+r},
+\dots, x_{(m-1)n+r}`, and denote its Fourier transform by :math:`X^r`. Then
+
+.. math::
+
+   X_k = X_{pm+s}
+   &= \sum_{i=0}^{mn - 1} e^{\frac{-2\pi j}{mn}\cdot ik} x_i\\
+   &= \sum_{q=0}^{m - 1}\sum_{r=0}^{n-1}
+      e^{\frac{-2\pi j}{mn}(qn + r)(pm + s)} x_{qn + r}\\
+   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp} \left[e^{\frac{-2\pi j}{mn}\cdot rs}
+      \sum_{q=0}^{m-1} e^{\frac{-2\pi j}{m}\cdot qs} x^r_q\right]\\
+   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
+      \left[e^{\frac{-2\pi j}{mn}\cdot rs} X^r_s\right].
+
+The whole expression is a Fourier transform of the expression in brackets
+(the exponential inside the bracket is the so-called "twiddle factor").
+
+An inconvenience of this structure is that :math:`x^r` is not a contiguous
+input samples, but rather of a strided array. While cuFFT does support both
+strided inputs and batched transformations, we couldn't batch over :math:`r`
+and over multiple spectra at the same time as it only supports a single batch
+dimension with corresponding stride. We solve this by modifying the PFB kernel
+to reorder its output such that each :math:`x^r` is output contiguously. This
+can be done by shuffling some bits in the output index (because we assume
+powers of two everywhere).
+
+In the post-processing kernel, each work-item computes the results for a
+single :math:`s` and for all :math:`p`. To compute the real-to-complex
+transformation, it also needs to compute
+
+.. math::
+
+   \overline{X_{-k}} = \overline{X_{-pm - s}}
+   = \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
+     \left[e^{\frac{-2\pi j}{mn}\cdot rs} \overline{X^r_{-s}}\right].
 
 Postprocessing
 ^^^^^^^^^^^^^^
