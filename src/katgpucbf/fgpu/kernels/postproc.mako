@@ -151,14 +151,14 @@ KERNEL void postproc(
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
-        // Which spectrum within the accumulation.
-        int spectrum = z * spectra_per_heap + ${r};
         int ch[2];
         ch[0] = ${c};
         if (ch[0] * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
             // Compute the mirror channel
             ch[1] = FFT_CHANNELS - ch[0];
+            // Which spectrum within the accumulation.
+            int spectrum = z * spectra_per_heap + ${r};
             // Which channel within the spectrum.
             int base_addr = spectrum * CHANNELS;
             float2 p[2][2][UF];  // Raw data; axes are pol, ch, sub-spectrum
@@ -255,9 +255,9 @@ KERNEL void postproc(
         {
             for (int j = 0; j < UF; j++)
             {
-                base[ch] = scratch[j][0].arr[${lr}][${lc}];
+                base[ch * out_stride] = scratch[j][0].arr[${lr}][${lc}];
                 if (ch != 0)
-                    base[CHANNELS - ch] = scratch[j][1].arr[${lr}][${lc}];
+                    base[(CHANNELS - ch) * out_stride] = scratch[j][1].arr[${lr}][${lc}];
                 ch += FFT_CHANNELS;
             }
         }
