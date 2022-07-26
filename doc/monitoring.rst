@@ -76,5 +76,5 @@ This is intended for debugging performance issues rather than production use,
 as it has much higher overhead than the other monitoring mechanisms. To
 activate it, pass :option:`!--monitor-log` with a filename to the process. It
 will write a file with a JSON record per line. The helper script in
-:file:`scratch/plot.py` can be used to show a visualisation of the various
+:program:`scratch/plot.py` can be used to show a visualisation of the various
 queues over time. It's not recommended for more than a few seconds of data.
