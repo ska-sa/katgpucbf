@@ -42,6 +42,16 @@ DEVICE_FN float2 cmul_add(float2 a, float2 b, float2 c)  // a * b + c
     return make_float2(c.x + a.x * b.x - a.y * b.y, c.y + a.x * b.y + a.y * b.x);
 }
 
+DEVICE_FN float2 cadd(float2 a, float2 b)
+{
+    return make_float2(a.x + b.x, a.y + b.y);
+}
+
+DEVICE_FN float2 csub(float2 a, float2 b)
+{
+    return make_float2(a.x - b.x, a.y - b.y);
+}
+
 DEVICE_FN char quant(float value)
 {
     int out;
@@ -58,26 +68,31 @@ DEVICE_FN char quant(float value)
                 // not to.
 }
 
-DEVICE_FN void mini_fft(const float2 in[UF], float2 out[UF])
+DEVICE_FN void mini_fft1(const float2 in[1], float2 out[1])
 {
-    const float2 exp_table[UF] =
-    {
-% for i in range(unzip_factor):
-        make_float2(
-            ${math.cos(2 * math.pi * i / unzip_factor)},
-            ${math.sin(2 * math.pi * i / unzip_factor)}
-        ),
-% endfor
-    };
-    // TODO: implement this as an FFT, not a naive FT
-    for (int i = 0; i < UF; i++)
-    {
-        float2 sum = make_float2(0.0f, 0.0f);
-        for (int j = 0; j < UF; j++)
-            sum = cmul_add(exp_table[i * j % UF], in[j], sum);
-        out[i] = sum;
-    }
+    out[0] = in[0];
 }
+
+DEVICE_FN void mini_fft2(const float2 in[2], float2 out[2])
+{
+    out[0] = cadd(in[0], in[1]);
+    out[1] = csub(in[0], in[1]);
+}
+
+DEVICE_FN void mini_fft4(const float2 in[4], float2 out[4])
+{
+    float2 apc = cadd(in[0], in[2]);  // a + c
+    float2 amc = csub(in[0], in[2]);  // a - c
+    float2 bpd = cadd(in[1], in[3]);  // b + d
+    float2 jdmjb = make_float2(in[1].y - in[3].y, in[3].x - in[1].x);  // jd - jb
+    out[0] = cadd(apc, bpd);
+    out[1] = cadd(amc, jdmjb);
+    out[2] = csub(apc, bpd);
+    out[3] = csub(amc, jdmjb);
+}
+
+// TODO: generalise to larger values of unzip_factor
+#define mini_fft mini_fft${unzip_factor}
 
 DEVICE_FN void load_data(const GLOBAL float2 *base, int ch, float2 out[UF])
 {
@@ -155,7 +170,7 @@ KERNEL void postproc(
             }
 
             // Apply twiddle factors for Cooley-Tukey
-            for (int j = 0; j < UF; j++)
+            for (int j = 1; j < UF; j++)
             {
                 for (int i = 0; i < 2; i++)
                 {
@@ -202,7 +217,7 @@ KERNEL void postproc(
 #pragma unroll
                 for (int i = 0; i < 2; i++)
                 {
-                    float4 g = gains[chj[i]];  // TODO: enforce padding to prevent out-of-bounds
+                    float4 g = gains[chj[i]];
                     float re[2], im[2];
                     /* Fine delay is in fractions of a sample. Gets multiplied by
                      * delay_scale x channel to scale appropriately for the channel, and then
@@ -234,8 +249,7 @@ KERNEL void postproc(
     // Write it out
     <%transpose:transpose_store coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
-        int ch;
-        ch = ${r};
+        int ch = ${r};
         char4 *base = out + z * out_stride_z + ${c};
         if (ch * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
@@ -244,6 +258,7 @@ KERNEL void postproc(
                 base[ch] = scratch[j][0].arr[${lr}][${lc}];
                 if (ch != 0)
                     base[CHANNELS - ch] = scratch[j][1].arr[${lr}][${lc}];
+                ch += FFT_CHANNELS;
             }
         }
     }

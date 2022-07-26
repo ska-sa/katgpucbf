@@ -131,12 +131,17 @@ class Postproc(accel.Operation):
         )
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
-        self.slots["gains"] = accel.IOSlot((template.channels, pols), np.complex64)
+        # Pad so that it can be safely indexed with [channels] inside the
+        # kernel, to avoid branching.
+        self.slots["gains"] = accel.IOSlot(
+            (accel.Dimension(template.channels, min_padded_size=template.channels + 1), pols),
+            np.complex64,
+        )
 
     def _run(self) -> None:
         block_x = self.template.block * self.template.vtx
         block_y = self.template.block * self.template.vty
-        groups_x = accel.divup(self.template.channels // 2 + 1, block_x)
+        groups_x = accel.divup(self.template.channels // self.template.unzip_factor // 2 + 1, block_x)
         groups_y = self.spectra_per_heap // block_y
         groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
