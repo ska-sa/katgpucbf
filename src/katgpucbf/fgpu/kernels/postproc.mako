@@ -21,25 +21,15 @@
 %>
 
 #define CHANNELS ${channels}
-#define UF ${unzip_factor}
-#define FFT_CHANNELS ${channels // unzip_factor}
+#define n ${unzip_factor}
+#define m ${channels // unzip_factor}
 
 <%transpose:transpose_data_class class_name="scratch_t" type="char4" block="${block}" vtx="${vtx}" vty="${vty}"/>
 <%transpose:transpose_coords_class class_name="transpose_coords" block="${block}" vtx="${vtx}" vty="${vty}"/>
 
-DEVICE_FN float2 apply_delay(float2 in, float re, float im)
-{
-    return make_float2(in.x * re - in.y * im, in.y * re + in.x * im);
-}
-
 DEVICE_FN float2 cmul(float2 a, float2 b)
 {
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}
-
-DEVICE_FN float2 cmul_add(float2 a, float2 b, float2 c)  // a * b + c
-{
-    return make_float2(c.x + a.x * b.x - a.y * b.y, c.y + a.x * b.y + a.y * b.x);
 }
 
 DEVICE_FN float2 cadd(float2 a, float2 b)
@@ -68,6 +58,8 @@ DEVICE_FN char quant(float value)
                 // not to.
 }
 
+/* The mini_fftN functions are FFTs for small fixed sizes. */
+
 DEVICE_FN void mini_fft1(const float2 in[1], float2 out[1])
 {
     out[0] = in[0];
@@ -81,7 +73,7 @@ DEVICE_FN void mini_fft2(const float2 in[2], float2 out[2])
 
 DEVICE_FN void mini_fft4(const float2 in[4], float2 out[4])
 {
-    float2 apc = cadd(in[0], in[2]);  // a + c
+    float2 apc = cadd(in[0], in[2]);  // a + c (where inputs are a, b, c, d)
     float2 amc = csub(in[0], in[2]);  // a - c
     float2 bpd = cadd(in[1], in[3]);  // b + d
     float2 jdmjb = make_float2(in[1].y - in[3].y, in[3].x - in[1].x);  // jd - jb
@@ -91,20 +83,18 @@ DEVICE_FN void mini_fft4(const float2 in[4], float2 out[4])
     out[3] = csub(amc, jdmjb);
 }
 
-// TODO: generalise to larger values of unzip_factor
 #define mini_fft mini_fft${unzip_factor}
 
-DEVICE_FN void load_data(const GLOBAL float2 *base, int ch, float2 out[UF])
+/* Fetch channel s from each input spectrum */
+DEVICE_FN void load_data(const GLOBAL float2 *base, int s, float2 out[n])
 {
-    for (int i = 0; i < UF; i++)
-    {
-        out[i] = base[ch & (CHANNELS - 1)];
-        ch += FFT_CHANNELS;
-    }
+    for (int r = 0; r < n; r++)
+        out[r] = base[r * m + s];
 }
 
 /* Kernel that handles:
- * - Computation of real-to-complex Fourier transform from a complex-to-complex transform
+ * - Computation of a real-to-complex Fourier transform from complex-to-complex
+ *   transforms
  * - Fine delays
  * - Partial time/channel transposition
  * - 8-bit quantisation
@@ -112,6 +102,10 @@ DEVICE_FN void load_data(const GLOBAL float2 *base, int ch, float2 out[UF])
  *
  * The kernel assumes that the actual delay (in fractions of a sample?) has
  * been calculated, calculates the per-channel phasor and applies it.
+ *
+ * See fgpu.design.rst for more detailed explanations of what this kernel is
+ * doing (particularly with regards to FFTs), as well as the meanings of many
+ * single-letter variables.
  *
  * Work group sizing:
  * - Each thread handles 2 * vtx * unzip_factor channels from vty spectra.
@@ -127,7 +121,8 @@ DEVICE_FN void load_data(const GLOBAL float2 *base, int ch, float2 out[UF])
  * it's contiguous then the strides will coincide with these dimensions, but
  * katsdpsigproc may have added some padding to satisfy alignment requirements.
  * At the moment, this isn't the case, but this code aims for robustness against
- * possible changes.
+ * possible changes. The input array is guaranteed to be tightly packed and so no
+ * in_stride is used.
  */
 KERNEL void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory
@@ -141,7 +136,7 @@ KERNEL void postproc(
     int out_stride,                           // Output stride between channels within a heap
     int spectra_per_heap)                     // Number of spectra per output heap
 {
-    LOCAL_DECL scratch_t scratch[UF][2];
+    LOCAL_DECL scratch_t scratch[n][2];
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
@@ -151,66 +146,66 @@ KERNEL void postproc(
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
-        int ch[2];
-        ch[0] = ${c};
-        if (ch[0] * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
+        int s[2];  // s[0] is s in the design doc; s[1] is -s, modulo m
+        s[0] = ${c};
+        if (s[0] * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
         {
-            // Compute the mirror channel
-            ch[1] = (-ch[0]) & (FFT_CHANNELS - 1);
+            // Compute the mirror channel (with & to wrap it)
+            s[1] = (-s[0]) & (m - 1);
             // Which spectrum within the accumulation.
             int spectrum = z * spectra_per_heap + ${r};
             // Which channel within the spectrum.
             int base_addr = spectrum * CHANNELS;
-            float2 p[2][2][UF];  // Raw data; axes are pol, ch, sub-spectrum
-            float2 q[2][2][UF];  // Fourier transform of p
+            float2 Zr[2][2][n];  // Raw data; axes are pol, +/- s, sub-spectrum
+            float2 Z[2][2][n];   // Final complex Fourier transform
             for (int i = 0; i < 2; i++)
             {
-                load_data(in0 + base_addr, ch[i], p[0][i]);
-                load_data(in1 + base_addr, ch[i], p[1][i]);
+                load_data(in0 + base_addr, s[i], Zr[0][i]);
+                load_data(in1 + base_addr, s[i], Zr[1][i]);
             }
-            // Conjugate the mirror channel
+            // Conjugate the negative channel
             for (int pol = 0; pol < 2; pol++)
-                for (int j = 0; j < UF; j++)
-                    p[pol][1][j].y = -p[pol][1][j].y;
+                for (int r = 0; r < n; r++)
+                    Zr[pol][1][r].y = -Zr[pol][1][r].y;
 
             // Apply twiddle factors for Cooley-Tukey
-            for (int j = 1; j < UF; j++)
+            for (int r = 1; r < n; r++)  // Skip 0 because it's a no-op
             {
-                float angle = ch[0] * j * (-2.0f / CHANNELS);
+                float angle = s[0] * r * (-2.0f / CHANNELS);
                 float2 t;
                 sincospif(angle, &t.y, &t.x);
                 for (int pol = 0; pol < 2; pol++)
                     for (int i = 0; i < 2; i++)
-                        p[pol][i][j] = cmul(p[pol][i][j], t);
+                        Zr[pol][i][r] = cmul(Zr[pol][i][r], t);
             }
 
             // Final pass of C2C transform
             for (int pol = 0; pol < 2; pol++)
                 for (int i = 0; i < 2; i++)
-                    mini_fft(p[pol][i], q[pol][i]);
+                    mini_fft(Zr[pol][i], Z[pol][i]);
 
             float2 delay = fine_delay[spectrum];
             float2 ph = phase[spectrum];
             /* Clean up C2C transform to form an R2C transform.
-             * The axes of v are polarisation, ch, sub-spectrum
+             * The axes of v are pol, +/- s, sub-spectrum
              */
-            for (int j = 0; j < UF; j++)
+            for (int p = 0; p < n; p++)
             {
-                float2 v[2][2];
+                float2 X[2][2];
                 float2 rot;
-                int chj[2];
-                chj[0] = ch[0] + j * FFT_CHANNELS;
-                chj[1] = CHANNELS - chj[0];
-                sincospif(delay_scale * chj[0], &rot.y, &rot.x);
+                int k[2];
+                k[0] = p * m + s[0];
+                k[1] = CHANNELS - k[0];
+                sincospif(delay_scale * k[0], &rot.y, &rot.x);
                 for (int pol = 0; pol < 2; pol++)
                 {
-                    float2 z = q[pol][0][j];
-                    float2 zn = q[pol][1][j];
-                    float2 a = make_float2(z.x + zn.x, z.y + zn.y);  // z + zn
-                    float2 b = make_float2(z.y - zn.y, zn.x - z.x);  // (z - zn) / j
-                    float2 r = cmul(b, rot);
-                    v[pol][0] = make_float2(0.5 * (a.x + r.x), 0.5 * (a.y + r.y));
-                    v[pol][1] = make_float2(0.5 * (a.x - r.x), -0.5 * (a.y - r.y));
+                    float2 z = Z[pol][0][p];
+                    float2 zn = Z[pol][1][p];
+                    float2 u = cadd(z, zn);
+                    float2 v = make_float2(z.y - zn.y, zn.x - z.x);  // (z - zn) / j
+                    float2 r = cmul(v, rot);
+                    X[pol][0] = make_float2(0.5 * (u.x + r.x), 0.5 * (u.y + r.y));
+                    X[pol][1] = make_float2(0.5 * (u.x - r.x), -0.5 * (u.y - r.y));
                 }
 
                 // Apply fine delay and gain
@@ -219,27 +214,28 @@ KERNEL void postproc(
 #pragma unroll
                 for (int i = 0; i < 2; i++)
                 {
-                    float4 g = gains[chj[i]];
-                    float re[2], im[2];
+                    float4 g = gains[k[i]];
+                    float2 delay_rot[2];
                     /* Fine delay is in fractions of a sample. Gets multiplied by
                      * delay_scale x channel to scale appropriately for the channel, and then
                      * constant phase is added.
                      */
                     // Note: delay_scale incorporates the minus sign
-                    sincospif(delay.x * delay_scale * chj[i] + ph.x, &im[0], &re[0]);
-                    sincospif(delay.y * delay_scale * chj[i] + ph.y, &im[1], &re[1]);
+                    float channel_scale = delay_scale * k[i];
+                    sincospif(delay.x * channel_scale + ph.x, &delay_rot[0].y, &delay_rot[0].x);
+                    sincospif(delay.y * channel_scale + ph.y, &delay_rot[1].y, &delay_rot[1].x);
                     for (int pol = 0; pol < 2; pol++)
-                        v[pol][i] = apply_delay(v[pol][i], re[pol], im[pol]);
-                    v[0][i] = cmul(make_float2(g.x, g.y), v[0][i]);
-                    v[1][i] = cmul(make_float2(g.z, g.w), v[1][i]);
+                        X[pol][i] = cmul(X[pol][i], delay_rot[pol]);
+                    X[0][i] = cmul(make_float2(g.x, g.y), X[0][i]);
+                    X[1][i] = cmul(make_float2(g.z, g.w), X[1][i]);
 
                     // Interleave polarisations. Quantise at the same time.
                     char4 packed;
-                    packed.x = quant(v[0][i].x);
-                    packed.y = quant(v[0][i].y);
-                    packed.z = quant(v[1][i].x);
-                    packed.w = quant(v[1][i].y);
-                    scratch[j][i].arr[${lr}][${lc}] = packed;
+                    packed.x = quant(X[0][i].x);
+                    packed.y = quant(X[0][i].y);
+                    packed.z = quant(X[1][i].x);
+                    packed.w = quant(X[1][i].y);
+                    scratch[p][i].arr[${lr}][${lc}] = packed;
                 }
             }
         }
@@ -251,16 +247,16 @@ KERNEL void postproc(
     // Write it out
     <%transpose:transpose_store coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
-        int ch = ${r};
-        char4 *base = out + z * out_stride_z + ${c};
-        if (ch * 2 <= FFT_CHANNELS)  // Note: <= not <. We need to process fft_channels/2 + 1 times
+        int s = ${r};
+        if (s * 2 <= m)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
-            for (int j = 0; j < UF; j++)
+            char4 *base = out + z * out_stride_z + ${c};
+            for (int p = 0; p < n; p++)
             {
-                base[ch * out_stride] = scratch[j][0].arr[${lr}][${lc}];
-                if (ch != 0)
-                    base[(CHANNELS - ch) * out_stride] = scratch[j][1].arr[${lr}][${lc}];
-                ch += FFT_CHANNELS;
+                int k = p * m + s;
+                base[k * out_stride] = scratch[p][0].arr[${lr}][${lc}];
+                if (k != 0)
+                    base[(CHANNELS - k) * out_stride] = scratch[p][1].arr[${lr}][${lc}];
             }
         }
     }

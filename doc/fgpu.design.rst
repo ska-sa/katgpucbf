@@ -242,29 +242,29 @@ implementation requires registers proportional to this factor.
 
 To recap the Cooley-Tukey algorithm: let a time-domain index :math:`i` be
 written as :math:`qn + r` and a frequency-domain index :math:`k` be
-written as :math:`pm + s`. Let :math:`x^r` denote the array :math:`x_r, x_{n+r},
-\dots, x_{(m-1)n+r}`, and denote its Fourier transform by :math:`X^r`. Then
+written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r},
+\dots, z_{(m-1)n+r}`, and denote its Fourier transform by :math:`Z^r`. Then
 
 .. math::
 
-   X_k = X_{pm+s}
-   &= \sum_{i=0}^{mn - 1} e^{\frac{-2\pi j}{mn}\cdot ik} x_i\\
+   Z_k = Z_{pm+s}
+   &= \sum_{i=0}^{mn - 1} e^{\frac{-2\pi j}{mn}\cdot ik} z_i\\
    &= \sum_{q=0}^{m - 1}\sum_{r=0}^{n-1}
-      e^{\frac{-2\pi j}{mn}(qn + r)(pm + s)} x_{qn + r}\\
+      e^{\frac{-2\pi j}{mn}(qn + r)(pm + s)} z_{qn + r}\\
    &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp} \left[e^{\frac{-2\pi j}{mn}\cdot rs}
-      \sum_{q=0}^{m-1} e^{\frac{-2\pi j}{m}\cdot qs} x^r_q\right]\\
+      \sum_{q=0}^{m-1} e^{\frac{-2\pi j}{m}\cdot qs} z^r_q\right]\\
    &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
-      \left[e^{\frac{-2\pi j}{mn}\cdot rs} X^r_s\right].
+      \left[e^{\frac{-2\pi j}{mn}\cdot rs} Z^r_s\right].
 
 The whole expression is a Fourier transform of the expression in brackets
 (the exponential inside the bracket is the so-called "twiddle factor").
 
-An inconvenience of this structure is that :math:`x^r` is not a contiguous
+An inconvenience of this structure is that :math:`z^r` is not a contiguous
 set of input samples, but a strided array. While cuFFT does support both
 strided inputs and batched transformations, we cannot batch over :math:`r`
 and over multiple spectra at the same time as it only supports a single batch
 dimension with corresponding stride. We solve this by modifying the PFB kernel
-to reorder its output such that each :math:`x^r` is output contiguously. This
+to reorder its output such that each :math:`z^r` is output contiguously. This
 can be done by shuffling some bits in the output index (because we assume
 powers of two everywhere).
 
@@ -274,9 +274,9 @@ transformation, it also needs to compute
 
 .. math::
 
-   \overline{X_{-k}} = \overline{X_{-pm - s}}
+   \overline{Z_{-k}} = \overline{Z_{-pm - s}}
    = \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
-     \left[e^{\frac{-2\pi j}{mn}\cdot rs} \overline{X^r_{-s}}\right].
+     \left[e^{\frac{-2\pi j}{mn}\cdot rs} \overline{Z^r_{-s}}\right].
 
 Postprocessing
 ^^^^^^^^^^^^^^
