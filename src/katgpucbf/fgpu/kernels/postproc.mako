@@ -139,11 +139,12 @@ DEVICE_FN void fix_r2c(float2 z, float2 zn, float2 rot, float2 out[2])
 
 /* Load/compute the complex-to-complex Fourier transform of the input.
  *
- * @param      s_  First channel to load. The channels loaded have the form
+ * @param      s_  First channel to compute. The channels have the form
  *                 +/-(pm + s) where 0 <= p < n.
  * @param      in  Pointers to raw input for this spectrum, indexed by
  *                 polarisation
- * @param[out] Z   Result, indexed by pol, +/- s, p
+ * @param[out] Z   Result, indexed by pol, +/- s, p. The negative channels are
+ *                 conjugated.
  */
 DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
 {
@@ -165,6 +166,35 @@ DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
     for (int pol = 0; pol < 2; pol++)
         for (int i = 0; i < 2; i++)
             mini_fft(Zr[pol][i], Z[pol][i]);
+}
+
+/* Load/compute the real-to-complex Fourier transform of the input.
+ *
+ * @param      s   First channel to compute. The channels have the form
+ *                 pm + s and CHANNELS - (pm + s) where 0 <= p < n.
+ * @param      in  Pointers to raw input for this spectrum, indexed by
+ *                 polarisation
+ * @param[out] X   Result, indexed by pol, +/- s, p
+ */
+DEVICE_FN void finish_fft(int s, const GLOBAL float2 *in[2], float2 X[2][2][n])
+{
+    float2 Z[2][2][n];
+    finish_c2c(s, in, Z);
+
+    // Clean up C2C transform to form an R2C transform.
+    for (int p = 0; p < n; p++)
+    {
+        float2 rot;
+        int k = p * m + s;
+        sincospif(k * (-1.0f / CHANNELS), &rot.y, &rot.x);
+        for (int pol = 0; pol < 2; pol++)
+        {
+            float2 Xt[2];  // temporary since X[pol, :, p] is not contiguous
+            fix_r2c(Z[pol][0][p], Z[pol][1][p], rot, Xt);
+            for (int i = 0; i < 2; i++)
+                X[pol][i][p] = Xt[i];
+        }
+    }
 }
 
 /* Apply delay model.
@@ -230,7 +260,6 @@ KERNEL void postproc(
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
-    const float delay_scale = -1.0f / CHANNELS;
 
     // Load a block of data
     // The transpose happens per-accumulation.
@@ -250,7 +279,8 @@ KERNEL void postproc(
                 {
                     float2 g[2];
                     // & to avoid overflow in edge cases
-                    float4_to_float2_array(gains[(i ? -k : k) & (CHANNELS - 1)], g);
+                    int ch = (i ? -k : k) & (CHANNELS - 1);
+                    float4_to_float2_array(gains[ch], g);
                     for (int pol = 0; pol < 2; pol++)
                         l_gains[p][pol][i][coords.lx] = g[pol];
                 }
@@ -265,26 +295,14 @@ KERNEL void postproc(
             int spectrum = z * spectra_per_heap + ${r};
             int base_addr = spectrum * CHANNELS;
             const GLOBAL float2 *in[2] = {in0 + base_addr, in1 + base_addr};
-            float2 Z[2][2][n];   // Final complex Fourier transform
-            finish_c2c(s, in, Z);
+            float2 X[2][2][n];   // Final real-to-complex Fourier transform
+            finish_fft(s, in, X);
 
             float delay[2], ph[2];
             float2_to_array(fine_delay[spectrum], delay);
             float2_to_array(phase[spectrum], ph);
             for (int p = 0; p < n; p++)
             {
-                /* Clean up C2C transform to form an R2C transform.
-                 * The axes of X are pol, +/- s
-                 */
-                float2 X[2][2];
-                float2 rot;
-                int k[2];
-                k[0] = p * m + s;
-                k[1] = CHANNELS - k[0];
-                sincospif(delay_scale * k[0], &rot.y, &rot.x);
-                for (int pol = 0; pol < 2; pol++)
-                    fix_r2c(Z[pol][0][p], Z[pol][1][p], rot, X[pol]);
-
                 /* Apply fine delay, phase and gain.
                  * Fine delay is in fractions of a sample. Gets multiplied by
                  * delay_scale x channel to scale appropriately for the
@@ -292,22 +310,27 @@ KERNEL void postproc(
                  * TODO: fine_delay and phase are common across channels, so
                  * could possibly be loaded more efficiently.
                  */
+                int k[2];
+                k[0] = p * m + s;
+                k[1] = CHANNELS - k[0];
                 for (int i = 0; i < 2; i++)
                 {
+                    const float delay_scale = -1.0f / CHANNELS;
                     float channel_scale = delay_scale * k[i];
+                    float2 out[2];
                     for (int pol = 0; pol < 2; pol++)
                     {
                         float2 g = l_gains[p][pol][i][coords.lx];
                         float phase = delay[pol] * channel_scale + ph[pol];
-                        X[pol][i] = apply_delay_gain(k[i], g, phase, X[pol][i]);
+                        out[pol] = apply_delay_gain(k[i], g, phase, X[pol][i][p]);
                     }
 
                     // Interleave polarisations. Quantise at the same time.
                     char4 packed;
-                    packed.x = quant(X[0][i].x);
-                    packed.y = quant(X[0][i].y);
-                    packed.z = quant(X[1][i].x);
-                    packed.w = quant(X[1][i].y);
+                    packed.x = quant(out[0].x);
+                    packed.y = quant(out[0].y);
+                    packed.z = quant(out[1].x);
+                    packed.w = quant(out[1].y);
                     scratch[p][i].arr[${lr}][${lc}] = packed;
                 }
             }
