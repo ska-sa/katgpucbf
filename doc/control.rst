@@ -61,7 +61,8 @@ Controlling the correlator
 
 The correlator components are controlled using `katcp`_. Standard katcp
 requests (such as querying and subscribing to sensors) are not covered here;
-only application-specific requests are listed.
+only application-specific requests are listed. Sensors are described in
+:ref:`monitoring-sensors`.
 
 .. _katcp: https://katcp-python.readthedocs.io/en/latest/_downloads/361189acb383a294be20d6c10c257cb4/NRF-KAT7-6.0-IFCE-002-Rev5-1.pdf
 
@@ -113,11 +114,6 @@ xbgpu
     state transmission is enabled.
 
     .. todo:: Update after NGC-721 is addressed
-
-.. todo::
-
-   Link to sensor descriptions once they're written in the monitoring section.
-
 
 Shutting down the correlator
 ----------------------------
