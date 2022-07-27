@@ -58,6 +58,20 @@ DEVICE_FN char quant(float value)
                 // not to.
 }
 
+/* Turn a float2 into an array of 2 floats for easier indexing */
+DEVICE_FN void float2_to_array(float2 v, float out[2])
+{
+    out[0] = v.x;
+    out[1] = v.y;
+}
+
+/* Turn a float4 into an array of 2 float2 for easier indexing */
+DEVICE_FN void float4_to_float2_array(float4 v, float2 out[2])
+{
+    out[0] = make_float2(v.x, v.y);
+    out[1] = make_float2(v.z, v.w);
+}
+
 /* The mini_fftN functions are FFTs for small fixed sizes. */
 
 DEVICE_FN void mini_fft1(const float2 in[1], float2 out[1])
@@ -123,6 +137,50 @@ DEVICE_FN void fix_r2c(float2 z, float2 zn, float2 rot, float2 out[2])
     out[1] = make_float2(0.5 * (u.x - r.x), -0.5 * (u.y - r.y));
 }
 
+/* Load/compute the complex-to-complex Fourier transform of the input.
+ *
+ * @param      s_  First channel to load. The channels loaded have the form
+ *                 +/-(pm + s) where 0 <= p < n.
+ * @param      in  Pointers to raw input for this spectrum, indexed by
+ *                 polarisation
+ * @param[out] Z   Result, indexed by pol, +/- s, p
+ */
+DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
+{
+    // Compute the mirror channel (with & to wrap it)
+    int s[2] = {s_, (-s_) & (m - 1)};
+    float2 Zr[2][2][n];  // Raw data; axes are pol, +/- s, sub-spectrum
+    for (int i = 0; i < 2; i++)
+        for (int pol = 0; pol < 2; pol++)
+            load_data(in[pol], s[i], Zr[pol][i]);
+
+    // Conjugate the negative channel
+    for (int pol = 0; pol < 2; pol++)
+        for (int r = 0; r < n; r++)
+            Zr[pol][1][r].y = -Zr[pol][1][r].y;
+
+    twiddle(s[0], Zr);
+
+    // Final pass of C2C transform
+    for (int pol = 0; pol < 2; pol++)
+        for (int i = 0; i < 2; i++)
+            mini_fft(Zr[pol][i], Z[pol][i]);
+}
+
+/* Apply delay model.
+ *
+ * @param          k      Channel
+ * @param          gain   Gain for the channel
+ * @param          phase  Total phase rotation in radians
+ * @param[in,out]  X      Channelised voltage, indexed by pol
+ */
+DEVICE_FN float2 apply_delay_gain(int k, float2 gain, float phase, float2 X)
+{
+    float2 rot;
+    sincospif(phase, &rot.y, &rot.x);
+    return cmul(cmul(X, rot), gain);
+}
+
 /* Kernel that handles:
  * - Computation of a real-to-complex Fourier transform from complex-to-complex
  *   transforms
@@ -168,7 +226,7 @@ KERNEL void postproc(
     int spectra_per_heap)                     // Number of spectra per output heap
 {
     LOCAL_DECL scratch_t scratch[n][2];
-    LOCAL_DECL float4 l_gains[n][2][${block}];
+    LOCAL_DECL float2 l_gains[n][2][2][${block}];  // indexed by p, pol, +/- s
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
@@ -178,86 +236,71 @@ KERNEL void postproc(
     // The transpose happens per-accumulation.
     <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
     {
-        int s[2];  // s[0] is s in the design doc; s[1] is -s, modulo m
-        s[0] = ${c};
-
+        int s = ${c};
         /* Load all the necessary gains for the subtile into local memory. This
          * depends on some implementation details of transpose_load
          * (specifically that ${c} is coords.lx plus a constant).
          */
-        if (s[0] * 2 <= m)
+        if (s * 2 <= m)
+        {
             for (int p = coords.ly; p < n; p += ${block})
             {
-                int k = p * m + s[0];
-                // & to avoid overflow in edge cases
-                l_gains[p][0][coords.lx] = gains[k & (CHANNELS - 1)];
-                l_gains[p][1][coords.lx] = gains[(-k) & (CHANNELS - 1)];
+                int k = p * m + s;
+                for (int i = 0; i < 2; i++)
+                {
+                    float2 g[2];
+                    // & to avoid overflow in edge cases
+                    float4_to_float2_array(gains[(i ? -k : k) & (CHANNELS - 1)], g);
+                    for (int pol = 0; pol < 2; pol++)
+                        l_gains[p][pol][i][coords.lx] = g[pol];
+                }
             }
+        }
 
         BARRIER();
 
-        if (s[0] * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
+        if (s * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
         {
-            // Compute the mirror channel (with & to wrap it)
-            s[1] = (-s[0]) & (m - 1);
             // Which spectrum within the accumulation.
             int spectrum = z * spectra_per_heap + ${r};
-            // Which channel within the spectrum.
             int base_addr = spectrum * CHANNELS;
-            float2 Zr[2][2][n];  // Raw data; axes are pol, +/- s, sub-spectrum
+            const GLOBAL float2 *in[2] = {in0 + base_addr, in1 + base_addr};
             float2 Z[2][2][n];   // Final complex Fourier transform
-            for (int i = 0; i < 2; i++)
-            {
-                load_data(in0 + base_addr, s[i], Zr[0][i]);
-                load_data(in1 + base_addr, s[i], Zr[1][i]);
-            }
-            // Conjugate the negative channel
-            for (int pol = 0; pol < 2; pol++)
-                for (int r = 0; r < n; r++)
-                    Zr[pol][1][r].y = -Zr[pol][1][r].y;
+            finish_c2c(s, in, Z);
 
-            twiddle(s[0], Zr);
-
-            // Final pass of C2C transform
-            for (int pol = 0; pol < 2; pol++)
-                for (int i = 0; i < 2; i++)
-                    mini_fft(Zr[pol][i], Z[pol][i]);
-
-            float2 delay = fine_delay[spectrum];
-            float2 ph = phase[spectrum];
+            float delay[2], ph[2];
+            float2_to_array(fine_delay[spectrum], delay);
+            float2_to_array(phase[spectrum], ph);
             for (int p = 0; p < n; p++)
             {
                 /* Clean up C2C transform to form an R2C transform.
-                 * The axes of v are pol, +/- s, sub-spectrum
+                 * The axes of X are pol, +/- s
                  */
                 float2 X[2][2];
                 float2 rot;
                 int k[2];
-                k[0] = p * m + s[0];
-                k[1] = (-k[0]) & (CHANNELS - 1);
+                k[0] = p * m + s;
+                k[1] = CHANNELS - k[0];
                 sincospif(delay_scale * k[0], &rot.y, &rot.x);
                 for (int pol = 0; pol < 2; pol++)
                     fix_r2c(Z[pol][0][p], Z[pol][1][p], rot, X[pol]);
 
-                // Apply fine delay and gain
-                // TODO: fine_delay is common across channels and gain is common across
-                // spectra, so could possibly be loaded more efficiently.
+                /* Apply fine delay, phase and gain.
+                 * Fine delay is in fractions of a sample. Gets multiplied by
+                 * delay_scale x channel to scale appropriately for the
+                 * channel, and then constant phase is added.
+                 * TODO: fine_delay and phase are common across channels, so
+                 * could possibly be loaded more efficiently.
+                 */
                 for (int i = 0; i < 2; i++)
                 {
-                    float4 g = l_gains[p][i][coords.lx];
-                    float2 delay_rot[2];
-                    /* Fine delay is in fractions of a sample. Gets multiplied by
-                     * delay_scale x channel to scale appropriately for the channel, and then
-                     * constant phase is added.
-                     */
-                    // Note: delay_scale incorporates the minus sign
                     float channel_scale = delay_scale * k[i];
-                    sincospif(delay.x * channel_scale + ph.x, &delay_rot[0].y, &delay_rot[0].x);
-                    sincospif(delay.y * channel_scale + ph.y, &delay_rot[1].y, &delay_rot[1].x);
                     for (int pol = 0; pol < 2; pol++)
-                        X[pol][i] = cmul(X[pol][i], delay_rot[pol]);
-                    X[0][i] = cmul(make_float2(g.x, g.y), X[0][i]);
-                    X[1][i] = cmul(make_float2(g.z, g.w), X[1][i]);
+                    {
+                        float2 g = l_gains[p][pol][i][coords.lx];
+                        float phase = delay[pol] * channel_scale + ph[pol];
+                        X[pol][i] = apply_delay_gain(k[i], g, phase, X[pol][i]);
+                    }
 
                     // Interleave polarisations. Quantise at the same time.
                     char4 packed;
