@@ -42,7 +42,7 @@ class PostprocTemplate:
     """
 
     def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1) -> None:
-        self.block = 16
+        self.block = 32
         self.vtx = 1
         self.vty = 1
         self.channels = channels

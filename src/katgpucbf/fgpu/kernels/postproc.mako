@@ -137,6 +137,7 @@ KERNEL void postproc(
     int spectra_per_heap)                     // Number of spectra per output heap
 {
     LOCAL_DECL scratch_t scratch[n][2];
+    LOCAL_DECL float4 l_gains[n][2][${block}];
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
@@ -148,6 +149,22 @@ KERNEL void postproc(
     {
         int s[2];  // s[0] is s in the design doc; s[1] is -s, modulo m
         s[0] = ${c};
+
+        /* Load all the necessary gains for the subtile into local memory. This
+         * depends on some implementation details of transpose_load
+         * (specifically that ${c} is correlated with coords.lx).
+         */
+        if (s[0] * 2 <= m)
+            for (int p = coords.ly; p < n; p += ${block})
+            {
+                int k = p * m + s[0];
+                // & to avoid overflow in edge cases
+                l_gains[p][0][coords.lx] = gains[k & (CHANNELS - 1)];
+                l_gains[p][1][coords.lx] = gains[(-k) & (CHANNELS - 1)];
+            }
+
+        BARRIER();
+
         if (s[0] * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
         {
             // Compute the mirror channel (with & to wrap it)
@@ -213,7 +230,7 @@ KERNEL void postproc(
                 // spectra, so could possibly be loaded more efficiently.
                 for (int i = 0; i < 2; i++)
                 {
-                    float4 g = gains[k[i]];
+                    float4 g = l_gains[p][i][coords.lx];
                     float2 delay_rot[2];
                     /* Fine delay is in fractions of a sample. Gets multiplied by
                      * delay_scale x channel to scale appropriately for the channel, and then
@@ -238,10 +255,10 @@ KERNEL void postproc(
                 }
             }
         }
+
+        BARRIER(); // ensure l_gains has been consumed before it gets updated
     }
     </%transpose:transpose_load>
-
-    BARRIER();
 
     // Write it out
     <%transpose:transpose_store coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
