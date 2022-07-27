@@ -40,6 +40,9 @@ class PFBFIRTemplate:
         The number of taps that you want the resulting PFB-FIRs to have.
     channels
         Number of channels into which the input data will be decomposed.
+    unzip_factor
+        The output is reordered so that every unzip_factor'ith pair of
+        outputs is placed contiguously.
     """
 
     def __init__(self, context: AbstractContext, taps: int, channels: int, unzip_factor: int = 1) -> None:

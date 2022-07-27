@@ -35,10 +35,12 @@ class PostprocTemplate:
 
     Parameters
     ----------
-    context: AbstractContext
+    context
         The GPU context that we'll operate in.
-    channels: int
+    channels
         Number of channels in each spectrum.
+    unzip_factor
+        Radix of the final Cooley-Tukey FFT step performed by the kernel.
     """
 
     def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1) -> None:
@@ -76,11 +78,11 @@ class Postproc(accel.Operation):
 
     .. rubric:: Slots
 
-    **in0**, **in1** : spectra × channels, complex64
+    **in0**, **in1** : spectra × unzip_factor × channels // unzip_factor, complex64
         Input channelised data for the two polarisations. These are formed by
         taking the complex-to-complex Fourier transform of the input
         reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
-    **out** : (spectra // spectra_per_heap, channels, spectra_per_heap, 2, 2), int8
+    **out** : spectra // spectra_per_heap × channels × spectra_per_heap × 2 × 2, int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.
     **fine_delay** : spectra × 2, float32
