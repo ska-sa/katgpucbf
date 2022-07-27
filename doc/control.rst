@@ -17,12 +17,12 @@ katsdpcontroller to communicate with the correlator components.
 
 There are two parts to katsdpcontroller: a :dfn:`master controller` and a
 :dfn:`product controller`. There is a single product controller per
-instantiated correlator. It is responsible for
+instantiated correlator. It is responsible for:
 
 - starting up the appropriate correlator components with suitable arguments,
   given a high-level description of the desired correlator configuration;
 - monitoring the health of those components;
-- registering them with `consul`_, so that infrastructure such as Prometheus
+- registering them with `Consul`_, so that infrastructure such as `Prometheus`_
   can discover them;
 - proxying their :ref:`monitoring-sensors`, so that clients need only
   subscribe to sensors from the product controller rather than individual
@@ -34,7 +34,8 @@ instantiated correlator. It is responsible for
 - providing correlator-wide katcp requests, which are implemented by issuing
   similar but finer-grained requests to the individual engines.
 
-.. _consul: https://www.consul.io/
+.. _Consul: https://www.consul.io/
+.. _Prometheus: https://prometheus.io/
 
 The master controller manages product controllers (and hence correlators),
 starting them up and shutting them down on request from the user. In a system
