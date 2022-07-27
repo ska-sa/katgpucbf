@@ -51,8 +51,8 @@ class PFBFIRTemplate:
         self.unzip_factor = unzip_factor
         if (2 * channels) % self.wgs != 0:
             raise ValueError(f"2*channels must be a multiple of {self.wgs}")
-        if channels <= 0 or channels & (channels - 1):
-            raise ValueError("channels must be a power of 2")
+        if channels <= 1 or channels & (channels - 1):
+            raise ValueError("channels must be an even power of 2")
         if channels % unzip_factor != 0:
             raise ValueError("channels must be a multiple of unzip_factor")
         program = accel.build(
