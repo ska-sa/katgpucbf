@@ -92,6 +92,37 @@ DEVICE_FN void load_data(const GLOBAL float2 *base, int s, float2 out[n])
         out[r] = base[r * m + s];
 }
 
+/* Apply twiddle factors for Cooley-Tukey (in place) */
+DEVICE_FN void twiddle(int s, float2 Zr[2][2][n])
+{
+    for (int r = 1; r < n; r++)  // Skip 0 because it's a no-op
+    {
+        float angle = (-2.0f / CHANNELS) * r * s;
+        float2 t;
+        sincospif(angle, &t.y, &t.x);
+        for (int pol = 0; pol < 2; pol++)
+            for (int i = 0; i < 2; i++)
+                Zr[pol][i][r] = cmul(Zr[pol][i][r], t);
+    }
+}
+
+/* Compute the real-to-complex transform from a complex-to-complex transform
+ * of the same raw data.
+ *
+ * @param      z    Complex-to-complex transform of some channel k
+ * @param      zn   Conjugation of channel -k
+ * @param      rot  exp(-pi * j * k / CHANNELS)
+ * @param[out] out  Real-to-complex transform at channels k and CHANNELS - k
+ */
+DEVICE_FN void fix_r2c(float2 z, float2 zn, float2 rot, float2 out[2])
+{
+    float2 u = cadd(z, zn);
+    float2 v = make_float2(z.y - zn.y, zn.x - z.x);  // (z - zn) / j
+    float2 r = cmul(v, rot);
+    out[0] = make_float2(0.5 * (u.x + r.x), 0.5 * (u.y + r.y));
+    out[1] = make_float2(0.5 * (u.x - r.x), -0.5 * (u.y - r.y));
+}
+
 /* Kernel that handles:
  * - Computation of a real-to-complex Fourier transform from complex-to-complex
  *   transforms
@@ -152,7 +183,7 @@ KERNEL void postproc(
 
         /* Load all the necessary gains for the subtile into local memory. This
          * depends on some implementation details of transpose_load
-         * (specifically that ${c} is correlated with coords.lx).
+         * (specifically that ${c} is coords.lx plus a constant).
          */
         if (s[0] * 2 <= m)
             for (int p = coords.ly; p < n; p += ${block})
@@ -185,16 +216,7 @@ KERNEL void postproc(
                 for (int r = 0; r < n; r++)
                     Zr[pol][1][r].y = -Zr[pol][1][r].y;
 
-            // Apply twiddle factors for Cooley-Tukey
-            for (int r = 1; r < n; r++)  // Skip 0 because it's a no-op
-            {
-                float angle = s[0] * r * (-2.0f / CHANNELS);
-                float2 t;
-                sincospif(angle, &t.y, &t.x);
-                for (int pol = 0; pol < 2; pol++)
-                    for (int i = 0; i < 2; i++)
-                        Zr[pol][i][r] = cmul(Zr[pol][i][r], t);
-            }
+            twiddle(s[0], Zr);
 
             // Final pass of C2C transform
             for (int pol = 0; pol < 2; pol++)
@@ -203,11 +225,11 @@ KERNEL void postproc(
 
             float2 delay = fine_delay[spectrum];
             float2 ph = phase[spectrum];
-            /* Clean up C2C transform to form an R2C transform.
-             * The axes of v are pol, +/- s, sub-spectrum
-             */
             for (int p = 0; p < n; p++)
             {
+                /* Clean up C2C transform to form an R2C transform.
+                 * The axes of v are pol, +/- s, sub-spectrum
+                 */
                 float2 X[2][2];
                 float2 rot;
                 int k[2];
@@ -215,15 +237,7 @@ KERNEL void postproc(
                 k[1] = (-k[0]) & (CHANNELS - 1);
                 sincospif(delay_scale * k[0], &rot.y, &rot.x);
                 for (int pol = 0; pol < 2; pol++)
-                {
-                    float2 z = Z[pol][0][p];
-                    float2 zn = Z[pol][1][p];
-                    float2 u = cadd(z, zn);
-                    float2 v = make_float2(z.y - zn.y, zn.x - z.x);  // (z - zn) / j
-                    float2 r = cmul(v, rot);
-                    X[pol][0] = make_float2(0.5 * (u.x + r.x), 0.5 * (u.y + r.y));
-                    X[pol][1] = make_float2(0.5 * (u.x - r.x), -0.5 * (u.y - r.y));
-                }
+                    fix_r2c(Z[pol][0][p], Z[pol][1][p], rot, X[pol]);
 
                 // Apply fine delay and gain
                 // TODO: fine_delay is common across channels and gain is common across
