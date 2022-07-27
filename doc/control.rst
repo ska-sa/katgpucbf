@@ -1,23 +1,51 @@
 Operation
 =========
 
-.. todo::
-
-    If this section gets too much, it can possibly make its way into its own
-    ``controlling.rst`` file or some such.
-
 katsdpcontroller
 ----------------
+This package (katgpucbf) provides the components of a correlator (engines and simulators),
+but not the mechanisms to start up and orchestrate all the components as a
+cohesive unit. That is provided by `katsdpcontroller`_.
 
-.. todo::  ``NGC-683``
-    Describe katsdpcontroller, its role, note that the module can be used
-    without it and whatever is used in its place will need to implement the
-    functionality described in this "chapter".
+.. _katsdpcontroller: https://github.com/ska-sa/katsdpcontroller
 
-    Important to note is that we try to make interacting with katsdpcontroller
-    as similar as possible compared to interacting with the individual engines,
-    for ease of understanding.
+For production use it is strongly recommended that katsdpcontroller is used to
+manage the correlator. Nevertheless, it is possible to run the individual
+pieces manually, or to implement an alternative controller. The remaining
+sections in this chapter describe the interfaces that are used by
+katsdpcontroller to communicate with the correlator components.
 
+There are two parts to katsdpcontroller: a :dfn:`master controller` and a
+:dfn:`product controller`. There is a single product controller per
+instantiated correlator. It is responsible for:
+
+- starting up the appropriate correlator components with suitable arguments,
+  given a high-level description of the desired correlator configuration;
+- monitoring the health of those components;
+- registering them with `Consul`_, so that infrastructure such as `Prometheus`_
+  can discover them;
+- proxying their :ref:`monitoring-sensors`, so that clients need only
+  subscribe to sensors from the product controller rather than individual
+  components;
+- in some cases, aggregating or renaming those sensors, to present a
+  correlator-wide suite of sensors, without clients needing to know about the
+  individual engines;
+- providing additional correlator-wide katcp sensors;
+- providing correlator-wide katcp requests, which are implemented by issuing
+  similar but finer-grained requests to the individual engines.
+
+.. _Consul: https://www.consul.io/
+.. _Prometheus: https://prometheus.io/
+
+The master controller manages product controllers (and hence correlators),
+starting them up and shutting them down on request from the user. In a system
+supporting subarrays, there will typically be a single master controller and
+zero or more product controllers at any one time.
+
+It is worth noting that katsdpcontroller was originally written to control the
+MeerKAT Science Data Processor and later extended to control correlators, so
+it has a number of features, requests and sensors that are not relevant to
+correlators.
 
 Starting the correlator
 -----------------------
@@ -33,7 +61,8 @@ Controlling the correlator
 
 The correlator components are controlled using `katcp`_. Standard katcp
 requests (such as querying and subscribing to sensors) are not covered here;
-only application-specific requests are listed.
+only application-specific requests are listed. Sensors are described in
+:ref:`monitoring-sensors`.
 
 .. _katcp: https://katcp-python.readthedocs.io/en/latest/_downloads/361189acb383a294be20d6c10c257cb4/NRF-KAT7-6.0-IFCE-002-Rev5-1.pdf
 
@@ -85,11 +114,6 @@ xbgpu
     state transmission is enabled.
 
     .. todo:: Update after NGC-721 is addressed
-
-.. todo::
-
-   Link to sensor descriptions once they're written in the monitoring section.
-
 
 Shutting down the correlator
 ----------------------------
