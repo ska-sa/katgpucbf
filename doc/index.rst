@@ -13,7 +13,11 @@ Welcome to katgpucbf's documentation!
    :maxdepth: 3
    :caption: Installation and Operation
 
-   operation
+   system_requirements
+   installation
+   control
+   monitoring
+   data_interfaces
 
 .. toctree::
    :maxdepth: 2
