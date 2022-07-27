@@ -1,13 +1,43 @@
 Operation
 =========
+There are two main scenarios involved in starting up and interacting with
+katgpucbf and its constituent engines:
+
+#. the instantiation and running of a complete end-to-end correlator, and
+#. the invocation of individual engines (dsim, fgpu, xbgpu) for more
+   fine-grained testing and debugging.
+
+The first of which requires a mechanism to orchestrate the simultaneous spin-up
+of a correlator's required components - that is, some combination of dsim(s),
+F-Engine(s) and XB-Engine(s). For this purpose, katgpucbf utilises the
+infrastructure provided by `katsdpcontroller`_ - discussed in the following
+section.
+
+Regarding the testing and debugging of individual engines, more detailed
+explanations of their inner-workings are discussed in their respective
+documents. An example of this scenario is running a standalone instance of
+``xbgpu`` along with an appropriately-configured ``fsim``.
+
+* Here, you might use one of the handy scripts under e.g. ``scratch/xbgpu/``
+  to launch an XB-Engine instance.
+
+
+The main thing to note for the context of this document is that, in
+both methods of invocation (via orchestration and individually), the engines
+support control via katcp commands issued to their ``<host>:<port>`` via a
+line-based networking utility. ``netcat`` (`nc`_) is likely the most
+readily-available tool for this job, but `ntsh`_ neatens up these exchanges
+and generally makes it easier to interact with.
+
+.. _katsdpcontroller: https://github.com/ska-sa/katsdpcontroller
+.. _nc: https://www.commandlinux.com/man-page/man1/nc.1.html
+.. _ntsh: https://pypi.org/project/ntsh/
 
 katsdpcontroller
 ----------------
-This package (katgpucbf) provides the components of a correlator (engines and simulators),
-but not the mechanisms to start up and orchestrate all the components as a
-cohesive unit. That is provided by `katsdpcontroller`_.
-
-.. _katsdpcontroller: https://github.com/ska-sa/katsdpcontroller
+This package (katgpucbf) provides the components of a correlator (engines and
+simulators), but not the mechanisms to start up and orchestrate all the
+components as a cohesive unit. That is provided by `katsdpcontroller`_.
 
 For production use it is strongly recommended that katsdpcontroller is used to
 manage the correlator. Nevertheless, it is possible to run the individual
@@ -118,27 +148,11 @@ xbgpu
 Shutting down the correlator
 ----------------------------
 
-There are two main scenarios which involve the shutting down of a correlator
-and its constituent engines.
-
-#. During normal correlator operation, and
-#. During testing and debugging of individual engines and/or dsims.
-
 Normal correlator operation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-As previously mentioned, currently :mod:`katgpucbf`'s correlator-wide
-orchestration is done via `katsdpcontroller`_. This, in turn, provides an
-interface to the correlator and its constituent engines based on an
-:external+aiokatcp:doc:`aiokatcp server <server/tutorial>`. For this reason, a
-user can connect to the correlator's ``<ip_addr>:<port>`` using a networking
-utility like ``netcat`` (`nc`_) and issue a ``?product-deconfigure`` command.
-
-.. note::
-    A sidebar to plug a utility written by one of :mod:`katgpucbf`'s
-    developers. `ntsh`_ makes this line-based protocol interaction much easier
-    to follow for beginner (and more experienced) users.
-
-This ``?product-deconfigure`` command triggers the stop procedure of all
+A user can connect to the correlator's ``<ip_addr>:<port>`` using a line-based
+networking utility and issue a ``?product-deconfigure`` command. This
+``?product-deconfigure`` command triggers the stop procedure of all
 engines and dsims running in the target correlator. The dsim, fgpu and xbgpu
 all make use of the
 :external+aiokatcp:py:class:`aiokatcp server <aiokatcp.server.DeviceServer>`'s
@@ -159,21 +173,11 @@ The ``on_stop`` procedure is vastly similar between the dsim, fgpu and xbgpu.
      :external+spead2:doc:`SPEAD stop heap <py-protocol>` across its output
      streams.
 
-.. _katsdpcontroller: https://github.com/ska-sa/katsdpcontroller
-.. _nc: https://www.commandlinux.com/man-page/man1/nc.1.html
-.. _ntsh: https://pypi.org/project/ntsh/
-
-Running individual Engines
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-An example of this scenario is running a standalone instance of ``xbgpu`` -
-along with an appropriately-configured ``fsim``.
-
-* Here, you might use one of the handy scripts under e.g. ``scratch/xbgpu/``
-  to launch an XB-Engine instance.
-* Once you've sufficiently debugged and/or reached the desired level of
-  confusion, you can simply issue a ``Ctrl + C`` in your terminal window.
-* ``xbgpu`` will shut down cleanly and quietly according to the stop procedure
-  mentioned above.
+Engine-specific testing and debugging
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Once you've sufficiently debugged and/or reached the desired level of confusion,
+you can simply issue a ``Ctrl + C`` in your terminal window. ``xbgpu`` will shut
+down cleanly and quietly according to the stop procedure mentioned above.
 
 A fair bit of work has gone into ensuring the engines and
 :external+aiokatcp:py:class:`DeviceServers <aiokatcp.server.DeviceServer>`
