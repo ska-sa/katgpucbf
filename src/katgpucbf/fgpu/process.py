@@ -95,7 +95,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     return weights.astype(np.float32)
 
 
-class EventItem:
+class QueueItem:
     """Queue Item for use in synchronisation between command queues.
 
     Derived classes will have allocated memory regions associated with them,
@@ -165,12 +165,12 @@ class PolInItem:
     chunk: Optional[recv.Chunk] = None  # Used with vkgdr only.
 
 
-class InItem(EventItem):
+class InItem(QueueItem):
     """Item for use in input queues.
 
     This Item references GPU memory regions for input samples from both
     polarisations, with metadata describing their dimensions (number of samples
-    and bitwidth of samples) in addition to the features of :class:`EventItem`.
+    and bitwidth of samples) in addition to the features of :class:`QueueItem`.
 
     An example of usage is as follows:
 
@@ -259,12 +259,12 @@ class InItem(EventItem):
         return self.timestamp + self.n_samples
 
 
-class OutItem(EventItem):
+class OutItem(QueueItem):
     """Item for use in output queues.
 
     This Item references GPU memory regions for output spectra from both
     polarisations, with something about the fine delay, in addition to the
-    features of :class:`EventItem`.
+    features of :class:`QueueItem`.
 
     An example of usage is as follows:
 
