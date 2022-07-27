@@ -89,7 +89,7 @@ def test_postproc(context: AbstractContext, command_queue: AbstractCommandQueue,
     spectra_per_heap_out = 256
     spectra = 512
     rng = np.random.default_rng(seed=1)
-    in_shape = (spectra * unzip_factor, channels // unzip_factor)
+    in_shape = (spectra, unzip_factor, channels // unzip_factor)
     h_in0 = _make_complex(lambda: rng.uniform(-512, 512, in_shape))
     h_in1 = _make_complex(lambda: rng.uniform(-512, 512, in_shape))
     h_fine_delay = rng.uniform(0.0, 2.0, (spectra, N_POLS)).astype(np.float32)

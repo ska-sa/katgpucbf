@@ -123,7 +123,8 @@ class Postproc(accel.Operation):
         cplx = accel.Dimension(COMPLEX, exact=True)
 
         in_shape = (
-            accel.Dimension(spectra * template.unzip_factor),
+            accel.Dimension(spectra),
+            accel.Dimension(template.unzip_factor, exact=True),
             accel.Dimension(template.channels // template.unzip_factor, exact=True),
         )
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)

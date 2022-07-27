@@ -122,7 +122,7 @@ class Compute(accel.OperationSequence):
 
         # PFB-FIR and FFT each happen for each polarisation.
         self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for pol in range(N_POLS)]
-        fft_shape = (spectra * template.unzip_factor, template.channels // template.unzip_factor)
+        fft_shape = (spectra, template.unzip_factor, template.channels // template.unzip_factor)
         fft_template = fft.FftTemplate(
             template.context,
             1,
