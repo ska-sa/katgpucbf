@@ -79,7 +79,7 @@ class QueueItem:
         """Reset the item's timestamp, and empty the event list.
 
         Subclasses should override this to reset other state. It is called by
-        the constructor so can also be used for initialisation.
+        the constructor so it can also be used for initialisation.
         """
         self.timestamp = timestamp
         self.events = []
