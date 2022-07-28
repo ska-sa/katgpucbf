@@ -53,6 +53,7 @@ from aiokatcp import DeviceServer
 from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
 from .. import recv as base_recv
 from ..monitor import Monitor
+from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
@@ -60,36 +61,6 @@ from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
 MISSING = np.array([-(2**31), 1], dtype=np.int32)
-
-
-class QueueItem:
-    """
-    Object to enable communication and synchronisation between different functions in the XBEngine object.
-
-    This queue item contains a buffer of preallocated GPU memory. This memory
-    is reused many times in the processing functions to prevent unecessary
-    allocations. The item also contains a list of events. Before accessing the
-    data in the buffer, the user needs to ensure that the events have all been
-    completed.
-    """
-
-    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, timestamp: int = 0) -> None:
-        self.reset(timestamp)
-        self.buffer_device = buffer_device
-
-    def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp and events."""
-        self.timestamp = timestamp
-        self.events: List[katsdpsigproc.abc.AbstractEvent] = []
-        # Need to reset chunk
-
-    def add_event(self, event: katsdpsigproc.abc.AbstractEvent) -> None:
-        """Add an event to the list of events in the QueueItem."""
-        self.events.append(event)
-
-    async def async_wait_for_events(self) -> None:
-        """Wait for all events on the list of events to be comlete."""
-        await katsdpsigproc.resource.async_wait_for_events(self.events)
 
 
 class RxQueueItem(QueueItem):
@@ -103,8 +74,9 @@ class RxQueueItem(QueueItem):
     """
 
     def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
+        self.buffer_device = buffer_device
         self.present = present
-        super().__init__(buffer_device, timestamp)
+        super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
@@ -125,8 +97,9 @@ class TxQueueItem(QueueItem):
     def __init__(
         self, buffer_device: katsdpsigproc.accel.DeviceArray, present_ants: np.ndarray, timestamp: int = 0
     ) -> None:
+        self.buffer_device = buffer_device
         self.present_ants = present_ants
-        super().__init__(buffer_device, timestamp)
+        super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and present antenna tracker."""
@@ -571,9 +544,9 @@ class XBEngine(DeviceServer):
             item.present[:] = chunk.present.reshape(item.present.shape)
             # Initiate transfer from received chunk to rx_item buffer.
             # First wait for asynchronous GPU work on the buffer.
-            self._upload_command_queue.enqueue_wait_for_events(item.events)
+            item.enqueue_wait_for_events(self._upload_command_queue)
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
-            item.add_event(self._upload_command_queue.enqueue_marker())
+            item.add_marker(self._upload_command_queue)
 
             # Give the received item to the _gpu_proc_loop function.
             await self._rx_item_queue.put(item)
@@ -600,7 +573,7 @@ class XBEngine(DeviceServer):
         self.sensors["synchronised"].value = bool(tx_item.present_ants.all())
 
         self.correlation.reduce()
-        tx_item.add_event(self._proc_command_queue.enqueue_marker())
+        tx_item.add_marker(self._proc_command_queue)
         await self._tx_item_queue.put(tx_item)
 
         # Prepare for the next accumulation (which might not be
@@ -705,9 +678,8 @@ class XBEngine(DeviceServer):
             if current_accum != tx_accum:
                 tx_item = await self._flush_accumulation(tx_item, current_accum)
 
-            proc_event = self._proc_command_queue.enqueue_marker()
             rx_item.reset()
-            rx_item.add_event(proc_event)
+            rx_item.add_marker(self._proc_command_queue)
             await self._rx_free_item_queue.put(rx_item)
 
         # When the stream is closed, if the sender loop is waiting for a tx item,
