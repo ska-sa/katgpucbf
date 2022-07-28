@@ -39,8 +39,8 @@ from katsdpsigproc.abc import AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
 from .. import BYTE_BITS, N_POLS
-from ..device import QueueItem
 from ..monitor import Monitor
+from ..queue_item import QueueItem
 from . import recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel

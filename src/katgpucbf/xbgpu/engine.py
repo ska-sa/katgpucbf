@@ -52,8 +52,8 @@ from aiokatcp import DeviceServer
 
 from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
 from .. import recv as base_recv
-from ..device import QueueItem
 from ..monitor import Monitor
+from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
