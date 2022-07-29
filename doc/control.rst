@@ -239,8 +239,7 @@ confusion, there are two options for engine shutdown:
   *  The ``port`` parameter is of most importance here.
 
 After either of these approaches are executed, the engine will shutdown cleanly
-and quietly according to the stop procedure discussed in its dedicated
-document.
+and quietly according to their common :ref:`engines-shutdown-procedure`.
 
 Of course, the :program:`fsim` just requires a ``Ctrl + C`` to end operations -
 no ``katcp`` commands supported here.

@@ -69,8 +69,33 @@ Event
     copying.
 
 
+Common features
+---------------
 
 .. todo:: ``NGC-675``
     Explanation of network receive, GPU processing and network transmit "loops".
     There'll be a few merges from the existing F- and XBgpu sections, and the
     Glossary as well.
+
+.. _engines-shutdown-procedure:
+
+Shutdown procedures
+^^^^^^^^^^^^^^^^^^^
+The dsim, fgpu and xbgpu all make use of the
+:external+aiokatcp:py:class:`aiokatcp server <aiokatcp.server.DeviceServer>`'s
+:external+aiokatcp:py:meth:`on_stop <aiokatcp.server.DeviceServer.on_stop>`
+feature which allows for any engine-specific clean-up to take place before
+coming to a final halt.
+
+The ``on_stop`` procedure is vastly similar between the dsim, fgpu and xbgpu.
+
+* The ``dsim`` simply stops its internal calculation and sending processes of
+  data and descriptors respectively.
+* ``fgpu`` and ``xbgpu`` both stop their respective
+  :external+spead2:doc:`spead2 receivers <recv-chunk>`, which allows for a more
+  natural ending of internal processing operations.
+
+  *  Each stage of processing passes a `None`-type on to the next stage,
+  *  Eventually resulting in the engine sending a
+     :external+spead2:doc:`SPEAD stop heap <py-protocol>` across its output
+     streams.
