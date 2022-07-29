@@ -14,18 +14,13 @@ infrastructure provided by `katsdpcontroller`_ - discussed in the following
 section.
 
 Regarding the testing and debugging of individual engines, more detailed
-explanations of their inner-workings are discussed in their respective
-documents. An example of this scenario is running a standalone instance of
-``xbgpu`` along with an appropriately-configured ``fsim``.
-
-* Here, you might use one of the handy scripts under e.g. ``scratch/xbgpu/``
-  to launch an XB-Engine instance.
-
+explanations of their inner-workings are discussed in their respective, more
+dedicated-discussion documents.
 
 The main thing to note for the context of this document is that, in
 both methods of invocation (via orchestration and individually), the engines
-support control via katcp commands issued to their ``<host>:<port>`` via a
-line-based networking utility. ``netcat`` (`nc`_) is likely the most
+support control via katcp commands issued to their ``<host>:<port>`` (using a
+line-based networking utility). ``netcat`` (`nc`_) is likely the most
 readily-available tool for this job, but `ntsh`_ neatens up these exchanges
 and generally makes it easier to interact with.
 
@@ -79,20 +74,79 @@ correlators.
 
 Starting the correlator
 -----------------------
+The katgpucbf repository comes with a ``scratch/`` directory, under which you
+will find handy scripts for correlator and engine invocation.
 
-.. todo::  ``NGC-684``
-    Describe how a correlator should be started. Master controller figures out
-    based on a set of input parameters, how to invoke a few instances of
-    katgpucbf as dsim, fgpu or xbgpu.
+End-to-end correlator startup
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+:program:`sim_correlator.py` provides an array of options for you to start your
+required correlator. Running ``./sim_correlator.py --help`` gives a brief
+explanation of the arguments required. Below is an example of a full command::
 
+    ./sim_correlator -a 2 -c 4096 -i 0.5
+    --adc-sample-rate 171e6
+    --name my_test_correlator
+    --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest
+    lab5.sdp.kat.ac.za
+
+The execution of this command contacts the master controller to request a new
+correlator product to be configured. The master controller figures out how many
+of each respective engine is required based on these input parameters, and
+launches them accordingly across the pool of processing nodes available.
+
+.. _indiv-engine-startup:
+
+Individual engine startup
+^^^^^^^^^^^^^^^^^^^^^^^^^
+The arguments required for individual engine invocation can be seen by
+running one of ``{dsim, fgpu, xbgpu} --help`` in an appropriately-configured
+terminal environment. There are a few mandatory ones, and ultimately stitching
+the entire incantation together by hand can become tiresome. For this reason,
+the scripts under ``scratch/{fgpu, xbgpu}`` have been shipped with the module.
+
+The scripts for standalone engine usage are prepopulated with typical
+configuration values for your convenience, and are usually named
+:program:`run-{dsim, fgpu, xbgpu}.sh`. It is important to note that the F- and
+XB-Engines can run in a standalone manner, but will require some form of
+stimulus to truly exercise the engine. For example, ``fgpu`` requires a
+corresponding ``dsim`` to produce data for ingest. Similarly, ``xbgpu``
+requires an appropriately-configured ``fsim``. Basically, the engines will do
+nothing until explicitly asked to.
+
+Adding to this, the :file:`scratch/{fgpu, xbgpu}` directory contains a final
+nesting doll named ``config`` containing configuration information for
+commonly-used hosts when invoking engines manually. These simply include
+100GbE interfaces available to use, and the
+
+dsim
+""""
+
+
+fgpu
+""""
+
+
+xbgpu
+"""""
+Here, you might use one of the handy scripts under ``scratch/xbgpu/`` to
+launch an XB-Engine instance and a corresponding :ref:`feng-packet-sim` using
+:program:`run-xbgpu.sh` and :program:`run-fsim.sh`.
 
 Controlling the correlator
 --------------------------
+A timely reminder for the context of this document regarding correlator and
+engine interactions:
 
-The correlator components are controlled using `katcp`_. Standard katcp
-requests (such as querying and subscribing to sensors) are not covered here;
-only application-specific requests are listed. Sensors are described in
-:ref:`monitoring-sensors`.
+* the ``<host>`` and ``<port>`` values for individual engines are configurable at
+  runtime, whereas
+* the ``<host>`` and ``<port>`` values for the correlator's *product controller*
+  is yielded after startup.
+
+In both cases, a user can connect to ``<host>:<port>`` and issue a ``?help`` to
+see the full range of commands available. The correlator components are
+controlled using `katcp`_. Standard katcp requests (such as querying and
+subscribing to sensors) are not covered here; only application-specific
+requests are listed. Sensors are described in :ref:`monitoring-sensors`.
 
 .. _katcp: https://katcp-python.readthedocs.io/en/latest/_downloads/361189acb383a294be20d6c10c257cb4/NRF-KAT7-6.0-IFCE-002-Rev5-1.pdf
 
@@ -148,36 +202,48 @@ xbgpu
 Shutting down the correlator
 ----------------------------
 
-Normal correlator operation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-A user can connect to the correlator's ``<ip_addr>:<port>`` using a line-based
-networking utility and issue a ``?product-deconfigure`` command. This
-``?product-deconfigure`` command triggers the stop procedure of all
-engines and dsims running in the target correlator. The dsim, fgpu and xbgpu
-all make use of the
-:external+aiokatcp:py:class:`aiokatcp server <aiokatcp.server.DeviceServer>`'s
-:external+aiokatcp:py:meth:`on_stop <aiokatcp.server.DeviceServer.on_stop>`
-feature which allows for any engine-specific clean-up to take place before
-coming to a final halt.
+End-to-end correlator shutdown
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+A user can issue a ``?product-deconfigure`` command to the correlator's
+product controller by connecting to its ``<host>:<port>`` via a line-based
+networking utility. This command triggers the stop procedure of all engines
+and dsims running in the target correlator. More specifically:
 
-The ``on_stop`` procedure is vastly similar between the dsim, fgpu and xbgpu.
+* the product controller instructs the orchestration software to stop the
+  containers running the engines,
+* which is received by the engines as a ``SIGTERM``,
+* finally triggering a ``halt`` in the engines for a graceful shutdown.
 
-* The ``dsim`` simply stops its internal calculation and sending processes of
-  data and descriptors respectively.
-* ``fgpu`` and ``xbgpu`` both stop their respective
-  :external+spead2:doc:`spead2 receivers <recv-chunk>`, which allows for a more
-  natural ending of internal processing operations.
+As discussed in their standalone documents, the shutdown procedures are vastly
+similar between the dsim, fgpu and xbgpu. Ultimately they all:
 
-  *  Each stage of processing passes a `None`-type on to the next stage,
-  *  Eventually resulting in the engine sending a
-     :external+spead2:doc:`SPEAD stop heap <py-protocol>` across its output
-     streams.
+* finish calculations on data currently in their pipelines,
+* stop the transmission of their SPEAD descriptors, and
+* in the case of ``fgpu`` and ``xbgpu``, stop their ``spead2`` receivers.
 
-Engine-specific testing and debugging
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Once you've sufficiently debugged and/or reached the desired level of confusion,
-you can simply issue a ``Ctrl + C`` in your terminal window. ``xbgpu`` will shut
-down cleanly and quietly according to the stop procedure mentioned above.
+  *  This allows for a more natural engine of internal processing operations.
+
+Individual engine shutdown
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Once you've sufficiently tested, debugged and/or reached the desired level of
+confusion, there are two options for engine shutdown:
+
+#. simply issue a ``Ctrl + C`` in the terminal window where the engine was
+   invoked, or
+#. connect to the engine's ``<host>:<port>`` via a line-based networking utility
+   and issue a ``?halt``.
+
+  *  As mentioned in the :ref:`indiv-engine-startup`, the host for a
+     hand-cranked engine is likely the machine it is run on (i.e.
+     ``localhost``), so
+  *  The ``port`` parameter is of most importance here.
+
+After either of these approaches are executed, the engine will shutdown cleanly
+and quietly according to the stop procedure discussed in its dedicated
+document.
+
+Of course, the :program:`fsim` just requires a ``Ctrl + C`` to end operations -
+no ``katcp`` commands supported here.
 
 A fair bit of work has gone into ensuring the engines and
 :external+aiokatcp:py:class:`DeviceServers <aiokatcp.server.DeviceServer>`
