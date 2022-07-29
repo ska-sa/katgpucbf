@@ -19,6 +19,7 @@ Submodules
 
    katgpucbf.meerkat
    katgpucbf.monitor
+   katgpucbf.queue_item
    katgpucbf.recv
    katgpucbf.ringbuffer
    katgpucbf.spead
