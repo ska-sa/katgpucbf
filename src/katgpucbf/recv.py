@@ -54,11 +54,21 @@ class Chunk(spead2.recv.Chunk):
     # New fields
     device: object
     timestamp: int
+    stream: weakref.ref
 
-    def __init__(self, *args, device: object = None, **kwargs):
+    def __init__(self, *args, stream: spead2.recv.ChunkRingStream, device: object = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.device = device
         self.timestamp = 0  # Actual value filled in when chunk received
+        self.stream = weakref.ref(stream)
+
+    def recycle(self) -> None:
+        """Return the chunk to the owning stream."""
+        stream = self.stream()
+        # If it is None, the stream has been garbage collected, and there is no
+        # need to return the chunk.
+        if stream is not None:
+            stream.add_free_chunk(self)
 
 
 class StatsCollector(Collector):

@@ -548,7 +548,7 @@ class Processor:
                 np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
         return True
 
-    def _pop_in(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
+    def _pop_in(self) -> None:
         """Remove the oldest InItem."""
         item = self._in_items.popleft()
         event = self.compute.command_queue.enqueue_marker()
@@ -559,7 +559,7 @@ class Processor:
                 assert pol_data.chunk is not None
                 chunks.append(pol_data.chunk)
                 pol_data.chunk = None
-            asyncio.create_task(self._push_recv_chunks(streams, chunks, event))
+            asyncio.create_task(self._push_recv_chunks(chunks, event))
         else:
             item.events.append(event)
         self.in_free_queue.put_nowait(item)
@@ -612,18 +612,16 @@ class Processor:
             self._out_item.timestamp = new_timestamp
 
     @staticmethod
-    async def _push_recv_chunks(
-        streams: Iterable[spead2.recv.ChunkRingStream], chunks: Iterable[recv.Chunk], event: AbstractEvent
-    ) -> None:
+    async def _push_recv_chunks(chunks: Iterable[recv.Chunk], event: AbstractEvent) -> None:
         """Return chunks to the streams once `event` has fired.
 
         This is only used when using vkgdr.
         """
         await async_wait_for_events([event])
-        for stream, chunk in zip(streams, chunks):
-            stream.add_free_chunk(chunk)
+        for chunk in chunks:
+            chunk.recycle()
 
-    async def run_processing(self, streams: List[spead2.recv.ChunkRingStream]) -> None:
+    async def run_processing(self) -> None:
         """Do the hard work of the F-engine.
 
         This function takes place entirely on the GPU. First, a little bit of
@@ -631,11 +629,6 @@ class Processor:
         the overlap required by the PFB. Coarse delay happens. Then a batch FFT
         operation is applied, and finally, fine-delay, phase correction,
         quantisation and corner-turn are performed.
-
-        Parameters
-        ----------
-        streams
-            These only seem to be used in the _use_vkgdr case.
         """
         while await self._fill_in():
             # If the input starts too late for the next expected timestamp,
@@ -748,7 +741,7 @@ class Processor:
                 # We've exhausted the input buffer.
                 # TODO: should maybe also do this if _in_items[1] would work
                 # just as well and we've filled the output buffer.
-                self._pop_in(streams)
+                self._pop_in()
         # Timestamp mostly doesn't matter because we're finished, but if a
         # katcp request arrives at this point we want to ensure the
         # steady-state-timestamp sensor is updated to a later timestamp than
@@ -818,7 +811,7 @@ class Processor:
                 for pol in range(len(chunks)):
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])
-                    streams[pol].add_free_chunk(chunks[pol])
+                    chunks[pol].recycle()
         logger.debug("run_receive completed")
         self.in_queue.put_nowait(None)
 

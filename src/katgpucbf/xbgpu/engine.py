@@ -391,8 +391,8 @@ class XBEngine(DeviceServer):
                 context=self.context,
             )
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
-            chunk = recv.Chunk(data=buf, present=present)
-            self.receiver_stream.add_free_chunk(chunk)
+            chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
+            chunk.recycle()  # Make available to the stream
 
     @staticmethod
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
@@ -636,7 +636,7 @@ class XBEngine(DeviceServer):
                 break
             await rx_item.async_wait_for_events()
             assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
-            self.receiver_stream.add_free_chunk(rx_item.chunk)
+            rx_item.chunk.recycle()
 
             current_timestamp = rx_item.timestamp
             if tx_item.timestamp < 0:

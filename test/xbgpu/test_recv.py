@@ -78,8 +78,8 @@ def stream(layout, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
         data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
         present = np.ones(layout.chunk_heaps, np.uint8)
-        chunk = Chunk(data=data, present=present)
-        stream.add_free_chunk(chunk)
+        chunk = Chunk(data=data, present=present, stream=stream)
+        chunk.recycle()
     stream.add_inproc_reader(queue)
 
     yield stream
@@ -213,14 +213,14 @@ class TestStream:
                     # It's a chunk with no data. Currently spead2 may generate
                     # these due to the way it allocates chunks to keep the window
                     # full.
-                    stream.add_free_chunk(chunk)
+                    chunk.recycle()
                     empty_chunks += 1
                     continue
                 assert chunk.chunk_id == expected_chunk_id
                 assert np.all(chunk.present)
                 np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
                 data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
-                stream.add_free_chunk(chunk)
+                chunk.recycle()
                 seen += 1
                 expected_chunk_id += 1
         assert seen == 5
@@ -308,7 +308,7 @@ class TestStream:
                 assert np.any(chunk.present)
                 received_chunk_ids.append(chunk.chunk_id)
                 received_chunk_presence[seen, :] = chunk.present
-                stream.add_free_chunk(chunk)
+                chunk.recycle()
                 seen += 1
 
         assert caplog.record_tuples == [

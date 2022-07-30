@@ -51,6 +51,7 @@ async def main() -> None:
     )
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(2)
     free_ringbuffer = spead2.recv.ChunkRingbuffer(4)
+    stream = katgpucbf.xbgpu.recv.make_stream(layout, data_ringbuffer, free_ringbuffer, -1, 2)
     for _ in range(free_ringbuffer.maxsize):
         shape = (
             layout.heaps_per_fengine_per_chunk,
@@ -62,10 +63,9 @@ async def main() -> None:
         )
         data = np.ones(shape, np.int8)
         present = np.zeros(shape[:2], np.uint8)
-        chunk = katgpucbf.recv.Chunk(data=data, present=present)
-        free_ringbuffer.put_nowait(chunk)
+        chunk = katgpucbf.recv.Chunk(data=data, present=present, stream=stream)
+        chunk.recycle()
 
-    stream = katgpucbf.xbgpu.recv.make_stream(layout, data_ringbuffer, free_ringbuffer, -1, 2)
     srcs = [(ep.host, ep.port) for ep in args.src]
     katgpucbf.recv.add_reader(
         stream, src=srcs, interface=args.interface, ibv=args.ibv, comp_vector=12, buffer=32 * 1024 * 1024
@@ -83,7 +83,7 @@ async def main() -> None:
                 break
             print(f"Chunk with timestamp {timestamp} is good")
         finally:
-            stream.add_free_chunk(chunk)
+            chunk.recycle()
 
 
 if __name__ == "__main__":

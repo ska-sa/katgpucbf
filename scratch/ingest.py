@@ -166,8 +166,9 @@ async def async_main(args: argparse.Namespace) -> None:
         chunk = spead2.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
+            stream=stream,
         )
-        stream.add_free_chunk(chunk)
+        chunk.recycle()  # Make it available to the stream
 
     config = spead2.recv.UdpIbvConfig(
         endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
@@ -212,7 +213,7 @@ async def async_main(args: argparse.Namespace) -> None:
         else:
             logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
 
-        stream.add_free_chunk(chunk)
+        chunk.recycle()
 
 
 if __name__ == "__main__":
