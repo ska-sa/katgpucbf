@@ -43,6 +43,7 @@ from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+import katgpucbf.recv
 from katgpucbf import COMPLEX
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps: Literal[False] = False,
         max_delay: int = DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, spead2.recv.Chunk], None]:  # noqa: D102
+    ) -> AsyncGenerator[Tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
         yield ...  # type: ignore
 
     @overload
@@ -244,7 +245,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps: bool = False,
         max_delay: int = DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:  # noqa: D102
+    ) -> AsyncGenerator[Tuple[int, Optional[katgpucbf.recv.Chunk]], None]:  # noqa: D102
         yield ...  # type: ignore
 
     async def complete_chunks(
@@ -253,7 +254,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps=False,
         max_delay=DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:
+    ) -> AsyncGenerator[Tuple[int, Optional[katgpucbf.recv.Chunk]], None]:
         """Iterate over the complete chunks of the stream.
 
         Each yielded value is a ``(timestamp, chunk)`` pair.
@@ -277,7 +278,7 @@ class BaselineCorrelationProductsReceiver:
         data_ringbuffer = self.stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         async for chunk in data_ringbuffer:
-            assert isinstance(chunk.present, np.ndarray)  # keeps mypy happy
+            assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
             timestamp = chunk.chunk_id * self.timestamp_step
             if min_timestamp is not None and timestamp < min_timestamp:
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
@@ -289,7 +290,7 @@ class BaselineCorrelationProductsReceiver:
                 yield timestamp, chunk
                 continue
             # If we get here, the chunk is ignored
-            self.stream.add_free_chunk(chunk)
+            chunk.recycle()
             if all_timestamps:
                 yield timestamp, None
         return
@@ -308,13 +309,13 @@ class BaselineCorrelationProductsReceiver:
         """
         async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
             chunk_data = np.array(chunk.data)  # Makes a copy before we return the chunk
-            self.stream.add_free_chunk(chunk)
+            chunk.recycle()
             return timestamp, chunk_data
         raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def consecutive_chunks(
         self, n: int, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
-    ) -> List[Tuple[int, spead2.recv.Chunk]]:
+    ) -> List[Tuple[int, katgpucbf.recv.Chunk]]:
         """Obtain `n` consecutive complete chunks from the stream.
 
         .. warning::
@@ -324,12 +325,12 @@ class BaselineCorrelationProductsReceiver:
            larger than 2 you should check that the free ring is initialised
            with enough chunks and update this comment.
         """
-        chunks: List[Tuple[int, spead2.recv.Chunk]] = []
+        chunks: List[Tuple[int, katgpucbf.recv.Chunk]] = []
         async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
             if chunk is None:
                 # Throw away failed attempt at getting an adjacent set
                 for _, old_chunk in chunks:
-                    self.stream.add_free_chunk(old_chunk)
+                    old_chunk.recycle()
                 chunks.clear()
                 continue
             chunks.append((timestamp, chunk))
@@ -411,11 +412,12 @@ def create_baseline_correlation_product_receive_stream(
     )
 
     for _ in range(max_chunks + n_extra_chunks):
-        chunk = spead2.recv.Chunk(
+        chunk = katgpucbf.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, COMPLEX), dtype=getattr(np, f"int{n_bits_per_sample}")),
+            stream=stream,
         )
-        stream.add_free_chunk(chunk)
+        chunk.recycle()
 
     if use_ibv:
         config = spead2.recv.UdpIbvConfig(
