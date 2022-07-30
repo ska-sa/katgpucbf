@@ -211,20 +211,19 @@ class TestStream:
         seen = 0
         async for chunk in data_ringbuffer:
             assert isinstance(chunk, Chunk)
-            if not np.any(chunk.present):
-                # It's a chunk with no data. Currently spead2 may generate
-                # these due to the way it allocates chunks to keep the window
-                # full.
-                chunk.recycle()
-                continue
-            assert chunk.stream_id == POL
-            assert chunk.chunk_id == expected_chunk_id
-            assert np.all(chunk.present)
-            np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
-            data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
-            chunk.recycle()
-            seen += 1
-            expected_chunk_id += 1
+            with chunk:
+                if not np.any(chunk.present):
+                    # It's a chunk with no data. Currently spead2 may generate
+                    # these due to the way it allocates chunks to keep the window
+                    # full.
+                    continue
+                assert chunk.stream_id == POL
+                assert chunk.chunk_id == expected_chunk_id
+                assert np.all(chunk.present)
+                np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
+                data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
+                seen += 1
+                expected_chunk_id += 1
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
         assert streams[POL].stats["katgpucbf.metadata_heaps"] == 1

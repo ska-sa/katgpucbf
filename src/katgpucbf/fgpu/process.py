@@ -808,6 +808,10 @@ class Processor:
 
                 # Wait until the copy is done, and then give the chunks of memory
                 # back to the receiver streams for reuse.
+                # NB: we don't use the Chunk context manager, because if
+                # something goes wrong we won't have waited for the event, and
+                # giving the chunk back to the stream while it's still in use
+                # by the device could cause incorrect data to be transmitted.
                 for pol in range(len(chunks)):
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])

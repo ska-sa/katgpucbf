@@ -209,20 +209,19 @@ class TestStream:
             empty_chunks = 0
             async for chunk in recv_chunks(stream):
                 assert isinstance(chunk, Chunk)
-                if not np.any(chunk.present):
-                    # It's a chunk with no data. Currently spead2 may generate
-                    # these due to the way it allocates chunks to keep the window
-                    # full.
-                    chunk.recycle()
-                    empty_chunks += 1
-                    continue
-                assert chunk.chunk_id == expected_chunk_id
-                assert np.all(chunk.present)
-                np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
-                data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
-                chunk.recycle()
-                seen += 1
-                expected_chunk_id += 1
+                with chunk:
+                    if not np.any(chunk.present):
+                        # It's a chunk with no data. Currently spead2 may generate
+                        # these due to the way it allocates chunks to keep the window
+                        # full.
+                        empty_chunks += 1
+                        continue
+                    assert chunk.chunk_id == expected_chunk_id
+                    assert np.all(chunk.present)
+                    np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
+                    data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
+                    seen += 1
+                    expected_chunk_id += 1
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
 
@@ -303,13 +302,13 @@ class TestStream:
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
             async for chunk in recv_chunks(stream):
-                # recv_chunks should filter out the phantom chunks created by
-                # spead2.
-                assert np.any(chunk.present)
-                received_chunk_ids.append(chunk.chunk_id)
-                received_chunk_presence[seen, :] = chunk.present
-                chunk.recycle()
-                seen += 1
+                with chunk:
+                    # recv_chunks should filter out the phantom chunks created by
+                    # spead2.
+                    assert np.any(chunk.present)
+                    received_chunk_ids.append(chunk.chunk_id)
+                    received_chunk_presence[seen, :] = chunk.present
+                    seen += 1
 
         assert caplog.record_tuples == [
             (

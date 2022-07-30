@@ -308,9 +308,8 @@ class BaselineCorrelationProductsReceiver:
             See :meth:`complete_chunks`
         """
         async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
-            chunk_data = np.array(chunk.data)  # Makes a copy before we return the chunk
-            chunk.recycle()
-            return timestamp, chunk_data
+            with chunk:
+                return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
         raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def consecutive_chunks(

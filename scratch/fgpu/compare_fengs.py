@@ -71,7 +71,7 @@ async def main() -> None:
         stream, src=srcs, interface=args.interface, ibv=args.ibv, comp_vector=12, buffer=32 * 1024 * 1024
     )
     async for chunk in data_ringbuffer:  # type: ignore
-        try:
+        with chunk:
             timestamp = chunk.chunk_id * layout.timestamp_step
             if not np.all(chunk.present[:, :2]):
                 print(f"Received a chunk with timestamp {timestamp} but not all data present")
@@ -82,8 +82,6 @@ async def main() -> None:
                 np.testing.assert_equal(chunk.data[:, 0], chunk.data[:, 1])
                 break
             print(f"Chunk with timestamp {timestamp} is good")
-        finally:
-            chunk.recycle()
 
 
 if __name__ == "__main__":
