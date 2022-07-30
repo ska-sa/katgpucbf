@@ -52,6 +52,7 @@ from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
 logger = logging.getLogger(__name__)
+SEND_DTYPE = np.dtype(np.int8)
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -338,16 +339,7 @@ def format_complex(value: numbers.Complex) -> str:
 
 
 class Engine(aiokatcp.DeviceServer):
-    """A logical grouping to combine a `Processor` with other things it needs.
-
-    The Engine class is essentially a wrapper around a
-    :class:`~katgpucbf.fgpu.process.Processor` object, but adds a delay model,
-    and source and sender functionality.
-
-    .. todo::
-
-      Perhaps in a future iteration, :class:`~katgpucbf.fgpu.process.Processor`
-      could be folded into :class:`Engine`.
+    """Top-level class running the whole thing.
 
     .. todo::
 
@@ -507,23 +499,6 @@ class Engine(aiokatcp.DeviceServer):
         n_in = 3
         n_send = 4
         n_out = n_send if use_peerdirect else 2
-        ringbuffer_capacity = 2
-        src_chunks_per_stream = 4
-
-        # Device resources
-        compute_queue = context.create_command_queue()
-        self._upload_queue = context.create_command_queue()
-        self._download_queue = context.create_command_queue()
-
-        extra_samples = max_delay_diff + taps * channels * 2
-        if extra_samples > chunk_samples:
-            raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        samples = chunk_samples + extra_samples
-
-        template = ComputeTemplate(context, taps)
-        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
-        device_weights = self.compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(compute_queue, generate_weights(channels, taps))
 
         # The type annotations have to be in comments because Python 3.8
         # doesn't support the syntax at runtime (Python 3.9 fixes that).
@@ -533,76 +508,19 @@ class Engine(aiokatcp.DeviceServer):
         self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
         self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
-        send_chunks: List[send.Chunk] = []
-        for _ in range(n_in):
-            self.in_free_queue.put_nowait(InItem(self.compute, packet_samples=src_packet_samples, use_vkgdr=use_vkgdr))
-        for _ in range(n_out):
-            item = OutItem(self.compute)
-            if use_peerdirect:
-                item.chunk = self._peerdirect_chunk_factory(item.spectra, len(dst))
-                send_chunks.append(item.chunk)
-            self.out_free_queue.put_nowait(item)
-        self._in_items: Deque[InItem] = deque()
-        self._out_item = self.out_free_queue.get_nowait()
-
-        self.delay_models = []
-        for pol in range(N_POLS):
-            delay_model = MultiDelayModel(
-                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}-delay"])
-            )
-            self.delay_models.append(delay_model)
-
-        self.gains = np.zeros((self.channels, self.pols), np.complex64)
-        for pol in range(N_POLS):  # TODO: simplify the init?
-            self.set_gains(pol, np.full(channels, gain, dtype=np.complex64))
-
-        if use_vkgdr:
-            import vkgdr.pycuda
-
-            with context:
-                # We could quite easily make do with non-coherent mappings and
-                # explicit flushing, but since NVIDIA currently only provides
-                # host-coherent memory, this is a simpler option.
-                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
-
-        data_ringbuffer = ChunkRingbuffer(
-            ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
+        self._init_compute(
+            context=context,
+            spectra=spectra,
+            spectra_per_heap=spectra_per_heap,
+            channels=channels,
+            taps=taps,
+            max_delay_diff=max_delay_diff,
         )
-        free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
-        self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = chunk_samples * SAMPLE_BITS // BYTE_BITS
-        for pol, stream in enumerate(self._src_streams):
-            for _ in range(src_chunks_per_stream):
-                if use_vkgdr:
-                    device_bytes = self.compute.slots[f"in{pol}"].required_bytes()
-                    with context:
-                        mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
-                    buf = np.array(mem, copy=False).view(np.uint8)
-                    # The device buffer contains extra space for copying the head
-                    # of the following chunk, but we don't need that in the host
-                    # mapping.
-                    buf = buf[:chunk_bytes]
-                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
-                    chunk = recv.Chunk(data=buf, device=device_array, stream=stream)
-                else:
-                    buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
-                    chunk = recv.Chunk(data=buf, stream=stream)
-                chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
-                chunk.recycle()  # Make available to the stream
 
-        send_dtype = np.dtype(np.int8)
-        if not use_peerdirect:
-            # When using PeerDirect, the chunks are created by _peerdirect_chunk_factory.
-            send_shape = (spectra // spectra_per_heap, channels, spectra_per_heap, N_POLS, COMPLEX)
-            for _ in range(self.send_free_queue.maxsize):
-                send_chunks.append(
-                    send.Chunk(
-                        accel.HostArray(send_shape, send_dtype, context=context),
-                        substreams=len(dst),
-                        feng_id=feng_id,
-                    )
-                )
+        self._in_items: Deque[InItem] = deque()
+        self._init_recv(src_affinity, monitor)
 
+        send_chunks = self._init_send(len(dst), use_peerdirect)
         self._send_stream = send.make_stream(
             endpoints=dst,
             interface=dst_interface,
@@ -620,16 +538,133 @@ class Engine(aiokatcp.DeviceServer):
             channels=channels,
             chunks=send_chunks,
         )
-        if not use_peerdirect:
-            for schunk in send_chunks:
-                self.send_free_queue.put_nowait(schunk)
+        self._out_item = self.out_free_queue.get_nowait()
+
+        self.delay_models: List[MultiDelayModel] = []
+        self.gains = np.zeros((self.channels, self.pols), np.complex64)
+        self._init_delay_gain()
 
         self._descriptor_heap_reflist = send.make_descriptor_heaps(
-            data_type=send_dtype,
+            data_type=SEND_DTYPE,
             channels=channels,
             substreams=len(dst),
             spectra_per_heap=spectra_per_heap,
         )
+
+    def _init_compute(
+        self,
+        context: AbstractContext,
+        spectra: int,
+        spectra_per_heap: int,
+        channels: int,
+        taps: int,
+        max_delay_diff: int,
+    ) -> None:
+        """Initialise ``self.compute`` and related resources."""
+        compute_queue = context.create_command_queue()
+        self._upload_queue = context.create_command_queue()
+        self._download_queue = context.create_command_queue()
+
+        extra_samples = max_delay_diff + taps * channels * 2
+        if extra_samples > self._src_layout.chunk_samples:
+            raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
+        samples = self._src_layout.chunk_samples + extra_samples
+
+        template = ComputeTemplate(context, taps)
+        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
+        device_weights = self.compute.slots["weights"].allocate(accel.DeviceAllocator(context))
+        device_weights.set(compute_queue, generate_weights(channels, taps))
+
+    def _init_recv(self, src_affinity: List[int], monitor: Monitor) -> None:
+        """Initialise the receive side of the engine."""
+        ringbuffer_capacity = 2
+        src_chunks_per_stream = 4
+
+        for _ in range(self.in_free_queue.maxsize):
+            self.in_free_queue.put_nowait(
+                InItem(self.compute, packet_samples=self._src_packet_samples, use_vkgdr=self._use_vkgdr)
+            )
+
+        context = self.compute.template.context
+        if self._use_vkgdr:
+            import vkgdr.pycuda
+
+            with context:
+                # We could quite easily make do with non-coherent mappings and
+                # explicit flushing, but since NVIDIA currently only provides
+                # host-coherent memory, this is a simpler option.
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
+
+        data_ringbuffer = ChunkRingbuffer(
+            ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
+        )
+        free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
+        self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
+        chunk_bytes = self._src_layout.chunk_samples * SAMPLE_BITS // BYTE_BITS
+        for pol, stream in enumerate(self._src_streams):
+            for _ in range(src_chunks_per_stream):
+                if self._use_vkgdr:
+                    device_bytes = self.compute.slots[f"in{pol}"].required_bytes()
+                    with context:
+                        mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
+                    buf = np.array(mem, copy=False).view(np.uint8)
+                    # The device buffer contains extra space for copying the head
+                    # of the following chunk, but we don't need that in the host
+                    # mapping.
+                    buf = buf[:chunk_bytes]
+                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
+                    chunk = recv.Chunk(data=buf, device=device_array, stream=stream)
+                else:
+                    buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
+                    chunk = recv.Chunk(data=buf, stream=stream)
+                chunk.present = np.zeros(self._src_layout.chunk_samples // self._src_packet_samples, np.uint8)
+                chunk.recycle()  # Make available to the stream
+
+    def _init_send(self, substreams: int, use_peerdirect: bool) -> List[send.Chunk]:
+        """Initialise the send side of the engine, with the exception of ``_send_stream``."""
+        send_chunks: List[send.Chunk] = []
+        for _ in range(self.out_free_queue.maxsize):
+            item = OutItem(self.compute)
+            if use_peerdirect:
+                dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
+                # buf is structurally a numpy array, but the pointer in it is a CUDA
+                # pointer and so actually trying to use it as such will cause a
+                # segfault.
+                buf = np.frombuffer(dev_buffer, dtype=item.spectra.dtype).reshape(item.spectra.shape)
+                chunk = send.Chunk(
+                    buf,
+                    substreams=substreams,
+                    feng_id=self.feng_id,
+                )
+                item.chunk = chunk
+                send_chunks.append(chunk)
+            self.out_free_queue.put_nowait(item)
+
+        spectra = self.compute.spectra
+        if not use_peerdirect:
+            # When using PeerDirect, the chunks are created along with the items
+            send_shape = (spectra // self.spectra_per_heap, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
+            for _ in range(self.send_free_queue.maxsize):
+                send_chunks.append(
+                    send.Chunk(
+                        accel.HostArray(send_shape, SEND_DTYPE, context=self.compute.template.context),
+                        substreams=substreams,
+                        feng_id=self.feng_id,
+                    )
+                )
+                self.send_free_queue.put_nowait(send_chunks[-1])
+        return send_chunks
+
+    def _init_delay_gain(self) -> None:
+        """Initialise the delays and gains."""
+        for pol in range(N_POLS):
+            delay_model = MultiDelayModel(
+                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}-delay"])
+            )
+            self.delay_models.append(delay_model)
+
+        for pol in range(N_POLS):
+            self.set_gains(pol, np.full(self.channels, self.default_gain, dtype=np.complex64))
 
     @property
     def channels(self) -> int:  # noqa: D401
@@ -698,30 +733,6 @@ class Engine(aiokatcp.DeviceServer):
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
-
-    def _peerdirect_chunk_factory(self, spectra: accel.DeviceArray, substreams: int) -> send.Chunk:
-        """Create a :class:`~katgpucbf.xbgpu.send.Chunk` to wrap on-device array for output spectra.
-
-        This is only used with PeerDirect.
-
-        Parameters
-        ----------
-        spectra
-            The array to wrap
-        substreams
-            Passed to the :class:`~katgpucbf.xbgpu.send.Chunk` constructor
-        """
-        dev_buffer = spectra.buffer.gpudata.as_buffer(spectra.buffer.nbytes)
-        # buf is structurally a numpy array, but the pointer in it is a CUDA
-        # pointer and so actually trying to use it as such will cause a
-        # segfault.
-        buf = np.frombuffer(dev_buffer, dtype=spectra.dtype).reshape(spectra.shape)
-        chunk = send.Chunk(
-            buf,
-            substreams=substreams,
-            feng_id=self.feng_id,
-        )
-        return chunk
 
     async def _next_in(self) -> Optional[InItem]:
         """Load next InItem for processing.
