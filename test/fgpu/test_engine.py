@@ -30,8 +30,7 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine
-from katgpucbf.fgpu.process import InItem, Processor
+from katgpucbf.fgpu.engine import Engine, InItem
 
 from .. import PromDiff
 from .test_recv import gen_heaps
@@ -132,7 +131,7 @@ class TestEngine:
         assert engine_server._port == 0
         assert engine_server._src_interface == "127.0.0.1"
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
-        assert engine_server._processor.channels == CHANNELS
+        assert engine_server.channels == CHANNELS
         assert engine_server.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
@@ -704,7 +703,7 @@ class TestEngine:
         assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
 
     def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> List[int]:
-        """Patch :meth:`.Processor._next_in` to make a request partway through the stream.
+        """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
@@ -722,8 +721,8 @@ class TestEngine:
                 timestamp.append(int(informs[0].arguments[4]))
             return await orig_next_in(self)
 
-        orig_next_in = Processor._next_in
-        monkeypatch.setattr(Processor, "_next_in", next_in)
+        orig_next_in = Engine._next_in
+        monkeypatch.setattr(Engine, "_next_in", next_in)
         return timestamp
 
     async def test_steady_state_gain(
