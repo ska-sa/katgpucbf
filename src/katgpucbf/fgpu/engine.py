@@ -105,25 +105,17 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
 
 @dataclass
 class PolInItem:
-    """Polarisation-specific elements of :class:`InItem`.
+    """Polarisation-specific elements of :class:`InItem`."""
 
-    Attributes
-    ----------
-    samples
-        A device memory region for storing the raw samples.
-    present
-        Bitmask indicating which packets were present in the chunk.
-    present_cumsum
-        Cumulative sum over :attr:`present`. It is up to the caller
-        to compute it at the appropriate time.
-    chunk
-        Chunk to return to recv after processing (used with vkgdr only).
-    """
-
+    #: A device memory region for storing the raw samples.
     samples: Optional[accel.DeviceArray]
+    #: Bitmask indicating which packets were present in the chunk.
     present: np.ndarray
+    #: Cumulative sum over :attr:`present`. It is up to the caller
+    #: to compute it at the appropriate time.
     present_cumsum: np.ndarray
-    chunk: Optional[recv.Chunk] = None  # Used with vkgdr only.
+    #: Chunk to return to recv after processing (used with vkgdr only).
+    chunk: Optional[recv.Chunk] = None
 
 
 class InItem(QueueItem):
@@ -147,16 +139,6 @@ class InItem(QueueItem):
         next_in_item.enqueue_wait_for_events(command_queue) # wait for its data to be completely copied
         ... # carry on executing kernels or whatever needs to be done with the data
 
-    Attributes
-    ----------
-    pol_data
-        Per-polarisation data
-    n_samples
-        Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in
-        :attr:`PolInItem.samples`.
-    sample_bits
-        Bitwidth of the data in :attr:`PolInItem.samples`.
-
     Parameters
     ----------
     compute
@@ -171,8 +153,11 @@ class InItem(QueueItem):
         host memory.
     """
 
+    #: Per-polarisation data
     pol_data: List[PolInItem]
+    #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
     n_samples: int
+    #: Bitwidth of the data in :attr:`PolInItem.samples`
     sample_bits: int
 
     def __init__(self, compute: Compute, timestamp: int = 0, *, packet_samples: int, use_vkgdr: bool = False) -> None:
@@ -244,28 +229,6 @@ class OutItem(QueueItem):
             # copy is finished, but this needn't be attached to the item unless
             # there's another queue afterwards.
 
-    Attributes
-    ----------
-    spectra
-        This is the actual output data, a collection of spectra, arranged in
-        memory by pol and by heap.
-    fine_delay
-        Provides a scratch space for collecting per-spectrum fine delays while
-        the `OutItem` is being prepared. When the `OutItem` is placed onto the
-        queue it is copied to the `Compute`.
-    phase
-        A similar scratch space for collecting per-spectrum phase offsets while
-        the :class:`OutItem` is being prepared.
-    gains
-        Per-channel gains
-    present
-        Bit-mask indicating which spectra contain valid data and should be
-        transmitted.
-    n_spectra
-        Number of spectra contained in :attr:`spectra`.
-    chunk
-        Corresponding chunk for transmission (only used in PeerDirect mode).
-
     Parameters
     ----------
     compute
@@ -275,12 +238,22 @@ class OutItem(QueueItem):
         Timestamp of the first spectrum in the `OutItem`.
     """
 
+    #: Output data, a collection of spectra, arranged in memory by pol and by heap.
     spectra: accel.DeviceArray
+    #: Provides a scratch space for collecting per-spectrum fine delays while
+    #: the `OutItem` is being prepared. When the `OutItem` is placed onto the
+    #: queue it is copied to the `Compute`.
     fine_delay: accel.HostArray
+    #: A similar scratch space for collecting per-spectrum phase offsets while
+    #: the :class:`OutItem` is being prepared.
     phase: accel.HostArray
+    #: Per-channel gains
     gains: accel.HostArray
+    #: Bit-mask indicating which spectra contain valid data and should be transmitted.
     present: np.ndarray
+    #: Number of spectra contained in :attr:`spectra`.
     n_spectra: int
+    #: Corresponding chunk for transmission (only used in PeerDirect mode).
     chunk: Optional[send.Chunk] = None
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
