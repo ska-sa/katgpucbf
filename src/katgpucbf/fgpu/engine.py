@@ -140,10 +140,10 @@ class InItem(QueueItem):
         # In the receive function
         my_in_item.pol_data[pol].samples.set_region(...)  # start copying sample data to the GPU,
         my_in_item.add_marker(command_queue)
-        in_queue.put_nowait(my_in_item)
+        self._in_queue.put_nowait(my_in_item)
         ...
         # in the processing function
-        next_in_item = await self.in_queue.get() # get the item from the queue
+        next_in_item = await self._in_queue.get() # get the item from the queue
         next_in_item.enqueue_wait_for_events(command_queue) # wait for its data to be completely copied
         ... # carry on executing kernels or whatever needs to be done with the data
 
@@ -234,10 +234,10 @@ class OutItem(QueueItem):
         # In the processing function
         compute.run_some_dsp(my_out_item.spectra) # Run the DSP, whatever it is.
         my_out_item.add_marker(command_queue)
-        out_queue.put_nowait(my_out_item)
+        self._out_queue.put_nowait(my_out_item)
         ...
         # in the transmit function
-        next_out_item = await self.out_queue.get() # get the item from the queue
+        next_out_item = await self._out_queue.get() # get the item from the queue
         next_out_item.enqueue_wait_for_events(download_queue) # wait for event indicating DSP is finished
         next_out_item.get_async(download_queue) # Start copying data back to the host
         ... # Normally you'd put a marker on the queue again so that you know when the
@@ -476,7 +476,7 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super(Engine, self).__init__(katcp_host, katcp_port)
-        self.populate_sensors(self.sensors)
+        self._populate_sensors(self.sensors)
 
         # Attriutes copied or initialised from arguments
         self._srcs = list(srcs)
@@ -493,7 +493,7 @@ class Engine(aiokatcp.DeviceServer):
         self.default_gain = gain
         self.sync_epoch = sync_epoch
         self.monitor = monitor
-        self._use_vkgdr = use_vkgdr
+        self.use_vkgdr = use_vkgdr
 
         # Tuning knobs not exposed via arguments
         n_in = 3
@@ -502,11 +502,11 @@ class Engine(aiokatcp.DeviceServer):
 
         # The type annotations have to be in comments because Python 3.8
         # doesn't support the syntax at runtime (Python 3.9 fixes that).
-        self.in_queue = monitor.make_queue("in_queue", n_in)  # type: asyncio.Queue[Optional[InItem]]
-        self.in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
-        self.out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[Optional[OutItem]]
-        self.out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
-        self.send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
+        self._in_queue = monitor.make_queue("in_queue", n_in)  # type: asyncio.Queue[Optional[InItem]]
+        self._in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
+        self._out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[Optional[OutItem]]
+        self._out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
+        self._send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
 
         self._init_compute(
             context=context,
@@ -538,7 +538,7 @@ class Engine(aiokatcp.DeviceServer):
             channels=channels,
             chunks=send_chunks,
         )
-        self._out_item = self.out_free_queue.get_nowait()
+        self._out_item = self._out_free_queue.get_nowait()
 
         self.delay_models: List[MultiDelayModel] = []
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
@@ -560,7 +560,7 @@ class Engine(aiokatcp.DeviceServer):
         taps: int,
         max_delay_diff: int,
     ) -> None:
-        """Initialise ``self.compute`` and related resources."""
+        """Initialise ``self._compute`` and related resources."""
         compute_queue = context.create_command_queue()
         self._upload_queue = context.create_command_queue()
         self._download_queue = context.create_command_queue()
@@ -571,8 +571,8 @@ class Engine(aiokatcp.DeviceServer):
         samples = self._src_layout.chunk_samples + extra_samples
 
         template = ComputeTemplate(context, taps)
-        self.compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
-        device_weights = self.compute.slots["weights"].allocate(accel.DeviceAllocator(context))
+        self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
+        device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps))
 
     def _init_recv(self, src_affinity: List[int], monitor: Monitor) -> None:
@@ -580,13 +580,13 @@ class Engine(aiokatcp.DeviceServer):
         ringbuffer_capacity = 2
         src_chunks_per_stream = 4
 
-        for _ in range(self.in_free_queue.maxsize):
-            self.in_free_queue.put_nowait(
-                InItem(self.compute, packet_samples=self._src_packet_samples, use_vkgdr=self._use_vkgdr)
+        for _ in range(self._in_free_queue.maxsize):
+            self._in_free_queue.put_nowait(
+                InItem(self._compute, packet_samples=self._src_packet_samples, use_vkgdr=self.use_vkgdr)
             )
 
-        context = self.compute.template.context
-        if self._use_vkgdr:
+        context = self._compute.template.context
+        if self.use_vkgdr:
             import vkgdr.pycuda
 
             with context:
@@ -603,8 +603,8 @@ class Engine(aiokatcp.DeviceServer):
         chunk_bytes = self._src_layout.chunk_samples * SAMPLE_BITS // BYTE_BITS
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
-                if self._use_vkgdr:
-                    device_bytes = self.compute.slots[f"in{pol}"].required_bytes()
+                if self.use_vkgdr:
+                    device_bytes = self._compute.slots[f"in{pol}"].required_bytes()
                     with context:
                         mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
                     buf = np.array(mem, copy=False).view(np.uint8)
@@ -623,8 +623,8 @@ class Engine(aiokatcp.DeviceServer):
     def _init_send(self, substreams: int, use_peerdirect: bool) -> List[send.Chunk]:
         """Initialise the send side of the engine, with the exception of ``_send_stream``."""
         send_chunks: List[send.Chunk] = []
-        for _ in range(self.out_free_queue.maxsize):
-            item = OutItem(self.compute)
+        for _ in range(self._out_free_queue.maxsize):
+            item = OutItem(self._compute)
             if use_peerdirect:
                 dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
                 # buf is structurally a numpy array, but the pointer in it is a CUDA
@@ -638,21 +638,21 @@ class Engine(aiokatcp.DeviceServer):
                 )
                 item.chunk = chunk
                 send_chunks.append(chunk)
-            self.out_free_queue.put_nowait(item)
+            self._out_free_queue.put_nowait(item)
 
-        spectra = self.compute.spectra
+        spectra = self._compute.spectra
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
             send_shape = (spectra // self.spectra_per_heap, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
-            for _ in range(self.send_free_queue.maxsize):
+            for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
-                        accel.HostArray(send_shape, SEND_DTYPE, context=self.compute.template.context),
+                        accel.HostArray(send_shape, SEND_DTYPE, context=self._compute.template.context),
                         substreams=substreams,
                         feng_id=self.feng_id,
                     )
                 )
-                self.send_free_queue.put_nowait(send_chunks[-1])
+                self._send_free_queue.put_nowait(send_chunks[-1])
         return send_chunks
 
     def _init_delay_gain(self) -> None:
@@ -669,22 +669,22 @@ class Engine(aiokatcp.DeviceServer):
     @property
     def channels(self) -> int:  # noqa: D401
         """Number of channels into which the incoming signal is decomposed."""
-        return self.compute.channels
+        return self._compute.channels
 
     @property
     def taps(self) -> int:  # noqa: D401
         """Number of taps in the PFB-FIR filter."""
-        return self.compute.template.taps
+        return self._compute.template.taps
 
     @property
     def spectra_per_heap(self) -> int:  # noqa: D401
         """The number of spectra which will be transmitted per output heap."""
-        return self.compute.spectra_per_heap
+        return self._compute.spectra_per_heap
 
     @property
     def sample_bits(self) -> int:  # noqa: D401
         """Bitwidth of the incoming digitiser samples."""
-        return self.compute.sample_bits
+        return self._compute.sample_bits
 
     @property
     def spectra_samples(self) -> int:  # noqa: D401
@@ -701,7 +701,7 @@ class Engine(aiokatcp.DeviceServer):
         return N_POLS
 
     @staticmethod
-    def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
+    def _populate_sensors(sensors: aiokatcp.SensorSet) -> None:
         """Define the sensors for an engine."""
         for pol in range(N_POLS):
             sensors.add(
@@ -737,11 +737,11 @@ class Engine(aiokatcp.DeviceServer):
     async def _next_in(self) -> Optional[InItem]:
         """Load next InItem for processing.
 
-        Move the next :class:`InItem` from the `in_queue` to `_in_items`, where
+        Move the next :class:`InItem` from the `_in_queue` to `_in_items`, where
         it will be picked up by the processing.
         """
         with self.monitor.with_state("run_processing", "wait in_queue"):
-            item = await self.in_queue.get()
+            item = await self._in_queue.get()
 
         if item is not None:
             self._in_items.append(item)
@@ -749,13 +749,13 @@ class Engine(aiokatcp.DeviceServer):
             #       f'{self._in_items[-1].n_samples} samples')
 
             # Make sure that all events associated with the item are past.
-            self._in_items[-1].enqueue_wait_for_events(self.compute.command_queue)
+            self._in_items[-1].enqueue_wait_for_events(self._compute.command_queue)
         else:
-            # To keep run_processing simple, it may make further calls to
+            # To keep _run_processing simple, it may make further calls to
             # _next_in after receiving a None. To keep things simple, put
             # a None back into the queue so that the next call also gets
             # None rather than hanging.
-            self.in_queue.put_nowait(None)
+            self._in_queue.put_nowait(None)
         return item
 
     async def _fill_in(self) -> bool:
@@ -790,7 +790,7 @@ class Engine(aiokatcp.DeviceServer):
                     assert pol_data0.samples is not None
                     assert pol_data1.samples is not None
                     pol_data1.samples.copy_region(
-                        self.compute.command_queue,
+                        self._compute.command_queue,
                         pol_data0.samples,
                         np.s_[:copy_bytes],
                         np.s_[-copy_bytes:],
@@ -812,8 +812,8 @@ class Engine(aiokatcp.DeviceServer):
     def _pop_in(self) -> None:
         """Remove the oldest InItem."""
         item = self._in_items.popleft()
-        event = self.compute.command_queue.enqueue_marker()
-        if self._use_vkgdr:
+        event = self._compute.command_queue.enqueue_marker()
+        if self.use_vkgdr:
             chunks = []
             for pol_data in item.pol_data:
                 pol_data.samples = None
@@ -823,15 +823,15 @@ class Engine(aiokatcp.DeviceServer):
             asyncio.create_task(self._push_recv_chunks(chunks, event))
         else:
             item.events.append(event)
-        self.in_free_queue.put_nowait(item)
+        self._in_free_queue.put_nowait(item)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
         """Grab the next free OutItem in the queue."""
         with self.monitor.with_state("run_processing", "wait out_free_queue"):
-            item = await self.out_free_queue.get()
+            item = await self._out_free_queue.get()
 
         # Just make double-sure that all events associated with the item are past.
-        item.enqueue_wait_for_events(self.compute.command_queue)
+        item.enqueue_wait_for_events(self._compute.command_queue)
         item.reset(new_timestamp)
         return item
 
@@ -839,7 +839,7 @@ class Engine(aiokatcp.DeviceServer):
         """Start the backend processing and prepare the data for transmission.
 
         Kick off the `run_backend()` processing, and put an event on the
-        relevant command queue. This lets the next coroutine (run_transmit) know
+        relevant command queue. This lets the next coroutine (_run_transmit) know
         that the backend processing is finished, and the data can be transmitted
         out.
 
@@ -860,12 +860,12 @@ class Engine(aiokatcp.DeviceServer):
             # TODO: only need to copy the relevant region, and can limit
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
-            self.compute.buffer("fine_delay").set_async(self.compute.command_queue, self._out_item.fine_delay)
-            self.compute.buffer("phase").set_async(self.compute.command_queue, self._out_item.phase)
-            self.compute.buffer("gains").set_async(self.compute.command_queue, self._out_item.gains)
-            self.compute.run_backend(self._out_item.spectra)
-            self._out_item.add_marker(self.compute.command_queue)
-            self.out_queue.put_nowait(self._out_item)
+            self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
+            self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
+            self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
+            self._compute.run_backend(self._out_item.spectra)
+            self._out_item.add_marker(self._compute.command_queue)
+            self._out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're
             # ready to flush again?
             self._out_item = await self._next_out(new_timestamp)
@@ -882,7 +882,7 @@ class Engine(aiokatcp.DeviceServer):
         for chunk in chunks:
             chunk.recycle()
 
-    async def run_processing(self) -> None:
+    async def _run_processing(self) -> None:
         """Do the hard work of the F-engine.
 
         This function takes place entirely on the GPU. First, a little bit of
@@ -972,7 +972,7 @@ class Engine(aiokatcp.DeviceServer):
                 for pol_data in self._in_items[0].pol_data:
                     assert pol_data.samples is not None
                     samples.append(pol_data.samples)
-                self.compute.run_frontend(samples, offsets, self._out_item.n_spectra, batch_spectra)
+                self._compute.run_frontend(samples, offsets, self._out_item.n_spectra, batch_spectra)
                 self._out_item.n_spectra += batch_spectra
                 # Work out which output spectra contain missing data.
                 self._out_item.present[out_slice] = True
@@ -1008,10 +1008,10 @@ class Engine(aiokatcp.DeviceServer):
         # steady-state-timestamp sensor is updated to a later timestamp than
         # anything we'll actually send.
         await self._flush_out(self._out_item.end_timestamp)
-        logger.debug("run_processing completed")
-        self.out_queue.put_nowait(None)
+        logger.debug("_run_processing completed")
+        self._out_queue.put_nowait(None)
 
-    async def run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
+    async def _run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -
@@ -1033,7 +1033,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         async for chunks in recv.chunk_sets(streams, layout):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
-                in_item = await self.in_free_queue.get()
+                in_item = await self._in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
                 # Make sure all the item's events are past.
                 await in_item.async_wait_for_events()
@@ -1047,12 +1047,12 @@ class Engine(aiokatcp.DeviceServer):
             for pol_data, chunk in zip(in_item.pol_data, chunks):
                 # Copy the present flags (synchronously).
                 pol_data.present[: len(chunk.present)] = chunk.present
-            if self._use_vkgdr:
+            if self.use_vkgdr:
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
                     assert pol_data.samples is None
                     pol_data.samples = chunk.device  # type: ignore
                     pol_data.chunk = chunk
-                self.in_queue.put_nowait(in_item)
+                self._in_queue.put_nowait(in_item)
             else:
                 # Copy each pol chunk to the right place on the GPU.
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
@@ -1062,10 +1062,10 @@ class Engine(aiokatcp.DeviceServer):
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
 
-                # Put events on the queue so that run_processing() knows when to
+                # Put events on the queue so that _run_processing() knows when to
                 # start.
                 in_item.events.extend(transfer_events)
-                self.in_queue.put_nowait(in_item)
+                self._in_queue.put_nowait(in_item)
 
                 # Wait until the copy is done, and then give the chunks of memory
                 # back to the receiver streams for reuse.
@@ -1078,7 +1078,7 @@ class Engine(aiokatcp.DeviceServer):
                         await async_wait_for_events([transfer_events[pol]])
                     chunks[pol].recycle()
         logger.debug("run_receive completed")
-        self.in_queue.put_nowait(None)
+        self._in_queue.put_nowait(None)
 
     def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
         """Return a chunk to the free queue after it has completed transmission.
@@ -1095,20 +1095,20 @@ class Engine(aiokatcp.DeviceServer):
         except Exception:
             logger.exception("Error sending chunk")
 
-    async def run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
+    async def _run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without PeerDirect. In the
         non-PeerDirect case, :class:`OutItem` objects are pulled from the
-        `out_queue`. We wait for the events that mark the end of the processing,
+        `_out_queue`. We wait for the events that mark the end of the processing,
         then copy the data to host memory before turning it over to the
         :obj:`sender` for transmission on the network. The "empty" item is then
-        returned to :meth:`run_processing` via the `out_free_queue`, and once
-        the chunk has been transmitted it is returned to `send_free_queue`.
+        returned to :meth:`_run_processing` via the `_out_free_queue`, and once
+        the chunk has been transmitted it is returned to `_send_free_queue`.
 
         In the PeerDirect case, the item and the chunk are bound together and
-        share memory. In this case `send_free_queue` is unused. The item is
-        only returned to `out_free_queue` once it has been fully transmitted.
+        share memory. In this case `_send_free_queue` is unused. The item is
+        only returned to `_out_free_queue` once it has been fully transmitted.
 
         Parameters
         ----------
@@ -1119,18 +1119,18 @@ class Engine(aiokatcp.DeviceServer):
         last_end_timestamp: Optional[int] = None
         while True:
             with self.monitor.with_state("run_transmit", "wait out_queue"):
-                out_item = await self.out_queue.get()
+                out_item = await self._out_queue.get()
             if not out_item:
                 break
             if out_item.chunk is not None:
                 # We're using PeerDirect
                 chunk = out_item.chunk
-                chunk.cleanup = partial(self.out_free_queue.put_nowait, out_item)
+                chunk.cleanup = partial(self._out_free_queue.put_nowait, out_item)
                 events = out_item.events
             else:
                 with self.monitor.with_state("run_transmit", "wait send_free_queue"):
-                    chunk = await self.send_free_queue.get()
-                chunk.cleanup = partial(self.send_free_queue.put_nowait, chunk)
+                    chunk = await self._send_free_queue.get()
+                chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
                 self._download_queue.enqueue_wait_for_events(out_item.events)
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
@@ -1154,7 +1154,7 @@ class Engine(aiokatcp.DeviceServer):
             if out_item.chunk is None:
                 # We're not in PeerDirect mode
                 # (when we are the cleanup callback returns the item)
-                self.out_free_queue.put_nowait(out_item)
+                self._out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(chunk.send(stream, n_frames))
             task.add_done_callback(partial(self._chunk_finished, chunk))
 
@@ -1169,7 +1169,7 @@ class Engine(aiokatcp.DeviceServer):
             await stream.async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
 
-    async def run_descriptors_loop(
+    async def _run_descriptors_loop(
         self,
         stream: "spead2.send.asyncio.AsyncStream",
         descriptor_heap_reflist: List[spead2.send.HeapReference],
@@ -1415,7 +1415,7 @@ class Engine(aiokatcp.DeviceServer):
         This function adds the receive, processing and transmit tasks onto the
         event loop. It also adds a task to continuously send the descriptor
         heaps at an interval based on the `descriptor_interval_s`. See
-        :meth:`~Processor.run_descriptors_loop` for more details.
+        :meth:`_run_descriptors_loop` for more details.
 
         Parameters
         ----------
@@ -1427,7 +1427,7 @@ class Engine(aiokatcp.DeviceServer):
         # Create the descriptor task first to ensure descriptors will be sent
         # before any data makes its way through the pipeline.
         self._descriptor_task = asyncio.create_task(
-            self.run_descriptors_loop(
+            self._run_descriptors_loop(
                 self._send_stream,
                 self._descriptor_heap_reflist,
                 self.n_ants,
@@ -1449,19 +1449,19 @@ class Engine(aiokatcp.DeviceServer):
             )
 
         proc_task = asyncio.create_task(
-            self.run_processing(),
+            self._run_processing(),
             name=GPU_PROC_TASK_NAME,
         )
         self.add_service_task(proc_task)
 
         recv_task = asyncio.create_task(
-            self.run_receive(self._src_streams, self._src_layout),
+            self._run_receive(self._src_streams, self._src_layout),
             name=RECV_TASK_NAME,
         )
         self.add_service_task(recv_task)
 
         send_task = asyncio.create_task(
-            self.run_transmit(self._send_stream),
+            self._run_transmit(self._send_stream),
             name=SEND_TASK_NAME,
         )
         self.add_service_task(send_task)
