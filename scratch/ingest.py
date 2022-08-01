@@ -166,8 +166,9 @@ async def async_main(args: argparse.Namespace) -> None:
         chunk = spead2.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
+            stream=stream,
         )
-        stream.add_free_chunk(chunk)
+        chunk.recycle()  # Make it available to the stream
 
     config = spead2.recv.UdpIbvConfig(
         endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
@@ -196,23 +197,22 @@ async def async_main(args: argparse.Namespace) -> None:
         plt.ion()
         plt.show()
     async for chunk in stream.data_ringbuffer:
-        received_heaps = int(np.sum(chunk.present))
-        if received_heaps == HEAPS_PER_CHUNK:
-            # We have a full chunk.
-            for i in range(n_bls):
-                # We're just plotting the magnitude for now. Phase is easy enough,
-                # and is left as an exercise to the reader.
-                lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
-                axs[i].relim()
-                axs[i].autoscale_view()
-            plt.title(f"Chunk {chunk.chunk_id}")
-            if not args.interactive:
-                plt.savefig(f"{chunk.chunk_id}.png")
-                logger.info("Wrote chunk %d", chunk.chunk_id)
-        else:
-            logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
-
-        stream.add_free_chunk(chunk)
+        with chunk:
+            received_heaps = int(np.sum(chunk.present))
+            if received_heaps == HEAPS_PER_CHUNK:
+                # We have a full chunk.
+                for i in range(n_bls):
+                    # We're just plotting the magnitude for now. Phase is easy enough,
+                    # and is left as an exercise to the reader.
+                    lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
+                    axs[i].relim()
+                    axs[i].autoscale_view()
+                plt.title(f"Chunk {chunk.chunk_id}")
+                if not args.interactive:
+                    plt.savefig(f"{chunk.chunk_id}.png")
+                    logger.info("Wrote chunk %d", chunk.chunk_id)
+            else:
+                logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
 
 
 if __name__ == "__main__":

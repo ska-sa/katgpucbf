@@ -287,12 +287,12 @@ class Engine(aiokatcp.DeviceServer):
                     # mapping.
                     buf = buf[:chunk_bytes]
                     device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
-                    chunk = recv.Chunk(data=buf, device=device_array)
+                    chunk = recv.Chunk(data=buf, device=device_array, stream=stream)
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
-                    chunk = recv.Chunk(data=buf)
+                    chunk = recv.Chunk(data=buf, stream=stream)
                 chunk.present = np.zeros(chunk_samples // src_packet_samples, np.uint8)
-                stream.add_free_chunk(chunk)
+                chunk.recycle()  # Make available to the stream
 
         send_dtype = np.dtype(np.int8)
         if not use_peerdirect:
@@ -620,7 +620,7 @@ class Engine(aiokatcp.DeviceServer):
             )
 
         proc_task = asyncio.create_task(
-            self._processor.run_processing(self._src_streams),
+            self._processor.run_processing(),
             name=GPU_PROC_TASK_NAME,
         )
         self.add_service_task(proc_task)
