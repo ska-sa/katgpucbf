@@ -264,7 +264,7 @@ async def chunk_sets(
                 while b and b[0].chunk_id < min_newest:
                     logger.warning("Chunk not matched: timestamp=%#x pol=%d", b[0].chunk_id * layout.chunk_samples, pol)
                     # Chunk was passed by without getting used. Return to the pool.
-                    streams[pol].add_free_chunk(b.popleft())
+                    b.popleft().recycle()
 
             # If we have a matching pair of chunks, then we can yield.
             if all(b and b[0].chunk_id == chunk.chunk_id for b in buf):
@@ -294,7 +294,7 @@ async def chunk_sets(
         stats_collector.update()  # Ensure final stats updates are captured
         for b in buf:
             for c in b:
-                streams[c.stream_id].add_free_chunk(c)
+                c.recycle()
 
 
 __all__ = ["Chunk", "Layout", "chunk_sets"]

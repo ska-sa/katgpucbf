@@ -19,63 +19,68 @@ be found `here`_.
 
 Glossary
 --------
-
-.. todo::  ``NGC-674``
-    Update Glossary section.
-
 This section serves (hopefully) to clarify some potentially confusing terms used
 within the source code.
 
-Stream
-^^^^^^
- - In the katgpucbf sense, this is derived from a spead2 recv or send stream.
- - Not to be confused with a CUDA stream, which is here encapsulated as a
-   command queue. CUDA streams aren't referred to directly in katgpucbf.
+Chunk
+    An array of data and associated metadata, including a timestamp. Chunks
+    are the granularity at which data is managed within an engine (e.g., for
+    transfer between CPU and GPU). To amortise per-chunk costs, chunks
+    typically contain many SPEAD heaps.
 
-Queue
-^^^^^
+Command Queue
+    Channel for submitting work to a GPU. See
+    :class:`katsdpsigproc.abc.AbstractCommandQueue`.
 
-- asyncio.Queue
+Device
+    GPU or other OpenCL accelerator device (which in general could even be the
+    CPU). See :class:`katsdpsigproc.abc.AbstractDevice`.
 
-  - This is a python Queue object that is designed for use in async programs.
-    In katgpucbf.fgpu, we use EventItems on Queues.
-
-- CommandQueue
-
-  - This is relevant to the GPU. Things placed in this queue are guaranteed to
-    be executed in order.
-  - There can be an arbitrary number of command queues. In katgpucbf.fgpu, we use one
-    for uploading, one for the actual DSP, and one for downloading from the GPU.
-  - You can put markers called Events in these command queues to synchronise
-    between different ones, or even just to make sure you don't download data
-    before it's finished processing.
-  - The term is borrowed from OpenCL. In CUDA it's called a Stream but it's the
-    same thing.
-  - In general if you don't specify one, CUDA will have a "default" one, but
-    katsdpsigproc requires you to specify one. This matches with the OpenCL
-    model and prevents accidentally submitting to the default CUDA queue.
+Engine
+    A single process which consumes and/or produces SPEAD data, and is managed
+    by katcp. An F-engine processes data for one antenna; an XB-Engine
+    processes data for a configurable subset of the correlator's bandwidth. It
+    is expected that a correlator will run more than one engine per server.
 
 Event
-^^^^^
+    Used for synchronisation between command queues or between a command queue
+    and the host. See :class:`katsdpsigproc.abc.AbstractEvent`.
 
-- The thing used to synchronise GPU command_queues.
-- EventItems though, are containers that assist in transferring stuff between
-  async coroutines in the main body of the F-engine.
+Heap
+    Basic message unit of SPEAD. Heaps may comprise one or more packets.
 
-  - They are objects that have GPU memory arrays and event lists associated with
-    them.
-  - They get populated then put on Queues, so that the next stage in the
-    pipeline can wait for the events so that it knows the memory is ready for
-    copying.
+Queue
+    See :class:`asyncio.Queue`. Not to be confused with Command Queues.
 
+Queue Item
+    See :class:`.QueueItem`. These are passed around on Queues.
 
-Common features
----------------
+Stream
+    A stream of SPEAD data. The scope is somewhat flexible, depending on the
+    viewpoint, and might span one or many multicast groups. For example, one
+    F-engine sends to many XB-engines (using many multicast groups), and this
+    is referred to as a single stream in the fgpu code. Conversely, an
+    XB-engine receives data from many F-engines (but using only one multicast
+    group), and that is also called "a stream" within the xbgpu code.
+
+    This should not be confused with a CUDA stream, which corresponds to a
+    Command Queue in OpenCL terminology.
+
+Timestamp
+    Timestamps are expressed in units of ADC (analogue-to-digital converter)
+    samples, measured from a configurable "sync epoch" (also known as the "sync
+    time"). When a timestamp is associated with a collection of data, it
+    generally reflects the timestamp of the *first* ADC sample that forms part
+    of that data.
 
 .. todo:: ``NGC-675``
+
     Explanation of network receive, GPU processing and network transmit "loops".
     There'll be a few merges from the existing F- and XBgpu sections, and the
     Glossary as well.
+
+Common features
+---------------
 
 .. _engines-shutdown-procedure:
 
