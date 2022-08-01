@@ -39,7 +39,7 @@ Device
 Engine
     A single process which consumes and/or produces SPEAD data, and is managed
     by katcp. An F-engine processes data for one antenna; an XB-Engine
-    processes data for an arbitrary subset of the correlator's bandwidth. It
+    processes data for a configurable subset of the correlator's bandwidth. It
     is expected that a correlator will run more than one engine per server.
 
 Event
@@ -68,7 +68,7 @@ Stream
 
 Timestamp
     Timestamps are expressed in units of ADC (analogue-to-digital converter)
-    samples, measured from an arbitrary "sync epoch" (also known as the "sync
+    samples, measured from a configurable "sync epoch" (also known as the "sync
     time"). When a timestamp is associated with a collection of data, it
     generally reflects the timestamp of the *first* ADC sample that forms part
     of that data.
