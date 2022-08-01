@@ -63,7 +63,8 @@ Stream
     XB-engine receives data from many F-engines (but using only one multicast
     group), and that is also called "a stream" within the xbgpu code.
 
-    This should not be confused with a CUDA stream.
+    This should not be confused with a CUDA stream, which corresponds to a
+    Command Queue in OpenCL terminology.
 
 Timestamp
     Timestamps are expressed in units of ADC (analogue-to-digital converter)
