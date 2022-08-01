@@ -226,7 +226,7 @@ is unnecessary, but it is simpler (and probably cheaper) to just do it anyway
 rather than branch to avoid it.
 
 Why is doing all this work more efficient that letting cuFFT handle the
-real-to-complex transformation? After it, cuFFT most likely does this (or
+real-to-complex transformation? After all, cuFFT most likely does this (or
 something equivalent) internally. The answer is that instead of using a
 separate kernel for it (which would consume memory bandwidth), we built it
 into the postprocessing kernel (see the next section).
