@@ -87,7 +87,7 @@ The dsim, fgpu and xbgpu all make use of the
 feature which allows for any engine-specific clean-up to take place before
 coming to a final halt.
 
-The ``on_stop`` procedure is vastly similar between the dsim, fgpu and xbgpu.
+The ``on_stop`` procedure is broadly similar between the dsim, fgpu and xbgpu.
 
 * The ``dsim`` simply stops its internal calculation and sending processes of
   data and descriptors respectively.

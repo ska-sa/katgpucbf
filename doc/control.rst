@@ -7,8 +7,8 @@ katgpucbf and its constituent engines:
 #. the invocation of individual engines (dsim, fgpu, xbgpu) for more
    fine-grained testing and debugging.
 
-The first of which requires a mechanism to orchestrate the simultaneous spin-up
-of a correlator's required components - that is, some combination of dsim(s),
+The first requires a mechanism to orchestrate the simultaneous spin-up of a
+correlator's required components - that is, some combination of dsim(s),
 F-Engine(s) and XB-Engine(s). For this purpose, katgpucbf utilises the
 infrastructure provided by `katsdpcontroller`_ - discussed in the following
 section.
@@ -17,16 +17,17 @@ Regarding the testing and debugging of individual engines, more detailed
 explanations of their inner-workings are discussed in their respective, more
 dedicated-discussion documents.
 
-The main thing to note for the context of this document is that, in
-both methods of invocation (via orchestration and individually), the engines
-support control via katcp commands issued to their ``<host>:<port>`` (using a
-line-based networking utility). ``netcat`` (`nc`_) is likely the most
+The main thing to note is that, in both methods of invocation (via
+orchestration and individually), the engines support control via katcp commands
+issued to their ``<host>:<port>``. ``netcat`` (`nc`_) is likely the most
 readily-available tool for this job, but `ntsh`_ neatens up these exchanges
 and generally makes it easier to interact with.
 
 .. _katsdpcontroller: https://github.com/ska-sa/katsdpcontroller
 .. _nc: https://www.commandlinux.com/man-page/man1/nc.1.html
 .. _ntsh: https://pypi.org/project/ntsh/
+
+.. _katsdpcontroller-discussion:
 
 katsdpcontroller
 ----------------
@@ -75,16 +76,24 @@ correlators.
 Starting the correlator
 -----------------------
 The katgpucbf repository comes with a ``scratch/`` directory, under which you
-will find handy scripts for correlator and engine invocation.
+will find handy scripts for correlator and engine invocation. Granted, the
+layout and usage of these scripts is tailored to SARAO DSP's internal lab
+development environment (e.g. host and interface names) and don't necessarily
+go through the same reviewing rigour as the actual codebase. For these reasons,
+it is recommended that these scripts are used more as an example of how to run
+components of katgpucbf, rather than set-in-stone modi operandi.
 
 End-to-end correlator startup
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-:program:`sim_correlator.py` provides an array of options for you to start your
-required correlator. Running ``./sim_correlator.py --help`` gives a brief
-explanation of the arguments required. Below is an example of a full command::
+If you intend on starting up a correlator with :program:`sim_correlator.py`,
+you will require a running master controller in accordance with
+:ref:`katsdpcontroller-discussion`. The script itself provides an array of
+options for you to start your correlator; running ``./sim_correlator.py --help``
+gives a brief explanation of the arguments required. Below is an example of a
+full command to run a 4k, 4-antenna, L-band correlator::
 
-    ./sim_correlator -a 2 -c 4096 -i 0.5
-    --adc-sample-rate 171e6
+    ./sim_correlator -a 4 -c 4096 -i 0.5
+    --adc-sample-rate 1712e6
     --name my_test_correlator
     --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest
     lab5.sdp.kat.ac.za
@@ -113,40 +122,54 @@ corresponding ``dsim`` to produce data for ingest. Similarly, ``xbgpu``
 requires an appropriately-configured ``fsim``. Basically, the engines will do
 nothing until explicitly asked to.
 
-Adding to this, the :file:`scratch/{fgpu, xbgpu}` directory contains a final
-nesting doll named ``config`` containing configuration information for
-commonly-used hosts when invoking engines manually. These simply include
-100GbE interfaces available to use, and the
+.. todo:: ``NGC-730``
+  Update scratch directory to have a single config sub-directory. Also add
+  comments on the scripts themselves to make it easier to follow.
 
-dsim
-""""
+Moreover, this directory contains information for each processing node that is
+capable of hosting a katgpucbf engine. ``scratch/config`` contains
+configuration information for commonly-used hosts when invoking engines
+manually. Config files contain names of 100GbE interfaces available to use,
+and the GPU identifier environment variable required by `CUDA`_. Should you
+wish to utilise katgpucbf in your own lab development environment, you will
+need to create your own ``<hostname>.sh`` accordingly.
 
+To test a 4k, 4-antenna XB-Engine processing L-band data, use the following
+commands on two separate servers. This will launch a single
+:ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu` instance on
+``host2``::
 
-fgpu
-""""
+    user@host1:~/katgpucbf/scratch/xbgpu$ ./run-fsim.sh 0
+    .
+    .
+    .
+    user@host2:~/katgpucbf$ source .venv/bin/activate && cd scratch/xbgpu/
+    (venv) user@host2:~/katgpucbf/scratch/xbgpu$ ./run-xbgpu.sh 0
 
+Naturally, it is up to the user to ensure command-line parameters are
+consistent across the components under test, e.g. ensuring the
+:option:`!--array-size` is consistent between the data generated (in the
+:program:`fsim`) and in the :program:`xbgpu` instance.
 
-xbgpu
-"""""
-Here, you might use one of the handy scripts under ``scratch/xbgpu/`` to
-launch an XB-Engine instance and a corresponding :ref:`feng-packet-sim` using
-:program:`run-xbgpu.sh` and :program:`run-fsim.sh`.
+.. note::
+    Depending on your host machine's configuration and setup, you might need
+    to run these scripts with root privileges to allow the :program:`fsim` and
+    :program:`xbgpu` to utilise the :external+spead2:std:ref:`ibverbs <spead2_net_raw>`
+    library.
+
+.. _CUDA: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars
 
 Controlling the correlator
 --------------------------
-A timely reminder for the context of this document regarding correlator and
-engine interactions:
+The correlator components are controlled using `katcp`_. A user can connect to
+the ``<host>:<port>`` and issue a ``?help`` to see the full range of commands
+available. The ``<host>`` and ``<port>`` values for individual engines are
+configurable at runtime, whereas the ``<host>`` and ``<port>`` values for the
+correlator's *product controller* are yielded after startup. Standard katcp
+requests (such as querying and subscribing to sensors) are not covered here;
+only application-specific requests are listed. Sensors are described in
+:ref:`monitoring-sensors`.
 
-* the ``<host>`` and ``<port>`` values for individual engines are configurable at
-  runtime, whereas
-* the ``<host>`` and ``<port>`` values for the correlator's *product controller*
-  is yielded after startup.
-
-In both cases, a user can connect to ``<host>:<port>`` and issue a ``?help`` to
-see the full range of commands available. The correlator components are
-controlled using `katcp`_. Standard katcp requests (such as querying and
-subscribing to sensors) are not covered here; only application-specific
-requests are listed. Sensors are described in :ref:`monitoring-sensors`.
 
 .. _katcp: https://katcp-python.readthedocs.io/en/latest/_downloads/361189acb383a294be20d6c10c257cb4/NRF-KAT7-6.0-IFCE-002-Rev5-1.pdf
 
@@ -205,23 +228,22 @@ Shutting down the correlator
 End-to-end correlator shutdown
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A user can issue a ``?product-deconfigure`` command to the correlator's
-product controller by connecting to its ``<host>:<port>`` via a line-based
-networking utility. This command triggers the stop procedure of all engines
-and dsims running in the target correlator. More specifically:
+product controller by connecting to its ``<host>:<port>``. This command
+triggers the stop procedure of all engines and dsims running in the target
+correlator. More specifically:
 
 * the product controller instructs the orchestration software to stop the
   containers running the engines,
 * which is received by the engines as a ``SIGTERM``,
 * finally triggering a ``halt`` in the engines for a graceful shutdown.
 
-As discussed in their standalone documents, the shutdown procedures are vastly
-similar between the dsim, fgpu and xbgpu. Ultimately they all:
+The shutdown procedures are broadly similar between the dsim, fgpu and xbgpu.
+Ultimately they all:
 
 * finish calculations on data currently in their pipelines,
 * stop the transmission of their SPEAD descriptors, and
-* in the case of ``fgpu`` and ``xbgpu``, stop their ``spead2`` receivers.
-
-  *  This allows for a more natural engine of internal processing operations.
+* in the case of ``fgpu`` and ``xbgpu``, stop their ``spead2`` receivers, which
+  allows for a more natural ending of internal processing operations.
 
 Individual engine shutdown
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -230,24 +252,10 @@ confusion, there are two options for engine shutdown:
 
 #. simply issue a ``Ctrl + C`` in the terminal window where the engine was
    invoked, or
-#. connect to the engine's ``<host>:<port>`` via a line-based networking utility
-   and issue a ``?halt``.
-
-  *  As mentioned in the :ref:`indiv-engine-startup`, the host for a
-     hand-cranked engine is likely the machine it is run on (i.e.
-     ``localhost``), so
-  *  The ``port`` parameter is of most importance here.
+#. connect to the engine's ``<host>:<port>`` and issue a ``?halt``.
 
 After either of these approaches are executed, the engine will shutdown cleanly
-and quietly according to their common :ref:`engines-shutdown-procedure`.
-
-Of course, the :program:`fsim` just requires a ``Ctrl + C`` to end operations -
-no ``katcp`` commands supported here.
-
-A fair bit of work has gone into ensuring the engines and
-:external+aiokatcp:py:class:`DeviceServers <aiokatcp.server.DeviceServer>`
-they're built on are robust to a variety of exceptions and anomalies. Adding to
-that, the reporting of errors and exceptions has been consolidated for ease of
-traceability, e.g. according to each stage of the processing chain (receive,
-gpu-processing, transmit). This reduces the potential chaos involved in
-monitoring correlator-wide operations.
+and quietly according to their common :ref:`engines-shutdown-procedure`. As the
+:ref:`feng-packet-sim` is a simple CLI utility, the :program:`fsim` just
+requires a ``Ctrl + C`` to end operations - no ``katcp`` commands supported
+here.
