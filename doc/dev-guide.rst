@@ -122,21 +122,21 @@ Boiler-plate files
 The module contains the following boiler-plate files:
 
 - ``Dockerfile`` for generating repeatable container images which are capable of
-  running :mod:`katgpucbf`.
-- ``Jenkinsfile`` for Continuous Integration (CI). This is currently configured
-  for use with the Jenkins server in our development lab.
+  running this package.
+- ``Jenkinsfile`` for a Jenkins Continuous Integration (CI) server to run unit
+  tests automatically. Comments in the file document hardware requirements.
 - ``requirements.in`` and ``requirements-dev.in`` specify the Python
   prerequisites for running and developing with :mod:`katgpucbf` respectively.
   They are used as inputs to `pip-compile`_.
 - ``requirements.txt`` and ``requirements-dev.txt`` list complete pinned
   requirements, to ensure repeatable operation. These are the output of the
   ``pip-compile`` process mentioned above. These should be passed to ``pip
-  install`` with the ``-r`` flag in order to install the requirements either to
-  run or develop. Development requirements are a super-set of the running
-  requirements, with additions which are useful for developers but not required
-  for users to run the software.
+  install`` with the ``-r`` flag to install the requirements either to run or
+  develop. Development requires an additional set of packages which are not
+  required for users to run the software (such as pytest). Note that developers
+  should install both sets of requirements, not just the development ones.
 - ``setup.cfg`` and ``setup.py`` allow :external+setuptools:doc:`setuptools  <setuptools>`
-  to install :mod:`katgpucbf`.
+  to install this package.
 - ``pyproject.toml`` is a standard file included with many Python projects. It
   is used to store some configuration for pre-commit (as described above), some
   configuration options for :mod:`pytest`, and other configuration as described
