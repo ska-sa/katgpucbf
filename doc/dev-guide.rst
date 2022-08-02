@@ -126,7 +126,7 @@ The module contains the following boiler-plate files:
 - ``Jenkinsfile`` for a Jenkins Continuous Integration (CI) server to run unit
   tests automatically. Comments in the file document hardware requirements.
 - ``requirements.in`` and ``requirements-dev.in`` specify the Python
-  prerequisites for running and developing with :mod:`katgpucbf` respectively.
+  prerequisites for running and developing with this package respectively.
   They are used as inputs to `pip-compile`_.
 - ``requirements.txt`` and ``requirements-dev.txt`` list complete pinned
   requirements, to ensure repeatable operation. These are the output of the
