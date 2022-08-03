@@ -56,7 +56,7 @@ ini_options = [
     IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default="false"),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
-    IniOption(name="author", help="Name of person executing this qualification run", type="string", default="Unknown"),
+    IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
 ]
 
 
@@ -102,7 +102,7 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
         config,
         {
             "$report_type": "TestConfiguration",
-            "Author": config.getini("author"),
+            "Tester": config.getini("tester").title(),
             "Test Suite Git Info": git_information,
         },
     )
