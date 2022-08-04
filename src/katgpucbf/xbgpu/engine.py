@@ -279,7 +279,7 @@ class XBEngine(DeviceServer):
         self._src_buffer = src_buffer
         self._src_comp_vector = src_comp_vector
 
-        self.tx_enabled = tx_enabled
+        self._init_tx_enabled = tx_enabled
 
         # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
         # these values too high results in too much GPU memory being consumed.
@@ -487,7 +487,7 @@ class XBEngine(DeviceServer):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
-            tx_enabled=self.tx_enabled,
+            tx_enabled=self._init_tx_enabled,
         )
 
         self.tx_transport_added = True
@@ -524,7 +524,7 @@ class XBEngine(DeviceServer):
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(), [queue], stream_config
             ),
-            tx_enabled=self.tx_enabled,
+            tx_enabled=self._init_tx_enabled,
         )
 
     async def _receiver_loop(self) -> None:

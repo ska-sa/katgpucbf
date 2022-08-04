@@ -384,9 +384,6 @@ async def session_correlator(
         )
         await _report_correlator_config(pytestconfig, host_config_querier, remote_control, master_controller_client)
 
-        # Turn on correlator output
-        await remote_control.product_controller_client.request("capture-start", "baseline_correlation_products")
-
         yield remote_control
 
         logger.info("Tearing down correlator.")

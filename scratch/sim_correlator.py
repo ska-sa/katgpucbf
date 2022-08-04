@@ -148,15 +148,13 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
     client = await aiokatcp.Client.connect(host, port)
     try:
         reply, _ = await client.request("product-configure", name, json.dumps(config))
-    except (aiokatcp.FailReply, ConnectionError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    product_host = reply[1].decode()
-    product_port = int(reply[2].decode())
-    print(f"Product controller is at {product_host}:{product_port}")
-    print("Enabling baseline correlation products transmission...")
-    product_client = await aiokatcp.Client.connect(product_host, product_port)
-    try:
+
+        product_host = reply[1].decode()
+        product_port = int(reply[2].decode())
+        print(f"Product controller is at {product_host}:{product_port}")
+
+        print("Enabling baseline correlation products transmission...")
+        product_client = await aiokatcp.Client.connect(product_host, product_port)
         reply, _ = await product_client.request("capture-start", "baseline_correlation_products")
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
