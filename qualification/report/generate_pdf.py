@@ -174,6 +174,7 @@ class GPU:
     driver: str
     vbios: str
     bus_id: str
+    ram: int
 
 
 @dataclass(frozen=True)
@@ -268,14 +269,16 @@ def _parse_interface(labels: dict) -> Interface:
     )
 
 
-def _parse_gpu(labels: dict) -> GPU:
-    """Parse a single GPU from ``dcgm_exporter_info`` labels."""
+def _parse_gpu(labels: dict, fb_total: float) -> GPU:
+    """Parse a single GPU from the DCGM_FI_DEV_FB_TOTAL metric."""
     return GPU(
         number=int(labels["gpu"]),
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
         bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
+        # Documentation says "MB", but using 10**6 leads to a "12GB" GPU only having 11.2 GiB
+        ram=round(fb_total * 1024**2),
     )
 
 
@@ -304,8 +307,8 @@ def _parse_host(msg: dict) -> Tuple[str, Host]:
             ram = int(value)
         elif metric_name == "node_ethtool_info":
             interfaces.append(_parse_interface(labels))
-        elif metric_name == "dcgm_exporter_info":
-            gpus.append(_parse_gpu(labels))
+        elif metric_name == "DCGM_FI_DEV_FB_TOTAL":
+            gpus.append(_parse_gpu(labels, value))
         elif metric_name == "node_uname_info":
             kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
     interfaces.sort(key=lambda interface: interface.name)
@@ -505,6 +508,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_row("Driver", gpu.driver)
                 host_table.add_row("VBIOS", gpu.vbios)
                 host_table.add_row("Bus ID", gpu.bus_id)
+                host_table.add_row("RAM", f"{gpu.ram / 2**30:.0f} GiB")
                 host_table.add_hline()
 
 
