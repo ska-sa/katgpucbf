@@ -234,6 +234,7 @@ class TestSend:
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(), [queue], stream_config
             ),
+            tx_enabled=True,
         )
 
         # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the

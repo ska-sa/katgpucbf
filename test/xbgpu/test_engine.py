@@ -451,6 +451,7 @@ class TestEngine:
             f"--heap-accumulation-threshold={heap_accumulation_threshold}",
             "--src-interface=lo",
             "--dst-interface=lo",
+            "--tx-enabled",
             "239.10.11.4:7149",  # src
             "239.21.11.4:7149",  # dst
         ]
