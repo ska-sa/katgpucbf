@@ -155,7 +155,7 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
 
         print("Enabling baseline correlation products transmission...")
         product_client = await aiokatcp.Client.connect(product_host, product_port)
-        reply, _ = await product_client.request("capture-start", "baseline_correlation_products")
+        await product_client.request("capture-start", "baseline_correlation_products")
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
