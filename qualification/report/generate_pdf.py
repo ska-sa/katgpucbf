@@ -642,7 +642,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
     today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", "CBF Team")
+    doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))

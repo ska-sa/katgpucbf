@@ -102,7 +102,7 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
         config,
         {
             "$report_type": "TestConfiguration",
-            "Tester": config.getini("tester").title(),
+            "Tester": config.getini("tester"),
             "Test Suite Git Info": git_information,
         },
     )
