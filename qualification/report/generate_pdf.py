@@ -406,11 +406,17 @@ def extract_requirements_verified(results: Iterable[Result]) -> DefaultDict[str,
         A dictionary with the requirements as keys and list of the tests which
         verify that requirement as the values.
     """
-    requirements_verified = defaultdict(list)
+    # Use a set as the default because it ensures no duplicates.
+    requirements_verified = defaultdict(set)
     for result in results:
         for requirement in result.requirements:
-            requirements_verified[requirement].append(fix_test_name(result.name))
-    return requirements_verified
+            # TODO: This will need to be adapted once NGC-656 is merged.
+            test_name = fix_test_name(result.name).split("[")[0]  # Remove the param list at the back.
+            requirements_verified[requirement].add(test_name)
+    # Convert from sets to lists because lists are easier to work with later.
+    for key in requirements_verified.keys():
+        requirements_verified[key] = list(requirements_verified[key])  # type: ignore
+    return requirements_verified  # type: ignore
 
 
 def fix_test_name(test_name: str) -> str:
