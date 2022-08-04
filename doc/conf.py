@@ -79,6 +79,8 @@ intersphinx_mapping = {
     "flake8": ("https://flake8.pycqa.org/en/latest/", None),
     "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
     "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
+    "setuptools": ("https://setuptools.readthedocs.io/en/stable/", None),
+    "pip": ("https://pip.pypa.io/en/stable/", None),
 }
 
 

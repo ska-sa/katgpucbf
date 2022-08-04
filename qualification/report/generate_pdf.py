@@ -33,7 +33,6 @@ from uuid import UUID
 import docutils.writers.latex2e
 import pytest
 from docutils.core import publish_parts
-from dotenv import dotenv_values
 from pylatex import (
     Command,
     Document,
@@ -176,6 +175,7 @@ class GPU:
     driver: str
     vbios: str
     bus_id: str
+    ram: int
 
 
 @dataclass(frozen=True)
@@ -270,14 +270,16 @@ def _parse_interface(labels: dict) -> Interface:
     )
 
 
-def _parse_gpu(labels: dict) -> GPU:
-    """Parse a single GPU from ``dcgm_exporter_info`` labels."""
+def _parse_gpu(labels: dict, fb_total: float) -> GPU:
+    """Parse a single GPU from the DCGM_FI_DEV_FB_TOTAL metric."""
     return GPU(
         number=int(labels["gpu"]),
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
         bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
+        # Documentation says "MB", but using 10**6 leads to a "12GB" GPU only having 11.2 GiB
+        ram=round(fb_total * 1024**2),
     )
 
 
@@ -306,8 +308,8 @@ def _parse_host(msg: dict) -> Tuple[str, Host]:
             ram = int(value)
         elif metric_name == "node_ethtool_info":
             interfaces.append(_parse_interface(labels))
-        elif metric_name == "dcgm_exporter_info":
-            gpus.append(_parse_gpu(labels))
+        elif metric_name == "DCGM_FI_DEV_FB_TOTAL":
+            gpus.append(_parse_gpu(labels, value))
         elif metric_name == "node_uname_info":
             kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
     interfaces.sort(key=lambda interface: interface.name)
@@ -527,6 +529,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_row("Driver", gpu.driver)
                 host_table.add_row("VBIOS", gpu.vbios)
                 host_table.add_row("Bus ID", gpu.bus_id)
+                host_table.add_row("RAM", f"{gpu.ram / 2**30:.0f} GiB")
                 host_table.add_hline()
 
 
@@ -679,16 +682,12 @@ def document_from_json(input_data: Union[str, list]) -> Document:
     test_configuration, results = parse(result_list)
     requirements_verified = extract_requirements_verified(results)
 
-    # Get information from the .env file, such as tester's name, which shouldn't
-    # really be in git. Allow environment to override
-    config = {**dotenv_values(), **os.environ}
-
     doc = Document(
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
     today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", config.get("TESTER_NAME", "Unknown"))
+    doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))
