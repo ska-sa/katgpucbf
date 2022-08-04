@@ -33,7 +33,6 @@ from uuid import UUID
 import docutils.writers.latex2e
 import pytest
 from docutils.core import publish_parts
-from dotenv import dotenv_values
 from pylatex import (
     Command,
     Document,
@@ -638,16 +637,12 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     test_configuration, results = parse(result_list)
 
-    # Get information from the .env file, such as tester's name, which shouldn't
-    # really be in git. Allow environment to override
-    config = {**dotenv_values(), **os.environ}
-
     doc = Document(
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
     today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", config.get("TESTER_NAME", "Unknown"))
+    doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))

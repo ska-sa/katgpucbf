@@ -8,5 +8,4 @@ pylatex
 pytest
 pytest-expectr
 pytest-reportlog
-python-dotenv
 spead2>=3.9.1
