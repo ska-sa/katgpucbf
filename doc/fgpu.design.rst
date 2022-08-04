@@ -187,7 +187,7 @@ Real-to-complex transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 Let's introduce some notation to see how this works. Let :math:`n` be the
 number of channels, :math:`x_i` be the (real) time-domain samples and
-:math:`X_i` be the Fourier transform (we divide by :math:`2n` rather than
+:math:`X_k` be the Fourier transform (we divide by :math:`2n` rather than
 :math:`n` because that's the number of input samples used).
 
 .. math:: X_k = \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i.
