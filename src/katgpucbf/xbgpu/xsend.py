@@ -176,6 +176,8 @@ class XSend:
     packet_payload
         Size in bytes for output packets (baseline correlation products
         payload only, headers and padding are then added to this).
+    tx_enabled
+        Start with output transmission enabled.
     """
 
     # Class static constants
@@ -193,7 +195,7 @@ class XSend:
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
-        tx_enabled: bool = True,
+        tx_enabled: bool = False,
     ) -> None:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")

@@ -203,6 +203,11 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
+    parser.add_argument(
+        "--tx-enabled",
+        action="store_true",
+        help="Start with correlator output transmission enabled, without having to issue a katcp command.",
+    )
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
@@ -254,6 +259,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> Tuple[XBE
         src_buffer=args.src_buffer,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
+        tx_enabled=args.tx_enabled,
         monitor=monitor,
         context=context,
     )
