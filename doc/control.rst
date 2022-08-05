@@ -126,38 +126,82 @@ nothing until explicitly asked to.
   Update scratch directory to have a single config sub-directory. Also add
   comments on the scripts themselves to make it easier to follow.
 
-Moreover, this directory contains information for each processing node that is
-capable of hosting a katgpucbf engine. ``scratch/config`` contains
-configuration information for commonly-used hosts when invoking engines
-manually. Config files contain names of 100GbE interfaces available to use,
-and the GPU identifier environment variable required by `CUDA`_. Should you
-wish to utilise katgpucbf in your own lab development environment, you will
-need to create your own ``<hostname>.sh`` accordingly.
+Before considering which engine you intend on testing, note the number of GPUs
+available in the target processing node. The `CUDA`_ library acknowledges the
+presence of a ``CUDA_VISIBLE_DEVICES`` environment variable, similar to that
+discussed by :external+katsdpsigproc:std:ref:`katsdpsigproc <configuration>`.
+You can simply ``export CUDA_VISIBLE_DEVICES=0`` in your terminal environment
+for the engine invocation to acknowledge your intention of using a particular
+GPU.
+
+.. _CUDA: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars
 
 To test a 4k, 4-antenna XB-Engine processing L-band data, use the following
-commands on two separate servers. This will launch a single
-:ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu` instance on
-``host2``::
+commands in separate terminals on two separate servers. This will launch a
+single :ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu`
+instance on ``host2``::
 
-    user@host1:~/katgpucbf/scratch/xbgpu$ ./run-fsim.sh 0
+    [Connect to host1, navigate to the location of the fsim and build it using 'make']
+    user@host1:~/katgpucbf/src/tools$ spead2_net_raw ./fsim --interface <100GbE NIC IP> \
+                                      --array-size 4 --channels 4096 \
+                                      --channels-per-substream 512 \
+                                      --spectra-per-heap 256 \
+                                      239.10.10.10+1:7148
     .
     .
     .
-    user@host2:~/katgpucbf$ source .venv/bin/activate && cd scratch/xbgpu/
-    (venv) user@host2:~/katgpucbf/scratch/xbgpu$ ./run-xbgpu.sh 0
+    [Connect to host2 and activate the local virtual environment]
+    (katgpucbf) user@host2:~/katgpucbf$ spead2_net_raw numactl -C 1 xbgpu \
+                                        --src-affinity 0 --src-comp-vector 0 \
+                                        --dst-affinity 1 --dst-comp-vector 1 \
+                                        --src-interface <100GbE interface name or IP address> \
+                                        --dst-interface <100GbE interface name or IP address> \
+                                        --src-ibv --dst-ibv \
+                                        --adc-sample-rate 1712e6 --array-size 4 \
+                                        --channels 4096 --spectra-per-heap 256 \
+                                        --channels-per-substream 512 \
+                                        --samples-between-spectra 8192 \
+                                        --katcp-port 7150 \
+                                        239.10.10.10:7148 239.10.11.10:7148
 
 Naturally, it is up to the user to ensure command-line parameters are
-consistent across the components under test, e.g. ensuring the
-:option:`!--array-size` is consistent between the data generated (in the
-:program:`fsim`) and in the :program:`xbgpu` instance.
+consistent across the components under test, e.g. using the same
+:option:`!--array-size` is for the data generated (in the :program:`fsim`) and
+the :program:`xbgpu` instance.
 
 .. note::
     Depending on your host machine's configuration and setup, you might need
-    to run these scripts with root privileges to allow the :program:`fsim` and
-    :program:`xbgpu` to utilise the :external+spead2:std:ref:`ibverbs <spead2_net_raw>`
-    library.
+    to run these scripts with root privileges to allow the e.g. :program:`fsim` and
+    and :program:`xbgpu` to utilise the
+    :external+spead2:std:ref:`ibverbs <spead2_net_raw>` library.
 
-.. _CUDA: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars
+Pinning thread affinities
+"""""""""""""""""""""""""
+.. todo:: ``NGC_730``
+  Update ``run-{dsim, fpgu, xbgpu}.sh`` scripts to standardise over usage
+  of either ``numactl`` or ``taskset``.
+
+:external+spead2:doc:`spead2's performance tuning discussion <perf>` outlines
+the need to set the affinity of all threads that aren't specifically pinned by
+:option:`!--{src, dst}-affinity`. This is often the main Python thread, but
+libraries like CUDA tend to spin up helper threads.
+
+
+Testing without a high-speed data network
+"""""""""""""""""""""""""""""""""""""""""
+katgpucbf allows the user to develop, debug and test its engines without the
+use of a high-speed e.g. 100GbE data network. The omission of
+:option:`!--{src, dst}-ibv` command-line parameters avoids receiving data via
+the Infiniband Verbs API. This means that if you wish to e.g. capture engine
+data on a machine that doesn't support ibverbs, you could use
+:manpage:`tcpdump(8)`.
+
+.. note::
+    The data rates you intend to process are still limited by the NIC in your
+    host machine. To truly take advantage of running engines without a
+    high-speed data network, consider reducing the :option:`!--adc-sample-rate`
+    by e.g. a factor of ten as this value greatly affects the engine
+    transmission rate.
 
 Controlling the correlator
 --------------------------
