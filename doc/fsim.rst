@@ -1,3 +1,5 @@
+.. _fsim:
+
 F-Engine Packet Simulator
 -------------------------
 
