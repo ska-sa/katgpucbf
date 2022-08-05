@@ -106,6 +106,7 @@ async def test_delay_application_time(
     expect(delta < 0.01)
 
 
+@pytest.mark.name("Delay Enable/Disable")
 @pytest.mark.requirements("CBF-REQ-0066,CBF-REQ-0110,CBF-REQ-0187,CBF-REQ-0188")
 async def test_delay_enable_disable(
     correlator: CorrelatorRemoteControl,
