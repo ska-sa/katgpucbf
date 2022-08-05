@@ -36,9 +36,9 @@ simulator (:program:`dsim`) can be used to test either an F-engine or an entire
 correlator. An F-engine simulator (:program:`fsim`) can be used to test an
 XB-engine in isolation.
 
-The module also includes unit tests (``test/``), as well as a framework for
+The module also includes unit tests (:file:`test/`), as well as a framework for
 automated testing of an entire correlator against the set of requirements
-applicable to the MeerKAT Extension CBF (``qualification/``).
+applicable to the MeerKAT Extension CBF (:file:`qualification/`).
 
 
 Controller
