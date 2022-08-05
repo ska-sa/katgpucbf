@@ -1,4 +1,4 @@
-.. _fsim:
+.. _feng-packet-sim:
 
 F-Engine Packet Simulator
 -------------------------

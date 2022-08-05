@@ -15,7 +15,6 @@
  ******************************************************************************/
 
 <%include file="/port.mako"/>
-<%include file="unpack_10bit.mako"/>
 <%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 
 /* TODO:

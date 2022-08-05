@@ -35,8 +35,8 @@ products (X) and beamformer output (B). The beamformer component is not
 currently implemented, but is planned for a future release.
 
 Additionally, packet simulators are provided for testing purposes. A :ref:`dsim`
-can be used to test either an F-engine or an entire correlator. An :ref:`fsim`
-can be used to test an XB-engine in isolation.
+can be used to test either an F-engine or an entire correlator. An
+:ref:`feng-packet-sim` can be used to test an XB-engine in isolation.
 
 The module also includes unit tests (:file:`test/`), as well as a framework for
 automated testing of an entire correlator against the set of requirements
