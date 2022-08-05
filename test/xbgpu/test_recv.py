@@ -93,9 +93,7 @@ def send_stream(queue) -> "spead2.send.asyncio.AsyncStream":
     config = spead2.send.StreamConfig(max_packet_size=9000)
     return spead2.send.asyncio.InprocStream(
         spead2.ThreadPool(),
-        [
-            queue,
-        ],
+        [queue],
         config,
     )
 
