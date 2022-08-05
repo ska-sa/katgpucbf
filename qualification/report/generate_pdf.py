@@ -450,10 +450,10 @@ def fix_test_name(test_name_full: str, mode_str_only: bool) -> str:
     into the MeerKAT Convention of
     - `<mode><num ant-pols>n<bandwidth>M<channelisation mode>k`,
     Where,
-    - <mode> is E {beamformer (b), correlator (c), both (bc)}
+    - <mode> can be one of {beamformer (b), correlator (c), or both (bc)}
 
     For example,
-    - 14-8192-l would be c28n856M8k
+    - 14-8192-l would translate to c28n856M8k
 
     .. todo::
         <mode> isn't exactly 'used' at the moment, so it has been purposefully
@@ -466,8 +466,7 @@ def fix_test_name(test_name_full: str, mode_str_only: bool) -> str:
     mode_str_only
         To indicate whether just the MeerKAT-spec mode string should be
         generated, or all other parameters should be preserved in the
-        translation. Defaulted to False as the unit test-level naming usually
-        needs to preserve the state that the unit test was invoked in.
+        translation.
     """
     test_name, test_params = test_name_full.split("[")
     test_name_pretty = " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
