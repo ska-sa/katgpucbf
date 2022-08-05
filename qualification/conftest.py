@@ -78,6 +78,7 @@ def pytest_configure(config: pytest.Config) -> None:
         whether they're correct or useful.
     """
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
+    config.addinivalue_line("markers", "name(name): human-readable name for the test")
     for option in ini_options:
         assert config.getini(option.name), f"{option.name} missing from pytest.ini"
 
@@ -165,6 +166,9 @@ def pdf_report(request) -> Reporter:
         else:
             reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
     data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
+    name_marker = request.node.get_closest_marker("name")
+    if name_marker is not None:
+        data[0]["test_name"] = name_marker.args[0]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 

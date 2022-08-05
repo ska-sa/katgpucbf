@@ -56,6 +56,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
     return sfdr_measurements
 
 
+@pytest.mark.name("Channelisation and SFDR")
 @pytest.mark.requirements("CBF-REQ-0126")
 async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
