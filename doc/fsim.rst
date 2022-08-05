@@ -1,3 +1,5 @@
+.. _feng-packet-sim:
+
 F-Engine Packet Simulator
 -------------------------
 
