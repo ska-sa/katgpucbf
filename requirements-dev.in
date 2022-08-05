@@ -14,5 +14,6 @@ pytest-mock
 pytest-xdist  # Allows for pytest to launch multiple threads
 sphinx
 sphinx-rtd-theme
+sphinx-mathjax-offline
 sphinxcontrib-bibtex
 sphinxcontrib-tikz
