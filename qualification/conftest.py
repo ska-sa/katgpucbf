@@ -130,9 +130,7 @@ def n_dsims():  # noqa: D401
 
 @pytest.fixture(
     scope="package",
-    params=[
-        8192,
-    ],
+    params=[8192],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -141,9 +139,7 @@ def n_channels(request):  # noqa: D401
 
 @pytest.fixture(
     scope="package",
-    params=[
-        "l",
-    ],
+    params=["l"],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""
