@@ -143,7 +143,8 @@ class Result:
     """
 
     nodeid: str
-    name: str
+    name: str  # Name by which the test is known to pytest (including parameters)
+    text_name: str  # Name shown in the document
     blurb: str
     requirements: List[str] = field(default_factory=list)
     steps: List[Step] = field(default_factory=list)
@@ -249,6 +250,14 @@ def _parse_report_data(result: Result, msg: dict) -> None:
             result.blurb = msg["blurb"]
         if result.start_time is None:
             result.start_time = float(msg["test_start"])
+        if not result.text_name:
+            if "test_name" in msg:
+                # Replace the Python identifier, but keep any parameters
+                result.text_name = msg["test_name"]
+                if "[" in result.name:
+                    result.text_name += result.name[result.name.index("[") :]
+            else:
+                result.text_name = fix_test_name(result.name)
         result.requirements = msg["requirements"]
     elif msg_type == "config":
         msg = dict(msg)  # Avoid mutating the caller's copy
@@ -370,7 +379,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
         if not results or results[-1].nodeid != nodeid:
             # It's the first time we've seen this nodeid (otherwise we merge
             # with the existing Result).
-            results.append(Result(nodeid, report.location[2], ""))
+            results.append(Result(nodeid, report.location[2], "", ""))
         result = results[-1]
         # The teardown phase has all the log messages, so we ignore the setup and call phases.
         if report.when == "teardown":
@@ -568,7 +577,7 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         for result in results:
             summary_table.add_row(
                 [
-                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
+                    Hyperref(Marker(result.name, prefix="subsec"), result.text_name),
                     TextColor("green" if result.outcome == "passed" else "red", result.outcome),
                     readable_duration(result.duration),
                 ]
@@ -659,7 +668,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
-            with section.create(Subsection(fix_test_name(result.name), label=result.name)):
+            with section.create(Subsection(result.text_name, label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
                     _doc_requirements(requirements_sec, result.requirements)
