@@ -126,13 +126,14 @@ nothing until explicitly asked to.
   Update scratch directory to have a single config sub-directory. Also add
   comments on the scripts themselves to make it easier to follow.
 
-Before considering which engine you intend on testing, note the number of GPUs
-available in the target processing node. The `CUDA`_ library acknowledges the
-presence of a ``CUDA_VISIBLE_DEVICES`` environment variable, similar to that
-discussed by :external+katsdpsigproc:std:ref:`katsdpsigproc <configuration>`.
-You can simply ``export CUDA_VISIBLE_DEVICES=0`` in your terminal environment
-for the engine invocation to acknowledge your intention of using a particular
-GPU.
+.. note::
+    Before considering which engine you intend on testing, note the number of GPUs
+    available in the target processing node. The `CUDA`_ library acknowledges the
+    presence of a ``CUDA_VISIBLE_DEVICES`` environment variable, similar to that
+    discussed by :external+katsdpsigproc:std:ref:`katsdpsigproc <configuration>`.
+    You can simply ``export CUDA_VISIBLE_DEVICES=0`` in your terminal environment
+    for the engine invocation to acknowledge your intention of using a particular
+    GPU.
 
 .. _CUDA: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars
 
@@ -170,10 +171,9 @@ consistent across the components under test, e.g. using the same
 the :program:`xbgpu` instance.
 
 .. note::
-    Depending on your host machine's configuration and setup, you might need
-    to run these scripts with root privileges to allow the e.g. :program:`fsim` and
-    and :program:`xbgpu` to utilise the
-    :external+spead2:std:ref:`ibverbs <spead2_net_raw>` library.
+    ibverbs requires ``CAP_NET_RAW`` capability on Linux hosts. See
+    :external+spead2:std:ref:`spead2's discussion <spead2_net_raw>` on
+    ensuring this is configured correctly for your usage.
 
 Pinning thread affinities
 """""""""""""""""""""""""
@@ -185,7 +185,6 @@ Pinning thread affinities
 the need to set the affinity of all threads that aren't specifically pinned by
 :option:`!--{src, dst}-affinity`. This is often the main Python thread, but
 libraries like CUDA tend to spin up helper threads.
-
 
 Testing without a high-speed data network
 """""""""""""""""""""""""""""""""""""""""
@@ -200,7 +199,7 @@ data on a machine that doesn't support ibverbs, you could use
     The data rates you intend to process are still limited by the NIC in your
     host machine. To truly take advantage of running engines without a
     high-speed data network, consider reducing the :option:`!--adc-sample-rate`
-    by e.g. a factor of ten as this value greatly affects the engine
+    by e.g. a factor of ten as this value greatly affects the engine's data
     transmission rate.
 
 Controlling the correlator
@@ -209,11 +208,10 @@ The correlator components are controlled using `katcp`_. A user can connect to
 the ``<host>:<port>`` and issue a ``?help`` to see the full range of commands
 available. The ``<host>`` and ``<port>`` values for individual engines are
 configurable at runtime, whereas the ``<host>`` and ``<port>`` values for the
-correlator's *product controller* are yielded after startup. Standard katcp
-requests (such as querying and subscribing to sensors) are not covered here;
-only application-specific requests are listed. Sensors are described in
-:ref:`monitoring-sensors`.
-
+correlator's *product controller* are yielded by the master controller after
+startup. Standard katcp requests (such as querying and subscribing to sensors)
+are not covered here; only application-specific requests are listed. Sensors
+are described in :ref:`monitoring-sensors`.
 
 .. _katcp: https://katcp-python.readthedocs.io/en/latest/_downloads/361189acb383a294be20d6c10c257cb4/NRF-KAT7-6.0-IFCE-002-Rev5-1.pdf
 
