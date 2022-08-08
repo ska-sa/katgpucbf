@@ -107,7 +107,7 @@ def n_dsims():  # noqa: D401
     params=[
         8192,
     ],
-    ids=["8192 C"],
+    ids=["8k C"],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -119,7 +119,7 @@ def n_channels(request):  # noqa: D401
     params=[
         "l",
     ],
-    ids=["856 B"],
+    ids=["856M B"],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""
@@ -231,7 +231,9 @@ async def _correlator_config_and_description(
     logger.info("Config for correlator generation: %s.", long_description)
 
     short_description = (
-        f"{n_antennas} A-{n_channels} C-" f"{int(BANDS[band].adc_sample_rate//1e6//2)} B-" f"{int_time} I-{n_dsims} D"
+        f"{n_antennas*2}n A-{n_channels//1000}k C-"
+        f"{int(BANDS[band].adc_sample_rate//1e6//2)}M B-"
+        f"{int_time}s I-{n_dsims} D"
     )
     return config, long_description, short_description
 

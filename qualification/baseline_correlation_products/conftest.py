@@ -23,7 +23,7 @@ import pytest
 ANTENNAS: Final[List[int]] = [4, 8]
 
 
-@pytest.fixture(scope="package", params=ANTENNAS, ids=[f"{x} A" for x in ANTENNAS])
+@pytest.fixture(scope="package", params=ANTENNAS, ids=[f"{2*x}n A" for x in ANTENNAS])
 def n_antennas(request):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
     return request.param

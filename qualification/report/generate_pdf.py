@@ -27,7 +27,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Callable, Dict, Final, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, Final, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
 import docutils.writers.latex2e
@@ -56,19 +56,13 @@ from pylatex.utils import bold, escape_latex
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
-UNIT_TRANSLATION_DICT: Final[Dict[str, Callable[[str], str]]] = {
-    "A": lambda ants: f"{int(ants)*2}n",
-    "B": lambda bw: f"{bw}M",
-    "C": lambda chans: f"{int(chans)//1000}k",
-    "ZZ": lambda param: f"-{param}",
-}
 
 
 def make_correlator_mode_str(keyvalue_config: str, mode_str_only: bool = True) -> str:
     """Convert a key/value config string into a MeerKAT mode string.
 
     The input is expected to be in the format of, e.g.:
-    - '4 A-8192 C-856 B'
+    - '8n A-8k C-856M B'
     And will return a config mode string of:
     - 8n856M8k
 
@@ -85,25 +79,24 @@ def make_correlator_mode_str(keyvalue_config: str, mode_str_only: bool = True) -
     config_mode_str
         String of translated parameters present in keyvalue_config
     """
+    corr_mode_ids: Final[List[str]] = ["A", "B", "C"]
     # The input keyvalue_config string, in a format of '<value> <unit>',
     # will be parsed into a list of tuples in the format of '(<unit>, <value>)'
-    # - This is to mimic a dictionary, but to allow any parameters outside of
-    #   the 'Antennas, Channels, Bandwidth' group to be assigned the same
-    #   'formatter', as per the UNIT_TRANSLATION_DICT.
+    # - This is mainly used to differentiate between values that do/don't
+    #   belong in the correlator mode string.
     param_tuples: List[Tuple[str, str]] = []
     for param_pair in keyvalue_config.split("-"):
         param_pair_split = param_pair.strip().split(" ")
-        if param_pair_split[-1].upper() in UNIT_TRANSLATION_DICT.keys():
+        if param_pair_split[-1].upper() in corr_mode_ids:
             param_tuples.append((param_pair_split[-1], param_pair_split[0]))
         elif not mode_str_only:
             param_tuples.append(("ZZ", " ".join(value for value in param_pair_split)))
         # else: Continue
 
     config_mode_str = ""
-    for param_unit, param_value in sorted(param_tuples):
-        # We shouldn't need to provide a default for handling a KeyError,
-        # but it's good practice.
-        config_mode_str += UNIT_TRANSLATION_DICT.get(param_unit, lambda param_value: "")(param_value)
+    for _, param_value in sorted(param_tuples):
+        # We only need the parameter value for the final string
+        config_mode_str += param_value
 
     return config_mode_str
 
