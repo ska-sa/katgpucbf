@@ -1,3 +1,5 @@
+.. _dsim:
+
 Digitiser Packet Simulator
 ==========================
 
