@@ -5,10 +5,17 @@ Introduction
 MeerKAT and MeerKAT Extension
 -----------------------------
 
-.. todo:: ``NGC-667``
-    - What SARAO is
-    - What MeerKAT and MK+ are
-    - Maybe some links
+The South African Radio Astronomy Observatory (`SARAO`_) manages all radio
+astronomy initiatives and facilities in South Africa, including the `MeerKAT`_
+radio telescope. MeerKAT is a precursor to the Square Kilometre Array (SKA) and
+consists of 64 offset-Gregorian antennas in the Karoo desert in South Africa.
+
+MeerKAT Extension is a project currently underway to extend MeerKAT with
+additional antennas and longer baselines. This module (``katgpucbf``) is
+intended for deployment with MeerKAT Extension.
+
+.. _SARAO: https://www.sarao.ac.za/about/sarao/
+.. _MeerKAT: https://www.sarao.ac.za/science/meerkat/about-meerkat/
 
 
 Radio Astronomy Correlators
