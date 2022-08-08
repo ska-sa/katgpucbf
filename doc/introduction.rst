@@ -14,10 +14,33 @@ MeerKAT and MeerKAT Extension
 Radio Astronomy Correlators
 ---------------------------
 
-.. todo::  ``NGC-678``
-    - Correlators are for correlating
-    - F-X architecture
-    - Ethernet interconnect
+Radio astronomy interferometry is a means of achieving higher sensitivity and
+resolution in radio telescopes by combining signals from multiple antennas,
+as opposed to relying on ever-larger individual antennas which are expensive
+and unwieldy.
+
+This combination of signals is typically achieved digitally by equipment known
+as a correlator. In the narrowband case, correlation is achieved by cross-
+multiplying each antenna's signal with each other antenna's signal. Since modern
+radio telescopes have wideband receivers, the signal is decomposed (typically
+using the Fourier transform) into multiple narrowband frequency channels.
+
+Mathematically, correlation and frequency decomposition can be done in any
+order. A correlator which calculates cross-correlations first and then frequency
+decomposition is referred to as X-F, while vice-versa is known as F-X. For
+practical reasons (both in terms of compute and interconnect), F-X correlators
+are more cost-effective to implement, and so MeerKAT and MeerKAT Extension make
+use of this architecture for their correlators.
+
+MeerKAT and MeerKAT Extension's correlators were developed with the influence
+of `CASPER`_. An important design decision in order to make the correlators as
+cost-effective as possible is to use commercially-available products as often
+as possible, most notably the use of Ethernet as the interconnect between
+individual signal-processing nodes. This allows the developers of the instrument
+to focus on the business of radio astronomy correlators, without having to
+design costly backplanes to make the correlator work.
+
+.. _CASPER: https://casper.berkeley.edu/
 
 
 
