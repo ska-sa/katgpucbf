@@ -33,12 +33,9 @@ are more cost-effective to implement, and so MeerKAT and MeerKAT Extension make
 use of this architecture for their correlators.
 
 MeerKAT and MeerKAT Extension's correlators were developed with the influence
-of `CASPER`_. An important design decision in order to make the correlators as
-cost-effective as possible is to use commercially-available products as often
-as possible, most notably the use of Ethernet as the interconnect between
-individual signal-processing nodes. This allows the developers of the instrument
-to focus on the business of radio astronomy correlators, without having to
-design costly backplanes to make the correlator work.
+of `CASPER`_. Costs are minimised by using commercially-available products
+wherever possible. In particular, Ethernet is used to connect signal-processing
+nodes. This eliminates the need to design costly custom backplanes.
 
 .. _CASPER: https://casper.berkeley.edu/
 
