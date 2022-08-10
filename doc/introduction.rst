@@ -17,7 +17,7 @@ intended for deployment with MeerKAT Extension.
 
 .. _SARAO: https://www.sarao.ac.za/about/sarao/
 .. _MeerKAT: https://www.sarao.ac.za/science/meerkat/about-meerkat/
-.. SKA: https://www.skao.int/en/about-us/skao
+.. _SKA: https://www.skao.int/en/about-us/skao
 
 
 Radio Astronomy Correlators
