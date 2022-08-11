@@ -58,8 +58,8 @@ RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
 
-def make_correlator_mode_str(config: dict, short_str: bool = True) -> str:
-    """Convert a correlator config dictionary into a description string.
+def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
+    """Generate a description string from a configuration dictionary.
 
     The input is expected to be in the format of, e.g.:
     {
@@ -67,46 +67,45 @@ def make_correlator_mode_str(config: dict, short_str: bool = True) -> str:
         "channels": "8192",
         "bandwidth": "856",
         "band": "L",
-        "integration": "0.5",
+        "integration_time": "0.5",
         "dsims": "4"
     }
 
-    If `short_str` is True, it will return a MeerKAT config mode string of:
-    - 8n856M8k
-
-    If `short_str` is False, it will return a 'long description' as a sentence:
+    If `expand` is True, it will return a 'long description' as a sentence:
     - 4 antennas, 8192 channels, L-band, 0.5s integrations, 4 dsims
+
+    If `expand` is False, it will return a MeerKAT config mode string of:
+    - 8n856M8k
 
     Parameters
     ----------
     config
         A dictionary in the format described above.
-    mode_str_only
-        To indicate whether just the mode string should be generated,
-        or a full-sentence description should be returned.
+    expand
+        To indicate whether a full-sentence description should be returned
+        or just the mode string should be generated.
 
     Returns
     -------
-    config_mode_str
-        String of parameters in the config dictionary.
+    Short or long description of correlator mode.
     """
-    config_mode_str: str
+    config_mode: str
 
-    if short_str:
-        antpols = int(config["antennas"]) * 2
-        chans = int(config["channels"]) // 1000
-        config_mode_str = f'{antpols}n{config["bandwidth"]}M{chans}k'
-    else:
+    if expand:
         # Long description required
-        config_mode_str = (
+        config_mode = (
             f'{config["antennas"]} antennas, '
             f'{config["channels"]} channels, '
             f'{config["band"]}-band, '
-            f'{config["integration"]}s integration, '
+            f'{config["integration_time"]}s integrations, '
             f'{config["dsims"]} dsims.'
         )
+    else:
+        antpols = int(config["antennas"]) * 2
+        chans = int(config["channels"]) // 1000
+        config_mode = f'{antpols}n{config["bandwidth"]}M{chans}k'
 
-    return config_mode_str
+    return config_mode
 
 
 class LstListing(Environment):
@@ -610,7 +609,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
             Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}")
         ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
-            subsec.append(make_correlator_mode_str(correlator.mode_config, short_str=False))
+            subsec.append(make_correlator_mode_str(correlator.mode_config, expand=True))
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:

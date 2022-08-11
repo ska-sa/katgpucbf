@@ -131,9 +131,7 @@ def n_dsims():  # noqa: D401
 
 @pytest.fixture(
     scope="package",
-    params=[
-        8192,
-    ],
+    params=[8192],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -142,9 +140,7 @@ def n_channels(request):  # noqa: D401
 
 @pytest.fixture(
     scope="package",
-    params=[
-        "l",
-    ],
+    params=["l"],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""
@@ -261,7 +257,7 @@ async def _correlator_config_and_description(
         "channels": str(n_channels),
         "bandwidth": f"{int(adc_sample_rate//1e6//2)}",
         "band": f"{BANDS[band].long_name}",
-        "integration": str(int_time),
+        "integration_time": str(int_time),
         "dsims": str(n_dsims),
     }
     long_description = (
@@ -281,7 +277,7 @@ async def correlator_config(_correlator_config_and_description: Tuple[dict, str,
 
 @pytest.fixture(scope="package")
 async def correlator_mode_config(_correlator_config_and_description: Tuple[dict, str, str]) -> str:
-    """Produce a brief dictionary of the correlator config."""
+    """Produce a dictionary describing the correlator config."""
     return _correlator_config_and_description[1]
 
 
