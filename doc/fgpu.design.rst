@@ -177,33 +177,73 @@ slow and require multiple passes over the memory, because
 
 2. It appears to handle real-to-complex transforms by first doing a
    complex-to-complex transform and then using an additional pass to fix up
-   the result.
+   the result (i.e. form final FFT output).
 
 For performance reasons, we move part of the Fourier Transform into the
 post-processing kernel (using the Cooley-Tukey algorithm), and also handle
-fixing up the real-to-complex transformation.
+fixing up the real-to-complex transformation. This is achieved by decomposing
+transformation into separately computed smaller parts (this is where Cooley-Tukey
+comes in). Part of the Fourier Transform is computed using cuFFT in the compute
+kernel and the rest of the process moves into the post-processing
+kernel. The computation to form the the real-to-complex transformation takes place here.
 
 Real-to-complex transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Let's introduce some notation to see how this works. Let :math:`n` be the
-number of channels, :math:`x_i` be the (real) time-domain samples and
-:math:`X_k` be the Fourier transform (we divide by :math:`2n` rather than
-:math:`n` because that's the number of input samples used).
+To start, let's consider the tradition equation for the Fourier Transform. Let :math:`n`
+be the number of channels we wish to decompose the input sequence into and let
+:math:`x_i` be the (real) time-domain samples and :math:`X_k` be the discrete Fourier transform (DFT)
+(the reasons for dividing by :math:`2n` rather than :math:`n` will be discussed shortly
+but simply put it is due to the number of input samples used).
 
 .. math:: X_k = \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i.
 
-Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}` be the even and odd input
-samples, with Fourier transforms :math:`U` and :math:`V` respectively. By
-pretending the data is complex, we're computing the Fourier transform of
-:math:`u + jv`, namely :math:`U + jV`. Let's call it :math:`Z`.
+We know that a direct implementation of the DFT is inefficient and alternative more efficient
+means exist to perform this computation. One such method is the FFT introduce by Cooley-Tukey
+and in the GPU space the cuFFT is one such implemetation. As highlighted earlier, for transform sizes
+of greater than 16384 (for a GeForce RTX 3080 Ti at least) requires more than one memory pass making it
+less efficient than it needs to be. The technique detailed below uses the decomposition as provided by
+Cooley-Tukey to breakdown a larger transform into smaller 'sub-transforms' where each 'sub-transform'
+is intentionally kept smaller for effiecincy reasons and later combined (same process as the FFT) to form
+the larger transform size. This is a multi-step process and requires some extra notation and math tricks.
 
-Firstly, we can reconstruct :math:`U` and :math:`V` from :math:`Z` by using
-Hermetian symmetry properties. Both :math:`u` and :math:`v` are real, so
-:math:`U` and :math:`V` are Hermitian symmetric. Let :math:`Z'` be :math:`Z`
-with reversed indices i.e., :math:`Z'_k = Z_{-k}` where indices are taken
-modulo :math:`n`. Then :math:`U' = \overline{U}, V' = \overline{V}` and
+Now for some notation to see how this works. let :math:`z` be the array of samples of length :math:`2n`.
+The extra length is due to the way in which the samples are used in array :math:`z`. In this case the
+original input sequence is a real-valued array but for the purposes of this computational sequence lets
+pretend it is a complex-valued array (i.e. every even-indexed sample is real-valued and every
+odd-indexed sample is the imaginary sample). The initial array was said to be made up of :math:`x_i` samples
+but lets break that into the even and odd indexed samples.
+
+Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}` be the even and odd input samples, with Fourier
+transforms :math:`U` and :math:`V` respectively. By pretending the data is complex, we're computing
+the Fourier transform of :math:`z = u + jv`, namely :math:`U + jV`. Let's call it :math:`Z`.
+
+It is important to remember that both :math:`u` and :math:`v` are real-valued, so :math:`U`
+and :math:`V` are Hermitian symmetric. By re-arranging things we can reconstruct :math:`U` and
+:math:`V` from :math:`Z` by using Hermetian symmetry properties. Now for a nifty trick: Let :math:`Z'`
+be :math:`Z` with reversed indices i.e., :math:`Z'_k = Z_{-k}` where indices are taken
+modulo :math:`n`. Taking this once step further then we can say :math:`Z'_k = Z_{-k} = \overline{Z}` where
+the 'overline' in :math:`\overline{Z}` denotes conjugation. This is effectively saying that by taking the
+reverse indices in :math:`Z_k` we get a conjugated result.
+
+Why is this so? Going back to the original definition for the DFT we saw the complex exponential
+:math:`e^{\frac{-2\pi j}{2n}\cdot ik}` has a variable :math:`k` where :math:`k` represents the
+frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reveresed
+(i.e. negative) the complex exponential changes to:
+
+.. math::
+   e^{\frac{-2\pi j}{2n}\cdot i(-k)}
+   = e^{\frac{2\pi j}{2n}\cdot i(k)}
+
+So by reversing the index has the same effect as taking the conjugate. Applying this to the :math:`U`
+and :math:`V` components then :math:`U' = \overline{U}, V' = \overline{V}`. Going full circle (for completeness)
+if one was to conjugate the reversal (i.e. :math:`\overline{U'}`) then since :math:`U' = \overline{U}`,
+then :math:`\overline{U'} = \overline{\overline{U}} = U`.
+
+Why is this important?
+
 
 .. math:: Z + \overline{Z'} = (U + \overline{U'}) + j(V - \overline{V'}) = 2U.
+
 
 Thus, :math:`U = \frac{Z + \overline{Z'}}{2}` and similarly
 :math:`V = \frac{Z - \overline{Z'}}{2j}`. Next, we use the Cooley-Tukey
