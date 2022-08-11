@@ -34,7 +34,7 @@ def main():
 
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
-        template = ComputeTemplate(context, args.taps)
+        template = ComputeTemplate(context, args.taps, args.channels)
         command_queue = context.create_tuning_command_queue()
         extra_samples = (args.taps - 1) * args.channels * 2
         spectra = args.samples // (args.channels * 2)
@@ -43,7 +43,6 @@ def main():
             samples=args.samples + extra_samples,
             spectra=spectra,
             spectra_per_heap=args.spectra_per_heap,
-            channels=args.channels,
         )
         # Fill everything with zeros just ensure performance isn't affected
         # by stray NaNs and the like.

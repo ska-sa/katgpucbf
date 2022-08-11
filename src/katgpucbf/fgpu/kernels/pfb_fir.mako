@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020-2021, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2022, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -19,6 +19,22 @@
 
 #define WGS ${wgs}
 #define TAPS ${taps}
+#define CHANNELS ${channels}
+#define UNZIP_FACTOR ${unzip_factor}
+
+/* Apply unzipping to an output index.
+ */
+DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
+{
+    // x.bit_length - 1 is log2(x) when x is a power of 2
+    const int low_bits = ${unzip_factor.bit_length() - 1};
+    const int high_bits = ${channels.bit_length() - unzip_factor.bit_length()};
+    // Bits to modify
+    const int mask = (2 << (low_bits + high_bits)) - 2;
+    unsigned int orig = idx & mask;
+    unsigned int swapped = ((orig >> low_bits) | (orig << high_bits)) & mask;
+    return (idx & ~mask) | swapped;
+}
 
 /* Each work-item is responsible for a run of input values with stride `step`.
  *
@@ -33,12 +49,12 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     const GLOBAL uchar * RESTRICT in,     // Input data (digitiser samples)
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
     int n,                                // Size of the `out` array, to avoid going out-of-bounds.
-    int step,                             // Number of input samples needed for each spectrum, i.e. 2*channels.
     int stepy,                            // Size of data that will be worked on by a single thread-block.
     int in_offset,                        // Number of samples to skip from the start of *in.
     int out_offset           // Number of samples to skip from the start of *out. Must be a multiple of `step` to make sense.
 )
 {
+    const int step = 2 * CHANNELS;
     // Figure out where our thread block has to work.
     int group_x = get_group_id(0);
     int group_y = get_group_id(1);
@@ -49,9 +65,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     int offset = group_y * stepy + pos; // This thread probably doesn't work on the very beginning of the data, so we
                                         // make the indexing easier for ourselves later.
 
-    //Increment this pointer because this thread may not need to write to the
+    // Increment this pointer because this thread may not need to write to the
     // beginning of the block.
-    out += offset + out_offset;
+    out += shuffle_index(offset + out_offset);
 
     // can't skip individual (input) samples with pointer arithmetic, so track in_offset
     in_offset += offset;

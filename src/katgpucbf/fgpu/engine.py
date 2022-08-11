@@ -543,8 +543,8 @@ class Engine(aiokatcp.DeviceServer):
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         samples = self._src_layout.chunk_samples + extra_samples
 
-        template = ComputeTemplate(context, taps)
-        self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap, channels)
+        template = ComputeTemplate(context, taps, channels)
+        self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps))
 
@@ -642,7 +642,7 @@ class Engine(aiokatcp.DeviceServer):
     @property
     def channels(self) -> int:  # noqa: D401
         """Number of channels into which the incoming signal is decomposed."""
-        return self._compute.channels
+        return self._compute.template.channels
 
     @property
     def taps(self) -> int:  # noqa: D401
