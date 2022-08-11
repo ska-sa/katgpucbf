@@ -27,7 +27,7 @@ import pyparsing as pp
 from .. import BYTE_BITS, __version__
 from .descriptors import DescriptorSender
 from .send import HeapSet, Sender
-from .signal import Signal, SignalService, format_signals, parse_signals
+from .signal import Signal, SignalService, TerminalError, format_signals, parse_signals
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         """
         try:
             signals = parse_signals(signals_str)
-        except pp.ParseBaseException as exc:
+        except (pp.ParseBaseException, TerminalError) as exc:
             raise aiokatcp.FailReply(str(exc))
         n_pol = self.spare.data.dims["pol"]
         if len(signals) != n_pol:

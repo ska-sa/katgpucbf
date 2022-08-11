@@ -43,6 +43,7 @@ from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
+import katgpucbf.recv
 from katgpucbf import COMPLEX
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,7 @@ class CorrelatorRemoteControl:
     product_controller_client: aiokatcp.Client
     dsim_clients: List[aiokatcp.Client]
     config: dict  # JSON dictionary used to configure the correlator
-    long_descr: str  # Human-readable description
-    short_descr: str  # Short-hand key/value description
+    mode_config: dict  # Configuration values used for MeerKAT mode string
     sensor_watcher: aiokatcp.SensorWatcher
     uuid: UUID = field(default_factory=uuid4)
 
@@ -93,7 +93,7 @@ class CorrelatorRemoteControl:
 
     @classmethod
     async def connect(
-        cls, name: str, host: str, port: int, config: Mapping, long_descr: str, short_descr: str
+        cls, name: str, host: str, port: int, config: Mapping, mode_config: dict
     ) -> "CorrelatorRemoteControl":
         """Connect to a correlator's product controller.
 
@@ -125,8 +125,7 @@ class CorrelatorRemoteControl:
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
             config=dict(config),
-            long_descr=long_descr,
-            short_descr=short_descr,
+            mode_config=mode_config,
             sensor_watcher=sensor_watcher,
         )
 
@@ -170,6 +169,15 @@ class CorrelatorRemoteControl:
         for client in clients:
             client.close()
         await asyncio.gather(*[client.wait_closed() for client in clients])
+
+    async def dsim_time(self, dsim_idx: int = 0) -> float:
+        """Get the current UNIX time, as reported by a dsim.
+
+        This helps make tests independent of the clock on the machine running
+        the test; it depends only on the dsims to be synchronised with each other.
+        """
+        reply, _ = await self.dsim_clients[dsim_idx].request("time")
+        return aiokatcp.decode(float, reply[0])
 
 
 class BaselineCorrelationProductsReceiver:
@@ -227,7 +235,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps: Literal[False] = False,
         max_delay: int = DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, spead2.recv.Chunk], None]:  # noqa: D102
+    ) -> AsyncGenerator[Tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
         yield ...  # type: ignore
 
     @overload
@@ -237,7 +245,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps: bool = False,
         max_delay: int = DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:  # noqa: D102
+    ) -> AsyncGenerator[Tuple[int, Optional[katgpucbf.recv.Chunk]], None]:  # noqa: D102
         yield ...  # type: ignore
 
     async def complete_chunks(
@@ -246,7 +254,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps=False,
         max_delay=DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, Optional[spead2.recv.Chunk]], None]:
+    ) -> AsyncGenerator[Tuple[int, Optional[katgpucbf.recv.Chunk]], None]:
         """Iterate over the complete chunks of the stream.
 
         Each yielded value is a ``(timestamp, chunk)`` pair.
@@ -270,7 +278,7 @@ class BaselineCorrelationProductsReceiver:
         data_ringbuffer = self.stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         async for chunk in data_ringbuffer:
-            assert isinstance(chunk.present, np.ndarray)  # keeps mypy happy
+            assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
             timestamp = chunk.chunk_id * self.timestamp_step
             if min_timestamp is not None and timestamp < min_timestamp:
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
@@ -282,7 +290,7 @@ class BaselineCorrelationProductsReceiver:
                 yield timestamp, chunk
                 continue
             # If we get here, the chunk is ignored
-            self.stream.add_free_chunk(chunk)
+            chunk.recycle()
             if all_timestamps:
                 yield timestamp, None
         return
@@ -300,10 +308,34 @@ class BaselineCorrelationProductsReceiver:
             See :meth:`complete_chunks`
         """
         async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
-            chunk_data = np.array(chunk.data)  # Makes a copy before we return the chunk
-            self.stream.add_free_chunk(chunk)
-            return timestamp, chunk_data
+            with chunk:
+                return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
         raise RuntimeError("stream was shut down before we received a complete chunk")
+
+    async def consecutive_chunks(
+        self, n: int, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
+    ) -> List[Tuple[int, katgpucbf.recv.Chunk]]:
+        """Obtain `n` consecutive complete chunks from the stream.
+
+        .. warning::
+
+           This is not safe to use with large values of `n`, because the chunks
+           are removed from the stream's pool. If you plan to use any value
+           larger than 2 you should check that the free ring is initialised
+           with enough chunks and update this comment.
+        """
+        chunks: List[Tuple[int, katgpucbf.recv.Chunk]] = []
+        async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
+            if chunk is None:
+                # Throw away failed attempt at getting an adjacent set
+                for _, old_chunk in chunks:
+                    old_chunk.recycle()
+                chunks.clear()
+                continue
+            chunks.append((timestamp, chunk))
+            if len(chunks) == n:
+                return chunks
+        raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
 
     def timestamp_to_unix(self, timestamp: int) -> float:
         """Convert an ADC timestamp to a UNIX time."""
@@ -379,11 +411,12 @@ def create_baseline_correlation_product_receive_stream(
     )
 
     for _ in range(max_chunks + n_extra_chunks):
-        chunk = spead2.recv.Chunk(
+        chunk = katgpucbf.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, COMPLEX), dtype=getattr(np, f"int{n_bits_per_sample}")),
+            stream=stream,
         )
-        stream.add_free_chunk(chunk)
+        chunk.recycle()
 
     if use_ibv:
         config = spead2.recv.UdpIbvConfig(

@@ -46,6 +46,8 @@ class Chunk(spead2.recv.Chunk):
     It extends the spead2 base class to store a timestamp (computed from
     the chunk ID when the chunk is received), and optionally store a
     vkgdr device array.
+
+    When used as a context manager, it will call :meth:`recycle` on exit.
     """
 
     # Refine the types used in the base class
@@ -54,11 +56,27 @@ class Chunk(spead2.recv.Chunk):
     # New fields
     device: object
     timestamp: int
+    stream: weakref.ref
 
-    def __init__(self, *args, device: object = None, **kwargs):
+    def __init__(self, *args, stream: spead2.recv.ChunkRingStream, device: object = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.device = device
         self.timestamp = 0  # Actual value filled in when chunk received
+        self.stream = weakref.ref(stream)
+
+    def __enter__(self) -> "Chunk":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.recycle()
+
+    def recycle(self) -> None:
+        """Return the chunk to the owning stream."""
+        stream = self.stream()
+        # If it is None, the stream has been garbage collected, and there is no
+        # need to return the chunk.
+        if stream is not None:
+            stream.add_free_chunk(self)
 
 
 class StatsCollector(Collector):

@@ -27,19 +27,19 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, Final, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
 import docutils.writers.latex2e
 import pytest
 from docutils.core import publish_parts
-from dotenv import dotenv_values
 from pylatex import (
     Command,
     Document,
     LongTable,
     MiniPage,
     MultiColumn,
+    MultiRow,
     NoEscape,
     Section,
     SmallText,
@@ -58,45 +58,53 @@ RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
 
-def make_correlator_mode_str(keyvalue_config: str, mode_str_only: bool = True) -> str:
-    """Convert a key/value config string into a MeerKAT mode string.
+def make_correlator_mode_str(config: dict, short_str: bool = True) -> str:
+    """Convert a correlator config dictionary into a description string.
 
     The input is expected to be in the format of, e.g.:
-    - '8n A-8k C-856M B'
-    And will return a config mode string of:
+    {
+        "antennas": "4",
+        "channels": "8192",
+        "bandwidth": "856",
+        "band": "L",
+        "integration": "0.5",
+        "dsims": "4"
+    }
+
+    If `short_str` is True, it will return a MeerKAT config mode string of:
     - 8n856M8k
+
+    If `short_str` is False, it will return a 'long description' as a sentence:
+    - 4 antennas, 8192 channels, L-band, 0.5s integrations, 4 dsims
 
     Parameters
     ----------
-    keyvalue_config
-        A string in a format described above.
+    config
+        A dictionary in the format described above.
     mode_str_only
         To indicate whether just the mode string should be generated,
-        or all other parameters should be preserved in the translation.
+        or a full-sentence description should be returned.
 
     Returns
     -------
     config_mode_str
-        String of translated parameters present in keyvalue_config
+        String of parameters in the config dictionary.
     """
-    corr_mode_ids: Final[List[str]] = ["A", "B", "C"]
-    # The input keyvalue_config string, in a format of '<value> <unit>',
-    # will be parsed into a list of tuples in the format of '(<unit>, <value>)'
-    # - This is mainly used to differentiate between values that do/don't
-    #   belong in the correlator mode string.
-    param_tuples: List[Tuple[str, str]] = []
-    for param_pair in keyvalue_config.split("-"):
-        param_pair_split = param_pair.strip().split(" ")
-        if param_pair_split[-1].upper() in corr_mode_ids:
-            param_tuples.append((param_pair_split[-1], param_pair_split[0]))
-        elif not mode_str_only:
-            param_tuples.append(("ZZ", " ".join(value for value in param_pair_split)))
-        # else: Continue
+    config_mode_str: str
 
-    config_mode_str = ""
-    for _, param_value in sorted(param_tuples):
-        # We only need the parameter value for the final string
-        config_mode_str += param_value
+    if short_str:
+        antpols = int(config["antennas"]) * 2
+        chans = int(config["channels"]) // 1000
+        config_mode_str = f'{antpols}n{config["bandwidth"]}M{chans}k'
+    else:
+        # Long description required
+        config_mode_str = (
+            f'{config["antennas"]} antennas, '
+            f'{config["channels"]} channels, '
+            f'{config["band"]}-band, '
+            f'{config["integration"]}s integration, '
+            f'{config["dsims"]} dsims.'
+        )
 
     return config_mode_str
 
@@ -187,7 +195,8 @@ class Result:
     """
 
     nodeid: str
-    name: str
+    name: str  # Name by which the test is known to pytest (including parameters)
+    text_name: str  # Name shown in the document
     blurb: str
     requirements: List[str] = field(default_factory=list)
     steps: List[Step] = field(default_factory=list)
@@ -218,6 +227,7 @@ class GPU:
     driver: str
     vbios: str
     bus_id: str
+    ram: int
 
 
 @dataclass(frozen=True)
@@ -247,8 +257,7 @@ class Task:
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
-    long_descr: str
-    short_descr: str
+    mode_config: dict
     uuid: UUID
     tasks: Dict[str, Task]
 
@@ -293,6 +302,14 @@ def _parse_report_data(result: Result, msg: dict) -> None:
             result.blurb = msg["blurb"]
         if result.start_time is None:
             result.start_time = float(msg["test_start"])
+        if not result.text_name:
+            if "test_name" in msg:
+                # Replace the Python identifier, but keep any parameters
+                result.text_name = msg["test_name"]
+                if "[" in result.name:
+                    result.text_name += result.name[result.name.index("[") :]
+            else:
+                result.text_name = fix_test_name(result.name)
         result.requirements = msg["requirements"]
     elif msg_type == "config":
         msg = dict(msg)  # Avoid mutating the caller's copy
@@ -313,14 +330,16 @@ def _parse_interface(labels: dict) -> Interface:
     )
 
 
-def _parse_gpu(labels: dict) -> GPU:
-    """Parse a single GPU from ``dcgm_exporter_info`` labels."""
+def _parse_gpu(labels: dict, fb_total: float) -> GPU:
+    """Parse a single GPU from the DCGM_FI_DEV_FB_TOTAL metric."""
     return GPU(
         number=int(labels["gpu"]),
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
         bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
+        # Documentation says "MB", but using 10**6 leads to a "12GB" GPU only having 11.2 GiB
+        ram=round(fb_total * 1024**2),
     )
 
 
@@ -349,8 +368,8 @@ def _parse_host(msg: dict) -> Tuple[str, Host]:
             ram = int(value)
         elif metric_name == "node_ethtool_info":
             interfaces.append(_parse_interface(labels))
-        elif metric_name == "dcgm_exporter_info":
-            gpus.append(_parse_gpu(labels))
+        elif metric_name == "DCGM_FI_DEV_FB_TOTAL":
+            gpus.append(_parse_gpu(labels, value))
         elif metric_name == "node_uname_info":
             kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
     interfaces.sort(key=lambda interface: interface.name)
@@ -372,9 +391,7 @@ def _parse_task(msg: dict) -> Task:
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CorrelatorConfiguration(
-        long_descr=msg["long_descr"], short_descr=msg["short_descr"], uuid=UUID(msg["uuid"]), tasks=tasks
-    )
+    return CorrelatorConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
@@ -414,7 +431,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
         if not results or results[-1].nodeid != nodeid:
             # It's the first time we've seen this nodeid (otherwise we merge
             # with the existing Result).
-            results.append(Result(nodeid, report.location[2], ""))
+            results.append(Result(nodeid, report.location[2], "", ""))
         result = results[-1]
         # The teardown phase has all the log messages, so we ignore the setup and call phases.
         if report.when == "teardown":
@@ -436,35 +453,34 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     return test_configuration, results
 
 
-def fix_test_name(test_name_full: str, mode_str_only: bool) -> str:
-    """Change a test's name from a pytest one to the expected report format.
-
-    The test name doesn't change much, but the parameters need to be translated
-    into the MeerKAT Convention of
-    - `<mode><num ant-pols>n<bandwidth>M<channelisation mode>k`,
-    Where,
-    - <mode> can be one of {beamformer (b), correlator (c), or both (bc)}
-
-    For example,
-    - 14-8192-l would translate to c28n856M8k
-
-    .. todo::
-        <mode> isn't exactly 'used' at the moment, so it has been purposefully
-        left out of the current implementation, pending review/feedback.
+def extract_requirements_verified(results: Iterable[Result]) -> Dict[str, List[str]]:
+    """Extract a matrix of requirements verified from the list of results.
 
     Parameters
     ----------
-    test_name_full
-        The pytest-style test name, e.g. 'test_baselines[8 A-8192 C-856 B]'
-    mode_str_only
-        To indicate whether just the MeerKAT-spec mode string should be
-        generated, or all other parameters should be preserved in the
-        translation.
-    """
-    test_name, test_params = test_name_full.split("[")
-    test_name_pretty = " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
+    results
+        Results as generated by :func:`parse`.
 
-    return f"{test_name_pretty}: {make_correlator_mode_str(test_params[:-1], mode_str_only)}"
+    Returns
+    -------
+        A dictionary with the requirements as keys and list of the tests which
+        verify that requirement as the values.
+    """
+    requirements_verified = defaultdict(list)
+    for result in results:
+        for requirement in result.requirements:
+            # TODO: This will need to be adapted once NGC-656 is merged.
+            test_name = fix_test_name(result.name).split("[")[0]  # Remove the param list at the back.
+            requirements_verified[requirement].append(test_name)
+    # Remove duplicates from the lists.
+    for key in requirements_verified.keys():
+        requirements_verified[key] = sorted(set(requirements_verified[key]))
+    return requirements_verified
+
+
+def fix_test_name(test_name: str) -> str:
+    """Change a test's name from a pytest one to a more human-friendly one."""
+    return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
 
 
 def collapse_versions(versions: Set[str]) -> str:
@@ -578,6 +594,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_row("Driver", gpu.driver)
                 host_table.add_row("VBIOS", gpu.vbios)
                 host_table.add_row("Bus ID", gpu.bus_id)
+                host_table.add_row("RAM", f"{gpu.ram / 2**30:.0f} GiB")
                 host_table.add_hline()
 
 
@@ -590,10 +607,10 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
     ]
     for i, correlator in enumerate(correlators, start=1):
         with section.create(
-            Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.short_descr)}")
+            Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}")
         ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
-            subsec.append(correlator.long_descr)
+            subsec.append(make_correlator_mode_str(correlator.mode_config, short_str=False))
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
@@ -611,6 +628,20 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
                             Hyperref(Marker(task.host, prefix="host"), task.host),
                         )
                     table.add_hline()
+
+
+def _doc_requirements_verified(doc: Document, requirements_verified: Dict[str, List]) -> None:
+    with doc.create(Section("Requirements Verified")) as req_section:
+        with req_section.create(LongTable(r"|l|l|")) as table:
+            table.add_hline()
+            table.add_row([bold("Requirement"), bold("Tests verifying requirement")])
+            table.add_hline()
+            for req, tests in sorted(requirements_verified.items(), key=lambda item: item[0]):
+                table.add_row(MultiRow(len(tests), data=req), tests[0])
+                for test in tests[1:]:
+                    table.add_hline(2)
+                    table.add_row("", test)
+                table.add_hline()
 
 
 def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration) -> None:
@@ -639,7 +670,7 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         for result in results:
             summary_table.add_row(
                 [
-                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name, mode_str_only=True)),
+                    Hyperref(Marker(result.name, prefix="subsec"), result.text_name),
                     TextColor("green" if result.outcome == "passed" else "red", result.outcome),
                     readable_duration(result.duration),
                 ]
@@ -683,7 +714,7 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
                     if correlator.uuid == UUID(value):
                         marker = Marker(value, prefix="correlator")
                         value = Hyperref(
-                            marker, f"Configuration {i}: {make_correlator_mode_str(correlator.short_descr)}"
+                            marker, f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}"
                         )
                         break
             config_table.add_row([key.capitalize(), value])
@@ -713,21 +744,20 @@ def document_from_json(input_data: Union[str, list]) -> Document:
         result_list = input_data
 
     test_configuration, results = parse(result_list)
-
-    # Get information from the .env file, such as tester's name, which shouldn't
-    # really be in git. Allow environment to override
-    config = {**dotenv_values(), **os.environ}
+    requirements_verified = extract_requirements_verified(results)
 
     doc = Document(
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
     today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", config.get("TESTER_NAME", "Unknown"))
+    doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
+
+    _doc_requirements_verified(doc, requirements_verified)
 
     _doc_test_configuration(doc, test_configuration)
 
@@ -736,7 +766,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
-            with section.create(Subsection(fix_test_name(result.name, mode_str_only=False), label=result.name)):
+            with section.create(Subsection(result.text_name, label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
                     _doc_requirements(requirements_sec, result.requirements)

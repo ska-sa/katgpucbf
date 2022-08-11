@@ -16,6 +16,7 @@
 
 """Unit tests for katcp server."""
 
+import re
 from typing import AsyncGenerator, Optional, Sequence
 
 import aiokatcp
@@ -113,10 +114,19 @@ async def test_signals(
     assert parse_signals(await get_sensor(katcp_client, "signals")) == parse_signals(signals_str)
 
 
-async def test_signals_unparsable(katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker) -> None:
+@pytest.mark.parametrize(
+    "spec,match",
+    [
+        ("foo", "Unknown variable 'foo'"),
+        ("nodither(1.0) + 0.0", "Signal 'nodither(1.0)' cannot be used in a larger expression"),
+    ],
+)
+async def test_signals_unparsable(
+    katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker, spec: str, match: str
+) -> None:
     """Test that ``?signals`` with an invalid signal specification fails gracefully."""
-    with pytest.raises(aiokatcp.FailReply, match="Unknown variable 'foo'"):
-        await katcp_client.request("signals", "foo")
+    with pytest.raises(aiokatcp.FailReply, match=re.escape(match)):
+        await katcp_client.request("signals", spec)
 
 
 async def test_signals_wrong_length(katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker) -> None:

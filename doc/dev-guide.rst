@@ -87,9 +87,6 @@ to monitor Python development.
   (or lint-like tool) for type annotations in the Python code - according to
   :pep:`484` and :pep:`526` notation.
 
-.. todo:: ``NGC-694``
-  Document these boilerplate files in the repository.
-
 .. _isort: https://pycqa.github.io/isort/
 
 Installation Prerequisites
@@ -102,9 +99,6 @@ the YAML configuration file is set up so that when the pre-commit hooks are
 installed, all dependencies are automatically installed. (Note, they won't be
 available to you in your Python environment, they will be used only by pre-commit.
 If you want to use them separately, you will need to install them separately with pip.)
-
-.. todo:: ``NGC-693``
-    Explain why :mod:`katgpucbf` has a ``requirements-dev.txt`` (in addition to ``requirements.txt``).
 
 Light-weight installation
 -------------------------
@@ -121,3 +115,31 @@ extras are available.
 This is not recommended for day-to-day development, because it will install
 whatever is the latest version at the time, rather than the known-good versions
 pinned in requirements.txt.
+
+Boiler-plate files
+------------------
+
+The module contains the following boiler-plate files:
+
+- ``Dockerfile`` for generating repeatable container images which are capable of
+  running this package.
+- ``Jenkinsfile`` for a Jenkins Continuous Integration (CI) server to run unit
+  tests automatically. Comments in the file document hardware requirements.
+- ``requirements.in`` and ``requirements-dev.in`` specify the Python
+  prerequisites for running and developing with this package respectively.
+  They are used as inputs to `pip-compile`_.
+- ``requirements.txt`` and ``requirements-dev.txt`` list complete pinned
+  requirements, to ensure repeatable operation. These are the output of the
+  ``pip-compile`` process mentioned above. These should be passed to ``pip
+  install`` with the ``-r`` flag to install the requirements either to run or
+  develop. Development requires an additional set of packages which are not
+  required for users to run the software (such as pytest). Note that developers
+  should install both sets of requirements, not just the development ones.
+- ``setup.cfg`` and ``setup.py`` allow :external+setuptools:doc:`setuptools  <setuptools>`
+  to install this package.
+- ``pyproject.toml`` is a standard file included with many Python projects. It
+  is used to store some configuration for pre-commit (as described above), some
+  configuration options for :mod:`pytest`, and other configuration as described
+  :external+pip:doc:`here <reference/build-system/pyproject-toml>`.
+
+.. _pip-compile: https://pip-tools.readthedocs.io/en/latest/#without-setup-py

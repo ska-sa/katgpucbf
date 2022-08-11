@@ -189,9 +189,12 @@ snowballstemmer==2.2.0
 sphinx==5.0.2
     # via
     #   -r requirements-dev.in
+    #   sphinx-mathjax-offline
     #   sphinx-rtd-theme
     #   sphinxcontrib-bibtex
     #   sphinxcontrib-tikz
+sphinx-mathjax-offline==0.0.1
+    # via -r requirements-dev.in
 sphinx-rtd-theme==1.0.0
     # via -r requirements-dev.in
 sphinxcontrib-applehelp==1.0.2

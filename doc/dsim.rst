@@ -1,3 +1,5 @@
+.. _dsim:
+
 Digitiser Packet Simulator
 ==========================
 
@@ -27,10 +29,79 @@ by a multi-path network).
 By default the content of the signal is a sine wave with a fixed frequency.
 However, the signal is highly configurable with the :option:`!--signals`
 option. A domain-specific language (DSL) allows continuous waves and Gaussian
-noise to be combined with basic operators. See :func:`.parse_signal` for a
-specification of this DSL. As an example, the following specification [#nl]_
-defines two signals which share a sine wave and some noise, and adds further
-noise that is uncorrelated between the polarisations:
+noise to be combined with basic operators (see below). The signals to send can
+also be changed on the fly by issuing the ``?signals`` command over katcp.
+
+.. _dsim-dsl:
+
+Signal specification
+--------------------
+
+Basics
+^^^^^^
+To specify a signal, one writes an
+expression followed by a semi-colon. This provides the signal for a single
+polarisation, so must be repeated for the number of single-pol streams. For
+example, the following [#nl]_ generates a continuous wave on the first
+polarisation and noise on the second polarisation:
+
+.. code::
+
+   cw(1.0, 1e9);
+   wgn(0.05);
+
+.. [#nl] While shown split over multiple lines, whitespace is not significant
+   and it may be easier to place it all on one line.
+
+Note that the semi-colons are required. A common mistake is to forget the
+final semi-colon. The following functions are available:
+
+:samp:`cw({amplitude}, {frequency})`
+    Continuous wave with the given amplitude and frequency (in Hz). There is
+    currently no way to directly control phase, although the ``delay``
+    function below gives limited control.
+
+:samp:`wgn({std} [, {entropy}])`
+    White Gaussian noise with given standard deviation. Optionally, one may
+    provide a non-negative integer seed in `entropy` to give reproducible
+    results.
+
+:samp:`delay({signal}, {delay})`
+    Delay another signal expression by `delay` samples. For example,
+    ``delay(cw(1.0, 1e9), 10)`` would shift the phase of a CW. Only integer
+    numbers of samples are supported (including negative values).
+
+:samp:`{constant}`
+    A real number can be used as a signal, which will be used for all samples
+    (DC).
+
+The output magnitude is limited to the range -1 to 1, so typically the
+`amplitude` for ``cw`` should be at most 1, and the `std` for ``wgn`` should
+be much less than 1.
+
+Operators
+^^^^^^^^^
+In addition to these basic building blocks, signals can be combined with the
+operators ``+``, ``-`` and ``*``. It should be noted that these operators can
+only be used on signals: the scalar arguments like `amplitude` and `std` must
+be literal constants rather than expressions.
+
+Variables
+^^^^^^^^^
+As in Python, it is also possible to assign an expression to a variable, and
+use the variable several times later. This has several advantages:
+
+1. It saves typing.
+
+2. The common part only needs to be computed once, speeding up evaluation.
+
+3. Random choices (such as in ``wgn``) are "locked in" to the variable. That
+   simplifies creation of correlated signals without needing to explicitly
+   choose entropy values.
+
+As an example, the following specification defines two signals which share a
+sine wave and some noise, and adds further noise that is uncorrelated between
+the polarisations:
 
 .. code::
 
@@ -38,17 +109,27 @@ noise that is uncorrelated between the polarisations:
    base + wgn(0.05);
    base + wgn(0.05);
 
-The signals to send can also be changed on the fly by issuing the ``?signals``
-command over katcp.
+Variables can only be defined once, and must be defined before they are used.
+As before, statements that don't define a variable define one of the outputs,
+and there must be exactly one such statement per single-pol stream.
 
-.. [#nl] While shown split over multiple lines, whitespace is not significant
-   and it may be easier to place it all on one line.
+Dithering
+^^^^^^^^^
+By default, the signal is dithered as a final step, by adding random values
+uniformly selected from the interval [-0.5, 0.5) least significant bits. The
+dither values are chosen independently for each single-pol stream, so that
+they are uncorrelated.
+
+Dithering can be disabled for an output by wrapping the expression in
+``nodither()``. A ``nodither`` signal can be assigned to a variable, but it
+cannot be combined with other signals using operators nor modified using
+``delay``.
 
 Design
 ------
 
 Signal generation
-~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^
 It would be extremely challenging for a CPU to simulate a signal in real-time,
 particularly given the need to pack the results into 10-bit samples. Instead,
 a window of signal is generated on startup, or on request to change the
@@ -83,7 +164,7 @@ dependent on the chunk size.
 .. _dask: https://dask.org/
 
 Transmission
-~~~~~~~~~~~~
+^^^^^^^^^^^^
 Most of the heavy work of transmission is handled by spead2. To minimise
 overheads, the heaps are pre-defined, and put into a
 :class:`spead2.send.HeapReferenceList` for bulk transmission with

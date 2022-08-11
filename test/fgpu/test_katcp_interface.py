@@ -90,9 +90,9 @@ class TestKatcpRequests:
         sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
         assert_valid_complex_list(sensor_value)
         assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
-        np.testing.assert_equal(engine_server._processor.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
+        np.testing.assert_equal(engine_server.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
         # Other pol must not have been affected
-        np.testing.assert_equal(engine_server._processor.gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
+        np.testing.assert_equal(engine_server.gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
 
     async def test_gain_set_vector(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
         """Test that the eq gain is correctly set with a vector of values."""
@@ -101,7 +101,7 @@ class TestKatcpRequests:
         # test.
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
         reply, _informs = await engine_client.request("gain", 0, *(str(gain) for gain in gains))
-        np.testing.assert_equal(engine_server._processor.gains[:, 0], gains)
+        np.testing.assert_equal(engine_server.gains[:, 0], gains)
         assert len(reply) == CHANNELS
         for value in reply:
             assert_valid_complex(aiokatcp.decode(str, value))
@@ -139,7 +139,7 @@ class TestKatcpRequests:
             sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
             assert_valid_complex_list(sensor_value)
             assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
-            np.testing.assert_equal(engine_server._processor.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
+            np.testing.assert_equal(engine_server.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
 
     async def test_gain_all_set_vector(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
         """Test that ``?gain-all`` works correctly with a scalar value."""
@@ -147,7 +147,7 @@ class TestKatcpRequests:
         reply, _informs = await engine_client.request("gain-all", *(str(gain) for gain in gains))
         assert reply == []
         for pol in range(N_POLS):
-            np.testing.assert_equal(engine_server._processor.gains[:, pol], gains)
+            np.testing.assert_equal(engine_server.gains[:, pol], gains)
             sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
             assert_valid_complex_list(sensor_value)
             np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)

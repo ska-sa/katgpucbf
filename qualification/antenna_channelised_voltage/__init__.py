@@ -28,7 +28,73 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 
-from .. import BaselineCorrelationProductsReceiver
+from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from ..reporter import Reporter
+
+
+async def sample_tone_response_hdr(
+    correlator: CorrelatorRemoteControl,
+    receiver: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+    amplitude: float,
+    rel_freqs: ArrayLike,
+    iterations: int = 3,
+    gain_step: float = 100.0,
+) -> np.ndarray:
+    """Compute spectra with high dynamic range.
+
+    Compute high dynamic range spectra per requested tone. One spectrum is
+    computed per tone. The HDR data is computed by iterating and applying various
+    gain values adjusted per iteration by the gain step.
+
+    Parameters
+    ----------
+    correlator
+        Container for correlator control using katcp.
+    receiver
+        Correlation receiver stream.
+    pdf_report
+        Pytest report logger.
+    iterations
+        Number of iterations to loop through when adjusting gain and computing HDR data.
+    gain_step
+        Step size for gain adjustment per iteration. This is a scaling factor.
+    amplitude
+        Required amplitude for generated CW tone. This is also used in computing initial gain.
+    rel_freqs
+        List of channels (can be fractional units of channels) which CW will be generated.
+
+    Returns
+    ----------
+    hdr_data
+        HDR data per spectrum.
+    """
+    # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
+    gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
+
+    rel_freqs = np.asarray(rel_freqs)
+
+    # Get a high dynamic range result (hdr_data) by using several gain settings
+    # and using the high-gain results to more accurately measure the samples
+    # whose power is low enough not to saturate.
+    for i in range(iterations):
+        pdf_report.detail(f"Set gain to {gain}.")
+        await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
+
+        data = await sample_tone_response(rel_freqs, amplitude, receiver)
+        data = data.astype(np.float64)
+
+        # Store gain adjusted data for SFDR measurement.
+        # Use current gain to capture spikes, then adjust gain.
+        if i == 0:
+            peak_data = np.max(data)
+            hdr_data = data
+        else:
+            # Compute HDR data
+            power_scale = gain_step ** (i * 2)
+            hdr_data = np.where(hdr_data >= peak_data / power_scale, hdr_data, data / power_scale)
+        gain *= gain_step
+    return hdr_data
 
 
 def compute_tone_gain(
