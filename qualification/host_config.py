@@ -21,7 +21,7 @@ from typing import Optional, Set
 from prometheus_api_client.prometheus_connect import PrometheusConnect
 
 QUERIES = [
-    'dcgm_exporter_info{instance="%h"}',
+    'DCGM_FI_DEV_FB_TOTAL{instance="%h"}',
     'node_cpu_info{instance="%h", cpu="0"}',
     'node_dmi_info{instance="%h"}',
     'node_ethtool_info{instance="%h"}',

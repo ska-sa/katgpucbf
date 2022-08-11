@@ -78,14 +78,13 @@ async def test_delay_application_time(
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
         async for timestamp, chunk in receiver.complete_chunks(max_delay=0):
-            pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
-            assert isinstance(chunk.data, np.ndarray)  # Keeps mypy happy
-            total = np.sum(chunk.data[:, bl_idx, :], axis=0)  # Sum over channels
-            receiver.stream.add_free_chunk(chunk)
-            if timestamp == target_acc_ts:
-                acc = total
-            if timestamp >= target_acc_ts:
-                break
+            with chunk:
+                pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
+                total = np.sum(chunk.data[:, bl_idx, :], axis=0)  # Sum over channels
+                if timestamp == target_acc_ts:
+                    acc = total
+                if timestamp >= target_acc_ts:
+                    break
         if acc is not None:
             break
 
@@ -107,6 +106,7 @@ async def test_delay_application_time(
     expect(delta < 0.01)
 
 
+@pytest.mark.name("Delay Enable/Disable")
 @pytest.mark.requirements("CBF-REQ-0066,CBF-REQ-0110,CBF-REQ-0187,CBF-REQ-0188")
 async def test_delay_enable_disable(
     correlator: CorrelatorRemoteControl,
@@ -424,10 +424,9 @@ async def _test_delay_phase_rate(
     timestamps = []
     phases = []
     for timestamp, chunk in await receiver.consecutive_chunks(2):
-        timestamps.append(timestamp)
-        assert isinstance(chunk.data, np.ndarray)  # Keep mypy happy
-        phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
-        receiver.stream.add_free_chunk(chunk)
+        with chunk:
+            timestamps.append(timestamp)
+            phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
     elapsed = timestamps[1] - timestamps[0]
     elapsed_s = elapsed / receiver.scale_factor_timestamp
     pdf_report.detail(f"Timestamps are {timestamps[0]}, {timestamps[1]} with difference {elapsed} ({elapsed_s:.3f} s).")

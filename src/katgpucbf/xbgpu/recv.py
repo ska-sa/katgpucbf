@@ -223,7 +223,7 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
             # during normal operation (caused by spead2's windowing
             # algorithm). Return the chunk to the stream since we are not
             # going to yield it.
-            stream.add_free_chunk(chunk)
+            chunk.recycle()
             continue
         elif not valid_chunk_received:
             # Need to check which is the first "proper" Chunk

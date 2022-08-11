@@ -52,13 +52,14 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.graphviz",
-    "sphinx.ext.imgmath",
+    "sphinx.ext.mathjax",
     "sphinx.ext.intersphinx",
     "sphinx.ext.napoleon",
     "sphinx.ext.todo",
     "sphinx.ext.viewcode",
     "sphinxcontrib.tikz",
     "sphinxcontrib.bibtex",
+    "sphinx-mathjax-offline",
 ]
 
 
@@ -79,6 +80,8 @@ intersphinx_mapping = {
     "flake8": ("https://flake8.pycqa.org/en/latest/", None),
     "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
     "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
+    "setuptools": ("https://setuptools.readthedocs.io/en/stable/", None),
+    "pip": ("https://pip.pypa.io/en/stable/", None),
 }
 
 
@@ -118,3 +121,7 @@ todo_include_todos = True
 # Adds \usetikzlibrary{...} to the latex preamble. We need "chains" for
 # rendering flowcharts.
 tikz_tikzlibraries = "chains"
+
+# Force MathJax to render as SVG rather than CHTML, to work around
+# https://github.com/mathjax/MathJax/issues/2701
+mathjax3_config = {"loader": {"load": ["input/tex", "output/svg"]}, "startup": {"output": "svg"}}
