@@ -68,20 +68,21 @@ warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
     "aiokatcp": ("https://aiokatcp.readthedocs.io/en/latest/", None),
+    "black": ("https://black.readthedocs.io/en/stable/", None),
     "coverage": ("https://coverage.readthedocs.io/en/stable/", None),
-    "numpy": ("https://numpy.org/doc/stable", None),
-    "pytest": ("https://docs.pytest.org/en/stable/", None),
-    "spead2": ("https://spead2.readthedocs.io/en/latest", None),
+    "flake8": ("https://flake8.pycqa.org/en/latest/", None),
+    "katpoint": ("https://katpoint.readthedocs.io/en/latest", None),
     "katsdpsigproc": ("https://katsdpsigproc.readthedocs.io/en/latest", None),
     "katsdptelstate": ("https://katsdptelstate.readthedocs.io/en/latest", None),
-    "black": ("https://black.readthedocs.io/en/stable/", None),
-    "flake8": ("https://flake8.pycqa.org/en/latest/", None),
-    "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
     "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
-    "setuptools": ("https://setuptools.readthedocs.io/en/stable/", None),
+    "numpy": ("https://numpy.org/doc/stable", None),
     "pip": ("https://pip.pypa.io/en/stable/", None),
+    "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
+    "pytest": ("https://docs.pytest.org/en/stable/", None),
+    "python": ("https://docs.python.org/3", None),
+    "setuptools": ("https://setuptools.readthedocs.io/en/stable/", None),
+    "spead2": ("https://spead2.readthedocs.io/en/latest", None),
 }
 
 
