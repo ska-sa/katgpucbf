@@ -8,6 +8,7 @@ Welcome to katgpucbf's documentation!
    :caption: Contents:
 
    introduction
+   maths
 
 .. toctree::
    :maxdepth: 3
