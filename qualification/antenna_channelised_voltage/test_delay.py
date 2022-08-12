@@ -29,7 +29,7 @@ from katgpucbf import BYTE_BITS, N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
-from ..reporter import Reporter
+from ..reporter import POTLocator, Reporter
 from . import compute_tone_gain
 
 MAX_DELAY = 79.53e-6  # seconds
@@ -279,6 +279,7 @@ def check_phases(
     ax.set_title(f"Phase with {caption}")
     ax.set_xlabel("Channel")
     ax.set_ylabel("Phase (degrees)")
+    ax.xaxis.set_major_locator(POTLocator())
     # It's very noisy, and a thinner linewidth allows more detail to be seen
     ax.plot(x, np.rad2deg(wrap_angle(actual)), linewidth=0.3, label="Actual")
     ax.plot(x, np.rad2deg(wrap_angle(expected)), linewidth=0.3, label="Expected")
@@ -287,6 +288,7 @@ def check_phases(
     ax_err.set_title(f"Phase error with {caption}")
     ax_err.set_xlabel("Channel")
     ax_err.set_ylabel("Error (degrees)")
+    ax_err.xaxis.set_major_locator(POTLocator())
     ax_err.plot(x, np.rad2deg(delta), linewidth=0.3)
 
     pdf_report.figure(fig)

@@ -21,8 +21,45 @@ import time
 from typing import Optional
 
 import matplotlib.figure
+import matplotlib.ticker
+import matplotlib.transforms
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+class POTLocator(matplotlib.ticker.Locator):
+    """Tick locator that uses a power-of-two step size.
+
+    This code is based on examining the source of MaxNLocator and
+    MultipleLocator. There may be some cargo-culting.
+    """
+
+    # Method docstrings are omitted because they're provided by the base class
+
+    def __init__(self, nbins: int = 10) -> None:
+        self.set_params(nbins=nbins)
+
+    def set_params(self, nbins: Optional[int]) -> None:  # noqa: D102
+        if nbins is not None:
+            self._nbins = nbins
+
+    def __call__(self) -> np.ndarray:  # noqa: D102
+        vmin, vmax = self.axis.get_view_interval()
+        return self.tick_values(vmin, vmax)
+
+    def tick_values(self, vmin: float, vmax: float) -> np.ndarray:  # noqa: D102
+        vmin, vmax = matplotlib.transforms.nonsingular(vmin, vmax, expander=1e-13, tiny=1e-14)
+        step = 2 ** np.ceil(np.log2((vmax - vmin) / self._nbins))
+        # Note: MultipleLocator uses a private helper class to ensure that
+        # floating-point rounding issues don't get in the way. For the
+        # qualification report the user can't zoom/pan arbitrarily, so we don't
+        # bother.
+        vmin = vmin // step * step
+        vmax = (vmax // step + 1) * step
+        n = (vmax - vmin + 0.001 * step) // step
+        locs = vmin - step + np.arange(n + 3) * step
+        return self.raise_if_exceeds(locs)
 
 
 class Reporter:

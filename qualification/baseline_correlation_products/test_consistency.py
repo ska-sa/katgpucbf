@@ -20,7 +20,7 @@ import matplotlib.figure
 import numpy as np
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
-from ..reporter import Reporter
+from ..reporter import POTLocator, Reporter
 
 
 async def test_consistency(
@@ -73,4 +73,5 @@ async def test_consistency(
     ax.set_title("Power")
     ax.set_xlabel("Channel")
     ax.set_ylabel("dBfs")
+    ax.xaxis.set_major_locator(POTLocator())
     pdf_report.figure(fig)
