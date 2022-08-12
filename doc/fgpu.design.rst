@@ -341,7 +341,7 @@ The first array when :math:`r=0` (i.e. :math:`z^{0}`)
 ==============  ========
    Inputs       Index(i)
 --------------  --------
-  qn + r (r=0)
+  i = qn + r
 ==============  ========
 0.4 + 0           0
 1.4 + 0           4
@@ -358,18 +358,18 @@ The fourth array when :math:`r=3` (i.e. :math:`z^{3}`)
 ==============  ========
    Inputs       Index(i)
 --------------  --------
-  qn + r (r=3)
+  i = qn + r
 ==============  ========
 0.4 + 3           3
 1.4 + 3           7
 2.4 + 3           11
 ...               ...
 ...               ...
-8191.4 + 1        32767
+8191.4 + 3        32767
 ==============  ========
 
 What this shows is that each sub-array consists of samples from the initial array :math:`z` indexed
-by :math:`i=qn+r` where each sample is every :math:`4^{th}` as determined by :math:`r`. Pictorially
+by :math:`i=qn+r` where each sample is every :math:`4^{th}` and offset by :math:`r`. Pictorially
 this looks like,
 
 .. image:: images/z_array_breakdown.png
@@ -391,7 +391,7 @@ When :math:`p=0`
 ==============  ========
    Inputs       Index(k)
 --------------  --------
-  pm + s
+  k = pm + s
 ==============  ========
 0.8192 + 0         0
 0.8192 + 1         1
@@ -408,7 +408,7 @@ When :math:`p=3`
 ==============  ========
    Inputs       Index(k)
 --------------  --------
-  pm + s
+  k = pm + s
 ==============  ========
 3.8192 + 0       24576
 3.8192 + 1       24577
