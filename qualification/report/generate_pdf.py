@@ -262,18 +262,10 @@ class CorrelatorConfiguration:
 
 
 @dataclass
-class ConfigParam:
-    """A configuration parameter describing software / hardware used in the test run."""
-
-    name: str
-    value: str
-
-
-@dataclass
 class TestConfiguration:
     """Global configuration of the test."""
 
-    params: List[ConfigParam] = field(default_factory=list)
+    params: Dict[str, str] = field(default_factory=dict)
     hosts: Dict[Host, List[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
     correlators: List[CorrelatorConfiguration] = field(default_factory=list)
 
@@ -404,18 +396,15 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
 
     Returns
     -------
-    Lists of :class:`ConfigParam` and :class:`Result` objects representing the
+    :class:`TestConfiguration` and :class:`Result` objects representing the
     test configuration and the results of all the tests logged in the JSON input.
     """
     test_configuration = TestConfiguration()
     results: List[Result] = []
     for line in input_data:
         if line["$report_type"] == "TestConfiguration":
-            # Tabulate this somehow. It'll need to modify the return.
-            line.pop("$report_type")
-            for config_param_name, config_param_value in line.items():
-                test_configuration.params.append(ConfigParam(config_param_name, config_param_value))
-            continue  # We've removed $report_type, which would break later code
+            test_configuration.params = dict(line)
+            test_configuration.params.pop("$report_type")
         elif line["$report_type"] == "HostConfiguration":
             hostname, host = _parse_host(line)
             test_configuration.hosts[host].append(hostname)
@@ -540,8 +529,8 @@ def _doc_test_configuration_global(section: Container, test_configuration: TestC
         config_table.add_hline()
         config_table.add_row([MultiColumn(2, align="|c|", data=bold("Test suite"))])
         config_table.add_hline()
-        for config_param in test_configuration.params:
-            config_table.add_row([config_param.name, config_param.value])
+        for config_key, config_value in test_configuration.params.items():
+            config_table.add_row([config_key, config_value])
             config_table.add_hline()
 
         config_table.add_row([MultiColumn(2, align="|c|", data=bold("Correlator"))])
