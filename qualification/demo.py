@@ -17,9 +17,10 @@
 """Example tests helpful in developing the reporting framework."""
 
 import matplotlib.figure
+import numpy as np
 import pytest
 
-from .reporter import Reporter
+from .reporter import POTLocator, Reporter
 
 
 @pytest.mark.requirements("DEMO-000")
@@ -51,7 +52,8 @@ def test_figure(pdf_report: Reporter) -> None:
     ax.set_xlabel("X axis")
     ax.set_ylabel("Y axis")
     ax.set_title("Caption")
-    ax.plot([1, 3, 4], [2, 6, 3], label="A line")
+    ax.xaxis.set_major_locator(POTLocator())
+    ax.plot(np.sin(np.arange(1024) * 2 * np.pi / 1024), label="sine wave")
     ax.legend()
 
     pdf_report.step("Show a figure")
