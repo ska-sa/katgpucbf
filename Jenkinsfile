@@ -47,14 +47,14 @@ pipeline {
       }
     }
 
-    stage('Parallel stage 1') {
-      parallel {
-        stage('Install katgpucbf package') {
-          steps {
-            sh 'pip install --no-deps ".[test]" && pip check'
-          }
-        }
+    stage('Install katgpucbf package') {
+      steps {
+        sh 'pip install --no-deps ".[test]" && pip check'
+      }
+    }
 
+    stage('Parallel stage') {
+      parallel {
         stage('Compile C++ tools') {
           steps {
             // Make and compile tools.
@@ -64,11 +64,7 @@ pipeline {
             }
           }
         }
-      }
-    }
 
-    stage('Parallel stage 2') {
-      parallel {
         /* This stage ensures that all the python style guidelines checks pass.
          * This will catch if someone has committed to the repo without
          * installing the required pre-commit hooks, or has bypassed them.
