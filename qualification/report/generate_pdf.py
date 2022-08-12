@@ -58,6 +58,56 @@ RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
 
+def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
+    """Generate a description string from a configuration dictionary.
+
+    The input is expected to be in the format of, e.g.:
+    {
+        "antennas": "4",
+        "channels": "8192",
+        "bandwidth": "856",
+        "band": "L",
+        "integration_time": "0.5",
+        "dsims": "4"
+    }
+
+    If `expand` is True, it will return a 'long description' as a sentence:
+    - 4 antennas, 8192 channels, L-band, 0.5s integrations, 4 dsims
+
+    If `expand` is False, it will return a MeerKAT config mode string of:
+    - 8n856M8k
+
+    Parameters
+    ----------
+    config
+        A dictionary in the format described above.
+    expand
+        To indicate whether a full-sentence description should be returned
+        or just the mode string should be generated.
+
+    Returns
+    -------
+    Short or long description of correlator mode.
+    """
+    config_mode: str
+
+    if expand:
+        # Long description required
+        config_mode = (
+            f'{config["antennas"]} antennas, '
+            f'{config["channels"]} channels, '
+            f'{config["band"]}-band, '
+            f'{config["integration_time"]}s integrations, '
+            f'{config["dsims"]} dsims.'
+        )
+    else:
+        antpols = int(config["antennas"]) * 2
+        chans = int(config["channels"]) // 1000
+        config_mode = f'{antpols}n{config["bandwidth"]}M{chans}k'
+
+    return config_mode
+
+
 class LstListing(Environment):
     """A class to wrap LaTeX's lstlisting environment."""
 
@@ -206,7 +256,7 @@ class Task:
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
-    description: str
+    mode_config: dict
     uuid: UUID
     tasks: Dict[str, Task]
 
@@ -340,7 +390,7 @@ def _parse_task(msg: dict) -> Task:
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CorrelatorConfiguration(description=msg["description"], uuid=UUID(msg["uuid"]), tasks=tasks)
+    return CorrelatorConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
@@ -555,9 +605,11 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
         ("XB-engine {i}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
     ]
     for i, correlator in enumerate(correlators, start=1):
-        with section.create(Subsection(f"Configuration {i}")) as subsec:
+        with section.create(
+            Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}")
+        ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
-            subsec.append(correlator.description)
+            subsec.append(make_correlator_mode_str(correlator.mode_config, expand=True))
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
@@ -660,7 +712,9 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
                 for i, correlator in enumerate(test_configuration.correlators, start=1):
                     if correlator.uuid == UUID(value):
                         marker = Marker(value, prefix="correlator")
-                        value = Hyperref(marker, f"Configuration {i}")
+                        value = Hyperref(
+                            marker, f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}"
+                        )
                         break
             config_table.add_row([key.capitalize(), value])
             config_table.add_hline()

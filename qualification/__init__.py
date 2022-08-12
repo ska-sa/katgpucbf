@@ -75,7 +75,7 @@ class CorrelatorRemoteControl:
     product_controller_client: aiokatcp.Client
     dsim_clients: List[aiokatcp.Client]
     config: dict  # JSON dictionary used to configure the correlator
-    description: str  # Human-readable description
+    mode_config: dict  # Configuration values used for MeerKAT mode string
     sensor_watcher: aiokatcp.SensorWatcher
     uuid: UUID = field(default_factory=uuid4)
 
@@ -93,7 +93,7 @@ class CorrelatorRemoteControl:
 
     @classmethod
     async def connect(
-        cls, name: str, host: str, port: int, config: Mapping, description: str
+        cls, name: str, host: str, port: int, config: Mapping, mode_config: dict
     ) -> "CorrelatorRemoteControl":
         """Connect to a correlator's product controller.
 
@@ -125,7 +125,7 @@ class CorrelatorRemoteControl:
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
             config=dict(config),
-            description=description,
+            mode_config=mode_config,
             sensor_watcher=sensor_watcher,
         )
 
