@@ -105,6 +105,16 @@ pipeline {
             sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch'
           }
         }
+
+        stage('Build documentation') {
+          options { timeout(time: 5, unit: 'MINUTES') }
+          steps {
+            // -W causes warnings to become errors.
+            // --keep-going ensures we get all warnings instead of just the first.
+            sh 'make -C doc clean html SPHINXOPTS="-W --keep-going"'
+            publishHTML(target: [reportName: 'Module documentation', reportDir: "doc/_build/html", reportFiles: 'index.html'])
+          }
+        }
       }
     }
 
