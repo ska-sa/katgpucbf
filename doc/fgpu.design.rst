@@ -184,8 +184,8 @@ post-processing kernel (using the Cooley-Tukey algorithm), and also handle
 fixing up the real-to-complex transformation. This is achieved by decomposing
 transformation into separately computed smaller parts (this is where Cooley-Tukey
 comes in). Part of the Fourier transform is computed using cuFFT in the compute
-kernel and the rest of the process moves into the post-processing
-kernel. The computation to form the the real-to-complex transformation takes place here.
+kernel and the final stage of the process (computation to form the the real-to-complex
+transformation) moves into the post-processing kernel.
 
 Real-to-complex transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -193,7 +193,8 @@ To start, let's consider the traditional equation for the Fourier Transform. Let
 be the number of channels we wish to decompose the input sequence into and let
 :math:`x_i` be the (real) time-domain samples and :math:`X_k` be the discrete Fourier transform (DFT)
 (the reasons for dividing by :math:`2N` rather than :math:`N` will be discussed shortly
-but simply put it is due to the number of input samples used).
+but simply put it is due to the number of input samples used)(note: :math:`k` ranges :math:`0`` to
+:math:`N-1`).
 
 .. math:: X_k = \sum_{i=0}^{2N-1} e^{\frac{-2\pi j}{2N}\cdot ik} x_i.
 
@@ -226,7 +227,7 @@ the 'overline' in :math:`\overline{Z}` denotes conjugation. This is effectively 
 reverse indices in :math:`Z_k` we get a conjugated result.
 
 Why is this so? Going back to the original definition for the DFT we saw the complex exponential
-:math:`e^{\frac{-2\pi j}{2n}\cdot ik}` has a variable :math:`k` where :math:`k` represents the
+:math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k` where :math:`k` represents the
 frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reveresed
 (i.e. negative) the complex exponential changes to:
 
@@ -327,7 +328,7 @@ is a means to indicate an :math:`r^{th}` array. In practice this :math:`r^{th}` 
 of the larger :math:`z` array of input data. Let's unpack this a bit further - What is actually happening
 is that the initial array :math:`z` is divided into :math:`n=4` separate arrays each of
 :math:`m=32768/4 = 8192` elements (hence the :math:`c=mn` above)(This is true for a desired overall
-transform size of 32768 channels). The actualy samples that land up in each array are defined by the
+transform size of 32768 channels). The actual samples that land up in each array are defined by the
 indexes :math:`i` and :math:`k`. Lets start with :math:`i`.
 
 It was stated that :math:`i = qn + r`. The parameter(s) :math:`r` takes on the range :math:`0` to :math:`n-1`
@@ -341,7 +342,7 @@ The first array when :math:`r=0` (i.e. :math:`z^{0}`)
 ==============  ========
    Inputs       Index(i)
 --------------  --------
-  i = qn + r
+  qn + r          i
 ==============  ========
 0.4 + 0           0
 1.4 + 0           4
@@ -358,7 +359,7 @@ The fourth array when :math:`r=3` (i.e. :math:`z^{3}`)
 ==============  ========
    Inputs       Index(i)
 --------------  --------
-  i = qn + r
+  qn + r          i
 ==============  ========
 0.4 + 3           3
 1.4 + 3           7
@@ -391,7 +392,7 @@ When :math:`p=0`
 ==============  ========
    Inputs       Index(k)
 --------------  --------
-  k = pm + s
+  pm + s           k
 ==============  ========
 0.8192 + 0         0
 0.8192 + 1         1
@@ -408,7 +409,7 @@ When :math:`p=3`
 ==============  ========
    Inputs       Index(k)
 --------------  --------
-  k = pm + s
+  pm + s           k
 ==============  ========
 3.8192 + 0       24576
 3.8192 + 1       24577
@@ -421,7 +422,7 @@ When :math:`p=3`
 Viewing the above tables it can be seen that the full range of outputs are indexed in batches of
 :math:`m=8192` outputs, *BUT*, this is not yet the final output and are merely the outputs as provided
 by inputting the respective :math:`z^{r}` arrays into cuFFT (all we have done at this point is
-computed :math:`Z_{k}` usinf cuFFT). As a useful flashback, we are computing :math:`Z_{k}` from :math:`z`
+computed :math:`Z_{k}` using cuFFT). As a useful flashback, we are computing :math:`Z_{k}` from :math:`z`
 (made up from smaller arrays :math:`z^{r}`) with the intention of computing the :math:`U` and :math:`V`
 terms. Why? So that with :math:`U` and :math:`V` we can compute :math:`X_{k}` which is our desired
 final output.
