@@ -65,4 +65,14 @@ Narrowband
 
 Delay and phase compensation
 ----------------------------
-.. todo:: Document delay and phase compensation
+The delay sign convention is such that a input voltage sample with timestamp
+:math:`t` will have an output timestamp of :math:`t + d` (where :math:`d` is
+the delay). In other words, the specified values are amounts by which the
+incoming signals should be delayed to align them.
+
+To correctly apply delay with sub-sample precision, it is necessary to know
+the original ("sky") frequency of the signal, before mixing and aliasing to
+baseband. The user supplies this indirectly by specifying the phase correction
+that must be applied at the centre frequency, i.e. :math:`-2\pi f_c d`, where
+:math:`f_c` is the centre frequency. This calculation is provided by
+:class:`katpoint.delay.DelayCorrection`.
