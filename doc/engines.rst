@@ -149,7 +149,6 @@ smooth out jitter in processing times.
 
 Transfers and events
 ^^^^^^^^^^^^^^^^^^^^
-
 To achieve the desired throughput it is necessary to overlap transfers to and
 from the GPU with its computations. Transfers are done using separate command
 queues, and an CUDA/OpenCL event (see :ref:`the glossary<dfn-event>`) is
