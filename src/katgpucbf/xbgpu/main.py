@@ -43,15 +43,7 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
-from .. import (
-    DEFAULT_KATCP_HOST,
-    DEFAULT_KATCP_PORT,
-    DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_TTL,
-    DESCRIPTOR_TASK_NAME,
-    SPEAD_DESCRIPTOR_INTERVAL_S,
-    __version__,
-)
+from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
@@ -300,12 +292,6 @@ async def async_main(args: argparse.Namespace) -> None:
     with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
         logger.info("Starting main processing loop")
 
-        # TODO: Work the descriptor task into being handled by xbengine.start
-        # see NGC-589.
-        descriptor_task = asyncio.create_task(
-            xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S), name=DESCRIPTOR_TASK_NAME
-        )
-        xbengine.add_service_task(descriptor_task)
         add_signal_handlers(xbengine)
 
         await xbengine.start()

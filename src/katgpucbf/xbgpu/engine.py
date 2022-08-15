@@ -50,7 +50,14 @@ import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
 
-from .. import DESCRIPTOR_TASK_NAME, GPU_PROC_TASK_NAME, RECV_TASK_NAME, SEND_TASK_NAME, __version__
+from .. import (
+    DESCRIPTOR_TASK_NAME,
+    GPU_PROC_TASK_NAME,
+    RECV_TASK_NAME,
+    SEND_TASK_NAME,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    __version__,
+)
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
@@ -786,7 +793,7 @@ class XBEngine(DeviceServer):
         await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
-    async def run_descriptors_loop(self, interval_s: float) -> None:
+    async def _run_descriptors_loop(self, interval_s: float) -> None:
         """
         Send the Baseline Correlation Products descriptors every `interval_s` seconds.
 
@@ -810,19 +817,31 @@ class XBEngine(DeviceServer):
         """Stop transmission of this baseline-correlation-products stream."""
         self.send_stream.tx_enabled = False
 
-    async def start(self) -> None:
+    async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
-        Launch all the different async functions required to run the X-Engine.
+        Start the engine.
 
-        These functions will loop forever and only exit once the XBEngine receives
-        a SIGINT or SIGTERM.
+        This function adds the receive, processing and transmit tasks onto the
+        event loop. It also adds a task to continuously send the descriptor
+        heap at an interval indicated by `descriptor_interval_s`.
 
-        .. todo::
+        These functions will loop forever and only exit once the XBEngine
+        receives a SIGINT or SIGTERM.
 
-            Starting up of descriptor transmission is currently done in
-            ``main.py``, it should be done here. For harmonious feng-shui.
-
+        Parameters
+        ----------
+        descriptor_interval_s
+            The interval used to dictate the 'engine sleep interval' between
+            sending the data descriptor.
         """
+        # Create the descriptor task first to ensure descriptor will be sent
+        # before any data makes its way through the pipeline.
+        self._descriptor_task = asyncio.create_task(
+            self._run_descriptors_loop(descriptor_interval_s),
+            name=DESCRIPTOR_TASK_NAME,
+        )
+        self.add_service_task(self._descriptor_task)
+
         base_recv.add_reader(
             self.receiver_stream,
             src=self._src,
@@ -846,13 +865,15 @@ class XBEngine(DeviceServer):
         Shut down processing when the device server is stopped.
 
         This is called by aiokatcp after closing the listening socket.
+        Also handle any Exceptions thrown unexpectedly in any of the
+        processing loops.
         """
+        self._descriptor_task.cancel()
         self.receiver_stream.stop()
-
         # If any of the tasks are already done then we had an exception, and
         # waiting for the rest may hang as the shutdown path won't proceed
         # neatly.
         if not any(task.done() for task in self.service_tasks):
             for task in self.service_tasks:
-                if task.get_name() != DESCRIPTOR_TASK_NAME:
+                if task is not self._descriptor_task:
                     await task
