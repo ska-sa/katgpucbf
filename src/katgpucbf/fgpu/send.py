@@ -166,7 +166,6 @@ def make_stream(
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create an asynchronous SPEAD stream for transmission."""
     dtype = chunks[0].data.dtype
-    rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor
     thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     memory_regions: List[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
