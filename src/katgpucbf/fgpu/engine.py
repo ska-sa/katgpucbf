@@ -550,8 +550,8 @@ class Engine(aiokatcp.DeviceServer):
 
     def _init_recv(self, src_affinity: List[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
-        ringbuffer_capacity = 2
         src_chunks_per_stream = 4
+        ringbuffer_capacity = src_chunks_per_stream * N_POLS
 
         for _ in range(self._in_free_queue.maxsize):
             self._in_free_queue.put_nowait(
