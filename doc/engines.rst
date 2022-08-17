@@ -127,11 +127,11 @@ chunks use more memory, add more latency to the system, and reduce LLC
 of the F-engine, increase the overheads associated with overlapping PFB
 (polyphase filter bank) windows.
 
-Chunking also helps reduce the impact of slow Python code. Digitiser and
-F-engine output heaps consist of only a single packet, and involving Python on a
-per-heap basis would be far too slow. We use
-:class:`spead2.recv.ChunkRingStream` to group heaps into chunks, which means
-Python code is only run per-chunk.
+Chunking also helps reduce the impact of slow Python code. Digitiser output
+heaps consist of only a single packet, and while F-engine output heaps can span
+multiple packets, they are still rather small and involving Python on a per-heap
+basis would be far too slow. We use :class:`spead2.recv.ChunkRingStream` to
+group heaps into chunks, which means Python code is only run per-chunk.
 
 Queues
 ^^^^^^
