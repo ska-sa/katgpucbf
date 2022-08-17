@@ -296,6 +296,10 @@ class TestChunkSets:
             chunk = Chunk(data=data, present=present, chunk_id=chunk_id, stream_id=pol, stream=streams[pol])
             ringbuffer.put_nowait(chunk)
 
+        for i in range(10):
+            # Throw in some empty chunks, to match what spead2 does
+            for pol in range(N_POLS):
+                add_chunk(i, pol, missing=layout.chunk_heaps)
         add_chunk(10, 0)
         add_chunk(10, 1)
         add_chunk(11, 1)
@@ -331,9 +335,9 @@ class TestChunkSets:
         assert sets[1][0].chunk_id == 12
         assert sets[2][0].chunk_id == 20
         # Check that the mismatched chunks were returned to the free ring
-        assert streams[0].add_free_chunk.call_count == 1
+        assert streams[0].add_free_chunk.call_count == 11
         assert streams[0].add_free_chunk.call_args[0][0].chunk_id == 21
-        assert streams[1].add_free_chunk.call_count == 1
+        assert streams[1].add_free_chunk.call_count == 11
         assert streams[1].add_free_chunk.call_args[0][0].chunk_id == 11
 
         # Check metrics
