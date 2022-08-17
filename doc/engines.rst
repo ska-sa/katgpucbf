@@ -1,7 +1,6 @@
 DSP Engine Design
 =================
 
-
 .. _gpu-terminology:
 
 Terminology
@@ -75,7 +74,6 @@ Timestamp
     generally reflects the timestamp of the *first* ADC sample that forms part
     of that data.
 
-
 Operation
 ---------
 
@@ -135,7 +133,6 @@ per-heap basis would be far too slow. We use
 :class:`spead2.recv.ChunkRingStream` to group heaps into chunks, which means
 Python code is only run per-chunk.
 
-
 Queues
 ^^^^^^
 Both engines consist of several components which run independently of each
@@ -157,9 +154,6 @@ are passed to the device to be waited for, so that the CPU does not need to
 block. The CPU does need to wait for host-to-device transfers before putting the
 buffer onto the free queue, and for device-to-host transfers before transmitting
 results, but this is deferred as long as possible.
-
-
-
 
 Common features
 ---------------
