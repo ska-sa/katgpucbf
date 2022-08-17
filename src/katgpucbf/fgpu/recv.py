@@ -241,10 +241,13 @@ async def chunk_sets(
             # Inspect the chunk we have just received.
             chunk.timestamp = chunk.chunk_id * layout.chunk_samples
             pol = chunk.stream_id
+            good = np.sum(chunk.present)
+            if not good:
+                chunk.recycle()
+                continue
             if first_timestamp == -1:
                 # TODO: use chunk.present to determine the actual first timestamp
                 first_timestamp = chunk.timestamp
-            good = np.sum(chunk.present)
             lost += layout.chunk_heaps - good
             logger.debug(
                 "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
