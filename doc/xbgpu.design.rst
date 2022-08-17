@@ -1,13 +1,18 @@
 X-Engine Design
 ===============
 
-Implementation details of tensor-core correlator
-------------------------------------------------
+Implementation details of correlation kernel
+--------------------------------------------
+The correlation kernel of the XB-engine is implemented using a modified version
+of code originally written by John Romein of ASTRON (which can be accessed
+`here`_).
 
-For an overview of the tensor-core correlator, see the `GTC presentation`_.
-This document gets into the low-level details of the implementation. Familiarity
-with CUDA (including warp matrix multiplies) as well as the function of a
-correlator are assumed.
+.. _here: https://git.astron.nl/RD/tensor-core-correlator/-/blob/83abdcc/libtcc/TCCorrelator.cu
+
+For an overview of the tensor-core correlator compute kernel, see the
+`GTC presentation`_.  This section gets into the low-level details of the
+implementation. Familiarity with CUDA (including warp matrix multiplies) as well
+as the function of a correlator are assumed.
 
 .. _GTC presentation: https://developer.nvidia.com/gtc/2019/video/s9306
 
@@ -257,7 +262,6 @@ results are added to the existing values in global memory.
 
 Accumulations, Dumps and Output Data
 -------------------------------------
-
 The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
 
@@ -267,7 +271,7 @@ these time samples is part of a different spectrum, meaning that the timestamp
 difference per sample is equal to the value of :option:`!--samples-between-spectra`.
 The timestamp difference between two consecutive heaps from the same F-Engine is equal to:
 
-  `heap_timestamp_step = --spectra-per-heap * --samples-between-spectra`.
+  `heap_timestamp_step = spectra_per_heap * samples_between_spectra`.
 
 A :dfn:`batch` of heaps is a collection of heaps from different F-Engines with the same
 timestamp. A :dfn:`chunk` consists of multiple consecutive batches (the number is given
@@ -286,13 +290,13 @@ The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
 between succesive dumps is therefore equal to:
 
-  `timestamp_difference = --spectra-per-heap * --samples-between-spectra * --heap-accumulation-threshold`
+  `timestamp_difference = spectra_per_heap * samples_between_spectra * heap_accumulation_threshold`
 
 The output heap timestamp is aligned to an integer multiple of
 `timestamp_difference` (equivalent to the current SKARAB "auto-resync" logic).
 The total accumulation time is equal to:
 
-  `accumulation_time_s = timestamp_difference * --adc-sample-rate(Hz)` seconds.
+  `accumulation_time_s = timestamp_difference * adc_sample_rate(Hz)` seconds.
 
 The output heap contains multiple packets and these packets are distributed over
 the entire `accumulation_time_s` interval to reduce network burstiness. The
