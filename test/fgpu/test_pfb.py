@@ -48,14 +48,7 @@ def pfb_fir_host(data, channels, unzip_factor, weights):
 
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int) -> None:
-    """Test the GPU PFB-FIR for numerical correctness.
-
-    Parameters
-    ----------
-    repeat
-        Number of times to repeat the GPU operation, default 1. A larger value
-        can be used for benchmarking purposes.
-    """
+    """Test the GPU PFB-FIR for numerical correctness."""
     taps = 16
     spectra = 3123
     channels = 4096
