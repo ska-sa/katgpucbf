@@ -117,7 +117,7 @@ The general operation of the DSP engines is illustrated in the diagram below:
    \draw[queue] (download) -- (transmit);
 
 The F-engine uses two input streams and aligns two incoming polarisations, but
-in the X-engine, this collapses to only a single stream.
+in the XB-engine there is only one.
 
 Chunking
 ^^^^^^^^
