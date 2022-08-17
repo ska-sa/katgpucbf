@@ -334,7 +334,7 @@ class TestChunkSets:
         assert sets[0][0].chunk_id == 10
         assert sets[1][0].chunk_id == 12
         assert sets[2][0].chunk_id == 20
-        # Check that the mismatched chunks were returned to the free ring
+        # Check that the mismatched / empty chunks were returned to the free ring
         assert streams[0].add_free_chunk.call_count == 11
         assert streams[0].add_free_chunk.call_args[0][0].chunk_id == 21
         assert streams[1].add_free_chunk.call_count == 11
