@@ -1,100 +1,31 @@
 F-Engine Design
 ===============
 
-.. todo::  ``NGC-675``
-   Most of this needs to be folded into the higher-level GPU "Design" document.
-   Whatever remains will probably need re-naming under and "F-engine" sub-
-   heading or some such.
-
-The actual GPU kernels are reasonably straight-forward, because they're
-generally memory-bound rather than compute-bound. The main challenges are in
-data movement through the system.
-
-.. tikz:: Data Flow. Double-headed arrows represent data passed through a
-   queue and returned via a free queue.
-   :libs: chains
-
-   \tikzset{proc/.style={draw, rounded corners, minimum width=4.5cm, minimum height=1cm},
-            pproc/.style={proc, minimum width=2cm},
-            flow/.style={->, >=latex, thick},
-            queue/.style={flow, <->},
-            fqueue/.style={queue, color=blue}}
-   \node[proc, start chain=going below, on chain] (align) {Align, copy to GPU};
-   \node[pproc, draw=none, anchor=west,
-         start chain=rx0 going above, on chain=rx0] (align0) at (align.west) {};
-   \node[pproc, draw=none, anchor=east,
-         start chain=rx1 going above, on chain=rx1] (align1) at (align.east) {};
-   \node[proc, on chain] (process) {GPU processing};
-   \node[proc, on chain] (download) {Copy from GPU};
-   \node[proc, on chain] (transmit) {Transmit};
-   \node[pproc, draw=none, anchor=west,
-         start chain=tx0 going below, on chain=tx0] (transmit0) at (transmit.west) {};
-   \node[pproc, draw=none, anchor=east,
-         start chain=tx1 going below, on chain=tx1] (transmit1) at (transmit.east) {};
-   \foreach \i in {0, 1} {
-     \node[pproc, on chain=rx\i] (receive\i) {Receive};
-     \node[pproc, on chain=rx\i] (stream\i) {Stream};
-     \node[pproc, on chain=tx\i] (outstream\i) {Stream};
-   }
-   \foreach \i in {0, 1} {
-     \draw[flow] (stream\i) -- (receive\i);
-     \draw[queue] (receive\i) -- (align\i);
-     \draw[flow] (transmit\i) -- (outstream\i);
-   }
-   \draw[queue] (align) -- (process);
-   \draw[queue] (process) -- (download);
-   \draw[queue] (download) -- (transmit);
-
-Chunking
---------
-GPUs have massive parallelism, and to exploit them fully requires large batch
-sizes (millions of elements). To accommodate this, the input packets are
-grouped into "chunks" of fixed numbers of samples. There is a tradeoff in the
-chunk size: large chunks use more memory, add more latency to the system, and
-reduce LLC (last-level cache) hit rates. Smaller chunks limit parallelism, and
-as will be seen later, increase the overheads associated with overlapping PFB
-(polyphase filter bank) windows.
-
-Chunking also helps reduce the impact of slow Python code. Digitiser heaps
-consist of only a single packet, and involving Python on a per-heap basis
-would be far too slow. We use :class:`spead2.recv.ChunkRingStream` to group
-heaps into chunks, which means Python code is only run per-chunk.
-
-Queues
-------
-The system consists of several components which run independently of each
-other - either via threads (spead2's C++ code) or Python's asyncio framework. The
-general pattern is that adjacent components are connected by a pair of queues:
-one carrying full buckets of data forward, and one returning free data. This
-approach allows all memory to be allocated up front. Slow components thus
-cause back-pressure on up-stream components by not returning buckets through
-the free queue fast enough. The number of buckets needs to be large enough to
-smooth out jitter in processing times.
-
 Network receive
 ---------------
-Each polarisation is handled as a separate SPEAD stream, with a separate
-thread. Separate threads are necessary
-because a single core is not fast enough to load the data. This introduces
-some challenges in aligning the polarisations, because locking a shared
-structure on every packet would be prohibitively expensive. Instead, the
-polarisations are kept separate during chunking, and aligned afterwards (in
-Python). A chunk is buffered until the matching chunk is received on the
-other polarisation. Alternatively, if a later chunk is seen for the other
+Each polarisation is handled as a separate SPEAD stream, with a separate thread.
+Separate threads are necessary because a single core is not fast enough to load
+the data. This introduces some challenges in aligning the polarisations, because
+locking a shared structure on every packet would be prohibitively expensive.
+Instead, the polarisations are kept separate during chunking, and aligned
+afterwards (in Python). A chunk is buffered until the matching chunk is received
+on the other polarisation. Alternatively, if a later chunk is seen for the other
 polarisation, then the chunk can never match and is discarded.
 
-To minimise the number of copies, chunks are initialised with CUDA pinned
-memory (host memory that can be efficiently copied to the GPU).
-Alternatively, it is possible to use `vkgdr`_ to have the CPU write directly
-to GPU memory while assembling the chunk. This is not enabled by default
-because it is not always possible to use more than 256 MiB of the GPU memory
-for this, which can severely limit the chunk size.
+To minimise the number of copies, chunks are initialised with CUDA pinned memory
+(host memory that can be efficiently copied to the GPU).  Alternatively, it is
+possible to use `vkgdr`_ to have the CPU write directly to GPU memory while
+assembling the chunk. This is not enabled by default because it is not always
+possible to use more than 256 MiB of the GPU memory for this, which can severely
+limit the chunk size.
 
 .. _vkgdr: https://github.com/ska-sa/vkgdr
 
 GPU Processing
 --------------
-
+The actual GPU kernels are reasonably straight-forward, because they're
+generally memory-bound rather than compute-bound. The main challenges are in
+data movement through the system.
 
 Narrowband
 ^^^^^^^^^^
@@ -106,7 +37,7 @@ implementing this is particularly complex, and is discussed separately in
 .. note::
 
    At the time of writing, the kernel has been written but the full narrowband
-   implementation is not yet implemented.
+   operation is not yet implemented.
 
 Decode
 ^^^^^^
@@ -337,17 +268,6 @@ buffer, then run the back-end and push the resulting spectra into a queue for
 transmission. It's important to (as far as possible) always run the back-end
 on the same amount of data, because cuFFT bakes the number of FFTs into its
 plan.
-
-Transfers and events
-^^^^^^^^^^^^^^^^^^^^
-To achieve the desired throughput it is necessary to overlap data transfers
-with computations. Transfers are done using separate command queues, and an
-CUDA/OpenCL event is associated with the completion of each transfer. Where
-possible, these events are passed to the device to be waited for, so that the
-CPU does not need to block. The CPU does need to wait for host-to-device
-transfers before putting the buffer onto the free queue, and for
-device-to-host transfers before transmitting results, but this is deferred as
-long as possible.
 
 Network transmit
 ----------------
