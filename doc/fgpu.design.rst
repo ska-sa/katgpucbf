@@ -182,7 +182,7 @@ slow and require multiple passes over the memory, because
 For performance reasons, we move part of the Fourier Transform into the
 post-processing kernel, and also handle fixing up the real-to-complex transformation.
 This is achieved by decomposing transformation into separately-computed smaller parts
-(this is where Cooley-Tukey comes in). Part of the Fourier transform is computed using
+(using the Cooley-Tukey algorithm). Part of the Fourier transform is computed using
 cuFFT and the final stage (post-processing kernel) of the process includes one round of
 Cooley-Tukey computation and the computation to form the real-to-complex transformation.
 
@@ -204,44 +204,39 @@ and in the GPU space the cuFFT is one such implemetation. As highlighted earlier
 of greater than 16384 (for a GeForce RTX 3080 Ti at least) require more than one memory pass making it
 less efficient than it needs to be. The technique detailed below uses the decomposition as provided by
 Cooley-Tukey to break down a larger transform into smaller 'sub-transforms' where the number of 'sub-transforms'
-are intentionally kept small for efficiency reasons and later combined (same process as the FFT) to form
+is intentionally kept small for efficiency reasons and later combined (same process as the FFT) to form
 the larger transform size. This is a multi-step process and requires some extra notation and math tricks.
 
 Now for some notation to see how this works. Let :math:`z` be the array of samples (:math:`x_{i}`) of
 length :math:`N`. For clarity, array :math:`x` has length :math:`2N` but is divided into even- and odd- samples
-each of length :math:`N`. In this case the original input sequence is a real-valued array but for the purposes
-of this computational sequence lets consider it a complex-valued array (i.e. every even-indexed sample is
-real-valued and every odd-indexed sample is considered the imaginary sample). The initial array was said to be
-made up of :math:`x_i` samples but we'll divide the original array into even- and odd-index samples.
+each of length :math:`N`. In other words, each adjacent pair of real values in :math:`x` is interpreted as the real
+and imaginary components of a complex value.
 
 Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}`, and let :math:`z_i = u_i + jv_i = x_{2i} + j x_{2i+1}`.
 We will start by computing the Fourier transform of :math:`z`. This is convenient to do because :math:`z` has the
 identical memory layout to :math:`x`, so we can obtain it just by viewing the same memory as containing N complex
 numbers instead of 2N real numbers.
 
-Let :math:`U`, :math:`V` and :math:`Z` denote the Fourier transforms of math:`u`, :math:`v` and :math:`z` respectively.
+Let :math:`U`, :math:`V` and :math:`Z` denote the Fourier transforms of :math:`u`, :math:`v` and :math:`z` respectively.
 Since the Fourier transform is a linear operator and we defined :math:`z = u + jv`, we also have :math:`Z = U + jV`.
 
 It is important to remember that both :math:`u` and :math:`v` are real-valued, so :math:`U`
 and :math:`V` are Hermitian symmetric. By re-arranging things we can reconstruct :math:`U` and
-:math:`V` from :math:`Z`. Now for a nifty trick: Let :math:`Z'`
-be :math:`Z` with reversed indices i.e., :math:`Z'_k = Z_{-k}` where indices are taken
-modulo :math:`n`. Taking this once step further then we can say :math:`Z'_k = Z_{-k} = \overline{Z}` where
-the 'overline' in :math:`\overline{Z}` denotes conjugation. This is effectively saying that by taking the
-reverse indices in :math:`Z_k` we get a conjugated result.
+:math:`V` from :math:`Z` using Hermitian symmetry properties. Now for a nifty trick: Let :math:`U'`
+be :math:`U` with reversed indices i.e., :math:`U'_k = U_{-k}` where indices are taken
+modulo :math:`n`. Taking this once step further then we can say :math:`U'_k = U_{-k} = \overline{U_k}` where
+the 'overline' in :math:`\overline{U_k}` denotes conjugation. This is effectively saying that by taking the
+reverse indices in :math:`U_k` we get a conjugated result.
 
 Why is this so? Going back to the original definition for the DFT we saw the complex exponential
 :math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k` where :math:`k` represents the
-frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reveresed
-(i.e. negative) the complex exponential changes to:
+frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reversed
+(i.e. negative) the complex exponential changes to :math:`e^{\frac{2\pi j}{2n}\cdot i(k)}` as the negaitive
+in :math:`-k` multiplies out.
 
-.. math::
-   e^{\frac{-2\pi j}{2n}\cdot i(-k)}
-   = e^{\frac{2\pi j}{2n}\cdot i(k)}
-
-So by reversing the index has the same effect as taking the conjugate. Applying this to the :math:`U`
-and :math:`V` components then :math:`U' = \overline{U}, V' = \overline{V}`. Going full circle (for completeness)
-if one was to conjugate the reversal (i.e. :math:`\overline{U'}`) then since :math:`U' = \overline{U}`,
+So by reversing the index has the same effect as taking the conjugate. Circling back to :math:`U` and :math:`V`
+components then :math:`U' = \overline{U}, V' = \overline{V}`. Going full circle (for completeness) if one was to
+conjugate the reversal (i.e. :math:`\overline{U'}`) then since :math:`U' = \overline{U}`,
 :math:`\overline{U'} = \overline{\overline{U}} = U`. Likewise for :math:`\overline{V'} = \overline{\overline{V}} = V`.
 
 Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the conjugate of
