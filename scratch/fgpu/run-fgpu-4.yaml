@@ -1,4 +1,4 @@
-session_name: stress
+session_name: fgpu-4
 windows:
     - window_name: window
       layout: tiled
