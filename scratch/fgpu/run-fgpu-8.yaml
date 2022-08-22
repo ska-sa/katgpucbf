@@ -1,0 +1,18 @@
+# Uses two windows because tmux gives an error about insufficient space
+# if one tries to do it in a single pane.
+session_name: fgpu-8
+windows:
+    - window_name: window1
+      layout: tiled
+      panes:
+          - ./run-fgpu.sh 0 --use-vkgdr --use-peerdirect
+          - ./run-fgpu.sh 1 --use-vkgdr --use-peerdirect
+          - ./run-fgpu.sh 2 --use-vkgdr --use-peerdirect
+          - ./run-fgpu.sh 3 --use-vkgdr --use-peerdirect
+    - window_name: window2
+      layout: tiled
+      panes:
+          - ./run-fgpu.sh 4 --use-vkgdr --use-peerdirect
+          - ./run-fgpu.sh 5 --use-vkgdr --use-peerdirect
+          - ./run-fgpu.sh 6 --use-vkgdr --use-peerdirect
+          - ./run-fgpu.sh 7 --use-vkgdr --use-peerdirect
