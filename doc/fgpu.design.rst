@@ -186,27 +186,27 @@ This is achieved by decomposing transformation into separately-computed smaller 
 cuFFT and the final stage (post-processing kernel) of the process includes one round of
 Cooley-Tukey computation and the computation to form the real-to-complex transformation.
 
-Real-to-complex transform
-~~~~~~~~~~~~~~~~~~~~~~~~~
 To start, let's consider the traditional equation for the Fourier Transform. Let :math:`N`
-be the number of channels we wish to decompose the input sequence into, and let
-:math:`x_i` be the (real) time-domain samples and :math:`X_k` be the discrete Fourier transform (DFT).
-Because the time domain is real, the frequency domain is Hermitian symmetric, and we only need to compute
-half of it to recover all the information. We thus only need to consider :math:`k` from :math:`0` to
-:math:`N-1` (this loses information about :math:`X_N`, but it is convenient to discard it and thus have
-a power-of-two number of outputs).
+be the number of channels into which we wish to decompose the input sequence into, and let
+:math:`x_i` be the (real) time-domain samples (:math:`0 \le i < 2N`) and :math:`X_k` be the discrete
+Fourier transform (DFT). Because the time domain is real, the frequency domain is Hermitian symmetric,
+and we only need to compute half of it to recover all the information. We thus only need to consider
+:math:`k` from :math:`0` to :math:`N-1` (this loses information about :math:`X_N`, but it is convenient
+to discard it and thus have a power-of-two number of outputs).
 
 .. math:: X_k = \sum_{i=0}^{2N-1} e^{\frac{-2\pi j}{2N}\cdot ik} x_i.
 
 We know that a direct implementation of the DFT is inefficient and alternative, more efficient
 means exist to perform this computation. One such method is the FFT introduce by Cooley-Tukey
-and in the GPU space the cuFFT is one such implemetation. As highlighted earlier, transform sizes
+and in the GPU space cuFFT is one such implemetation. As highlighted earlier, transform sizes
 of greater than 16384 (for a GeForce RTX 3080 Ti at least) require more than one memory pass making it
 less efficient than it needs to be. The technique detailed below uses the decomposition as provided by
 Cooley-Tukey to break down a larger transform into smaller 'sub-transforms' where the number of 'sub-transforms'
 is intentionally kept small for efficiency reasons and later combined (same process as the FFT) to form
 the larger transform size. This is a multi-step process and requires some extra notation and math tricks.
 
+Real-to-complex transform
+~~~~~~~~~~~~~~~~~~~~~~~~~
 Now for some notation to see how this works. Let :math:`z` be the array of samples (:math:`x_{i}`) of
 length :math:`N`. For clarity, array :math:`x` has length :math:`2N` but is divided into even- and odd- samples
 each of length :math:`N`. In other words, each adjacent pair of real values in :math:`x` is interpreted as the real
@@ -215,16 +215,19 @@ and imaginary components of a complex value.
 Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}`, and let :math:`z_i = u_i + jv_i = x_{2i} + j x_{2i+1}`.
 We will start by computing the Fourier transform of :math:`z`. This is convenient to do because :math:`z` has the
 identical memory layout to :math:`x`, so we can obtain it just by viewing the same memory as containing N complex
-numbers instead of 2N real numbers.
+numbers instead of 2N real numbers. In other words, each adjacent pair of real values in :math:`x` is interpreted
+as the real and imaginary components of a complex value.
 
 Let :math:`U`, :math:`V` and :math:`Z` denote the Fourier transforms of :math:`u`, :math:`v` and :math:`z` respectively.
 Since the Fourier transform is a linear operator and we defined :math:`z = u + jv`, we also have :math:`Z = U + jV`.
 
 It is important to remember that both :math:`u` and :math:`v` are real-valued, so :math:`U`
 and :math:`V` are Hermitian symmetric. By re-arranging things we can reconstruct :math:`U` and
-:math:`V` from :math:`Z` using Hermitian symmetry properties. Now for a nifty trick: Let :math:`U'`
+:math:`V` from :math:`Z` using Hermitian symmetry properties. Let :math:`U'`
 be :math:`U` with reversed indices i.e., :math:`U'_k = U_{-k}` where indices are taken
-modulo :math:`n`. Taking this once step further then we can say :math:`U'_k = U_{-k} = \overline{U_k}` where
+modulo :math:`n`.
+
+Hermitian symmetry means that :math:`U'_k = U_{-k} = \overline{U_k}` where
 the 'overline' in :math:`\overline{U_k}` denotes conjugation. This is effectively saying that by taking the
 reverse indices in :math:`U_k` we get a conjugated result.
 
@@ -234,13 +237,13 @@ frequency component under computation for the input sequence :math:`x_i`. If :ma
 (i.e. negative) the complex exponential changes to :math:`e^{\frac{2\pi j}{2n}\cdot i(k)}` as the negaitive
 in :math:`-k` multiplies out.
 
-So by reversing the index has the same effect as taking the conjugate. Circling back to :math:`U` and :math:`V`
-components then :math:`U' = \overline{U}, V' = \overline{V}`. Going full circle (for completeness) if one was to
-conjugate the reversal (i.e. :math:`\overline{U'}`) then since :math:`U' = \overline{U}`,
-:math:`\overline{U'} = \overline{\overline{U}} = U`. Likewise for :math:`\overline{V'} = \overline{\overline{V}} = V`.
+Moving back to :math:`U` and :math:`V` components then :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
+Going full circle (for completeness) if one was to conjugate the reversal (i.e. :math:`\overline{U'}`) then since
+:math:`U' = \overline{U}`, :math:`\overline{U'} = \overline{\overline{U}} = U`. Likewise for
+:math:`\overline{V'} = \overline{\overline{V}} = V`.
 
-Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the conjugate of
-:math:`Z`, namely :math:`Z'`.
+Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the reverse (which becomes
+the conjugate as described above) of :math:`Z`, namely :math:`Z'`.
 
 .. math::
    Z'              &= U' + jV'\\
@@ -249,26 +252,26 @@ Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can 
                    &= U - jV\\
 
 What we actually want is to be able to separate out :math:`U` and :math:`jV` in terms of only :math:`Z`
-and :math:`Z'` (remember, :math:`Z` is the input array of real-valued samples we are dividing up as even and
-odd-indexed samples).
+and :math:`Z'` (remember, :math:`z` is the input array of real-valued samples reinterpreted as if it is
+an array of N complex samples).
 
-Now lets formulate both :math:`U` and :math:`V` in terms of :math:`Z` and :math:`Z'`.
+Now let's formulate both :math:`U` and :math:`V` in terms of :math:`Z` and :math:`\overline{Z'}`.
 
 .. math::
       Z + \overline{Z'} &= (U + jV) + (U - jV)\\
                         &= 2U +j(V-V)\\
-                        &= 2U\\
+                        &= 2U.
 
 Likewise,
 
 .. math::
       Z - \overline{Z'} &= (U + jV) - (U - jV)\\
-                        &= 2jV\\
+                        &= 2jV.
 
 
 Using the above we can see that :math:`U = \frac{Z + \overline{Z'}}{2}` and similarly
 :math:`V = \frac{Z - \overline{Z'}}{2j}`. Next, we use the Cooley-Tukey
-transform to construct :math:`X` from :math:`U` and :math:`V`. To do this lets go back to
+transform to construct :math:`X` from :math:`U` and :math:`V`. To do this let's go back to
 the initial definition of the DFT and expand that using the Cooley-Tukey approach.
 
 .. math::
@@ -280,9 +283,8 @@ the initial definition of the DFT and expand that using the Cooley-Tukey approac
           e^{\frac{-\pi j}{N}\cdot k}\sum_{i=0}^{N-1} e^{\frac{-2\pi j}{N}\cdot ik} v_i\\
        &= U_k + e^{\frac{-\pi j}{N}\cdot k} V_k.\\
 
-What we get is a means to compute the desired output :math:`X_{k}` but in terms of using the
-computed factors :math:`U` and :math:`V` which we compute from the complex-valued input data
-sequence :math:`z`.
+What we get is a means to compute the desired output :math:`X_{k}` using the :math:`U` and :math:`V`
+which we compute from the complex-valued input data sequence :math:`z`.
 
 We can also re-use some common expressions by computing :math:`X_{N-k}` at the same time
 
@@ -294,9 +296,8 @@ We can also re-use some common expressions by computing :math:`X_{N-k}` at the s
 This raises the question: Why compute both :math:`X_{k}` and :math:`X_{N-k}`? After all,
 parameter :math:`k` should range the full channel range initially stated (parameter :math:`N`). The answer:
 compute efficiency. It is costly to compute :math:`U_k` and :math:`V_k` so if we can use them to
-compute two elements of X (:math:`X_{k}` and :math:`X_{N-k}`) at once it is better than producing
-only one element of :math:`X`. The so-called "twiddle-factor" handles the final stage of the
-real-to-complex transformation.
+compute two elements of :math:`X`` (:math:`X_{k}` and :math:`X_{N-k}`) at once it is better than producing
+only one element of :math:`X`.
 
 **A side note:** When :math:`k = 0` or :math:`k = \frac{N}{2}` the second calculation
 is unnecessary, but it is simpler (and probably cheaper) to just do it anyway
