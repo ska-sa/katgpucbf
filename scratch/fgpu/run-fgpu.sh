@@ -3,7 +3,7 @@
 set -e -u
 
 # Load variables for machine-specific config
-. config/$(hostname -s).sh
+. ../config/$(hostname -s).sh
 
 nproc=$(nproc)
 step=$(($nproc / 4))

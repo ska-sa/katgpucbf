@@ -3,7 +3,7 @@
 set -e -u
 
 # Load variables for machine-specific config
-. config/$(hostname -s).sh
+. ../config/$(hostname -s).sh
 
 if [ "$#" -ne 1 ]; then
     echo "Usage: $0 0|1|2|3" 1>&2

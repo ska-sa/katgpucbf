@@ -2,6 +2,9 @@
 
 set -e -u
 
+# Load variables for machine-specific config
+. ../config/$(hostname -s).sh
+
 iface_ip1=10.100.43.1
 iface_ip2=10.100.41.1
 mcast="239.10.10.$((10 + $1 * 2))+1:7148"
