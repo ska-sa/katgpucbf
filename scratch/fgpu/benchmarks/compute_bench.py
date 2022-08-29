@@ -18,9 +18,12 @@
 
 import argparse
 
+import numpy as np
 from katsdpsigproc import accel
 
+from katgpucbf import N_POLS
 from katgpucbf.fgpu.compute import ComputeTemplate
+from katgpucbf.fgpu.engine import generate_weights
 
 
 def main():
@@ -32,6 +35,7 @@ def main():
     parser.add_argument("--passes", type=int, default=10)
     args = parser.parse_args()
 
+    rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
         template = ComputeTemplate(context, args.taps, args.channels)
@@ -44,10 +48,26 @@ def main():
             spectra=spectra,
             spectra_per_heap=args.spectra_per_heap,
         )
-        # Fill everything with zeros just ensure performance isn't affected
-        # by stray NaNs and the like.
         fn.ensure_all_bound()
-        for name in ["weights", "fine_delay", "phase", "gains"]:
+
+        h_weights = fn.buffer("weights").empty_like()
+        h_weights[:] = generate_weights(args.channels, args.taps)
+        fn.buffer("weights").set(command_queue, h_weights)
+
+        h_gains = fn.buffer("gains").empty_like()
+        h_gains[:] = 1
+        fn.buffer("gains").set(command_queue, h_gains)
+
+        for i in range(N_POLS):
+            buf = fn.buffer(f"in{i}")
+            h_data = buf.empty_like()
+            assert h_data.dtype == np.uint8
+            h_data[:] = rng.integers(0, 256, size=h_data.shape, dtype=np.uint8)
+            buf.set(command_queue, h_data)
+
+        # Fill these with zeros just to ensure performance isn't affected
+        # by stray NaNs and the like.
+        for name in ["fine_delay", "phase"]:
             fn.buffer(name).zero(command_queue)
 
         def run():
