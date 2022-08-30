@@ -1,4 +1,3 @@
-#!/bin/bash
 # This NIC seems to be dropping a lot of incoming packets
 # (maybe contending with GPU on the same host bridge?)
 # iface1=enp129s0f0
