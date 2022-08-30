@@ -358,8 +358,11 @@ class TestEngine:
             # Wait for heap to be ready and then update out item group
             # with the new values.
             heap = await recv_stream.get()
-            items = ig_recv.update(heap)
 
+            while (updated_items := set(ig_recv.update(heap))) == set():
+                # Test has gone on long enough that we've received another descriptor
+                heap = await recv_stream.get()
+            assert updated_items == {"frequency", "timestamp", "xeng_raw"}
             # Ensure that the timestamp from the heap is what we expect.
             assert (
                 ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
@@ -451,6 +454,7 @@ class TestEngine:
             f"--heap-accumulation-threshold={heap_accumulation_threshold}",
             "--src-interface=lo",
             "--dst-interface=lo",
+            "--tx-enabled",
             "239.10.11.4:7149",  # src
             "239.21.11.4:7149",  # dst
         ]

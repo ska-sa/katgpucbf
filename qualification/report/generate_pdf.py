@@ -27,19 +27,19 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
 import docutils.writers.latex2e
 import pytest
 from docutils.core import publish_parts
-from dotenv import dotenv_values
 from pylatex import (
     Command,
     Document,
     LongTable,
     MiniPage,
     MultiColumn,
+    MultiRow,
     NoEscape,
     Section,
     SmallText,
@@ -56,6 +56,56 @@ from pylatex.utils import bold, escape_latex
 
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
+
+
+def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
+    """Generate a description string from a configuration dictionary.
+
+    The input is expected to be in the format of, e.g.:
+    {
+        "antennas": "4",
+        "channels": "8192",
+        "bandwidth": "856",
+        "band": "L",
+        "integration_time": "0.5",
+        "dsims": "4"
+    }
+
+    If `expand` is True, it will return a 'long description' as a sentence:
+    - 4 antennas, 8192 channels, L-band, 0.5s integrations, 4 dsims
+
+    If `expand` is False, it will return a MeerKAT config mode string of:
+    - 8n856M8k
+
+    Parameters
+    ----------
+    config
+        A dictionary in the format described above.
+    expand
+        To indicate whether a full-sentence description should be returned
+        or just the mode string should be generated.
+
+    Returns
+    -------
+    Short or long description of correlator mode.
+    """
+    config_mode: str
+
+    if expand:
+        # Long description required
+        config_mode = (
+            f'{config["antennas"]} antennas, '
+            f'{config["channels"]} channels, '
+            f'{config["band"]}-band, '
+            f'{config["integration_time"]}s integrations, '
+            f'{config["dsims"]} dsims.'
+        )
+    else:
+        antpols = int(config["antennas"]) * 2
+        chans = int(config["channels"]) // 1000
+        config_mode = f'{antpols}n{config["bandwidth"]}M{chans}k'
+
+    return config_mode
 
 
 class LstListing(Environment):
@@ -144,8 +194,10 @@ class Result:
     """
 
     nodeid: str
-    name: str
-    blurb: str
+    name: str  # Name by which the test is known to pytest (including parameters)
+    text_name: str = ""  # Name shown in the document (excluding parameters)
+    parameters: str = ""  # Parameter part of `name`
+    blurb: str = ""
     requirements: List[str] = field(default_factory=list)
     steps: List[Step] = field(default_factory=list)
     outcome: Literal["passed", "failed", "skipped"] = "failed"
@@ -153,6 +205,14 @@ class Result:
     start_time: Optional[float] = None
     duration: float = 0.0
     config: dict = field(default_factory=dict)
+
+    @property
+    def full_text_name(self) -> str:
+        """Human-readable name, including parameters."""
+        if self.parameters:
+            return f"{self.text_name} [{self.parameters}]"
+        else:
+            return self.text_name
 
 
 @dataclass(frozen=True)
@@ -175,6 +235,7 @@ class GPU:
     driver: str
     vbios: str
     bus_id: str
+    ram: int
 
 
 @dataclass(frozen=True)
@@ -204,24 +265,16 @@ class Task:
 class CorrelatorConfiguration:
     """Configuration information for a correlator instance."""
 
-    description: str
+    mode_config: dict
     uuid: UUID
     tasks: Dict[str, Task]
-
-
-@dataclass
-class ConfigParam:
-    """A configuration parameter describing software / hardware used in the test run."""
-
-    name: str
-    value: str
 
 
 @dataclass
 class TestConfiguration:
     """Global configuration of the test."""
 
-    params: List[ConfigParam] = field(default_factory=list)
+    params: Dict[str, str] = field(default_factory=dict)
     hosts: Dict[Host, List[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
     correlators: List[CorrelatorConfiguration] = field(default_factory=list)
 
@@ -249,6 +302,19 @@ def _parse_report_data(result: Result, msg: dict) -> None:
             result.blurb = msg["blurb"]
         if result.start_time is None:
             result.start_time = float(msg["test_start"])
+        if not result.text_name:
+            if "[" in result.name:
+                pos = result.name.index("[")
+                base_name = result.name[:pos]
+                result.parameters = result.name[pos + 1 : -1]
+            else:
+                result.parameters = ""
+                base_name = result.name
+            if "test_name" in msg:
+                # Replace the Python identifier, but keep any parameters
+                result.text_name = msg["test_name"]
+            else:
+                result.text_name = fix_test_name(base_name)
         result.requirements = msg["requirements"]
     elif msg_type == "config":
         msg = dict(msg)  # Avoid mutating the caller's copy
@@ -269,14 +335,16 @@ def _parse_interface(labels: dict) -> Interface:
     )
 
 
-def _parse_gpu(labels: dict) -> GPU:
-    """Parse a single GPU from ``dcgm_exporter_info`` labels."""
+def _parse_gpu(labels: dict, fb_total: float) -> GPU:
+    """Parse a single GPU from the DCGM_FI_DEV_FB_TOTAL metric."""
     return GPU(
         number=int(labels["gpu"]),
         model_name=labels["modelName"],
         driver=labels.get("DCGM_FI_DRIVER_VERSION", UNKNOWN),
         vbios=labels.get("DCGM_FI_DEV_VBIOS_VERSION", UNKNOWN),
         bus_id=labels.get("DCGM_FI_DEV_PCI_BUSID", UNKNOWN),
+        # Documentation says "MB", but using 10**6 leads to a "12GB" GPU only having 11.2 GiB
+        ram=round(fb_total * 1024**2),
     )
 
 
@@ -305,8 +373,8 @@ def _parse_host(msg: dict) -> Tuple[str, Host]:
             ram = int(value)
         elif metric_name == "node_ethtool_info":
             interfaces.append(_parse_interface(labels))
-        elif metric_name == "dcgm_exporter_info":
-            gpus.append(_parse_gpu(labels))
+        elif metric_name == "DCGM_FI_DEV_FB_TOTAL":
+            gpus.append(_parse_gpu(labels, value))
         elif metric_name == "node_uname_info":
             kernel = " ".join([labels["sysname"], labels["release"], labels["version"]])
     interfaces.sort(key=lambda interface: interface.name)
@@ -328,7 +396,7 @@ def _parse_task(msg: dict) -> Task:
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CorrelatorConfiguration(description=msg["description"], uuid=UUID(msg["uuid"]), tasks=tasks)
+    return CorrelatorConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
 def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
@@ -342,18 +410,15 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
 
     Returns
     -------
-    Lists of :class:`ConfigParam` and :class:`Result` objects representing the
+    :class:`TestConfiguration` and :class:`Result` objects representing the
     test configuration and the results of all the tests logged in the JSON input.
     """
     test_configuration = TestConfiguration()
     results: List[Result] = []
     for line in input_data:
         if line["$report_type"] == "TestConfiguration":
-            # Tabulate this somehow. It'll need to modify the return.
-            line.pop("$report_type")
-            for config_param_name, config_param_value in line.items():
-                test_configuration.params.append(ConfigParam(config_param_name, config_param_value))
-            continue  # We've removed $report_type, which would break later code
+            test_configuration.params = dict(line)
+            test_configuration.params.pop("$report_type")
         elif line["$report_type"] == "HostConfiguration":
             hostname, host = _parse_host(line)
             test_configuration.hosts[host].append(hostname)
@@ -368,7 +433,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
         if not results or results[-1].nodeid != nodeid:
             # It's the first time we've seen this nodeid (otherwise we merge
             # with the existing Result).
-            results.append(Result(nodeid, report.location[2], ""))
+            results.append(Result(nodeid, report.location[2]))
         result = results[-1]
         # The teardown phase has all the log messages, so we ignore the setup and call phases.
         if report.when == "teardown":
@@ -388,6 +453,31 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
             failure_message = re.sub("\x1b\\[.*?m", "", report.longreprtext)
             result.failure_messages.append(failure_message)
     return test_configuration, results
+
+
+def extract_requirements_verified(results: Iterable[Result]) -> Dict[str, List[str]]:
+    """Extract a matrix of requirements verified from the list of results.
+
+    Parameters
+    ----------
+    results
+        Results as generated by :func:`parse`.
+
+    Returns
+    -------
+        A dictionary with the requirements as keys and list of the tests which
+        verify that requirement as the values.
+    """
+    requirements_verified = defaultdict(list)
+    for result in results:
+        for requirement in result.requirements:
+            # TODO: This will need to be adapted once NGC-656 is merged.
+            test_name = fix_test_name(result.name).split("[")[0]  # Remove the param list at the back.
+            requirements_verified[requirement].append(test_name)
+    # Remove duplicates from the lists.
+    for key in requirements_verified.keys():
+        requirements_verified[key] = sorted(set(requirements_verified[key]))
+    return requirements_verified
 
 
 def fix_test_name(test_name: str) -> str:
@@ -453,8 +543,8 @@ def _doc_test_configuration_global(section: Container, test_configuration: TestC
         config_table.add_hline()
         config_table.add_row([MultiColumn(2, align="|c|", data=bold("Test suite"))])
         config_table.add_hline()
-        for config_param in test_configuration.params:
-            config_table.add_row([config_param.name, config_param.value])
+        for config_key, config_value in test_configuration.params.items():
+            config_table.add_row([config_key, config_value])
             config_table.add_hline()
 
         config_table.add_row([MultiColumn(2, align="|c|", data=bold("Correlator"))])
@@ -506,6 +596,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_row("Driver", gpu.driver)
                 host_table.add_row("VBIOS", gpu.vbios)
                 host_table.add_row("Bus ID", gpu.bus_id)
+                host_table.add_row("RAM", f"{gpu.ram / 2**30:.0f} GiB")
                 host_table.add_hline()
 
 
@@ -517,9 +608,11 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
         ("XB-engine {i}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
     ]
     for i, correlator in enumerate(correlators, start=1):
-        with section.create(Subsection(f"Configuration {i}")) as subsec:
+        with section.create(
+            Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}")
+        ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
-            subsec.append(correlator.description)
+            subsec.append(make_correlator_mode_str(correlator.mode_config, expand=True))
             with subsec.create(LongTable(r"|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
@@ -539,6 +632,20 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
                     table.add_hline()
 
 
+def _doc_requirements_verified(doc: Document, requirements_verified: Dict[str, List]) -> None:
+    with doc.create(Section("Requirements Verified")) as req_section:
+        with req_section.create(LongTable(r"|l|l|")) as table:
+            table.add_hline()
+            table.add_row([bold("Requirement"), bold("Tests verifying requirement")])
+            table.add_hline()
+            for req, tests in sorted(requirements_verified.items(), key=lambda item: item[0]):
+                table.add_row(MultiRow(len(tests), data=req), tests[0])
+                for test in tests[1:]:
+                    table.add_hline(2)
+                    table.add_row("", test)
+                table.add_hline()
+
+
 def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration) -> None:
     with doc.create(Section("Test Configuration")) as config_section:
         _doc_test_configuration_global(config_section, test_configuration)
@@ -549,7 +656,7 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
 
 
 def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
-    with section.create(LongTable(r"|r|l|r|")) as summary_table:
+    with section.create(LongTable(r"|l|l|l|r|")) as summary_table:
         total_duration: float = 0.0
         passed = 0
         failed = 0
@@ -557,6 +664,7 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         summary_table.add_row(
             [
                 bold("Test"),
+                bold("Parameters"),
                 bold("Result"),
                 bold("Duration"),
             ]
@@ -565,7 +673,8 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
         for result in results:
             summary_table.add_row(
                 [
-                    Hyperref(Marker(result.name, prefix="subsec"), fix_test_name(result.name)),
+                    Hyperref(Marker(result.name, prefix="subsec"), result.text_name),
+                    result.parameters,
                     TextColor("green" if result.outcome == "passed" else "red", result.outcome),
                     readable_duration(result.duration),
                 ]
@@ -608,7 +717,9 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
                 for i, correlator in enumerate(test_configuration.correlators, start=1):
                     if correlator.uuid == UUID(value):
                         marker = Marker(value, prefix="correlator")
-                        value = Hyperref(marker, f"Configuration {i}")
+                        value = Hyperref(
+                            marker, f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}"
+                        )
                         break
             config_table.add_row([key.capitalize(), value])
             config_table.add_hline()
@@ -637,21 +748,20 @@ def document_from_json(input_data: Union[str, list]) -> Document:
         result_list = input_data
 
     test_configuration, results = parse(result_list)
-
-    # Get information from the .env file, such as tester's name, which shouldn't
-    # really be in git. Allow environment to override
-    config = {**dotenv_values(), **os.environ}
+    requirements_verified = extract_requirements_verified(results)
 
     doc = Document(
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
     today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", config.get("TESTER_NAME", "Unknown"))
+    doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
+
+    _doc_requirements_verified(doc, requirements_verified)
 
     _doc_test_configuration(doc, test_configuration)
 
@@ -660,7 +770,7 @@ def document_from_json(input_data: Union[str, list]) -> Document:
 
     with doc.create(Section("Detailed Test Results")) as section:
         for result in results:
-            with section.create(Subsection(fix_test_name(result.name), label=result.name)):
+            with section.create(Subsection(result.full_text_name, label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
                     _doc_requirements(requirements_sec, result.requirements)

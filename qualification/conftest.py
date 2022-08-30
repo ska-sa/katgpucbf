@@ -56,6 +56,7 @@ ini_options = [
     IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default="false"),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
+    IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
 ]
 
 
@@ -77,6 +78,7 @@ def pytest_configure(config: pytest.Config) -> None:
         whether they're correct or useful.
     """
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
+    config.addinivalue_line("markers", "name(name): human-readable name for the test")
     for option in ini_options:
         assert config.getini(option.name), f"{option.name} missing from pytest.ini"
 
@@ -97,7 +99,14 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     # better place, and I did look around quite a bit.
     git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
     logger.info("Git information: %s", git_information)
-    custom_report_log(config, {"$report_type": "TestConfiguration", "Test Suite Git Info": git_information})
+    custom_report_log(
+        config,
+        {
+            "$report_type": "TestConfiguration",
+            "Tester": config.getini("tester"),
+            "Test Suite Git Info": git_information,
+        },
+    )
 
 
 # Need to redefine this from pytest-asyncio to have it at package scope
@@ -122,9 +131,7 @@ def n_dsims():  # noqa: D401
 
 @pytest.fixture(
     scope="package",
-    params=[
-        8192,
-    ],
+    params=[8192],
 )
 def n_channels(request):  # noqa: D401
     """Number of channels for the channeliser."""
@@ -133,9 +140,7 @@ def n_channels(request):  # noqa: D401
 
 @pytest.fixture(
     scope="package",
-    params=[
-        "l",
-    ],
+    params=["l"],
 )
 def band(request) -> str:  # noqa: D104
     """Band ID."""
@@ -161,6 +166,9 @@ def pdf_report(request) -> Reporter:
         else:
             reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
     data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
+    name_marker = request.node.get_closest_marker("name")
+    if name_marker is not None:
+        data[0]["test_name"] = name_marker.args[0]
     request.node.user_properties.append(("pdf_report_data", data))
     return Reporter(data)
 
@@ -192,7 +200,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 @pytest.fixture(scope="package")
 async def _correlator_config_and_description(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
-) -> Tuple[dict, str]:
+) -> Tuple[dict, dict]:
     # Adapted from `sim_correlator.py` but with logic for using multiple dsims
     # removed. For the time being, we're going to use a single dsim for
     # consistency with MeerKAT's qualification testing.
@@ -240,23 +248,36 @@ async def _correlator_config_and_description(
         "int_time": int_time,
     }
 
-    description = (
+    # The first three key/values are used for the traditional MeerKAT
+    # correlator mode string, the second three are used for a more complete
+    # correlator description in the final report.
+    # TODO: Update the key to be the actual parameter/fixture name
+    correlator_mode_config: Dict[str, str] = {
+        "antennas": str(n_antennas),
+        "channels": str(n_channels),
+        "bandwidth": f"{int(adc_sample_rate//1e6//2)}",
+        "band": f"{BANDS[band].long_name}",
+        "integration_time": str(int_time),
+        "dsims": str(n_dsims),
+    }
+    long_description = (
         f"{n_antennas} antennas, {n_channels} channels, "
         f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
     )
-    logger.info("Config for correlator generation: %s.", description)
-    return config, description
+    logger.info("Config for correlator generation: %s.", long_description)
+
+    return config, correlator_mode_config
 
 
 @pytest.fixture(scope="package")
-async def correlator_config(_correlator_config_and_description: Tuple[dict, str]) -> dict:
+async def correlator_config(_correlator_config_and_description: Tuple[dict, str, str]) -> dict:
     """Produce the configuration dict from the given parameters."""
     return _correlator_config_and_description[0]
 
 
 @pytest.fixture(scope="package")
-async def correlator_description(_correlator_config_and_description: Tuple[dict, str]) -> str:
-    """Produce a short human-readable description of the correlator config."""
+async def correlator_mode_config(_correlator_config_and_description: Tuple[dict, str, str]) -> str:
+    """Produce a dictionary describing the correlator config."""
     return _correlator_config_and_description[1]
 
 
@@ -324,7 +345,7 @@ async def _report_correlator_config(
         pytestconfig,
         {
             "$report_type": "CorrelatorConfiguration",
-            "description": correlator.description,
+            "mode_config": correlator.mode_config,
             "uuid": str(correlator.uuid),
             "tasks": tasks,
         },
@@ -352,7 +373,7 @@ async def session_correlator(
     host_config_querier: HostConfigQuerier,
     master_controller_client: aiokatcp.Client,
     correlator_config: dict,
-    correlator_description: str,
+    correlator_mode_config: dict,
 ) -> AsyncGenerator[CorrelatorRemoteControl, None]:
     """Start a correlator using the SDP master controller.
 
@@ -380,7 +401,11 @@ async def session_correlator(
     )
     try:
         remote_control = await CorrelatorRemoteControl.connect(
-            product_name, product_controller_host, product_controller_port, correlator_config, correlator_description
+            product_name,
+            product_controller_host,
+            product_controller_port,
+            correlator_config,
+            correlator_mode_config,
         )
         await _report_correlator_config(pytestconfig, host_config_querier, remote_control, master_controller_client)
 

@@ -14,7 +14,6 @@ Submodules
    katgpucbf.fgpu.main
    katgpucbf.fgpu.pfb
    katgpucbf.fgpu.postproc
-   katgpucbf.fgpu.process
    katgpucbf.fgpu.recv
    katgpucbf.fgpu.send
 

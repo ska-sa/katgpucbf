@@ -1,100 +1,31 @@
 F-Engine Design
 ===============
 
-.. todo::  ``NGC-675``
-   Most of this needs to be folded into the higher-level GPU "Design" document.
-   Whatever remains will probably need re-naming under and "F-engine" sub-
-   heading or some such.
-
-The actual GPU kernels are reasonably straight-forward, because they're
-generally memory-bound rather than compute-bound. The main challenges are in
-data movement through the system.
-
-.. tikz:: Data Flow. Double-headed arrows represent data passed through a
-   queue and returned via a free queue.
-   :libs: chains
-
-   \tikzset{proc/.style={draw, rounded corners, minimum width=4.5cm, minimum height=1cm},
-            pproc/.style={proc, minimum width=2cm},
-            flow/.style={->, >=latex, thick},
-            queue/.style={flow, <->},
-            fqueue/.style={queue, color=blue}}
-   \node[proc, start chain=going below, on chain] (align) {Align, copy to GPU};
-   \node[pproc, draw=none, anchor=west,
-         start chain=rx0 going above, on chain=rx0] (align0) at (align.west) {};
-   \node[pproc, draw=none, anchor=east,
-         start chain=rx1 going above, on chain=rx1] (align1) at (align.east) {};
-   \node[proc, on chain] (process) {GPU processing};
-   \node[proc, on chain] (download) {Copy from GPU};
-   \node[proc, on chain] (transmit) {Transmit};
-   \node[pproc, draw=none, anchor=west,
-         start chain=tx0 going below, on chain=tx0] (transmit0) at (transmit.west) {};
-   \node[pproc, draw=none, anchor=east,
-         start chain=tx1 going below, on chain=tx1] (transmit1) at (transmit.east) {};
-   \foreach \i in {0, 1} {
-     \node[pproc, on chain=rx\i] (receive\i) {Receive};
-     \node[pproc, on chain=rx\i] (stream\i) {Stream};
-     \node[pproc, on chain=tx\i] (outstream\i) {Stream};
-   }
-   \foreach \i in {0, 1} {
-     \draw[flow] (stream\i) -- (receive\i);
-     \draw[queue] (receive\i) -- (align\i);
-     \draw[flow] (transmit\i) -- (outstream\i);
-   }
-   \draw[queue] (align) -- (process);
-   \draw[queue] (process) -- (download);
-   \draw[queue] (download) -- (transmit);
-
-Chunking
---------
-GPUs have massive parallelism, and to exploit them fully requires large batch
-sizes (millions of elements). To accommodate this, the input packets are
-grouped into "chunks" of fixed numbers of samples. There is a tradeoff in the
-chunk size: large chunks use more memory, add more latency to the system, and
-reduce LLC (last-level cache) hit rates. Smaller chunks limit parallelism, and
-as will be seen later, increase the overheads associated with overlapping PFB
-(polyphase filter bank) windows.
-
-Chunking also helps reduce the impact of slow Python code. Digitiser heaps
-consist of only a single packet, and involving Python on a per-heap basis
-would be far too slow. We use :class:`spead2.recv.ChunkRingStream` to group
-heaps into chunks, which means Python code is only run per-chunk.
-
-Queues
-------
-The system consists of several components which run independently of each
-other - either via threads (spead2's C++ code) or Python's asyncio framework. The
-general pattern is that adjacent components are connected by a pair of queues:
-one carrying full buckets of data forward, and one returning free data. This
-approach allows all memory to be allocated up front. Slow components thus
-cause back-pressure on up-stream components by not returning buckets through
-the free queue fast enough. The number of buckets needs to be large enough to
-smooth out jitter in processing times.
-
 Network receive
 ---------------
-Each polarisation is handled as a separate SPEAD stream, with a separate
-thread. Separate threads are necessary
-because a single core is not fast enough to load the data. This introduces
-some challenges in aligning the polarisations, because locking a shared
-structure on every packet would be prohibitively expensive. Instead, the
-polarisations are kept separate during chunking, and aligned afterwards (in
-Python). A chunk is buffered until the matching chunk is received on the
-other polarisation. Alternatively, if a later chunk is seen for the other
+Each polarisation is handled as a separate SPEAD stream, with a separate thread.
+Separate threads are necessary because a single core is not fast enough to load
+the data. This introduces some challenges in aligning the polarisations, because
+locking a shared structure on every packet would be prohibitively expensive.
+Instead, the polarisations are kept separate during chunking, and aligned
+afterwards (in Python). A chunk is buffered until the matching chunk is received
+on the other polarisation. Alternatively, if a later chunk is seen for the other
 polarisation, then the chunk can never match and is discarded.
 
-To minimise the number of copies, chunks are initialised with CUDA pinned
-memory (host memory that can be efficiently copied to the GPU).
-Alternatively, it is possible to use `vkgdr`_ to have the CPU write directly
-to GPU memory while assembling the chunk. This is not enabled by default
-because it is not always possible to use more than 256 MiB of the GPU memory
-for this, which can severely limit the chunk size.
+To minimise the number of copies, chunks are initialised with CUDA pinned memory
+(host memory that can be efficiently copied to the GPU).  Alternatively, it is
+possible to use `vkgdr`_ to have the CPU write directly to GPU memory while
+assembling the chunk. This is not enabled by default because it is not always
+possible to use more than 256 MiB of the GPU memory for this, which can severely
+limit the chunk size.
 
 .. _vkgdr: https://github.com/ska-sa/vkgdr
 
 GPU Processing
 --------------
-
+The actual GPU kernels are reasonably straight-forward, because they're
+generally memory-bound rather than compute-bound. The main challenges are in
+data movement through the system.
 
 Narrowband
 ^^^^^^^^^^
@@ -106,7 +37,7 @@ implementing this is particularly complex, and is discussed separately in
 .. note::
 
    At the time of writing, the kernel has been written but the full narrowband
-   implementation is not yet implemented.
+   operation is not yet implemented.
 
 Decode
 ^^^^^^
@@ -160,25 +91,136 @@ this, we allocate sufficient space at the end of each chunk for the PFB
 footprint, and copy the start of the next chunk to the end of the current one.
 Note that this adds an extra chunk worth of latency to the process.
 
+.. _fgpu-fft:
+
 FFT
 ^^^
-After the FIR above, we can perform the FFT, which is done with a cuFFT
-real-to-complex transformation. This is straightforward, and the built-in
-support for doing multiple FFTs at once means that it can saturate the GPU
-even with small channel counts. cuFFT does write an output for the Nyquist
-frequency (which is discarded in the MeerKAT design), but we take care of that
-in the following step.
+After the FIR above, we can perform the FFT, which is done with cuFFT. The
+built-in support for doing multiple FFTs at once means that it can saturate
+the GPU even with small channel counts.
+
+Naïvely using cuFFT for the full real-to-complex transformation can be quite
+slow and require multiple passes over the memory, because
+
+1. There is a maximum number of channels that cuFFT can handle in one pass (it
+   depends on the GPU, but seems to be 16384 for a GeForce RTX 3080 Ti).
+   Larger transforms require at least one more pass.
+
+2. It appears to handle real-to-complex transforms by first doing a
+   complex-to-complex transform and then using an additional pass to fix up
+   the result.
+
+For performance reasons, we move part of the Fourier Transform into the
+post-processing kernel (using the Cooley-Tukey algorithm), and also handle
+fixing up the real-to-complex transformation.
+
+Real-to-complex transform
+~~~~~~~~~~~~~~~~~~~~~~~~~
+Let's introduce some notation to see how this works. Let :math:`n` be the
+number of channels, :math:`x_i` be the (real) time-domain samples and
+:math:`X_k` be the Fourier transform (we divide by :math:`2n` rather than
+:math:`n` because that's the number of input samples used).
+
+.. math:: X_k = \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i.
+
+Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}` be the even and odd input
+samples, with Fourier transforms :math:`U` and :math:`V` respectively. By
+pretending the data is complex, we're computing the Fourier transform of
+:math:`u + jv`, namely :math:`U + jV`. Let's call it :math:`Z`.
+
+Firstly, we can reconstruct :math:`U` and :math:`V` from :math:`Z` by using
+Hermetian symmetry properties. Both :math:`u` and :math:`v` are real, so
+:math:`U` and :math:`V` are Hermitian symmetric. Let :math:`Z'` be :math:`Z`
+with reversed indices i.e., :math:`Z'_k = Z_{-k}` where indices are taken
+modulo :math:`n`. Then :math:`U' = \overline{U}, V' = \overline{V}` and
+
+.. math:: Z + \overline{Z'} = (U + \overline{U'}) + j(V - \overline{V'}) = 2U.
+
+Thus, :math:`U = \frac{Z + \overline{Z'}}{2}` and similarly
+:math:`V = \frac{Z - \overline{Z'}}{2j}`. Next, we use the Cooley-Tukey
+transform to construct :math:`X` from :math:`U` and :math:`V`. We can also
+re-use some common expressions by computing :math:`X_{n-k}` at the same time:
+
+.. math::
+
+   X_k &= \sum_{i=0}^{2n-1} e^{\frac{-2\pi j}{2n}\cdot ik} x_i\\
+       &= \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{2n}\cdot 2ik} u_i +
+          \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{2n}\cdot (2i+1)k} v_i\\
+       &= \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot ik} u_i +
+          e^{\frac{-\pi j}{n}\cdot k}\sum_{i=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot ik} v_i\\
+       &= U_k + e^{\frac{-\pi j}{n}\cdot k} V_k.\\
+   X_{n-k} &= U_{n-k} + e^{\frac{-pi j}{n}\cdot (n-k)} V_{n-k}\\
+           &= \overline{U_k} - \overline{e^{\frac{-\pi j}{n}\cdot k} V_k}.
+
+Note that when :math:`k = 0` or :math:`k = \frac{n}{2}` the second calculation
+is unnecessary, but it is simpler (and probably cheaper) to just do it anyway
+rather than branch to avoid it.
+
+Why is doing all this work more efficient that letting cuFFT handle the
+real-to-complex transformation? After all, cuFFT most likely does this (or
+something equivalent) internally. The answer is that instead of using a
+separate kernel for it (which would consume memory bandwidth), we built it
+into the postprocessing kernel (see the next section).
+
+Unzipping the FFT
+~~~~~~~~~~~~~~~~~
+From here we'll assume all transforms are complex-to-complex unless specified
+otherwise. The Cooley-Tukey algorithm allows a transform of size :math:`c =
+mn` to be decomposed into :math:`n` transforms of size :math:`m` followed by
+:math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
+"unzipping factor". We will keep it small (typically not more than 4), as the
+implementation requires registers proportional to this factor.
+
+To recap the Cooley-Tukey algorithm: let a time-domain index :math:`i` be
+written as :math:`qn + r` and a frequency-domain index :math:`k` be
+written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r},
+\dots, z_{(m-1)n+r}`, and denote its Fourier transform by :math:`Z^r`. Then
+
+.. math::
+
+   Z_k = Z_{pm+s}
+   &= \sum_{i=0}^{mn - 1} e^{\frac{-2\pi j}{mn}\cdot ik} z_i\\
+   &= \sum_{q=0}^{m - 1}\sum_{r=0}^{n-1}
+      e^{\frac{-2\pi j}{mn}(qn + r)(pm + s)} z_{qn + r}\\
+   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp} \left[e^{\frac{-2\pi j}{mn}\cdot rs}
+      \sum_{q=0}^{m-1} e^{\frac{-2\pi j}{m}\cdot qs} z^r_q\right]\\
+   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
+      \left[e^{\frac{-2\pi j}{mn}\cdot rs} Z^r_s\right].
+
+The whole expression is a Fourier transform of the expression in brackets
+(the exponential inside the bracket is the so-called "twiddle factor").
+
+An inconvenience of this structure is that :math:`z^r` is not a contiguous
+set of input samples, but a strided array. While cuFFT does support both
+strided inputs and batched transformations, we cannot batch over :math:`r`
+and over multiple spectra at the same time as it only supports a single batch
+dimension with corresponding stride. We solve this by modifying the PFB kernel
+to reorder its output such that each :math:`z^r` is output contiguously. This
+can be done by shuffling some bits in the output index (because we assume
+powers of two everywhere).
+
+In the post-processing kernel, each work-item computes the results for a
+single :math:`s` and for all :math:`p`. To compute the real-to-complex
+transformation, it also needs to compute
+
+.. math::
+
+   \overline{Z_{-k}} = \overline{Z_{-pm - s}}
+   = \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
+     \left[e^{\frac{-2\pi j}{mn}\cdot rs} \overline{Z^r_{-s}}\right].
 
 Postprocessing
 ^^^^^^^^^^^^^^
 The remaining steps are to
 
- 1. Apply gains and fine delays.
- 2. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
+ 1. Compute the real Fourier transform from several complex-to-complex
+    transforms (see the previous section).
+ 2. Apply gains and fine delays.
+ 3. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
     are stored contiguously for each channel (the Nyquist frequencies are also
     discarded at this point).
- 3. Convert to int8.
- 4. Interleave the polarisations.
+ 4. Convert to int8.
+ 5. Interleave the polarisations.
 
 These are all combined into a single kernel to minimise memory traffic. The
 katsdpsigproc package provides a template for transpositions, and the other
@@ -186,8 +228,9 @@ operations are all straightforward. While C++ doesn't have a convert with
 saturation function, we can access the CUDA functionality through inline PTX
 assembly (OpenCL C has an equivalent function).
 
-Fine delays are computed using the ``sincospi`` function, which saves both a
-multiplication by :math:`\pi` and a range reduction.
+Fine delays and the twiddle factor for the Cooley-Tukey transformation are
+computed using the ``sincospi`` function, which saves both a multiplication by
+:math:`\pi` and a range reduction.
 
 Coarse delays
 ^^^^^^^^^^^^^
@@ -225,17 +268,6 @@ buffer, then run the back-end and push the resulting spectra into a queue for
 transmission. It's important to (as far as possible) always run the back-end
 on the same amount of data, because cuFFT bakes the number of FFTs into its
 plan.
-
-Transfers and events
-^^^^^^^^^^^^^^^^^^^^
-To achieve the desired throughput it is necessary to overlap data transfers
-with computations. Transfers are done using separate command queues, and an
-CUDA/OpenCL event is associated with the completion of each transfer. Where
-possible, these events are passed to the device to be waited for, so that the
-CPU does not need to block. The CPU does need to wait for host-to-device
-transfers before putting the buffer onto the free queue, and for
-device-to-host transfers before transmitting results, but this is deferred as
-long as possible.
 
 Network transmit
 ----------------

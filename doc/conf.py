@@ -52,13 +52,14 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.graphviz",
-    "sphinx.ext.imgmath",
+    "sphinx.ext.mathjax",
     "sphinx.ext.intersphinx",
     "sphinx.ext.napoleon",
     "sphinx.ext.todo",
     "sphinx.ext.viewcode",
     "sphinxcontrib.tikz",
     "sphinxcontrib.bibtex",
+    "sphinx-mathjax-offline",
 ]
 
 
@@ -67,18 +68,21 @@ warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
     "aiokatcp": ("https://aiokatcp.readthedocs.io/en/latest/", None),
+    "black": ("https://black.readthedocs.io/en/stable/", None),
     "coverage": ("https://coverage.readthedocs.io/en/stable/", None),
-    "numpy": ("https://numpy.org/doc/stable", None),
-    "pytest": ("https://docs.pytest.org/en/stable/", None),
-    "spead2": ("https://spead2.readthedocs.io/en/latest", None),
+    "flake8": ("https://flake8.pycqa.org/en/latest/", None),
+    "katpoint": ("https://katpoint.readthedocs.io/en/latest", None),
     "katsdpsigproc": ("https://katsdpsigproc.readthedocs.io/en/latest", None),
     "katsdptelstate": ("https://katsdptelstate.readthedocs.io/en/latest", None),
-    "black": ("https://black.readthedocs.io/en/stable/", None),
-    "flake8": ("https://flake8.pycqa.org/en/latest/", None),
-    "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
     "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
+    "numpy": ("https://numpy.org/doc/stable", None),
+    "pip": ("https://pip.pypa.io/en/stable/", None),
+    "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
+    "pytest": ("https://docs.pytest.org/en/stable/", None),
+    "python": ("https://docs.python.org/3", None),
+    "setuptools": ("https://setuptools.readthedocs.io/en/stable/", None),
+    "spead2": ("https://spead2.readthedocs.io/en/latest", None),
 }
 
 
@@ -118,3 +122,7 @@ todo_include_todos = True
 # Adds \usetikzlibrary{...} to the latex preamble. We need "chains" for
 # rendering flowcharts.
 tikz_tikzlibraries = "chains"
+
+# Force MathJax to render as SVG rather than CHTML, to work around
+# https://github.com/mathjax/MathJax/issues/2701
+mathjax3_config = {"loader": {"load": ["input/tex", "output/svg"]}, "startup": {"output": "svg"}}

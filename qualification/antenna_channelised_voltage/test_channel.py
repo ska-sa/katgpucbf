@@ -23,7 +23,7 @@ import pytest
 from matplotlib.figure import Figure
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
-from ..reporter import Reporter
+from ..reporter import POTLocator, Reporter
 from . import sample_tone_response_hdr
 
 
@@ -56,6 +56,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[floa
     return sfdr_measurements
 
 
+@pytest.mark.name("Channelisation and SFDR")
 @pytest.mark.requirements("CBF-REQ-0126")
 async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
@@ -133,7 +134,6 @@ async def test_channelisation_and_sfdr(
     plot_channel = rel_freqs[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
-    xticks = np.linspace(0, receiver.n_chans, 9)
     ymin = -100
     title = f"SFDR for channel {plot_channel}"
     x = np.linspace(0, receiver.n_chans - 1, len(hdr_data_db[selected_plot_idx, :]))
@@ -145,13 +145,13 @@ async def test_channelisation_and_sfdr(
     ax.set_title(title)
     ax.set_xlabel("Channel")
     ax.set_ylabel("dB")
-    ax.set_xticks(xticks)
+    ax.xaxis.set_major_locator(POTLocator())
     ax.set_ylim(ymin, -0.05 * ymin)
     if ymin < -required_sfdr_db:
         ax.axhline(-required_sfdr_db, dashes=(1, 1), color="black")
         ax.annotate(
             f"{-required_sfdr_db} dB",
-            (xticks[-1], -required_sfdr_db),
+            (0, -required_sfdr_db),
             xytext=(-3, -3),
             textcoords="offset points",
             horizontalalignment="right",

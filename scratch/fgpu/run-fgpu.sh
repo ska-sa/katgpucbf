@@ -5,8 +5,9 @@ set -e -u
 # Load variables for machine-specific config
 . ../config/$(hostname -s).sh
 
+nodes=$(lscpu | grep 'NUMA node.*CPU' | wc -l)
 nproc=$(nproc)
-step=$(($nproc / 4))
+step=$(($nproc / $nodes))
 hstep=$(($step / 2))
 
 src_affinity="$(($step*$1)),$(($step*$1+1))"
@@ -29,8 +30,16 @@ case "$1" in
         iface="$iface2"
         export CUDA_VISIBLE_DEVICES="$cuda2"
         ;;
+    4|5)
+        iface="$iface3"
+        export CUDA_VISIBLE_DEVICES="$cuda3"
+        ;;
+    6|7)
+        iface="$iface4"
+        export CUDA_VISIBLE_DEVICES="$cuda4"
+        ;;
     *)
-        echo "Pass 0-3" 1>&2
+        echo "Pass 0-7" 1>&2
         exit 2
         ;;
 esac
@@ -48,6 +57,6 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
     --sync-epoch 0 \
-    --array-size 4 \
+    --array-size ${array_size:-8} \
     --feng-id "$feng_id" \
     $srcs $dst "$@"

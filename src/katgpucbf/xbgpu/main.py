@@ -43,15 +43,7 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
-from .. import (
-    DEFAULT_KATCP_HOST,
-    DEFAULT_KATCP_PORT,
-    DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_TTL,
-    DESCRIPTOR_TASK_NAME,
-    SPEAD_DESCRIPTOR_INTERVAL_S,
-    __version__,
-)
+from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
@@ -203,6 +195,11 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
+    parser.add_argument(
+        "--tx-enabled",
+        action="store_true",
+        help="Start with correlator output transmission enabled, without having to issue a katcp command.",
+    )
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
@@ -254,6 +251,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> Tuple[XBE
         src_buffer=args.src_buffer,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
+        tx_enabled=args.tx_enabled,
         monitor=monitor,
         context=context,
     )
@@ -294,12 +292,6 @@ async def async_main(args: argparse.Namespace) -> None:
     with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
         logger.info("Starting main processing loop")
 
-        # TODO: Work the descriptor task into being handled by xbengine.start
-        # see NGC-589.
-        descriptor_task = asyncio.create_task(
-            xbengine.run_descriptors_loop(SPEAD_DESCRIPTOR_INTERVAL_S), name=DESCRIPTOR_TASK_NAME
-        )
-        xbengine.add_service_task(descriptor_task)
         add_signal_handlers(xbengine)
 
         await xbengine.start()

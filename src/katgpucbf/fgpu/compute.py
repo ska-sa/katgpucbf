@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -43,19 +43,27 @@ class ComputeTemplate:
         The GPU context that we'll operate in.
     taps
         The number of taps that you want the resulting PFB-FIRs to have.
+    channels
+        Number of channels into which the input data will be decomposed.
     """
 
-    def __init__(self, context: AbstractContext, taps: int) -> None:
+    def __init__(self, context: AbstractContext, taps: int, channels: int) -> None:
         self.context = context
         self.taps = taps
-        self.pfb_fir = pfb.PFBFIRTemplate(context, taps)
-        self.postproc = postproc.PostprocTemplate(context)
+        self.channels = channels
+        self.unzip_factor = 4 if channels >= 8 else 1
+        self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, self.unzip_factor)
+        self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor)
 
     def instantiate(
-        self, command_queue: AbstractCommandQueue, samples: int, spectra: int, spectra_per_heap: int, channels: int
+        self,
+        command_queue: AbstractCommandQueue,
+        samples: int,
+        spectra: int,
+        spectra_per_heap: int,
     ) -> "Compute":  # We have to put the return type in quotes because we haven't declared the `Compute` class yet.
         """Generate a :class:`Compute` object based on the template."""
-        return Compute(self, command_queue, samples, spectra, spectra_per_heap, channels)
+        return Compute(self, command_queue, samples, spectra, spectra_per_heap)
 
 
 class Compute(accel.OperationSequence):
@@ -96,8 +104,6 @@ class Compute(accel.OperationSequence):
         Number of spectra in each output chunk.
     spectra_per_heap
         Number of spectra to send in each output heap.
-    channels
-        Number of channels into which the input data will be decomposed.
     """
 
     def __init__(
@@ -107,33 +113,30 @@ class Compute(accel.OperationSequence):
         samples: int,
         spectra: int,
         spectra_per_heap: int,
-        channels: int,
     ) -> None:
         self.sample_bits = SAMPLE_BITS
         self.template = template
-        self.channels = channels
         self.samples = samples
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
 
         # PFB-FIR and FFT each happen for each polarisation.
-        self.pfb_fir = [
-            template.pfb_fir.instantiate(command_queue, samples, spectra, channels) for pol in range(N_POLS)
-        ]
+        self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for pol in range(N_POLS)]
+        fft_shape = (spectra, template.unzip_factor, template.channels // template.unzip_factor)
         fft_template = fft.FftTemplate(
             template.context,
             1,
-            (spectra, 2 * channels),
-            np.float32,
+            fft_shape,
             np.complex64,
-            (spectra, 2 * channels),
-            (spectra, channels + 1),
+            np.complex64,
+            fft_shape,
+            fft_shape,
         )
         self.fft = [fft_template.instantiate(command_queue, fft.FftMode.FORWARD) for pol in range(N_POLS)]
 
         # Postproc is single though because it involves the corner turn which
         # combines the two pols.
-        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap, channels)
+        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap)
 
         operations: List[Tuple[str, accel.Operation]] = []
         for pol in range(N_POLS):
@@ -155,11 +158,15 @@ class Compute(accel.OperationSequence):
             "phase": ["postproc:phase"],
             "gains": ["postproc:gains"],
         }
+        aliases = {}
         for pol in range(N_POLS):
             compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
-            compounds[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
+            # pfb_firN:out is an array of real values while fftN:src
+            # reinterprets it as an array of complex values. We thus have to
+            # make them aliases to view the memory as different types.
+            aliases[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
             compounds[f"fft_out{pol}"] = [f"fft{pol}:dest", f"postproc:in{pol}"]
-        super().__init__(command_queue, operations, compounds)
+        super().__init__(command_queue, operations, compounds, aliases)
 
     def run_frontend(
         self, samples: Sequence[accel.DeviceArray], in_offsets: Sequence[int], out_offset: int, spectra: int

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -38,24 +38,42 @@ class PFBFIRTemplate:
         The GPU context that we'll operate in.
     taps
         The number of taps that you want the resulting PFB-FIRs to have.
+    channels
+        Number of channels into which the input data will be decomposed.
+    unzip_factor
+        The output is reordered so that every unzip_factor'ith pair of
+        outputs is placed contiguously.
     """
 
-    def __init__(self, context: AbstractContext, taps: int) -> None:
+    def __init__(self, context: AbstractContext, taps: int, channels: int, unzip_factor: int = 1) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
         self.wgs = 128
         self.taps = taps
+        self.channels = channels
+        self.unzip_factor = unzip_factor
+        if (2 * channels) % self.wgs != 0:
+            raise ValueError(f"2*channels must be a multiple of {self.wgs}")
+        if channels <= 1 or channels & (channels - 1):
+            raise ValueError("channels must be an even power of 2")
+        if channels % unzip_factor != 0:
+            raise ValueError("channels must be a multiple of unzip_factor")
         program = accel.build(
             context,
             "kernels/pfb_fir.mako",
-            {"wgs": self.wgs, "taps": self.taps},
+            {"wgs": self.wgs, "taps": self.taps, "channels": channels, "unzip_factor": unzip_factor},
             extra_dirs=[pkg_resources.resource_filename(__name__, "")],
         )
         self.kernel = program.get_kernel("pfb_fir")
 
-    def instantiate(self, command_queue: AbstractCommandQueue, samples: int, spectra: int, channels: int) -> "PFBFIR":
+    def instantiate(
+        self,
+        command_queue: AbstractCommandQueue,
+        samples: int,
+        spectra: int,
+    ) -> "PFBFIR":
         """Generate a :class:`PFBFIR` object based on the template."""
-        return PFBFIR(self, command_queue, samples, spectra, channels)
+        return PFBFIR(self, command_queue, samples, spectra)
 
 
 class PFBFIR(accel.Operation):
@@ -100,32 +118,32 @@ class PFBFIR(accel.Operation):
         Number of samples that will be processed each time the operation is run.
     spectra
         Number of spectra that we will get from each chunk of samples.
-    channels
-        Number of channels into which the input data will be decomposed.
     """
 
     def __init__(
-        self, template: PFBFIRTemplate, command_queue: AbstractCommandQueue, samples: int, spectra: int, channels: int
+        self,
+        template: PFBFIRTemplate,
+        command_queue: AbstractCommandQueue,
+        samples: int,
+        spectra: int,
     ) -> None:
         super().__init__(command_queue)
         if samples % BYTE_BITS != 0:
             raise ValueError(f"samples must be a multiple of {BYTE_BITS}")
-        if (2 * channels) % template.wgs != 0:
-            raise ValueError(f"2*channels must be a multiple of {template.wgs}")
         self.template = template
         self.samples = samples
+        step = 2 * template.channels
         self.spectra = spectra  # Can be changed (TODO: documentation)
-        self.channels = channels
         self.slots["in"] = accel.IOSlot((samples * SAMPLE_BITS // BYTE_BITS,), np.uint8)
-        self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(2 * channels, exact=True)), np.float32)
-        self.slots["weights"] = accel.IOSlot((2 * channels * template.taps,), np.float32)
+        self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
+        self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
         self.in_offset = 0  # Number of samples to skip from the start of *in
         self.out_offset = 0  # Number of "spectra" to skip from the start of *out.
 
     def _run(self) -> None:
         if self.spectra == 0:
             return
-        step = 2 * self.channels
+        step = 2 * self.template.channels
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
         if self.in_offset + step * (self.spectra + self.template.taps - 1) > in_buffer.shape[0]:
@@ -151,7 +169,6 @@ class PFBFIR(accel.Operation):
                 self.buffer("in").buffer,
                 self.buffer("weights").buffer,
                 np.int32(out_n),
-                np.int32(step),
                 np.int32(stepy),
                 np.int32(self.in_offset),
                 np.int32(self.out_offset * step),  # Must be a multiple of step to make sense.

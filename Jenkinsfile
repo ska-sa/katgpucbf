@@ -47,8 +47,24 @@ pipeline {
       }
     }
 
+    stage('Install katgpucbf package') {
+      steps {
+        sh 'pip install --no-deps ".[test]" && pip check'
+      }
+    }
+
     stage('Parallel stage') {
       parallel {
+        stage('Compile C++ tools') {
+          steps {
+            // Make and compile tools.
+            dir('src/tools') {
+              sh 'make clean'
+              sh 'make -j'
+            }
+          }
+        }
+
         /* This stage ensures that all the python style guidelines checks pass.
          * This will catch if someone has committed to the repo without
          * installing the required pre-commit hooks, or has bypassed them.
@@ -63,50 +79,45 @@ pipeline {
           }
         }
 
-        stage('Install katgpucbf package') {
+        /* This stage actually runs pytest. Pytest has a number of flags that are
+         * not required but make life easier:
+         * 1. -n X: Launches X threads and runs the tests in parallel across
+         *     multiple threads. This speeds up testing significantly. NOTE: This
+         *     can create resource contention over things like GPU RAM. If it
+         *     starts becoming an issue set X to 1. I have noticed an issue once
+         *     where sometimes one thread got stuck and it stalled the pipeline.
+         *     Until this has been solved, I am removing this argument entirely
+         * 2. -v: Increases verbosity
+         * 3. --junitxml=reports/result.xml' Writes the results to a file for later
+         *    examination.
+         */
+        stage('Run pytest (quick)') {
+          when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
+          options { timeout(time: 10, unit: 'MINUTES') }
           steps {
-            sh 'pip install --no-deps ".[test]" && pip check'
+            sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch'
+          }
+        }
+        stage('Run pytest (full)') {
+          when { anyOf { changeRequest target: 'main'; branch 'main' } }
+          options { timeout(time: 60, unit: 'MINUTES') }
+          steps {
+            sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch'
           }
         }
 
-        stage('Compile C++ tools') {
+        stage('Build documentation') {
+          options { timeout(time: 5, unit: 'MINUTES') }
           steps {
-            // Make and compile tools.
-            dir('src/tools') {
-              sh 'make clean'
-              sh 'make -j'
-            }
+            // -W causes warnings to become errors.
+            // --keep-going ensures we get all warnings instead of just the first.
+            sh 'make -C doc clean html SPHINXOPTS="-W --keep-going"'
+            publishHTML(target: [reportName: 'Module documentation', reportDir: "doc/_build/html", reportFiles: 'index.html'])
           }
         }
       }
     }
 
-    /* This stage actually runs pytest. Pytest has a number of flags that are
-     * not required but make life easier:
-     * 1. -n X: Launches X threads and runs the tests in parallel across
-     *     multiple threads. This speeds up testing significantly. NOTE: This
-     *     can create resource contention over things like GPU RAM. If it
-     *     starts becoming an issue set X to 1. I have noticed an issue once
-     *     where sometimes one thread got stuck and it stalled the pipeline.
-     *     Until this has been solved, I am removing this argument entirely
-     * 2. -v: Increases verbosity
-     * 3. --junitxml=reports/result.xml' Writes the results to a file for later
-     *    examination.
-     */
-    stage('Run pytest (quick)') {
-      when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
-      options { timeout(time: 10, unit: 'MINUTES') }
-      steps {
-        sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch'
-      }
-    }
-    stage('Run pytest (full)') {
-      when { anyOf { changeRequest target: 'main'; branch 'main' } }
-      options { timeout(time: 60, unit: 'MINUTES') }
-      steps {
-        sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch'
-      }
-    }
     stage('Publish test results') {
       steps {
         junit 'reports/result.xml'

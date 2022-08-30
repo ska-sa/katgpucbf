@@ -56,6 +56,7 @@ and it'll look something like this:
 .. code:: ini
 
    [pytest]
+   tester = Your Name
    asyncio_mode = auto
    master_controller_host = lab5.sdp.kat.ac.za
    master_controller_port = 5001
@@ -105,11 +106,3 @@ run
 This requires at least ``texlive-base``, ``texlive-latex-extra``, ``texlive-science`` and
 ``latexmk``. This step doesn't interact with the live system at all, so it is
 possible to copy/mount the JSON file to another machine to run this step.
-
-Some values are taken from the environment (or if present, a ``.env`` file—see
-`python-dotenv`_). In particular, these are
-
-TESTER_NAME
-    Used as the author of the document.
-
-.. _python-dotenv: https://github.com/theskumar/python-dotenv
