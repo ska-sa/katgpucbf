@@ -8,7 +8,9 @@ set -e -u
 channels=${channels:-32768}
 channels_per_substream=${channels_per_substream:-512}
 
-affinity="$(($1 * 6))"
+nproc=$(nproc)
+step=$(($nproc / 4))
+affinity="$(($1 * step))"
 rx_affinity=$affinity
 rx_comp=$rx_affinity
 tx_affinity=$(($affinity + 1))
