@@ -121,9 +121,9 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--src-buffer",
         type=int,
-        default=64 * 1024 * 1024,
+        default=96 * 1024 * 1024,
         metavar="BYTES",
-        help="Size of network receive buffer (per pol) [64MiB]",
+        help="Size of network receive buffer (per pol) [96MiB]",
     )
     parser.add_argument(
         "--dst-interface", type=get_interface_address, required=True, help="Name of output network device"

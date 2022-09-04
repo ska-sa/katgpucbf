@@ -451,7 +451,7 @@ class Engine(aiokatcp.DeviceServer):
         super(Engine, self).__init__(katcp_host, katcp_port)
         self._populate_sensors(self.sensors)
 
-        # Attriutes copied or initialised from arguments
+        # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
@@ -912,57 +912,61 @@ class Engine(aiokatcp.DeviceServer):
             orig_timestamps, fine_delays, phase = _invert_models(
                 self.delay_models, start_timestamp, max_end, self.spectra_samples
             )
-            for pol in range(len(orig_timestamps)):
-                coarse_delays = timestamps - orig_timestamps[pol]
-                # Uses fact that argmax returns first maximum i.e. first true value
-                delay_change = int(np.argmax(coarse_delays != start_coarse_delays[pol]))
-                if coarse_delays[delay_change] != start_coarse_delays[pol]:
-                    logger.debug(
-                        "Coarse delay on pol %d changed from %d to %d at %d",
-                        pol,
-                        start_coarse_delays[pol],
-                        coarse_delays[delay_change],
-                        orig_timestamps[pol, delay_change],
-                    )
-                    timestamps = timestamps[:delay_change]
-                    orig_timestamps = orig_timestamps[:, :delay_change]
-                    fine_delays = fine_delays[:, :delay_change]
-                    phase = phase[:, :delay_change]
-            batch_spectra = orig_timestamps.shape[1]
+            # timestamps can be empty if we fast-forwarded the output right over the
+            # end of the current input item, and it causes problems if we don't check
+            # for it (argmax of an empty sequence).
+            if timestamps.size:
+                for pol in range(len(orig_timestamps)):
+                    coarse_delays = timestamps - orig_timestamps[pol]
+                    # Uses fact that argmax returns first maximum i.e. first true value
+                    delay_change = int(np.argmax(coarse_delays != start_coarse_delays[pol]))
+                    if coarse_delays[delay_change] != start_coarse_delays[pol]:
+                        logger.debug(
+                            "Coarse delay on pol %d changed from %d to %d at %d",
+                            pol,
+                            start_coarse_delays[pol],
+                            coarse_delays[delay_change],
+                            orig_timestamps[pol, delay_change],
+                        )
+                        timestamps = timestamps[:delay_change]
+                        orig_timestamps = orig_timestamps[:, :delay_change]
+                        fine_delays = fine_delays[:, :delay_change]
+                        phase = phase[:, :delay_change]
+                batch_spectra = orig_timestamps.shape[1]
 
-            # Here we run the "frontend" which handles:
-            # - 10-bit to float conversion
-            # - Coarse delay
-            # - The PFB-FIR.
-            if batch_spectra > 0:
-                logging.debug("Processing %d spectra", batch_spectra)
-                out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
-                self._out_item.fine_delay[out_slice] = fine_delays.T
-                # Divide by pi because the arguments of sincospif() used in the
-                # kernel are in radians/PI.
-                self._out_item.phase[out_slice] = phase.T / np.pi
-                samples = []
-                for pol_data in self._in_items[0].pol_data:
-                    assert pol_data.samples is not None
-                    samples.append(pol_data.samples)
-                self._compute.run_frontend(samples, offsets, self._out_item.n_spectra, batch_spectra)
-                self._out_item.n_spectra += batch_spectra
-                # Work out which output spectra contain missing data.
-                self._out_item.present[out_slice] = True
-                for pol, pol_data in enumerate(self._in_items[0].pol_data):
-                    # Offset in the chunk of the first sample for each spectrum
-                    first_offset = np.arange(
-                        offsets[pol],
-                        offsets[pol] + batch_spectra * self.spectra_samples,
-                        self.spectra_samples,
-                    )
-                    # Offset of the last sample (inclusive, rather than past-the-end)
-                    last_offset = first_offset + self.taps * self.spectra_samples - 1
-                    first_packet = first_offset // self._src_packet_samples
-                    # last_packet is exclusive
-                    last_packet = last_offset // self._src_packet_samples + 1
-                    present_packets = pol_data.present_cumsum[last_packet] - pol_data.present_cumsum[first_packet]
-                    self._out_item.present[out_slice] &= present_packets == last_packet - first_packet
+                # Here we run the "frontend" which handles:
+                # - 10-bit to float conversion
+                # - Coarse delay
+                # - The PFB-FIR.
+                if batch_spectra > 0:
+                    logging.debug("Processing %d spectra", batch_spectra)
+                    out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
+                    self._out_item.fine_delay[out_slice] = fine_delays.T
+                    # Divide by pi because the arguments of sincospif() used in the
+                    # kernel are in radians/PI.
+                    self._out_item.phase[out_slice] = phase.T / np.pi
+                    samples = []
+                    for pol_data in self._in_items[0].pol_data:
+                        assert pol_data.samples is not None
+                        samples.append(pol_data.samples)
+                    self._compute.run_frontend(samples, offsets, self._out_item.n_spectra, batch_spectra)
+                    self._out_item.n_spectra += batch_spectra
+                    # Work out which output spectra contain missing data.
+                    self._out_item.present[out_slice] = True
+                    for pol, pol_data in enumerate(self._in_items[0].pol_data):
+                        # Offset in the chunk of the first sample for each spectrum
+                        first_offset = np.arange(
+                            offsets[pol],
+                            offsets[pol] + batch_spectra * self.spectra_samples,
+                            self.spectra_samples,
+                        )
+                        # Offset of the last sample (inclusive, rather than past-the-end)
+                        last_offset = first_offset + self.taps * self.spectra_samples - 1
+                        first_packet = first_offset // self._src_packet_samples
+                        # last_packet is exclusive
+                        last_packet = last_offset // self._src_packet_samples + 1
+                        present_packets = pol_data.present_cumsum[last_packet] - pol_data.present_cumsum[first_packet]
+                        self._out_item.present[out_slice] &= present_packets == last_packet - first_packet
 
             # The _flush_out method calls the "backend" which triggers the FFT
             # and postproc operations.

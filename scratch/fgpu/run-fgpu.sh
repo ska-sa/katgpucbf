@@ -3,7 +3,7 @@
 set -e -u
 
 # Load variables for machine-specific config
-. config/$(hostname -s).sh
+. ../config/$(hostname -s).sh
 
 nodes=$(lscpu | grep 'NUMA node.*CPU' | wc -l)
 nproc=$(nproc)

@@ -2,12 +2,15 @@
 
 set -e -u
 
-iface1=enp193s0f0
-iface2=enp193s0f1
+# Load variables for machine-specific config
+. ../config/$(hostname -s).sh
+
 channels=${channels:-32768}
 channels_per_substream=${channels_per_substream:-512}
 
-affinity="$(($1 * 6))"
+nproc=$(nproc)
+step=$(($nproc / 4))
+affinity="$(($1 * step))"
 rx_affinity=$affinity
 rx_comp=$rx_affinity
 tx_affinity=$(($affinity + 1))
@@ -21,11 +24,11 @@ channel_offset=$(($channels_per_substream * $1))
 case "$1" in
     0|1)
         iface="$iface1"
-        export CUDA_VISIBLE_DEVICES=0
+        export CUDA_VISIBLE_DEVICES="$cuda1"
         ;;
     2|3)
         iface="$iface2"
-        export CUDA_VISIBLE_DEVICES=0
+        export CUDA_VISIBLE_DEVICES="$cuda2"
         ;;
     *)
         echo "Pass 0-3" 1>&2
