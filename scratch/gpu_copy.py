@@ -14,6 +14,7 @@ parser.add_argument("--size", "-s", type=int, default=1024 * 1024 * 1024)
 parser.add_argument("--repeat", "-r", type=int, default=20)
 parser.add_argument("--forever", action="store_true")
 parser.add_argument("--mem", default="pagelocked", choices=("pagelocked", "wc", "huge"))
+parser.add_argument("--fill", type=int, default=1)
 parser.add_argument("direction", choices=("htod", "dtoh", "dtod"))
 args = parser.parse_args()
 
@@ -32,7 +33,7 @@ if args.direction != "dtod":
         assert len(host) == size
     else:
         parser.error(f"Unknown memory type {args.mem}")
-    host.fill(1)
+    host.fill(args.fill)
     device.set(host)
 else:
     device2 = GPUArray((size,), np.uint8)
