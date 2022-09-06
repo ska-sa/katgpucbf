@@ -39,9 +39,8 @@ frequency bin). Specifically, if there are :math:`n` output channels and
 
 .. math::
 
-   \DeclareMathOperator{\sinc}{sinc}
    x_i = A\sin^2\left(\frac{\pi i}{w - 1}\right)
-         \sinc\left(\frac{i + \tfrac 12 - nt}{2n}\right),
+         \operatorname{sinc}\left(\frac{i + \tfrac 12 - nt}{2n}\right),
 
 where :math:`i` runs from 0 to :math:`w - 1`. Here :math:`A` is a
 normalisation factor which is chosen such that :math:`\sum_i x_i^2 = 1`. This
