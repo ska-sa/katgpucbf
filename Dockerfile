@@ -35,6 +35,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python-is-python3 \
     git \
     pkg-config \
+    latexmk \
     libboost-dev \
     libboost-program-options-dev \
     libboost-system-dev \
