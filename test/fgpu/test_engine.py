@@ -535,11 +535,6 @@ class TestEngine:
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
         timestamps = timestamps[:, np.newaxis]
-        # Invert the delay model to find the corresponding input timestamps,
-        # which in turn tells us the delay and phase rate applied at those times.
-        # If t_i is the input timestamp and t_o is the output timestamp, then the
-        # delay is t_i * delay_rate and hence t_o = t_i * (1 + delay_rate).
-        timestamps = timestamps / (1 + delay_rate)  # shape Nx2
         expected_phase = wrap_angle(phase_rate_per_sample * timestamps)
         np.testing.assert_equal(
             wrap_angle(np.angle(out_data[tone_channels[0]]) - expected_phase), pytest.approx(0.0, abs=0.01)
