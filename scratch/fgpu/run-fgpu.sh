@@ -9,13 +9,14 @@ nodes=$(lscpu | grep 'NUMA node.*CPU' | wc -l)
 nproc=$(nproc)
 step=$(($nproc / $nodes))
 hstep=$(($step / 2))
+src_idx=$(($1 % 4))
 
 src_affinity="$(($step*$1)),$(($step*$1+1))"
 src_comp=$src_affinity
 dst_affinity="$(($step*$1+$hstep))"
 dst_comp=$dst_affinity
 other_affinity="$(($step*$1+$hstep+1))"
-srcs="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
+srcs="239.102.$src_idx.64+7:7148 239.102.$src_idx.72+7:7148"
 dst="239.102.$((200+$1)).0+15:7148"
 katcp_port="$(($1+7140))"
 prom_port="$(($1+7150))"
