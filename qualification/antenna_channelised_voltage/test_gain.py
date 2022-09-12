@@ -21,6 +21,7 @@ import asyncio
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from pytest_check import check
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
 from ..reporter import Reporter
@@ -31,7 +32,6 @@ async def test_gains(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     r"""Test that gains can be applied.
 
@@ -85,7 +85,8 @@ async def test_gains(
     pdf_report.detail(f"Gains set in {elapsed:.3f}s")
     # Disabled until we determine whether CBF-REQ-0200 is applicable - it
     # currently fails.
-    # expect(elapsed < 1, "Took too long to set gains")
+    with check:
+        assert elapsed < 1, "Took too long to set gains"
 
     pdf_report.step("Collect and compare results.")
     data = await next_chunk_data()
@@ -103,4 +104,5 @@ async def test_gains(
     # must have a resolution of 1 dB or better.
     # In reality the limit on accuracy is likely to be the F-engine output
     # quantisation, since gain is handled as single-precision float.
-    expect(max_rel_error < 0.1, "Maximum error exceeds 0.5 dB")
+    with check:
+        assert max_rel_error < 0.1, "Maximum error exceeds 0.5 dB"

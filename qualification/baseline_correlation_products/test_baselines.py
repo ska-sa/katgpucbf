@@ -20,6 +20,7 @@ from typing import Tuple
 
 import numpy as np
 import pytest
+from pytest_check import check
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
@@ -30,7 +31,6 @@ async def test_baseline_correlation_products(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     """Test that the baseline ordering indicated in the sensor matches the output data.
 
@@ -75,12 +75,14 @@ async def test_baseline_correlation_products(
             loud_bls = np.nonzero(data[channel, :, 0])[0]
             # Check that the baseline actually appears in the list.
             appears = i in loud_bls
-            expect(appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!")
+            with check:
+                assert appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!"
             # Check that no unexpected baselines have signal.
             no_unexpected = all(
                 is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls
             )
-            expect(no_unexpected, "Signal found in unexpected baseline.")
+            with check:
+                assert no_unexpected, "Signal found in unexpected baseline."
             if not (appears and no_unexpected):
                 everything_is_awesome = False
         pdf_report.detail(

@@ -21,6 +21,7 @@ from typing import List
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from pytest_check import check
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import POTLocator, Reporter
@@ -62,7 +63,6 @@ async def test_channelisation_and_sfdr(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     r"""Test channel position and measure SFDR per channel under test.
 
@@ -108,7 +108,8 @@ async def test_channelisation_and_sfdr(
     pdf_report.step("Check tone positions.")
     for idx, sel_chan in enumerate(rel_freqs):
         peak_chan = np.argmax(hdr_data[idx])
-        expect(sel_chan == peak_chan)
+        with check:
+            assert sel_chan == peak_chan
 
     # The maximum is to avoid errors when data is 0
     hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / np.max(hdr_data))
@@ -120,7 +121,8 @@ async def test_channelisation_and_sfdr(
     sfdr_min = np.min(sfdr_measurements)
 
     # Check that minimum SFDR measurement meets the requirement.
-    expect(sfdr_min >= required_sfdr_db)
+    with check:
+        assert sfdr_min >= required_sfdr_db
     sfdr_mean = np.mean(sfdr_measurements)
 
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(rel_freqs)} channels.")

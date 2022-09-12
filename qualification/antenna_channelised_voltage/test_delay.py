@@ -24,6 +24,7 @@ from typing import Callable, List, Optional, Tuple
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from pytest_check import check
 
 from katgpucbf import BYTE_BITS, N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
@@ -43,7 +44,6 @@ async def test_delay_application_time(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     """Test that delay/phase changes are applied at the correct time.
 
@@ -103,7 +103,8 @@ async def test_delay_application_time(
     load_time = receiver.timestamp_to_unix(target_acc_ts) + load_frac * receiver.int_time
     delta = load_time - target
     pdf_report.detail(f"Estimated load time error: {delta * 1e6:.3f}µs.")
-    expect(delta < 0.01)
+    with check:
+        assert delta < 0.01
 
 
 @pytest.mark.name("Delay Enable/Disable")
@@ -112,7 +113,6 @@ async def test_delay_enable_disable(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     """Test that delay and phase compensation can be enabled and disabled.
 
@@ -160,7 +160,8 @@ async def test_delay_enable_disable(
     await set_delays(["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants)
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(-math.pi / 2, abs=np.deg2rad(1)))
+    with check:
+        assert phase == pytest.approx(-math.pi / 2, abs=np.deg2rad(1))
 
     pdf_report.step("Check that delay compensation can be enabled.")
     pdf_report.detail("Apply 1/2 cycle delay to one pol.")
@@ -169,18 +170,21 @@ async def test_delay_enable_disable(
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
     # One might expect it to be pi radians, but that ignores the implicit
     # phase adjustment that ensures the centre channel has zero phase.
-    expect(phase == pytest.approx(math.pi / 3, abs=np.deg2rad(1)))
+    with check:
+        assert phase == pytest.approx(math.pi / 3, abs=np.deg2rad(1))
 
     pdf_report.step("Check that compensation can be disabled.")
     await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
     phase = await measure_phase()
     pdf_report.detail(f"Phase is {np.rad2deg(phase):.3f} degrees.")
-    expect(phase == pytest.approx(0, abs=np.deg2rad(1)))
+    with check:
+        assert phase == pytest.approx(0, abs=np.deg2rad(1))
 
     pdf_report.step("Check update time.")
     max_elapsed = max(elapsed)
     pdf_report.detail(f"Maximum time for ?delays request is {max_elapsed:.3f}s.")
-    expect(max_elapsed < 1 / 0.167)
+    with check:
+        assert max_elapsed < 1 / 0.167
 
 
 @pytest.mark.requirements("CBF-REQ-0187,CBF-REQ-0188")
@@ -205,7 +209,6 @@ async def test_delay_sensors(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     """Test that delay sensors work correctly.
 
@@ -240,19 +243,20 @@ async def test_delay_sensors(
     pdf_report.detail("Check that sensors do not reflect the future.")
     for label in receiver.input_labels:
         value = delay_sensor_value(label)
-        expect(value[1:] == (0.0, 0.0, 0.0, 0.0))
+        with check:
+            assert value[1:] == (0.0, 0.0, 0.0, 0.0)
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
     await receiver.next_complete_chunk(min_timestamp=load_ts)
     for expected, label in zip(delay_tuples, receiver.input_labels):
         value = delay_sensor_value(label)
         pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
-        expect(value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value")
+        with check:
+            assert value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value"
 
 
 def check_phases(
     pdf_report: Reporter,
-    expect,
     actual: np.ndarray,
     expected: np.ndarray,
     caption: str,
@@ -270,7 +274,8 @@ def check_phases(
     rms_error = np.sqrt(np.mean(np.square(delta)))
     pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f} degrees.")
     pdf_report.detail(f"RMS error is {np.rad2deg(rms_error):.5f} degrees.")
-    expect(np.rad2deg(max_error) <= 1.0, "Maximum error is more than 1 degree")
+    with check:
+        assert np.rad2deg(max_error) <= 1.0, "Maximum error is more than 1 degree"
 
     fig = Figure(tight_layout=True)
     ax, ax_err = fig.subplots(2)
@@ -308,7 +313,6 @@ async def _test_delay_phase_fixed(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
     delay_phases: List[Tuple[float, float]],
     caption_cb: Callable[[float, float], str],
     report_residual: bool,
@@ -320,7 +324,7 @@ async def _test_delay_phase_fixed(
 
     Parameters
     ----------
-    correlator, receive_baseline_correlation_products, pdf_report, expect
+    correlator, receive_baseline_correlation_products, pdf_report
         Fixtures
     delay_phases
         Pairs of (delay, phase) to test
@@ -377,14 +381,13 @@ async def _test_delay_phase_fixed(
         input2 = receiver.input_labels[-1]
         bl_idx = receiver.bls_ordering.index((input1, input2))
         expected = delay_phase(receiver.n_chans, residual) + phase
-        check_phases(pdf_report, expect, actual[:, bl_idx], expected, caption)
+        check_phases(pdf_report, actual[:, bl_idx], expected, caption)
 
 
 async def _test_delay_phase_rate(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
     rates: List[Tuple[float, float]],
     caption_cb: Callable[[float, float], str],
 ) -> None:
@@ -395,7 +398,7 @@ async def _test_delay_phase_rate(
 
     Parameters
     ----------
-    correlator, receive_baseline_correlation_products, pdf_report, expect
+    correlator, receive_baseline_correlation_products, pdf_report
         Fixtures
     rates
         Pairs of (delay_rate, phase_rate) to test
@@ -442,7 +445,7 @@ async def _test_delay_phase_rate(
         bl_idx = receiver.bls_ordering.index((input1, input2))
         actual = phases[1][:, bl_idx] - phases[0][:, bl_idx]
         expected = delay_phase(receiver.n_chans, delay_rate * elapsed) + phase_rate * elapsed_s
-        check_phases(pdf_report, expect, actual, expected, caption)
+        check_phases(pdf_report, actual, expected, caption)
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
@@ -450,7 +453,6 @@ async def test_delay(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     r"""Test performance of delay compensation with a fixed delay.
 
@@ -468,7 +470,6 @@ async def test_delay(
         correlator,
         receive_baseline_correlation_products,
         pdf_report,
-        expect,
         [(delay, 0.0) for delay in delays],
         lambda delay, phase: f"delay {delay * 1e12:.2f}ps",
         True,
@@ -480,7 +481,6 @@ async def test_delay_rate(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     r"""Test performance of delay compensation with a delay rate.
 
@@ -497,7 +497,6 @@ async def test_delay_rate(
         correlator,
         receive_baseline_correlation_products,
         pdf_report,
-        expect,
         [(delay_rate, 0.0) for delay_rate in rates],
         lambda delay_rate, phase_rate: f"delay rate {delay_rate}",
     )
@@ -508,7 +507,6 @@ async def test_delay_phase(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     r"""Test performance of delay tracking with a fixed phase.
 
@@ -524,7 +522,6 @@ async def test_delay_phase(
         correlator,
         receive_baseline_correlation_products,
         pdf_report,
-        expect,
         [(0.0, phase) for phase in phases],
         lambda delay, phase: f"phase {phase:.4f} rad ({np.rad2deg(phase):.2f}°)",
         False,
@@ -536,7 +533,6 @@ async def test_phase_rate(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     r"""Test performance of delay tracking with a phase rate.
 
@@ -553,7 +549,6 @@ async def test_phase_rate(
         correlator,
         receive_baseline_correlation_products,
         pdf_report,
-        expect,
         [(0.0, phase_rate) for phase_rate in rates],
         lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )

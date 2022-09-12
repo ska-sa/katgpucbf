@@ -6,6 +6,6 @@ numpy
 prometheus-api-client
 pylatex
 pytest
-pytest-expectr
+pytest-check
 pytest-reportlog
 spead2>=3.9.1
