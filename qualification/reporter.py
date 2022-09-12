@@ -88,6 +88,15 @@ class Reporter:
         logger.debug(message)
         self._cur_step.append({"$msg_type": "detail", "message": message, "timestamp": time.time()})
 
+    def failure(self, message: str) -> None:
+        """Report a non-fatal test failure.
+
+        This should generally not be done directly; use pytest_check.
+        """
+        if self._cur_step is None:
+            raise ValueError("Cannot have failure without a current step")
+        self._cur_step.append({"$msg_type": "failure", "message": message, "timestamp": time.time()})
+
     def raw_figure(self, code: str) -> None:
         """Add raw LaTeX to the document.
 

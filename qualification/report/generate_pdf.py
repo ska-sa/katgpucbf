@@ -154,8 +154,12 @@ def rst2latex(text: str) -> str:
     return publish_parts(source=text, writer=writer)["body"]
 
 
+class DetailBase:
+    """Any information provided inside a ``pdf_report.step``."""
+
+
 @dataclass
-class Detail:
+class Detail(DetailBase):
     """A message logged by ``pdf_report.detail``."""
 
     message: str
@@ -163,7 +167,15 @@ class Detail:
 
 
 @dataclass
-class Figure:
+class Failure(DetailBase):
+    """A failure logged by ``pdf_report.failure``."""
+
+    message: str
+    timestamp: float
+
+
+@dataclass
+class Figure(DetailBase):
     """A figure created by ``pdf_report.figure`` or ``pdf_report.raw_figure``."""
 
     code: str
@@ -182,7 +194,7 @@ class Step:
     """A step created by ``pdf_report.step``."""
 
     message: str
-    details: List[Union[Detail, Figure]] = field(default_factory=list)
+    details: List[DetailBase] = field(default_factory=list)
 
 
 @dataclass
@@ -279,11 +291,13 @@ class TestConfiguration:
     correlators: List[CorrelatorConfiguration] = field(default_factory=list)
 
 
-def _parse_detail(detail: dict) -> Union[Detail, Figure]:
+def _parse_detail(detail: dict) -> DetailBase:
     """Parse a single detail from the details of a step."""
     msg_type = detail["$msg_type"]
     if msg_type == "detail":
         return Detail(detail["message"], detail["timestamp"])
+    elif msg_type == "failure":
+        return Failure(detail["message"], detail["timestamp"])
     elif msg_type == "figure":
         return Figure(detail["code"])
     else:
@@ -778,9 +792,9 @@ def document_from_json(input_data: Union[str, list]) -> Document:
                     _doc_outcome(results_sec, test_configuration, result)
                 with section.create(Subsubsection("Procedure", label=False)) as procedure:
                     with section.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
+                        procedure_table.add_hline()
                         assert result.start_time is not None
                         for step in result.steps:
-                            procedure_table.add_hline()
                             procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
                             procedure_table.add_hline()
                             for detail in step.details:
@@ -789,6 +803,21 @@ def document_from_json(input_data: Union[str, list]) -> Document:
                                         [
                                             f"{readable_duration(detail.timestamp - result.start_time)}",
                                             detail.message,
+                                        ]
+                                    )
+                                elif isinstance(detail, Failure):
+                                    # add_row doesn't seem to have a way to put
+                                    # more than one sequential command into a
+                                    # cell. Just construct the cell by hand.
+                                    # Without the Bflushleft there is (for some
+                                    # reason) a lot of extra vertical space.
+                                    cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
+                                    cell += "\n" + detail.message + "\n"
+                                    cell += r"\end{lstlisting}\end{Bflushleft}"
+                                    procedure_table.add_row(
+                                        [
+                                            f"{readable_duration(detail.timestamp - result.start_time)}",
+                                            NoEscape(cell),
                                         ]
                                     )
                                 elif isinstance(detail, Figure):
