@@ -22,6 +22,7 @@ is channel 0, rather than the centre channel. The difference is dealt with
 by the request handler for the ``?delays`` katcp request.
 """
 
+import math
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
@@ -36,6 +37,16 @@ def wrap_angle(angle):
     This works on both Python scalars and numpy arrays.
     """
     return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def _div_up(x: int, step: int) -> int:
+    """Divide `x` by `step` and round up."""
+    return (x + step - 1) // step
+
+
+def _round_up(x: int, step: int) -> int:
+    """Round `x` up to the next multiple of `step`."""
+    return (x + step - 1) // step * step
 
 
 class NonMonotonicQueryWarning(UserWarning):
@@ -94,6 +105,13 @@ class AbstractDelayModel(ABC):
         orig_time, residual, phase = self.range(time, time + 1, 1)
         return int(orig_time[0]), float(residual[0]), float(phase[0])
 
+    @abstractmethod
+    def skip(self, target: int, start: int, step: int) -> int:
+        """Find the next output time for which the input time is at least `target`.
+
+        The output time must also be at least `start` and a multiple of `step`.
+        """
+
 
 class LinearDelayModel(AbstractDelayModel):
     """Delay model that adjusts delay linearly over time.
@@ -143,6 +161,21 @@ class LinearDelayModel(AbstractDelayModel):
         # epoch
         return rel_time - coarse_delay + self.start, fine_delay, phase
 
+    def skip(self, target: int, start: int, step: int) -> int:  # noqa: D102
+        # Let r be the output time relative to self.start.
+        # Solve: r - delay - r * delay_rate > (target - self.start) - 0.5
+        # <=> r * (1 - delay_rate) > target - self.start + delay - 0.5
+        r = math.ceil((target - self.start + self.delay - 0.5) / (1.0 - self.delay_rate))
+        t = max(r + self.start, start)
+        t = _round_up(t, step)
+        # Floating-point gremlins means we can't be 100% sure that evaluating
+        # at time t will generate a (rounded) input timestamp that is >=
+        # target, but we should be close. If delay_rate is extremely close to 1
+        # then this could be expensive, but that's not expected in practice.
+        while self(t)[0] < target:
+            t += step
+        return t
+
 
 class MultiDelayModel(AbstractDelayModel):
     """Piece-wise linear delay model.
@@ -150,6 +183,8 @@ class MultiDelayModel(AbstractDelayModel):
     The model evolves over time by calling :meth:`add`. It **must** only be
     queried with monotonically increasing `start` values, because as soon as a
     query is made beyond the end of the first piece it is discarded.
+    Additionally, after calling :meth:`skip`, the return value should be
+    treated as a lower bound for future `start` values.
 
     In the initial state it has a model with zero delay.
 
@@ -176,22 +211,25 @@ class MultiDelayModel(AbstractDelayModel):
         if self.callback_func is not None:
             self.callback_func(self._models)
 
-    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+    def _popleft_until(self, start: int) -> None:
+        """Pop models that pre-date `start`."""
         if start < self._models[0].start:
             warnings.warn(
                 f"Timestamp {start} is before start of first linear model "
                 f"at {self._models[0].start} - possibly due to non-monotonic queries",
                 NonMonotonicQueryWarning,
             )
+        while len(self._models) > 1 and start >= self._models[1].start:
+            self._popleft()
 
+    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+        self._popleft_until(start)
         assert step > 0
         n = len(range(start, stop, step))
         # Allocate space to hold the combined results from all subqueries
         orig = np.zeros(n, np.dtype(np.int64))
         fine_delay = np.zeros(n, np.dtype(np.float64))
         phase = np.zeros(n, np.dtype(np.float64))
-
-        cull = 0  # Number of models to discard as they contribute nothing
         pos = 0  # Number of entries that have been filled in so far
         for i, model in enumerate(self._models):
             if pos == n:
@@ -200,19 +238,28 @@ class MultiDelayModel(AbstractDelayModel):
             if i + 1 == len(self._models):
                 next_pos = n
             else:
-                next_pos = min(n, (self._models[i + 1].start - start + step - 1) // step)
-            if next_pos <= 0:
-                next_pos = 0
-                cull += 1
-            elif next_pos > pos:
+                next_pos = min(n, _div_up(self._models[i + 1].start - start, step))
+            if next_pos > pos:
                 sub_orig, sub_fine_delay, sub_phase = model.range(start + pos * step, start + next_pos * step, step)
                 orig[pos:next_pos] = sub_orig
                 fine_delay[pos:next_pos] = sub_fine_delay
                 phase[pos:next_pos] = sub_phase
-            pos = next_pos
-        for _ in range(cull):
-            self._popleft()
+                pos = next_pos
         return orig, fine_delay, phase
+
+    def skip(self, target: int, start: int, step: int) -> int:  # noqa: D102
+        self._popleft_until(start)
+        assert step > 0
+        while True:
+            t = self._models[0].skip(target, start, step)
+            if len(self._models) == 1 or t < self._models[1].start:
+                # The returned time is within the domain of the first
+                # linear model.
+                return t
+            # If we get here, no timestamp within the domain of the first
+            # linear model is satisfactory.
+            self._popleft()
+            start = self._models[0].start
 
     def add(self, model: LinearDelayModel) -> None:
         """Extend the model with a new linear model.

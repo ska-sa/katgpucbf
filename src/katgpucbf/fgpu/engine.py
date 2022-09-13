@@ -872,16 +872,15 @@ class Engine(aiokatcp.DeviceServer):
             orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
             if min(orig_start_timestamps) < self._in_items[0].timestamp:
                 align = self.spectra_per_heap * self.spectra_samples
-                start_timestamp = max(start_timestamp, self._in_items[0].timestamp)
-                start_timestamp = accel.roundup(start_timestamp, align)
-                # TODO: add a helper to the delay model to accelerate this?
-                # Might not be needed, since max delay is not many multiples of
-                # align.
-                while True:
+                # This loop is needed because MultiDelayModel is not necessarily
+                # monotonic, and so simply taking the larger of the two skip
+                # results does not guarantee a suitable timestamp.
+                while min(orig_start_timestamps) < self._in_items[0].timestamp:
+                    start_timestamp = max(
+                        model.skip(self._in_items[0].timestamp, start_timestamp + 1, align)
+                        for model in self.delay_models
+                    )
                     orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
-                    if min(orig_start_timestamps) >= self._in_items[0].timestamp:
-                        break
-                    start_timestamp += align
                 await self._flush_out(start_timestamp)
             # When we add new spectra they must follow contiguously for any
             # that we've already buffered.
