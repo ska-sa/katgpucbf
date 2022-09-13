@@ -30,10 +30,6 @@ pipeline {
 
   }
 
-  environment {
-    DEBIAN_FRONTEND = 'noninteractive' // Required for zero interaction when installing or upgrading software packages
-  }
-
   options {
     timeout(time: 2, unit: 'HOURS')
   }
