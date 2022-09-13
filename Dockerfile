@@ -80,7 +80,7 @@ FROM build-base as jenkins
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     latexmk \
-    texlive-fonts-recommended \
+    tex-gyre \
     texlive-latex-recommended \
     texlive-latex-extra
 
