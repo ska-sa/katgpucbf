@@ -111,6 +111,14 @@ RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker
 
 #######################################################################
 
+# Image used by Jenkins
+FROM build-base as jenkins
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    latexmk
+
+#######################################################################
+
 # The above builds everything. Now install it into a lighter-weight runtime
 # image, without all the stuff needed for the build itself.
 FROM base

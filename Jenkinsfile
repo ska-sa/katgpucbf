@@ -13,10 +13,10 @@
 pipeline {
   agent {
     dockerfile {
-      /* Use the initial layers of the build image as the image for testing. This
-       * provides the appropriate dependencies.
+      /* Use the Jenkins-specific stage of the Dockerfile as the image for
+       * testing. This provides the appropriate dependencies.
        */
-      additionalBuildArgs '--target=build-base'
+      additionalBuildArgs '--target=jenkins'
 
       /* The following argument needs to be specified in order for the container
        * to launch correctly.
