@@ -148,8 +148,8 @@ class MultiDelayModel(AbstractDelayModel):
     """Piece-wise linear delay model.
 
     The model evolves over time by calling :meth:`add`. It **must** only be
-    queried monotonically, because as soon as a query is made beyond the end
-    of the first piece it is discarded.
+    queried with monotonically increasing `start` values, because as soon as a
+    query is made beyond the end of the first piece it is discarded.
 
     In the initial state it has a model with zero delay.
 
