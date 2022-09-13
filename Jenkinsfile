@@ -111,7 +111,7 @@ pipeline {
           steps {
             // -W causes warnings to become errors.
             // --keep-going ensures we get all warnings instead of just the first.
-            sh 'make -C doc clean html SPHINXOPTS="-W --keep-going"'
+            sh 'make -C doc clean html latexpdf SPHINXOPTS="-W --keep-going"'
             publishHTML(target: [reportName: 'Module documentation', reportDir: "doc/_build/html", reportFiles: 'index.html'])
           }
         }
