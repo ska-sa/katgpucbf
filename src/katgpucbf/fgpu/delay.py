@@ -114,12 +114,12 @@ class LinearDelayModel(AbstractDelayModel):
     Raises
     ------
     ValueError
-        if `rate` is less than or equal to -1 or `start` is negative
+        if `rate` is greater than or equal to 1 or `start` is negative
     """
 
     def __init__(self, start: int, delay: float, delay_rate: float, phase: float, phase_rate: float) -> None:
-        if delay_rate <= -1.0:
-            raise ValueError("delay rate must be greater than -1")
+        if delay_rate >= 1.0:
+            raise ValueError("delay rate must be less than 1")
         self.start = start
         self.delay = float(delay)
         self.delay_rate = float(delay_rate)

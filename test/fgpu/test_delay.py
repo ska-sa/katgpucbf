@@ -103,9 +103,9 @@ def test_linear_stability_delay_rate() -> None:
 
 
 def test_linear_bad_delay_rate() -> None:
-    """Delay rate can't be -1 or less."""
+    """Delay rate can't be 1 or more."""
     with pytest.raises(ValueError):
-        LinearDelayModel(1, 2.0, -1.0, 0.0, 0.0)
+        LinearDelayModel(1, 2.0, 1.0, 0.0, 0.0)
 
 
 def test_multi_add_older(multi) -> None:
