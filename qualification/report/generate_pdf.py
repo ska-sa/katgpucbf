@@ -154,12 +154,8 @@ def rst2latex(text: str) -> str:
     return publish_parts(source=text, writer=writer)["body"]
 
 
-class DetailBase:
-    """Any information provided inside a ``pdf_report.step``."""
-
-
 @dataclass
-class Detail(DetailBase):
+class Detail:
     """A message logged by ``pdf_report.detail``."""
 
     message: str
@@ -167,7 +163,7 @@ class Detail(DetailBase):
 
 
 @dataclass
-class Failure(DetailBase):
+class Failure:
     """A failure logged by ``pdf_report.failure``."""
 
     message: str
@@ -175,7 +171,7 @@ class Failure(DetailBase):
 
 
 @dataclass
-class Figure(DetailBase):
+class Figure:
     """A figure created by ``pdf_report.figure`` or ``pdf_report.raw_figure``."""
 
     code: str
@@ -189,12 +185,15 @@ class Figure(DetailBase):
         self.code = re.sub(r"\\(pgfsys@[a-z@]+)", r"\\csname \1\\endcsname", self.code)
 
 
+Item = Union[Detail, Failure, Figure]  # Any information provided inside a ``pdf_report.step``
+
+
 @dataclass
 class Step:
     """A step created by ``pdf_report.step``."""
 
     message: str
-    details: List[DetailBase] = field(default_factory=list)
+    items: List[Item] = field(default_factory=list)
 
 
 @dataclass
@@ -291,17 +290,17 @@ class TestConfiguration:
     correlators: List[CorrelatorConfiguration] = field(default_factory=list)
 
 
-def _parse_detail(detail: dict) -> DetailBase:
-    """Parse a single detail from the details of a step."""
-    msg_type = detail["$msg_type"]
+def _parse_item(item: dict) -> Item:
+    """Parse a single item from the items of a step."""
+    msg_type = item["$msg_type"]
     if msg_type == "detail":
-        return Detail(detail["message"], detail["timestamp"])
+        return Detail(item["message"], item["timestamp"])
     elif msg_type == "failure":
-        return Failure(detail["message"], detail["timestamp"])
+        return Failure(item["message"], item["timestamp"])
     elif msg_type == "figure":
-        return Figure(detail["code"])
+        return Figure(item["code"])
     else:
-        raise ValueError(f"Do not know how to parse detail $msg_type of {msg_type!r}")
+        raise ValueError(f"Do not know how to parse item $msg_type of {msg_type!r}")
 
 
 def _parse_report_data(result: Result, msg: dict) -> None:
@@ -309,8 +308,8 @@ def _parse_report_data(result: Result, msg: dict) -> None:
     assert isinstance(msg, dict)
     msg_type = msg["$msg_type"]
     if msg_type == "step":
-        details = [_parse_detail(detail) for detail in msg["details"]]
-        result.steps.append(Step(msg["message"], details))
+        items = [_parse_item(item) for item in msg["items"]]
+        result.steps.append(Step(msg["message"], items))
     elif msg_type == "test_info":
         if not result.blurb:
             result.blurb = msg["blurb"]
@@ -797,33 +796,33 @@ def document_from_json(input_data: Union[str, list]) -> Document:
                         for step in result.steps:
                             procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
                             procedure_table.add_hline()
-                            for detail in step.details:
-                                if isinstance(detail, Detail):
+                            for item in step.items:
+                                if isinstance(item, Detail):
                                     procedure_table.add_row(
                                         [
-                                            f"{readable_duration(detail.timestamp - result.start_time)}",
-                                            detail.message,
+                                            f"{readable_duration(item.timestamp - result.start_time)}",
+                                            item.message,
                                         ]
                                     )
-                                elif isinstance(detail, Failure):
+                                elif isinstance(item, Failure):
                                     # add_row doesn't seem to have a way to put
                                     # more than one sequential command into a
                                     # cell. Just construct the cell by hand.
                                     # Without the Bflushleft there is (for some
                                     # reason) a lot of extra vertical space.
                                     cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
-                                    cell += "\n" + detail.message + "\n"
+                                    cell += "\n" + item.message + "\n"
                                     cell += r"\end{lstlisting}\end{Bflushleft}"
                                     procedure_table.add_row(
                                         [
-                                            f"{readable_duration(detail.timestamp - result.start_time)}",
+                                            f"{readable_duration(item.timestamp - result.start_time)}",
                                             NoEscape(cell),
                                         ]
                                     )
-                                elif isinstance(detail, Figure):
+                                elif isinstance(item, Figure):
                                     mp = MiniPage(width=NoEscape(r"\textwidth"))
                                     mp.append(NoEscape(r"\center"))
-                                    mp.append(NoEscape(detail.code))
+                                    mp.append(NoEscape(item.code))
                                     procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
                                 procedure_table.add_hline()
 

@@ -79,7 +79,7 @@ class Reporter:
         """Report the start of a high-level step."""
         self._cur_step = []
         logger.info(message)
-        self._data.append({"$msg_type": "step", "message": message, "details": self._cur_step})
+        self._data.append({"$msg_type": "step", "message": message, "items": self._cur_step})
 
     def detail(self, message: str) -> None:
         """Report a low-level detail, associated with the previous call to :meth:`step`."""
