@@ -79,7 +79,9 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 FROM build-base as jenkins
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-    latexmk
+    latexmk \
+    texlive-latex-recommended \
+    texlive-latex-extra
 
 #######################################################################
 
