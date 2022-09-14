@@ -19,6 +19,7 @@
 import matplotlib.figure
 import numpy as np
 import pytest
+from pytest_check import check
 
 from .reporter import POTLocator, Reporter
 
@@ -60,10 +61,19 @@ def test_figure(pdf_report: Reporter) -> None:
     pdf_report.figure(fig)
 
 
-def test_expect(pdf_report: Reporter, expect) -> None:
-    """Use ``expect`` and observe failures."""
+def three():
+    """Return 3, to demonstrate assertion rewriting with pytest-check."""
+    return 3
+
+
+def test_check(pdf_report: Reporter) -> None:
+    """Use ``check`` and observe failures."""
     pdf_report.step("Expect some bad things")
-    expect(1 == 2)
-    expect(3 == 4)
+    x = 1
+    with check:
+        assert x * three() == 2
+    with check:
+        assert 3 == 4, "check with msg"
     pdf_report.step("Expect some good things")
-    expect(1 == 1)
+    with check:
+        assert 1 == 1

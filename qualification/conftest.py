@@ -28,6 +28,7 @@ from typing import AsyncGenerator, Dict, Generator, List, Tuple, Type, TypeVar
 import aiokatcp
 import matplotlib.style
 import pytest
+import pytest_check
 from async_timeout import timeout
 from katsdpservices import get_interface_address
 
@@ -154,7 +155,7 @@ def int_time() -> float:  # noqa: D104
 
 
 @pytest.fixture(autouse=True)
-def pdf_report(request) -> Reporter:
+def pdf_report(request, monkeypatch) -> Reporter:
     """Fixture for logging steps in a test."""
     blurb = inspect.getdoc(request.node.function)
     if blurb is None:
@@ -170,7 +171,25 @@ def pdf_report(request) -> Reporter:
     if name_marker is not None:
         data[0]["test_name"] = name_marker.args[0]
     request.node.user_properties.append(("pdf_report_data", data))
-    return Reporter(data)
+    reporter = Reporter(data)
+    orig_log_failure = pytest_check.check_methods.log_failure
+    orig_get_full_context = pytest_check.check_methods.get_full_context
+
+    def get_full_context(level):
+        # The real log_failure function constructs a backtrace, and inserting
+        # our wrapper into the call stack messes that up. We need to have it
+        # skip an extra level for each wrapper we're injecting.
+        return orig_get_full_context(level + 2)
+
+    def log_failure(msg):
+        reporter.failure(f"Failed assertion: {msg}")
+        return orig_log_failure(msg)
+
+    # Patch the central point where pytest-check logs failures so that we can
+    # insert them into the test procedure.
+    monkeypatch.setattr(pytest_check.check_methods, "log_failure", log_failure)
+    monkeypatch.setattr(pytest_check.check_methods, "get_full_context", get_full_context)
+    return reporter
 
 
 @pytest.fixture(scope="session")

@@ -79,7 +79,7 @@ class Reporter:
         """Report the start of a high-level step."""
         self._cur_step = []
         logger.info(message)
-        self._data.append({"$msg_type": "step", "message": message, "details": self._cur_step})
+        self._data.append({"$msg_type": "step", "message": message, "items": self._cur_step})
 
     def detail(self, message: str) -> None:
         """Report a low-level detail, associated with the previous call to :meth:`step`."""
@@ -87,6 +87,15 @@ class Reporter:
             raise ValueError("Cannot have detail without a current step")
         logger.debug(message)
         self._cur_step.append({"$msg_type": "detail", "message": message, "timestamp": time.time()})
+
+    def failure(self, message: str) -> None:
+        """Report a non-fatal test failure.
+
+        This should generally not be done directly; use pytest_check.
+        """
+        if self._cur_step is None:
+            raise ValueError("Cannot have failure without a current step")
+        self._cur_step.append({"$msg_type": "failure", "message": message, "timestamp": time.time()})
 
     def raw_figure(self, code: str) -> None:
         """Add raw LaTeX to the document.

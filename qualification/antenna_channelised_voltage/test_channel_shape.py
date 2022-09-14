@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
+from pytest_check import check
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
@@ -60,7 +61,6 @@ async def test_channel_shape(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    expect,
 ) -> None:
     """Test the shape of the response to a single channel.
 
@@ -148,4 +148,5 @@ async def test_channel_shape(
     pdf_report.detail(
         f"-53 dB bandwidth is {width_53db:.3f} channels ({width_53db / width_3db:.3f}x the pass bandwidth)."
     )
-    expect(width_53db <= 2 * width_3db)
+    with check:
+        assert width_53db <= 2 * width_3db

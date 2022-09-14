@@ -74,3 +74,7 @@ repos:
         name: pip-compile requirements-dev.in
         args: [requirements-dev.in]
         files: ^requirements(-dev)?\.(in|txt)$
+      - id: pip-compile
+        name: pip-compile qualification/requirements.in
+        args: [qualification/requirements.in]
+        files: .*requirements(-dev)?\.(in|txt)$
