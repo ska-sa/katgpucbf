@@ -75,6 +75,17 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 
 #######################################################################
 
+# Image used by Jenkins
+FROM build-base as jenkins
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    latexmk \
+    tex-gyre \
+    texlive-latex-recommended \
+    texlive-latex-extra
+
+#######################################################################
+
 # The above image is independent of the contents of this package (except
 # for requirements.txt), and is used to form the image for Jenkins
 # testing. We now install the package in a new build stage.

@@ -13,10 +13,10 @@
 pipeline {
   agent {
     dockerfile {
-      /* Use the initial layers of the build image as the image for testing. This
-       * provides the appropriate dependencies.
+      /* Use the Jenkins-specific stage of the Dockerfile as the image for
+       * testing. This provides the appropriate dependencies.
        */
-      additionalBuildArgs '--target=build-base'
+      additionalBuildArgs '--target=jenkins'
 
       /* The following argument needs to be specified in order for the container
        * to launch correctly.
@@ -28,10 +28,6 @@ pipeline {
       args '--gpus=all'
     }
 
-  }
-
-  environment {
-    DEBIAN_FRONTEND = 'noninteractive' // Required for zero interaction when installing or upgrading software packages
   }
 
   options {
@@ -111,7 +107,7 @@ pipeline {
           steps {
             // -W causes warnings to become errors.
             // --keep-going ensures we get all warnings instead of just the first.
-            sh 'make -C doc clean html SPHINXOPTS="-W --keep-going"'
+            sh 'make -C doc clean html latexpdf SPHINXOPTS="-W --keep-going"'
             publishHTML(target: [reportName: 'Module documentation', reportDir: "doc/_build/html", reportFiles: 'index.html'])
           }
         }
