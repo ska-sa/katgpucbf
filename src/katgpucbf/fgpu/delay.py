@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,10 +22,11 @@ is channel 0, rather than the centre channel. The difference is dealt with
 by the request handler for the ``?delays`` katcp request.
 """
 
+import math
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -36,6 +37,16 @@ def wrap_angle(angle):
     This works on both Python scalars and numpy arrays.
     """
     return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def _div_up(x: int, step: int) -> int:
+    """Divide `x` by `step` and round up."""
+    return (x + step - 1) // step
+
+
+def _round_up(x: int, step: int) -> int:
+    """Round `x` up to the next multiple of `step`."""
+    return (x + step - 1) // step * step
 
 
 class NonMonotonicQueryWarning(UserWarning):
@@ -49,16 +60,7 @@ class AbstractDelayModel(ABC):
     """
 
     @abstractmethod
-    def __call__(self, time: float) -> float:
-        """Determine delay at a given sample.
-
-        Note that this returns only the delay that was applied to the original
-        timestamp, not the timestamp itself. No check is made that the sample
-        comes after `start` - the function will happily interpolate backwards.
-        """
-
-    @abstractmethod
-    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find input timestamps corresponding to a range of output samples.
 
         For each output sample with timestamp in ``range(start, stop, step)``,
@@ -76,14 +78,14 @@ class AbstractDelayModel(ABC):
         Returns
         -------
         orig_time
-            Undelayed timestamps corresponding to ``range(start, stop, step)``
+            Undelayed integer timestamps corresponding to ``range(start, stop, step)``
         residual
             Fractional sample delay not accounted for by ``time - orig_time``.
         phase
             Fringe-stopping phase to be added.
         """
 
-    def invert(self, time: int) -> Tuple[int, float, float]:
+    def __call__(self, time: int) -> Tuple[int, float, float]:
         """Find input sample timestamp corresponding to a given output sample.
 
         Parameters
@@ -94,14 +96,21 @@ class AbstractDelayModel(ABC):
         Returns
         -------
         orig_time
-            Undelayed timestamp corresponding to `time`.
+            Undelayed integer timestamp corresponding to `time`.
         residual
             Fractional sample delay not accounted for by ``time - orig_time``.
         phase
             Fringe-stopping phase to be added.
         """
-        orig_time, residual, phase = self.invert_range(time, time + 1, 1)
+        orig_time, residual, phase = self.range(time, time + 1, 1)
         return int(orig_time[0]), float(residual[0]), float(phase[0])
+
+    @abstractmethod
+    def skip(self, target: int, start: int, step: int) -> int:
+        """Find the next output time for which the input time is at least `target`.
+
+        The output time must also be at least `start` and a multiple of `step`.
+        """
 
 
 class LinearDelayModel(AbstractDelayModel):
@@ -110,7 +119,7 @@ class LinearDelayModel(AbstractDelayModel):
     Parameters
     ----------
     start
-        Sample at which the model should start being used.
+        Output sample at which the model should start being used.
     delay
         Delay to apply at `start`. [seconds]
     delay_rate
@@ -123,72 +132,59 @@ class LinearDelayModel(AbstractDelayModel):
     Raises
     ------
     ValueError
-        if `rate` is less than or equal to -1 or `start` is negative
+        if `rate` is greater than or equal to 1 or `start` is negative
     """
 
     def __init__(self, start: int, delay: float, delay_rate: float, phase: float, phase_rate: float) -> None:
-        if delay_rate <= -1.0:
-            raise ValueError("delay rate must be greater than -1")
+        if delay_rate >= 1.0:
+            raise ValueError("delay rate must be less than 1")
         self.start = start
         self.delay = float(delay)
         self.delay_rate = float(delay_rate)
         self.phase = wrap_angle(float(phase))
         self.phase_rate = float(phase_rate)
 
-    def __call__(self, time: float) -> float:  # noqa: D102
-        rel_time = time - self.start
-        return rel_time * self.delay_rate + self.delay
-
-    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
-        # 1 + y is the inverse of 1 + delay_rate
-        y = -self.delay_rate / (1 + self.delay_rate)
+    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         # Variables with names prefixed rel_ treat start of delay model as t_0.
-        # This makes it easier to apply the rate.
-        # rel_time is the (relative) corrected timestamp, i.e. after the delay
-        # model has been applied, while rel_orig is the (relative) original
-        # timestamp, the one that would have come from the digitiser before
-        # correction.
+        # This makes it easier to apply the rate and reduces rounding errors.
         rel_time = np.arange(start - self.start, stop - self.start, step, dtype=np.dtype(np.int64))
-        # Solve `rel_time = rel_orig + delay + rel_orig*rate` for rel_orig and
-        # you end up with
-        # rel_orig = (rel_time - self.delay) / (1 + self.delay_rate).
-        #          = (rel_time - self.delay) * (1 + y)
-        # Evaluating that naively leads to loss of precision. Instead, it is
-        # expanded into 4 terms. Most of the terms are either integer (no
-        # error) or very small (and hence absolute rounding error is small).
-        # The terms are split into integer and fractional components, which are
-        # added separately.
-        terms: List[Union[np.ndarray, float]] = [rel_time, rel_time * y, -self.delay, -self.delay * y]
-        terms_int = [np.rint(term).astype(np.int64) for term in terms]
-        frac = sum(term - term_int for term, term_int in zip(terms, terms_int))
-        assert isinstance(frac, np.ndarray)  # Tells mypy that sum isn't over an empty list
-        # Summing fractional values may make up a full integer. Extract it so
-        # that frac remains in [-0.5, 0.5].
-        extra = np.rint(frac)
-        frac -= extra
-        terms_int.append(extra.astype(np.int64))
-        rel_orig_rnd = sum(terms_int)
-        assert isinstance(rel_orig_rnd, np.ndarray)  # Tells mypy that sum isn't over an empty list
-        # At this point rel_orig is rel_orig_rnd + frac
+        delay = self.delay + rel_time * self.delay_rate
+        coarse_delay = np.rint(delay).astype(np.int64)
         # Prevent coarse delay from becoming negative
-        adjust = np.minimum(rel_time - rel_orig_rnd, 0)
-        rel_orig_rnd += adjust
-        frac -= adjust
+        coarse_delay = np.maximum(coarse_delay, 0)
+        fine_delay = delay - coarse_delay
 
         # Calculate the phase
-        phase = wrap_angle((rel_orig_rnd + frac) * self.phase_rate + self.phase)
+        phase = wrap_angle(rel_time * self.phase_rate + self.phase)
 
         # add self.start back again to return the timestamps in the original
         # epoch
-        return rel_orig_rnd + self.start, -frac, phase
+        return rel_time - coarse_delay + self.start, fine_delay, phase
+
+    def skip(self, target: int, start: int, step: int) -> int:  # noqa: D102
+        # Let r be the output time relative to self.start.
+        # Solve: r - delay - r * delay_rate > (target - self.start) - 0.5
+        # <=> r * (1 - delay_rate) > target - self.start + delay - 0.5
+        r = math.ceil((target - self.start + self.delay - 0.5) / (1.0 - self.delay_rate))
+        t = max(r + self.start, start)
+        t = _round_up(t, step)
+        # Floating-point gremlins means we can't be 100% sure that evaluating
+        # at time t will generate a (rounded) input timestamp that is >=
+        # target, but we should be close. If delay_rate is extremely close to 1
+        # then this could be expensive, but that's not expected in practice.
+        while self(t)[0] < target:
+            t += step
+        return t
 
 
 class MultiDelayModel(AbstractDelayModel):
     """Piece-wise linear delay model.
 
     The model evolves over time by calling :meth:`add`. It **must** only be
-    queried monotonically, because as soon as a query is made beyond the end
-    of the first piece it is discarded.
+    queried with monotonically increasing `start` values, because as soon as a
+    query is made beyond the end of the first piece it is discarded.
+    Additionally, after calling :meth:`skip`, the return value should be
+    treated as a lower bound for future `start` values.
 
     In the initial state it has a model with zero delay.
 
@@ -209,59 +205,61 @@ class MultiDelayModel(AbstractDelayModel):
         if callback_func is not None:
             callback_func(self._models)
 
-    def __call__(self, time: float) -> float:  # noqa: D102
-        while len(self._models) > 1 and time >= self._models[1].start:
-            self._popleft()
-        if time < self._models[0].start:
-            warnings.warn(
-                f"Timestamp {time} is before start of first linear model "
-                f"at {self._models[0].start} - possibly due to non-monotonic queries",
-                NonMonotonicQueryWarning,
-            )
-        return self._models[0](time)
-
     def _popleft(self) -> None:
         """Carry out a popleft and callback invocation."""
         self._models.popleft()
         if self.callback_func is not None:
             self.callback_func(self._models)
 
-    def invert_range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
-        orig, fine_delay, phase = self._models[0].invert_range(start, stop, step)
-
-        if len(orig) == 0:  # Defence against corner case breaking things.
-            return orig, fine_delay, phase
-
-        if orig[0] < self._models[0].start:
+    def _popleft_until(self, start: int) -> None:
+        """Pop models that pre-date `start`."""
+        if start < self._models[0].start:
             warnings.warn(
-                f"Timestamp {orig[0]} is before start of first linear model "
+                f"Timestamp {start} is before start of first linear model "
                 f"at {self._models[0].start} - possibly due to non-monotonic queries",
                 NonMonotonicQueryWarning,
             )
-
-        # Step through later models and overwrite the first one where later ones
-        # are valid. This is not particularly optimal since we evaluate the full
-        # range for each combination of model and timestamp. However, we expect
-        # to have only a small number of models.
-        cull = 0
-        for i, model in enumerate(self._models):
-            if i == 0:
-                continue  # We've already done the first one
-            if stop <= model.start:
-                # Models are assumed to have positive delays, so the
-                # inverse of stop in any model is <= stop.
-                break
-            new_orig, new_fine_delay, new_phase = model.invert_range(start, stop, step)
-            mask = new_orig >= model.start
-            np.copyto(orig, new_orig, where=mask)
-            np.copyto(fine_delay, new_fine_delay, where=mask)
-            np.copyto(phase, new_phase, where=mask)
-            if mask[0]:
-                # The previous model is completely overwritten
-                cull = i
-        for _ in range(cull):
+        while len(self._models) > 1 and start >= self._models[1].start:
             self._popleft()
+
+    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+        self._popleft_until(start)
+        assert step > 0
+        n = len(range(start, stop, step))
+        # Allocate space to hold the combined results from all subqueries
+        orig = np.zeros(n, np.dtype(np.int64))
+        fine_delay = np.zeros(n, np.dtype(np.float64))
+        phase = np.zeros(n, np.dtype(np.float64))
+        pos = 0  # Number of entries that have been filled in so far
+        for i, model in enumerate(self._models):
+            if pos == n:
+                break  # We've filled everything in already, so no need to continue
+            # Find first position in the query which belongs to the next model
+            if i + 1 == len(self._models):
+                next_pos = n
+            else:
+                next_pos = min(n, _div_up(self._models[i + 1].start - start, step))
+            if next_pos > pos:
+                sub_orig, sub_fine_delay, sub_phase = model.range(start + pos * step, start + next_pos * step, step)
+                orig[pos:next_pos] = sub_orig
+                fine_delay[pos:next_pos] = sub_fine_delay
+                phase[pos:next_pos] = sub_phase
+                pos = next_pos
         return orig, fine_delay, phase
+
+    def skip(self, target: int, start: int, step: int) -> int:  # noqa: D102
+        self._popleft_until(start)
+        assert step > 0
+        while True:
+            t = self._models[0].skip(target, start, step)
+            if len(self._models) == 1 or t < self._models[1].start:
+                # The returned time is within the domain of the first
+                # linear model.
+                return t
+            # If we get here, no timestamp within the domain of the first
+            # linear model is satisfactory.
+            self._popleft()
+            start = self._models[0].start
 
     def add(self, model: LinearDelayModel) -> None:
         """Extend the model with a new linear model.

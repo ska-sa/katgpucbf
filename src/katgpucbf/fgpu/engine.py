@@ -63,12 +63,12 @@ def _host_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.H
     return accel.HostArray(slot.shape, slot.dtype, slot.required_padded_shape(), context=context)
 
 
-def _invert_models(
+def _sample_models(
     delay_models: Iterable[AbstractDelayModel], start: int, stop: int, step: int
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Call :meth:`.AbstractDelayModel.invert_range` on multiple delay models and stack results."""
+    """Call :meth:`.AbstractDelayModel.range` on multiple delay models and stack results."""
     # Each element of parts is a tuple of results from one delay model
-    parts = [model.invert_range(start, stop, step) for model in delay_models]
+    parts = [model.range(start, stop, step) for model in delay_models]
     # Transpose so that each element of groups is one result from all delay models
     return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
 
@@ -869,19 +869,18 @@ class Engine(aiokatcp.DeviceServer):
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
             start_timestamp = self._out_item.end_timestamp
-            orig_start_timestamps = [model.invert(start_timestamp)[0] for model in self.delay_models]
+            orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
             if min(orig_start_timestamps) < self._in_items[0].timestamp:
                 align = self.spectra_per_heap * self.spectra_samples
-                start_timestamp = max(start_timestamp, self._in_items[0].timestamp)
-                start_timestamp = accel.roundup(start_timestamp, align)
-                # TODO: add a helper to the delay model to accelerate this?
-                # Might not be needed, since max delay is not many multiples of
-                # align.
-                while True:
-                    orig_start_timestamps = [model.invert(start_timestamp)[0] for model in self.delay_models]
-                    if min(orig_start_timestamps) >= self._in_items[0].timestamp:
-                        break
-                    start_timestamp += align
+                # This loop is needed because MultiDelayModel is not necessarily
+                # monotonic, and so simply taking the larger of the two skip
+                # results does not guarantee a suitable timestamp.
+                while min(orig_start_timestamps) < self._in_items[0].timestamp:
+                    start_timestamp = max(
+                        model.skip(self._in_items[0].timestamp, start_timestamp + 1, align)
+                        for model in self.delay_models
+                    )
+                    orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
                 await self._flush_out(start_timestamp)
             # When we add new spectra they must follow contiguously for any
             # that we've already buffered.
@@ -909,7 +908,7 @@ class Engine(aiokatcp.DeviceServer):
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
             timestamps = np.arange(start_timestamp, max_end, self.spectra_samples)
-            orig_timestamps, fine_delays, phase = _invert_models(
+            orig_timestamps, fine_delays, phase = _sample_models(
                 self.delay_models, start_timestamp, max_end, self.spectra_samples
             )
             # timestamps can be empty if we fast-forwarded the output right over the

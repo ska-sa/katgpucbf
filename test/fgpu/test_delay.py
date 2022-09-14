@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -15,6 +15,7 @@
 ################################################################################
 
 """Unit tests for DelayModel functions."""
+import copy
 from functools import partial
 from typing import List, Sequence
 
@@ -54,13 +55,13 @@ def mdelay_callback_list() -> List:
 
 @pytest.fixture
 def linear() -> LinearDelayModel:
-    """Create a LinearDelayModel with a fixed set of parameters for testing."""
+    """Create a :class:`.LinearDelayModel` with a fixed set of parameters for testing."""
     return LinearDelayModel(12345, 100.0, 0.25, 0.1, 0.1)
 
 
 @pytest.fixture
 def multi(linear, mdelay_callback_list) -> MultiDelayModel:
-    """Create a MultiDelayModel with a fixed set of parameters for testing."""
+    """Create a :class:`.MultiDelayModel` with a fixed set of parameters for testing."""
     out = MultiDelayModel(callback_func=partial(mdelay_model_callback, update_list=mdelay_callback_list))
     # First model is the same as the linear fixture
     out.add(linear)
@@ -70,41 +71,44 @@ def multi(linear, mdelay_callback_list) -> MultiDelayModel:
 
 
 def test_linear_call(linear: LinearDelayModel) -> None:
-    """Test the calling of the DelayModel, monotonically.
-
-    .. todo:: Try to the model in unexpected ways to confirm it handles failures gracefully?
-    """
-    assert linear(12000.0) == 13.75
-    assert linear(12345.0) == 100.0
-    assert linear(12345.5) == 100.125
-    assert linear(12945.5) == 250.125
-    assert linear(12945.75) == 250.1875
+    """Test calling the delay model against manually-calculated correct outputs."""
+    assert linear(12345) == (12245, 0.0, wrap_angle(0.1))
+    assert linear(12790) == (12579, 0.25, pytest.approx(wrap_angle(44.6)))
+    assert linear(12788) == (12577, -0.25, pytest.approx(wrap_angle(44.4)))
 
 
-def test_linear_invert(linear: LinearDelayModel) -> None:
-    """Test `invert()` against manually-calculated correct outputs."""
-    assert linear.invert(12445) == (12345, 0.0, wrap_angle(0.1))
-    assert linear.invert(13001) == pytest.approx((12790, 0.2, wrap_angle(44.58)))
-    assert linear.invert(12999) == pytest.approx((12788, -0.2, wrap_angle(44.42)))
+def test_linear_range(linear: LinearDelayModel) -> None:
+    """Test :meth:`.LinearDelayModel.range` against manually-calculated correct outputs."""
+    time, residual, phase = linear.range(12999, 13005, 1)
+    np.testing.assert_array_equal(time, [12735, 12736, 12737, 12738, 12739, 12739])
+    np.testing.assert_array_equal(residual, [-0.5, -0.25, 0.0, 0.25, 0.5, -0.25])
+    np.testing.assert_array_almost_equal(phase, wrap_angle(np.array([65.5, 65.6, 65.7, 65.8, 65.9, 66.0])))
 
 
-def test_linear_invert_range(linear: LinearDelayModel) -> None:
-    """Test `invert_range()` against manually-calculated correct outputs."""
-    time, residual, phase = linear.invert_range(12999, 13005, 1)
-    np.testing.assert_array_equal(time, [12788, 12789, 12790, 12791, 12791, 12792])
-    np.testing.assert_array_almost_equal(residual, [-0.2, 0.0, 0.2, 0.4, -0.4, -0.2])
-    np.testing.assert_array_almost_equal(phase, wrap_angle(np.array([44.42, 44.50, 44.58, 44.66, 44.74, 44.82])))
-
-    time, residual, _phase = linear.invert_range(13000, 14000, 100)
-    exact_time = time - residual
-    forward = exact_time + np.apply_along_axis(linear, 0, exact_time)
-    np.testing.assert_array_almost_equal(forward, np.arange(13000, 14000, 100))
+@pytest.mark.parametrize(
+    "target,start,step",
+    [
+        (100, 0, 1),
+        (100, 12345, 1),
+        (100, 12345, 64),
+        (12788, 0, 1),
+        (12790, 0, 1),
+        (200000, 12345, 100),
+    ],
+)
+def test_linear_skip(linear: LinearDelayModel, target: int, start: int, step: int) -> None:
+    """Test :meth:`LinearDelayModel.skip`."""
+    t = linear.skip(target, start, step)
+    assert t >= start
+    assert t % step == 0
+    assert t - step < start or linear(t - step)[0] < target
+    assert linear(t)[0] >= target
 
 
 def test_linear_stability_delay() -> None:
     """Test that delay is preserved over large timescales."""
     model = LinearDelayModel(10**14, 1000000.001, 0.0, 0.0, 0.0)
-    time, residual, phase = model.invert(2 * 10**14)
+    time, residual, phase = model(2 * 10**14)
     assert time == 2 * 10**14 - 1000000
     assert residual == pytest.approx(0.001, abs=1e-9)
     assert phase == 0.0
@@ -113,17 +117,16 @@ def test_linear_stability_delay() -> None:
 def test_linear_stability_delay_rate() -> None:
     """Test that delay rate can be accurately applied over long periods."""
     model = LinearDelayModel(10**14, 0.0, 1e-10, 0.0, 0.0)
-    time, residual, phase = model.invert(2 * 10**14)
+    time, residual, phase = model(2 * 10**14)
     assert time == 2 * 10**14 - 10**4
-    # Actual value is -1e-6 + 1e-16 - 1e-26 + 1e-36 etc
-    assert residual == pytest.approx(-1e-6 + 1e-16)
+    assert residual == 0.0
     assert phase == 0.0
 
 
 def test_linear_bad_delay_rate() -> None:
-    """Delay rate can't be -1 or less."""
+    """Delay rate can't be 1 or more."""
     with pytest.raises(ValueError):
-        LinearDelayModel(1, 2.0, -1.0, 0.0, 0.0)
+        LinearDelayModel(1, 2.0, 1.0, 0.0, 0.0)
 
 
 def test_multi_add_older(multi) -> None:
@@ -135,49 +138,49 @@ def test_multi_add_older(multi) -> None:
     assert list(multi._models) == [old_models[0], old_models[1], new_linear]
 
 
-def test_multi_call(multi, mdelay_callback_list) -> None:
-    """Test :func:`katgpucbf.fgpu.delay.MultiDelayModel.__call__`.
-
-    This also incorporates the usage of the callback_func specified in the
-    `multi` test fixture.
-    """
-    orig_models = list(multi._models)
-
-    assert multi(100.0) == 0.0
-    assert multi(12345.0) == 100.0
-    assert multi(12945.75) == 250.1875
-    assert multi(50001.0) == 2000.25
-
-    for callback_update, orig_model in zip(mdelay_callback_list, orig_models):
-        assert callback_update[0] == orig_model.start
-        assert callback_update[1] == orig_model.delay
-        assert callback_update[2] == orig_model.delay_rate
-        assert callback_update[3] == orig_model.phase
-        assert callback_update[4] == orig_model.phase_rate
-
-    assert len(multi._models) == 1  # Should have popped the older models
-    # Going backwards returns unspecified result
-    with pytest.warns(NonMonotonicQueryWarning):
-        multi(100.0)
-
-
-def test_multi_invert_range(multi) -> None:
-    """Test :func:`katgpucbf.fgpu.delay.MultiDelayModel.invert_range`."""
-    time, residual, phase = multi.invert_range(0, 60000, 11000)
-    np.testing.assert_array_equal(time, [0, 11000, 19989, 32957, 43984, 52400])
-    np.testing.assert_allclose(residual, [0.0, 0.0, 0.0, 0.11, -0.46, 0.0], atol=0.01)
-    np.testing.assert_allclose(phase, [0.0, 0.0, -2.05, -1.35, 2.11, -1.74], atol=0.01)
+def test_multi_range(multi) -> None:
+    """Test :meth:`katgpucbf.fgpu.delay.MultiDelayModel.range`."""
+    time, residual, phase = multi.range(0, 60000, 11000)
+    np.testing.assert_array_equal(time, [0, 11000, 19486, 32957, 43984, 51750])
+    np.testing.assert_allclose(residual, [0.0, 0.0, -0.25, 0.0, -0.5, 0.0], atol=0.01)
+    np.testing.assert_allclose(phase, [0.0, 0.0, -2.01, -0.916, 2.270, 2.155], atol=0.01)
     # Warn if queries are not monotonic
-    multi.invert_range(50000, 60000, 1)
+    multi.range(50000, 60000, 1)
     with pytest.warns(NonMonotonicQueryWarning):
-        multi.invert_range(0, 60000, 11000)
+        multi.range(0, 60000, 11000)
+
+
+@pytest.mark.parametrize(
+    "target,start,step",
+    [
+        (100, 12345, 1),
+        (100000, 12345, 1),
+        (30000, 30000, 9),
+        (49000, 12345, 7),
+        (49000, 60000, 3),
+    ],
+)
+def test_multi_skip(multi: MultiDelayModel, target: int, start: int, step: int) -> None:
+    """Test :meth:`.MultiDelayModel.skip`."""
+    # skip modifies the model, so make a copy to allow the original to be
+    # queried
+    orig = copy.deepcopy(multi)
+    t = multi.skip(target, start, step)
+    assert t >= start
+    # Check that it hasn't deleted too much of the model.
+    assert multi.skip(target, t, step) == t
+    assert t % step == 0
+    assert t - step < start or orig(t - step)[0] < target
+    assert orig(t)[0] >= target
+    # Check that it has deleted as much as it was expected to
+    assert len(multi._models) == 1 or t < multi._models[1].start
 
 
 @pytest.mark.parametrize("model", ["multi", "linear"])
-def test_invert_range_empty(request, model) -> None:
-    """Test invert_range with an empty range."""
+def test_range_empty(request, model) -> None:
+    """Test range with an empty range."""
     model = request.getfixturevalue(model)
-    time, residual, phase = model.invert_range(0, 0, 1000)
+    time, residual, phase = model.range(0, 0, 1000)
     assert time.shape == (0,)
     assert residual.shape == (0,)
     assert phase.shape == (0,)
