@@ -249,6 +249,13 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> Tuple[XBE
         src_affinity=args.src_affinity,
         src_comp_vector=args.src_comp_vector,
         src_buffer=args.src_buffer,
+        dst=args.dst,
+        dst_interface=args.dst_interface,
+        dst_ttl=args.dst_ttl,
+        dst_ibv=args.dst_ibv,
+        dst_packet_payload=args.dst_packet_payload,
+        dst_affinity=args.dst_affinity,
+        dst_comp_vector=args.dst_comp_vector,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         rx_reorder_tol=args.rx_reorder_tol,
         tx_enabled=args.tx_enabled,
@@ -271,19 +278,6 @@ async def async_main(args: argparse.Namespace) -> None:
     """
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     xbengine, monitor = make_engine(context, args)
-
-    # Attach this transport to send the baseline correlation products to the
-    # network.
-    xbengine.add_udp_sender_transport(
-        dest_ip=args.dst.host,
-        dest_port=args.dst.port,
-        interface_ip=args.dst_interface,
-        ttl=args.dst_ttl,
-        thread_affinity=args.dst_affinity,
-        comp_vector=args.dst_comp_vector,
-        packet_payload=args.dst_packet_payload,
-        use_ibv=args.dst_ibv,
-    )
 
     prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
     if args.prometheus_port is not None:

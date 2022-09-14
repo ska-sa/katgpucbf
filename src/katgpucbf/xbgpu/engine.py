@@ -49,6 +49,7 @@ import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
+from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     DESCRIPTOR_TASK_NAME,
@@ -144,15 +145,9 @@ class XBEngine(DeviceServer):
     into chunks. A chunk consists of multiple batches of F-Engine heaps where a
     batch is a collection of heaps from all F-Engine with the same timestamp.
 
-    This class allows for different types of transports to be used for the
-    sender and receiver code. These transports allow for in-process unit tests
-    to be created that do not require access to the network.
-
     The initialiser allocates all memory buffers to be used during the lifetime
     of the XBEngine object. These buffers are continuously reused to ensure
-    memory use remains constrained. It does not specify the transports to be
-    used. These need to be specified by the ``add_*_receiver_transport()`` and
-    the ``add_*_sender_transport()`` functions provided in this class.
+    memory use remains constrained.
 
     .. todo::
 
@@ -175,11 +170,8 @@ class XBEngine(DeviceServer):
     send_rate_factor
         Configure the spead2 sender with a rate proportional to this factor.
         This value is intended to dictate a data transmission rate slightly
-        higher/faster than the ADC rate.
-        NOTE:
-
-        - A factor of zero (0) tells the sender to transmit as fast as
-          possible.
+        higher/faster than the ADC rate. A factor of zero (0) tells the sender
+        to transmit as fast as possible.
     n_ants
         The number of antennas to be correlated.
     n_channels_total
@@ -219,6 +211,22 @@ class XBEngine(DeviceServer):
     rx_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
+    dst
+        A list of destination endpoints for the outgoing data.
+    dst_interface
+        IP address of the network device to use for output.
+    dst_ttl
+        TTL for outgoing packets.
+    dst_ibv
+        Use ibverbs for output.
+    dst_packet_payload
+        Size for output packets (voltage payload only, headers and padding are
+        added to this).
+    dst_affinity
+        CPU core for output-handling thread.
+    dst_comp_vector
+        Completion vector for transmission, or -1 for polling.
+        See :class:`spead2.send.UdpIbvConfig` for further information.
     tx_enabled
         Start with correlator output transmission enabled, without having to
         issue a katcp command.
@@ -254,6 +262,13 @@ class XBEngine(DeviceServer):
         src_affinity: int,
         src_comp_vector: int,
         src_buffer: int,
+        dst: Endpoint,
+        dst_interface: str,
+        dst_ttl: int,
+        dst_ibv: bool,
+        dst_packet_payload: int,
+        dst_affinity: int,
+        dst_comp_vector: int,
         heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
         rx_reorder_tol: int,
         tx_enabled: bool,
@@ -270,7 +285,6 @@ class XBEngine(DeviceServer):
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
         # Array configuration parameters
-        self.adc_sample_rate_hz = adc_sample_rate_hz
         self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.n_ants = n_ants
@@ -318,9 +332,6 @@ class XBEngine(DeviceServer):
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
         self.channel_offset_value = channel_offset_value
-
-        # False if no transport has been added, true otherwise.
-        self.tx_transport_added = False
 
         self.monitor = monitor
 
@@ -407,6 +418,36 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
+        # NOTE: This value staggers the send so that packets within a heap are
+        # transmitted onto the network across the entire time between dumps.
+        # Care needs to be taken to ensure that this rate is not set too high.
+        # If it is too high, the entire pipeline will stall needlessly waiting
+        # for packets to be transmitted too slowly.
+        self.dump_interval_s: float = self.timestamp_increment_per_accumulation / adc_sample_rate_hz
+
+        self.send_stream = XSend(
+            n_ants=self.n_ants,
+            n_channels=self.n_channels_total,
+            n_channels_per_stream=self.n_channels_per_stream,
+            dump_interval_s=self.dump_interval_s,
+            send_rate_factor=self.send_rate_factor,
+            channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
+            context=self.context,
+            packet_payload=dst_packet_payload,
+            stream_factory=lambda stream_config, buffers: make_stream(
+                dest_ip=dst.host,
+                dest_port=dst.port,
+                interface_ip=dst_interface,
+                ttl=dst_ttl,
+                use_ibv=dst_ibv,
+                affinity=dst_affinity,
+                comp_vector=dst_comp_vector,
+                stream_config=stream_config,
+                buffers=buffers,
+            ),
+            tx_enabled=self._init_tx_enabled,
+        )
+
     @staticmethod
     def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
         """Define the sensors for an XBEngine."""
@@ -419,119 +460,6 @@ class XBEngine(DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.ERROR,
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
             )
-        )
-
-    def add_udp_sender_transport(
-        self,
-        dest_ip: str,
-        dest_port: int,
-        interface_ip: str,
-        ttl: int,
-        thread_affinity: int,
-        comp_vector: int,
-        packet_payload: int,
-        use_ibv: bool = True,
-    ) -> None:
-        """
-        Add a UDP transport to the sender.
-
-        If indicated (use_ibv), the sender will transmit UDP packets out of the
-        specified interface using the ibverbs library to offload processing
-        from the CPU.
-
-        The UdpIbvStream is intended for use in production, and the UdpStream
-        for local testing on a suitable machine.
-
-        Parameters
-        ----------
-        dest_ip
-            multicast IP address of destination data
-        dest_port
-            Port of transmitted data
-        interface_ip
-            IP address of interface to trasnmit data on.
-        ttl
-            Time to live for the output multicast packets.
-        thread_affinity
-            The sender creates its own thread to run in the background
-            transmitting data. It is bound to the CPU core specified here.
-        comp_vector
-            Completion vector for transmission, or -1 for polling.
-            See :class:`spead2.send.UdpIbvConfig` for further information.
-        use_ibv
-            Use spead2's ibverbs transport for data transmission.
-        packet_payload
-            Size in bytes for output packets (baseline correlation products
-            payload only, headers and padding are then added to this).
-        """
-        if self.tx_transport_added is True:
-            raise AttributeError("Transport for sending data has already been set.")
-
-        # NOTE: This value staggers the send so that packets within a heap are
-        # transmitted onto the network across the entire time between dumps.
-        # Care needs to be taken to ensure that this rate is not set too high.
-        # If it is too high, the entire pipeline will stall needlessly waiting
-        # for packets to be transmitted too slowly.
-        self.dump_interval_s: float = self.timestamp_increment_per_accumulation / self.adc_sample_rate_hz
-
-        self.send_stream = XSend(
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_total,
-            n_channels_per_stream=self.n_channels_per_stream,
-            dump_interval_s=self.dump_interval_s,
-            send_rate_factor=self.send_rate_factor,
-            channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
-            context=self.context,
-            packet_payload=packet_payload,
-            stream_factory=lambda stream_config, buffers: make_stream(
-                dest_ip=dest_ip,
-                dest_port=dest_port,
-                interface_ip=interface_ip,
-                ttl=ttl,
-                use_ibv=use_ibv,
-                affinity=thread_affinity,
-                comp_vector=comp_vector,
-                stream_config=stream_config,
-                buffers=buffers,
-            ),
-            tx_enabled=self._init_tx_enabled,
-        )
-
-        self.tx_transport_added = True
-
-    def add_inproc_sender_transport(self, queue: spead2.InprocQueue) -> None:
-        """
-        Add the inproc transport to the sender.
-
-        The sender will send heaps out on an InprocQueue. This transport is
-        intended to be used for testing purposes.
-
-        Parameters
-        ----------
-        queue
-            SPEAD2 inproc queue to send heaps to.
-        """
-        if self.tx_transport_added is True:
-            raise AttributeError("Transport for sending data has already been set.")
-        self.tx_transport_added = True
-
-        # For the inproc transport this value is set very low as the dump rate
-        # does affect performance for an inproc queue and a high dump rate just
-        # makes the unit tests take very long to run.
-        self.dump_interval_s = 0
-
-        self.send_stream = XSend(
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_total,
-            n_channels_per_stream=self.n_channels_per_stream,
-            dump_interval_s=self.dump_interval_s,
-            send_rate_factor=self.send_rate_factor,
-            channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
-            context=self.context,
-            stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
-                spead2.ThreadPool(), [queue], stream_config
-            ),
-            tx_enabled=self._init_tx_enabled,
         )
 
     async def _receiver_loop(self) -> None:
@@ -850,9 +778,6 @@ class XBEngine(DeviceServer):
             comp_vector=self._src_comp_vector,
             buffer=self._src_buffer,
         )
-
-        if self.tx_transport_added is not True:
-            raise AttributeError("Transport for sending data has not yet been set.")
 
         self.add_service_task(asyncio.create_task(self._receiver_loop(), name=RECV_TASK_NAME))
         self.add_service_task(asyncio.create_task(self._gpu_proc_loop(), name=GPU_PROC_TASK_NAME))

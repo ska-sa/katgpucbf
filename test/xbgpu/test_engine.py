@@ -396,6 +396,7 @@ class TestEngine:
         self,
         context: AbstractContext,
         mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: spead2.InprocQueue,
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
@@ -417,11 +418,6 @@ class TestEngine:
         generated from a timestamp starting after the first accumulation
         boundary to more accurately test the setting of the first output
         packet's timestamp (to be non-zero).
-
-        .. todo::
-            The queue used for the XBEngine's sender transport and the final
-            recv_stream need to be abstracted into a fixture, similar to
-            test/fgpu's mock_send_stream.
         """
         n_samples_between_spectra = 2 * n_channels_total
 
@@ -436,7 +432,7 @@ class TestEngine:
         n_total_accumulations = n_full_accumulations + 1
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        queue = spead2.InprocQueue()
+        queue = mock_send_stream
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
         recv_stream.add_inproc_reader(queue)
 
@@ -472,7 +468,6 @@ class TestEngine:
 
         xbengine.sensors["synchronised"].attach(sensor_observer)
 
-        xbengine.add_inproc_sender_transport(queue)
         await xbengine.send_stream.send_descriptor_heap()
 
         await xbengine.start()
