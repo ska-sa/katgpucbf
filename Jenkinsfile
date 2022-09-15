@@ -24,10 +24,13 @@ pipeline {
        * --gpus=all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be
        * installed on the host.
+       *
+       * -v /var/run/docker.sock:/var/run/docker.sock: makes the connection to
+       * the Docker server available inside the container (for building a Docker
+       * image).
        */
-      args '--gpus=all'
+      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
     }
-
   }
 
   options {
@@ -119,6 +122,27 @@ pipeline {
       steps {
         junit 'reports/result.xml'
         cobertura coberturaReportFile: 'coverage.xml'
+      }
+    }
+
+    stage('Build Docker image') {
+      environment {
+        DOCKER_BUILDKIT = '1'
+      }
+      steps {
+        sshagent(['github-ssh']) {
+          script {
+            branch = env.BRANCH_NAME
+            tag = (branch == "main") ? "latest" : branch
+            // Supply credentials to Dockerhub so that we can reliably pull the base image
+            docker.withRegistry("https://docker.io/", "dockerhub") {
+              dockerImage = docker.build "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}", "--pull --ssh default ."
+            }
+            docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
+              dockerImage.push()
+            }
+          }
+        }
       }
     }
   }
