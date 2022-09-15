@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -14,48 +14,15 @@
 # limitations under the License.
 ################################################################################
 
-"""
-Module for performing unit tests on the XSend class in the xsend.py module.
+"""Unit tests for the :mod:`katgpucbf.xbgpu.xsend` module."""
 
-Testing network code is difficult to do on a single thread. SPEAD2 has the
-concept of transports. A transport generally receives data from a network.
-SPEAD2 provides two other transports that can receive simulated network data -
-these can be used for testing the receiver in once process. The two transports
-are an inproc and a buffer transport. The inproc transport is more flexible and
-as such is used here.
-
-NOTE: A downside of this test is that it does not check that the packet formats
-are exactly correct. This test will ensure that the packets are transmitted in
-a way that they are able to be assembled into a heap by any SPEAD2 receiver or
-a full implementation of the SPEAD protocol. However, the exact packet size and
-the presence of repeat pointers within the a packet are not checked. Some sort
-of external test should be done to check this. See the
-display_xengine_multicast_packets.py script in the scratch folder of this repo
-as a starting point to check packet formats. UPDATE: If we wanted to actually
-process real network packets, we could use the SPEAD2 PCAP transport. This
-allows SPEAD2 to read a PCAP file. We could generate network data in a manner
-that duplicates real traffic and then store that in a PCAP file to be used in
-unit tests. This data could be interleaved and out of order if necessary for a
-more robust test. The downside to a PCAP test is that the PCAP file could get
-quite large quite quickly. This could lead to the repo getting very large which
-is to be avoided. I think the best use a single PCAP file of a single array
-configuration and run a single unit test and then use the inproc readers as
-done below for the remaining configurations.  This will ensure that we run a
-test on "real" data while still testing all configurations without the repo
-growing too large.
-
-TODO: Implement a pcap test as described in the above note.
-TODO: Review the xsend.py class to see if some functionality has not been
-covered in all of these tests.
-"""
-
-from asyncio import create_task, gather
 from typing import Final
 
 import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
+from katsdpsigproc.abc import AbstractContext
 
 from katgpucbf import COMPLEX
 from katgpucbf.spead import FREQUENCY_ID, TIMESTAMP_ID, XENG_RAW_ID
@@ -64,47 +31,36 @@ from katgpucbf.xbgpu.xsend import XSend
 from . import test_parameters
 
 TOTAL_HEAPS: Final[int] = 20
-DUMP_INTERVAL_S: Final[int] = 0
-SEND_RATE_FACTOR: Final[float] = 1.1
-SAMPLE_BITWIDTH: Final[int] = 32
+TIMESTAMP_SCALE: Final[int] = 0x1000000
 
 
-class TestSend:
-    """Test the spead2 send stream in :class:`xbgpu.xsend.XSend`."""
+class TestXSend:
+    """Test :class:`katgpucbf.xbgpu.xsend.XSend`."""
 
     @staticmethod
     async def _send_data(send_stream: XSend) -> None:
         """Send a fixed number of heaps."""
-        num_sent = 0
-
-        # 4.1 Send the descriptor as the recv_stream object needs it to
+        # Send the descriptor as the recv_stream object needs it to
         # interpret the received heaps correctly.
         await send_stream.send_descriptor_heap()
 
-        # 4.2 Run until a set number of heaps have been transferred.
-        while num_sent < TOTAL_HEAPS:
-            # 4.2.1 Get a free buffer to store the next heap - there is not
+        for i in range(TOTAL_HEAPS):
+            # Get a free buffer to store the next heap - there is not
             # always a free buffer available. This function yields until one it
             # available.
             buffer_wrapper = await send_stream.get_free_heap()
 
-            # 4.2.2 Populate the buffer with dummy data - notice how we copy
-            # new values into the buffer, we dont overwrite the buffer.
-            # Attempts to overwrite the buffer will throw an error. This is
-            # intended behavour as the memory regions in the buffer have been
-            # configured for zero-copy sends.
-            # The [:] syntax forces the data to be copied to the buffer.
-            # Without this, the buffer_wrapper variable would point to the new
-            # created numpy array which is located in new location in memory
-            # and the old buffer would be garbage collected.
-            buffer_wrapper.buffer[:] = np.full(buffer_wrapper.buffer.shape, num_sent, np.uint8)
+            # Populate the buffer with dummy data.
+            buffer_wrapper.buffer.fill(i)
 
-            # 4.2.3 Give the buffer back to the send_stream to transmit out
-            # onto the network. The timestamp is multiplied by 0x1000000 so
-            # that its value is different from the values in the buffer_wrapper
-            # array.
-            send_stream.send_heap(num_sent * 0x1000000, buffer_wrapper)
-            num_sent += 1
+            # Give the buffer back to the send_stream to transmit out
+            # onto the network. The timestamp is multiplied by TIMESTAMP_SCALE
+            # so that its value is different from the values in the
+            # buffer_wrapper array.
+            send_stream.send_heap(i * TIMESTAMP_SCALE, buffer_wrapper)
+        # send_heap just queues data for sending but is non-blocking.
+        # Flush to ensure that the data all gets sent before we return.
+        await send_stream.source_stream.async_flush()
 
     @staticmethod
     async def _recv_data(
@@ -116,85 +72,41 @@ class TestSend:
         """Receive data transmitted from :func:`_send_data`.
 
         Error-check data here as well.
-
-        .. todo::
-            Remove error-checking, to be placed elsewhere in the unit test, and
-            Consolidate _send and _recv.
         """
-        num_received = 0
         ig = spead2.ItemGroup()
 
-        # 5.1 Wait for the first packet to arrive - it is expected to be the
-        # SPEAD descriptor. Without the descriptor the recv_stream cannot
-        # interpret the heaps correctly.
+        # Wait for the first packet to arrive - it is expected to be the
+        # SPEAD descriptor.
         heap = await recv_stream.get()
         assert heap.cnt % n_engines == 4 % n_engines, "The heap IDs are not correctly strided"
         items = ig.update(heap)
-        assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
+        assert items == {}, "This heap contains item values not just the expected descriptors."
 
-        # 5.2 Wait for the rest of the heaps to arrive and then end the function.
-        while num_received < TOTAL_HEAPS:
-            # 5.2.1 The next heap may not be available immediatly. This
-            # function waits asynchronously until a
-            # heap arrives.
+        # Check the data heaps
+        for i in range(TOTAL_HEAPS):
             heap = await recv_stream.get()
-
             items = ig.update(heap)
-            has_timestamp = False
-            has_channel_offset = False
-            has_xeng_raw = False
-
-            for item in items.values():
-                # 5.2.2 Check that the received heap has a timestamp item with
-                # the correct expected value.
-                if item.id == 0x1600:
-                    has_timestamp = True
-                    assert (
-                        item.value == num_received * 0x1000000
-                    ), f"Timestamp value incorrect. Expected: {hex(num_received)}, actual {hex(item.value)}"
-
-                # 5.2.2 Check that the received heap has a channel offset item
-                # with the correct expected value.
-                if item.id == 0x4103:
-                    has_channel_offset = True
-                    assert item.value == n_channels_per_stream * 4, (
-                        "Channel offset incorrect. "
-                        f"Expected: {hex(n_channels_per_stream * 4)}, actual: {hex(item.value)}"
-                    )
-
-                # 5.2.2 Check that the received heap has an xeng_raw data
-                # buffer item. Check that the buffer is the correct size and
-                # that the values are all the expected value.
-                if item.id == 0x1800:
-                    has_xeng_raw = True
-                    data_length_bytes = n_baselines * n_channels_per_stream * COMPLEX * SAMPLE_BITWIDTH // 8
-                    assert item.value.nbytes == data_length_bytes, (
-                        "xeng_raw data not correct size. "
-                        f"Expected: {data_length_bytes} bytes, actual: {item.value.size} bytes."
-                    )
-                    assert (
-                        item.value.dtype == np.int32
-                    ), f"xeng_raw dtype is {(item.value.dtype)}, dtype of uint64 expected."
-                    assert np.all(item.value == num_received)
-
-            assert has_timestamp, f"Received heap is missing timestamp item with ID {hex(TIMESTAMP_ID)}"
-            assert has_channel_offset, f"Received heap is missing channel offset item with ID {hex(FREQUENCY_ID)}"
-            assert has_xeng_raw, f"Received heap is missing xeng_raw data buffer item with ID {hex(XENG_RAW_ID)}"
-            num_received += 1
+            assert set(items.keys()) == {"timestamp", "frequency", "xeng_raw"}
+            assert items["timestamp"].id == TIMESTAMP_ID
+            assert items["timestamp"].value == i * TIMESTAMP_SCALE
+            assert items["frequency"].id == FREQUENCY_ID
+            assert items["frequency"].value == n_channels_per_stream * 4
+            assert items["xeng_raw"].id == XENG_RAW_ID
+            assert items["xeng_raw"].value.shape == (n_channels_per_stream, n_baselines, COMPLEX)
+            assert items["xeng_raw"].value.dtype == np.int32
+            np.testing.assert_equal(items["xeng_raw"].value, i)
 
     @pytest.mark.combinations(
         "num_ants, num_channels",
         test_parameters.array_size,
         test_parameters.num_channels,
     )
-    async def test_send_simple(self, context, num_ants, num_channels) -> None:
+    async def test_send_simple(self, context: AbstractContext, num_ants: int, num_channels: int) -> None:
         """
-        Tests the XSend class in the xsend.py module.
+        Test :class:`katgpucbf.xbgpu.xsend.XSend`.
 
-        This test transmits a number of heaps from a XSend object over a SPEAD2
-        inproc transport. A SPEAD2 receiver object then examines the transmitted
-        heaps to ensure that the correct fields are transmitted with the correct
-        values.
+        This test transmits a number of heaps from a XSend object over a spead2
+        inproc transport. The received heaps are then checked.
 
         This test does not generate random data as it will take much more compute
         to check that the random data is received correctly. I do not think that
@@ -202,11 +114,22 @@ class TestSend:
         assembling heaps correctly which is a function of SPEAD2 not the XSend
         class. Mangled heaps should be picked up in the SPEAD2 unit tests.
 
+        .. note::
+
+            This test only tests at the level of heaps, and does not verify anything
+            about the layout of individual packets, which is left up to spead2. In
+            particular, it does not verify that
+
+            - packets have the requested payload size;
+            - every packet has a copy of the immediate items.
+
         Parameters
         ----------
-        num_ants: int
+        context
+            Device context for allocating buffers.
+        num_ants
             The number of antennas that have been correlated.
-        num_channels: int
+        num_channels
             The number of frequency channels out of the FFT. NB: This is not the
             number of FFT channels per stream. The number of channels per stream is
             calculated from this value.
@@ -218,17 +141,13 @@ class TestSend:
         n_channels_per_stream = num_channels // n_engines
         n_baselines = (num_ants + 1) * (num_ants) * 2
 
-        # 3. Initialise SPEAD2 sender and receiver objects and link them
-        # together.
-        # 3.1 Create the queue that will link the sender and receiver together.
         queue = spead2.InprocQueue()
-
         send_stream = XSend(
             n_ants=num_ants,
             n_channels=num_channels,
             n_channels_per_stream=n_channels_per_stream,
-            dump_interval_s=DUMP_INTERVAL_S,
-            send_rate_factor=SEND_RATE_FACTOR,
+            dump_interval_s=0.0,  # Just send as fast as possible to speed up the test
+            send_rate_factor=0,
             channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
             context=context,
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
@@ -236,15 +155,11 @@ class TestSend:
             ),
             tx_enabled=True,
         )
+        await self._send_data(send_stream)
+        # Stop the queue, to ensure that if recv_data tries to read more heaps
+        # than were sent, it will error out rather than hanging.
+        queue.stop()
 
-        # 3.3 Create a generic SPEAD2 receiver that will receive heaps from the
-        # XSend over the queue.
-        thread_pool = spead2.ThreadPool()
-        recv_stream = spead2.recv.asyncio.Stream(thread_pool, spead2.recv.StreamConfig(max_heaps=100))
+        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig())
         recv_stream.add_inproc_reader(queue)
-
-        # TODO: These need to be consolidated into one task
-        await gather(
-            create_task(self._send_data(send_stream)),
-            create_task(self._recv_data(recv_stream, n_engines, n_channels_per_stream, n_baselines)),
-        )
+        await self._recv_data(recv_stream, n_engines, n_channels_per_stream, n_baselines)
