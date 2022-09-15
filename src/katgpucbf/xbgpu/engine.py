@@ -220,7 +220,7 @@ class XBEngine(DeviceServer):
     dst_ibv
         Use ibverbs for output.
     dst_packet_payload
-        Size for output packets (voltage payload only, headers and padding are
+        Size for output packets (correlation product payload only, headers and padding are
         added to this).
     dst_affinity
         CPU core for output-handling thread.
