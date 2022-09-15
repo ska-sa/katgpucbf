@@ -17,9 +17,27 @@
 """Fixtures for use in xbgpu unit tests."""
 
 import pytest
+import spead2
 
 
 @pytest.fixture
 def n_src_streams() -> int:  # noqa: D401
     """Number of source streams for an xbgpu instance."""
     return 1
+
+
+@pytest.fixture
+def mock_send_stream(mocker) -> spead2.InprocQueue:
+    """Mock out creation of the send stream.
+
+    Calls to :class:`spead2.send.asyncio.UdpStream` are replaced by an
+    in-process stream. Returns an inproc queue to receive the output from that
+    stream.
+    """
+    queue = spead2.InprocQueue()
+
+    def constructor(thread_pool, endpoints, config, *args, **kwargs):
+        return spead2.send.asyncio.InprocStream(thread_pool, [queue], config)
+
+    mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
+    return queue
