@@ -212,7 +212,7 @@ class XBEngine(DeviceServer):
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
     dst
-        A list of destination endpoints for the outgoing data.
+        Destination endpoint for the outgoing data.
     dst_interface
         IP address of the network device to use for output.
     dst_ttl
