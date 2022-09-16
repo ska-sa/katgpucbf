@@ -1,3 +1,19 @@
+/*******************************************************************************
+ * Copyright (c) 2021-2022, National Research Foundation (SARAO)
+ *
+ * Licensed under the BSD 3-Clause License (the "License"); you may not use
+ * this file except in compliance with the License. You may obtain a copy
+ * of the License at
+ *
+ *   https://opensource.org/licenses/BSD-3-Clause
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 /* This file tells Jenkins how to test this repo. Everything runs in docker
  * containers, so in theory any Jenkins server should be able to parse this
  * file, although the Jenkins server needs access to a GPU with tensor cores.
@@ -24,10 +40,13 @@ pipeline {
        * --gpus=all: This argument passes the Nvidia driver and devices from the
        * host to the container. It requires the NVIDIA Container Runtime to be
        * installed on the host.
+       *
+       * -v /var/run/docker.sock:/var/run/docker.sock: makes the connection to
+       * the Docker server available inside the container (for building a Docker
+       * image).
        */
-      args '--gpus=all'
+      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
     }
-
   }
 
   options {
@@ -119,6 +138,27 @@ pipeline {
       steps {
         junit 'reports/result.xml'
         cobertura coberturaReportFile: 'coverage.xml'
+      }
+    }
+
+    stage('Build Docker image') {
+      environment {
+        DOCKER_BUILDKIT = '1'
+      }
+      steps {
+        sshagent(['github-ssh']) {
+          script {
+            branch = env.BRANCH_NAME
+            tag = (branch == "main") ? "latest" : branch
+            // Supply credentials to Dockerhub so that we can reliably pull the base image
+            docker.withRegistry("https://docker.io/", "dockerhub") {
+              dockerImage = docker.build "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}", "--pull --ssh default ."
+            }
+            docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
+              dockerImage.push()
+            }
+          }
+        }
       }
     }
   }
