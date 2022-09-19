@@ -59,7 +59,7 @@ llvmlite==0.38.1
     # via numba
 locket==1.0.0
     # via partd
-mako==1.2.1
+mako==1.2.2
     # via
     #   katsdpsigproc
     #   pycuda
