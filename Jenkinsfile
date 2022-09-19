@@ -141,7 +141,8 @@ pipeline {
       }
     }
 
-    stage('Build Docker image') {
+    stage('Build and push Docker image') {
+      when { not { changeRequest() }}
       environment {
         DOCKER_BUILDKIT = '1'
       }
