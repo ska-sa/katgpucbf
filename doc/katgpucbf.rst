@@ -22,6 +22,7 @@ Submodules
    katgpucbf.queue_item
    katgpucbf.recv
    katgpucbf.ringbuffer
+   katgpucbf.send
    katgpucbf.spead
    katgpucbf.utils
 

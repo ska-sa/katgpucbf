@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -32,6 +32,8 @@ from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
 PREAMBLE_SIZE = 72
+#: Data type of the output payload
+SEND_DTYPE = np.dtype(np.int8)
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 skipped_heaps_counter = Counter(
@@ -194,9 +196,8 @@ def make_stream(
     return stream
 
 
-def _make_descriptor_heap(
+def make_descriptor_heap(
     *,
-    data_type: np.dtype,
     channels_per_substream: int,
     spectra_per_heap: int,
 ) -> "spead2.send.Heap":
@@ -230,41 +231,7 @@ def _make_descriptor_heap(
         "feng_raw",
         "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
         shape=heap_data_shape,
-        dtype=data_type,
+        dtype=SEND_DTYPE,
     )
 
     return ig.get_heap(descriptors="all", data="none")
-
-
-def make_descriptor_heaps(
-    *,
-    data_type: np.dtype,
-    channels: int,
-    substreams: int,
-    spectra_per_heap: int,
-) -> List[spead2.send.HeapReference]:
-    """Create a list of heap references for the F-Engine descriptors.
-
-    This is done for efficiency in sending the descriptors to their various
-    destinations. It produces one descriptor heap for each substream.
-
-    Parameters
-    ----------
-    data_type
-        Type of the raw data transmitted by the F-Engine.
-    channels
-        Total number of channels output by this F-Engine.
-    substreams
-        Number of output streams produced by this F-Engine.
-    spectra_per_heap
-        Number of spectra in each output heap.
-    """
-    descriptor_heap = _make_descriptor_heap(
-        data_type=data_type,
-        channels_per_substream=channels // substreams,
-        spectra_per_heap=spectra_per_heap,
-    )
-    return [
-        spead2.send.HeapReference(descriptor_heap, substream_index=substream_index)
-        for substream_index in range(substreams)
-    ]
