@@ -78,9 +78,12 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 # Image used by Jenkins
 FROM build-base as jenkins
 
+# docker so that Jenkins can build a Docker image
+# All the TeX stuff for building the documentation
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     docker.io \
     latexmk \
+    pdf2svg \
     tex-gyre \
     texlive-latex-recommended \
     texlive-latex-extra
