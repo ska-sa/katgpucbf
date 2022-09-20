@@ -63,6 +63,7 @@ from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
+from ..send import DescriptorSender
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -721,22 +722,6 @@ class XBEngine(DeviceServer):
         await self.send_stream.send_stop_heap()
         logger.debug("_sender_loop completed")
 
-    async def _run_descriptors_loop(self, interval_s: float) -> None:
-        """
-        Send the Baseline Correlation Products descriptors every `interval_s` seconds.
-
-        This function is not part of the main run function as we do not want it
-        running during the unit tests.
-        """
-        while True:
-            # Send the descriptor heap concurrently with the sleep, so that if
-            # it takes a while (because there is data to send) it doesn't delay
-            # the next iteration.
-            await asyncio.gather(
-                asyncio.sleep(interval_s),
-                self.send_stream.send_descriptor_heap(),
-            )
-
     async def request_capture_start(self, ctx) -> None:
         """Start transmission of this baseline-correlation-products stream."""
         self.send_stream.tx_enabled = True
@@ -764,10 +749,12 @@ class XBEngine(DeviceServer):
         """
         # Create the descriptor task first to ensure descriptor will be sent
         # before any data makes its way through the pipeline.
-        self._descriptor_task = asyncio.create_task(
-            self._run_descriptors_loop(descriptor_interval_s),
-            name=DESCRIPTOR_TASK_NAME,
+        descriptor_sender = DescriptorSender(
+            self.send_stream.source_stream,
+            self.send_stream.descriptor_heap,
+            descriptor_interval_s,
         )
+        self._descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
         self.add_service_task(self._descriptor_task)
 
         base_recv.add_reader(

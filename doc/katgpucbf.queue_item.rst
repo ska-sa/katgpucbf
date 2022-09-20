@@ -1,5 +1,5 @@
-katgpucbf.queue_item module
-===========================
+katgpucbf.queue\_item module
+============================
 
 .. automodule:: katgpucbf.queue_item
    :members:

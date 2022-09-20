@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -25,8 +25,9 @@ import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
+from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
 from katgpucbf.dsim import descriptors, send
+from katgpucbf.send import DescriptorSender
 
 N_POLS = 2
 N_ENDPOINTS_PER_POL = 4
@@ -156,6 +157,10 @@ def descriptor_heap() -> spead2.send.Heap:  # noqa: D401
 @pytest.fixture
 def descriptor_sender(
     descriptor_send_stream: "spead2.send.asyncio.AsyncStream", descriptor_heap: spead2.send.Heap
-) -> descriptors.DescriptorSender:  # noqa: D401
+) -> DescriptorSender:  # noqa: D401
     """A :class:`~katgpucbf.dsim.descriptors.DescriptorSender`."""
-    return descriptors.DescriptorSender(descriptor_send_stream, descriptor_heap)
+    return DescriptorSender(
+        descriptor_send_stream,
+        descriptor_heap,
+        SPEAD_DESCRIPTOR_INTERVAL_S,
+    )

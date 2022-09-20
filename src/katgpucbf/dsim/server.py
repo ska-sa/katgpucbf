@@ -25,7 +25,7 @@ import aiokatcp
 import pyparsing as pp
 
 from .. import BYTE_BITS, __version__
-from .descriptors import DescriptorSender
+from ..send import DescriptorSender
 from .send import HeapSet, Sender
 from .signal import Signal, SignalService, TerminalError, format_signals, parse_signals
 

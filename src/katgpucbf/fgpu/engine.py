@@ -47,12 +47,12 @@ from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
+from ..send import DescriptorSender
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
 logger = logging.getLogger(__name__)
-SEND_DTYPE = np.dtype(np.int8)
 
 
 def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
@@ -517,10 +517,8 @@ class Engine(aiokatcp.DeviceServer):
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
         self._init_delay_gain()
 
-        self._descriptor_heap_reflist = send.make_descriptor_heaps(
-            data_type=SEND_DTYPE,
-            channels=channels,
-            substreams=len(dst),
+        self._descriptor_heap = send.make_descriptor_heap(
+            channels_per_substream=channels // len(dst),
             spectra_per_heap=spectra_per_heap,
         )
 
@@ -620,7 +618,7 @@ class Engine(aiokatcp.DeviceServer):
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
-                        accel.HostArray(send_shape, SEND_DTYPE, context=self._compute.template.context),
+                        accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
                         substreams=substreams,
                         feng_id=self.feng_id,
                     )
@@ -1145,60 +1143,6 @@ class Engine(aiokatcp.DeviceServer):
             await stream.async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
 
-    async def _run_descriptors_loop(
-        self,
-        stream: "spead2.send.asyncio.AsyncStream",
-        descriptor_heap_reflist: List[spead2.send.HeapReference],
-        n_ants: int,
-        feng_id: int,
-        base_interval_s: float,
-    ) -> None:
-        """Send the Antenna Channelised Voltage descriptors.
-
-        The descriptors are initially sent once straight away. This loop then
-        sleeps for `feng_id x base_interval_s` seconds, then continually sends
-        descriptors every `n_ants x base_interval_s` seconds.
-
-        Parameters
-        ----------
-        stream
-            This object takes large chunks of data and packages it
-            appropriately in SPEAD heaps for transmission on the network.
-        descriptor_heap_reflist
-            The descriptors describing the format of the heaps in the data
-            stream. Formatted as a list of HeapReference's to be as efficient
-            as possible during the send procedure.
-        base_interval_s
-            The base interval used as a multiplier on feng_id and n_ants to
-            dictate the initial 'engine sleep interval' and 'send interval'
-            respectively.
-        """
-        await asyncio.gather(
-            self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(feng_id * base_interval_s)
-        )
-        send_interval_s = n_ants * base_interval_s
-        while True:
-            await asyncio.gather(
-                self.async_send_descriptors(stream, descriptor_heap_reflist), asyncio.sleep(send_interval_s)
-            )
-
-    def async_send_descriptors(
-        self,
-        stream: "spead2.send.asyncio.AsyncStream",
-        descriptor_heap_reflist: List[spead2.send.HeapReference],
-    ) -> asyncio.Future:
-        """Send one descriptor to every substream.
-
-        Parameters
-        ----------
-        stream
-            This object takes large chunks of data and packages it
-            appropriately in SPEAD heaps for transmission on the network.
-        descriptor_heap_reflist
-            See :meth:`~fgpu.send.make_descriptor_heaps` for more information.
-        """
-        return stream.async_send_heaps(heaps=descriptor_heap_reflist, mode=spead2.send.GroupMode.ROUND_ROBIN)
-
     def delay_update_timestamp(self) -> int:
         """Return a timestamp by which an update to the delay model will take effect."""
         # end_timestamp is updated whenever delays are written into the out_item
@@ -1402,16 +1346,13 @@ class Engine(aiokatcp.DeviceServer):
         """
         # Create the descriptor task first to ensure descriptors will be sent
         # before any data makes its way through the pipeline.
-        self._descriptor_task = asyncio.create_task(
-            self._run_descriptors_loop(
-                self._send_stream,
-                self._descriptor_heap_reflist,
-                self.n_ants,
-                self.feng_id,
-                descriptor_interval_s,
-            ),
-            name=DESCRIPTOR_TASK_NAME,
+        descriptor_sender = DescriptorSender(
+            self._send_stream,
+            self._descriptor_heap,
+            self.n_ants * descriptor_interval_s,
+            (self.feng_id + 1) * descriptor_interval_s,
         )
+        self._descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
         self.add_service_task(self._descriptor_task)
 
         for pol, stream in enumerate(self._src_streams):

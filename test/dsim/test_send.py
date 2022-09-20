@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -27,7 +27,7 @@ from spead2 import ItemGroup
 
 from katgpucbf import DIG_HEAP_SAMPLES
 from katgpucbf.dsim import send
-from katgpucbf.dsim.descriptors import DescriptorSender
+from katgpucbf.send import DescriptorSender
 
 from .. import PromDiff, unpackbits
 from .conftest import N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
@@ -95,14 +95,16 @@ async def test_sender(
             sender.halt()
         return ret
 
-    mocker.patch.object(
-        spead2.send.asyncio.InprocStream, "async_send_heaps", side_effect=wrapped_send_heaps, autospec=True
-    )
-
     # Start descriptor sender and wait for descriptors before awaiting for DSim data
     descriptor_sender_task = asyncio.create_task(descriptor_sender.run())
     descriptor_recv_streams_task = asyncio.create_task(descriptor_recv(descriptor_recv_streams, descriptor_sender))
     _, ig = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
+
+    # Note: only do this after dealing with the descriptors, as otherwise
+    # they interfere with the countdown.
+    mocker.patch.object(
+        spead2.send.asyncio.InprocStream, "async_send_heaps", side_effect=wrapped_send_heaps, autospec=True
+    )
 
     # Stop the descriptor queue
     for queue in descriptor_inproc_queues:

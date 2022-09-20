@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -15,13 +15,13 @@
 ################################################################################
 
 """Digitiser simulator descriptor sender."""
-import asyncio
+
 from typing import Iterable, Tuple
 
 import spead2
 import spead2.send.asyncio
 
-from .. import DIG_HEAP_SAMPLES, SPEAD_DESCRIPTOR_INTERVAL_S
+from .. import DIG_HEAP_SAMPLES
 from ..spead import (
     ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
@@ -91,42 +91,3 @@ def create_config() -> spead2.send.StreamConfig:
         max_packet_size=MAX_PACKET_SIZE,
         max_heaps=4,
     )
-
-
-class DescriptorSender:
-    """Digitiser descriptor sender.
-
-    Parameters
-    ----------
-    stream:
-        Stream created for descriptors.
-    descriptor_heap:
-        Descriptor heap for sending.
-    """
-
-    def __init__(
-        self,
-        stream: "spead2.send.asyncio.AsyncStream",
-        descriptor_heap: spead2.send.Heap,
-    ) -> None:
-
-        self._halt_event = asyncio.Event()
-
-        self.stream = stream
-        self.heap_to_send = descriptor_heap
-
-    def halt(self) -> None:
-        """Request :meth:`run` to stop, but do not wait for it."""
-        self._halt_event.set()
-
-    async def run(self) -> None:
-        """Run digitiser descriptor sender."""
-        while True:
-            try:
-                await self.stream.async_send_heap(self.heap_to_send)
-                # Wait for event (if a halt requested). wait_for will time out if not received
-                # within descriptor_interval period and descriptor will be resent.
-                await asyncio.wait_for(self._halt_event.wait(), timeout=SPEAD_DESCRIPTOR_INTERVAL_S)
-                break
-            except asyncio.TimeoutError:
-                pass
