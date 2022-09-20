@@ -163,5 +163,4 @@ def descriptor_sender(
         descriptor_send_stream,
         descriptor_heap,
         SPEAD_DESCRIPTOR_INTERVAL_S,
-        SPEAD_DESCRIPTOR_INTERVAL_S,
     )

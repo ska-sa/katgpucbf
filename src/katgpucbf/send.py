@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+from typing import Optional
 
 import spead2.send.asyncio
 
@@ -39,25 +40,26 @@ class DescriptorSender:
         substreams simultaneously.
     descriptors
         The descriptor heap to send.
-    first_interval
-        Delay (in seconds) immediately after starting.
     interval
         Interval (in seconds) between sending descriptors.
+    first_interval
+        Delay (in seconds) immediately after starting. If not specified, it
+        defaults to `interval`.
     """
 
     def __init__(
         self,
         stream: "spead2.send.asyncio.AsyncStream",
         descriptors: spead2.send.Heap,
-        first_interval: float,
         interval: float,
+        first_interval: Optional[float] = None,
     ) -> None:
         self._stream = stream
         self._heap_reference_list = spead2.send.HeapReferenceList(
             [spead2.send.HeapReference(descriptors, substream_index=i) for i in range(stream.num_substreams)]
         )
-        self._first_interval = first_interval
         self._interval = interval
+        self._first_interval = interval if first_interval is None else first_interval
         self._halt_event = asyncio.Event()
 
     async def _send_descriptors(self) -> None:

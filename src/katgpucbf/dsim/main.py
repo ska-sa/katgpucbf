@@ -170,12 +170,7 @@ async def async_main() -> None:
 
     # Start descriptor sender first so descriptors are sent before dsim data.
     descriptor_heap = descriptors.create_descriptors_heap()
-    descriptor_sender = DescriptorSender(
-        descriptor_stream,
-        descriptor_heap,
-        SPEAD_DESCRIPTOR_INTERVAL_S,
-        SPEAD_DESCRIPTOR_INTERVAL_S,
-    )
+    descriptor_sender = DescriptorSender(descriptor_stream, descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S)
     descriptor_task = asyncio.create_task(descriptor_sender.run())
 
     if args.dither_seed is None:

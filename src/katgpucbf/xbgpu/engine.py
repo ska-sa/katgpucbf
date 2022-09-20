@@ -753,7 +753,6 @@ class XBEngine(DeviceServer):
             self.send_stream.source_stream,
             self.send_stream.descriptor_heap,
             descriptor_interval_s,
-            descriptor_interval_s,
         )
         self._descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
         self.add_service_task(self._descriptor_task)

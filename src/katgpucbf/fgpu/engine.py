@@ -1349,8 +1349,8 @@ class Engine(aiokatcp.DeviceServer):
         descriptor_sender = DescriptorSender(
             self._send_stream,
             self._descriptor_heap,
-            (self.feng_id + 1) * descriptor_interval_s,
             self.n_ants * descriptor_interval_s,
+            (self.feng_id + 1) * descriptor_interval_s,
         )
         self._descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
         self.add_service_task(self._descriptor_task)
