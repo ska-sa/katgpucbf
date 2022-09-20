@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -295,7 +295,6 @@ class XSend:
             dtype=np.int32,
         )
 
-        # The first heap is the SPEAD descriptor - store it for transmission when required
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, timestamp: int, buffer_wrapper: BufferWrapper) -> None:
@@ -358,20 +357,6 @@ class XSend:
         future, buffer_wrapper = await self._heaps_queue.get()
         await asyncio.wait([future])
         return buffer_wrapper
-
-    async def send_descriptor_heap(self) -> None:
-        """
-        Send the SPEAD descriptor over the spead2 transport.
-
-        This function transmits the descriptor heap created at the start of
-        transmission. I am unsure if this is the correct or best way to do
-        this. At this stage in development descriptors have not been considered
-        deeply.
-
-        This function has no associated unit test - it will likely need to be
-        revisited later as its need and function become clear.
-        """
-        await self.source_stream.async_send_heap(self.descriptor_heap)
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""

@@ -40,9 +40,9 @@ class TestXSend:
     @staticmethod
     async def _send_data(send_stream: XSend) -> None:
         """Send a fixed number of heaps."""
-        # Send the descriptor as the recv_stream object needs it to
+        # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
-        await send_stream.send_descriptor_heap()
+        await send_stream.source_stream.async_send_heap(send_stream.descriptor_heap)
 
         for i in range(TOTAL_HEAPS):
             # Get a free buffer to store the next heap - there is not

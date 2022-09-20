@@ -468,8 +468,6 @@ class TestEngine:
 
         xbengine.sensors["synchronised"].attach(sensor_observer)
 
-        await xbengine.send_stream.send_descriptor_heap()
-
         await xbengine.start()
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
