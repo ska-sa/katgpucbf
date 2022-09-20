@@ -33,7 +33,8 @@ import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL
+from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
+from ..send import DescriptorSender
 from ..utils import add_signal_handlers
 from . import descriptors, send, signal
 from .server import DeviceServer
@@ -169,7 +170,12 @@ async def async_main() -> None:
 
     # Start descriptor sender first so descriptors are sent before dsim data.
     descriptor_heap = descriptors.create_descriptors_heap()
-    descriptor_sender = descriptors.DescriptorSender(stream=descriptor_stream, descriptor_heap=descriptor_heap)
+    descriptor_sender = DescriptorSender(
+        descriptor_stream,
+        descriptor_heap,
+        SPEAD_DESCRIPTOR_INTERVAL_S,
+        SPEAD_DESCRIPTOR_INTERVAL_S,
+    )
     descriptor_task = asyncio.create_task(descriptor_sender.run())
 
     if args.dither_seed is None:

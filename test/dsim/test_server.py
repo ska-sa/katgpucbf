@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -25,10 +25,10 @@ import numpy as np
 import pytest
 
 from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
-from katgpucbf.dsim.descriptors import DescriptorSender
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
 from katgpucbf.dsim.signal import SignalService, parse_signals
+from katgpucbf.send import DescriptorSender
 
 from .. import get_sensor
 from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS

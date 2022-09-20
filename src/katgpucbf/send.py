@@ -58,18 +58,32 @@ class DescriptorSender:
         )
         self._first_interval = first_interval
         self._interval = interval
+        self._halt_event = asyncio.Event()
 
     async def _send_descriptors(self) -> None:
         logger.debug("Sending descriptors")
         await self._stream.async_send_heaps(heaps=self._heap_reference_list, mode=spead2.send.GroupMode.ROUND_ROBIN)
 
+    def halt(self) -> None:
+        """Request :meth:`run` to stop, but do not wait for it."""
+        self._halt_event.set()
+
     async def run(self) -> None:
-        """Send the descriptors indefinitely (cancel to stop)."""
-        await self._send_descriptors()
+        """Send the descriptors indefinitely (use :meth:`halt` or cancel to stop)."""
         t = self._first_interval
-        while True:
-            # Send the descriptor heap concurrently with the sleep, so that if
-            # it takes a while (because there is data to send) it doesn't delay
-            # the next iteration.
-            await asyncio.gather(asyncio.sleep(t), self._send_descriptors())
+        loop = asyncio.get_running_loop()
+        deadline = loop.time()
+        while not self._halt_event.is_set():
+            await self._send_descriptors()
+            # Compute absolute time to send the next one (this ensure that there is
+            # no systematic drift).
+            deadline += t
+            # Turn into a relative time. Ensure we always sleep for a small
+            # interval, even if we fell behind.
+            delay = max(t * 0.01, deadline - loop.time())
+            try:
+                # wait_for will time out if _halt_event is not set by the deadline.
+                await asyncio.wait_for(self._halt_event.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                pass
             t = self._interval
