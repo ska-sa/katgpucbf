@@ -1,0 +1,50 @@
+\documentclass{standalone}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\begin{document}
+	\begin{tikzpicture}[
+		>=latex,
+		block_clear/.style={rectangle,draw=black,minimum height=1cm,text width=2.0cm,align=center},
+		block_green/.style={rectangle,draw=black,fill=green,minimum height=1cm,text width=0.25cm,align=center},
+		block_text/.style={rectangle,minimum height=1cm,text width=2.0cm,align=center},
+		]
+
+		\node[block_text, anchor=center] (node0) at (0.0,0.0) {upload command queue};
+		\node[block_clear, right = of node0, anchor=west] (node1) {Copy CPU $\rightarrow$ GPU};
+		\draw[-] (node0.east) -- (node1.west);
+
+		\node[block_green, right=0cm of node1] (node2){};
+
+		\node[block_text, right=9.75cm of node2] (node10){};
+		\draw[-] (node2.east) -- (node10.west);
+
+		\node[block_clear,  above=3.0cm of node2.north east, anchor=west] (node3) {Recycle CPU Memory};
+		\draw [->] (node2.east) -- (node3.south west) node [pos=0.5,left] {\texttt{async\_wait\_for\_events()}};
+
+		\node[block_clear, below=2.0cm of node2.east, anchor=west] (node4) {Process};
+		\draw [->] (node2.south east) -- (node4.north west) node [pos=0.5,right] {\texttt{enqueue\_wait\_for\_events()}};
+		\node[block_green, right=0cm of node4] (node5){};
+
+		\node[block_text, right=7.0cm of node5] (node11){};
+		\draw[-] (node5.east) -- (node11.west);
+
+		\node[block_text, left=4.75cm of node4, anchor=center] (node6) {processing command queue};
+		\draw[-] (node6.east) -- (node4.west);
+
+		\node[block_clear,  below=2.0cm of node5.south east, anchor=west] (node7) {Copy GPU $\rightarrow$ CPU};
+		\node[block_green, right=0cm of node7] (node8){};
+
+		\node[block_text, right=4.25cm of node8] (node12){};
+		\draw[-] (node8.east) -- (node12.west);
+
+		\draw [->] (node5.south east) -- (node7.north west) node [pos=0.5,left] {\texttt{enqueue\_wait\_for\_events()}};
+
+		\node[block_text, left=6.25 of node7] (node9) {download command queue};
+		\draw[-] (node9.east) -- (node7.west);
+
+		\node[block_clear,  above=8.0cm of node8.east, anchor=west] (node10) {Transmit};
+		\draw [->] (node8.north east) -- (node10.south west) node [pos=0.7,right] {\texttt{async\_wait\_for\_events()}};
+
+
+	\end{tikzpicture}
+\end{document}
