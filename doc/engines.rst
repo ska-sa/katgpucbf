@@ -158,7 +158,7 @@ results, but this is deferred as long as possible.
 The above concepts are illustrated in the following figure:
 
 .. tikz:: GPU command queues, showing the upload, processing and download
-    command queues, and the events used for synchronisation.
+    command queues, and the events (shown in green) used for synchronisation.
     :libs: chains
 
 		[
