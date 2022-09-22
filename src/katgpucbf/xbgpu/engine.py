@@ -699,7 +699,7 @@ class XBEngine(DeviceServer):
             await katsdpsigproc.resource.async_wait_for_events([event])
 
             if not np.any(item.present_ants):
-                # All Antennas have missed data at some point, zero the entire dump
+                # All Antennas have missed data at some point, mark the entire dump missing
                 logger.warning("All Antennas had a break in data during this accumulation")
                 buffer_wrapper.buffer[...] = MISSING
                 incomplete_accum_counter.inc(1)
