@@ -333,6 +333,11 @@ The heap payload size in this example is equal to
 Missing Data Handling
 ---------------------
 
-.. todo:: ``NGC-746``
-
-    Document the handling of missing data.
+As with fgpu, metadata indicating present or missing input heaps are passed down
+the pipeline alongside the data. If some input data is missing, processing is
+performed as normal. Unlike fgpu which suppresses transmissions for which some
+input data was missing, xbgpu will replace affected baselines with a "magic
+number" of (-2**31, 1), so that unaffected baselines can still be transmitted,
+but the receiver will know that those baselines are invalid. If a dump is
+affected by missing data on all antennas, it will still be transmitted but will
+contain only the magic value and no useful data.
