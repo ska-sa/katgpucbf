@@ -51,6 +51,9 @@ class HeapSet:
 
         timestamps
             1D array of timestamps, big-endian 64-bit
+        digitiser_status
+            2D array of digitiser status values, big-endian 64-bit (indexed by
+            polarisation and time)
         payload
             2D array of raw sample data (indexed by polarisation and time)
         heaps
@@ -98,7 +101,7 @@ class HeapSet:
         heaps = []
         substream_offset = list(itertools.accumulate(n_substreams, initial=0))
         digitiser_id_items = [spead.make_immediate(spead.DIGITISER_ID_ID, dig_id) for dig_id in digitiser_id]
-        digitiser_status_item = spead.make_immediate(spead.DIGITISER_STATUS_ID, 0)
+        digitiser_status = np.zeros((n_pols, n), dtype=">u8")
         for i in range(n):
             # The ... in indexing causes numpy to give a 0d array view, rather than
             # a scalar.
@@ -106,6 +109,8 @@ class HeapSet:
             cur_heaps = []
             timestamp_item = spead.make_immediate(spead.TIMESTAMP_ID, heap_timestamp)
             for j in range(n_pols):
+                heap_status = digitiser_status[j, i, ...]
+                digitiser_status_item = spead.make_immediate(spead.DIGITISER_STATUS_ID, heap_status)
                 heap_payload = payload[j, i]
                 heap = spead2.send.Heap(spead.FLAVOUR)
                 heap.add_item(timestamp_item)
@@ -130,6 +135,7 @@ class HeapSet:
                 "timestamps": (["time"], timestamps),
                 "payload": (["pol", "time", "data"], payload, {"shared_array": shared_payload}),
                 "heaps": (["time", "pol"], heaps),
+                "digitiser_status": (["pol", "time"], digitiser_status),
             }
         )
         return cls(data)
