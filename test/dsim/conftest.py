@@ -16,7 +16,6 @@
 
 """Common fixtures for dsim tests."""
 
-import time
 from typing import Generator, Sequence
 from unittest import mock
 
@@ -107,7 +106,7 @@ def sender(
     send_stream: "spead2.send.asyncio.AsyncStream", heap_sets: Sequence[send.HeapSet]
 ) -> send.Sender:  # noqa: D401
     """A :class:`~katgpucbf.dsim.Sender` using the first of :func:`heaps_sets`."""
-    return send.Sender(send_stream, heap_sets[0], 0, DIG_HEAP_SAMPLES, time.time(), ADC_SAMPLE_RATE)
+    return send.Sender(send_stream, heap_sets[0], DIG_HEAP_SAMPLES, ADC_SAMPLE_RATE)
 
 
 @pytest.fixture

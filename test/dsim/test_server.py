@@ -27,7 +27,7 @@ import pytest
 from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
-from katgpucbf.dsim.signal import SignalService, parse_signals
+from katgpucbf.dsim.signal import parse_signals
 from katgpucbf.send import DescriptorSender
 
 from .. import get_sensor
@@ -39,26 +39,19 @@ async def katcp_server(
     sender: Sender, heap_sets: Sequence[HeapSet], descriptor_sender: DescriptorSender
 ) -> AsyncGenerator[DeviceServer, None]:  # noqa: D401
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
-    # Make up a bogus signal. It's not actually populated in heap_sets
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
-
     dither_seed = 42
-    signal_service = SignalService([heap_set.data["payload"] for heap_set in heap_sets], DIG_SAMPLE_BITS, dither_seed)
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
         spare=heap_sets[1],
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=DIG_SAMPLE_BITS,
-        first_timestamp=0,
         dither_seed=dither_seed,
-        signals_str=signals_str,
-        signals=parse_signals(signals_str),
-        period=SIGNAL_HEAPS,  # Bogus value to test the sensor
-        signal_service=signal_service,
         host="127.0.0.1",
         port=0,
     )
+    await server.set_signals(parse_signals(signals_str), signals_str, SIGNAL_HEAPS)
     await server.start()
     yield server
     await server.stop()
@@ -104,10 +97,10 @@ async def test_signals(
     assert reply == [b"1234567"]
     _, informs = await katcp_client.request("sensor-value", "steady-state-timestamp")
     assert informs[0].arguments[4] == b"1234567"
-    set_heaps.assert_called_once_with(heap_sets[1])
+    set_heaps.assert_called_once_with(heap_sets[0])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
-    np.testing.assert_equal(heap_sets[1].data["payload"].isel(pol=0).data, 0)
-    assert not np.all(heap_sets[1].data["payload"].isel(pol=1).data == 0)
+    np.testing.assert_equal(heap_sets[0].data["payload"].isel(pol=0).data, 0)
+    assert not np.all(heap_sets[0].data["payload"].isel(pol=1).data == 0)
     # Check that sensors were updated
     assert await get_sensor(katcp_client, "signals-orig") == signals_str
     assert await get_sensor(katcp_client, "period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
