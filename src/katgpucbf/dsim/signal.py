@@ -537,7 +537,7 @@ def quantise(
 def _saturation_flags(data: np.ndarray, saturation_value: np.generic) -> np.ndarray:
     out = np.empty(data.shape, np.bool_)
     for i in range(len(data)):
-        out[i] = np.abs(out[i]) >= saturation_value
+        out[i] = np.abs(data[i]) >= saturation_value
     return out
 
 
@@ -708,7 +708,7 @@ class SignalService:
         period: Optional[int]
         sample_rate: float
         out_idx: int  #: Index of the out array in the list of valid arrays
-        out_saturation_idx: Optional[int]  #: Index of the out saturation array in the list of valid arrays
+        out_saturated_idx: Optional[int]  #: Index of the out saturated array in the list of valid arrays
 
     @staticmethod
     def _run(
@@ -752,7 +752,7 @@ class SignalService:
                     req.sample_rate,
                     sample_bits,
                     arrays[req.out_idx],
-                    out_saturated=arrays[req.out_saturation_idx] if req.out_saturation_idx is not None else None,
+                    out_saturated=arrays[req.out_saturated_idx] if req.out_saturated_idx is not None else None,
                     dither=dither,
                 )
             except Exception as exc:
@@ -816,18 +816,18 @@ class SignalService:
         period: Optional[int],
         sample_rate: float,
         out: xr.DataArray,
-        out_saturation: Optional[xr.DataArray] = None,
+        out_saturated: Optional[xr.DataArray] = None,
     ) -> None:
         """Perform signal sampling in the remote process.
 
-        `out` and `out_saturation` must each be one of the arrays passed to the
+        `out` and `out_saturated` must each be one of the arrays passed to the
         constructor. Only the first `n` samples will be populated (and this
         will be taken as the period).
         """
         out_idx = self._array_index(out)
-        out_saturation_idx = self._array_index(out_saturation) if out_saturation is not None else None
+        out_saturated_idx = self._array_index(out_saturated) if out_saturated is not None else None
         loop = asyncio.get_running_loop()
-        req = SignalService._Request(signals, timestamp, period, sample_rate, out_idx, out_saturation_idx)
+        req = SignalService._Request(signals, timestamp, period, sample_rate, out_idx, out_saturated_idx)
         await loop.run_in_executor(None, self._make_request, req)
 
     async def __aenter__(self) -> "SignalService":

@@ -29,6 +29,7 @@ import xarray as xr
 from .. import BYTE_BITS, __version__
 from ..send import DescriptorSender
 from .send import HeapSet, Sender
+from .shared_array import SharedArray
 from .signal import Signal, SignalService, TerminalError, format_signals, parse_signals
 
 logger = logging.getLogger(__name__)
@@ -75,8 +76,14 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.spare = spare
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
-        # Scratch space for computing saturation counts
-        self._saturated = xr.zeros_like(sender.heap_set.data["payload"], dtype=bool)
+        # Scratch space for computing saturation counts. It is passed to
+        # (and filled in by) the SignalService, so needs to use shared
+        # memory.
+        saturated_shape = (sender.heap_set.data.sizes["pol"], sender.heap_set.data.sizes["time"], sender.heap_samples)
+        shared_saturated = SharedArray.create("saturated", saturated_shape, bool)
+        self._saturated = xr.DataArray(
+            shared_saturated.buffer, dims=["pol", "time", "data"], attrs={"shared_array": shared_saturated}
+        )
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
         heap_sets = [sender.heap_set, spare]
         self._signal_service = SignalService(
