@@ -45,6 +45,9 @@ class DescriptorSender:
     first_interval
         Delay (in seconds) immediately after starting. If not specified, it
         defaults to `interval`.
+    all_substreams
+        Send descriptors to all substreams if true, otherwise default behaviour
+        is to send only to the first substream.
     """
 
     def __init__(
@@ -53,10 +56,14 @@ class DescriptorSender:
         descriptors: spead2.send.Heap,
         interval: float,
         first_interval: Optional[float] = None,
+        *,
+        all_substreams: bool = False,
     ) -> None:
         self._stream = stream
         self._heap_reference_list = spead2.send.HeapReferenceList(
             [spead2.send.HeapReference(descriptors, substream_index=i) for i in range(stream.num_substreams)]
+            if all_substreams
+            else [spead2.send.HeapReference(descriptors, substream_index=0)]
         )
         self._interval = interval
         self._first_interval = interval if first_interval is None else first_interval
