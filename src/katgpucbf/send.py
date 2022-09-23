@@ -57,7 +57,7 @@ class DescriptorSender:
         interval: float,
         first_interval: Optional[float] = None,
         *,
-        all_substreams: Optional[bool] = False,
+        all_substreams: bool = False,
     ) -> None:
         self._stream = stream
         self._heap_reference_list = spead2.send.HeapReferenceList(
