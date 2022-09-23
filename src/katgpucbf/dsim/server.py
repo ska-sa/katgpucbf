@@ -22,6 +22,7 @@ import time
 from typing import Optional, Sequence
 
 import aiokatcp
+import numpy as np
 import pyparsing as pp
 import xarray as xr
 
@@ -164,6 +165,14 @@ class DeviceServer(aiokatcp.DeviceServer):
             await self._signal_service.sample(
                 signals, 0, period, self.adc_sample_rate, self.spare.data["payload"], self._saturated
             )
+            saturation_count = self._saturated.sum(dim="data", dtype=np.int64)
+            # As per M1000-0001-053: bits [47:32] hold saturation count, while
+            # bit 1 holds a boolean flag.
+            # np.left_shift is << but xarray doesn't seem to implement the
+            # operator overload.
+            digitiser_status = np.left_shift(saturation_count, 32)
+            digitiser_status |= xr.where(digitiser_status, np.int64(2), np.int64(0))
+            self.spare.data["digitiser_status"][:] = digitiser_status
             spare = self.sender.heap_set
             timestamp = await self.sender.set_heaps(self.spare)
             self.spare = spare
