@@ -88,7 +88,9 @@ async def test_signals(
     mocker,
 ) -> None:
     """Test the ``?signals`` katcp command."""
-    signals_str = "cw(0.0, 1000.0); cw(1.0, 1000.0);"
+    # CW with magnitude 2 should saturate 2/3 of the time. The frequency is
+    # set low enough that some heaps will have no saturation.
+    signals_str = "cw(0.0, 2e4); cw(2.0, 2e4);"
     set_heaps = mocker.patch.object(sender, "set_heaps", autospec=True, return_value=1234567)
     args: list = [signals_str]
     if period is not None:
@@ -99,8 +101,18 @@ async def test_signals(
     assert informs[0].arguments[4] == b"1234567"
     set_heaps.assert_called_once_with(heap_sets[0])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
-    np.testing.assert_equal(heap_sets[0].data["payload"].isel(pol=0).data, 0)
-    assert not np.all(heap_sets[0].data["payload"].isel(pol=1).data == 0)
+    payload = heap_sets[0].data["payload"]
+    status = heap_sets[0].data["digitiser_status"]
+    np.testing.assert_equal(payload.isel(pol=0).data, 0)
+    assert not np.all(payload.isel(pol=1).data == 0)
+    # Check that the saturation flag is consistent with the saturation count
+    np.testing.assert_equal((status.data & 2) > 0, (status.data >> 32) > 0)
+    if period is None:  # The tests below depend on having enough unique data
+        # Check that pol 1 is saturated about as much as expected
+        assert np.mean(status.isel(pol=1).data >> 32) / DIG_HEAP_SAMPLES == pytest.approx(2 / 3, abs=0.01)
+        # Check that some heaps are entirely unsaturated, so that the
+        # saturation flag consistency test is not vacuous.
+        assert not np.all(status.isel(pol=1).data & 2)
     # Check that sensors were updated
     assert await get_sensor(katcp_client, "signals-orig") == signals_str
     assert await get_sensor(katcp_client, "period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
