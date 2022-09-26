@@ -19,3 +19,7 @@
 from typing import Final
 
 METRIC_NAMESPACE: Final = "dsim"
+#: Bit position in digitiser_status SPEAD item for ADC saturation flag
+STATUS_SATURATION_FLAG_BIT: Final = 1
+#: First bit position in digitiser status SPEAD item for ADC saturation count
+STATUS_SATURATION_COUNT_SHIFT: Final = 32
