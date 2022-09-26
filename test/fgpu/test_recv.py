@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,7 +19,7 @@
 import dataclasses
 import itertools
 import logging
-from typing import Generator, Iterable, List, Optional, Sequence, cast
+from typing import Dict, Generator, Iterable, List, Optional, Sequence, Tuple, cast
 from unittest.mock import Mock
 
 import numpy as np
@@ -30,7 +30,15 @@ from numpy.typing import ArrayLike
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
 from katgpucbf.fgpu.recv import Chunk, Layout
-from katgpucbf.spead import ADC_SAMPLES_ID, DIGITISER_ID_ID, DIGITISER_STATUS_ID, FLAVOUR, TIMESTAMP_ID
+from katgpucbf.spead import (
+    ADC_SAMPLES_ID,
+    DIGITISER_ID_ID,
+    DIGITISER_STATUS_ID,
+    DIGITISER_STATUS_SATURATION_COUNT_SHIFT,
+    DIGITISER_STATUS_SATURATION_FLAG_BIT,
+    FLAVOUR,
+    TIMESTAMP_ID,
+)
 
 from .. import PromDiff
 
@@ -92,7 +100,8 @@ def streams(
             data = np.empty(layout.chunk_bytes, np.uint8)
             # Use np.ones to make sure the bits get zeroed out
             present = np.ones(layout.chunk_heaps, np.uint8)
-            chunk = Chunk(data=data, present=present, stream=stream)
+            extra = np.zeros(layout.chunk_heaps, np.uint16)
+            chunk = Chunk(data=data, present=present, extra=extra, stream=stream)
             chunk.recycle()
         stream.add_inproc_reader(queue)
 
@@ -118,6 +127,7 @@ def gen_heaps(
     first_timestamp: int,
     pol: int,
     present: Optional[Sequence[bool]] = None,
+    saturated: Optional[Sequence[int]] = None,
 ) -> Generator[spead2.send.Heap, None, None]:
     """Generate heaps from an array of data.
 
@@ -127,6 +137,10 @@ def gen_heaps(
 
     If `present` is specified, it must contain one boolean per heap. If the
     boolean is false, the heap is skipped.
+
+    If `present` is specified, it contains the saturation count for each heap
+    (used to compute `digitiser_status`). If not specified, all samples are
+    assumed to be unsaturated.
     """
     data_arr = np.require(data, dtype=np.uint8)
     assert data_arr.ndim == 1
@@ -136,10 +150,16 @@ def gen_heaps(
     imm_format = [("u", FLAVOUR.heap_address_bits)]
     for i, row in enumerate(data_arr):
         if present is None or present[i]:
+            if saturated is not None and saturated[i] > 0:
+                status = (saturated[i] << DIGITISER_STATUS_SATURATION_COUNT_SHIFT) | (
+                    1 << DIGITISER_STATUS_SATURATION_FLAG_BIT
+                )
+            else:
+                status = 0
             heap = spead2.send.Heap(FLAVOUR)
             heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
             heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
-            heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=0))
+            heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=status))
             heap.add_item(spead2.Item(ADC_SAMPLES_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
             yield heap
         timestamp += layout.heap_samples
@@ -288,12 +308,17 @@ class TestChunkSets:
         for stream in streams:
             stream.data_ringbuffer = ringbuffer
         rng = np.random.default_rng(1)
+        expected_clip: Dict[Tuple[int, int], int] = {}  # Maps (chunk_id, pol) to total clip count
 
         def add_chunk(chunk_id: int, pol: int, missing: int = 0) -> None:
             data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
             present = np.ones(layout.chunk_heaps, np.uint8)
             present[:missing] = 0  # Mark some leading heaps as missing
-            chunk = Chunk(data=data, present=present, chunk_id=chunk_id, stream_id=pol, stream=streams[pol])
+            extra = rng.integers(0, layout.heap_samples - 1, size=layout.chunk_heaps, dtype=np.uint16)
+            expected_clip[chunk_id, pol] = int(np.sum(extra[missing:], dtype=np.int64))
+            chunk = Chunk(
+                data=data, present=present, extra=extra, chunk_id=chunk_id, stream_id=pol, stream=streams[pol]
+            )
             ringbuffer.put_nowait(chunk)
 
         for i in range(10):
@@ -331,6 +356,8 @@ class TestChunkSets:
                 assert s[pol].stream_id == pol
                 assert s[pol].chunk_id == s[0].chunk_id
                 assert s[pol].timestamp == s[0].chunk_id * layout.chunk_samples
+        expected_ids = [10, 12, 20]
+        assert [s[0].chunk_id for s in sets] == expected_ids
         assert sets[0][0].chunk_id == 10
         assert sets[1][0].chunk_id == 12
         assert sets[2][0].chunk_id == 20
@@ -351,3 +378,5 @@ class TestChunkSets:
         assert get_sample_diffs("input_missing_heaps_total") == [11 * 16 - 46, 11 * 16 - 47]
         assert get_sample_diffs("input_bad_timestamp_heaps_total") == [123, 1123]
         assert get_sample_diffs("input_metadata_heaps_total") == [321, 1321]
+        expected_clip_total = [sum(expected_clip[chunk_id, pol] for chunk_id in expected_ids) for pol in range(N_POLS)]
+        assert get_sample_diffs("input_clipped_samples_total") == expected_clip_total

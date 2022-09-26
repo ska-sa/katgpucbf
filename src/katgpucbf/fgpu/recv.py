@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -35,7 +35,7 @@ from .. import BYTE_BITS, N_POLS
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
-from ..spead import TIMESTAMP_ID
+from ..spead import DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -53,11 +53,15 @@ bytes_counter = Counter(
 missing_heaps_counter = Counter(
     "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
 )
+dig_clip_counter = Counter(
+    "input_clipped_samples", "number of ADC samples that clipped", ["pol"], namespace=METRIC_NAMESPACE
+)
 _PER_POL_COUNTERS = [
     heaps_counter,
     chunks_counter,
     bytes_counter,
     missing_heaps_counter,
+    dig_clip_counter,
 ]
 
 stats_collector = StatsCollector(
@@ -124,9 +128,10 @@ class Layout(BaseLayout):
         )
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):
             data = numba.carray(data_ptr, 1)
-            items = numba.carray(intp_to_voidptr(data[0].items), 2, dtype=np.int64)
+            items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
             timestamp = items[0]
             payload_size = items[1]
+            status = items[2]
             user_data = numba.carray(user_data_ptr, 1)
             batch_stats = numba.carray(
                 intp_to_voidptr(data[0].batch_stats),
@@ -145,6 +150,11 @@ class Layout(BaseLayout):
             data[0].chunk_id = timestamp // chunk_samples
             data[0].heap_index = timestamp // heap_samples % chunk_heaps
             data[0].heap_offset = data[0].heap_index * heap_bytes
+
+            extra = numba.carray(intp_to_voidptr(data[0].extra), 1, dtype=np.uint16)
+            data[0].extra_offset = data[0].heap_index * 2  # 2 is sizeof(uint16)
+            data[0].extra_size = 2
+            extra[0] = status >> DIGITISER_STATUS_SATURATION_COUNT_SHIFT
 
         return chunk_place_impl
 
@@ -180,8 +190,9 @@ def make_streams(
     streams = [
         make_base_stream(
             layout=layout,
-            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID],
+            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID, DIGITISER_STATUS_ID],
             max_active_chunks=MAX_CHUNKS,
+            max_heap_extra=np.dtype(np.uint16).itemsize,
             data_ringbuffer=data_ringbuffer,
             free_ringbuffer=free_ringbuffers[pol],
             affinity=src_affinity[pol],
@@ -282,6 +293,10 @@ async def chunk_sets(
                     heaps_counter.labels(pol).inc(buf_good)
                     chunks_counter.labels(pol).inc()
                     bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
+                    # Zero out saturation count for heaps that were never received
+                    # (otherwise the value is undefined memory).
+                    c.extra[c.present == 0] = 0
+                    dig_clip_counter.labels(pol).inc(int(np.sum(c.extra, dtype=np.uint64)))
                     # Determine how many heaps we expected to have seen by
                     # now, and subtract from it the number actually seen to
                     # determine the number missing. This accounts for both

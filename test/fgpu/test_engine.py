@@ -19,7 +19,7 @@
 import logging
 from dataclasses import dataclass
 from functools import partial
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import aiokatcp
 import numpy as np
@@ -269,6 +269,9 @@ class TestEngine:
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
         assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
+        saturation_value = 2 ** (SAMPLE_BITS - 1) - 1
+        saturated = np.abs(dig_data) >= saturation_value
+        saturated = np.sum(saturated.reshape(N_POLS, -1, src_layout.heap_samples), axis=-1, dtype=np.uint16)
         dig_data = self._pack_samples(dig_data)
         dig_stream = self._make_digitiser(mock_recv_streams)
         heap_gens = [
@@ -278,6 +281,7 @@ class TestEngine:
                 first_timestamp,
                 pol,
                 present=src_present[pol] if src_present is not None else None,
+                saturated=saturated[pol],
             )
             for pol, pol_data in enumerate(dig_data)
         ]
@@ -546,6 +550,22 @@ class TestEngine:
             wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
 
+    def _watch_sensors(self, sensors: Sequence[aiokatcp.Sensor]) -> Dict[str, List]:
+        """Set up observers on sensors that record updates.
+
+        The updates are returned in a dictionary whose key is the sensor name and
+        whose value is a list of sensor values.
+        """
+        sensor_updates_dict: Dict[str, List] = {sensor.name: [] for sensor in sensors}
+
+        def sensor_observer(sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List) -> None:
+            """Populate a list to compare at the end of this unit-test."""
+            updates_list.append(sensor_reading.value)
+
+        for sensor in sensors:
+            sensor.attach(partial(sensor_observer, updates_list=sensor_updates_dict[sensor.name]))
+        return sensor_updates_dict
+
     async def test_delay_changes(
         self,
         mock_recv_streams: List[spead2.InprocQueue],
@@ -556,16 +576,7 @@ class TestEngine:
         """Test loading several future delay models."""
         # Set up infrastructure for testing delay sensor updates
         delay_sensors = [engine_server.sensors[f"input{pol}-delay"] for pol in range(N_POLS)]
-        sensor_updates_dict: Dict[str, List] = {delay_sensor.name: [] for delay_sensor in delay_sensors}
-
-        def sensor_observer(
-            delay_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List
-        ) -> None:
-            """Populate a list to compare at the end of this unit-test."""
-            updates_list.append(sensor_reading.value)
-
-        for delay_sensor in delay_sensors:
-            delay_sensor.attach(partial(sensor_observer, updates_list=sensor_updates_dict[delay_sensor.name]))
+        sensor_updates_dict = self._watch_sensors(delay_sensors)
 
         # To keep things simple, we'll just use phase, not delay.
         tone_channel = CHANNELS // 2
@@ -696,6 +707,30 @@ class TestEngine:
         frame_size = channels * spectra_per_heap * N_POLS * COMPLEX * np.dtype(np.int8).itemsize
         assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
         assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
+
+    async def test_saturation_sensors(
+        self,
+        mock_recv_streams: List[spead2.InprocQueue],
+        mock_send_stream: List[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+    ) -> None:
+        """Test that the ``dig-clip-cnt`` sensors are set correctly."""
+        sensors = [engine_server.sensors[f"dig.pol{pol}-dig-clip-cnt"] for pol in range(N_POLS)]
+        sensor_update_dict = self._watch_sensors(sensors)
+        n_samples = 3 * CHUNK_SAMPLES
+        dig_data = np.zeros((2, n_samples), np.int16)
+        saturation_value = 2 ** (SAMPLE_BITS - 1) - 1
+        dig_data[0, 10000:15000] = saturation_value
+        dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
+        await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            dig_data,
+        )
+        assert sensor_update_dict[sensors[0].name] == [5000, 5000, 5000]
+        assert sensor_update_dict[sensors[1].name] == [0, 0, 10000]
 
     def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> List[int]:
         """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
