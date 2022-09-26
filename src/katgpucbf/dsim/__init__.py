@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,7 +19,3 @@
 from typing import Final
 
 METRIC_NAMESPACE: Final = "dsim"
-#: Bit position in digitiser_status SPEAD item for ADC saturation flag
-STATUS_SATURATION_FLAG_BIT: Final = 1
-#: First bit position in digitiser status SPEAD item for ADC saturation count
-STATUS_SATURATION_COUNT_SHIFT: Final = 32

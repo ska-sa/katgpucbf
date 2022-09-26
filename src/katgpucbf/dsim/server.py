@@ -28,7 +28,7 @@ import xarray as xr
 
 from .. import BYTE_BITS, __version__
 from ..send import DescriptorSender
-from . import STATUS_SATURATION_COUNT_SHIFT, STATUS_SATURATION_FLAG_BIT
+from ..spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
 from .send import HeapSet, Sender
 from .shared_array import SharedArray
 from .signal import Signal, SignalService, TerminalError, format_signals, parse_signals
@@ -178,8 +178,10 @@ class DeviceServer(aiokatcp.DeviceServer):
             # bit 1 holds a boolean flag.
             # np.left_shift is << but xarray doesn't seem to implement the
             # operator overload.
-            digitiser_status = np.left_shift(saturation_count, STATUS_SATURATION_COUNT_SHIFT)
-            digitiser_status |= xr.where(digitiser_status, np.int64(1 << STATUS_SATURATION_FLAG_BIT), np.int64(0))
+            digitiser_status = np.left_shift(saturation_count, DIGITISER_STATUS_SATURATION_COUNT_SHIFT)
+            digitiser_status |= xr.where(
+                digitiser_status, np.int64(1 << DIGITISER_STATUS_SATURATION_FLAG_BIT), np.int64(0)
+            )
             self.spare.data["digitiser_status"][:] = digitiser_status
             spare = self.sender.heap_set
             timestamp = await self.sender.set_heaps(self.spare)

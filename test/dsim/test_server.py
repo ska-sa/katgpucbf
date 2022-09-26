@@ -25,11 +25,11 @@ import numpy as np
 import pytest
 
 from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
-from katgpucbf.dsim import STATUS_SATURATION_COUNT_SHIFT, STATUS_SATURATION_FLAG_BIT
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
 from katgpucbf.dsim.signal import parse_signals
 from katgpucbf.send import DescriptorSender
+from katgpucbf.spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
 
 from .. import get_sensor
 from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
@@ -108,15 +108,15 @@ async def test_signals(
     assert not np.all(payload.isel(pol=1).data == 0)
     # Check that the saturation flag is consistent with the saturation count
     np.testing.assert_equal(
-        (status.data & (1 << STATUS_SATURATION_FLAG_BIT)) > 0,
-        (status.data >> STATUS_SATURATION_COUNT_SHIFT) > 0,
+        (status.data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT)) > 0,
+        (status.data >> DIGITISER_STATUS_SATURATION_COUNT_SHIFT) > 0,
     )
     if period is None:  # The tests below depend on having enough unique data
         # Check that pol 1 is saturated about as much as expected
         assert np.mean(status.isel(pol=1).data >> 32) / DIG_HEAP_SAMPLES == pytest.approx(2 / 3, abs=0.01)
         # Check that some heaps are entirely unsaturated, so that the
         # saturation flag consistency test is not vacuous.
-        assert not np.all(status.isel(pol=1).data & (1 << STATUS_SATURATION_FLAG_BIT))
+        assert not np.all(status.isel(pol=1).data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT))
     # Check that sensors were updated
     assert await get_sensor(katcp_client, "signals-orig") == signals_str
     assert await get_sensor(katcp_client, "period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
