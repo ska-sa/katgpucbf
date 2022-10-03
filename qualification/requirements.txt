@@ -306,7 +306,7 @@ snowballstemmer==2.2.0
     # via
     #   -r qualification/../requirements-dev.txt
     #   sphinx
-spead2==3.11.0
+spead2==3.11.1
     # via -r qualification/requirements.in
 sphinx==5.0.2
     # via
