@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -29,6 +29,11 @@ ADC_SAMPLES_ID = 0x3300  # Digitiser data
 XENG_RAW_ID = 0x1800
 TIMESTAMP_ID = 0x1600
 MAX_PACKET_SIZE = 8872
+
+#: Bit position in digitiser_status SPEAD item for ADC saturation flag
+DIGITISER_STATUS_SATURATION_FLAG_BIT = 1
+#: First bit position in digitiser status SPEAD item for ADC saturation count
+DIGITISER_STATUS_SATURATION_COUNT_SHIFT = 32
 
 #: SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)

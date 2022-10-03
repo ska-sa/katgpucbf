@@ -19,14 +19,18 @@
 import asyncio
 import logging
 import time
-from typing import Sequence
+from typing import Optional, Sequence
 
 import aiokatcp
+import numpy as np
 import pyparsing as pp
+import xarray as xr
 
 from .. import BYTE_BITS, __version__
 from ..send import DescriptorSender
+from ..spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
 from .send import HeapSet, Sender
+from .shared_array import SharedArray
 from .signal import Signal, SignalService, TerminalError, format_signals, parse_signals
 
 logger = logging.getLogger(__name__)
@@ -45,22 +49,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         Sampling rate in Hz
     sample_bits
         Number of bits per output sample
-    first_timestamp
-        The timestamp associated with the first output sample
     dither_seed
         Dither seed (used only to populate a sensor).
-    signals_str
-        String that was parsed to produce `signals`.
-    signals
-        User-requested signals. Note that these must have already been loaded
-        into the sender; it is provided here purely to populate sensors.
-    period
-        Initial period used to generate the signal loaded into the sender.
-    signal_service
-        Helper process for generating new signals. It must be constructed
-        consistent with the other arguments (in particular,
-        ``sender.heap_set.data["payload"]`` and ``spare.data["payload"]`` must
-        be passed to the constructor).
     *args, **kwargs
         Passed to base class
     """
@@ -77,12 +67,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         spare: HeapSet,
         adc_sample_rate: float,
         sample_bits: int,
-        first_timestamp: int,
         dither_seed: int,
-        signals_str: str,
-        signals: Sequence[Signal],
-        period: int,
-        signal_service: SignalService,
         *args,
         **kwargs,
     ) -> None:
@@ -92,37 +77,41 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.spare = spare
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
-        self.first_timestamp = first_timestamp
+        # Scratch space for computing saturation counts. It is passed to
+        # (and filled in by) the SignalService, so needs to use shared
+        # memory.
+        saturated_shape = (sender.heap_set.data.sizes["pol"], sender.heap_set.data.sizes["time"], sender.heap_samples)
+        shared_saturated = SharedArray.create("saturated", saturated_shape, bool)
+        self._saturated = xr.DataArray(
+            shared_saturated.buffer, dims=["pol", "time", "data"], attrs={"shared_array": shared_saturated}
+        )
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
-        self._signal_service = signal_service
+        heap_sets = [sender.heap_set, spare]
+        self._signal_service = SignalService(
+            [heap_set.data["payload"] for heap_set in heap_sets] + [self._saturated],
+            sample_bits,
+            dither_seed,
+        )
 
         self._signals_orig_sensor = aiokatcp.Sensor(
             str,
             "signals-orig",
             "User-provided string used to define the signals",
-            initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            default=signals_str,
         )
         self._signals_sensor = aiokatcp.Sensor(
             str,
             "signals",
             "String reproducibly describing how the signals are generated",
-            initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            default=format_signals(signals),
         )
         self._period_sensor = aiokatcp.Sensor(
             int,
             "period",
             "Number of samples after which the signals will be repeated",
-            initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            default=period,
         )
         self._steady_state_sensor = aiokatcp.Sensor(
             int,
             "steady-state-timestamp",
             "Heaps with this timestamp or greater are guaranteed to reflect the effects of previous katcp requests.",
-            default=0,
-            initial_status=aiokatcp.Sensor.Status.NOMINAL,
         )
         self.sensors.add(self._signals_orig_sensor)
         self.sensors.add(self._signals_sensor)
@@ -171,6 +160,38 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.descriptor_sender.halt()
         await self._signal_service.stop()
 
+    async def set_signals(self, signals: Sequence[Signal], signals_str: str, period: Optional[int] = None) -> int:
+        """Change the signals :meth:`request_signals`.
+
+        This is the implementation of :meth:`request_signals`. See that method for
+        description of the parameters and return value (`signals` is the parsed
+        version of `signals_str`).
+        """
+        if period is None:
+            period = self.sensors["max-period"].value
+        async with self._signals_lock:
+            await self._signal_service.sample(
+                signals, 0, period, self.adc_sample_rate, self.spare.data["payload"], self._saturated
+            )
+            saturation_count = self._saturated.sum(dim="data", dtype=np.int64)
+            # As per M1000-0001-053: bits [47:32] hold saturation count, while
+            # bit 1 holds a boolean flag.
+            # np.left_shift is << but xarray doesn't seem to implement the
+            # operator overload.
+            digitiser_status = np.left_shift(saturation_count, DIGITISER_STATUS_SATURATION_COUNT_SHIFT)
+            digitiser_status |= xr.where(
+                digitiser_status, np.int64(1 << DIGITISER_STATUS_SATURATION_FLAG_BIT), np.int64(0)
+            )
+            self.spare.data["digitiser_status"][:] = digitiser_status
+            spare = self.sender.heap_set
+            timestamp = await self.sender.set_heaps(self.spare)
+            self.spare = spare
+            self._signals_orig_sensor.value = signals_str
+            self._signals_sensor.value = format_signals(signals)
+            self._period_sensor.value = period
+            self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
+            return timestamp
+
     async def request_signals(self, ctx, signals_str: str, period: int = None) -> int:
         """Update the signals that are generated.
 
@@ -198,25 +219,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         n_pol = self.spare.data.dims["pol"]
         if len(signals) != n_pol:
             raise aiokatcp.FailReply(f"expected {n_pol} signals, received {len(signals)}")
-        if period is None:
-            period = self.sensors["max-period"].value
-
-        async with self._signals_lock:
-            await self._signal_service.sample(
-                signals,
-                self.first_timestamp,
-                period,
-                self.adc_sample_rate,
-                self.spare.data["payload"],
-            )
-            spare = self.sender.heap_set
-            timestamp = await self.sender.set_heaps(self.spare)
-            self.spare = spare
-            self._signals_orig_sensor.value = signals_str
-            self._signals_sensor.value = format_signals(signals)
-            self._period_sensor.value = period
-            self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
-            return timestamp
+        return await self.set_signals(signals, signals_str, period)
 
     async def request_time(self, ctx) -> float:
         """Return the current UNIX timestamp."""

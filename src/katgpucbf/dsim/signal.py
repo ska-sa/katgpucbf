@@ -534,6 +534,26 @@ def quantise(
 
 
 @numba.njit(nogil=True)
+def _saturation_flags(data: np.ndarray, saturation_value: np.generic) -> np.ndarray:
+    out = np.empty(data.shape, np.bool_)
+    for i in range(len(data)):
+        out[i] = np.abs(data[i]) >= saturation_value
+    return out
+
+
+def saturation_flags(data: da.Array, saturation_value) -> da.Array:
+    """Return a flag array indicating saturated elements of ``data``.
+
+    Elements are considered saturated if they exceed `saturation_value` in
+    absolute value.
+    """
+    assert data.ndim == 1
+    # Ensure the saturation value is already a numpy scalar
+    saturation_value = data.dtype.type(saturation_value)
+    return da.map_blocks(_saturation_flags, data, meta=np.array((), bool), saturation_value=saturation_value)
+
+
+@numba.njit(nogil=True)
 def _packbits(data: np.ndarray, bits: int) -> np.ndarray:
     # Note: needs lots of explicit casting to np.uint64, as otherwise
     # numba seems to want to infer double precision.
@@ -579,6 +599,7 @@ def sample(
     sample_rate: float,
     sample_bits: int,
     out: xr.DataArray,
+    out_saturated: Optional[xr.DataArray] = None,
     *,
     dither: Union[bool, xr.DataArray] = True,
     dither_seed: Optional[int] = None,
@@ -605,6 +626,9 @@ def sample(
     out
         Output array, with a dimension called ``pol`` (which must match the
         number of signals). The other dimensions are flattened.
+    out_saturated
+        Output array, with the same shape as ``out``, into which saturation
+        flags are written.
     dither
         If true (default), add uniform random values in the range [-0.5, 0.5)
         after scaling to reduce artefacts. It may also be a :class:`xr.DataArray`
@@ -631,7 +655,8 @@ def sample(
             raise ValueError(f"Expected at least {period} dither samples, only found {dither.sizes['data']}")
         dither = dither.isel(data=np.s_[:period])
 
-    sampled = []
+    in_arrays = []
+    out_arrays = []
     for i, sig in enumerate(signals):
         data = sig.sample(period, sample_rate)
         if sig.terminal:
@@ -640,13 +665,21 @@ def sample(
             sig_dither = dither.isel(pol=i).data
         data = quantise(data, sample_bits, sig_dither)
         data = da.roll(data, -timestamp)
+        if out_saturated is not None:
+            saturated = saturation_flags(data, 2 ** (sample_bits - 1) - 1)
         data = packbits(data, sample_bits)
         if period < n:
             data = da.tile(data, n // period)
-        sampled.append(data)
+            if out_saturated is not None:
+                saturated = da.tile(saturated, n // period)
+        in_arrays.append(data)
+        out_arrays.append(out.isel(pol=i).data.ravel())
+        if out_saturated is not None:
+            in_arrays.append(saturated)
+            out_arrays.append(out_saturated.isel(pol=i).data.ravel())
     # Compute all the pols together, so that common signals are only computed
     # once.
-    da.store(sampled, [out.isel(pol=i).data.ravel() for i in range(len(signals))], lock=False)
+    da.store(in_arrays, out_arrays, lock=False)
 
 
 class SignalService:
@@ -674,7 +707,8 @@ class SignalService:
         timestamp: int
         period: Optional[int]
         sample_rate: float
-        out_idx: int  #: Index of the array in the list of valid arrays
+        out_idx: int  #: Index of the out array in the list of valid arrays
+        out_saturated_idx: Optional[int]  #: Index of the out saturated array in the list of valid arrays
 
     @staticmethod
     def _run(
@@ -718,6 +752,7 @@ class SignalService:
                     req.sample_rate,
                     sample_bits,
                     arrays[req.out_idx],
+                    out_saturated=arrays[req.out_saturated_idx] if req.out_saturated_idx is not None else None,
                     dither=dither,
                 )
             except Exception as exc:
@@ -764,6 +799,16 @@ class SignalService:
         if reply is not None:
             raise reply
 
+    def _array_index(self, out: xr.DataArray) -> int:
+        for i, array in enumerate(self.arrays):
+            # Object identity doesn't work well, I think because fetching one
+            # xr.DataArray from a xr.DataSet creates a new object on the fly.
+            # So we check if they're referencing the same memory in the same
+            # way.
+            if array.data.__array_interface__ == out.data.__array_interface__:
+                return i
+        raise ValueError("output was not registered with the constructor")
+
     async def sample(
         self,
         signals: Sequence[Signal],
@@ -771,25 +816,18 @@ class SignalService:
         period: Optional[int],
         sample_rate: float,
         out: xr.DataArray,
+        out_saturated: Optional[xr.DataArray] = None,
     ) -> None:
         """Perform signal sampling in the remote process.
 
-        `out` must be one of the arrays passed to the constructor. Only the
-        first `n` samples will be populated (and this will be taken as the
-        period).
+        `out` and `out_saturated` must each be one of the arrays passed to the
+        constructor. Only the first `n` samples will be populated (and this
+        will be taken as the period).
         """
-        for i, array in enumerate(self.arrays):
-            # Object identity doesn't work well, I think because fetching one
-            # xr.DataArray from a xr.DataSet creates a new object on the fly.
-            # So we check if they're referencing the same memory in the same
-            # way.
-            if array.data.__array_interface__ == out.data.__array_interface__:
-                out_idx = i
-                break
-        else:
-            raise ValueError("output was not registered with the constructor")
+        out_idx = self._array_index(out)
+        out_saturated_idx = self._array_index(out_saturated) if out_saturated is not None else None
         loop = asyncio.get_running_loop()
-        req = SignalService._Request(signals, timestamp, period, sample_rate, out_idx)
+        req = SignalService._Request(signals, timestamp, period, sample_rate, out_idx, out_saturated_idx)
         await loop.run_in_executor(None, self._make_request, req)
 
     async def __aenter__(self) -> "SignalService":

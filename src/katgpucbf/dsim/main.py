@@ -175,16 +175,6 @@ async def async_main() -> None:
 
     if args.dither_seed is None:
         args.dither_seed = np.random.SeedSequence().entropy  # Generate a random seed
-    signal_service = signal.SignalService(
-        [heap_set.data["payload"] for heap_set in heap_sets], args.sample_bits, args.dither_seed
-    )
-    await signal_service.sample(
-        args.signals,
-        0,
-        args.period,
-        args.adc_sample_rate,
-        heap_sets[0].data["payload"],
-    )
 
     # Enable real-time scheduling after creating signal_service (which spawns a
     # bunch of processes we don't want to have it) but before creating the send
@@ -209,34 +199,22 @@ async def async_main() -> None:
         ibv=args.ibv,
         affinity=args.affinity,
     )
-
-    timestamp = 0
-    if args.sync_time is not None:
-        timestamp, start_time = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.max_period)
-    else:
-        args.sync_time = time.time()
-        start_time = args.sync_time
-    logger.info("First timestamp will be %#x", timestamp)
-
     # Set spead stream to have heap id in even numbers for dsim data.
     stream.set_cnt_sequence(2, 2)
-    sender = send.Sender(stream, heap_sets[0], timestamp, args.heap_samples, args.sync_time, args.adc_sample_rate)
+    sender = send.Sender(stream, heap_sets[0], args.heap_samples, args.adc_sample_rate)
 
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
         spare=heap_sets[1],
         adc_sample_rate=args.adc_sample_rate,
-        first_timestamp=timestamp,
         dither_seed=args.dither_seed,
         sample_bits=args.sample_bits,
-        signals_str=args.signals_orig,
-        signals=args.signals,
-        period=args.period,
-        signal_service=signal_service,
         host=args.katcp_host,
         port=args.katcp_port,
     )
+    await server.set_signals(args.signals, args.signals_orig, args.period)
+
     # Only set this affinity after constructing DeviceServer, which creates
     # a separate process for the signal service that shouldn't inherit this.
     if args.main_affinity >= 0:
@@ -245,13 +223,20 @@ async def async_main() -> None:
 
     add_signal_handlers(server)
 
+    timestamp = 0
+    if args.sync_time is not None:
+        timestamp, start_time = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.max_period)
+    else:
+        args.sync_time = time.time()
+        start_time = args.sync_time
+    logger.info("First timestamp will be %#x", timestamp)
     # Sleep until start_time. Python doesn't seem to have an interface
     # for sleeping until an absolute time, so this will be wrong by the
     # time that elapsed from calling time.time until calling
     # asyncio.sleep, but that's small change.
     await asyncio.sleep(max(0, start_time - time.time()))
     logger.info("Starting transmission")
-    await asyncio.gather(sender.run(), descriptor_task, server.join())
+    await asyncio.gather(sender.run(timestamp, args.sync_time), descriptor_task, server.join())
 
 
 def main() -> None:

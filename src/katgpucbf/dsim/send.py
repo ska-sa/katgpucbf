@@ -51,6 +51,9 @@ class HeapSet:
 
         timestamps
             1D array of timestamps, big-endian 64-bit
+        digitiser_status
+            2D array of digitiser status values, big-endian 64-bit (indexed by
+            polarisation and time)
         payload
             2D array of raw sample data (indexed by polarisation and time)
         heaps
@@ -98,7 +101,7 @@ class HeapSet:
         heaps = []
         substream_offset = list(itertools.accumulate(n_substreams, initial=0))
         digitiser_id_items = [spead.make_immediate(spead.DIGITISER_ID_ID, dig_id) for dig_id in digitiser_id]
-        digitiser_status_item = spead.make_immediate(spead.DIGITISER_STATUS_ID, 0)
+        digitiser_status = np.zeros((n_pols, n), dtype=">u8")
         for i in range(n):
             # The ... in indexing causes numpy to give a 0d array view, rather than
             # a scalar.
@@ -106,6 +109,8 @@ class HeapSet:
             cur_heaps = []
             timestamp_item = spead.make_immediate(spead.TIMESTAMP_ID, heap_timestamp)
             for j in range(n_pols):
+                heap_status = digitiser_status[j, i, ...]
+                digitiser_status_item = spead.make_immediate(spead.DIGITISER_STATUS_ID, heap_status)
                 heap_payload = payload[j, i]
                 heap = spead2.send.Heap(spead.FLAVOUR)
                 heap.add_item(timestamp_item)
@@ -130,6 +135,7 @@ class HeapSet:
                 "timestamps": (["time"], timestamps),
                 "payload": (["pol", "time", "data"], payload, {"shared_array": shared_payload}),
                 "heaps": (["time", "pol"], heaps),
+                "digitiser_status": (["pol", "time"], digitiser_status),
             }
         )
         return cls(data)
@@ -204,15 +210,13 @@ class Sender:
         self,
         stream: "spead2.send.asyncio.AsyncStream",
         heap_set: HeapSet,
-        first_timestamp: int,
         heap_samples: int,
-        sync_time: float,
         adc_sample_rate: float,
     ) -> None:
         self.stream = stream
         self.heap_set = heap_set
         self.heap_samples = heap_samples
-        self.sync_time = sync_time
+        self.sync_time = 0.0  # Dummy value; run() will initialise
         self.adc_sample_rate = adc_sample_rate
         # The futures serve two functions:
         # - prevent concurrent access to the timestamps while they're being sent
@@ -221,10 +225,8 @@ class Sender:
         self._running = True  # Set to false to start shutdown
         self._finished = asyncio.Event()
         # First timestamp that we haven't yet submitted to async_send_heaps
-        self._next_timestamp = first_timestamp
-        # Prepare initial timestamps
-        first_end_timestamp = first_timestamp + self.heap_set.data.dims["time"] * self.heap_samples
-        heap_set.data["timestamps"][:] = np.arange(first_timestamp, first_end_timestamp, heap_samples, dtype=">u8")
+        # (value is a dummy; real initial value is set by run)
+        self._next_timestamp = 0
 
     def halt(self) -> None:
         """Request :meth:`run` to stop, but do not wait for it."""
@@ -249,8 +251,15 @@ class Sender:
         output_heaps_counter.inc(heaps)
         output_bytes_counter.inc(bytes)
 
-    async def run(self) -> None:
+    async def run(self, first_timestamp: int, sync_time: float) -> None:
         """Send heaps continuously."""
+        self._next_timestamp = first_timestamp
+        self.sync_time = sync_time
+        # Prepare initial timestamps
+        first_end_timestamp = first_timestamp + self.heap_set.data.dims["time"] * self.heap_samples
+        self.heap_set.data["timestamps"][:] = np.arange(
+            first_timestamp, first_end_timestamp, self.heap_samples, dtype=">u8"
+        )
         while self._running:
             for i, part in enumerate(self.heap_set.parts):
                 await asyncio.sleep(0)  # ensure other tasks get time to run
@@ -297,5 +306,6 @@ class Sender:
                 old_futures.append(future)
         self.heap_set = heap_set
         timestamp = self._next_timestamp
-        await asyncio.wait(old_futures)
+        if old_futures:
+            await asyncio.wait(old_futures)
         return timestamp

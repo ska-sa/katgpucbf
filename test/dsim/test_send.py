@@ -18,6 +18,7 @@
 
 import asyncio
 import itertools
+import time
 from typing import Optional, Sequence
 
 import numpy as np
@@ -117,7 +118,7 @@ async def test_sender(
 
     # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
-        await sender.run()
+        await sender.run(0, time.time())
     for queue in inproc_queues:
         queue.stop()
 

@@ -27,8 +27,9 @@ import pytest
 from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DeviceServer
-from katgpucbf.dsim.signal import SignalService, parse_signals
+from katgpucbf.dsim.signal import parse_signals
 from katgpucbf.send import DescriptorSender
+from katgpucbf.spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
 
 from .. import get_sensor
 from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
@@ -39,26 +40,19 @@ async def katcp_server(
     sender: Sender, heap_sets: Sequence[HeapSet], descriptor_sender: DescriptorSender
 ) -> AsyncGenerator[DeviceServer, None]:  # noqa: D401
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
-    # Make up a bogus signal. It's not actually populated in heap_sets
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
-
     dither_seed = 42
-    signal_service = SignalService([heap_set.data["payload"] for heap_set in heap_sets], DIG_SAMPLE_BITS, dither_seed)
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
         spare=heap_sets[1],
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=DIG_SAMPLE_BITS,
-        first_timestamp=0,
         dither_seed=dither_seed,
-        signals_str=signals_str,
-        signals=parse_signals(signals_str),
-        period=SIGNAL_HEAPS,  # Bogus value to test the sensor
-        signal_service=signal_service,
         host="127.0.0.1",
         port=0,
     )
+    await server.set_signals(parse_signals(signals_str), signals_str, SIGNAL_HEAPS)
     await server.start()
     yield server
     await server.stop()
@@ -95,7 +89,9 @@ async def test_signals(
     mocker,
 ) -> None:
     """Test the ``?signals`` katcp command."""
-    signals_str = "cw(0.0, 1000.0); cw(1.0, 1000.0);"
+    # CW with magnitude 2 should saturate 2/3 of the time. The frequency is
+    # set low enough that some heaps will have no saturation.
+    signals_str = "cw(0.0, 2e4); cw(2.0, 2e4);"
     set_heaps = mocker.patch.object(sender, "set_heaps", autospec=True, return_value=1234567)
     args: list = [signals_str]
     if period is not None:
@@ -104,10 +100,23 @@ async def test_signals(
     assert reply == [b"1234567"]
     _, informs = await katcp_client.request("sensor-value", "steady-state-timestamp")
     assert informs[0].arguments[4] == b"1234567"
-    set_heaps.assert_called_once_with(heap_sets[1])
+    set_heaps.assert_called_once_with(heap_sets[0])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
-    np.testing.assert_equal(heap_sets[1].data["payload"].isel(pol=0).data, 0)
-    assert not np.all(heap_sets[1].data["payload"].isel(pol=1).data == 0)
+    payload = heap_sets[0].data["payload"]
+    status = heap_sets[0].data["digitiser_status"]
+    np.testing.assert_equal(payload.isel(pol=0).data, 0)
+    assert not np.all(payload.isel(pol=1).data == 0)
+    # Check that the saturation flag is consistent with the saturation count
+    np.testing.assert_equal(
+        (status.data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT)) > 0,
+        (status.data >> DIGITISER_STATUS_SATURATION_COUNT_SHIFT) > 0,
+    )
+    if period is None:  # The tests below depend on having enough unique data
+        # Check that pol 1 is saturated about as much as expected
+        assert np.mean(status.isel(pol=1).data >> 32) / DIG_HEAP_SAMPLES == pytest.approx(2 / 3, abs=0.01)
+        # Check that some heaps are entirely unsaturated, so that the
+        # saturation flag consistency test is not vacuous.
+        assert not np.all(status.isel(pol=1).data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT))
     # Check that sensors were updated
     assert await get_sensor(katcp_client, "signals-orig") == signals_str
     assert await get_sensor(katcp_client, "period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
