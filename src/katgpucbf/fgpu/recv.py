@@ -295,6 +295,7 @@ async def chunk_sets(
                     bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
                     # Zero out saturation count for heaps that were never received
                     # (otherwise the value is undefined memory).
+                    assert c.extra is not None
                     c.extra[c.present == 0] = 0
                     dig_clip_counter.labels(pol).inc(int(np.sum(c.extra, dtype=np.uint64)))
                     # Determine how many heaps we expected to have seen by

@@ -53,6 +53,7 @@ class Chunk(spead2.recv.Chunk):
     # Refine the types used in the base class
     present: np.ndarray
     data: np.ndarray
+    extra: Optional[np.ndarray]
     # New fields
     device: object
     timestamp: int

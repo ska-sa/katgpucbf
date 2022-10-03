@@ -1037,7 +1037,12 @@ class Engine(aiokatcp.DeviceServer):
                 pol_data.present[: len(chunk.present)] = chunk.present
                 # Update the digitiser saturation count (the "extra" fields holds
                 # per-heap values).
-                self.sensors[f"dig.pol{pol}-dig-clip-cnt"].value += int(np.sum(chunk.extra, dtype=np.uint64))
+                assert chunk.extra is not None
+                sensor = self.sensors[f"dig.pol{pol}-dig-clip-cnt"]
+                sensor.set_value(
+                    sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
+                    timestamp=chunk.timestamp + layout.chunk_samples,
+                )
             if self.use_vkgdr:
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
                     assert pol_data.samples is None

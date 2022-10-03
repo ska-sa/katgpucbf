@@ -556,11 +556,13 @@ class TestEngine:
         The updates are returned in a dictionary whose key is the sensor name and
         whose value is a list of sensor values.
         """
-        sensor_updates_dict: Dict[str, List] = {sensor.name: [] for sensor in sensors}
+        sensor_updates_dict: Dict[str, List[aiokatcp.Reading]] = {sensor.name: [] for sensor in sensors}
 
-        def sensor_observer(sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List) -> None:
+        def sensor_observer(
+            sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List[aiokatcp.Reading]
+        ) -> None:
             """Populate a list to compare at the end of this unit-test."""
-            updates_list.append(sensor_reading.value)
+            updates_list.append(sensor_reading)
 
         for sensor in sensors:
             sensor.attach(partial(sensor_observer, updates_list=sensor_updates_dict[sensor.name]))
@@ -611,7 +613,8 @@ class TestEngine:
             for expected_time, expected_phase, sensor_update in zip(
                 update_times, update_phases, sensor_updates_dict[delay_sensor.name]
             ):
-                sensor_values = sensor_update[1:-1].split(",")  # (timestamp, delay, delay_rate, phase, phase_rate)
+                # (timestamp, delay, delay_rate, phase, phase_rate)
+                sensor_values = sensor_update.value[1:-1].split(",")
                 sensor_values = [float(field.strip()) for field in sensor_values]
                 # NOTE: This tolerance is in place as the ADC timestamp gets
                 # converted to a UNIX time and back again, losing some precision
@@ -729,8 +732,12 @@ class TestEngine:
             engine_server,
             dig_data,
         )
-        assert sensor_update_dict[sensors[0].name] == [5000, 5000, 5000]
-        assert sensor_update_dict[sensors[1].name] == [0, 0, 10000]
+        # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
+        # __eq__ and __repr__) so that it can be used in comparisons.
+        assert [r.value for r in sensor_update_dict[sensors[0].name]] == [5000, 5000, 5000]
+        assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == [524288, 1048576, 1572864]
+        assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0, 10000]
+        assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == [524288, 1048576, 1572864]
 
     def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> List[int]:
         """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
