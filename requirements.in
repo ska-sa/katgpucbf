@@ -9,6 +9,6 @@ prometheus-async
 psutil  # Gives more accurate dask.system.CPU_COUNT
 pycuda
 pyparsing>=3.0.0
-spead2>=3.9.1
+spead2>=3.11.0
 vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr
 xarray
