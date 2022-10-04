@@ -53,6 +53,7 @@ class Chunk(spead2.recv.Chunk):
     # Refine the types used in the base class
     present: np.ndarray
     data: np.ndarray
+    extra: Optional[np.ndarray]
     # New fields
     device: object
     timestamp: int
@@ -241,6 +242,7 @@ class BaseLayout(ABC):
 
 
 def make_stream(
+    *,
     layout: BaseLayout,
     spead_items: List[int],
     max_active_chunks: int,
@@ -248,6 +250,7 @@ def make_stream(
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     affinity: int,
     stream_stats: List[str],
+    max_heap_extra: int = 0,
     **kwargs: Any,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
@@ -260,6 +263,8 @@ def make_stream(
         List of SPEAD item IDs to be expected in the heap headers.
     max_active_chunks
         Maximum number of chunks under construction.
+    max_heap_extra
+        Maximum non-payload data written by the place callback
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
@@ -279,6 +284,7 @@ def make_stream(
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=spead_items,
         max_chunks=max_active_chunks,
+        max_heap_extra=max_heap_extra,
         place=layout.chunk_place(stats_base),
     )
 

@@ -584,11 +584,16 @@ class Engine(aiokatcp.DeviceServer):
                     # mapping.
                     buf = buf[:chunk_bytes]
                     device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
-                    chunk = recv.Chunk(data=buf, device=device_array, stream=stream)
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
-                    chunk = recv.Chunk(data=buf, stream=stream)
-                chunk.present = np.zeros(self._src_layout.chunk_samples // self._src_packet_samples, np.uint8)
+                    device_array = None
+                chunk = recv.Chunk(
+                    data=buf,
+                    device=device_array,
+                    present=np.zeros(self._src_layout.chunk_samples // self._src_packet_samples, np.uint8),
+                    extra=np.zeros(self._src_layout.chunk_samples // self._src_packet_samples, np.uint16),
+                    stream=stream,
+                )
                 chunk.recycle()  # Make available to the stream
 
     def _init_send(self, substreams: int, use_peerdirect: bool) -> List[send.Chunk]:
@@ -697,13 +702,22 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    "steady-state-timestamp",
-                    "Heaps with this timestamp or greater are guaranteed to "
-                    "reflect the effects of previous katcp requests.",
+                    f"dig.pol{pol}-dig-clip-cnt",
+                    "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "steady-state-timestamp",
+                "Heaps with this timestamp or greater are guaranteed to "
+                "reflect the effects of previous katcp requests.",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
 
     async def _next_in(self) -> Optional[InItem]:
         """Load next InItem for processing.
@@ -1018,9 +1032,17 @@ class Engine(aiokatcp.DeviceServer):
             in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
 
             transfer_events = []
-            for pol_data, chunk in zip(in_item.pol_data, chunks):
+            for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
                 # Copy the present flags (synchronously).
                 pol_data.present[: len(chunk.present)] = chunk.present
+                # Update the digitiser saturation count (the "extra" fields holds
+                # per-heap values).
+                assert chunk.extra is not None
+                sensor = self.sensors[f"dig.pol{pol}-dig-clip-cnt"]
+                sensor.set_value(
+                    sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
+                    timestamp=chunk.timestamp + layout.chunk_samples,
+                )
             if self.use_vkgdr:
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
                     assert pol_data.samples is None
