@@ -56,9 +56,7 @@ pipeline {
   stages {
     stage('Install Python packages') {
       steps {
-        sshagent(['github-ssh']) {
-          sh 'pip install -r requirements.txt -r requirements-dev.txt'
-        }
+        sh 'pip install -r requirements.txt -r requirements-dev.txt'
       }
     }
 
@@ -88,9 +86,7 @@ pipeline {
           steps {
             sh 'pre-commit install'
             // no-commit-to-branch complains if we are on the main branch
-            sshagent(['github-ssh']) {
-              sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
-            }
+            sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
           }
         }
 
@@ -147,17 +143,15 @@ pipeline {
         DOCKER_BUILDKIT = '1'
       }
       steps {
-        sshagent(['github-ssh']) {
-          script {
-            branch = env.BRANCH_NAME
-            tag = (branch == "main") ? "latest" : branch
-            // Supply credentials to Dockerhub so that we can reliably pull the base image
-            docker.withRegistry("https://docker.io/", "dockerhub") {
-              dockerImage = docker.build "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}", "--pull --ssh default ."
-            }
-            docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
-              dockerImage.push()
-            }
+        script {
+          branch = env.BRANCH_NAME
+          tag = (branch == "main") ? "latest" : branch
+          // Supply credentials to Dockerhub so that we can reliably pull the base image
+          docker.withRegistry("https://docker.io/", "dockerhub") {
+            dockerImage = docker.build "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}", "--pull ."
+          }
+          docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
+            dockerImage.push()
           }
         }
       }

@@ -16,9 +16,6 @@
 # limitations under the License.
 ################################################################################
 
-# This Dockerfile requires BuildKit to build. To build, run
-# DOCKER_BUILDKIT=1 docker build --ssh default -t <NAME> .
-
 # Use the nvidia development image as a base. This gives access to all
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
@@ -60,11 +57,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libcap-dev \
     libdivide-dev \
     libvulkan-dev libxext6 libegl1 \
-    openssh-client \
     wget
-
-# Provide Github's SSH host keys for fetching vkgdr (private repository).
-COPY docker/github_known_hosts /root/.ssh/known_hosts
 
 # Create a virtual environment
 RUN python -m venv /venv
@@ -114,7 +107,7 @@ FROM build-base as build-py
 
 # Install requirements (already copied to build-base image).
 WORKDIR /tmp/katgpucbf
-RUN --mount=type=ssh pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
 # Install the package itself. Using --no-deps ensures that if there are
 # requirements that aren't pinned in requirements.txt, the subsequent
