@@ -148,7 +148,7 @@ typing-extensions==4.2.0
     #   katsdpsigproc
     #   prometheus-async
     #   pytools
-vkgdr @ git+ssh://git@github.com/ska-sa/vkgdr
+vkgdr==0.1
     # via -r requirements.in
 wrapt==1.14.1
     # via
