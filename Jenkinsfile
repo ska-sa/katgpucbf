@@ -148,7 +148,12 @@ pipeline {
           tag = (branch == "main") ? "latest" : branch
           // Supply credentials to Dockerhub so that we can reliably pull the base image
           docker.withRegistry("https://docker.io/", "dockerhub") {
-            dockerImage = docker.build "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}", "--pull ."
+            dockerImage = docker.build(
+              "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}",
+              "--pull "
+              + "--label=org.opencontainers.image.revision=${env.GIT_COMMIT} "
+              + "--label=org.opencontainers.image.source=${env.GIT_URL} ."
+            )
           }
           docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
             dockerImage.push()
