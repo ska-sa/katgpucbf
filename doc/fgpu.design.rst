@@ -207,9 +207,9 @@ the larger transform size. This is a multi-step process and requires some extra 
 
 Real-to-complex transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Now for some notation to see how this works. We start by treating :math:`x` (a real array of length N) as if it is 
-a complex array :math:`z` of length N, with each adjacent pair of real values in :math:`x` interpreted as the 
-real and imaginary components of a complex value, and computing the Fourier transform of :math:`z`. Formally, 
+Now for some notation to see how this works. We start by treating :math:`x` (a real array of length N) as if it is
+a complex array :math:`z` of length N, with each adjacent pair of real values in :math:`x` interpreted as the
+real and imaginary components of a complex value, and computing the Fourier transform of :math:`z`. Formally,
 let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}`. Then :math:`z_i = u_i + jv_i = x_{2i} + j x_{2i+1}`.
 
 For clarity, array :math:`x` has length :math:`2N` but is divided into even- and odd- samples
@@ -320,7 +320,7 @@ algorithm allows a transform of size :math:`N = mn` to be decomposed into :math:
 size :math:`m` followed by :math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
 "unzipping factor". We will keep it small (typically not more than 4), as the
 implementation requires registers proportional to this factor. We are now going to go step-by-step and
-separate the input array :math:`x` into :math:`n` parts of size :math:`m` with each part operated on using a 
+separate the input array :math:`x` into :math:`n` parts of size :math:`m` with each part operated on using a
 Fourier transform.
 
 The aim is to compute :math:`Z_k` so putting it more formally we have
@@ -339,12 +339,12 @@ The aim is to compute :math:`Z_k` so putting it more formally we have
 The whole expression is a Fourier transform of the expression in brackets
 (the exponential inside the bracket is the so-called "twiddle factor").
 
-Now let's walk through each part. To recap the indexing used in the Cooley-Tukey algorithm: let a 
-time-domain index :math:`i` be written as :math:`qn + r` and a frequency-domain index :math:`k` be 
-written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r}, \dots, z_{(m-1)n+r}`, 
-and denote its Fourier transform by :math:`Z^r`. It is worthwhile to point out that the superscript 
+Now let's walk through each part. To recap the indexing used in the Cooley-Tukey algorithm: let a
+time-domain index :math:`i` be written as :math:`qn + r` and a frequency-domain index :math:`k` be
+written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r}, \dots, z_{(m-1)n+r}`,
+and denote its Fourier transform by :math:`Z^r`. It is worthwhile to point out that the superscript
 :math:`r` *does not* denote raise to the power but rather is a means to indicate an :math:`r^{th}` array.
-In practice this :math:`r^{th}` array is a subset (part) of the larger :math:`z` array of input data. 
+In practice this :math:`r^{th}` array is a subset (part) of the larger :math:`z` array of input data.
 
 Let's unpack this a bit further --- what is actually happening
 is that the initial array :math:`z` is divided into :math:`n=4` separate arrays each of
@@ -398,14 +398,14 @@ this looks like,
    :width: 600
 (click image to enlarge)
 
-Right, so we have separate sub-arrays as indexed form the initial array, what happens next? These various
+Right, so we have separate sub-arrays as indexed from the initial array, what happens next? These various
 :math:`z^{r}` arrays are fed to cuFFT yielding 4 complex-to-complex transforms. These separate transforms
-now need to be combined to form a single real-to-complex transform of the full initial size. An inconvenience 
-of this structure is that :math:`z^r` is not a contiguous set of input samples, but a strided array. 
+now need to be combined to form a single real-to-complex transform of the full initial size. An inconvenience
+of this structure is that :math:`z^r` is not a contiguous set of input samples, but a strided array.
 While cuFFT does support both strided inputs and batched transformations, we cannot batch over :math:`r`
-and over multiple spectra at the same time as it only supports a single batch dimension with corresponding 
-stride. We solve this by modifying the PFB kernel to reorder its output such that each :math:`z^r` is output 
-contiguously. This can be done by shuffling some bits in the output index (because we assume powers of two 
+and over multiple spectra at the same time as it only supports a single batch dimension with corresponding
+stride. We solve this by modifying the PFB kernel to reorder its output such that each :math:`z^r` is output
+contiguously. This can be done by shuffling some bits in the output index (because we assume powers of two
 everywhere).
 
 To see how the :math:`k` indexing works, :math:`k = pm + s` and is dealt with in a similar manner as above.
