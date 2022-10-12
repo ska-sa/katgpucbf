@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
 chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
+samples_counter = Counter("input_samples", "number of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE)
 bytes_counter = Counter(
     "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
 )
@@ -59,6 +60,7 @@ dig_clip_counter = Counter(
 _PER_POL_COUNTERS = [
     heaps_counter,
     chunks_counter,
+    samples_counter,
     bytes_counter,
     missing_heaps_counter,
     dig_clip_counter,
@@ -292,6 +294,7 @@ async def chunk_sets(
                     buf_good = int(np.sum(c.present))
                     heaps_counter.labels(pol).inc(buf_good)
                     chunks_counter.labels(pol).inc()
+                    samples_counter.labels(pol).inc(buf_good * layout.heap_samples)
                     bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
                     # Zero out saturation count for heaps that were never received
                     # (otherwise the value is undefined memory).
