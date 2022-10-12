@@ -373,6 +373,7 @@ class TestChunkSets:
 
         assert get_sample_diffs("input_heaps_total") == [46, 47]
         assert get_sample_diffs("input_chunks_total") == [3, 3]
+        assert get_sample_diffs("input_samples_total") == [46 * 4096, 47 * 4096]
         assert get_sample_diffs("input_bytes_total") == [46 * 5120, 47 * 5120]
         assert get_sample_diffs("input_too_old_heaps_total") == [111, 1111]
         assert get_sample_diffs("input_missing_heaps_total") == [11 * 16 - 46, 11 * 16 - 47]
