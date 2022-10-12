@@ -702,7 +702,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"dig.pol{pol}-dig-clip-cnt",
+                    f"input{pol}-dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -1038,7 +1038,7 @@ class Engine(aiokatcp.DeviceServer):
                 # Update the digitiser saturation count (the "extra" fields holds
                 # per-heap values).
                 assert chunk.extra is not None
-                sensor = self.sensors[f"dig.pol{pol}-dig-clip-cnt"]
+                sensor = self.sensors[f"input{pol}-dig-clip-cnt"]
                 sensor.set_value(
                     sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
                     timestamp=chunk.timestamp + layout.chunk_samples,
