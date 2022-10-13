@@ -187,7 +187,7 @@ cuFFT and the final stage (post-processing kernel) of the process includes one r
 Cooley-Tukey computation and the computation to form the real-to-complex transformation.
 
 To start, let's consider the traditional equation for the Fourier Transform. Let :math:`N`
-be the number of channels into which we wish to decompose the input sequence into, and let
+be the number of channels into which we wish to decompose the input sequence, and let
 :math:`x_i` be the (real) time-domain samples (:math:`0 \le i < 2N`) and :math:`X_k` be its discrete
 Fourier transform (DFT). Because the time domain is real, the frequency domain is Hermitian symmetric,
 and we only need to compute half of it to recover all the information. We thus only need to consider
@@ -197,7 +197,7 @@ to discard it and thus have a power-of-two number of outputs).
 .. math:: X_k = \sum_{i=0}^{2N-1} e^{\frac{-2\pi j}{2N}\cdot ik} x_i.
 
 We know that a direct implementation of the DFT is inefficient and alternative, more efficient
-means exist to perform this computation. One such method is the FFT introduce by Cooley-Tukey
+means exist to perform this computation. One such method is the FFT introduced by Cooley-Tukey
 and in the GPU space cuFFT is one such implementation. As highlighted earlier, transform sizes
 of greater than 16384 (for a GeForce RTX 3080 Ti at least) require more than one memory pass making it
 less efficient than it needs to be. The technique detailed below uses the decomposition as provided by
@@ -207,22 +207,14 @@ the larger transform size. This is a multi-step process and requires some extra 
 
 Real-to-complex transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Now for some notation to see how this works. We start by treating :math:`x` (a real array of length N) as if it is
+Now for some notation to see how this works. We start by treating :math:`x` (a real array of length 2N) as if it is
 a complex array :math:`z` of length N, with each adjacent pair of real values in :math:`x` interpreted as the
 real and imaginary components of a complex value, and computing the Fourier transform of :math:`z`. Formally,
 let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}`. Then :math:`z_i = u_i + jv_i = x_{2i} + j x_{2i+1}`.
 
-For clarity, array :math:`x` has length :math:`2N` but is divided into even- and odd- samples
-each of length :math:`N`. In other words, each adjacent pair of real values in :math:`x` is interpreted as the real
-and imaginary components of a complex value.
-
-We will start by computing the Fourier transform of :math:`z`. This is convenient to do because :math:`z` has the
-identical memory layout to :math:`x`, so we can obtain it just by viewing the same memory as containing N complex
-numbers instead of 2N real numbers. In other words, each adjacent pair of real values in :math:`x` is interpreted
-as the real and imaginary components of a complex value.
-
-Let :math:`U`, :math:`V` and :math:`Z` denote the Fourier transforms of :math:`u`, :math:`v` and :math:`z` respectively.
-Since the Fourier transform is a linear operator and we defined :math:`z = u + jv`, we also have :math:`Z = U + jV`.
+We will start by computing the Fourier transform of :math:`z`. Let :math:`U`, :math:`V` and :math:`Z` denote the
+Fourier transforms of :math:`u`, :math:`v` and :math:`z` respectively. Since the Fourier transform is a linear
+operator and we defined :math:`z = u + jv`, we also have :math:`Z = U + jV`.
 
 It is important to remember that both :math:`u` and :math:`v` are real-valued, so :math:`U`
 and :math:`V` are Hermitian symmetric. By re-arranging things we can reconstruct :math:`U` and
@@ -320,7 +312,7 @@ algorithm allows a transform of size :math:`N = mn` to be decomposed into :math:
 size :math:`m` followed by :math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
 "unzipping factor". We will keep it small (typically not more than 4), as the
 implementation requires registers proportional to this factor. We are now going to go step-by-step and
-separate the input array :math:`x` into :math:`n` parts of size :math:`m` with each part operated on using a
+separate the input array :math:`z` into :math:`n` parts of size :math:`m` with each part operated on using a
 Fourier transform.
 
 The aim is to compute :math:`Z_k` so putting it more formally we have
@@ -343,16 +335,16 @@ Now let's walk through each part. To recap the indexing used in the Cooley-Tukey
 time-domain index :math:`i` be written as :math:`qn + r` and a frequency-domain index :math:`k` be
 written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r}, \dots, z_{(m-1)n+r}`,
 and denote its Fourier transform by :math:`Z^r`. It is worthwhile to point out that the superscript
-:math:`r` *does not* denote raise to the power but rather is a means to indicate an :math:`r^{th}` array.
+:math:`r` *does not* exponentiation but rather is a means to indicate an :math:`r^{th}` array.
 In practice this :math:`r^{th}` array is a subset (part) of the larger :math:`z` array of input data.
 
-Let's unpack this a bit further --- what is actually happening
-is that the initial array :math:`z` is divided into :math:`n=4` separate arrays each of
-:math:`m=32768/4 = 8192` elements (hence the :math:`N = mn` above)(This is true for a desired overall
-transform size of 32768 channels). The actual samples that land up in each array are defined by the
-indices :math:`i` and :math:`k`. Lets start with :math:`i`.
+As a way of an example, let :math:`n=4` ("unzipping factor") and :math:`N=32768` (total number of channels).
+Now let's unpack this a bit further --- what is actually happening is that the initial array :math:`z` is divided into
+:math:`n=4` separate arrays each of :math:`m=32768/4 = 8192` elements (hence the :math:`N = mn` above).
+This is true for a desired overall transform size of 32768 channels. The actual samples that land up in each
+array are defined by the indices :math:`i` and :math:`k`.
 
-It was stated that :math:`i = qn + r`. The parameter :math:`r` takes on the range :math:`0` to :math:`n-1`
+Lets start with :math:`i`. It was stated that :math:`i = qn + r`. The parameter :math:`r` takes on the range :math:`0` to :math:`n-1`
 (so :math:`r=0` to :math:`r=3` as :math:`n = 4`) and :math:`q` takes on the
 range :math:`0` to :math:`m-1` (i.e. :math:`q=0` to :math:`q=8191`).
 So we are dividing up array :math:`z` into :math:`n` smaller arrays denoted by  :math:`r` (i.e. :math:`z^{r}`)
@@ -361,34 +353,20 @@ each of length :math:`m=8192`. So what does this look like practically?
 The first array when :math:`r=0` (i.e. :math:`z^{0}`)
 
 ========================   ========
-   Inputs                  Index(i)
+   Inputs                  Index
 ------------------------   --------
   qn + r                      i
 ========================   ========
 :math:`0 \cdot 4` + 0         0
 :math:`1 \cdot 4` + 0         4
 :math:`2 \cdot 4` + 0         8
-...               ...
-...               ...
+...                           ...
+...                           ...
 :math:`8191 \cdot 4` + 0    32764
 ========================   ========
 
-... (intentionally skipping 2nd and 3rd array to conserve space)
-
-The fourth array when :math:`r=3` (i.e. :math:`z^{3}`)
-
-========================  ========
-   Inputs                 Index(i)
-------------------------  --------
-  qn + r                     i
-========================  ========
-:math:`0 \cdot 4 + 3`        3
-:math:`1 \cdot 4 + 3`        7
-:math:`2 \cdot 4 + 3`        11
-...               ...
-...               ...
-:math:`8191 \cdot 4 + 3`   32767
-========================  ========
+This can be extended to the other remaining arrays. The fourth array when :math:`r=3` (for example), :math:`z^{3}`
+is :math:`z_{3}`, :math:`z_{7}`, :math:`z_{11}`, ..., :math:`z_{32767}`.
 
 What this shows is that each sub-array consists of samples from the initial array :math:`z` indexed
 by :math:`i=qn+r` where each sample is every :math:`4^{th}` and offset by :math:`r`. Pictorially
@@ -396,10 +374,9 @@ this looks like,
 
 .. image:: images/z_array.png
    :width: 600
-(click image to enlarge)
 
 Right, so we have separate sub-arrays as indexed from the initial array, what happens next? These various
-:math:`z^{r}` arrays are fed to cuFFT yielding 4 complex-to-complex transforms. These separate transforms
+:math:`z^{r}` arrays are fed to cuFFT yielding :math:`n` complex-to-complex transforms. These separate transforms
 now need to be combined to form a single real-to-complex transform of the full initial size. An inconvenience
 of this structure is that :math:`z^r` is not a contiguous set of input samples, but a strided array.
 While cuFFT does support both strided inputs and batched transformations, we cannot batch over :math:`r`
@@ -408,7 +385,7 @@ stride. We solve this by modifying the PFB kernel to reorder its output such tha
 contiguously. This can be done by shuffling some bits in the output index (because we assume powers of two
 everywhere).
 
-To see how the :math:`k` indexing works, :math:`k = pm + s` and is dealt with in a similar manner as above.
+To see how the :math:`k` indexing works :math:`k = pm + s` and is dealt with in a similar manner as above.
 Parameter :math:`m = 8192` (in this example), and :math:`p` has a range :math:`0` to :math:`n-1`
 (i.e. :math:`p = 0` to :math:`p = 3` as :math:`n = 4` in our example); and :math:`s` takes on the
 range :math:`0` to :math:`m-1` (i.e. :math:`s = 0` to :math:`s = 8191`).
@@ -418,34 +395,19 @@ Looking at this practically,
 When :math:`p = 0`
 
 ===========================  =========
-   Inputs                     Index(k)
+   Inputs                     Index
 ---------------------------  ---------
   pm + s                      k
 ===========================  =========
 :math:`0 \cdot 8192` + 0      0
 :math:`0 \cdot 8192` + 1      1
 :math:`0 \cdot 8192` + 2      2
-...               ...
-...               ...
+...                           ...
+...                           ...
 :math:`0 \cdot 8192` + 8191   8191
 ===========================  =========
 
-... (intentionally skipping a few to conserve space)
-
-When :math:`p=3`
-
-===========================  ========
-   Inputs                    Index(k)
----------------------------  --------
-  pm + s                         k
-===========================  ========
-:math:`3 \cdot 8192` + 0      24576
-:math:`3 \cdot 8192` + 1      24577
-:math:`3 \cdot 8192` + 2      24578
-...              ...
-...              ...
-:math:`3 \cdot 8192` + 8191   32767
-===========================  ========
+This too can be extended to the other remaining arrays.
 
 Viewing the above tables it can be seen that the full range of outputs are indexed in batches of
 :math:`m = 8192` outputs, *but*, this is not yet the final output and are merely the outputs as provided
