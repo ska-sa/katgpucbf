@@ -45,7 +45,7 @@ pipeline {
        * the Docker server available inside the container (for building a Docker
        * image).
        */
-      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
+      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
     }
   }
 
@@ -97,7 +97,7 @@ pipeline {
          *     can create resource contention over things like GPU RAM. If it
          *     starts becoming an issue set X to 1. I have noticed an issue once
          *     where sometimes one thread got stuck and it stalled the pipeline.
-         *     Until this has been solved, I am removing this argument entirely
+         *     Until this has been solved, I am removing this argument entirely.
          * 2. -v: Increases verbosity
          * 3. --junitxml=reports/result.xml' Writes the results to a file for later
          *    examination.
@@ -161,6 +161,18 @@ pipeline {
         }
       }
     }
+
+    stage('Run qualification tests') {
+       steps {
+         script {
+           branch = env.BRANCH_NAME
+           tag = (branch == "main") ? "latest" : branch
+           sh 'pip install -r qualification/requirements.txt'
+           sh "spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}"
+           sh "qualification/report/generate_pdf.py report.json report.pdf"
+         }
+       }
+    }
   }
 
   /* This post stage is configured to always run at the end of the pipeline,
@@ -172,7 +184,7 @@ pipeline {
   post {
     always {
       emailext attachLog: true,
-      attachmentsPattern: 'reports/result.xml',
+      attachmentsPattern: 'reports/result.xml, report.pdf',
       body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
       <b>Node:</b> ${env.NODE_NAME}<br>
       <b>Duration:</b> ${currentBuild.durationString}<br>
@@ -183,9 +195,7 @@ pipeline {
       subject: '$PROJECT_NAME - $BUILD_STATUS!',
       to: '$DEFAULT_RECIPIENTS'
 
-
       cleanWs()
     }
   }
-
 }

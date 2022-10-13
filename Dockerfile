@@ -95,7 +95,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     pdf2svg \
     tex-gyre \
     texlive-latex-recommended \
-    texlive-latex-extra
+    texlive-latex-extra \
+    texlive-base \
+    texlive-science \
+    lmodern
 
 #######################################################################
 
