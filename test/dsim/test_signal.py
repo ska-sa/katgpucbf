@@ -17,7 +17,7 @@
 """Unit tests for signal generation functions."""
 
 import operator
-from typing import Any, Callable, List, Sequence, cast
+from typing import Any, Callable, List, Sequence, Tuple, cast
 from unittest import mock
 
 import dask.array as da
@@ -272,6 +272,27 @@ class TestPackbits:
         packed = signal.packbits(data, 10).compute()
         unpacked = unpackbits(packed, 10)
         np.testing.assert_equal(data.compute(), unpacked)
+
+
+class TestSaturationCounts:
+    """Tests for :func:`katgpucbf.dsim.signal.saturation_counts`."""
+
+    @pytest.mark.parametrize("chunks", [((5,), (4,)), ((3, 2), (3, 1))])
+    def test(self, chunks: Tuple[Tuple[int, ...], ...]) -> None:
+        """Test the basics with a variety of chunking schemes."""
+        data = np.array(
+            [
+                [127, 126, -127, -128],
+                [0, 0, 0, 0],
+                [-126, -127, -128, 126],
+                [127, 127, 127, 127],
+                [-127, -128, -127, -128],
+            ],
+            dtype=np.int8,
+        )
+        dask_data = da.from_array(data, chunks=chunks)
+        out = signal.saturation_counts(dask_data, saturation_value=127).compute()
+        np.testing.assert_equal(out, [3, 0, 2, 4, 4])
 
 
 class TestSample:

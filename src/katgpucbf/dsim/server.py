@@ -80,10 +80,10 @@ class DeviceServer(aiokatcp.DeviceServer):
         # Scratch space for computing saturation counts. It is passed to
         # (and filled in by) the SignalService, so needs to use shared
         # memory.
-        saturated_shape = (sender.heap_set.data.sizes["pol"], sender.heap_set.data.sizes["time"], sender.heap_samples)
-        shared_saturated = SharedArray.create("saturated", saturated_shape, bool)
+        saturated_shape = (sender.heap_set.data.sizes["pol"], sender.heap_set.data.sizes["time"])
+        shared_saturated = SharedArray.create("saturated", saturated_shape, np.uint64)
         self._saturated = xr.DataArray(
-            shared_saturated.buffer, dims=["pol", "time", "data"], attrs={"shared_array": shared_saturated}
+            shared_saturated.buffer, dims=["pol", "time"], attrs={"shared_array": shared_saturated}
         )
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
         heap_sets = [sender.heap_set, spare]
@@ -171,16 +171,21 @@ class DeviceServer(aiokatcp.DeviceServer):
             period = self.sensors["max-period"].value
         async with self._signals_lock:
             await self._signal_service.sample(
-                signals, 0, period, self.adc_sample_rate, self.spare.data["payload"], self._saturated
+                signals,
+                0,
+                period,
+                self.adc_sample_rate,
+                self.spare.data["payload"],
+                self._saturated,
+                self.sender.heap_samples,
             )
-            saturation_count = self._saturated.sum(dim="data", dtype=np.int64)
             # As per M1000-0001-053: bits [47:32] hold saturation count, while
             # bit 1 holds a boolean flag.
             # np.left_shift is << but xarray doesn't seem to implement the
             # operator overload.
-            digitiser_status = np.left_shift(saturation_count, DIGITISER_STATUS_SATURATION_COUNT_SHIFT)
+            digitiser_status = np.left_shift(self._saturated, DIGITISER_STATUS_SATURATION_COUNT_SHIFT)
             digitiser_status |= xr.where(
-                digitiser_status, np.int64(1 << DIGITISER_STATUS_SATURATION_FLAG_BIT), np.int64(0)
+                digitiser_status, np.uint64(1 << DIGITISER_STATUS_SATURATION_FLAG_BIT), np.uint64(0)
             )
             self.spare.data["digitiser_status"][:] = digitiser_status
             spare = self.sender.heap_set

@@ -534,23 +534,35 @@ def quantise(
 
 
 @numba.njit(nogil=True)
-def _saturation_flags(data: np.ndarray, saturation_value: np.generic) -> np.ndarray:
-    out = np.empty(data.shape, np.bool_)
-    for i in range(len(data)):
-        out[i] = np.abs(data[i]) >= saturation_value
+def _saturation_counts(data: np.ndarray, saturation_value: np.integer) -> np.ndarray:
+    out = np.empty((data.shape[0], 1), np.uint64)
+    for i in range(data.shape[0]):
+        total = np.uint64(0)
+        for j in range(data.shape[1]):
+            total += np.uint64(data[i, j] >= saturation_value or data[i, j] <= -saturation_value)
+        out[i, 0] = total
     return out
 
 
-def saturation_flags(data: da.Array, saturation_value) -> da.Array:
-    """Return a flag array indicating saturated elements of ``data``.
+def saturation_counts(data: da.Array, saturation_value) -> da.Array:
+    """Return an array indicating counts of saturated elements of ``data``.
+
+    The count is taken along each row of ``data``.
 
     Elements are considered saturated if they exceed `saturation_value` in
     absolute value.
     """
-    assert data.ndim == 1
+    assert data.ndim == 2
     # Ensure the saturation value is already a numpy scalar
     saturation_value = data.dtype.type(saturation_value)
-    return da.map_blocks(_saturation_flags, data, meta=np.array((), bool), saturation_value=saturation_value)
+    block_sums = da.map_blocks(
+        _saturation_counts,
+        data,
+        meta=np.array((), np.uint64),
+        chunks=(data.chunks[0], (1,) * len(data.chunks[1])),
+        saturation_value=saturation_value,
+    )
+    return da.sum(block_sums, axis=1)
 
 
 @numba.njit(nogil=True)
@@ -600,6 +612,7 @@ def sample(
     sample_bits: int,
     out: xr.DataArray,
     out_saturated: Optional[xr.DataArray] = None,
+    saturation_group: int = 1,
     *,
     dither: Union[bool, xr.DataArray] = True,
     dither_seed: Optional[int] = None,
@@ -628,7 +641,11 @@ def sample(
         number of signals). The other dimensions are flattened.
     out_saturated
         Output array, with the same shape as ``out``, into which saturation
-        flags are written.
+        counts are written.
+    saturation_group
+        Samples are taken in contiguous groups of this size and each element of
+        out_saturated is a saturation count for one group. This must divide
+        into the total number of samples.
     dither
         If true (default), add uniform random values in the range [-0.5, 0.5)
         after scaling to reduce artefacts. It may also be a :class:`xr.DataArray`
@@ -643,6 +660,8 @@ def sample(
         period = n
     if n % period:
         raise ValueError(f"period {period} does not divide into total samples {n}")
+    if n % saturation_group:
+        raise ValueError(f"saturation_group (saturation_group) does not divide into total samples {n}")
 
     if dither is True:
         dither = make_dither(len(signals), period, entropy=dither_seed)
@@ -665,13 +684,11 @@ def sample(
             sig_dither = dither.isel(pol=i).data
         data = quantise(data, sample_bits, sig_dither)
         data = da.roll(data, -timestamp)
-        if out_saturated is not None:
-            saturated = saturation_flags(data, 2 ** (sample_bits - 1) - 1)
-        data = packbits(data, sample_bits)
         if period < n:
             data = da.tile(data, n // period)
-            if out_saturated is not None:
-                saturated = da.tile(saturated, n // period)
+        if out_saturated is not None:
+            saturated = saturation_counts(data.reshape(-1, saturation_group), 2 ** (sample_bits - 1) - 1)
+        data = packbits(data, sample_bits)
         in_arrays.append(data)
         out_arrays.append(out.isel(pol=i).data.ravel())
         if out_saturated is not None:
@@ -709,6 +726,7 @@ class SignalService:
         sample_rate: float
         out_idx: int  #: Index of the out array in the list of valid arrays
         out_saturated_idx: Optional[int]  #: Index of the out saturated array in the list of valid arrays
+        saturation_group: int
 
     @staticmethod
     def _run(
@@ -753,6 +771,7 @@ class SignalService:
                     sample_bits,
                     arrays[req.out_idx],
                     out_saturated=arrays[req.out_saturated_idx] if req.out_saturated_idx is not None else None,
+                    saturation_group=req.saturation_group,
                     dither=dither,
                 )
             except Exception as exc:
@@ -817,6 +836,7 @@ class SignalService:
         sample_rate: float,
         out: xr.DataArray,
         out_saturated: Optional[xr.DataArray] = None,
+        saturation_group: int = 1,
     ) -> None:
         """Perform signal sampling in the remote process.
 
@@ -827,7 +847,9 @@ class SignalService:
         out_idx = self._array_index(out)
         out_saturated_idx = self._array_index(out_saturated) if out_saturated is not None else None
         loop = asyncio.get_running_loop()
-        req = SignalService._Request(signals, timestamp, period, sample_rate, out_idx, out_saturated_idx)
+        req = SignalService._Request(
+            signals, timestamp, period, sample_rate, out_idx, out_saturated_idx, saturation_group
+        )
         await loop.run_in_executor(None, self._make_request, req)
 
     async def __aenter__(self) -> "SignalService":
