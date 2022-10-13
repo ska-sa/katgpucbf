@@ -154,11 +154,12 @@ in parallel. The chunk size is determined by the constant
 :data:`katgpucbf.dsim.signal.CHUNK_SIZE`.
 
 The simulator also populates the saturation count and flag in the
-``digitiser_status`` SPEAD item. A per-sample saturation flag is computed with
-dask (prior to bit-packing), and then accumulated to heap granularity with
-serial code. This accumulation could be done more directly for better
-efficiency, but the current approach is reasonably performant and does not
-require the sampling code to take the heap size into account.
+``digitiser_status`` SPEAD item. A per-heap saturation count is computed with
+dask (prior to bit-packing), and then packed into the ``digitiser_status``
+bit-field with serial code. This accumulation could be done in parallel for
+better efficiency, but the current approach is reasonably performant and does
+not require the sampling code to have any knowledge of the format of the
+``digitiser_status`` item.
 
 Generating reproducible random signals needs to be done carefully when
 parallelising. The given random seed is first used to produce a
