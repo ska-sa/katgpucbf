@@ -315,27 +315,11 @@ implementation requires registers proportional to this factor. We are now going 
 separate the input array :math:`z` into :math:`n` parts of size :math:`m` with each part operated on using a
 Fourier transform.
 
-The aim is to compute :math:`Z_k` so putting it more formally we have
-
-.. math::
-
-   Z_k = Z_{pm+s}
-   &= \sum_{i=0}^{mn - 1} e^{\frac{-2\pi j}{mn}\cdot ik} z_i\\
-   &= \sum_{q=0}^{m - 1}\sum_{r=0}^{n-1}
-      e^{\frac{-2\pi j}{mn}(qn + r)(pm + s)} z_{qn + r}\\
-   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp} \left[e^{\frac{-2\pi j}{mn}\cdot rs}
-      \sum_{q=0}^{m-1} e^{\frac{-2\pi j}{m}\cdot qs} z^r_q\right]\\
-   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
-      \left[e^{\frac{-2\pi j}{mn}\cdot rs} Z^r_s\right].
-
-The whole expression is a Fourier transform of the expression in brackets
-(the exponential inside the bracket is the so-called "twiddle factor").
-
-Now let's walk through each part. To recap the indexing used in the Cooley-Tukey algorithm: let a
+To recap the indexing used in the Cooley-Tukey algorithm: let a
 time-domain index :math:`i` be written as :math:`qn + r` and a frequency-domain index :math:`k` be
 written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r}, \dots, z_{(m-1)n+r}`,
 and denote its Fourier transform by :math:`Z^r`. It is worthwhile to point out that the superscript
-:math:`r` *does not* exponentiation but rather is a means to indicate an :math:`r^{th}` array.
+:math:`r` *does not* denote exponentiation but rather is a means to indicate an :math:`r^{th}` array.
 In practice this :math:`r^{th}` array is a subset (part) of the larger :math:`z` array of input data.
 
 As a way of an example, let :math:`n=4` ("unzipping factor") and :math:`N=32768` (total number of channels).
@@ -416,6 +400,22 @@ computed :math:`Z^{r}` using cuFFT). As a useful flashback, we are aiming to com
 (made up from smaller arrays :math:`z^{r}`) with the intention of computing the :math:`U` and :math:`V`
 terms. Why? So that with :math:`U` and :math:`V` we can compute :math:`X_{k}` which is our desired
 final output.
+
+The aim is to compute :math:`Z_k` so putting it more formally we have
+
+.. math::
+
+   Z_k = Z_{pm+s}
+   &= \sum_{i=0}^{mn - 1} e^{\frac{-2\pi j}{mn}\cdot ik} z_i\\
+   &= \sum_{q=0}^{m - 1}\sum_{r=0}^{n-1}
+      e^{\frac{-2\pi j}{mn}(qn + r)(pm + s)} z_{qn + r}\\
+   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp} \left[e^{\frac{-2\pi j}{mn}\cdot rs}
+      \sum_{q=0}^{m-1} e^{\frac{-2\pi j}{m}\cdot qs} z^r_q\right]\\
+   &= \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
+      \left[e^{\frac{-2\pi j}{mn}\cdot rs} Z^r_s\right].
+
+The whole expression is a Fourier transform of the expression in brackets
+(the exponential inside the bracket is the so-called "twiddle factor").
 
 In the post-processing kernel, each work-item computes the results for a
 single :math:`s` and for all :math:`p`. To compute the real-to-complex
