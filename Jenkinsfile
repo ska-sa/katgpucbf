@@ -29,6 +29,8 @@
 pipeline {
   agent {
     dockerfile {
+      registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
+
       /* Use the Jenkins-specific stage of the Dockerfile as the image for
        * testing. This provides the appropriate dependencies.
        */
