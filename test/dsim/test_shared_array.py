@@ -17,12 +17,17 @@
 """Unit tests for :mod:`.shared_array`."""
 
 import multiprocessing
-from typing import Generator
+from typing import Generator, Union
 
 import numpy as np
 import pytest
 
 from katgpucbf.dsim.shared_array import SharedArray
+
+# Process isn't an attribute of BaseContext but of each subclass
+_MPContext = Union[
+    multiprocessing.context.ForkContext, multiprocessing.context.ForkServerContext, multiprocessing.context.SpawnContext
+]
 
 
 @pytest.fixture
@@ -63,7 +68,7 @@ class TestSharedArray:
         assert array.buffer.shape == (10000,)
         assert array.buffer.dtype == np.int32
 
-    def test_share(self, array: SharedArray, mp_context: multiprocessing.context.BaseContext) -> None:
+    def test_share(self, array: SharedArray, mp_context: _MPContext) -> None:
         """Test sharing an array between processes."""
         conn, child_conn = mp_context.Pipe()
         proc = mp_context.Process(target=_child, args=(child_conn,))
