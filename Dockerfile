@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as base
+FROM nvidia/cuda:11.7.1-devel-ubuntu22.04 as base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
@@ -151,8 +151,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     python-is-python3 \
     curl \
     numactl \
-    libboost-program-options1.71.0 \
-    libboost-system1.71.0 \
+    libboost-program-options1.74.0 \
+    libboost-system1.74.0 \
     libibverbs1 \
     librdmacm1 \
     ibverbs-providers \
