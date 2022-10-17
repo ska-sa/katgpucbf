@@ -31,6 +31,7 @@ from typing import AsyncGenerator, List, Literal, Mapping, Optional, Tuple, over
 from uuid import UUID, uuid4
 
 import aiokatcp
+import async_timeout
 import numba
 import numpy as np
 import scipy
@@ -296,7 +297,11 @@ class BaselineCorrelationProductsReceiver:
         return
 
     async def next_complete_chunk(
-        self, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
+        self,
+        min_timestamp: Optional[int] = None,
+        *,
+        max_delay: int = DEFAULT_MAX_DELAY,
+        timeout: Optional[float] = 10.0,
     ) -> Tuple[int, NDArray[np.int32]]:
         """Return the data from the next complete chunk from the stream.
 
@@ -307,13 +312,19 @@ class BaselineCorrelationProductsReceiver:
         min_timestamp, max_delay
             See :meth:`complete_chunks`
         """
-        async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
-            with chunk:
-                return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
+        async with async_timeout.timeout(timeout):
+            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
+                with chunk:
+                    return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
         raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def consecutive_chunks(
-        self, n: int, min_timestamp: Optional[int] = None, *, max_delay: int = DEFAULT_MAX_DELAY
+        self,
+        n: int,
+        min_timestamp: Optional[int] = None,
+        *,
+        max_delay: int = DEFAULT_MAX_DELAY,
+        timeout: Optional[float] = 10.0,
     ) -> List[Tuple[int, katgpucbf.recv.Chunk]]:
         """Obtain `n` consecutive complete chunks from the stream.
 
@@ -325,16 +336,17 @@ class BaselineCorrelationProductsReceiver:
            with enough chunks and update this comment.
         """
         chunks: List[Tuple[int, katgpucbf.recv.Chunk]] = []
-        async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
-            if chunk is None:
-                # Throw away failed attempt at getting an adjacent set
-                for _, old_chunk in chunks:
-                    old_chunk.recycle()
-                chunks.clear()
-                continue
-            chunks.append((timestamp, chunk))
-            if len(chunks) == n:
-                return chunks
+        async with async_timeout.timeout(timeout):
+            async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
+                if chunk is None:
+                    # Throw away failed attempt at getting an adjacent set
+                    for _, old_chunk in chunks:
+                        old_chunk.recycle()
+                    chunks.clear()
+                    continue
+                chunks.append((timestamp, chunk))
+                if len(chunks) == n:
+                    return chunks
         raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
 
     def timestamp_to_unix(self, timestamp: int) -> float:
