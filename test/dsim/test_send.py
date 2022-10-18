@@ -77,6 +77,11 @@ async def test_sender(
     # The last 3 half-heapsets are from after the switch
     switch_heap = SIGNAL_HEAPS * repeats - 3 * (SIGNAL_HEAPS // 2)
     switch_task: Optional[asyncio.Future[int]] = None
+    # The copy below fails on xarray >= 2022.9.0 because it tries to deep-copy
+    # SharedArray, which doesn't support that. The attribute isn't needed for
+    # this test, so just delete it.
+    for heap_set in heap_sets:
+        del heap_set.data["payload"].attrs["shared_array"]
     orig_payload = [heap_set.data["payload"].copy() for heap_set in heap_sets]
 
     async def switch_heap_sets() -> int:
