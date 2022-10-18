@@ -149,7 +149,7 @@ pipeline {
           branch = env.BRANCH_NAME
           tag = (branch == "main") ? "latest" : branch
           // Supply credentials to Dockerhub so that we can reliably pull the base image
-          docker.withRegistry("https://docker.io/", "dockerhub") {
+          docker.withRegistry("", "dockerhub") {
             dockerImage = docker.build(
               "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}",
               "--pull "
