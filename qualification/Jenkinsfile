@@ -50,7 +50,7 @@ pipeline {
        * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
        * 2 etc. The correct driver needs to be specified.
        */
-      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
+      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock --network=host --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
     }
   }
 
