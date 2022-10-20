@@ -82,6 +82,20 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
     make -j && \
     make install
 
+# Build pycuda with a workaround to pin the numpy version. We then inject the
+# patched version into pip's wheel cache, at the place it would look for the
+# original pycuda wheel. The patch has been merged upstream, but not yet (Oct
+# 2022) released. Once a new release is in use in requirements.txt, this will
+# become useless as pip will look in a different place for the cached wheel,
+# but it won't break anything.
+#
+# A side benefit is that later stages that install pycuda will be quick as
+# they'll use the wheel.
+RUN pip wheel --no-deps "pycuda @ git+https://github.com/bmerry/pycuda@fcb925e3c697e326d70969aeb8851df86466db5f" && \
+    wheel_path="$HOME/.cache/pip/wheels/95/16/07/8e2ba8228e568968e7f19a2cdfa8a3c60bf47e385507a6a4e6/" && \
+    mkdir -p "$wheel_path" && \
+    mv pycuda-*.whl "$wheel_path"
+
 #######################################################################
 
 # Image used by Jenkins
