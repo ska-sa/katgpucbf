@@ -41,23 +41,14 @@ pipeline {
       /* The following argument needs to be specified in order for the container
        * to launch correctly.
        *
-       * --gpus=all: This argument passes the Nvidia driver and devices from the
-       * host to the container. It requires the NVIDIA Container Runtime to be
-       * installed on the host.
-       *
-       * -v /var/run/docker.sock:/var/run/docker.sock: makes the connection to
-       * the Docker server available inside the container (for building a Docker
-       * image).
-       *
-       * --network=host: The docker container needs access to the internet to
-       * install packages and an interface to connect to the correlator network.
-       * This command passes all the host interfaces to the container to be
-       * used as required.
+       * --network=host: The docker container requires access to the high-speed
+       * correlator network. This command passes all the host interfaces to the
+       * container to be used as required.
        *
        * --device=/dev/infiniband/rdma_cm and --device=/dev/infiniband/uverbs0:
        * These flags pass the drivers required for ibverbs to the container.
        * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
-       * 2 etc. The correct once needs to be specified.
+       * 2 etc. The correct driver needs to be specified.
        */
       args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock --network=host -u=root --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
     }
@@ -123,7 +114,7 @@ pipeline {
 
   /* This post stage is configured to always run at the end of this pipeline,
    * regardless of the completion status. In this stage an email is sent to
-   * the specified address with details of the Jenkins job and a pdf report
+   * the specified address with details of the Jenkins job and a PDF report
    * containing the qualification test results. The final step removes the workspace when
    * the build is complete.
    */

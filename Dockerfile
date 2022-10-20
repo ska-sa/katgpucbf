@@ -88,7 +88,7 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 FROM build-base as jenkins
 
 # docker so that Jenkins can build a Docker image
-# All the TeX stuff for building the documentation
+# All the TeX stuff for building the documentation and qualification report
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     docker.io \
     latexmk \
