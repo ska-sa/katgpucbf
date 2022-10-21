@@ -150,8 +150,6 @@ class LinearDelayModel(AbstractDelayModel):
         rel_time = np.arange(start - self.start, stop - self.start, step, dtype=np.dtype(np.int64))
         delay = self.delay + rel_time * self.delay_rate
         coarse_delay = np.rint(delay).astype(np.int64)
-        # Prevent coarse delay from becoming negative
-        coarse_delay = np.maximum(coarse_delay, 0)
         fine_delay = delay - coarse_delay
 
         # Calculate the phase

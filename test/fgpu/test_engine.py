@@ -357,7 +357,7 @@ class TestEngine:
         [
             (0.0, 0.0),
             (8192.0, 234.5),
-            (42.0, 58.0),
+            (-42.0, 58.0),
             (42.4, 24.2),
             pytest.param((42.7, 24.9), marks=[pytest.mark.cmdline_args("--dst-chunk-jones=65536")]),
             pytest.param((42.8, 24.5), marks=[pytest.mark.use_vkgdr]),
