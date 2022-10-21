@@ -41,15 +41,16 @@ pipeline {
       /* The following argument needs to be specified in order for the container
        * to launch correctly.
        *
-       * --network=host:
-       * The docker container requires access to the high-speed
+       * --network=host: The docker container requires access to the high-speed
        * correlator network. This command passes all the host interfaces to the
        * container to be used as required.
        *
-       * -e NVIDIA_MOFED=enabled:
-       * This argument passes the drivers required for ibverbs to the container.
+       * --device=/dev/infiniband/rdma_cm and --device=/dev/infiniband/uverbs0:
+       * These flags pass the drivers required for ibverbs to the container.
+       * NOTE: The driver is not always ubverbs0, sometimes it is ubverbs1 or
+       * 2 etc. The correct driver needs to be specified.
        */
-      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock --network=host --ulimit=memlock=-1 -e NVIDIA_MOFED=enabled'
+      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock --network=host --ulimit=memlock=-1 --device=/dev/infiniband/rdma_cm  --device=/dev/infiniband/uverbs0'
     }
   }
 
