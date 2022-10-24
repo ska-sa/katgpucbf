@@ -69,7 +69,7 @@ pipeline {
          script {
            sh 'pip install -r qualification/requirements.txt'
            sh 'pip install --no-deps ".[qualification]" && pip check'
-           sh "spead2_net_raw pytest -v -c pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest"
+           sh "spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest"
            sh "qualification/report/generate_pdf.py report.json report.pdf"
            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf'])
          }
