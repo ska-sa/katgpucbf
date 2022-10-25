@@ -21,7 +21,7 @@ generations. Other platforms may well work, but have not been tested.
   without ibverbs, but the functionality is not available (yet) in `xbgpu`.
 
 ### Software
-* Ubuntu 20.04
-* Python 3.8.
+* Ubuntu 22.04
+* Python 3.10.
 * CUDA version 11.4. (Most early development was done using 10.1, which may
   still work but has not been tested for some time.)

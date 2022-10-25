@@ -101,21 +101,12 @@ RUN pip wheel --no-deps "pycuda @ git+https://github.com/bmerry/pycuda@fcb925e3c
 # Image used by Jenkins
 FROM build-base as jenkins
 
-# The pre-commit hooks run on Python 3.8 to ensure that the code is
-# backwards-compatible. Get it from deadsnakes. apt-add-repository isn't
-# installed, and installing it pulls in a ton of other junk, so add it
-# manually.
-RUN echo "deb https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes.list && \
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776
-
 # docker so that Jenkins can build a Docker image
 # All the TeX stuff for building the documentation
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     docker.io \
     latexmk \
     pdf2svg \
-    python3.8 \
-    python3.8-venv \
     tex-gyre \
     texlive-latex-recommended \
     texlive-latex-extra
