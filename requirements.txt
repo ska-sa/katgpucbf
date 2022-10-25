@@ -4,9 +4,9 @@
 #
 #    pip-compile requirements.in
 #
-aioconsole==0.4.1
+aioconsole==0.5.1
     # via aiomonitor
-aiohttp==3.8.1
+aiohttp==3.8.3
     # via -r requirements.in
 aiokatcp==1.3.1
     # via -r requirements.in
@@ -23,15 +23,15 @@ async-timeout==4.0.2
     #   aiohttp
     #   aiokatcp
     #   redis
-attrs==21.4.0
+attrs==22.1.0
     # via aiohttp
 cffi==1.15.1
     # via vkgdr
-charset-normalizer==2.1.0
+charset-normalizer==2.1.1
     # via aiohttp
-cloudpickle==2.1.0
+cloudpickle==2.2.0
     # via dask
-dask==2022.6.1
+dask==2022.10.0
     # via -r requirements.in
 decorator==5.1.1
     # via
@@ -39,27 +39,29 @@ decorator==5.1.1
     #   katsdpsigproc
 deprecated==1.2.13
     # via redis
-frozenlist==1.3.0
+frozenlist==1.3.1
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2022.5.0
+fsspec==2022.8.2
     # via dask
 hiredis==2.0.0
     # via katsdptelstate
-idna==3.3
+idna==3.4
     # via yarl
+importlib-metadata==5.0.0
+    # via numba
 katsdpservices[aiomonitor]==1.2
     # via -r requirements.in
-katsdpsigproc[cuda]==1.4.2
+katsdpsigproc[cuda]==1.4.3
     # via -r requirements.in
 katsdptelstate==0.11
     # via -r requirements.in
-llvmlite==0.38.1
+llvmlite==0.39.1
     # via numba
 locket==1.0.0
     # via partd
-mako==1.2.2
+mako==1.2.3
     # via
     #   katsdpsigproc
     #   pycuda
@@ -75,9 +77,9 @@ netifaces==0.11.0
     # via
     #   katsdpservices
     #   katsdptelstate
-numba==0.55.2
+numba==0.56.3
     # via katsdpsigproc
-numpy==1.22.4
+numpy==1.23.4
     # via
     #   -r requirements.in
     #   katsdpsigproc
@@ -92,19 +94,19 @@ packaging==21.3
     #   dask
     #   redis
     #   xarray
-pandas==1.4.3
+pandas==1.5.0
     # via
     #   katsdpsigproc
     #   xarray
-partd==1.2.0
+partd==1.3.0
     # via dask
 platformdirs==2.5.2
     # via pytools
 prometheus-async==22.2.0
     # via -r requirements.in
-prometheus-client==0.14.1
+prometheus-client==0.15.0
     # via prometheus-async
-psutil==5.9.1
+psutil==5.9.2
     # via -r requirements.in
 pycparser==2.21
     # via cffi
@@ -122,13 +124,13 @@ python-dateutil==2.8.2
     # via pandas
 pytools==2022.1.12
     # via pycuda
-pytz==2022.1
+pytz==2022.4
     # via pandas
 pyyaml==6.0
     # via dask
 redis==4.3.4
     # via katsdptelstate
-scipy==1.8.1
+scipy==1.9.2
     # via katsdpsigproc
 six==1.16.0
     # via
@@ -138,11 +140,11 @@ spead2==3.11.1
     # via -r requirements.in
 terminaltables==3.1.10
     # via aiomonitor
-toolz==0.11.2
+toolz==0.12.0
     # via
     #   dask
     #   partd
-typing-extensions==4.2.0
+typing-extensions==4.4.0
     # via
     #   aiokatcp
     #   katsdpsigproc
@@ -154,10 +156,12 @@ wrapt==1.14.1
     # via
     #   deprecated
     #   prometheus-async
-xarray==2022.3.0
+xarray==2022.10.0
     # via -r requirements.in
-yarl==1.7.2
+yarl==1.8.1
     # via aiohttp
+zipp==3.9.0
+    # via importlib-metadata
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools

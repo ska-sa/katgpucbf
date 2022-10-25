@@ -226,7 +226,7 @@ async def test_delay_sensors(
     load_time = now + 2.0
     load_ts = receiver.unix_to_timestamp(load_time)
     for _ in range(receiver.n_inputs):
-        delay = rng.uniform(0.0, MAX_DELAY)
+        delay = rng.uniform(-MAX_DELAY, MAX_DELAY)
         delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE)
         phase = rng.uniform(-np.pi, np.pi)
         phase_rate = rng.uniform(-MAX_PHASE_RATE, MAX_PHASE_RATE)
@@ -465,7 +465,7 @@ async def test_delay(
     """
     receiver = receive_baseline_correlation_products
     # Minimum, maximum, resolution step, and a small coarse delay
-    delays = [0.0, MAX_DELAY, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
+    delays = [0.0, MAX_DELAY, -MAX_DELAY, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
     await _test_delay_phase_fixed(
         correlator,
         receive_baseline_correlation_products,
