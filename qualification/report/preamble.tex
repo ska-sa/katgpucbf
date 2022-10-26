@@ -14,6 +14,8 @@
 % http://www.bollchen.de/blog/2011/04/good-looking-line-breaks-with-the-listings-package/
 \lstset{prebreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookleftarrow}}}
 \lstset{postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookrightarrow\space}}}
+% Make degree sign in listings (e.g. from a backtrace) work.
+\lstset{inputencoding=utf8,literate={°}{{\textdegree}}1}
 
 \newcommand{\docClient}{NRF (National Research Foundation)}
 \newcommand{\docFacility}{SARAO (South African Radio Astronomy Observatory)}
