@@ -19,7 +19,7 @@
  * be able to parse this file, however the pytest-jenkins.ini file needs to be
  * configured for the hardware it is running on. The Docker Engine being used needs
  * to have been configured to use the NVIDIA Container Runtime and the node which the
- * container runs on needs the Nvidia Driver installed.
+ * container runs on needs the NVIDIA OFED driver installed.
  *
  * Additionally the Jenkins server also needs access to an NVIDIA NIC that
  * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
@@ -45,7 +45,7 @@ pipeline {
        * correlator network. This command passes all the host network interfaces to the
        * container to be used as required.
        *
-       * --ulimit=memlock=-: This argument is required when using ibverbs.
+       * --ulimit=memlock=-1: This argument is required when using ibverbs.
        *
        * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
        * to the container.
