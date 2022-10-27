@@ -23,7 +23,7 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Deque, Optional, cast
+from typing import cast
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -474,13 +474,11 @@ class Engine(aiokatcp.DeviceServer):
         n_send = 4
         n_out = n_send if use_peerdirect else 2
 
-        # The type annotations have to be in comments because Python 3.8
-        # doesn't support the syntax at runtime (Python 3.9 fixes that).
-        self._in_queue = monitor.make_queue("in_queue", n_in)  # type: asyncio.Queue[Optional[InItem]]
-        self._in_free_queue = monitor.make_queue("in_free_queue", n_in)  # type: asyncio.Queue[InItem]
-        self._out_queue = monitor.make_queue("out_queue", n_out)  # type: asyncio.Queue[Optional[OutItem]]
-        self._out_free_queue = monitor.make_queue("out_free_queue", n_out)  # type: asyncio.Queue[OutItem]
-        self._send_free_queue = monitor.make_queue("send_free_queue", n_send)  # type: asyncio.Queue[send.Chunk]
+        self._in_queue: asyncio.Queue[InItem | None] = monitor.make_queue("in_queue", n_in)
+        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
+        self._out_queue: asyncio.Queue[OutItem | None] = monitor.make_queue("out_queue", n_out)
+        self._out_free_queue: asyncio.Queue[OutItem] = monitor.make_queue("out_free_queue", n_out)
+        self._send_free_queue: asyncio.Queue[send.Chunk] = monitor.make_queue("send_free_queue", n_send)
 
         self._init_compute(
             context=context,
@@ -491,7 +489,7 @@ class Engine(aiokatcp.DeviceServer):
             max_delay_diff=max_delay_diff,
         )
 
-        self._in_items: Deque[InItem] = deque()
+        self._in_items: deque[InItem] = deque()
         self._init_recv(src_affinity, monitor)
 
         send_chunks = self._init_send(len(dst), use_peerdirect)
