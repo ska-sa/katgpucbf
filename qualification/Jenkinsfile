@@ -1,0 +1,107 @@
+/*******************************************************************************
+ * Copyright (c) 2021-2022, National Research Foundation (SARAO)
+ *
+ * Licensed under the BSD 3-Clause License (the "License"); you may not use
+ * this file except in compliance with the License. You may obtain a copy
+ * of the License at
+ *
+ *   https://opensource.org/licenses/BSD-3-Clause
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
+/* This file tells Jenkins how to execute the qualification tests for this repo.
+ * Everything runs in docker containers, so in theory any Jenkins server should
+ * be able to parse this file, however the pytest-jenkins.ini file needs to be
+ * configured for the hardware it is running on. The Docker Engine being used needs
+ * to have been configured to use the NVIDIA Container Runtime and the node which the
+ * container runs on needs the NVIDIA OFED driver installed.
+ *
+ * Additionally the Jenkins server also needs access to an NVIDIA NIC that
+ * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
+ * container using specific flags.
+ *
+ * For more information on the qualification framework, see katgpucbf/doc/qualification.rst
+ */
+
+pipeline {
+  agent {
+    dockerfile {
+      registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
+
+      /* Use the Jenkins-specific stage of the Dockerfile as the image for
+       * testing. This provides the appropriate dependencies.
+       */
+      additionalBuildArgs '--target=jenkins'
+
+      /* The following argument needs to be specified in order for the container
+       * to launch correctly.
+       *
+       * --network=host: The Docker container requires access to the high-speed
+       * correlator network. This command passes all the host network interfaces to the
+       * container to be used as required.
+       *
+       * --ulimit=memlock=-1: This argument is required when using ibverbs.
+       *
+       * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
+       * to the container.
+       *
+       * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
+       * devices into the container.
+       *
+       */
+      args '--network=host --ulimit=memlock=-1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
+    }
+  }
+
+  options {
+    timeout(time: 1, unit: 'HOURS')
+  }
+
+  stages {
+
+    /* This stage executes the qualification tests on the latest docker image
+     * of katgpucbf that has been previously unit-tested, and generates a report of the
+     * qualification test results.
+     */
+    stage('Run qualification tests') {
+       steps {
+         script {
+           sh 'pip install -r qualification/requirements.txt'
+           sh 'pip install --no-deps ".[qualification]" && pip check'
+           sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
+           sh 'qualification/report/generate_pdf.py report.json report.pdf'
+           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf'])
+         }
+       }
+    }
+  }
+
+  /* This post stage is configured to always run at the end of this pipeline,
+   * regardless of the completion status. In this stage an email is sent to
+   * the specified address with details of the Jenkins job and a PDF report
+   * containing the qualification test results. The final step removes the workspace when
+   * the build is complete.
+   */
+  post {
+    always {
+      emailext attachLog: true,
+      attachmentsPattern: 'report.pdf',
+      body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
+      <b>Node:</b> ${env.NODE_NAME}<br>
+      <b>Duration:</b> ${currentBuild.durationString}<br>
+      <b>Build URL:</b> ${env.BUILD_URL}<br>
+      <br>
+      <i>Note: This is an Automated email notification.</i>""",
+      recipientProviders: [developers(), requestor()],
+      subject: 'Qualification Tests - katgpucbf - $BUILD_STATUS!',
+      to: '$DEFAULT_RECIPIENTS'
+
+      cleanWs()
+    }
+  }
+}
