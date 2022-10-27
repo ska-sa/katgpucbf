@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,8 +18,8 @@
 
 set -e # So we can stop on a failure instead of bumbling along.
 
-echo "Creating a virtual env for katcbfgpu development"
-python3.8 -m venv .venv --prompt katgpucbf
+echo "Creating a virtual env for katgpucbf development"
+python3.10 -m venv .venv --prompt katgpucbf
 echo "Activating the virtual env"
 source .venv/bin/activate
 

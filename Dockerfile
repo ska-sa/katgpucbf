@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as base
+FROM nvidia/cuda:11.7.1-devel-ubuntu22.04 as base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
@@ -65,7 +65,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==21.3.1 setuptools==58.3.0 wheel==0.36.2
+RUN pip install pip==22.3 setuptools==65.5.0 wheel==0.37.1
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that when we want to update we only have to do it in one place.
@@ -81,6 +81,20 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
     ../configure && \
     make -j && \
     make install
+
+# Build pycuda with a workaround to pin the numpy version. We then inject the
+# patched version into pip's wheel cache, at the place it would look for the
+# original pycuda wheel. The patch has been merged upstream, but not yet (Oct
+# 2022) released. Once a new release is in use in requirements.txt, this will
+# become useless as pip will look in a different place for the cached wheel,
+# but it won't break anything.
+#
+# A side benefit is that later stages that install pycuda will be quick as
+# they'll use the wheel.
+RUN pip wheel --no-deps "pycuda @ git+https://github.com/bmerry/pycuda@fcb925e3c697e326d70969aeb8851df86466db5f" && \
+    wheel_path="$HOME/.cache/pip/wheels/95/16/07/8e2ba8228e568968e7f19a2cdfa8a3c60bf47e385507a6a4e6/" && \
+    mkdir -p "$wheel_path" && \
+    mv pycuda-*.whl "$wheel_path"
 
 #######################################################################
 
@@ -154,8 +168,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     python-is-python3 \
     curl \
     numactl \
-    libboost-program-options1.71.0 \
-    libboost-system1.71.0 \
+    libboost-program-options1.74.0 \
+    libboost-system1.74.0 \
     libibverbs1 \
     librdmacm1 \
     ibverbs-providers \
