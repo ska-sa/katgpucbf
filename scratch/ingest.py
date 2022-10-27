@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
+
+################################################################################
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 import argparse
 import ast
 import asyncio
 import logging
-from typing import Union
 
 import aiokatcp
 import matplotlib
@@ -23,7 +39,7 @@ from spead2.recv.numba import chunk_place_data
 CPLX = 2
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
+async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> int | float | str:
     """Get the value of a katcp sensor.
 
     If the sensor value can't be cast as an int or a float (in that order), the

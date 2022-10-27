@@ -2,7 +2,6 @@
 
 import argparse
 import json
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,7 +35,7 @@ parser.add_argument("filename")
 args = parser.parse_args()
 
 events = []
-with open(args.filename, "r") as f:
+with open(args.filename) as f:
     for line in f:
         if not line.endswith("\n"):
             break
@@ -44,7 +43,7 @@ with open(args.filename, "r") as f:
 
 events.sort(key=lambda event: event["time"])
 queues = {}
-queue: Optional[Queue]
+queue: Queue | None
 state_machines = {}
 for data in events:
     if data["type"] == "qsize":

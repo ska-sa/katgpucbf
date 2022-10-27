@@ -23,8 +23,8 @@ import operator
 import os
 import signal
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Union
 
 import dask.array as da
 import numba
@@ -265,7 +265,7 @@ class Random(Signal):
 
     entropy: int  #: entropy used to populate a :class:`np.random.SeedSequence`
 
-    def __init__(self, entropy: Optional[int] = None) -> None:
+    def __init__(self, entropy: int | None = None) -> None:
         self.entropy = entropy if entropy is not None else self._generate_entropy()
 
     def _generate_entropy(self) -> int:
@@ -314,7 +314,7 @@ class WGN(Random):
 
     std: float = 1.0  #: standard deviation
 
-    def __init__(self, std: float, entropy: Optional[int] = None) -> None:
+    def __init__(self, std: float, entropy: int | None = None) -> None:
         # __init__ is overridden to change the argument order
         super().__init__(entropy)
         self.std = std
@@ -393,7 +393,7 @@ def _apply_operator(s: str, loc: int, tokens: pp.ParseResults) -> Signal:
     return result
 
 
-def parse_signals(prog: str) -> List[Signal]:
+def parse_signals(prog: str) -> list[Signal]:
     """Generate a set of signals from a domain-specific language.
 
     See :ref:`dsim-dsl` for a description of the language.
@@ -469,7 +469,7 @@ def _dither_sample_chunk(seed_seq: Sequence[np.random.SeedSequence], *, chunk_si
     return rng.random(size=chunk_size, dtype=np.float32) - np.float32(0.5)
 
 
-def make_dither(n_pols: int, n: int, entropy: Optional[int] = None) -> xr.DataArray:
+def make_dither(n_pols: int, n: int, entropy: int | None = None) -> xr.DataArray:
     """Create a set of dither signals to use with :func:`quantise`.
 
     The returned array has ``pol`` and ``data`` axes, and is backed by a Dask
@@ -607,15 +607,15 @@ def packbits(data: da.Array, bits: int) -> da.Array:
 def sample(
     signals: Sequence[Signal],
     timestamp: int,
-    period: Optional[int],
+    period: int | None,
     sample_rate: float,
     sample_bits: int,
     out: xr.DataArray,
-    out_saturated: Optional[xr.DataArray] = None,
+    out_saturated: xr.DataArray | None = None,
     saturation_group: int = 1,
     *,
-    dither: Union[bool, xr.DataArray] = True,
-    dither_seed: Optional[int] = None,
+    dither: bool | xr.DataArray = True,
+    dither_seed: int | None = None,
 ) -> None:
     """Sample, quantise and pack a set of signals.
 
@@ -722,17 +722,17 @@ class SignalService:
 
         signals: Sequence[Signal]
         timestamp: int
-        period: Optional[int]
+        period: int | None
         sample_rate: float
         out_idx: int  #: Index of the out array in the list of valid arrays
-        out_saturated_idx: Optional[int]  #: Index of the out saturated array in the list of valid arrays
+        out_saturated_idx: int | None  #: Index of the out saturated array in the list of valid arrays
         saturation_group: int
 
     @staticmethod
     def _run(
-        array_schemas: List[dict],
+        array_schemas: list[dict],
         sample_bits: int,
-        dither_seed: Optional[int],
+        dither_seed: int | None,
         pipe: multiprocessing.connection.Connection,
     ) -> None:
         """Run the main service loop for the separate process.
@@ -785,7 +785,7 @@ class SignalService:
         for array in arrays:
             array.attrs["shared_array"].close()
 
-    def __init__(self, arrays: Sequence[xr.DataArray], sample_bits: int, dither_seed: Optional[int] = None) -> None:
+    def __init__(self, arrays: Sequence[xr.DataArray], sample_bits: int, dither_seed: int | None = None) -> None:
         self.arrays = arrays
         # These contain the `shared_array` attribute, which carries the
         # reference to the shared memory into the child process.
@@ -832,10 +832,10 @@ class SignalService:
         self,
         signals: Sequence[Signal],
         timestamp: int,
-        period: Optional[int],
+        period: int | None,
         sample_rate: float,
         out: xr.DataArray,
-        out_saturated: Optional[xr.DataArray] = None,
+        out_saturated: xr.DataArray | None = None,
         saturation_group: int = 1,
     ) -> None:
         """Perform signal sampling in the remote process.

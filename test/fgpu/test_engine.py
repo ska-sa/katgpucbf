@@ -17,9 +17,9 @@
 """Unit tests for Engine functions."""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import aiokatcp
 import numpy as np
@@ -157,7 +157,7 @@ class TestEngine:
         ]
         # TODO: same problem for `dst` itself.
 
-    def _make_digitiser(self, queues: List[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
+    def _make_digitiser(self, queues: list[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
         """Create send stream for a fake digitiser.
 
         The resulting stream has one sub-stream per polarisation.
@@ -211,18 +211,18 @@ class TestEngine:
 
     async def _send_data(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine: Engine,
         dig_data: np.ndarray,
         *,
         first_timestamp: int = 0,
-        expected_first_timestamp: Optional[int] = None,
-        src_present: Optional[np.ndarray] = None,
-        dst_present: Union[int, np.ndarray, None] = None,
+        expected_first_timestamp: int | None = None,
+        src_present: np.ndarray | None = None,
+        dst_present: int | np.ndarray | None = None,
         channels: int = CHANNELS,
         spectra_per_heap: int = SPECTRA_PER_HEAP,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve results.
 
         `dig_data` must contain integer values rather than packed 10-bit samples.
@@ -365,11 +365,11 @@ class TestEngine:
     )
     async def test_channel_centre_tones(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
-        delay_samples: Tuple[float, float],
+        delay_samples: tuple[float, float],
     ) -> None:
         """Put in tones at channel centre frequencies, with delays and gains, and check the result."""
         # Delay the tone by a negative amount, then compensate with a positive delay.
@@ -445,8 +445,8 @@ class TestEngine:
 
     async def test_spectral_leakage(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
     ) -> None:
@@ -499,8 +499,8 @@ class TestEngine:
 
     async def test_delay_phase_rate(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
     ) -> None:
@@ -550,16 +550,16 @@ class TestEngine:
             wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
 
-    def _watch_sensors(self, sensors: Sequence[aiokatcp.Sensor]) -> Dict[str, List]:
+    def _watch_sensors(self, sensors: Sequence[aiokatcp.Sensor]) -> dict[str, list]:
         """Set up observers on sensors that record updates.
 
         The updates are returned in a dictionary whose key is the sensor name and
         whose value is a list of sensor values.
         """
-        sensor_updates_dict: Dict[str, List[aiokatcp.Reading]] = {sensor.name: [] for sensor in sensors}
+        sensor_updates_dict: dict[str, list[aiokatcp.Reading]] = {sensor.name: [] for sensor in sensors}
 
         def sensor_observer(
-            sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: List[aiokatcp.Reading]
+            sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading, *, updates_list: list[aiokatcp.Reading]
         ) -> None:
             """Populate a list to compare at the end of this unit-test."""
             updates_list.append(sensor_reading)
@@ -570,8 +570,8 @@ class TestEngine:
 
     async def test_delay_changes(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
     ) -> None:
@@ -637,8 +637,8 @@ class TestEngine:
     @pytest.mark.cmdline_args("--spectra-per-heap=32")
     async def test_missing_heaps(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         channels: int,
@@ -713,8 +713,8 @@ class TestEngine:
 
     async def test_saturation_sensors(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
     ) -> None:
@@ -739,7 +739,7 @@ class TestEngine:
         assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0, 10000]
         assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == [524288, 1048576, 1572864]
 
-    def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> List[int]:
+    def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
         """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
@@ -749,7 +749,7 @@ class TestEngine:
         counter = 0
         timestamp = []
 
-        async def next_in(self) -> Optional[InItem]:
+        async def next_in(self) -> InItem | None:
             nonlocal counter
             counter += 1
             if counter == 6:
@@ -764,8 +764,8 @@ class TestEngine:
 
     async def test_steady_state_gain(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         monkeypatch,
@@ -797,8 +797,8 @@ class TestEngine:
 
     async def test_steady_state_delay(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
-        mock_send_stream: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         monkeypatch,

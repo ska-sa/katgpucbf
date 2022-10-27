@@ -17,7 +17,8 @@
 """Unit tests for :mod:`.shared_array`."""
 
 import multiprocessing
-from typing import Generator, Union
+from collections.abc import Generator
+from typing import Union
 
 import numpy as np
 import pytest

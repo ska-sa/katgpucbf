@@ -20,8 +20,9 @@ import ctypes
 import time
 import weakref
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
+from typing import Any
 
 import numba.core.ccallback
 import numpy as np
@@ -53,7 +54,7 @@ class Chunk(spead2.recv.Chunk):
     # Refine the types used in the base class
     present: np.ndarray
     data: np.ndarray
-    extra: Optional[np.ndarray]
+    extra: np.ndarray | None
     # New fields
     device: object
     timestamp: int
@@ -88,18 +89,18 @@ class StatsCollector(Collector):
         """Information about a single registered stream."""
 
         stream: "weakref.ReferenceType[spead2.recv.ChunkRingStream]"
-        indices: List[int]  # Indices of counters, in the order given by counter_map
-        prev: List[int]  # Amounts already counted
+        indices: list[int]  # Indices of counters, in the order given by counter_map
+        prev: list[int]  # Amounts already counted
 
     class _LabelSet:
         """Information shared by all streams with the same set of labels."""
 
-        labels: Tuple[str, ...]
-        totals: Dict[str, int]  # sum over all streams, indexed by stat name
+        labels: tuple[str, ...]
+        totals: dict[str, int]  # sum over all streams, indexed by stat name
         created: float  # time of creation
-        streams: List["StatsCollector._StreamInfo"]
+        streams: list["StatsCollector._StreamInfo"]
 
-        def __init__(self, labels: Tuple[str, ...], stat_names: Iterable[str]) -> None:
+        def __init__(self, labels: tuple[str, ...], stat_names: Iterable[str]) -> None:
             self.labels = labels
             self.totals = {stat_name: 0 for stat_name in stat_names}
             self.created = time.time()
@@ -145,7 +146,7 @@ class StatsCollector(Collector):
 
     def __init__(
         self,
-        counter_map: Mapping[str, Tuple[str, str]],
+        counter_map: Mapping[str, tuple[str, str]],
         labelnames: Iterable[str] = (),
         namespace: str = "",
         registry: CollectorRegistry = REGISTRY,
@@ -155,7 +156,7 @@ class StatsCollector(Collector):
             for stat_name, (name, description) in counter_map.items()
         }
         self._labelnames = tuple(labelnames)
-        self._label_sets: Dict[Tuple[str, ...], "StatsCollector._LabelSet"] = {}
+        self._label_sets: dict[tuple[str, ...], "StatsCollector._LabelSet"] = {}
         if registry:
             registry.register(self)
 
@@ -244,12 +245,12 @@ class BaseLayout(ABC):
 def make_stream(
     *,
     layout: BaseLayout,
-    spead_items: List[int],
+    spead_items: list[int],
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     affinity: int,
-    stream_stats: List[str],
+    stream_stats: list[str],
     max_heap_extra: int = 0,
     **kwargs: Any,
 ) -> spead2.recv.ChunkRingStream:
@@ -300,8 +301,8 @@ def make_stream(
 def add_reader(
     stream: spead2.recv.ChunkRingStream,
     *,
-    src: Union[str, List[Tuple[str, int]]],
-    interface: Optional[str],
+    src: str | list[tuple[str, int]],
+    interface: str | None,
     ibv: bool,
     comp_vector: int,
     buffer: int,

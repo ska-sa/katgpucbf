@@ -16,7 +16,7 @@
 
 """Digital down-conversion."""
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import numpy as np
 import pkg_resources
@@ -26,7 +26,12 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 from .. import BYTE_BITS
 from . import SAMPLE_BITS
 
-_TuningDict = TypedDict("_TuningDict", {"wgs": int, "sg_size": int, "coarsen": int, "segment_samples": int})
+
+class _TuningDict(TypedDict):
+    wgs: int
+    sg_size: int
+    coarsen: int
+    segment_samples: int
 
 
 class DDCTemplate:
@@ -49,9 +54,7 @@ class DDCTemplate:
         If `taps` is not a multiple of `decimation`
     """
 
-    def __init__(
-        self, context: AbstractContext, taps: int, decimation: int, tuning: Optional[_TuningDict] = None
-    ) -> None:
+    def __init__(self, context: AbstractContext, taps: int, decimation: int, tuning: _TuningDict | None = None) -> None:
         if taps <= 0:
             raise ValueError("taps must be positive")
         if decimation <= 0:

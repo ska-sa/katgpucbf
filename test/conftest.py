@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -43,7 +43,7 @@ combination is a candidate.
 
 import itertools
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import pytest
 import spead2
@@ -64,9 +64,9 @@ def pytest_addoption(parser) -> None:
 
 @dataclass
 class _CombinationsCandidate:
-    indices: Tuple[int, ...]  # Index into the list of options for each position
+    indices: tuple[int, ...]  # Index into the list of options for each position
     values: tuple  # Actual value, organised by position
-    by_name: Dict[str, Any]  # Lookup by argument name (for filtering)
+    by_name: dict[str, Any]  # Lookup by argument name (for filtering)
 
 
 def pytest_generate_tests(metafunc) -> None:
@@ -110,7 +110,7 @@ def pytest_generate_tests(metafunc) -> None:
             cover = [[0] * len(value_list) for value_list in values]
             combos = []
             while any(0 in c for c in cover):
-                best: Optional[_CombinationsCandidate] = None
+                best: _CombinationsCandidate | None = None
                 best_score = 0
                 for candidate in candidates:
                     score = sum(c[idx] for c, idx in zip(cover, candidate.indices))
@@ -130,7 +130,7 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 @pytest.fixture
-def mock_recv_streams(mocker, n_src_streams: int) -> List[spead2.InprocQueue]:
+def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
     """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
 
     Returns
@@ -145,8 +145,8 @@ def mock_recv_streams(mocker, n_src_streams: int) -> List[spead2.InprocQueue]:
     def add_reader(
         stream: spead2.recv.ChunkRingStream,
         *,
-        src: Union[str, List[Tuple[str, int]]],
-        interface: Optional[str],
+        src: str | list[tuple[str, int]],
+        interface: str | None,
         ibv: bool,
         comp_vector: int,
         buffer: int,

@@ -19,7 +19,7 @@
 Allocations of memory for input, intermediate and output are also handled here.
 """
 
-from typing import List, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 from katsdpsigproc import accel, fft
@@ -138,7 +138,7 @@ class Compute(accel.OperationSequence):
         # combines the two pols.
         self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap)
 
-        operations: List[Tuple[str, accel.Operation]] = []
+        operations: list[tuple[str, accel.Operation]] = []
         for pol in range(N_POLS):
             operations.append((f"pfb_fir{pol}", self.pfb_fir[pol]))
         for pol in range(N_POLS):

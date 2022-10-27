@@ -26,7 +26,7 @@ import math
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Callable, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
 
 import numpy as np
 
@@ -60,7 +60,7 @@ class AbstractDelayModel(ABC):
     """
 
     @abstractmethod
-    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def range(self, start: int, stop: int, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find input timestamps corresponding to a range of output samples.
 
         For each output sample with timestamp in ``range(start, stop, step)``,
@@ -85,7 +85,7 @@ class AbstractDelayModel(ABC):
             Fringe-stopping phase to be added.
         """
 
-    def __call__(self, time: int) -> Tuple[int, float, float]:
+    def __call__(self, time: int) -> tuple[int, float, float]:
         """Find input sample timestamp corresponding to a given output sample.
 
         Parameters
@@ -144,7 +144,7 @@ class LinearDelayModel(AbstractDelayModel):
         self.phase = wrap_angle(float(phase))
         self.phase_rate = float(phase_rate)
 
-    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+    def range(self, start: int, stop: int, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         # Variables with names prefixed rel_ treat start of delay model as t_0.
         # This makes it easier to apply the rate and reduces rounding errors.
         rel_time = np.arange(start - self.start, stop - self.start, step, dtype=np.dtype(np.int64))
@@ -192,7 +192,7 @@ class MultiDelayModel(AbstractDelayModel):
     immediately by the constructor.
     """
 
-    def __init__(self, callback_func: Optional[Callable[[Sequence[LinearDelayModel]], None]] = None) -> None:
+    def __init__(self, callback_func: Callable[[Sequence[LinearDelayModel]], None] | None = None) -> None:
         # The initial time is -1 rather than 0 so that it doesn't get removed
         # if a model is added with start time 0, which can lead to some
         # spurious warnings in unit tests about non-monotonic queries.
@@ -220,7 +220,7 @@ class MultiDelayModel(AbstractDelayModel):
         while len(self._models) > 1 and start >= self._models[1].start:
             self._popleft()
 
-    def range(self, start: int, stop: int, step: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+    def range(self, start: int, stop: int, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
         self._popleft_until(start)
         assert step > 0
         n = len(range(start, stop, step))

@@ -17,7 +17,6 @@
 """Collection of tests for the KATCP interface of katgpucbf.fgpu."""
 
 import re
-from typing import Tuple
 
 import aiokatcp
 import numpy as np
@@ -172,10 +171,10 @@ class TestKatcpRequests:
         The validation is done by comparing it against the corresponding delay sensor readings.
         """
 
-        def parse_delay_string(delay_str: str) -> Tuple[float, float, float, float]:
+        def parse_delay_string(delay_str: str) -> tuple[float, float, float, float]:
             delay_str, phase_str = delay_str.split(":")
-            delay, delay_rate = [float(value) for value in delay_str.split(",")]
-            phase, phase_rate = [float(value) for value in phase_str.split(",")]
+            delay, delay_rate = (float(value) for value in delay_str.split(","))
+            phase, phase_rate = (float(value) for value in phase_str.split(","))
             return delay, delay_rate, wrap_angle(phase), phase_rate
 
         start_time = SYNC_EPOCH

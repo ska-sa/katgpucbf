@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -26,7 +26,6 @@
 """
 
 import importlib.resources
-from typing import List
 
 import numpy as np
 from katsdpsigproc import accel, cuda
@@ -115,9 +114,7 @@ class CorrelationTemplate:
                 * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
             )
         else:
-            raise ValueError(
-                "ants_per_block must equal either 64 or 48, currently equal to {0}.".format(self._n_ants_per_block)
-            )
+            raise ValueError(f"ants_per_block must equal either 64 or 48, currently equal to {self._n_ants_per_block}.")
 
         with importlib.resources.path("katgpucbf.xbgpu", "kernels") as kernels:
             source = (kernels / "tensor_core_correlation_kernel.cu").read_text()
@@ -265,7 +262,7 @@ class Correlation(accel.Operation):
         return ant2 * (ant2 + 1) // 2 + ant1
 
     @staticmethod
-    def get_baselines_for_missing_ants(present_ants: np.ndarray, n_ants: int) -> List[int]:
+    def get_baselines_for_missing_ants(present_ants: np.ndarray, n_ants: int) -> list[int]:
         """Get all baselines for ants indicated as missing in `present_ants`.
 
         Parameters

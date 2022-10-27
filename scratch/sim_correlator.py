@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 
+################################################################################
+# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Start a simulated correlator via the SDP master controller.
 
 This script constructs a JSON dictionary to describe a correlator simulation,
@@ -13,14 +29,14 @@ import contextlib
 import ipaddress
 import json
 import sys
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import aiokatcp
 
 from katgpucbf.meerkat import BANDS
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments (which may be specified as a parameter)."""
     parser = argparse.ArgumentParser()
     parser.add_argument("controller", help="Hostname of the SDP master controller")
@@ -162,7 +178,7 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
     return 0
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     config = generate_config(args)
     if args.write:

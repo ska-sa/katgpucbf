@@ -23,7 +23,8 @@ import logging
 import subprocess
 import time
 from collections import namedtuple
-from typing import AsyncGenerator, Dict, Generator, List, Tuple, Type, TypeVar
+from collections.abc import AsyncGenerator, Generator
+from typing import TypeVar
 
 import aiokatcp
 import matplotlib.style
@@ -160,7 +161,7 @@ def pdf_report(request, monkeypatch) -> Reporter:
     blurb = inspect.getdoc(request.node.function)
     if blurb is None:
         raise AssertionError(f"Test {request.node.name} has no docstring")
-    reqs: List[str] = []
+    reqs: list[str] = []
     for marker in request.node.iter_markers("requirements"):
         if isinstance(marker.args[0], (tuple, list)):
             reqs.extend(marker.args[0])
@@ -219,7 +220,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 @pytest.fixture(scope="package")
 async def _correlator_config_and_description(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
-) -> Tuple[dict, dict]:
+) -> tuple[dict, dict]:
     # Adapted from `sim_correlator.py` but with logic for using multiple dsims
     # removed. For the time being, we're going to use a single dsim for
     # consistency with MeerKAT's qualification testing.
@@ -271,7 +272,7 @@ async def _correlator_config_and_description(
     # correlator mode string, the second three are used for a more complete
     # correlator description in the final report.
     # TODO: Update the key to be the actual parameter/fixture name
-    correlator_mode_config: Dict[str, str] = {
+    correlator_mode_config: dict[str, str] = {
         "antennas": str(n_antennas),
         "channels": str(n_channels),
         "bandwidth": f"{int(adc_sample_rate//1e6//2)}",
@@ -289,13 +290,13 @@ async def _correlator_config_and_description(
 
 
 @pytest.fixture(scope="package")
-async def correlator_config(_correlator_config_and_description: Tuple[dict, str, str]) -> dict:
+async def correlator_config(_correlator_config_and_description: tuple[dict, str, str]) -> dict:
     """Produce the configuration dict from the given parameters."""
     return _correlator_config_and_description[0]
 
 
 @pytest.fixture(scope="package")
-async def correlator_mode_config(_correlator_config_and_description: Tuple[dict, str, str]) -> str:
+async def correlator_mode_config(_correlator_config_and_description: tuple[dict, str, str]) -> str:
     """Produce a dictionary describing the correlator config."""
     return _correlator_config_and_description[1]
 
@@ -321,10 +322,10 @@ async def _report_correlator_config(
     correlator: CorrelatorRemoteControl,
     master_controller_client: aiokatcp.Client,
 ) -> None:
-    async def get_task_details(suffix: str, type: Type[_T]) -> Dict[str, _T]:
+    async def get_task_details(suffix: str, type: type[_T]) -> dict[str, _T]:
         """Get value of a task-specific sensor for all tasks."""
         _, informs = await correlator.product_controller_client.request("sensor-value", rf"/.*\.{suffix}$/")
-        result: Dict[str, _T] = {}
+        result: dict[str, _T] = {}
         for inform in informs:
             if inform.arguments[3] == b"nominal":
                 task = aiokatcp.decode(str, inform.arguments[2]).rsplit(".", 1)[0]  # Strip off suffix

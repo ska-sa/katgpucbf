@@ -19,9 +19,10 @@
 import functools
 import logging
 from collections import deque
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator, Deque, List, Sequence, cast
+from typing import Deque, cast
 
 import numba
 import numpy as np
@@ -166,7 +167,7 @@ def make_streams(
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffers: Sequence[spead2.recv.ChunkRingbuffer],
     src_affinity: Sequence[int],
-) -> List[spead2.recv.ChunkRingStream]:
+) -> list[spead2.recv.ChunkRingStream]:
     """Create SPEAD receiver streams.
 
     Small helper function with F-engine-specific logic in it. Returns a stream
@@ -210,9 +211,9 @@ def make_streams(
 
 
 async def chunk_sets(
-    streams: List[spead2.recv.ChunkRingStream],
+    streams: list[spead2.recv.ChunkRingStream],
     layout: Layout,
-) -> AsyncGenerator[List[Chunk], None]:
+) -> AsyncGenerator[list[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
     This code receives chunks of data from the C++-domain Ringbuffer, matches
@@ -234,7 +235,7 @@ async def chunk_sets(
     n_pol = len(streams)
     # Working buffer to match up pairs of chunks from both pols. There is
     # a deque for each pol, ordered by time
-    buf: List[Deque[Chunk]] = [deque() for _ in streams]
+    buf: list[Deque[Chunk]] = [deque() for _ in streams]
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
 

@@ -18,7 +18,8 @@
 
 import asyncio
 import math
-from typing import Callable, Final, List, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from typing import Final
 
 import katsdpsigproc
 import katsdpsigproc.accel as accel
@@ -221,13 +222,13 @@ class XSend:
         self.heap_payload_size_bytes: Final[int] = (
             self.n_channels_per_stream * self.n_baselines * COMPLEX * self._sample_bits // 8
         )
-        self.heap_shape: Final[Tuple] = (self.n_channels_per_stream, self.n_baselines, COMPLEX)
+        self.heap_shape: Final[tuple] = (self.n_channels_per_stream, self.n_baselines, COMPLEX)
         self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
 
         self.context: Final[katsdpsigproc.abc.AbstractContext] = context
 
-        self._heaps_queue: asyncio.Queue[Tuple[asyncio.Future, BufferWrapper]] = asyncio.Queue()
-        self.buffers: List[accel.HostArray] = []
+        self._heaps_queue: asyncio.Queue[tuple[asyncio.Future, BufferWrapper]] = asyncio.Queue()
+        self.buffers: list[accel.HostArray] = []
 
         for _ in range(self._n_send_heaps_in_flight):
             # TODO: I'm not too happy about this hardcoded int32 here, but I don't

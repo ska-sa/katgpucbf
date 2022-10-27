@@ -16,7 +16,8 @@
 
 """Unit tests for XBEngine module."""
 
-from typing import AbstractSet, Final, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import AbstractSet, Final
 
 import aiokatcp
 import numpy as np
@@ -159,7 +160,7 @@ class TestEngine:
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
         missing_antennas: AbstractSet[int] = frozenset(),
-    ) -> List[spead2.send.HeapReference]:
+    ) -> list[spead2.send.HeapReference]:
         """Generate a deterministic input for sending to the XBEngine.
 
         One heap is generated per antenna in the array. All heaps will have the
@@ -218,7 +219,7 @@ class TestEngine:
         modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
 
         # 2. Generate all the heaps for the different antennas.
-        heaps: List[spead2.send.HeapReference] = []
+        heaps: list[spead2.send.HeapReference] = []
         for ant_index in range(n_ants):
             sample_array = np.zeros(modified_heap_shape, np.uint32)
 
@@ -272,7 +273,7 @@ class TestEngine:
         return heaps
 
     def _make_feng(
-        self, queues: List[spead2.InprocQueue], max_packet_size: int, max_heaps: int
+        self, queues: list[spead2.InprocQueue], max_packet_size: int, max_heaps: int
     ) -> "spead2.send.asyncio.AsyncStream":
         """Create send stream for a fake F-Engine."""
         feng_stream_config = spead2.send.StreamConfig(
@@ -283,7 +284,7 @@ class TestEngine:
 
     async def _send_data(
         self,
-        mock_recv_streams: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
         recv_stream: spead2.recv.asyncio.Stream,
         *,
         heap_accumulation_threshold: int,
@@ -395,12 +396,12 @@ class TestEngine:
     async def test_xengine_end_to_end(
         self,
         context: AbstractContext,
-        mock_recv_streams: List[spead2.InprocQueue],
+        mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: spead2.InprocQueue,
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
-        missing_antenna: Optional[int],
+        missing_antenna: int | None,
     ):
         """
         End-to-end test for the XBEngine.
@@ -460,7 +461,7 @@ class TestEngine:
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
-        actual_sensor_updates: List[Tuple[bool, aiokatcp.Sensor.Status]] = []
+        actual_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
 
         def sensor_observer(sync_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading):
             """Record sensor updates in a list for later comparison."""
@@ -529,7 +530,7 @@ class TestEngine:
             n_total_accumulations
         )
 
-        expected_sensor_updates: List[Tuple[bool, aiokatcp.Sensor.Status]] = []
+        expected_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
         # As per the explanation in :func:`~send_data`, the first accumulation
         # is expected to be incomplete.
         expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))

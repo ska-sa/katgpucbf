@@ -3,7 +3,7 @@ import asyncio
 import copy
 import functools
 from collections import deque
-from typing import Deque, List, Optional
+from typing import Deque
 
 import bokeh.server.contexts
 import numpy as np
@@ -16,7 +16,7 @@ FREQUENCY_ID = 0x4103
 FENG_RAW_ID = 0x4300
 
 
-def parse_args(args: List[str]) -> argparse.Namespace:
+def parse_args(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--channels", "-c", type=int, required=True)
     parser.add_argument("--substreams", "-s", type=int)
@@ -47,7 +47,7 @@ class Backend:
         address: str,
         interface: str,
         channels: int,
-        substreams: Optional[int],
+        substreams: int | None,
         acc_len: int,
         keep_ratio: int,
         server_context: bokeh.server.contexts.BokehServerContext,
@@ -74,7 +74,7 @@ class Backend:
         self.last_full_timestamp = -1
         self.server_context = server_context
 
-    def _get_frame(self, timestamp: int) -> Optional[Frame]:
+    def _get_frame(self, timestamp: int) -> Frame | None:
         if timestamp % self.keep_step != 0:
             return None
         if not self.frames or timestamp > self.frames[-1].timestamp:

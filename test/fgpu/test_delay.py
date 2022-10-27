@@ -16,8 +16,8 @@
 
 """Unit tests for DelayModel functions."""
 import copy
+from collections.abc import Sequence
 from functools import partial
-from typing import List, Sequence
 
 import numpy as np
 import pytest
@@ -34,7 +34,7 @@ def test_wrap_angle(input: float, output: float) -> None:
     assert wrap_angle(-input) == pytest.approx(-output)
 
 
-def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel], *, update_list: List) -> None:
+def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel], *, update_list: list) -> None:
     """Test functionality in MultiDelayModel."""
     update_list.append(
         (
@@ -48,7 +48,7 @@ def mdelay_model_callback(linear_delay_models: Sequence[LinearDelayModel], *, up
 
 
 @pytest.fixture
-def mdelay_callback_list() -> List:
+def mdelay_callback_list() -> list:
     """Create an empty list to populate with delay model values via callback."""
     return []
 

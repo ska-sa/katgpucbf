@@ -18,7 +18,6 @@
 import io
 import logging
 import time
-from typing import Optional
 
 import matplotlib.figure
 import matplotlib.ticker
@@ -40,7 +39,7 @@ class POTLocator(matplotlib.ticker.Locator):
     def __init__(self, nbins: int = 10) -> None:
         self.set_params(nbins=nbins)
 
-    def set_params(self, nbins: Optional[int]) -> None:  # noqa: D102
+    def set_params(self, nbins: int | None) -> None:  # noqa: D102
         if nbins is not None:
             self._nbins = nbins
 
@@ -67,7 +66,7 @@ class Reporter:
 
     def __init__(self, data: list) -> None:
         self._data = data
-        self._cur_step: Optional[list] = None
+        self._cur_step: list | None = None
 
     def config(self, **kwargs) -> None:
         """Report the test configuration."""

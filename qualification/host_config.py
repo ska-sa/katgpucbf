@@ -16,8 +16,6 @@
 
 """Collect and report configuration of hosts."""
 
-from typing import Optional, Set
-
 from prometheus_api_client.prometheus_connect import PrometheusConnect
 
 QUERIES = [
@@ -40,9 +38,9 @@ class HostConfigQuerier:
 
     def __init__(self, prometheus_url: str) -> None:
         self._prom = PrometheusConnect(prometheus_url)
-        self._seen: Set[str] = set()
+        self._seen: set[str] = set()
 
-    def get_config(self, hostname: str) -> Optional[list]:
+    def get_config(self, hostname: str) -> list | None:
         """Retrieve information about a host.
 
         The return value is a list of JSON dicts, each representing a single

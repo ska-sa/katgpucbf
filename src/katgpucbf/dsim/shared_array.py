@@ -20,7 +20,6 @@ import mmap
 import multiprocessing.connection
 import multiprocessing.reduction
 import os
-from typing import Tuple
 
 import numpy as np
 from numpy.typing import DTypeLike
@@ -41,10 +40,10 @@ class SharedArray:
     """
 
     @staticmethod
-    def _byte_size(shape: Tuple[int, ...], dtype: DTypeLike) -> int:
+    def _byte_size(shape: tuple[int, ...], dtype: DTypeLike) -> int:
         return int(np.product(shape)) * np.dtype(dtype).itemsize
 
-    def __init__(self, fd: int, shape: Tuple[int, ...], dtype: DTypeLike) -> None:
+    def __init__(self, fd: int, shape: tuple[int, ...], dtype: DTypeLike) -> None:
         size = self._byte_size(shape, dtype)
         self._mapping = mmap.mmap(fd, size, flags=mmap.MAP_SHARED)
         self._fd = fd
@@ -62,7 +61,7 @@ class SharedArray:
         os.close(self._fd)
 
     @classmethod
-    def create(cls, name: str, shape: Tuple[int, ...], dtype: DTypeLike) -> "SharedArray":
+    def create(cls, name: str, shape: tuple[int, ...], dtype: DTypeLike) -> "SharedArray":
         """Create a new array from scratch.
 
         Parameters
@@ -100,7 +99,7 @@ def _reduce(a: SharedArray) -> tuple:
     return _rebuild, (multiprocessing.reduction.DupFd(a._fd), a.buffer.shape, a.buffer.dtype)
 
 
-def _rebuild(dupfd, shape: Tuple[int, ...], dtype: DTypeLike) -> SharedArray:
+def _rebuild(dupfd, shape: tuple[int, ...], dtype: DTypeLike) -> SharedArray:
     return SharedArray(dupfd.detach(), shape, dtype)
 
 

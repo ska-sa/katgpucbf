@@ -16,7 +16,7 @@
 
 """Digitiser simulator descriptor sender."""
 
-from typing import Iterable, Tuple
+from collections.abc import Iterable
 
 import spead2
 import spead2.send.asyncio
@@ -34,7 +34,7 @@ from ..spead import (
 
 
 def make_descriptor_stream(
-    endpoints: Iterable[Tuple[str, int]], config: spead2.send.StreamConfig, ttl: int, interface_address: str
+    endpoints: Iterable[tuple[str, int]], config: spead2.send.StreamConfig, ttl: int, interface_address: str
 ) -> spead2.send.asyncio.UdpStream:
     """Create a stream for sending descriptors alongside dsim data."""
     return spead2.send.asyncio.UdpStream(

@@ -32,7 +32,7 @@ everything required to run the XB-Engine.
 import argparse
 import asyncio
 import logging
-from typing import Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import katsdpsigproc.accel
 import prometheus_async
@@ -51,7 +51,7 @@ from .correlation import device_filter
 logger = logging.getLogger(__name__)
 
 
-def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse all command line parameters for the XB-Engine and ensure that they are valid."""
     parser = argparse.ArgumentParser(description="Launch an XB-Engine for a single multicast stream.")
     parser.add_argument(
@@ -213,7 +213,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
-def make_engine(context: AbstractContext, args: argparse.Namespace) -> Tuple[XBEngine, Monitor]:
+def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBEngine, Monitor]:
     """Make an :class:`XBEngine` object, given a GPU context.
 
     Parameters
@@ -279,7 +279,7 @@ async def async_main(args: argparse.Namespace) -> None:
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     xbengine, monitor = make_engine(context, args)
 
-    prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
+    prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 

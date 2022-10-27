@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,7 +16,7 @@
 
 """Fixtures for use in fgpu unit tests."""
 
-from typing import AsyncGenerator, List
+from collections.abc import AsyncGenerator
 
 import aiokatcp
 import async_timeout
@@ -39,14 +39,14 @@ def n_src_streams() -> int:  # noqa: D401
 
 
 @pytest.fixture
-def mock_send_stream(mocker) -> List[spead2.InprocQueue]:
+def mock_send_stream(mocker) -> list[spead2.InprocQueue]:
     """Mock out creation of the send stream.
 
     Each time a :class:`spead2.send.asyncio.UdpStream` is created, it instead
     creates an in-process stream and appends an equivalent number of inproc
     queues to the list returned by the fixture.
     """
-    queues: List[spead2.InprocQueue] = []
+    queues: list[spead2.InprocQueue] = []
 
     def constructor(thread_pool, endpoints, config, *args, **kwargs):
         stream_queues = [spead2.InprocQueue() for _ in endpoints]

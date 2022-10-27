@@ -16,8 +16,6 @@
 
 """Baseline verification tests."""
 
-from typing import Tuple
-
 import numpy as np
 import pytest
 from pytest_check import check
@@ -90,7 +88,7 @@ async def test_baseline_correlation_products(
         )
 
 
-def is_signal_expected_in_baseline(expected_bl: Tuple[str, str], loud_bl: Tuple[str, str]) -> bool:
+def is_signal_expected_in_baseline(expected_bl: tuple[str, str], loud_bl: tuple[str, str]) -> bool:
     """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
 
     It isn't possible in the general case to get signal in only a single

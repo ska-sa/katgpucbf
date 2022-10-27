@@ -16,8 +16,6 @@
 
 """Unit tests for digital down conversion."""
 
-from typing import Optional
-
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
@@ -63,7 +61,7 @@ def test_ddc(
     taps: int,
     decimation: int,
     samples: int,
-    tuning: Optional[_TuningDict],
+    tuning: _TuningDict | None,
 ) -> None:
     """Test DDC kernel."""
     rng = np.random.default_rng(seed=1)

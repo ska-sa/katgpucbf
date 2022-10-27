@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiokatcp
 import numpy as np
@@ -47,11 +47,11 @@ class PromDiff:
         self,
         *,
         registry: prometheus_client.CollectorRegistry = prometheus_client.REGISTRY,
-        namespace: Optional[str] = None
+        namespace: str | None = None
     ) -> None:
         self._registry = registry
-        self._before: List[prometheus_client.samples.Sample] = []
-        self._after: List[prometheus_client.samples.Sample] = []
+        self._before: list[prometheus_client.samples.Sample] = []
+        self._after: list[prometheus_client.samples.Sample] = []
         self._prefix = namespace + "_" if namespace is not None else ""
 
     def __enter__(self) -> "PromDiff":
@@ -62,14 +62,14 @@ class PromDiff:
         self._after = [s for metric in self._registry.collect() for s in metric.samples]
 
     def _get_value(
-        self, samples: List[prometheus_client.samples.Sample], name: str, labels: Dict[str, str]
-    ) -> Optional[float]:
+        self, samples: list[prometheus_client.samples.Sample], name: str, labels: dict[str, str]
+    ) -> float | None:
         for s in samples:
             if s.name == self._prefix + name and s.labels == labels:
                 return s.value
         return None
 
-    def get_sample_value(self, name: str, labels: Optional[Dict[str, str]] = None) -> Optional[float]:
+    def get_sample_value(self, name: str, labels: dict[str, str] | None = None) -> float | None:
         """Return the value of the metric at the end of the context manager protocol.
 
         If it is not found, returns ``None``.
@@ -78,7 +78,7 @@ class PromDiff:
             labels = {}
         return self._get_value(self._after, name, labels)
 
-    def get_sample_diff(self, name: str, labels: Optional[Dict[str, str]] = None) -> Optional[float]:
+    def get_sample_diff(self, name: str, labels: dict[str, str] | None = None) -> float | None:
         """Return the increase in the metric during the context manager protocol.
 
         If it is not found, returns ``None``. If it was not found on entry,
