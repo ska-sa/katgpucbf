@@ -226,7 +226,7 @@ async def test_delay_sensors(
     load_time = now + 2.0
     load_ts = receiver.unix_to_timestamp(load_time)
     for _ in range(receiver.n_inputs):
-        delay = rng.uniform(0.0, MAX_DELAY)
+        delay = rng.uniform(-MAX_DELAY, MAX_DELAY)
         delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE)
         phase = rng.uniform(-np.pi, np.pi)
         phase_rate = rng.uniform(-MAX_PHASE_RATE, MAX_PHASE_RATE)
@@ -260,6 +260,7 @@ def check_phases(
     actual: np.ndarray,
     expected: np.ndarray,
     caption: str,
+    tolerance_deg: float = 1,
 ) -> None:
     """Compare expected and actual phases to ensure they're within 1°.
 
@@ -272,10 +273,10 @@ def check_phases(
     delta = wrap_angle(actual - expected)
     max_error = np.max(delta)
     rms_error = np.sqrt(np.mean(np.square(delta)))
-    pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f} degrees.")
-    pdf_report.detail(f"RMS error is {np.rad2deg(rms_error):.5f} degrees.")
+    pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f}°.")
+    pdf_report.detail(f"RMS error over channels is {np.rad2deg(rms_error):.5f}°.")
     with check:
-        assert np.rad2deg(max_error) <= 1.0, "Maximum error is more than 1 degree"
+        assert np.rad2deg(max_error) <= tolerance_deg, f"Maximum error is more than {tolerance_deg}°"
 
     fig = Figure(tight_layout=True)
     ax, ax_err = fig.subplots(2)
@@ -445,7 +446,9 @@ async def _test_delay_phase_rate(
         bl_idx = receiver.bls_ordering.index((input1, input2))
         actual = phases[1][:, bl_idx] - phases[0][:, bl_idx]
         expected = delay_phase(receiver.n_chans, delay_rate * elapsed) + phase_rate * elapsed_s
-        check_phases(pdf_report, actual, expected, caption)
+        # Allow 2° rather than 1° because we're taking the difference between
+        # two phases which each have a 1° tolerance.
+        check_phases(pdf_report, actual, expected, caption, tolerance_deg=2)
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
@@ -465,7 +468,7 @@ async def test_delay(
     """
     receiver = receive_baseline_correlation_products
     # Minimum, maximum, resolution step, and a small coarse delay
-    delays = [0.0, MAX_DELAY, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
+    delays = [0.0, MAX_DELAY, -MAX_DELAY, 2.5e-12, 2.75 / receiver.scale_factor_timestamp]
     await _test_delay_phase_fixed(
         correlator,
         receive_baseline_correlation_products,

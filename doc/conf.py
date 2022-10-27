@@ -78,10 +78,10 @@ intersphinx_mapping = {
     "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "pip": ("https://pip.pypa.io/en/stable/", None),
-    "pydocstyle": ("http://www.pydocstyle.org/en/stable/", None),
+    "pydocstyle": ("https://www.pydocstyle.org/en/stable/", None),
     "pytest": ("https://docs.pytest.org/en/stable/", None),
     "python": ("https://docs.python.org/3", None),
-    "setuptools": ("https://setuptools.readthedocs.io/en/stable/", None),
+    "setuptools": ("https://setuptools.pypa.io/en/stable/", None),
     "spead2": ("https://spead2.readthedocs.io/en/latest", None),
 }
 

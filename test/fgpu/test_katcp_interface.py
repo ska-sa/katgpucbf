@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -202,7 +202,6 @@ class TestKatcpRequests:
             "3.76,0.12:7.322-1.91",  # Missing comma, phase half
             "3.76,0.12:apple,1.91",  # Non-float value for phase
             "3.76,pear:7.322,1.91",  # Non-float value for delay rate
-            "-1.0,0.0:0.0,0.0",  # Negative delay
         ],
     )
     async def test_delay_model_update_malformed(self, engine_client, malformed_delay_string):

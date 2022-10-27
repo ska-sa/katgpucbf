@@ -1323,10 +1323,6 @@ class Engine(aiokatcp.DeviceServer):
             delay_str, phase_str = coeffs.split(":")
             delay, delay_rate = comma_string_to_float(delay_str)
             phase, phase_rate = comma_string_to_float(phase_str)
-            if delay < 0:
-                raise aiokatcp.FailReply("delay cannot be negative")
-            if delay + 5 * delay_rate < 0:
-                logger.warning("delay will become negative within 5s")
 
             delay_samples = delay * self.adc_sample_rate
             # For compatibility with MeerKAT, the phase given is the net change in

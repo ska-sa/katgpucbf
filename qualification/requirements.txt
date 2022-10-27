@@ -4,10 +4,14 @@
 #
 #    pip-compile qualification/requirements.in
 #
+aiokatcp==1.3.1
+    # via -r qualification/requirements.in
 alabaster==0.7.12
     # via
     #   -r qualification/../requirements-dev.txt
     #   sphinx
+appdirs==1.4.4
+    # via katsdpsigproc
 asttokens==2.0.8
     # via
     #   -r qualification/../requirements-dev.txt
@@ -16,6 +20,8 @@ async-timeout==4.0.2
     # via
     #   -r qualification/../requirements-dev.txt
     #   -r qualification/requirements.in
+    #   aiokatcp
+    #   redis
 attrs==22.1.0
     # via
     #   -r qualification/../requirements-dev.txt
@@ -48,6 +54,8 @@ click==8.1.3
     # via
     #   -r qualification/../requirements-dev.txt
     #   pip-tools
+cloudpickle==2.2.0
+    # via dask
 contourpy==1.0.5
     # via matplotlib
 coverage[toml]==6.5.0
@@ -56,12 +64,18 @@ coverage[toml]==6.5.0
     #   pytest-cov
 cycler==0.11.0
     # via matplotlib
+dask==2022.10.0
+    # via -r qualification/requirements.in
 dateparser==1.1.1
     # via prometheus-api-client
 decorator==5.1.1
     # via
     #   -r qualification/../requirements-dev.txt
+    #   aiokatcp
     #   ipython
+    #   katsdpsigproc
+deprecated==1.2.13
+    # via redis
 distlib==0.3.6
     # via
     #   -r qualification/../requirements-dev.txt
@@ -88,6 +102,10 @@ filelock==3.8.0
     #   virtualenv
 fonttools==4.37.4
     # via matplotlib
+fsspec==2022.10.0
+    # via dask
+hiredis==2.0.0
+    # via katsdptelstate
 httmock==1.4.0
     # via prometheus-api-client
 identify==2.5.6
@@ -116,6 +134,12 @@ jinja2==3.1.2
     # via
     #   -r qualification/../requirements-dev.txt
     #   sphinx
+katsdpservices==1.2
+    # via -r qualification/requirements.in
+katsdpsigproc==1.4.3
+    # via -r qualification/requirements.in
+katsdptelstate==0.11
+    # via -r qualification/requirements.in
 kiwisolver==1.4.4
     # via matplotlib
 latexcodec==2.0.1
@@ -126,10 +150,15 @@ llvmlite==0.39.1
     # via
     #   -r qualification/../requirements-dev.txt
     #   numba
+locket==1.0.0
+    # via partd
+mako==1.2.3
+    # via katsdpsigproc
 markupsafe==2.1.1
     # via
     #   -r qualification/../requirements-dev.txt
     #   jinja2
+    #   mako
 matplotlib==3.6.1
     # via
     #   -r qualification/requirements.in
@@ -138,37 +167,57 @@ matplotlib-inline==0.1.6
     # via
     #   -r qualification/../requirements-dev.txt
     #   ipython
+msgpack==1.0.4
+    # via katsdptelstate
+netifaces==0.11.0
+    # via
+    #   katsdpservices
+    #   katsdptelstate
 nodeenv==1.7.0
     # via
     #   -r qualification/../requirements-dev.txt
     #   pre-commit
 numba==0.56.3
-    # via -r qualification/../requirements-dev.txt
+    # via
+    #   -r qualification/../requirements-dev.txt
+    #   katsdpsigproc
 numpy==1.23.4
     # via
     #   -r qualification/../requirements-dev.txt
     #   -r qualification/requirements.in
     #   contourpy
+    #   katsdpsigproc
+    #   katsdptelstate
     #   matplotlib
     #   numba
     #   pandas
     #   prometheus-api-client
+    #   scipy
     #   spead2
+    #   xarray
 ordered-set==4.1.0
     # via pylatex
 packaging==21.3
     # via
     #   -r qualification/../requirements-dev.txt
     #   build
+    #   dask
     #   matplotlib
     #   pytest
+    #   redis
     #   sphinx
+    #   xarray
 pandas==1.5.0
-    # via prometheus-api-client
+    # via
+    #   katsdpsigproc
+    #   prometheus-api-client
+    #   xarray
 parso==0.8.3
     # via
     #   -r qualification/../requirements-dev.txt
     #   jedi
+partd==1.3.0
+    # via dask
 pep517==0.13.0
     # via
     #   -r qualification/../requirements-dev.txt
@@ -197,6 +246,12 @@ pre-commit==2.20.0
     # via -r qualification/../requirements-dev.txt
 prometheus-api-client==0.5.1
     # via -r qualification/requirements.in
+prometheus-async==22.2.0
+    # via -r qualification/requirements.in
+prometheus-client==0.15.0
+    # via
+    #   -r qualification/requirements.in
+    #   prometheus-async
 prompt-toolkit==3.0.31
     # via
     #   -r qualification/../requirements-dev.txt
@@ -225,6 +280,8 @@ pybtex-docutils==1.0.2
     #   sphinxcontrib-bibtex
 pycparser==2.21
     # via -r qualification/../requirements-dev.txt
+pygelf==0.4.2
+    # via katsdpservices
 pygments==2.13.0
     # via
     #   -r qualification/../requirements-dev.txt
@@ -279,8 +336,11 @@ pytz-deprecation-shim==0.1.0.post0
 pyyaml==6.0
     # via
     #   -r qualification/../requirements-dev.txt
+    #   dask
     #   pre-commit
     #   pybtex
+redis==4.3.4
+    # via katsdptelstate
 regex==2022.3.2
     # via dateparser
 requests==2.28.1
@@ -289,10 +349,13 @@ requests==2.28.1
     #   httmock
     #   prometheus-api-client
     #   sphinx
+scipy==1.9.3
+    # via katsdpsigproc
 six==1.16.0
     # via
     #   -r qualification/../requirements-dev.txt
     #   asttokens
+    #   katsdptelstate
     #   latexcodec
     #   pybtex
     #   python-dateutil
@@ -356,11 +419,19 @@ tomli==2.0.1
     #   coverage
     #   pep517
     #   pytest
+toolz==0.12.0
+    # via
+    #   dask
+    #   partd
 traitlets==5.4.0
     # via
     #   -r qualification/../requirements-dev.txt
     #   ipython
     #   matplotlib-inline
+typing-extensions==4.4.0
+    # via
+    #   aiokatcp
+    #   katsdpsigproc
 tzdata==2022.5
     # via pytz-deprecation-shim
 tzlocal==4.2
@@ -381,6 +452,12 @@ wheel==0.37.1
     # via
     #   -r qualification/../requirements-dev.txt
     #   pip-tools
+wrapt==1.14.1
+    # via
+    #   deprecated
+    #   prometheus-async
+xarray==2022.10.0
+    # via -r qualification/requirements.in
 
 # The following packages are considered to be unsafe in a requirements file:
 # pip

@@ -102,14 +102,17 @@ RUN pip wheel --no-deps "pycuda @ git+https://github.com/bmerry/pycuda@fcb925e3c
 FROM build-base as jenkins
 
 # docker so that Jenkins can build a Docker image
-# All the TeX stuff for building the documentation
+# All the TeX stuff for building the documentation and qualification report
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     docker.io \
     latexmk \
+    lmodern \
     pdf2svg \
     tex-gyre \
+    texlive-base \
+    texlive-latex-extra \
     texlive-latex-recommended \
-    texlive-latex-extra
+    texlive-science
 
 #######################################################################
 
