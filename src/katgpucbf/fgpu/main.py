@@ -24,7 +24,8 @@ actual running of the processing.
 import argparse
 import asyncio
 import logging
-from typing import Callable, List, Optional, Sequence, Tuple, TypeVar
+from collections.abc import Callable, Sequence
+from typing import TypeVar
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -43,7 +44,7 @@ _T = TypeVar("_T")
 logger = logging.getLogger(__name__)
 
 
-def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> Callable[[str], List[_T]]:
+def comma_split(base_type: Callable[[str], _T], count: int | None = None) -> Callable[[str], list[_T]]:
     """Return a function to split a comma-delimited str into a list of type _T.
 
     This function is used to parse lists of CPU core numbers, which come from
@@ -60,7 +61,7 @@ def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> 
         could be any length.
     """
 
-    def func(value: str) -> List[_T]:  # noqa: D102
+    def func(value: str) -> list[_T]:  # noqa: D102
         parts = value.split(",")
         n = len(parts)
         if count is not None and n != count:
@@ -70,7 +71,7 @@ def comma_split(base_type: Callable[[str], _T], count: Optional[int] = None) -> 
     return func
 
 
-def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Declare and parse command-line arguments.
 
     Parameters
@@ -236,7 +237,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
-def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> Tuple[Engine, Monitor]:
+def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine, Monitor]:
     """Make an :class:`Engine` object, given a GPU context.
 
     Parameters
@@ -299,7 +300,7 @@ async def async_main() -> None:
     logger.info("Initialising F-engine on %s", ctx.device.name)
     engine, monitor = make_engine(ctx, args)
     add_signal_handlers(engine)
-    prometheus_server: Optional[prometheus_async.aio.web.MetricsHTTPServer] = None
+    prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
     with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):

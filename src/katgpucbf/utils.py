@@ -20,7 +20,6 @@ import ipaddress
 import logging
 import signal
 from asyncio import get_event_loop
-from typing import List, Tuple, Union
 
 from aiokatcp import DeviceServer
 from katsdptelstate.endpoint import endpoint_list_parser
@@ -45,7 +44,7 @@ def add_signal_handlers(server: DeviceServer) -> None:
         loop.add_signal_handler(signum, handler)
 
 
-def parse_source(value: str) -> Union[List[Tuple[str, int]], str]:
+def parse_source(value: str) -> list[tuple[str, int]] | str:
     """Parse a string into a list of IP endpoints."""
     try:
         endpoints = endpoint_list_parser(7148)(value)

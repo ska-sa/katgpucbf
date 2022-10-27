@@ -19,7 +19,7 @@
 import asyncio
 import logging
 import time
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import aiokatcp
 import numpy as np
@@ -160,7 +160,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.descriptor_sender.halt()
         await self._signal_service.stop()
 
-    async def set_signals(self, signals: Sequence[Signal], signals_str: str, period: Optional[int] = None) -> int:
+    async def set_signals(self, signals: Sequence[Signal], signals_str: str, period: int | None = None) -> int:
         """Change the signals :meth:`request_signals`.
 
         This is the implementation of :meth:`request_signals`. See that method for

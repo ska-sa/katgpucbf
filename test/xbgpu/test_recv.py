@@ -19,7 +19,7 @@
 import itertools
 import logging
 import random
-from typing import Generator, Iterator, List
+from collections.abc import Generator, Iterator
 
 import numpy as np
 import pytest
@@ -166,7 +166,7 @@ class TestStream:
         if reorder:
             # We don't shuffle the first few heaps, this just makes sure
             # that we get chunk 123 first, as expected.
-            heap_list: List[spead2.send.Heap] = []
+            heap_list: list[spead2.send.Heap] = []
             for _ in range(2):
                 heap_list.append(next(heaps))
             # The rest are going to be pretty well shuffled. Heaps from a given

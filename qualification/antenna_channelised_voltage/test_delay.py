@@ -19,7 +19,7 @@
 import asyncio
 import math
 from ast import literal_eval
-from typing import Callable, List, Optional, Tuple
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -63,7 +63,7 @@ async def test_delay_application_time(
 
     attempts = 5
     advance = 0.2
-    acc: Optional[np.ndarray] = None
+    acc: np.ndarray | None = None
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
     for attempt in range(attempts):
         pdf_report.step(f"Set delay {advance * 1000:.0f}ms in the future (attempt {attempt + 1} / {attempts}).")
@@ -133,7 +133,7 @@ async def test_delay_enable_disable(
         phase = np.arctan2(value[1], value[0])
         return phase
 
-    async def set_delays(delays: List[str]) -> None:
+    async def set_delays(delays: list[str]) -> None:
         start = asyncio.get_running_loop().time()
         await correlator.product_controller_client.request(
             "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
@@ -147,7 +147,7 @@ async def test_delay_enable_disable(
     signal = f"cw(0.1, {freq})"
     gain = compute_tone_gain(receiver, 0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
-    elapsed: List[float] = []
+    elapsed: list[float] = []
 
     pdf_report.step("Inject tone.")
     pdf_report.detail(f"Set signal to {signal} on both pols.")
@@ -314,7 +314,7 @@ async def _test_delay_phase_fixed(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    delay_phases: List[Tuple[float, float]],
+    delay_phases: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
     report_residual: bool,
 ) -> None:
@@ -389,7 +389,7 @@ async def _test_delay_phase_rate(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
-    rates: List[Tuple[float, float]],
+    rates: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
 ) -> None:
     """Test performance of delay or phase compensation with a rate of change.

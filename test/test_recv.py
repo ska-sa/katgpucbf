@@ -18,7 +18,7 @@
 
 import gc
 import weakref
-from typing import Iterable
+from collections.abc import Iterable
 from unittest import mock
 
 import pytest

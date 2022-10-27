@@ -19,7 +19,7 @@
 import asyncio
 import itertools
 import time
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import spead2.recv.asyncio
@@ -76,7 +76,7 @@ async def test_sender(
     remaining_calls = repeats * 2  # Each repetition sends a HeapSet in two halves
     # The last 3 half-heapsets are from after the switch
     switch_heap = SIGNAL_HEAPS * repeats - 3 * (SIGNAL_HEAPS // 2)
-    switch_task: Optional[asyncio.Future[int]] = None
+    switch_task: asyncio.Future[int] | None = None
     # The copy below fails on xarray >= 2022.9.0 because it tries to deep-copy
     # SharedArray, which doesn't support that. The attribute isn't needed for
     # this test, so just delete it.

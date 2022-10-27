@@ -20,7 +20,7 @@ import asyncio
 import functools
 import itertools
 import time
-from typing import Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import spead2.send.asyncio
@@ -143,7 +143,7 @@ class HeapSet:
 
 def make_stream(
     *,
-    endpoints: Iterable[Tuple[str, int]],
+    endpoints: Iterable[tuple[str, int]],
     heap_sets: Iterable[HeapSet],
     n_pols: int,
     adc_sample_rate: float,
@@ -221,7 +221,7 @@ class Sender:
         # The futures serve two functions:
         # - prevent concurrent access to the timestamps while they're being sent
         # - limiting the amount of data in flight
-        self._futures: List[Optional[asyncio.Future[int]]] = [None] * len(heap_set.parts)
+        self._futures: list[asyncio.Future[int] | None] = [None] * len(heap_set.parts)
         self._running = True  # Set to false to start shutdown
         self._finished = asyncio.Event()
         # First timestamp that we haven't yet submitted to async_send_heaps

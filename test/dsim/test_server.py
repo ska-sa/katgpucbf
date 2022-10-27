@@ -17,7 +17,7 @@
 """Unit tests for katcp server."""
 
 import re
-from typing import AsyncGenerator, Optional, Sequence
+from collections.abc import AsyncGenerator, Sequence
 
 import aiokatcp
 import async_timeout
@@ -85,7 +85,7 @@ async def test_signals(
     katcp_client: aiokatcp.Client,
     sender: Sender,
     heap_sets: Sequence[HeapSet],
-    period: Optional[int],
+    period: int | None,
     mocker,
 ) -> None:
     """Test the ``?signals`` katcp command."""

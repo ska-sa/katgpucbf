@@ -18,7 +18,7 @@
 
 import asyncio
 import functools
-from typing import Callable, List, Optional, Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import spead2.send
@@ -100,7 +100,7 @@ class Chunk:
         #: Timestamp of the first heap
         self._timestamp = 0
         #: Callback to return the chunk to the appropriate queue
-        self.cleanup: Optional[Callable[[], None]] = None
+        self.cleanup: Callable[[], None] | None = None
         timestamp_step = spectra_per_heap * channels * 2
         #: Storage for timestamps in the SPEAD heaps.
         self._timestamps = (np.arange(n_frames) * timestamp_step).astype(">u8")
@@ -150,7 +150,7 @@ class Chunk:
 
 def make_stream(
     *,
-    endpoints: List[Endpoint],
+    endpoints: list[Endpoint],
     interface: str,
     ttl: int,
     ibv: bool,
@@ -169,7 +169,7 @@ def make_stream(
     """Create an asynchronous SPEAD stream for transmission."""
     dtype = chunks[0].data.dtype
     thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
-    memory_regions: List[object] = [chunk.data for chunk in chunks]
+    memory_regions: list[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
     rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor
     config = spead2.send.StreamConfig(

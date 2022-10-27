@@ -25,7 +25,7 @@ import logging
 import math
 import os
 import time
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import katsdpservices
 import numpy as np
@@ -42,7 +42,7 @@ from .server import DeviceServer
 logger = logging.getLogger(__name__)
 
 
-def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(prog="dsim")
     parser.add_argument(
@@ -128,7 +128,7 @@ def parse_args(arglist: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
-def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> Tuple[int, float]:
+def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> tuple[int, float]:
     """Determine ADC timestamp for first sample and the time at which to start sending.
 
     The resulting value will be a multiple of `align`.
@@ -156,7 +156,7 @@ async def async_main() -> None:
         for _ in range(2)
     ]
 
-    endpoints: List[Tuple[str, int]] = []
+    endpoints: list[tuple[str, int]] = []
     for pol_dest in args.dest:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))

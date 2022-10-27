@@ -26,8 +26,9 @@ import ast
 import asyncio
 import logging
 import re
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List, Literal, Mapping, Optional, Tuple, overload
+from typing import Literal, overload
 from uuid import UUID, uuid4
 
 import aiokatcp
@@ -74,7 +75,7 @@ class CorrelatorRemoteControl:
 
     name: str
     product_controller_client: aiokatcp.Client
-    dsim_clients: List[aiokatcp.Client]
+    dsim_clients: list[aiokatcp.Client]
     config: dict  # JSON dictionary used to configure the correlator
     mode_config: dict  # Configuration values used for MeerKAT mode string
     sensor_watcher: aiokatcp.SensorWatcher
@@ -232,21 +233,21 @@ class BaselineCorrelationProductsReceiver:
     @overload
     async def complete_chunks(
         self,
-        min_timestamp: Optional[int] = None,
+        min_timestamp: int | None = None,
         *,
         all_timestamps: Literal[False] = False,
         max_delay: int = DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
         yield ...  # type: ignore
 
     @overload
     async def complete_chunks(
         self,
-        min_timestamp: Optional[int] = None,
+        min_timestamp: int | None = None,
         *,
         all_timestamps: bool = False,
         max_delay: int = DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, Optional[katgpucbf.recv.Chunk]], None]:  # noqa: D102
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:  # noqa: D102
         yield ...  # type: ignore
 
     async def complete_chunks(
@@ -255,7 +256,7 @@ class BaselineCorrelationProductsReceiver:
         *,
         all_timestamps=False,
         max_delay=DEFAULT_MAX_DELAY,
-    ) -> AsyncGenerator[Tuple[int, Optional[katgpucbf.recv.Chunk]], None]:
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:
         """Iterate over the complete chunks of the stream.
 
         Each yielded value is a ``(timestamp, chunk)`` pair.
@@ -298,11 +299,11 @@ class BaselineCorrelationProductsReceiver:
 
     async def next_complete_chunk(
         self,
-        min_timestamp: Optional[int] = None,
+        min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: Optional[float] = 10.0,
-    ) -> Tuple[int, NDArray[np.int32]]:
+        timeout: float | None = 10.0,
+    ) -> tuple[int, NDArray[np.int32]]:
         """Return the data from the next complete chunk from the stream.
 
         The return value includes the timestamp.
@@ -321,11 +322,11 @@ class BaselineCorrelationProductsReceiver:
     async def consecutive_chunks(
         self,
         n: int,
-        min_timestamp: Optional[int] = None,
+        min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: Optional[float] = 10.0,
-    ) -> List[Tuple[int, katgpucbf.recv.Chunk]]:
+        timeout: float | None = 10.0,
+    ) -> list[tuple[int, katgpucbf.recv.Chunk]]:
         """Obtain `n` consecutive complete chunks from the stream.
 
         .. warning::
@@ -335,7 +336,7 @@ class BaselineCorrelationProductsReceiver:
            larger than 2 you should check that the free ring is initialised
            with enough chunks and update this comment.
         """
-        chunks: List[Tuple[int, katgpucbf.recv.Chunk]] = []
+        chunks: list[tuple[int, katgpucbf.recv.Chunk]] = []
         async with async_timeout.timeout(timeout):
             async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
                 if chunk is None:
@@ -360,7 +361,7 @@ class BaselineCorrelationProductsReceiver:
 
 def create_baseline_correlation_product_receive_stream(
     interface_address: str,
-    multicast_endpoints: List[Tuple[str, int]],
+    multicast_endpoints: list[tuple[str, int]],
     n_bls: int,
     n_chans: int,
     n_chans_per_substream: int,

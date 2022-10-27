@@ -25,9 +25,10 @@ import pathlib
 import re
 import tempfile
 from collections import defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Literal, Union
 from uuid import UUID
 
 import docutils.writers.latex2e
@@ -193,7 +194,7 @@ class Step:
     """A step created by ``pdf_report.step``."""
 
     message: str
-    items: List[Item] = field(default_factory=list)
+    items: list[Item] = field(default_factory=list)
 
 
 @dataclass
@@ -209,11 +210,11 @@ class Result:
     text_name: str = ""  # Name shown in the document (excluding parameters)
     parameters: str = ""  # Parameter part of `name`
     blurb: str = ""
-    requirements: List[str] = field(default_factory=list)
-    steps: List[Step] = field(default_factory=list)
+    requirements: list[str] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
     outcome: Literal["passed", "failed", "skipped"] = "failed"
-    failure_messages: List[str] = field(default_factory=list)
-    start_time: Optional[float] = None
+    failure_messages: list[str] = field(default_factory=list)
+    start_time: float | None = None
     duration: float = 0.0
     config: dict = field(default_factory=dict)
 
@@ -254,10 +255,10 @@ class Host:
     """Configuration information for a host."""
 
     kernel: str
-    cpus: Tuple[str, ...]
-    interfaces: Tuple[Interface, ...]
-    gpus: Tuple[GPU, ...]
-    ram: Optional[int]
+    cpus: tuple[str, ...]
+    interfaces: tuple[Interface, ...]
+    gpus: tuple[GPU, ...]
+    ram: int | None
     product_name: str = UNKNOWN
     board_name: str = UNKNOWN
     bios_version: str = UNKNOWN
@@ -278,16 +279,16 @@ class CorrelatorConfiguration:
 
     mode_config: dict
     uuid: UUID
-    tasks: Dict[str, Task]
+    tasks: dict[str, Task]
 
 
 @dataclass
 class TestConfiguration:
     """Global configuration of the test."""
 
-    params: Dict[str, str] = field(default_factory=dict)
-    hosts: Dict[Host, List[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
-    correlators: List[CorrelatorConfiguration] = field(default_factory=list)
+    params: dict[str, str] = field(default_factory=dict)
+    hosts: dict[Host, list[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
+    correlators: list[CorrelatorConfiguration] = field(default_factory=list)
 
 
 def _parse_item(item: dict) -> Item:
@@ -361,14 +362,14 @@ def _parse_gpu(labels: dict, fb_total: float) -> GPU:
     )
 
 
-def _parse_host(msg: dict) -> Tuple[str, Host]:
+def _parse_host(msg: dict) -> tuple[str, Host]:
     """Parse a single host configuration line."""
     kernel = UNKNOWN
-    cpus: Dict[int, str] = {}  # Indexed by package
+    cpus: dict[int, str] = {}  # Indexed by package
     interfaces = []
     gpus = []
     kwargs = {}
-    ram: Optional[int] = None
+    ram: int | None = None
 
     for metric in msg["config"]:
         labels = metric["metric"]
@@ -412,7 +413,7 @@ def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
     return CorrelatorConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
-def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
+def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
     """Parse the data written by pytest-reportlog.
 
     Parameters
@@ -427,7 +428,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     test configuration and the results of all the tests logged in the JSON input.
     """
     test_configuration = TestConfiguration()
-    results: List[Result] = []
+    results: list[Result] = []
     for line in input_data:
         if line["$report_type"] == "TestConfiguration":
             test_configuration.params = dict(line)
@@ -468,7 +469,7 @@ def parse(input_data: List[dict]) -> Tuple[TestConfiguration, List[Result]]:
     return test_configuration, results
 
 
-def extract_requirements_verified(results: Iterable[Result]) -> Dict[str, List[str]]:
+def extract_requirements_verified(results: Iterable[Result]) -> dict[str, list[str]]:
     """Extract a matrix of requirements verified from the list of results.
 
     Parameters
@@ -498,7 +499,7 @@ def fix_test_name(test_name: str) -> str:
     return " ".join([word.capitalize() for word in test_name.split("_") if word != "test"])
 
 
-def collapse_versions(versions: Set[str]) -> str:
+def collapse_versions(versions: set[str]) -> str:
     """Reduce a set of versions to a single string.
 
     This is appropriate to use when it is expected that there will be at most one.
@@ -645,7 +646,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
                     table.add_hline()
 
 
-def _doc_requirements_verified(doc: Document, requirements_verified: Dict[str, List]) -> None:
+def _doc_requirements_verified(doc: Document, requirements_verified: dict[str, list]) -> None:
     with doc.create(Section("Requirements Verified")) as req_section:
         with req_section.create(LongTable(r"|l|l|")) as table:
             table.add_hline()
@@ -738,7 +739,7 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
             config_table.add_hline()
 
 
-def document_from_json(input_data: Union[str, list]) -> Document:
+def document_from_json(input_data: str | list) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
     Parameters

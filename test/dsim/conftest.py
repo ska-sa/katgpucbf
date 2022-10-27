@@ -16,7 +16,7 @@
 
 """Common fixtures for dsim tests."""
 
-from typing import Generator, Sequence
+from collections.abc import Generator, Sequence
 from unittest import mock
 
 import numpy as np

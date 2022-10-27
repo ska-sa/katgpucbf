@@ -20,9 +20,10 @@ import asyncio
 import logging
 import numbers
 from collections import deque
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Deque, Iterable, List, Optional, Sequence, Tuple, Union, cast
+from typing import Deque, Optional, cast
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -65,7 +66,7 @@ def _host_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.H
 
 def _sample_models(
     delay_models: Iterable[AbstractDelayModel], start: int, stop: int, step: int
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Call :meth:`.AbstractDelayModel.range` on multiple delay models and stack results."""
     # Each element of parts is a tuple of results from one delay model
     parts = [model.range(start, stop, step) for model in delay_models]
@@ -108,14 +109,14 @@ class PolInItem:
     """Polarisation-specific elements of :class:`InItem`."""
 
     #: A device memory region for storing the raw samples.
-    samples: Optional[accel.DeviceArray]
+    samples: accel.DeviceArray | None
     #: Bitmask indicating which packets were present in the chunk.
     present: np.ndarray
     #: Cumulative sum over :attr:`present`. It is up to the caller
     #: to compute it at the appropriate time.
     present_cumsum: np.ndarray
     #: Chunk to return to recv after processing (used with vkgdr only).
-    chunk: Optional[recv.Chunk] = None
+    chunk: recv.Chunk | None = None
 
 
 class InItem(QueueItem):
@@ -154,7 +155,7 @@ class InItem(QueueItem):
     """
 
     #: Per-polarisation data
-    pol_data: List[PolInItem]
+    pol_data: list[PolInItem]
     #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
@@ -254,7 +255,7 @@ class OutItem(QueueItem):
     #: Number of spectra contained in :attr:`spectra`.
     n_spectra: int
     #: Corresponding chunk for transmission (only used in PeerDirect mode).
-    chunk: Optional[send.Chunk] = None
+    chunk: send.Chunk | None = None
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
@@ -417,14 +418,14 @@ class Engine(aiokatcp.DeviceServer):
         katcp_host: str,
         katcp_port: int,
         context: AbstractContext,
-        srcs: List[Union[str, List[Tuple[str, int]]]],
-        src_interface: Optional[str],
+        srcs: list[str | list[tuple[str, int]]],
+        src_interface: str | None,
         src_ibv: bool,
-        src_affinity: List[int],
-        src_comp_vector: List[int],
+        src_affinity: list[int],
+        src_comp_vector: list[int],
         src_packet_samples: int,
         src_buffer: int,
-        dst: List[Endpoint],
+        dst: list[Endpoint],
         dst_interface: str,
         dst_ttl: int,
         dst_ibv: bool,
@@ -448,7 +449,7 @@ class Engine(aiokatcp.DeviceServer):
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
-        super(Engine, self).__init__(katcp_host, katcp_port)
+        super().__init__(katcp_host, katcp_port)
         self._populate_sensors(self.sensors)
 
         # Attributes copied or initialised from arguments
@@ -513,7 +514,7 @@ class Engine(aiokatcp.DeviceServer):
         )
         self._out_item = self._out_free_queue.get_nowait()
 
-        self.delay_models: List[MultiDelayModel] = []
+        self.delay_models: list[MultiDelayModel] = []
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
         self._init_delay_gain()
 
@@ -546,7 +547,7 @@ class Engine(aiokatcp.DeviceServer):
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps))
 
-    def _init_recv(self, src_affinity: List[int], monitor: Monitor) -> None:
+    def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
         src_chunks_per_stream = 4
         ringbuffer_capacity = src_chunks_per_stream * N_POLS
@@ -596,9 +597,9 @@ class Engine(aiokatcp.DeviceServer):
                 )
                 chunk.recycle()  # Make available to the stream
 
-    def _init_send(self, substreams: int, use_peerdirect: bool) -> List[send.Chunk]:
+    def _init_send(self, substreams: int, use_peerdirect: bool) -> list[send.Chunk]:
         """Initialise the send side of the engine, with the exception of ``_send_stream``."""
-        send_chunks: List[send.Chunk] = []
+        send_chunks: list[send.Chunk] = []
         for _ in range(self._out_free_queue.maxsize):
             item = OutItem(self._compute)
             if use_peerdirect:
@@ -719,7 +720,7 @@ class Engine(aiokatcp.DeviceServer):
             )
         )
 
-    async def _next_in(self) -> Optional[InItem]:
+    async def _next_in(self) -> InItem | None:
         """Load next InItem for processing.
 
         Move the next :class:`InItem` from the `_in_queue` to `_in_items`, where
@@ -999,7 +1000,7 @@ class Engine(aiokatcp.DeviceServer):
         logger.debug("_run_processing completed")
         self._out_queue.put_nowait(None)
 
-    async def _run_receive(self, streams: List[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
+    async def _run_receive(self, streams: list[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -
@@ -1111,8 +1112,8 @@ class Engine(aiokatcp.DeviceServer):
         stream
             The stream transmitting data.
         """
-        task: Optional[asyncio.Future] = None
-        last_end_timestamp: Optional[int] = None
+        task: asyncio.Future | None = None
+        last_end_timestamp: int | None = None
         while True:
             with self.monitor.with_state("run_transmit", "wait out_queue"):
                 out_item = await self._out_queue.get()
@@ -1244,7 +1245,7 @@ class Engine(aiokatcp.DeviceServer):
             gains = gains.repeat(self.channels)
         return gains
 
-    async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
+    async def request_gain(self, ctx, input: int, *values: str) -> tuple[str, ...]:
         """Set or query the eq gains.
 
         If no values are provided, the gains are simply returned.
@@ -1298,7 +1299,7 @@ class Engine(aiokatcp.DeviceServer):
           malformed requests.
         """
 
-        def comma_string_to_float(comma_string: str) -> Tuple[float, float]:
+        def comma_string_to_float(comma_string: str) -> tuple[float, float]:
             a_str, b_str = comma_string.split(",")
             a = float(a_str)
             b = float(b_str)

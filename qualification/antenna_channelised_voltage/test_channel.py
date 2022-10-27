@@ -16,8 +16,6 @@
 
 """CBF Channel test."""
 
-from typing import List
-
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
@@ -28,7 +26,7 @@ from ..reporter import POTLocator, Reporter
 from . import sample_tone_response_hdr
 
 
-def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> List[float]:
+def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> list[float]:
     """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
 
     Estimate the SFDR by measuring the power (dB) of the next strongest

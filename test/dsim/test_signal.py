@@ -17,7 +17,8 @@
 """Unit tests for signal generation functions."""
 
 import operator
-from typing import Any, Callable, List, Sequence, Tuple, cast
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 from unittest import mock
 
 import dask.array as da
@@ -278,7 +279,7 @@ class TestSaturationCounts:
     """Tests for :func:`katgpucbf.dsim.signal.saturation_counts`."""
 
     @pytest.mark.parametrize("chunks", [((5,), (4,)), ((3, 2), (3, 1))])
-    def test(self, chunks: Tuple[Tuple[int, ...], ...]) -> None:
+    def test(self, chunks: tuple[tuple[int, ...], ...]) -> None:
         """Test the basics with a variety of chunking schemes."""
         data = np.array(
             [
@@ -310,16 +311,16 @@ class TestSample:
         return xr.DataArray(raw, dims=["pol", "time", "data"])
 
     @pytest.fixture
-    def signals(self) -> List[Signal]:
+    def signals(self) -> list[Signal]:
         """Dual-pol signals."""
         return signal.parse_signals("wgn(0.2, 1); wgn(0.5, 2);")
 
-    def test_bad_period(self, signals: List[Signal], out: xr.DataArray) -> None:
+    def test_bad_period(self, signals: list[Signal], out: xr.DataArray) -> None:
         """Test that an error is raised if `period` does not divide into data size."""
         with pytest.raises(ValueError):
             signal.sample(signals, 0, 17, 1.0, 10, out)
 
-    def test_period(self, signals: List[Signal], out: xr.DataArray) -> None:
+    def test_period(self, signals: list[Signal], out: xr.DataArray) -> None:
         """Test that a short period is respected."""
         signal.sample(signals, 0, 4096, 1.0, 10, out)
         # Each heap should be identical
@@ -328,13 +329,13 @@ class TestSample:
         # Period shouldn't be shorter then requested
         assert not (out.isel(time=0, data=np.s_[:2560]) == out.isel(time=0, data=np.s_[2560:])).all()
 
-    def test_period_none(self, signals: List[Signal], out: xr.DataArray) -> None:
+    def test_period_none(self, signals: list[Signal], out: xr.DataArray) -> None:
         """Test that specifying the period as None works."""
         signal.sample(signals, 0, None, 1.0, 10, out)
         # Must not have a shorter period
         assert not (out.isel(time=np.s_[:2]) == out.isel(time=np.s_[2:])).all()
 
-    def test_nodither_signals(self, signals: List[Signal], out: xr.DataArray) -> None:
+    def test_nodither_signals(self, signals: list[Signal], out: xr.DataArray) -> None:
         """Test that ``nodither()`` signals disable dither."""
         signal.sample(signals, 0, None, 1.0, 10, out, dither=False)
         orig = out.copy()

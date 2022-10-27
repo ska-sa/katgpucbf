@@ -28,8 +28,9 @@ import contextlib
 import json
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from time import monotonic
-from typing import Any, Generator, TypeVar
+from typing import Any, TypeVar
 
 _M = TypeVar("_M", bound="Monitor")
 

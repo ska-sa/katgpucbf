@@ -21,7 +21,6 @@ what is coming out of the F-engines rather than to test the X-engines.
 """
 
 import asyncio
-from typing import List, Tuple
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -167,7 +166,7 @@ async def sample_tone_response(
     out = np.empty(out_shape, np.int32)
     # Each element is an (out_index, signal_spec) pair. When it fills up to the
     # number of inputs available, `flush` is called.
-    tasks: List[Tuple[Tuple[int, ...], str]] = []
+    tasks: list[tuple[tuple[int, ...], str]] = []
 
     async def flush() -> None:
         """Execute all the work in `tasks`."""

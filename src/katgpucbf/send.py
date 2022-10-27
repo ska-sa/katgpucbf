@@ -18,7 +18,6 @@
 
 import asyncio
 import logging
-from typing import Optional
 
 import spead2.send.asyncio
 
@@ -55,7 +54,7 @@ class DescriptorSender:
         stream: "spead2.send.asyncio.AsyncStream",
         descriptors: spead2.send.Heap,
         interval: float,
-        first_interval: Optional[float] = None,
+        first_interval: float | None = None,
         *,
         all_substreams: bool = False,
     ) -> None:

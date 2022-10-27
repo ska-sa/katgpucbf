@@ -17,9 +17,9 @@
 """SPEAD receiver utilities."""
 import functools
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import AsyncGenerator
 
 import numba
 import numpy as np

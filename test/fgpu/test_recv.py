@@ -19,7 +19,8 @@
 import dataclasses
 import itertools
 import logging
-from typing import Dict, Generator, Iterable, List, Optional, Sequence, Tuple, cast
+from collections.abc import Generator, Iterable, Sequence
+from typing import cast
 from unittest.mock import Mock
 
 import numpy as np
@@ -68,7 +69,7 @@ class TestLayout:
 
 
 @pytest.fixture
-def queues() -> List[spead2.InprocQueue]:
+def queues() -> list[spead2.InprocQueue]:
     """Create a in-process queue per polarization."""
     return [spead2.InprocQueue() for _ in range(N_POLS)]
 
@@ -80,7 +81,7 @@ def data_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
 
 
 @pytest.fixture
-def free_ringbuffers(layout) -> List[spead2.recv.asyncio.ChunkRingbuffer]:
+def free_ringbuffers(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
     """Create asynchronous free chunk ringbuffers, to be used by the receive streams."""
     return [spead2.recv.asyncio.ChunkRingbuffer(4) for _ in range(N_POLS)]
 
@@ -88,7 +89,7 @@ def free_ringbuffers(layout) -> List[spead2.recv.asyncio.ChunkRingbuffer]:
 @pytest.fixture
 def streams(
     layout, data_ringbuffer, free_ringbuffers, queues
-) -> Generator[List[spead2.recv.ChunkRingStream], None, None]:
+) -> Generator[list[spead2.recv.ChunkRingStream], None, None]:
     """Create a receive stream per polarization.
 
     They are connected to the :func:`queues` fixture for input and
@@ -126,8 +127,8 @@ def gen_heaps(
     data: ArrayLike,
     first_timestamp: int,
     pol: int,
-    present: Optional[Sequence[bool]] = None,
-    saturated: Optional[Sequence[int]] = None,
+    present: Sequence[bool] | None = None,
+    saturated: Sequence[int] | None = None,
 ) -> Generator[spead2.send.Heap, None, None]:
     """Generate heaps from an array of data.
 
@@ -174,8 +175,8 @@ class TestStream:
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
-        streams: List[spead2.recv.ChunkRingStream],
-        queues: List[spead2.InprocQueue],
+        streams: list[spead2.recv.ChunkRingStream],
+        queues: list[spead2.InprocQueue],
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
         timestamps: str,
@@ -253,8 +254,8 @@ class TestStream:
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
-        streams: List[spead2.recv.ChunkRingStream],
-        queues: List[spead2.InprocQueue],
+        streams: list[spead2.recv.ChunkRingStream],
+        queues: list[spead2.InprocQueue],
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
@@ -308,7 +309,7 @@ class TestChunkSets:
         for stream in streams:
             stream.data_ringbuffer = ringbuffer
         rng = np.random.default_rng(1)
-        expected_clip: Dict[Tuple[int, int], int] = {}  # Maps (chunk_id, pol) to total clip count
+        expected_clip: dict[tuple[int, int], int] = {}  # Maps (chunk_id, pol) to total clip count
 
         def add_chunk(chunk_id: int, pol: int, missing: int = 0) -> None:
             data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
@@ -344,7 +345,7 @@ class TestChunkSets:
                 recv.stats_collector.add_stream(stream, labels=[str(pol)])
             sets = [
                 chunk_set
-                async for chunk_set in recv.chunk_sets(cast(List[spead2.recv.ChunkRingStream], streams), layout)
+                async for chunk_set in recv.chunk_sets(cast(list[spead2.recv.ChunkRingStream], streams), layout)
             ]
         assert caplog.record_tuples == [
             ("katgpucbf.fgpu.recv", logging.WARNING, "Chunk not matched: timestamp=0xb0000 pol=1")
@@ -368,7 +369,7 @@ class TestChunkSets:
         assert streams[1].add_free_chunk.call_args[0][0].chunk_id == 11
 
         # Check metrics
-        def get_sample_diffs(name: str) -> List[Optional[float]]:
+        def get_sample_diffs(name: str) -> list[float | None]:
             return [prom_diff.get_sample_diff(name, {"pol": str(pol)}) for pol in range(N_POLS)]
 
         assert get_sample_diffs("input_heaps_total") == [46, 47]

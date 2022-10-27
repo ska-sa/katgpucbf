@@ -39,7 +39,6 @@ import asyncio
 import logging
 import math
 import time
-from typing import List, Optional, Tuple
 
 import aiokatcp
 import katsdpsigproc
@@ -90,7 +89,7 @@ class RxQueueItem(QueueItem):
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
-        self.chunk: Optional[recv.Chunk] = None
+        self.chunk: recv.Chunk | None = None
 
 
 class TxQueueItem(QueueItem):
@@ -257,7 +256,7 @@ class XBEngine(DeviceServer):
         sample_bits: int,
         heap_accumulation_threshold: int,
         channel_offset_value: int,
-        src: List[Tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
+        src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
         src_interface: str,
         src_ibv: bool,
         src_affinity: int,
@@ -276,7 +275,7 @@ class XBEngine(DeviceServer):
         monitor: Monitor,
         context: katsdpsigproc.abc.AbstractContext,
     ):
-        super(XBEngine, self).__init__(katcp_host, katcp_port)
+        super().__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
 
         if sample_bits != 8:
@@ -384,9 +383,9 @@ class XBEngine(DeviceServer):
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[Optional[RxQueueItem]] = self.monitor.make_queue("rx_item_queue", n_rx_items)
+        self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
-        self._tx_item_queue: asyncio.Queue[Optional[TxQueueItem]] = self.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
