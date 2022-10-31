@@ -18,7 +18,6 @@
 
 import multiprocessing
 from collections.abc import Generator
-from typing import Union
 
 import numpy as np
 import pytest
@@ -26,9 +25,11 @@ import pytest
 from katgpucbf.dsim.shared_array import SharedArray
 
 # Process isn't an attribute of BaseContext but of each subclass
-_MPContext = Union[
-    multiprocessing.context.ForkContext, multiprocessing.context.ForkServerContext, multiprocessing.context.SpawnContext
-]
+_MPContext = (
+    multiprocessing.context.ForkContext
+    | multiprocessing.context.ForkServerContext
+    | multiprocessing.context.SpawnContext
+)
 
 
 @pytest.fixture

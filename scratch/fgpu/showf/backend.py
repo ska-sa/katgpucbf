@@ -3,7 +3,6 @@ import asyncio
 import copy
 import functools
 from collections import deque
-from typing import Deque
 
 import bokeh.server.contexts
 import numpy as np
@@ -70,7 +69,7 @@ class Backend:
             spead2.recv.RingStreamConfig(heaps=32 * substreams),
         )
         self.stream.add_udp_ibv_reader(endpoint_tuples, get_interface_address(interface), buffer_size=64 * 1024 * 1024)
-        self.frames: Deque[Frame] = deque()
+        self.frames: deque[Frame] = deque()
         self.last_full_timestamp = -1
         self.server_context = server_context
 

@@ -22,7 +22,7 @@ from collections import deque
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Deque, cast
+from typing import cast
 
 import numba
 import numpy as np
@@ -235,7 +235,7 @@ async def chunk_sets(
     n_pol = len(streams)
     # Working buffer to match up pairs of chunks from both pols. There is
     # a deque for each pol, ordered by time
-    buf: list[Deque[Chunk]] = [deque() for _ in streams]
+    buf: list[deque[Chunk]] = [deque() for _ in streams]
     ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
     lost = 0
 

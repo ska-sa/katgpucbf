@@ -88,7 +88,7 @@ class StatsCollector(Collector):
     class _StreamInfo:
         """Information about a single registered stream."""
 
-        stream: "weakref.ReferenceType[spead2.recv.ChunkRingStream]"
+        stream: weakref.ReferenceType[spead2.recv.ChunkRingStream]
         indices: list[int]  # Indices of counters, in the order given by counter_map
         prev: list[int]  # Amounts already counted
 
