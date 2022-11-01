@@ -224,18 +224,9 @@ modulo :math:`N`.
 
 Hermitian symmetry means that :math:`U'_k = U_{-k} = \overline{U_k}` where
 the 'overline' in :math:`\overline{U_k}` denotes conjugation. This is effectively saying that by taking the
-reverse indices in :math:`U_k` we get a conjugated result.
+reverse indices in :math:`U_k` we get a conjugated result (see [#]_ for a reminder why this is the case).
 
-Why is this so? Going back to the original definition for the DFT we saw the complex exponential
-:math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k` where :math:`k` represents the
-frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reversed
-(i.e. negative) the complex exponential changes to :math:`e^{\frac{2\pi j}{2n}\cdot i(k)}` as the negative
-in :math:`-k` multiplies out.
-
-Moving back to :math:`U` and :math:`V` components then :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
-Going full circle (for completeness) if one was to conjugate the reversal (i.e. :math:`\overline{U'}`) then since
-:math:`U' = \overline{U}`, :math:`\overline{U'} = \overline{\overline{U}} = U`. Likewise for
-:math:`\overline{V'} = \overline{\overline{V}} = V`.
+Looking back at to :math:`U` and :math:`V` components then :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
 
 Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the reverse of :math:`Z`,
 namely :math:`Z'`.
@@ -733,3 +724,7 @@ The work group size, subgroup size and coarsening factor can all affect
 performance significantly, and not always in obvious ways. It will likely be
 necessary to implement autotuning to get optimal results across a range of
 problem parameters and hardware devices, but this has not yet been done.
+
+.. rubric:: Footnotes
+
+.. [#] Going back to the original definition for the DFT we saw the complex exponential :math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k` where :math:`k` represents the frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reversed (i.e. negative) the complex exponential changes to :math:`e^{\frac{2\pi j}{2n}\cdot i(k)}` as the negative in :math:`-k` multiplies out.
