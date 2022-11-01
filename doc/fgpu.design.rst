@@ -108,51 +108,114 @@ slow and require multiple passes over the memory, because
 
 2. It appears to handle real-to-complex transforms by first doing a
    complex-to-complex transform and then using an additional pass to fix up
-   the result.
+   the result (i.e. form final FFT output).
 
 For performance reasons, we move part of the Fourier Transform into the
-post-processing kernel (using the Cooley-Tukey algorithm), and also handle
-fixing up the real-to-complex transformation.
+post-processing kernel, and also handle fixing up the real-to-complex transformation.
+This is achieved by decomposing the transformation into separately-computed smaller parts
+(using the Cooley-Tukey algorithm). Part of the Fourier transform is computed using
+cuFFT and the final stage (post-processing kernel) of the process includes one round of
+Cooley-Tukey computation and the computation to form the real-to-complex transformation.
+
+To start, let's consider the traditional equation for the Fourier Transform. Let :math:`N`
+be the number of channels into which we wish to decompose the input sequence, and let
+:math:`x_i` be the (real) time-domain samples (:math:`0 \le i < 2N`) and :math:`X_k` be its discrete
+Fourier transform (DFT). Because the time domain is real, the frequency domain is Hermitian symmetric,
+and we only need to compute half of it to recover all the information. We thus only need to consider
+:math:`k` from :math:`0` to :math:`N-1` (this loses information about :math:`X_N`, but it is convenient
+to discard it and thus have a power-of-two number of outputs).
+
+.. math:: X_k = \sum_{i=0}^{2N-1} e^{\frac{-2\pi j}{2N}\cdot ik} x_i.
+
+We know that a direct implementation of the DFT is inefficient and alternative, more efficient
+means exist to perform this computation. One such method is the FFT introduced by Cooley-Tukey
+and in the GPU space cuFFT is one such implementation. As highlighted earlier, transform sizes
+of greater than 16384 (for a GeForce RTX 3080 Ti at least) require more than one memory pass making it
+less efficient than it needs to be. The technique detailed below uses the decomposition as provided by
+Cooley-Tukey to break down a larger transform into smaller 'sub-transforms' where the number of 'sub-transforms'
+is intentionally kept small for efficiency reasons and later combined (same process as the FFT) to form
+the larger transform size. This is a multi-step process and requires some extra notation and math tricks.
 
 Real-to-complex transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Let's introduce some notation to see how this works. Let :math:`n` be the
-number of channels, :math:`x_i` be the (real) time-domain samples and
-:math:`X_k` be the Fourier transform (we divide by :math:`2n` rather than
-:math:`n` because that's the number of input samples used).
+Now for some notation to see how this works. We start by treating :math:`x` (a real array of length 2N) as if it is
+a complex array :math:`z` of length N, with each adjacent pair of real values in :math:`x` interpreted as the
+real and imaginary components of a complex value, and computing the Fourier transform of :math:`z`. Formally,
+let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}`. Then :math:`z_i = u_i + jv_i = x_{2i} + j x_{2i+1}`.
 
-.. math:: X_k = \sum_{i=0}^{2n} e^{\frac{-2\pi j}{2n}\cdot ik} x_i.
+We will start by computing the Fourier transform of :math:`z`. Let :math:`U`, :math:`V` and :math:`Z` denote the
+Fourier transforms of :math:`u`, :math:`v` and :math:`z` respectively. Since the Fourier transform is a linear
+operator and we defined :math:`z = u + jv`, we also have :math:`Z = U + jV`.
 
-Let :math:`u_i = x_{2i}` and :math:`v_i = x_{2i+1}` be the even and odd input
-samples, with Fourier transforms :math:`U` and :math:`V` respectively. By
-pretending the data is complex, we're computing the Fourier transform of
-:math:`u + jv`, namely :math:`U + jV`. Let's call it :math:`Z`.
+It is important to remember that both :math:`u` and :math:`v` are real-valued, so :math:`U`
+and :math:`V` are Hermitian symmetric. By re-arranging things we can reconstruct :math:`U` and
+:math:`V` from :math:`Z` using Hermitian symmetry properties. Let :math:`U'`
+be :math:`U` with reversed indices i.e., :math:`U'_k = U_{-k}` where indices are taken
+modulo :math:`N`.
 
-Firstly, we can reconstruct :math:`U` and :math:`V` from :math:`Z` by using
-Hermetian symmetry properties. Both :math:`u` and :math:`v` are real, so
-:math:`U` and :math:`V` are Hermitian symmetric. Let :math:`Z'` be :math:`Z`
-with reversed indices i.e., :math:`Z'_k = Z_{-k}` where indices are taken
-modulo :math:`n`. Then :math:`U' = \overline{U}, V' = \overline{V}` and
+Hermitian symmetry means that :math:`U'_k = U_{-k} = \overline{U_k}` where
+the 'overline' in :math:`\overline{U_k}` denotes conjugation. This is effectively saying that by taking the
+reverse indices in :math:`U_k` we get a conjugated result (see [#]_ for a reminder of why this is the case).
 
-.. math:: Z + \overline{Z'} = (U + \overline{U'}) + j(V - \overline{V'}) = 2U.
+Looking back at :math:`U` and :math:`V` components, :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
+Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the reverse of :math:`Z`,
+namely :math:`Z'`.
 
-Thus, :math:`U = \frac{Z + \overline{Z'}}{2}` and similarly
+.. math::
+   Z'              &= U' + jV'\\
+   \overline{Z'}   &= \overline{U' + jV'}\\
+                   &= \overline{U'} + \overline{j}\overline{V'}\\
+                   &= U - jV\\
+
+What we actually want is to be able to separate out :math:`U` and :math:`jV` in terms of only :math:`Z`
+and :math:`Z'` (remember, :math:`z` is the input array of real-valued samples reinterpreted as if it is
+an array of N complex samples).
+
+Now let's formulate both :math:`U` and :math:`V` in terms of :math:`Z` and :math:`\overline{Z'}`.
+
+.. math::
+      Z + \overline{Z'} &= (U + jV) + (U - jV)\\
+                        &= 2U +j(V-V)\\
+                        &= 2U.
+
+Likewise,
+
+.. math::
+      Z - \overline{Z'} &= (U + jV) - (U - jV)\\
+                        &= 2jV.
+
+
+Using the above we can see that :math:`U = \frac{Z + \overline{Z'}}{2}` and similarly
 :math:`V = \frac{Z - \overline{Z'}}{2j}`. Next, we use the Cooley-Tukey
-transform to construct :math:`X` from :math:`U` and :math:`V`. We can also
-re-use some common expressions by computing :math:`X_{n-k}` at the same time:
+transform to construct :math:`X` from :math:`U` and :math:`V`. To do this let's go back to
+the initial definition of the DFT and expand that using the Cooley-Tukey approach.
 
 .. math::
 
-   X_k &= \sum_{i=0}^{2n-1} e^{\frac{-2\pi j}{2n}\cdot ik} x_i\\
-       &= \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{2n}\cdot 2ik} u_i +
-          \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{2n}\cdot (2i+1)k} v_i\\
-       &= \sum_{i=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot ik} u_i +
-          e^{\frac{-\pi j}{n}\cdot k}\sum_{i=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot ik} v_i\\
-       &= U_k + e^{\frac{-\pi j}{n}\cdot k} V_k.\\
-   X_{n-k} &= U_{n-k} + e^{\frac{-pi j}{n}\cdot (n-k)} V_{n-k}\\
-           &= \overline{U_k} - \overline{e^{\frac{-\pi j}{n}\cdot k} V_k}.
+   X_k &= \sum_{i=0}^{2N-1} e^{\frac{-2\pi j}{2N}\cdot ik} x_i\\
+       &= \sum_{i=0}^{N-1} e^{\frac{-2\pi j}{2N}\cdot 2ik} u_i +
+          \sum_{i=0}^{N-1} e^{\frac{-2\pi j}{2N}\cdot (2i+1)k} v_i\\
+       &= \sum_{i=0}^{N-1} e^{\frac{-2\pi j}{N}\cdot ik} u_i +
+          e^{\frac{-\pi j}{N}\cdot k}\sum_{i=0}^{N-1} e^{\frac{-2\pi j}{N}\cdot ik} v_i\\
+       &= U_k + e^{\frac{-\pi j}{N}\cdot k} V_k.\\
 
-Note that when :math:`k = 0` or :math:`k = \frac{n}{2}` the second calculation
+What we get is a means to compute the desired output :math:`X_{k}` using the :math:`U` and :math:`V`
+which we compute from the complex-valued input data sequence :math:`z`.
+
+We can also re-use some common expressions by computing :math:`X_{N-k}` at the same time
+
+.. math::
+
+   X_{N-k} &= U_{N-k} + e^{\frac{-\pi j}{N}\cdot (N-k)} V_{N-k}\\
+           &= \overline{U_k} - \overline{e^{\frac{-\pi j}{N}\cdot k} V_k}.
+
+This raises the question: Why compute both :math:`X_{k}` and :math:`X_{N-k}`? After all,
+parameter :math:`k` should range the full channel range initially stated (parameter :math:`N`). The answer:
+compute efficiency. It is costly to compute :math:`U_k` and :math:`V_k` so if we can use them to
+compute two elements of :math:`X`` (:math:`X_{k}` and :math:`X_{N-k}`) at once it is better than producing
+only one element of :math:`X`.
+
+**A side note:** When :math:`k = 0` or :math:`k = \frac{N}{2}` the second calculation
 is unnecessary, but it is simpler (and probably cheaper) to just do it anyway
 rather than branch to avoid it.
 
@@ -164,17 +227,101 @@ into the postprocessing kernel (see the next section).
 
 Unzipping the FFT
 ~~~~~~~~~~~~~~~~~
-From here we'll assume all transforms are complex-to-complex unless specified
-otherwise. The Cooley-Tukey algorithm allows a transform of size :math:`c =
-mn` to be decomposed into :math:`n` transforms of size :math:`m` followed by
-:math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
+Right --- lets get practical and show how we *actually* implement this. From here we'll assume all
+transforms are complex-to-complex unless specified otherwise. Firstly, some recap: the Cooley-Tukey
+algorithm allows a transform of size :math:`N = mn` to be decomposed into :math:`n` transforms of
+size :math:`m` followed by :math:`m` transforms of size :math:`n`. We'll refer to :math:`n` as the
 "unzipping factor". We will keep it small (typically not more than 4), as the
-implementation requires registers proportional to this factor.
+implementation requires registers proportional to this factor. We are now going to go step-by-step and
+separate the input array :math:`z` into :math:`n` parts of size :math:`m` with each part operated on using a
+Fourier transform.
 
-To recap the Cooley-Tukey algorithm: let a time-domain index :math:`i` be
-written as :math:`qn + r` and a frequency-domain index :math:`k` be
-written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r},
-\dots, z_{(m-1)n+r}`, and denote its Fourier transform by :math:`Z^r`. Then
+To recap the indexing used in the Cooley-Tukey algorithm: let a
+time-domain index :math:`i` be written as :math:`qn + r` and a frequency-domain index :math:`k` be
+written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r}, \dots, z_{(m-1)n+r}`,
+and denote its Fourier transform by :math:`Z^r`. It is worthwhile to point out that the superscript
+:math:`r` *does not* denote exponentiation but rather is a means to indicate an :math:`r^{th}` array.
+In practice this :math:`r^{th}` array is a subset (part) of the larger :math:`z` array of input data.
+
+As a way of an example, let :math:`n=4` ("unzipping factor") and :math:`N=32768` (total number of channels).
+Now let's unpack this a bit further --- what is actually happening is that the initial array :math:`z` is divided into
+:math:`n=4` separate arrays each of :math:`m=32768/4 = 8192` elements (hence the :math:`N = mn` above).
+The actual samples that land up in each array are defined by the indices :math:`i` and :math:`k`.
+
+Lets start with :math:`i`. It was stated that :math:`i = qn + r`. The parameter :math:`r` takes on the range :math:`0` to :math:`n-1`
+(so :math:`r=0` to :math:`r=3` as :math:`n = 4`) and :math:`q` takes on the
+range :math:`0` to :math:`m-1` (i.e. :math:`q=0` to :math:`q=8191`).
+So we are dividing up array :math:`z` into :math:`n` smaller arrays denoted by  :math:`r` (i.e. :math:`z^{r}`)
+each of length :math:`m=8192`. So what does this look like practically?
+
+The first array when :math:`r=0` (i.e. :math:`z^{0}`)
+
+========================   ========
+   Inputs                  Index
+------------------------   --------
+  qn + r                      i
+========================   ========
+:math:`0 \cdot 4` + 0         0
+:math:`1 \cdot 4` + 0         4
+:math:`2 \cdot 4` + 0         8
+...                           ...
+...                           ...
+:math:`8191 \cdot 4` + 0    32764
+========================   ========
+
+This can be extended to the other remaining arrays. The fourth array when :math:`r=3` (for example), :math:`z^{3}`
+is :math:`z_{3}`, :math:`z_{7}`, :math:`z_{11}`, ..., :math:`z_{32767}`.
+
+What this shows is that each sub-array consists of samples from the initial array :math:`z` indexed
+by :math:`i=qn+r` where each sample is every :math:`4^{th}` and offset by :math:`r`. Pictorially
+this looks like,
+
+.. image:: images/z_array.png
+   :width: 600
+
+Right, so we have separate sub-arrays as indexed from the initial array, what happens next? These various
+:math:`z^{r}` arrays are fed to cuFFT yielding :math:`n` complex-to-complex transforms. These separate transforms
+now need to be combined to form a single real-to-complex transform of the full initial size. An inconvenience
+of this structure is that :math:`z^r` is not a contiguous set of input samples, but a strided array.
+While cuFFT does support both strided inputs and batched transformations, we cannot batch over :math:`r`
+and over multiple spectra at the same time as it only supports a single batch dimension with corresponding
+stride. We solve this by modifying the PFB kernel to reorder its output such that each :math:`z^r` is output
+contiguously. This can be done by shuffling some bits in the output index (because we assume powers of two
+everywhere).
+
+To see how the :math:`k` indexing works :math:`k = pm + s` and is dealt with in a similar manner as above.
+Parameter :math:`m = 8192` (in this example), and :math:`p` has a range :math:`0` to :math:`n-1`
+(i.e. :math:`p = 0` to :math:`p = 3` as :math:`n = 4` in our example); and :math:`s` takes on the
+range :math:`0` to :math:`m-1` (i.e. :math:`s = 0` to :math:`s = 8191`).
+
+Looking at this practically,
+
+When :math:`p = 0`
+
+===========================  =========
+   Inputs                     Index
+---------------------------  ---------
+  pm + s                      k
+===========================  =========
+:math:`0 \cdot 8192` + 0      0
+:math:`0 \cdot 8192` + 1      1
+:math:`0 \cdot 8192` + 2      2
+...                           ...
+...                           ...
+:math:`0 \cdot 8192` + 8191   8191
+===========================  =========
+
+This too can be extended to the other remaining arrays.
+
+Viewing the above tables it can be seen that the full range of outputs are indexed in batches of
+:math:`m = 8192` outputs, *but*, this is not yet the final output and are merely the outputs as provided
+by inputting the respective :math:`z^{r}` arrays into cuFFT (all we have done at this point is
+computed :math:`Z^{r}` using cuFFT). As a useful flashback, we are aiming to compute :math:`Z_{k}` from :math:`z`
+(made up from smaller arrays :math:`z^{r}`) with the intention of computing the :math:`U` and :math:`V`
+terms. Why? So that with :math:`U` and :math:`V` we can compute :math:`X_{k}` which is our desired
+final output.
+
+The aim is to compute :math:`Z_k` so putting it more formally we have
 
 .. math::
 
@@ -190,15 +337,6 @@ written as :math:`pm + s`. Let :math:`z^r` denote the array :math:`z_r, z_{n+r},
 The whole expression is a Fourier transform of the expression in brackets
 (the exponential inside the bracket is the so-called "twiddle factor").
 
-An inconvenience of this structure is that :math:`z^r` is not a contiguous
-set of input samples, but a strided array. While cuFFT does support both
-strided inputs and batched transformations, we cannot batch over :math:`r`
-and over multiple spectra at the same time as it only supports a single batch
-dimension with corresponding stride. We solve this by modifying the PFB kernel
-to reorder its output such that each :math:`z^r` is output contiguously. This
-can be done by shuffling some bits in the output index (because we assume
-powers of two everywhere).
-
 In the post-processing kernel, each work-item computes the results for a
 single :math:`s` and for all :math:`p`. To compute the real-to-complex
 transformation, it also needs to compute
@@ -208,6 +346,15 @@ transformation, it also needs to compute
    \overline{Z_{-k}} = \overline{Z_{-pm - s}}
    = \sum_{r=0}^{n-1} e^{\frac{-2\pi j}{n}\cdot rp}
      \left[e^{\frac{-2\pi j}{mn}\cdot rs} \overline{Z^r_{-s}}\right].
+
+
+Right, lets wrap things up. We have :math:`Z_{k}` (i.e. :math:`Z`)
+and :math:`\overline{Z_{-k}}` (i.e. :math:`\overline{Z'}`) which is what we set
+out to compute. This then means we can compute :math:`X_{k}` and :math:`X_{N-k}`
+as stated earlier from :math:`U = \frac{Z + \overline{Z'}}{2}` and
+:math:`V = \frac{Z - \overline{Z'}}{2j}` (with appropriate twiddle factor) to combine
+the various outputs from cuFFT and get the final desired output :math:`X_k`.
+
 
 Postprocessing
 ^^^^^^^^^^^^^^
@@ -496,3 +643,13 @@ The work group size, subgroup size and coarsening factor can all affect
 performance significantly, and not always in obvious ways. It will likely be
 necessary to implement autotuning to get optimal results across a range of
 problem parameters and hardware devices, but this has not yet been done.
+
+.. rubric:: Footnotes
+
+.. [#]
+   Going back to the original definition for the DFT we saw the complex
+   exponential :math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k`
+   where :math:`k` represents the frequency component under computation for the
+   input sequence :math:`x_i.` If :math:`k` is reversed (i.e. negative) the
+   complex exponential changes to :math:`e^{\frac{2\pi j}{2N}\cdot ik}` as the
+   negative in :math:`-k` multiplies out.
