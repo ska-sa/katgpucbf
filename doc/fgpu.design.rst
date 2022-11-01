@@ -325,8 +325,7 @@ In practice this :math:`r^{th}` array is a subset (part) of the larger :math:`z`
 As a way of an example, let :math:`n=4` ("unzipping factor") and :math:`N=32768` (total number of channels).
 Now let's unpack this a bit further --- what is actually happening is that the initial array :math:`z` is divided into
 :math:`n=4` separate arrays each of :math:`m=32768/4 = 8192` elements (hence the :math:`N = mn` above).
-This is true for a desired overall transform size of 32768 channels. The actual samples that land up in each
-array are defined by the indices :math:`i` and :math:`k`.
+The actual samples that land up in each array are defined by the indices :math:`i` and :math:`k`.
 
 Lets start with :math:`i`. It was stated that :math:`i = qn + r`. The parameter :math:`r` takes on the range :math:`0` to :math:`n-1`
 (so :math:`r=0` to :math:`r=3` as :math:`n = 4`) and :math:`q` takes on the
