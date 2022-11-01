@@ -224,9 +224,9 @@ modulo :math:`N`.
 
 Hermitian symmetry means that :math:`U'_k = U_{-k} = \overline{U_k}` where
 the 'overline' in :math:`\overline{U_k}` denotes conjugation. This is effectively saying that by taking the
-reverse indices in :math:`U_k` we get a conjugated result (see [#]_ for a reminder why this is the case).
+reverse indices in :math:`U_k` we get a conjugated result (see [#]_ for a reminder of why this is the case).
 
-Looking back at to :math:`U` and :math:`V` components then :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
+Looking back at :math:`U` and :math:`V` components then :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
 
 Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the reverse of :math:`Z`,
 namely :math:`Z'`.
@@ -727,4 +727,10 @@ problem parameters and hardware devices, but this has not yet been done.
 
 .. rubric:: Footnotes
 
-.. [#] Going back to the original definition for the DFT we saw the complex exponential :math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k` where :math:`k` represents the frequency component under computation for the input sequence :math:`x_i`. If :math:`k` is reversed (i.e. negative) the complex exponential changes to :math:`e^{\frac{2\pi j}{2n}\cdot i(k)}` as the negative in :math:`-k` multiplies out.
+.. [#]
+   Going back to the original definition for the DFT we saw the complex
+   exponential :math:`e^{\frac{-2\pi j}{2N}\cdot ik}` has a variable :math:`k`
+   where :math:`k` represents the frequency component under computation for the
+   input sequence :math:`x_i.` If :math:`k` is reversed (i.e. negative) the
+   complex exponential changes to :math:`e^{\frac{2\pi j}{2N}\cdot ik}` as the
+   negative in :math:`-k` multiplies out.
