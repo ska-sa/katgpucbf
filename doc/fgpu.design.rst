@@ -226,8 +226,7 @@ Hermitian symmetry means that :math:`U'_k = U_{-k} = \overline{U_k}` where
 the 'overline' in :math:`\overline{U_k}` denotes conjugation. This is effectively saying that by taking the
 reverse indices in :math:`U_k` we get a conjugated result (see [#]_ for a reminder of why this is the case).
 
-Looking back at :math:`U` and :math:`V` components then :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
-
+Looking back at :math:`U` and :math:`V` components, :math:`U' = \overline{U}` and similarly :math:`V' = \overline{V}`.
 Why is this important? Previously we stated that :math:`Z = U + jV`. Now we can consider the reverse of :math:`Z`,
 namely :math:`Z'`.
 
