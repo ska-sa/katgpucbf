@@ -134,7 +134,8 @@ async def test_channelisation_and_sfdr(
     plot_channel = rel_freqs[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
 
-    ymin = -100
+    ymin = np.floor(np.mean(hdr_data_db)) - 3
+
     title = f"SFDR for channel {plot_channel}"
     x = np.linspace(0, receiver.n_chans - 1, len(hdr_data_db[selected_plot_idx, :]))
     db_plot = hdr_data_db[selected_plot_idx, :]
@@ -142,6 +143,40 @@ async def test_channelisation_and_sfdr(
     fig = Figure()
     ax = fig.subplots()
     ax.plot(x, db_plot)
+    ax.set_title(title)
+    ax.set_xlabel("Channel")
+    ax.set_ylabel("dB")
+    ax.xaxis.set_major_locator(POTLocator())
+    ax.set_ylim(ymin, -0.05 * ymin)
+    if ymin < -required_sfdr_db:
+        ax.axhline(-required_sfdr_db, dashes=(1, 1), color="black")
+        ax.annotate(
+            f"{-required_sfdr_db} dB",
+            (0, -required_sfdr_db),
+            xytext=(-3, -3),
+            textcoords="offset points",
+            horizontalalignment="right",
+            verticalalignment="top",
+        )
+    pdf_report.figure(fig)
+
+    zoom_plot_range = 3
+
+    assert plot_channel >= zoom_plot_range and plot_channel <= receiver.n_chans - zoom_plot_range - 1
+    assert zoom_plot_range >= 3
+
+    if (plot_channel - zoom_plot_range) < 0:
+        zoom_plot_range = np.abs(plot_channel - zoom_plot_range)
+
+    if (plot_channel + zoom_plot_range) > receiver.n_chans:
+        zoom_plot_range = receiver.n_chans - plot_channel
+
+    title = f"Zoom SFDR for channel {plot_channel}"
+    x = np.linspace(-zoom_plot_range, zoom_plot_range, zoom_plot_range * 2 + 1)
+
+    fig = Figure()
+    ax = fig.subplots()
+    ax.stem(x, db_plot[plot_channel - zoom_plot_range : plot_channel + zoom_plot_range + 1], bottom=ymin)
     ax.set_title(title)
     ax.set_xlabel("Channel")
     ax.set_ylabel("dB")
