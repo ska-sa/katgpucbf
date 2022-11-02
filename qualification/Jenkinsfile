@@ -90,7 +90,7 @@ pipeline {
   post {
     always {
       emailext attachLog: true,
-      attachmentsPattern: 'report.json, report.pdf',
+      attachmentsPattern: 'report.pdf',
       body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
       <b>Node:</b> ${env.NODE_NAME}<br>
       <b>Duration:</b> ${currentBuild.durationString}<br>
