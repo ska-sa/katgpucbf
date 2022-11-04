@@ -63,6 +63,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
+from ..utils import DeviceStatusSensor
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -277,6 +278,7 @@ class XBEngine(DeviceServer):
     ):
         super().__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
+        self.sensors.add(DeviceStatusSensor(self.sensors))
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")

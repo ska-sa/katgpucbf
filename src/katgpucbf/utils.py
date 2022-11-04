@@ -20,14 +20,19 @@ import ipaddress
 import logging
 import signal
 from asyncio import get_event_loop
+from enum import Enum
+from typing import Optional, TypeVar
 
-from aiokatcp import DeviceServer
+import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
+
+_T = TypeVar("_T")
+_U = TypeVar("_U")
 
 logger = logging.getLogger(__name__)
 
 
-def add_signal_handlers(server: DeviceServer) -> None:
+def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [signal.SIGINT, signal.SIGTERM]
 
@@ -53,3 +58,50 @@ def parse_source(value: str) -> list[tuple[str, int]] | str:
         return [(ep.host, ep.port) for ep in endpoints]
     except ValueError:
         return value
+
+
+class DeviceStatus(Enum):
+    """Discrete `device-status` readings.
+
+    Doesn't follow the convention of :class:`aiokatcp.Sensor.Status` because
+    it's useful for `UNKNOWN` to have the highest (or worst) value.
+    """
+
+    OK = 1
+    DEGRADED = 2
+    FAIL = 3
+    UNKNOWN = 4
+
+
+class DeviceStatusSensor(aiokatcp.AggregateSensor):
+    """Summary sensor for quickly ascertaining device status.
+
+    This takes its value from the worst status of its target set of sensors, so
+    it's quick to identify if there's something wrong, or if everything is good.
+    """
+
+    def __init__(self, target: aiokatcp.SensorSet):
+        super().__init__(target=target, sensor_type=DeviceStatus, name="device-status")
+
+    def update_aggregate(
+        self,
+        updated_sensor: Optional[aiokatcp.Sensor[_T]],
+        reading: Optional[aiokatcp.Reading[_T]],
+        old_reading: Optional[aiokatcp.Reading[_T]],
+    ) -> aiokatcp.Reading[DeviceStatus]:  # noqa: D102
+        # For device status it's far simpler just to re-calculate everything
+        # each time. In my mind I thought there might be a more elegant /
+        # efficient way of doing this, but it's the simplest thing that works
+        # for now.
+        worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN
+        for sensor in self.target.values():
+            if self.filter_aggregate(sensor):
+                worst_status = max(worst_status, sensor.status)
+
+        if worst_status == aiokatcp.Sensor.Status.NOMINAL:
+            return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
+        if worst_status == aiokatcp.Sensor.Status.WARN:
+            return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
+        if worst_status == aiokatcp.Sensor.Status.UNKNOWN:  # Do we need to take this situation into account?
+            return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.UNKNOWN, DeviceStatus.UNKNOWN)
+        return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)

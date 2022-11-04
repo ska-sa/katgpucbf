@@ -49,6 +49,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
+from ..utils import DeviceStatusSensor
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -451,6 +452,7 @@ class Engine(aiokatcp.DeviceServer):
     ) -> None:
         super().__init__(katcp_host, katcp_port)
         self._populate_sensors(self.sensors)
+        self.sensors.add(DeviceStatusSensor(self.sensors))
 
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
