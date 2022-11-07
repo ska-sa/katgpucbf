@@ -90,9 +90,7 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor):
         old_reading: Optional[aiokatcp.Reading[_T]],
     ) -> aiokatcp.Reading[DeviceStatus]:  # noqa: D102
         # For device status it's far simpler just to re-calculate everything
-        # each time. In my mind I thought there might be a more elegant /
-        # efficient way of doing this, but it's the simplest thing that works
-        # for now.
+        # each time, than to try and maintain state.
         worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN
         for sensor in self.target.values():
             if self.filter_aggregate(sensor):
