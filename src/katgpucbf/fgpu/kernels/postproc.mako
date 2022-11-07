@@ -243,7 +243,7 @@ DEVICE_FN float2 apply_delay_gain(int k, float2 gain, float phase, float2 X)
  * possible changes. The input array is guaranteed to be tightly packed and so no
  * in_stride is used.
  */
-KERNEL void postproc(
+KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory
     const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
     const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
