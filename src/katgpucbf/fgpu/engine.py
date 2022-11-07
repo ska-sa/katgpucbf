@@ -241,6 +241,8 @@ class OutItem(QueueItem):
 
     #: Output data, a collection of spectra, arranged in memory by pol and by heap.
     spectra: accel.DeviceArray
+    #: Output saturation count, per pol
+    saturation: accel.DeviceArray
     #: Provides a scratch space for collecting per-spectrum fine delays while
     #: the `OutItem` is being prepared. When the `OutItem` is placed onto the
     #: queue it is copied to the `Compute`.
@@ -259,6 +261,7 @@ class OutItem(QueueItem):
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
+        self.saturated = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["saturated"]))
         self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
         self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
         self.gains = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["gains"]))
@@ -847,7 +850,7 @@ class Engine(aiokatcp.DeviceServer):
             self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
             self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
             self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
-            self._compute.run_backend(self._out_item.spectra)
+            self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
             self._out_item.add_marker(self._compute.command_queue)
             self._out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're

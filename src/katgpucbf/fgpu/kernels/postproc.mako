@@ -42,20 +42,42 @@ DEVICE_FN float2 csub(float2 a, float2 b)
     return make_float2(a.x - b.x, a.y - b.y);
 }
 
-DEVICE_FN char quant(float value)
+// Quantise, and return saturation flag
+DEVICE_FN bool quant(float value, signed char *out)
 {
-    int out;
-#ifdef __OPENCL_VERSION__
-    out = convert_char_sat_rte(value);
-#else
+    bool saturated = false;
+    if (value < -127.0f)
+    {
+        value = -127.0f;
+        saturated = true;
+    }
+    else if (value > 127.0f)
+    {
+        value = 127.0f;
+        saturated = true;
+    }
+
+    int q;
     // Convert to s8, round to nearest integer, and saturate
-    asm("cvt.rni.sat.s8.f32 %0, %1;" : "=r" (out) : "f"(value));
+    // (saturation is redundant due to the test above, but automatic
+    // for float-to-int conversions on CUDA hardware).
+#ifdef __OPENCL_VERSION__
+    q = convert_char_sat_rte(value);
+#else
+    asm("cvt.rni.sat.s8.f32 %0, %1;" : "=r" (q) : "f"(value));
 #endif
-    // Clamp -128 to -127 to give symmetrical output
-    out = (out == -128) ? -127 : out;
-    return out; // Returning an int as a char can lose values, but since we have
-                // just made sure it's s8 in the previous line, it's guaranteed
-                // not to.
+    // Returning an int as a char can lose values, but since we have
+    // just made sure it's s8 in the previous line, it's guaranteed
+    // not to.
+    *out = q;
+    return saturated;
+}
+
+// Quantise, and return saturation flag
+DEVICE_FN bool quant_complex(float2 value, signed char *out_x, signed char *out_y)
+{
+    // Note: | not || to avoid short-circuiting
+    return quant(value.x, out_x) | quant(value.y, out_y);
 }
 
 /* Turn a float2 into an array of 2 floats for easier indexing */
@@ -245,6 +267,7 @@ DEVICE_FN float2 apply_delay_gain(int k, float2 gain, float phase, float2 X)
  */
 KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory
+    GLOBAL unsigned int * RESTRICT out_saturated, // Output saturation count, per pol
     const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
     const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
     const GLOBAL float2 * RESTRICT fine_delay, // Fine delay, in fraction of a sample (per pol)
@@ -260,6 +283,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
+    unsigned int saturated[2] = {0, 0};
 
     // Load a block of data
     // The transpose happens per-accumulation.
@@ -315,6 +339,11 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                 k[1] = CHANNELS - k[0];
                 for (int i = 0; i < 2; i++)
                 {
+                    /* Skip processing duplicates. This is mainly needed to
+                     * avoid double-counting saturation.
+                     */
+                    if (i == 1 && (s == 0 || s * 2 == m))
+                        continue;
                     const float delay_scale = -1.0f / CHANNELS;
                     float channel_scale = delay_scale * k[i];
                     float2 out[2];
@@ -327,10 +356,8 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
 
                     // Interleave polarisations. Quantise at the same time.
                     char4 packed;
-                    packed.x = quant(out[0].x);
-                    packed.y = quant(out[0].y);
-                    packed.z = quant(out[1].x);
-                    packed.w = quant(out[1].y);
+                    saturated[0] += quant_complex(out[0], &packed.x, &packed.y);
+                    saturated[1] += quant_complex(out[1], &packed.z, &packed.w);
                     scratch[p][i].arr[${lr}][${lc}] = packed;
                 }
             }
@@ -351,10 +378,15 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
             {
                 int k = p * m + s;
                 base[k * out_stride] = scratch[p][0].arr[${lr}][${lc}];
-                if (k != 0)
+                if (s != 0 && s * 2 != m)  // Skip the duplicates (calculation was skipped)
                     base[(CHANNELS - k) * out_stride] = scratch[p][1].arr[${lr}][${lc}];
             }
         }
     }
     </%transpose:transpose_store>
+
+    // TODO: could reduce within the workgroup and do only one atomic update
+    // per workgroup. It doesn't seem to have much impact though.
+    for (int i = 0; i < 2; i++)
+        atomicAdd(&out_saturated[i], saturated[i]);
 }

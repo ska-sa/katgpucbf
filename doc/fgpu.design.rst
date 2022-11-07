@@ -215,10 +215,6 @@ compute efficiency. It is costly to compute :math:`U_k` and :math:`V_k` so if we
 compute two elements of :math:`X`` (:math:`X_{k}` and :math:`X_{N-k}`) at once it is better than producing
 only one element of :math:`X`.
 
-**A side note:** When :math:`k = 0` or :math:`k = \frac{N}{2}` the second calculation
-is unnecessary, but it is simpler (and probably cheaper) to just do it anyway
-rather than branch to avoid it.
-
 Why is doing all this work more efficient that letting cuFFT handle the
 real-to-complex transformation? After all, cuFFT most likely does this (or
 something equivalent) internally. The answer is that instead of using a
@@ -355,6 +351,12 @@ as stated earlier from :math:`U = \frac{Z + \overline{Z'}}{2}` and
 :math:`V = \frac{Z - \overline{Z'}}{2j}` (with appropriate twiddle factor) to combine
 the various outputs from cuFFT and get the final desired output :math:`X_k`.
 
+We also wish to keep a tally of saturated (clipped) values, which requires
+that each output value is considered exactly once. This is made more
+complicated by the process that computes :math:`X_k` and :math:`X_{N-k}`
+jointly. With :math:`k = pm + s`, we consider all :math:`0 \le 0 < n` and
+:math:`0 \le s \le \frac{m}{2}`, and discard :math:`X_{N-k}` when :math:`s =
+0` or :math:`s = \frac{m}{2}` as these are duplicated cases.
 
 Postprocessing
 ^^^^^^^^^^^^^^
