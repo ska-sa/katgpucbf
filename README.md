@@ -17,8 +17,7 @@ generations. Other platforms may well work, but have not been tested.
 * An Nvidia GPU. For the XB-engine, it needs to be of compute capability 7.2 or greater
   and have tensor cores.
 * Mellanox OFED Drivers v5.3.1 for ibverbs functionality. (Any v5+ should work.)
-  For best performance, ibverbs is recommended. Currently `fgpu` can operate
-  without ibverbs, but the functionality is not available (yet) in `xbgpu`.
+  For best performance, ibverbs is recommended. 
 
 ### Software
 * Ubuntu 22.04
