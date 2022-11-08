@@ -85,9 +85,8 @@ class Postproc(accel.Operation):
     **out** : spectra // spectra_per_heap × channels × spectra_per_heap × N_POLS × COMPLEX, int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.
-    **saturated** : N_POLS, uint32
-        Number of saturated complex values in **out**. Executing the kernel
-        increments these values
+    **saturated** : heaps × N_POLS, uint32
+        Number of saturated complex values in **out**.
     **fine_delay** : spectra × 2, float32
         Fine delay in samples (one value per pol).
     **phase** : spectra × 2, float32
@@ -126,6 +125,7 @@ class Postproc(accel.Operation):
         self.spectra_per_heap = spectra_per_heap
         pols = accel.Dimension(N_POLS, exact=True)
         cplx = accel.Dimension(COMPLEX, exact=True)
+        heaps = spectra // spectra_per_heap
 
         in_shape = (
             accel.Dimension(spectra),
@@ -134,10 +134,8 @@ class Postproc(accel.Operation):
         )
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["out"] = accel.IOSlot(
-            (spectra // spectra_per_heap, template.channels, spectra_per_heap, pols, cplx), np.int8
-        )
-        self.slots["saturated"] = accel.IOSlot((pols,), np.uint32)
+        self.slots["out"] = accel.IOSlot((heaps, template.channels, spectra_per_heap, pols, cplx), np.int8)
+        self.slots["saturated"] = accel.IOSlot((heaps, pols), np.uint32)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["gains"] = accel.IOSlot((template.channels, pols), np.complex64)

@@ -267,7 +267,7 @@ DEVICE_FN float2 apply_delay_gain(int k, float2 gain, float phase, float2 X)
  */
 KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory
-    GLOBAL unsigned int * RESTRICT out_saturated, // Output saturation count, per pol
+    GLOBAL unsigned int (* RESTRICT out_saturated)[2], // Output saturation count, per heap and pol
     const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
     const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
     const GLOBAL float2 * RESTRICT fine_delay, // Fine delay, in fraction of a sample (per pol)
@@ -388,5 +388,5 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     // TODO: could reduce within the workgroup and do only one atomic update
     // per workgroup. It doesn't seem to have much impact though.
     for (int i = 0; i < 2; i++)
-        atomicAdd(&out_saturated[i], saturated[i]);
+        atomicAdd(&out_saturated[z][i], saturated[i]);
 }
