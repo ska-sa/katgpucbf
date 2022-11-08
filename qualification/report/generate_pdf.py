@@ -841,7 +841,29 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input", help="Output of pytest --report-log=...")
     parser.add_argument("pdf", help="PDF file to write")
+    parser.add_argument("-c", "--commit_id", action="store_true", help="Outputs commit ID of test image")
     args = parser.parse_args()
+    #####################################################
+    if args.commit_id:
+        if not isinstance(args.input, list):
+            result_list = []
+            with open(args.input) as fp:
+                for line in fp:
+                    result_list.append(json.loads(line))
+        else:
+            result_list = args.input
+        # git_version = result_list[8]["tasks"]["f.antenna_channelised_voltage.0"]["git_version"]
+        # print(git_version)
+
+        engine_list = []
+        my_list = result_list[8]["tasks"]
+        for x, y in my_list.items():
+            # print(x, y)
+            if "f.antenna_channelised_voltage" in x or "xb.baseline_correlation_products" in x:
+                engine_list.append(y["git_version"])
+        print(engine_list[0])
+
+    #####################################################
     doc = document_from_json(args.input)
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
