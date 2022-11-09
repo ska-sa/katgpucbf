@@ -711,7 +711,7 @@ class TestEngine:
         assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
         assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
 
-    async def test_saturation_sensors(
+    async def test_dig_clip_cnt_sensors(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
