@@ -707,8 +707,10 @@ class TestEngine:
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
         assert prom_diff.get_sample_diff("output_heaps_total") == output_heaps
-        frame_size = channels * spectra_per_heap * N_POLS * COMPLEX * np.dtype(np.int8).itemsize
+        frame_samples = channels * spectra_per_heap * N_POLS
+        frame_size = frame_samples * COMPLEX * np.dtype(np.int8).itemsize
         assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
+        assert prom_diff.get_sample_diff("output_samples_total") == np.sum(dst_present) * frame_samples
         assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
 
     async def test_dig_clip_cnt_sensors(
