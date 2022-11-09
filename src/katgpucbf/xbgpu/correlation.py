@@ -199,6 +199,11 @@ class Correlation(accel.Operation):
         self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
         self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
+        self.slots["out_saturated"] = accel.IOSlot(dimensions=(1,), dtype=np.uint32)
+        if n_batches * self.template.n_channels * self.template.n_baselines * N_POLS * N_POLS >= 2**31:
+            # Can probably go higher, but rather keep it low to reduce the risk
+            # of indexing bugs.
+            raise ValueError("2^31 or more visibilities are not currently supported")
         self.first_batch = 0
         self.last_batch = n_batches
         self.n_batches = n_batches
@@ -226,10 +231,17 @@ class Correlation(accel.Operation):
         self.ensure_all_bound()
         mid_visibilities_buffer = self.buffer("mid_visibilities")
         out_visibilities_buffer = self.buffer("out_visibilities")
-        wgs = 128
+        out_saturated_buffer = self.buffer("out_saturated")
+        wgs = 128  # TODO: could be tuned. But this kernel costs a tiny amount
+        out_saturated_buffer.zero(self.command_queue)
         self.command_queue.enqueue_kernel(
             self.template.reduce_kernel,
-            [out_visibilities_buffer.buffer, mid_visibilities_buffer.buffer, np.uint32(self.n_batches)],
+            [
+                out_visibilities_buffer.buffer,
+                out_saturated_buffer.buffer,
+                mid_visibilities_buffer.buffer,
+                np.uint32(self.n_batches),
+            ],
             global_size=(accel.roundup(int(np.product(out_visibilities_buffer.shape)), wgs), 1, 1),
             local_size=(wgs, 1, 1),
         )

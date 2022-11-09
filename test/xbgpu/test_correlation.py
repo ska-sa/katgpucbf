@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -163,7 +163,7 @@ def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueu
     correlation = template.instantiate(command_queue, 2)
     correlation.ensure_all_bound()
 
-    # Fill the source with maximal values, to ensure saturation is reach quickly
+    # Fill the source with maximal values, to ensure saturation is reached quickly
     buf_samples_device = correlation.buffer("in_samples")
     buf_samples_host = buf_samples_device.empty_like()
     in_dtype = buf_samples_device.dtype
@@ -174,7 +174,9 @@ def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueu
 
     buf_visibilities_device = correlation.buffer("out_visibilities")
     out_dtype = buf_visibilities_device.dtype
-    iters = np.iinfo(out_dtype).max // (2 * high * high) + 1  # Enough to saturate
+    # Experimentally, enough iterations to saturate some but not all values.
+    # The test *may* need modification if the parameters change.
+    iters = np.iinfo(out_dtype).max // (template.n_spectra_per_heap * high * high) * 10
 
     correlation.zero_visibilities()
     correlation.first_batch = 0
@@ -188,11 +190,15 @@ def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueu
     correlation()
     correlation.reduce()
     buf_visibilities_host = buf_visibilities_device.get(command_queue)
+    buf_saturated_host = correlation.buffer("out_saturated").get(command_queue)
 
     expected = correlate_host(buf_samples_host[0:1]) * iters + correlate_host(buf_samples_host[1:2])
-    # Check that saturation does in fact occur
+    # Check that saturation does in fact occur, but not all the time
     assert np.sum(expected < np.iinfo(out_dtype).min) > 0
     assert np.sum(expected > np.iinfo(out_dtype).max) > 0
-    expected = np.clip(expected, -np.iinfo(out_dtype).max, np.iinfo(out_dtype).max)
+    assert np.sum(np.all(np.abs(expected) < np.iinfo(out_dtype).max, axis=-1)) > 0
 
+    expected_sat = np.sum(np.any(np.abs(expected) > np.iinfo(out_dtype).max, axis=-1))
+    expected = np.clip(expected, -np.iinfo(out_dtype).max, np.iinfo(out_dtype).max)
     np.testing.assert_equal(buf_visibilities_host, expected)
+    assert buf_saturated_host[()] == expected_sat
