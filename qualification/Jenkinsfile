@@ -27,7 +27,7 @@
  *
  * For more information on the qualification framework, see katgpucbf/doc/qualification.rst
  */
-
+def COMMIT_ID = '0'
 pipeline {
   agent {
     dockerfile {
@@ -74,8 +74,9 @@ pipeline {
            sh 'pip install -r qualification/requirements.txt'
            sh 'pip install --no-deps ".[qualification]" && pip check'
            sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
-           sh 'qualification/report/generate_pdf.py report.json report.pdf -c'
-
+           sh 'qualification/report/generate_pdf.py report.json report.pdf'
+           //COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+           COMMIT_ID = '10'
            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
          }
        }
@@ -96,6 +97,7 @@ pipeline {
       <b>Node:</b> ${env.NODE_NAME}<br>
       <b>Duration:</b> ${currentBuild.durationString}<br>
       <b>Build URL:</b> ${env.BUILD_URL}<br>
+      <b>Test Image Commit ID:</b> ${COMMIT_ID}<br>
       <br>
       <i>Note: This is an Automated email notification.</i>""",
       recipientProviders: [developers(), requestor()],
