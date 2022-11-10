@@ -80,57 +80,16 @@ def make_stream(
         )
 
 
-class BufferWrapper:
-    """
-    Holds a buffer object that has been configured so that it can be zero-copy transferred onto the network.
-
-    In order to preserve the zero-copy properties of the buffer, data can
-    only be copied to the buffer within this class, the buffer handle
-    cannot be overwritten. For example: ``buffer_wrapper.buffer = new_array``
-    will fail as it attempts to assign a new object to the buffer variable
-    while ``buffer_wrapper.buffer[:] = new_array`` will succeed as it
-    overwrites the values in the buffer, not the buffer itself.
-
-    There may be a better way to hold these buffer objects and prevent them
-    being overwritten other than wrapping them in an BufferWrapper but I could
-    not think of any at the time of writing.
-
-    Parameters
-    ----------
-    buffer
-        The array configured for zero-copy transfers.
-    """
-
-    def __init__(self, buffer: np.ndarray) -> None:
-        self._buffer: np.ndarray = buffer
-
-    @property
-    def buffer(self) -> np.ndarray:
-        """Return the buffer associated with this class."""
-        return self._buffer
-
-    @buffer.setter
-    def buffer(self, buffer) -> None:
-        """
-        Overwrite the buffer's handle - this functionality has been disabled.
-
-        Instead of overwriting the handle, copy to the buffer using array
-        indexing [:] instead.
-        """
-        raise AttributeError("Don't overwrite the buffer's handle! Copy to it instead using array indexing [:].")
-
-
 class XSend:
     """
     Class for turning baseline correlation products into SPEAD heaps and transmitting them.
 
     This class creates a queue of buffers that can be sent out onto the
     network. To get one of these buffers call :meth:`get_free_heap` - it will
-    return a buffer wrapped in a :class:`BufferWrapper` object. Once the
-    necessary data has been copied to the buffer and it is ready to be sent
-    onto the network, pass it back to this object using :meth:`send_heap`. This
-    object will create a limited number of buffers and keep recycling them -
-    avoiding any memory allocation at runtime.
+    return a buffer. Once the necessary data has been copied to the buffer and
+    it is ready to be sent onto the network, pass it back to this object using
+    :meth:`send_heap`. This object will create a limited number of buffers and
+    keep recycling them - avoiding any memory allocation at runtime.
 
     This has been designed to run in an asyncio loop, and :meth:`get_free_heap`
     function makes sure that the next buffer in the queue is not in flight
@@ -227,7 +186,7 @@ class XSend:
 
         self.context: Final[katsdpsigproc.abc.AbstractContext] = context
 
-        self._heaps_queue: asyncio.Queue[tuple[asyncio.Future, BufferWrapper]] = asyncio.Queue()
+        self._heaps_queue: asyncio.Queue[tuple[asyncio.Future, accel.HostArray]] = asyncio.Queue()
         self.buffers: list[accel.HostArray] = []
 
         for _ in range(self._n_send_heaps_in_flight):
@@ -241,8 +200,7 @@ class XSend:
             dummy_future: asyncio.Future = asyncio.Future()
             dummy_future.set_result("")
 
-            self._heaps_queue.put_nowait((dummy_future, BufferWrapper(buffer)))
-
+            self._heaps_queue.put_nowait((dummy_future, buffer))
             self.buffers.append(buffer)
 
         # Transport-agnostic stream information
@@ -298,10 +256,10 @@ class XSend:
 
         self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
 
-    def send_heap(self, timestamp: int, buffer_wrapper: BufferWrapper) -> None:
-        """Take in a :class:`BufferWrapper` and send it as a SPEAD heap.
+    def send_heap(self, timestamp: int, buffer: accel.HostArray) -> None:
+        """Take in a buffer and send it as a SPEAD heap.
 
-        This function is non-blocking. There is no guarantee that a packet has
+        This function is non-blocking. There is no guarantee that a heap has
         been sent by the time the function completes.
 
         Parameters
@@ -309,13 +267,13 @@ class XSend:
         timestamp
             The timestamp that will be assigned to the buffer when it is
             encapsulated in a SPEAD heap.
-        buffer_wrapper
-            Wrapped buffer to sent as a SPEAD heap.
+        buffer
+            Buffer to sent as a SPEAD heap.
         """
         if self.tx_enabled:
             self.item_group["timestamp"].value = timestamp
             self.item_group["frequency"].value = self.channel_offset
-            self.item_group["xeng_raw"].value = buffer_wrapper.buffer
+            self.item_group["xeng_raw"].value = buffer
 
             heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
             # This flag forces the heap to include all item_group pointers in every
@@ -325,24 +283,24 @@ class XSend:
             heap_to_send.repeat_pointers = True
 
             future = self.source_stream.async_send_heap(heap_to_send)
-            self._heaps_queue.put_nowait((future, buffer_wrapper))
+            self._heaps_queue.put_nowait((future, buffer))
             # NOTE: It's not strictly true to say that the data has been sent at
             # this point; it's only been queued for sending. But it should be close
             # enough for monitoring data rates at the granularity that this is
             # typically done.
             output_heaps_counter.inc(1)
-            output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
+            output_bytes_counter.inc(buffer.nbytes)
         else:
             # :meth:`get_free_heap` still needs to await some Future before
-            # returning a buffer_wrapper.
+            # returning a buffer.
             flush_stream_task = asyncio.create_task(self.source_stream.async_flush())
-            self._heaps_queue.put_nowait((flush_stream_task, buffer_wrapper))
+            self._heaps_queue.put_nowait((flush_stream_task, buffer))
 
-    async def get_free_heap(self) -> BufferWrapper:
+    async def get_free_heap(self) -> accel.HostArray:
         """
-        Return a :class:`BufferWrapper` object from the internal fifo queue when one is available.
+        Return a buffer from the internal fifo queue when one is available.
 
-        There are a limited number of BufferWrapper in existence and
+        There are a limited number of buffers in existence and
         they are all stored with a future object. If the future is complete,
         the buffer is not being used for sending and it will return the buffer
         immediately. If the future is still busy, this function will wait
@@ -352,12 +310,12 @@ class XSend:
 
         Returns
         -------
-        buffer_wrapper
-            Free buffer wrapped in a :class:`BufferWrapper`.
+        buffer
+            Free buffer
         """
-        future, buffer_wrapper = await self._heaps_queue.get()
+        future, buffer = await self._heaps_queue.get()
         await asyncio.wait([future])
-        return buffer_wrapper
+        return buffer
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""
