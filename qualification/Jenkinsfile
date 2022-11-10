@@ -74,7 +74,7 @@ pipeline {
            sh 'pip install -r qualification/requirements.txt'
            sh 'pip install --no-deps ".[qualification]" && pip check'
            sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
-           sh 'qualification/report/generate_pdf.py report.json report.pdf'
+           sh 'qualification/report/generate_pdf.py report.json report.pdf -c'
            //COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
            COMMIT_ID = '10'
            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
