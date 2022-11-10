@@ -37,11 +37,11 @@ import time
 import aiokatcp
 import katsdpsigproc
 import katsdpsigproc.abc
-import katsdpsigproc.accel
 import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
+from katsdpsigproc import accel
 from katsdptelstate.endpoint import Endpoint
 
 from .. import (
@@ -51,6 +51,7 @@ from .. import (
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
+    accel_utils,
 )
 from .. import recv as base_recv
 from ..monitor import Monitor
@@ -75,7 +76,7 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
-    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
+    def __init__(self, buffer_device: accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
         self.buffer_device = buffer_device
         self.present = present
         super().__init__(timestamp)
@@ -97,9 +98,14 @@ class TxQueueItem(QueueItem):
     """
 
     def __init__(
-        self, buffer_device: katsdpsigproc.accel.DeviceArray, present_ants: np.ndarray, timestamp: int = 0
+        self,
+        buffer_device: accel.DeviceArray,
+        saturated: accel.DeviceArray,
+        present_ants: np.ndarray,
+        timestamp: int = 0,
     ) -> None:
         self.buffer_device = buffer_device
+        self.saturated = saturated
         self.present_ants = present_ants
         super().__init__(timestamp)
 
@@ -383,30 +389,31 @@ class XBEngine(DeviceServer):
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
-            buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = accel_utils.device_allocate_slot(
                 self.context,
-                self.correlation.slots["in_samples"].shape,  # type: ignore
-                self.correlation.slots["in_samples"].dtype,  # type: ignore
+                self.correlation.slots["in_samples"],
             )
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
-            buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = accel_utils.device_allocate_slot(
                 self.context,
-                self.correlation.slots["out_visibilities"].shape,  # type: ignore
-                self.correlation.slots["out_visibilities"].dtype,  # type: ignore
+                self.correlation.slots["out_visibilities"],
+            )
+            saturated = accel_utils.device_allocate_slot(
+                self.context,
+                self.correlation.slots["out_saturated"],
             )
             present_ants = np.zeros(shape=(n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, present_ants)
+            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
-            buf = katsdpsigproc.accel.HostArray(
-                self.correlation.slots["in_samples"].shape,  # type: ignore
-                self.correlation.slots["in_samples"].dtype,  # type: ignore
-                context=self.context,
+            buf = accel_utils.host_allocate_slot(
+                self.context,
+                self.correlation.slots["in_samples"],
             )
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
@@ -518,7 +525,7 @@ class XBEngine(DeviceServer):
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
         tx_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
-        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
         self.correlation.zero_visibilities()
         return tx_item
 
@@ -562,7 +569,7 @@ class XBEngine(DeviceServer):
 
         # Indicate that the timestamp still needs to be filled in.
         tx_item.timestamp = -1
-        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
         self.correlation.zero_visibilities()
         while True:
             # Get item from the receiver function.
