@@ -27,12 +27,6 @@ loops within the object.
       eventually. It is expected that this logic will need to go in the
       _gpu_proc_loop for the B-Engine processing and then a seperate sender
       loop would need to be created for sending B-Engine data.
-    - Implement control - There is no mechanism to interact with a running pipeline.
-    - Catch asyncio exceptions - If one of the running asyncio loops has an
-      exception, it will stop running without crashing the program or printing
-      the error trace stack. This is not an issue when things are working, but
-      if we could catch those exceptions and crash the program, it would make
-      detecting and debugging heaps much simpler.
 """
 
 import asyncio
