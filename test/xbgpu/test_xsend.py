@@ -45,19 +45,19 @@ class TestXSend:
         await send_stream.source_stream.async_send_heap(send_stream.descriptor_heap)
 
         for i in range(TOTAL_HEAPS):
-            # Get a free buffer to store the next heap - there is not
-            # always a free buffer available. This function yields until one it
-            # available.
-            buffer = await send_stream.get_free_heap()
+            # Get a free heap - there is not always a free one available. This
+            # function yields until one it available.
+            heap = await send_stream.get_free_heap()
 
             # Populate the buffer with dummy data.
-            buffer.fill(i)
+            heap.buffer.fill(i)
 
-            # Give the buffer back to the send_stream to transmit out
+            # Give the heap back to the send_stream to transmit out
             # onto the network. The timestamp is multiplied by TIMESTAMP_SCALE
             # so that its value is different from the values in the
             # buffer array.
-            send_stream.send_heap(i * TIMESTAMP_SCALE, buffer)
+            heap.timestamp = i * TIMESTAMP_SCALE
+            send_stream.send_heap(heap)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
         await send_stream.source_stream.async_flush()

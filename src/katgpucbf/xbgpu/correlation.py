@@ -199,7 +199,7 @@ class Correlation(accel.Operation):
         self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
         self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
-        self.slots["out_saturated"] = accel.IOSlot(dimensions=(1,), dtype=np.uint32)
+        self.slots["out_saturated"] = accel.IOSlot(dimensions=(), dtype=np.uint32)
         if n_batches * self.template.n_channels * self.template.n_baselines * N_POLS * N_POLS >= 2**31:
             # Can probably go higher, but rather keep it low to reduce the risk
             # of indexing bugs.
