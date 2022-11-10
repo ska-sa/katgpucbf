@@ -855,13 +855,17 @@ def main():
         # git_version = result_list[8]["tasks"]["f.antenna_channelised_voltage.0"]["git_version"]
         # print(git_version)
 
-        engine_list = []
-        my_list = result_list[8]["tasks"]
-        for x, y in my_list.items():
-            # print(x, y)
-            if "f.antenna_channelised_voltage" in x or "xb.baseline_correlation_products" in x:
-                engine_list.append(y["git_version"])
-        print(engine_list[0])
+        for i in result_list:
+            print("\n\n#----------------------------#\n\n")
+            print(i)
+
+        # engine_list = []
+        # my_list = result_list[8]["tasks"]
+        # for x, y in my_list.items():
+        # print(x, y)
+        #    if "f.antenna_channelised_voltage" in x or "xb.baseline_correlation_products" in x:
+        #        engine_list.append(y["git_version"])
+        # print(engine_list[0])
 
     #####################################################
     doc = document_from_json(args.input)
