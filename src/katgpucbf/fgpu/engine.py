@@ -241,6 +241,8 @@ class OutItem(QueueItem):
 
     #: Output data, a collection of spectra, arranged in memory by pol and by heap.
     spectra: accel.DeviceArray
+    #: Output saturation count, per pol
+    saturation: accel.DeviceArray
     #: Provides a scratch space for collecting per-spectrum fine delays while
     #: the `OutItem` is being prepared. When the `OutItem` is placed onto the
     #: queue it is copied to the `Compute`.
@@ -259,6 +261,7 @@ class OutItem(QueueItem):
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
         self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
+        self.saturated = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["saturated"]))
         self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
         self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
         self.gains = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["gains"]))
@@ -608,6 +611,7 @@ class Engine(aiokatcp.DeviceServer):
                 buf = np.frombuffer(dev_buffer, dtype=item.spectra.dtype).reshape(item.spectra.shape)
                 chunk = send.Chunk(
                     buf,
+                    saturated=item.saturated.empty_like(),
                     substreams=substreams,
                     feng_id=self.feng_id,
                 )
@@ -618,11 +622,13 @@ class Engine(aiokatcp.DeviceServer):
         spectra = self._compute.spectra
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
-            send_shape = (spectra // self.spectra_per_heap, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
+            heaps = spectra // self.spectra_per_heap
+            send_shape = (heaps, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
                         accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
+                        accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
                         substreams=substreams,
                         feng_id=self.feng_id,
                     )
@@ -844,10 +850,11 @@ class Engine(aiokatcp.DeviceServer):
             # TODO: only need to copy the relevant region, and can limit
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
+            # Without this, saturation counts can be wrong.
             self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
             self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
             self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
-            self._compute.run_backend(self._out_item.spectra)
+            self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
             self._out_item.add_marker(self._compute.command_queue)
             self._out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're
@@ -1130,6 +1137,7 @@ class Engine(aiokatcp.DeviceServer):
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
+                out_item.saturated.get_async(self._download_queue, chunk.saturated)
                 events = [self._download_queue.enqueue_marker()]
 
             chunk.timestamp = out_item.timestamp
