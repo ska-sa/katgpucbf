@@ -36,8 +36,11 @@ output_heaps_counter = Counter("output_x_heaps", "number of X-engine heaps trans
 output_bytes_counter = Counter(
     "output_x_bytes", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
+output_visibilities_counter = Counter(
+    "output_x_visibilities", "number of scalar visibilities that saturated", namespace=METRIC_NAMESPACE
+)
 output_clipped_visibilities_counter = Counter(
-    "output_clipped_visibilities", "number of visibilities that saturated", namespace=METRIC_NAMESPACE
+    "output_x_clipped_visibilities", "number of scalar visibilities that saturated", namespace=METRIC_NAMESPACE
 )
 incomplete_accum_counter = Counter(
     "output_x_incomplete_accs",
@@ -298,6 +301,7 @@ class XSend:
             # typically done.
             output_heaps_counter.inc(1)
             output_bytes_counter.inc(heap.buffer.nbytes)
+            output_visibilities_counter.inc(heap.buffer.shape[0] * heap.buffer.shape[1])
             output_clipped_visibilities_counter.inc(saturated)
         else:
             # :meth:`get_free_heap` still needs to await some Future before
