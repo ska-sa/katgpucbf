@@ -354,7 +354,7 @@ the various outputs from cuFFT and get the final desired output :math:`X_k`.
 We also wish to keep a tally of saturated (clipped) values, which requires
 that each output value is considered exactly once. This is made more
 complicated by the process that computes :math:`X_k` and :math:`X_{N-k}`
-jointly. With :math:`k = pm + s`, we consider all :math:`0 \le 0 < n` and
+jointly. With :math:`k = pm + s`, we consider all :math:`0 \le p < n` and
 :math:`0 \le s \le \frac{m}{2}`, and discard :math:`X_{N-k}` when :math:`s =
 0` or :math:`s = \frac{m}{2}` as these are duplicated cases.
 
