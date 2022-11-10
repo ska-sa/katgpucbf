@@ -660,7 +660,7 @@ class XBEngine(DeviceServer):
                 break
             await item.async_wait_for_events()
 
-            buffer_wrapper = await self.send_stream.get_free_heap()
+            buffer = await self.send_stream.get_free_heap()
 
             # NOTE: We do not expect the time between dumps to be the same each
             # time as the time.time() function checks the wall time now, not
@@ -693,14 +693,14 @@ class XBEngine(DeviceServer):
             old_time_s = new_time_s
             old_timestamp = item.timestamp
 
-            item.buffer_device.get_async(self._download_command_queue, buffer_wrapper.buffer)
+            item.buffer_device.get_async(self._download_command_queue, buffer)
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
             if not np.any(item.present_ants):
                 # All Antennas have missed data at some point, mark the entire dump missing
                 logger.warning("All Antennas had a break in data during this accumulation")
-                buffer_wrapper.buffer[...] = MISSING
+                buffer[...] = MISSING
                 incomplete_accum_counter.inc(1)
             elif not item.present_ants.all():
                 affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.n_ants)
@@ -708,12 +708,12 @@ class XBEngine(DeviceServer):
                     # Multiply by four as each baseline (antenna pair) has four
                     # associated correlation components (polarisation pairs).
                     affected_baseline_index = affected_baseline * 4
-                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
+                    buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
 
                 incomplete_accum_counter.inc(1)
             # else: No F-Engines had a break in data for this accumulation
 
-            self.send_stream.send_heap(item.timestamp, buffer_wrapper)
+            self.send_stream.send_heap(item.timestamp, buffer)
 
             item.reset()
             await self._tx_free_item_queue.put(item)
