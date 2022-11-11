@@ -73,14 +73,14 @@ class DeviceStatus(Enum):
     UNKNOWN = 4
 
 
-class DeviceStatusSensor(aiokatcp.AggregateSensor):
+class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
     """Summary sensor for quickly ascertaining device status.
 
     This takes its value from the worst status of its target set of sensors, so
     it's quick to identify if there's something wrong, or if everything is good.
     """
 
-    def __init__(self, target: aiokatcp.SensorSet):
+    def __init__(self, target: aiokatcp.SensorSet) -> None:
         super().__init__(target=target, sensor_type=DeviceStatus, name="device-status")
 
     def update_aggregate(
@@ -88,9 +88,11 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor):
         updated_sensor: Optional[aiokatcp.Sensor[_T]],
         reading: Optional[aiokatcp.Reading[_T]],
         old_reading: Optional[aiokatcp.Reading[_T]],
-    ) -> aiokatcp.Reading[DeviceStatus]:  # noqa: D102
+    ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
         # For device status it's far simpler just to re-calculate everything
         # each time, than to try and maintain state.
+        if reading is not None and old_reading is not None and reading.status == old_reading.status:
+            return None  # Sensor didn't change state, so no change in overall device status
         worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN
         for sensor in self.target.values():
             if self.filter_aggregate(sensor):
