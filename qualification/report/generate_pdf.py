@@ -855,9 +855,9 @@ def main():
         # git_version = result_list[8]["tasks"]["f.antenna_channelised_voltage.0"]["git_version"]
         # print(git_version)
 
-        for i in result_list:
-            print("\n\n#----------------------------#\n\n")
-            print(i)
+        # for i in result_list:
+        #    print("\n\n#----------------------------#\n\n")
+        #    print(i)
 
         # engine_list = []
         # my_list = result_list[8]["tasks"]
@@ -866,7 +866,11 @@ def main():
         #    if "f.antenna_channelised_voltage" in x or "xb.baseline_correlation_products" in x:
         #        engine_list.append(y["git_version"])
         # print(engine_list[0])
+        test_configuration, results = parse(result_list)
+        gv = test_configuration.correlators[0].tasks["f.antenna_channelised_voltage.0"].git_version
+        print(gv)
 
+    # import IPython; IPython.embed()
     #####################################################
     doc = document_from_json(args.input)
     if args.pdf.endswith(".pdf"):
