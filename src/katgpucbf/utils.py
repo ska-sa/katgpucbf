@@ -100,11 +100,11 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
                 worst_status = max(worst_status, sensor.status)
 
         if reading is not None and old_reading is not None:  # i.e. an update
-            # max in order to prevent time from appearing to move backwards
-            # if sensors' timestamps come from different places
             timestamp = sensor.timestamp
-        else:
+        else:  # i.e. an addition or removal
             timestamp = time.time()
+        # max in order to prevent time from appearing to move backwards
+        # if sensors' timestamps come from different places
         timestamp = max(timestamp, self.timestamp)
 
         if worst_status == aiokatcp.Sensor.Status.NOMINAL:
