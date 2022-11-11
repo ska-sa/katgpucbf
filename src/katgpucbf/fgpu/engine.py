@@ -23,7 +23,6 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import cast
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -43,6 +42,7 @@ from .. import (
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
+    accel_utils,
 )
 from .. import recv as base_recv
 from ..monitor import Monitor
@@ -54,14 +54,6 @@ from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
 logger = logging.getLogger(__name__)
-
-
-def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
-    return accel.DeviceArray(context, slot.shape, slot.dtype, slot.required_padded_shape())
-
-
-def _host_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.HostArray:
-    return accel.HostArray(slot.shape, slot.dtype, slot.required_padded_shape(), context=context)
 
 
 def _sample_models(
@@ -171,7 +163,7 @@ class InItem(QueueItem):
                 # initialising the item from the chunks.
                 samples = None
             else:
-                samples = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots[f"in{pol}"]))
+                samples = accel_utils.device_allocate_slot(compute.template.context, compute.slots[f"in{pol}"])
             self.pol_data.append(
                 PolInItem(
                     samples=samples,
@@ -260,11 +252,11 @@ class OutItem(QueueItem):
     chunk: send.Chunk | None = None
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
-        self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
-        self.saturated = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["saturated"]))
-        self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
-        self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
-        self.gains = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["gains"]))
+        self.spectra = accel_utils.device_allocate_slot(compute.template.context, compute.slots["out"])
+        self.saturated = accel_utils.device_allocate_slot(compute.template.context, compute.slots["saturated"])
+        self.fine_delay = accel_utils.host_allocate_slot(compute.template.context, compute.slots["fine_delay"])
+        self.phase = accel_utils.host_allocate_slot(compute.template.context, compute.slots["phase"])
+        self.gains = accel_utils.host_allocate_slot(compute.template.context, compute.slots["gains"])
         self.present = np.zeros(self.fine_delay.shape[0], dtype=bool)
         super().__init__(timestamp)
 
