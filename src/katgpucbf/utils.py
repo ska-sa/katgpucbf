@@ -19,6 +19,7 @@
 import ipaddress
 import logging
 import signal
+import time
 from asyncio import get_event_loop
 from enum import Enum
 from typing import TypeVar
@@ -98,8 +99,15 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
             if self.filter_aggregate(sensor):
                 worst_status = max(worst_status, sensor.status)
 
+        if reading is not None and old_reading is not None:  # i.e. an update
+            # max in order to prevent time from appearing to move backwards
+            # if sensors' timestamps come from different places
+            timestamp = max(self.timestamp, sensor.timestamp)
+        else:
+            timestamp = max(self.timestamp, time.time())
+
         if worst_status == aiokatcp.Sensor.Status.NOMINAL:
-            return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
+            return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
         if worst_status == aiokatcp.Sensor.Status.WARN:
-            return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
-        return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)
+            return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
+        return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)
