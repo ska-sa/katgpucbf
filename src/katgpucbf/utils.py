@@ -21,13 +21,12 @@ import logging
 import signal
 from asyncio import get_event_loop
 from enum import Enum
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 _T = TypeVar("_T")
-_U = TypeVar("_U")
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +69,6 @@ class DeviceStatus(Enum):
     OK = 1
     DEGRADED = 2
     FAIL = 3
-    UNKNOWN = 4
 
 
 class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
@@ -81,19 +79,21 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
     """
 
     def __init__(self, target: aiokatcp.SensorSet) -> None:
-        super().__init__(target=target, sensor_type=DeviceStatus, name="device-status")
+        super().__init__(
+            target=target, sensor_type=DeviceStatus, name="device-status", description="Overall engine health"
+        )
 
     def update_aggregate(
         self,
-        updated_sensor: Optional[aiokatcp.Sensor[_T]],
-        reading: Optional[aiokatcp.Reading[_T]],
-        old_reading: Optional[aiokatcp.Reading[_T]],
+        updated_sensor: aiokatcp.Sensor[_T] | None,
+        reading: aiokatcp.Reading[_T] | None,
+        old_reading: aiokatcp.Reading[_T] | None,
     ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
         # For device status it's far simpler just to re-calculate everything
         # each time, than to try and maintain state.
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
-        worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN
+        worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL
         for sensor in self.target.values():
             if self.filter_aggregate(sensor):
                 worst_status = max(worst_status, sensor.status)
@@ -102,6 +102,4 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
             return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
         if worst_status == aiokatcp.Sensor.Status.WARN:
             return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
-        if worst_status == aiokatcp.Sensor.Status.UNKNOWN:  # Do we need to take this situation into account?
-            return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.UNKNOWN, DeviceStatus.UNKNOWN)
         return aiokatcp.Reading(sensor.timestamp, aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)
