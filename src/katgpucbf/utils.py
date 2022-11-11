@@ -90,10 +90,10 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
         reading: aiokatcp.Reading[_T] | None,
         old_reading: aiokatcp.Reading[_T] | None,
     ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
-        # For device status it's far simpler just to re-calculate everything
-        # each time, than to try and maintain state.
+
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
+        # Otherwise, we have to recalculate.
         worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL
         for sensor in self.target.values():
             if self.filter_aggregate(sensor):
@@ -102,9 +102,10 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
         if reading is not None and old_reading is not None:  # i.e. an update
             # max in order to prevent time from appearing to move backwards
             # if sensors' timestamps come from different places
-            timestamp = max(self.timestamp, sensor.timestamp)
+            timestamp = sensor.timestamp
         else:
-            timestamp = max(self.timestamp, time.time())
+            timestamp = time.time()
+        timestamp = max(timestamp, self.timestamp)
 
         if worst_status == aiokatcp.Sensor.Status.NOMINAL:
             return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
