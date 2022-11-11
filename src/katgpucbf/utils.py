@@ -108,7 +108,10 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
         timestamp = max(timestamp, self.timestamp)
 
         if worst_status == aiokatcp.Sensor.Status.NOMINAL:
-            return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
-        if worst_status == aiokatcp.Sensor.Status.WARN:
-            return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
-        return aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)
+            agg_value = DeviceStatus.OK
+        elif worst_status == aiokatcp.Sensor.Status.WARN:
+            agg_value = DeviceStatus.DEGRADED
+        else:
+            agg_value = DeviceStatus.FAIL
+
+        return aiokatcp.Reading(timestamp, worst_status, agg_value)
