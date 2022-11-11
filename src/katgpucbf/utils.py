@@ -90,7 +90,6 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
         reading: aiokatcp.Reading[_T] | None,
         old_reading: aiokatcp.Reading[_T] | None,
     ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
-
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
         # Otherwise, we have to recalculate.
@@ -100,7 +99,8 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
                 worst_status = max(worst_status, sensor.status)
 
         if reading is not None and old_reading is not None:  # i.e. an update
-            timestamp = sensor.timestamp
+            assert updated_sensor is not None
+            timestamp = updated_sensor.timestamp
         else:  # i.e. an addition or removal
             timestamp = time.time()
         # max in order to prevent time from appearing to move backwards
