@@ -452,7 +452,6 @@ class Engine(aiokatcp.DeviceServer):
     ) -> None:
         super().__init__(katcp_host, katcp_port)
         self._populate_sensors(self.sensors)
-        self.sensors.add(DeviceStatusSensor(self.sensors))
 
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
@@ -719,6 +718,7 @@ class Engine(aiokatcp.DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+        sensors.add(DeviceStatusSensor(sensors))
 
     async def _next_in(self) -> InItem | None:
         """Load next InItem for processing.

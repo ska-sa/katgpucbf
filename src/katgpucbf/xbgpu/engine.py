@@ -278,7 +278,6 @@ class XBEngine(DeviceServer):
     ):
         super().__init__(katcp_host, katcp_port)
         self.populate_sensors(self.sensors)
-        self.sensors.add(DeviceStatusSensor(self.sensors))
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -463,6 +462,7 @@ class XBEngine(DeviceServer):
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
             )
         )
+        sensors.add(DeviceStatusSensor(sensors))
 
     async def _receiver_loop(self) -> None:
         """
