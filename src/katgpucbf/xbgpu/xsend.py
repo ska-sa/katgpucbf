@@ -37,7 +37,7 @@ output_bytes_counter = Counter(
     "output_x_bytes", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
 output_visibilities_counter = Counter(
-    "output_x_visibilities", "number of scalar visibilities that saturated", namespace=METRIC_NAMESPACE
+    "output_x_visibilities", "number of scalar visibilities", namespace=METRIC_NAMESPACE
 )
 output_clipped_visibilities_counter = Counter(
     "output_x_clipped_visibilities", "number of scalar visibilities that saturated", namespace=METRIC_NAMESPACE
