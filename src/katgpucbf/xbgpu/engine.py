@@ -470,7 +470,7 @@ class XBEngine(DeviceServer):
         sensors.add(
             aiokatcp.Sensor(
                 int,
-                "clip-cnt",
+                "xeng-clip-cnt",
                 "Number of visibilities that saturated",
                 default=0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -737,7 +737,7 @@ class XBEngine(DeviceServer):
                 # heap.
                 end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
                 end_timestamp = end_adc_timestamp / self.adc_sample_rate_hz + self.sync_epoch
-                clip_cnt_sensor = self.sensors["clip-cnt"]
+                clip_cnt_sensor = self.sensors["xeng-clip-cnt"]
                 clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
             self.send_stream.send_heap(heap)
 
