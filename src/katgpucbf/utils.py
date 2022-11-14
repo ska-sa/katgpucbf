@@ -19,15 +19,20 @@
 import ipaddress
 import logging
 import signal
+import time
 from asyncio import get_event_loop
+from enum import Enum
+from typing import TypeVar
 
-from aiokatcp import DeviceServer
+import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
+
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 
 
-def add_signal_handlers(server: DeviceServer) -> None:
+def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
     """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
     signums = [signal.SIGINT, signal.SIGTERM]
 
@@ -53,3 +58,56 @@ def parse_source(value: str) -> list[tuple[str, int]] | str:
         return [(ep.host, ep.port) for ep in endpoints]
     except ValueError:
         return value
+
+
+class DeviceStatus(Enum):
+    """Discrete `device-status` readings."""
+
+    OK = 1
+    DEGRADED = 2
+    FAIL = 3
+
+
+class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
+    """Summary sensor for quickly ascertaining device status.
+
+    This takes its value from the worst status of its target set of sensors, so
+    it's quick to identify if there's something wrong, or if everything is good.
+    """
+
+    def __init__(self, target: aiokatcp.SensorSet) -> None:
+        super().__init__(
+            target=target, sensor_type=DeviceStatus, name="device-status", description="Overall engine health"
+        )
+
+    def update_aggregate(
+        self,
+        updated_sensor: aiokatcp.Sensor[_T] | None,
+        reading: aiokatcp.Reading[_T] | None,
+        old_reading: aiokatcp.Reading[_T] | None,
+    ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
+        if reading is not None and old_reading is not None and reading.status == old_reading.status:
+            return None  # Sensor didn't change state, so no change in overall device status
+        # Otherwise, we have to recalculate.
+        worst_status = aiokatcp.Sensor.Status.NOMINAL
+        for sensor in self.target.values():
+            if self.filter_aggregate(sensor):
+                worst_status = max(worst_status, sensor.status)
+
+        if reading is not None and old_reading is not None:  # i.e. an update
+            assert updated_sensor is not None
+            timestamp = updated_sensor.timestamp
+        else:  # i.e. an addition or removal
+            timestamp = time.time()
+        # max in order to prevent time from appearing to move backwards
+        # if sensors' timestamps come from different places
+        timestamp = max(timestamp, self.timestamp)
+
+        if worst_status == aiokatcp.Sensor.Status.NOMINAL:
+            agg_value = DeviceStatus.OK
+        elif worst_status == aiokatcp.Sensor.Status.WARN:
+            agg_value = DeviceStatus.DEGRADED
+        else:
+            agg_value = DeviceStatus.FAIL
+
+        return aiokatcp.Reading(timestamp, worst_status, agg_value)

@@ -49,6 +49,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
+from ..utils import DeviceStatusSensor
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -715,6 +716,7 @@ class Engine(aiokatcp.DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+        sensors.add(DeviceStatusSensor(sensors))
 
     async def _next_in(self) -> InItem | None:
         """Load next InItem for processing.

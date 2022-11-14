@@ -58,6 +58,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
+from ..utils import DeviceStatusSensor
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -462,6 +463,7 @@ class XBEngine(DeviceServer):
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
             )
         )
+        sensors.add(DeviceStatusSensor(sensors))
 
     async def _receiver_loop(self) -> None:
         """
