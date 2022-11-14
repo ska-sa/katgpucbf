@@ -61,11 +61,7 @@ def parse_source(value: str) -> list[tuple[str, int]] | str:
 
 
 class DeviceStatus(Enum):
-    """Discrete `device-status` readings.
-
-    Doesn't follow the convention of :class:`aiokatcp.Sensor.Status` because
-    it's useful for `UNKNOWN` to have the highest (or worst) value.
-    """
+    """Discrete `device-status` readings."""
 
     OK = 1
     DEGRADED = 2
@@ -93,7 +89,7 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
         # Otherwise, we have to recalculate.
-        worst_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL
+        worst_status = aiokatcp.Sensor.Status.NOMINAL
         for sensor in self.target.values():
             if self.filter_aggregate(sensor):
                 worst_status = max(worst_status, sensor.status)
