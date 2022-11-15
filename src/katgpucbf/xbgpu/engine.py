@@ -188,6 +188,8 @@ class XBEngine(DeviceServer):
     heap_accumulation_threshold
         The number of consecutive heaps to accumulate. This value is used to
         determine the dump rate.
+    sync_epoch
+        UNIX time corresponding to timestamp zero
     channel_offset_value
         The index of the first channel in the subset of channels processed by
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
@@ -256,6 +258,7 @@ class XBEngine(DeviceServer):
         n_spectra_per_heap: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
+        sync_epoch: float,
         channel_offset_value: int,
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
         src_interface: str,
@@ -286,8 +289,10 @@ class XBEngine(DeviceServer):
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
         # Array configuration parameters
+        self.adc_sample_rate_hz = adc_sample_rate_hz
         self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
+        self.sync_epoch = sync_epoch
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
@@ -461,6 +466,15 @@ class XBEngine(DeviceServer):
                 default=False,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
+            )
+        )
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "xeng-clip-cnt",
+                "Number of visibilities that saturated",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
         sensors.add(DeviceStatusSensor(sensors))
@@ -718,6 +732,15 @@ class XBEngine(DeviceServer):
             # else: No F-Engines had a break in data for this accumulation
 
             heap.timestamp = item.timestamp
+            if self.send_stream.tx_enabled:
+                # Convert timestamp for the *end* of the heap (not the start)
+                # to a UNIX time for the sensor update. NB: this should be done
+                # *before* send_heap, because that gives away ownership of the
+                # heap.
+                end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
+                end_timestamp = end_adc_timestamp / self.adc_sample_rate_hz + self.sync_epoch
+                clip_cnt_sensor = self.sensors["xeng-clip-cnt"]
+                clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
             self.send_stream.send_heap(heap)
 
             item.reset()

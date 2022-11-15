@@ -150,6 +150,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
     )
     parser.add_argument(
+        "--sync-epoch",
+        type=float,
+        required=True,
+        help="UNIX time at which digitisers were synced.",
+    )
+    parser.add_argument(
         "--src-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
     )
     parser.add_argument(
@@ -242,6 +248,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         n_samples_between_spectra=args.samples_between_spectra,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
+        sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,
         src=args.src,
         src_interface=args.src_interface,
