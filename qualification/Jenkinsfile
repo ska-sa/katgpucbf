@@ -27,7 +27,7 @@
  *
  * For more information on the qualification framework, see katgpucbf/doc/qualification.rst
  */
-def COMMIT_ID = '0'
+def COMMIT_ID = 'unknown'
 pipeline {
   agent {
     dockerfile {
