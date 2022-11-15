@@ -19,8 +19,8 @@
 import ipaddress
 import logging
 import signal
-import time
 from asyncio import get_event_loop
+from collections import Counter
 from enum import Enum
 from typing import TypeVar
 
@@ -68,7 +68,7 @@ class DeviceStatus(Enum):
     FAIL = 3
 
 
-class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
+class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
     """Summary sensor for quickly ascertaining device status.
 
     This takes its value from the worst status of its target set of sensors, so
@@ -76,6 +76,8 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
     """
 
     def __init__(self, target: aiokatcp.SensorSet) -> None:
+        # We count the number of sensors with each possible status
+        self._counts: Counter[aiokatcp.Sensor.Status] = Counter()
         super().__init__(
             target=target, sensor_type=DeviceStatus, name="device-status", description="Overall engine health"
         )
@@ -88,26 +90,23 @@ class DeviceStatusSensor(aiokatcp.AggregateSensor[DeviceStatus]):
     ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
-        # Otherwise, we have to recalculate.
-        worst_status = aiokatcp.Sensor.Status.NOMINAL
-        for sensor in self.target.values():
-            if self.filter_aggregate(sensor):
-                worst_status = max(worst_status, sensor.status)
+        return super().update_aggregate(updated_sensor, reading, old_reading)
 
-        if reading is not None and old_reading is not None:  # i.e. an update
-            assert updated_sensor is not None
-            timestamp = updated_sensor.timestamp
-        else:  # i.e. an addition or removal
-            timestamp = time.time()
-        # max in order to prevent time from appearing to move backwards
-        # if sensors' timestamps come from different places
-        timestamp = max(timestamp, self.timestamp)
+    def aggregate_add(self, sensor: aiokatcp.Sensor[_T], reading: aiokatcp.Reading[_T]) -> bool:  # noqa: D102
+        self._counts[reading.status] += 1
+        return True
 
-        if worst_status == aiokatcp.Sensor.Status.NOMINAL:
-            agg_value = DeviceStatus.OK
+    def aggregate_remove(self, sensor: aiokatcp.Sensor[_T], reading: aiokatcp.Reading[_T]) -> bool:  # noqa: D102
+        self._counts[reading.status] -= 1
+        return True
+
+    def aggregate_compute(self) -> tuple[aiokatcp.Sensor.Status, DeviceStatus]:  # noqa: D102
+        worst_status = max(
+            (status for status, count in self._counts.items() if count > 0), default=aiokatcp.Sensor.Status.NOMINAL
+        )
+        if worst_status <= aiokatcp.Sensor.Status.NOMINAL:  # NOMINAL or UNKNOWN
+            return (aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
         elif worst_status == aiokatcp.Sensor.Status.WARN:
-            agg_value = DeviceStatus.DEGRADED
+            return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
         else:
-            agg_value = DeviceStatus.FAIL
-
-        return aiokatcp.Reading(timestamp, worst_status, agg_value)
+            return (aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)
