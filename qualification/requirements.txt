@@ -4,7 +4,7 @@
 #
 #    pip-compile qualification/requirements.in
 #
-aiokatcp==1.5.0
+aiokatcp==1.5.1
     # via -r qualification/requirements.in
 alabaster==0.7.12
     # via
