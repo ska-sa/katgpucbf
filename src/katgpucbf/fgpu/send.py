@@ -36,8 +36,12 @@ PREAMBLE_SIZE = 72
 SEND_DTYPE = np.dtype(np.int8)
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
+output_samples_counter = Counter("output_samples", "number of samples transmitted", namespace=METRIC_NAMESPACE)
 skipped_heaps_counter = Counter(
     "output_skipped_heaps", "heaps not sent because input data was incomplete", namespace=METRIC_NAMESPACE
+)
+output_clip_counter = Counter(
+    "output_clipped_samples", "number of samples that were saturated", ["pol"], namespace=METRIC_NAMESPACE
 )
 
 
@@ -52,18 +56,23 @@ class Frame:
         Zero-dimensional array of dtype ``>u8`` holding the timestamp.
     data
         Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS, COMPLEX).
+    saturated
+        Saturation data for the frame, of shape (N_POLS,)
     feng_id
         Value to put in ``feng_id`` SPEAD item
     substreams
         Number of substreams into which the channels are divided
     """
 
-    def __init__(self, timestamp: np.ndarray, data: np.ndarray, *, substreams: int, feng_id: int) -> None:
+    def __init__(
+        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, substreams: int, feng_id: int
+    ) -> None:
         channels = data.shape[0]
         assert channels % substreams == 0
         channels_per_substream = channels // substreams
         self.heaps = []
         self.data = data
+        self.saturated = saturated
         for i in range(substreams):
             start_channel = i * channels_per_substream
             heap = spead2.send.Heap(FLAVOUR)
@@ -85,6 +94,7 @@ class Chunk:
     def __init__(
         self,
         data: np.ndarray,
+        saturated: np.ndarray,
         *,
         substreams: int,
         feng_id: int,
@@ -95,6 +105,7 @@ class Chunk:
         if channels % substreams != 0:
             raise ValueError("substreams must divide into channels")
         self.data = data
+        self.saturated = saturated
         #: Whether each frame has valid data
         self.present = np.zeros(n_frames, dtype=bool)
         #: Timestamp of the first heap
@@ -107,7 +118,8 @@ class Chunk:
         # The ... in indexing causes numpy to give a 0d array view, rather than
         # a scalar.
         self._frames = [
-            Frame(self._timestamps[i, ...], data[i], feng_id=feng_id, substreams=substreams) for i in range(n_frames)
+            Frame(self._timestamps[i, ...], data[i], saturated[i], feng_id=feng_id, substreams=substreams)
+            for i in range(n_frames)
         ]
 
     @property
@@ -131,6 +143,9 @@ class Chunk:
         if not future.cancelled() and future.exception() is None:
             output_heaps_counter.inc(len(frame.heaps))
             output_bytes_counter.inc(frame.data.nbytes)
+            output_samples_counter.inc(frame.data.size // COMPLEX)
+            for pol in range(N_POLS):
+                output_clip_counter.labels(pol).inc(frame.saturated[pol])
 
     async def send(self, stream: "spead2.send.asyncio.AsyncStream", frames: int) -> None:
         """Transmit heaps on a SPEAD stream.

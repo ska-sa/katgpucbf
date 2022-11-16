@@ -27,12 +27,6 @@ loops within the object.
       eventually. It is expected that this logic will need to go in the
       _gpu_proc_loop for the B-Engine processing and then a seperate sender
       loop would need to be created for sending B-Engine data.
-    - Implement control - There is no mechanism to interact with a running pipeline.
-    - Catch asyncio exceptions - If one of the running asyncio loops has an
-      exception, it will stop running without crashing the program or printing
-      the error trace stack. This is not an issue when things are working, but
-      if we could catch those exceptions and crash the program, it would make
-      detecting and debugging heaps much simpler.
 """
 
 import asyncio
@@ -43,11 +37,11 @@ import time
 import aiokatcp
 import katsdpsigproc
 import katsdpsigproc.abc
-import katsdpsigproc.accel
 import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
+from katsdpsigproc import accel
 from katsdptelstate.endpoint import Endpoint
 
 from .. import (
@@ -57,12 +51,14 @@ from .. import (
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
+    accel_utils,
 )
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
+from ..utils import DeviceStatusSensor
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -81,7 +77,7 @@ class RxQueueItem(QueueItem):
     the copy is complete to reuse resources.
     """
 
-    def __init__(self, buffer_device: katsdpsigproc.accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
+    def __init__(self, buffer_device: accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
         self.buffer_device = buffer_device
         self.present = present
         super().__init__(timestamp)
@@ -103,9 +99,14 @@ class TxQueueItem(QueueItem):
     """
 
     def __init__(
-        self, buffer_device: katsdpsigproc.accel.DeviceArray, present_ants: np.ndarray, timestamp: int = 0
+        self,
+        buffer_device: accel.DeviceArray,
+        saturated: accel.DeviceArray,
+        present_ants: np.ndarray,
+        timestamp: int = 0,
     ) -> None:
         self.buffer_device = buffer_device
+        self.saturated = saturated
         self.present_ants = present_ants
         super().__init__(timestamp)
 
@@ -187,6 +188,8 @@ class XBEngine(DeviceServer):
     heap_accumulation_threshold
         The number of consecutive heaps to accumulate. This value is used to
         determine the dump rate.
+    sync_epoch
+        UNIX time corresponding to timestamp zero
     channel_offset_value
         The index of the first channel in the subset of channels processed by
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
@@ -255,6 +258,7 @@ class XBEngine(DeviceServer):
         n_spectra_per_heap: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
+        sync_epoch: float,
         channel_offset_value: int,
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
         src_interface: str,
@@ -285,8 +289,10 @@ class XBEngine(DeviceServer):
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
         # Array configuration parameters
+        self.adc_sample_rate_hz = adc_sample_rate_hz
         self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
+        self.sync_epoch = sync_epoch
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
@@ -389,30 +395,31 @@ class XBEngine(DeviceServer):
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
         for _ in range(n_rx_items):
-            buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = accel_utils.device_allocate_slot(
                 self.context,
-                self.correlation.slots["in_samples"].shape,  # type: ignore
-                self.correlation.slots["in_samples"].dtype,  # type: ignore
+                self.correlation.slots["in_samples"],
             )
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
-            buffer_device = katsdpsigproc.accel.DeviceArray(
+            buffer_device = accel_utils.device_allocate_slot(
                 self.context,
-                self.correlation.slots["out_visibilities"].shape,  # type: ignore
-                self.correlation.slots["out_visibilities"].dtype,  # type: ignore
+                self.correlation.slots["out_visibilities"],
+            )
+            saturated = accel_utils.device_allocate_slot(
+                self.context,
+                self.correlation.slots["out_saturated"],
             )
             present_ants = np.zeros(shape=(n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, present_ants)
+            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
-            buf = katsdpsigproc.accel.HostArray(
-                self.correlation.slots["in_samples"].shape,  # type: ignore
-                self.correlation.slots["in_samples"].dtype,  # type: ignore
-                context=self.context,
+            buf = accel_utils.host_allocate_slot(
+                self.context,
+                self.correlation.slots["in_samples"],
             )
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
@@ -461,6 +468,16 @@ class XBEngine(DeviceServer):
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
             )
         )
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "xeng-clip-cnt",
+                "Number of visibilities that saturated",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
+        sensors.add(DeviceStatusSensor(sensors))
 
     async def _receiver_loop(self) -> None:
         """
@@ -524,7 +541,7 @@ class XBEngine(DeviceServer):
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
         tx_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
-        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
         self.correlation.zero_visibilities()
         return tx_item
 
@@ -568,7 +585,7 @@ class XBEngine(DeviceServer):
 
         # Indicate that the timestamp still needs to be filled in.
         tx_item.timestamp = -1
-        self.correlation.bind(out_visibilities=tx_item.buffer_device)
+        self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
         self.correlation.zero_visibilities()
         while True:
             # Get item from the receiver function.
@@ -660,7 +677,7 @@ class XBEngine(DeviceServer):
                 break
             await item.async_wait_for_events()
 
-            buffer_wrapper = await self.send_stream.get_free_heap()
+            heap = await self.send_stream.get_free_heap()
 
             # NOTE: We do not expect the time between dumps to be the same each
             # time as the time.time() function checks the wall time now, not
@@ -693,14 +710,15 @@ class XBEngine(DeviceServer):
             old_time_s = new_time_s
             old_timestamp = item.timestamp
 
-            item.buffer_device.get_async(self._download_command_queue, buffer_wrapper.buffer)
+            item.buffer_device.get_async(self._download_command_queue, heap.buffer)
+            item.saturated.get_async(self._download_command_queue, heap.saturated)
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
             if not np.any(item.present_ants):
                 # All Antennas have missed data at some point, mark the entire dump missing
                 logger.warning("All Antennas had a break in data during this accumulation")
-                buffer_wrapper.buffer[...] = MISSING
+                heap.buffer[...] = MISSING
                 incomplete_accum_counter.inc(1)
             elif not item.present_ants.all():
                 affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.n_ants)
@@ -708,12 +726,22 @@ class XBEngine(DeviceServer):
                     # Multiply by four as each baseline (antenna pair) has four
                     # associated correlation components (polarisation pairs).
                     affected_baseline_index = affected_baseline * 4
-                    buffer_wrapper.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
+                    heap.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
 
                 incomplete_accum_counter.inc(1)
             # else: No F-Engines had a break in data for this accumulation
 
-            self.send_stream.send_heap(item.timestamp, buffer_wrapper)
+            heap.timestamp = item.timestamp
+            if self.send_stream.tx_enabled:
+                # Convert timestamp for the *end* of the heap (not the start)
+                # to a UNIX time for the sensor update. NB: this should be done
+                # *before* send_heap, because that gives away ownership of the
+                # heap.
+                end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
+                end_timestamp = end_adc_timestamp / self.adc_sample_rate_hz + self.sync_epoch
+                clip_cnt_sensor = self.sensors["xeng-clip-cnt"]
+                clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
+            self.send_stream.send_heap(heap)
 
             item.reset()
             await self._tx_free_item_queue.put(item)

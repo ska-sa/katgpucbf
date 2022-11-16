@@ -284,7 +284,7 @@ from that accumulation is normally called a :dfn:`dump` — the terms are used
 interchangeably. Once all the data for a dump has been correlated, the separate
 accumulators are added together ("reduced") to produce a final result.  This
 reduction process also converts from 64-bit to 32-bit integers, saturating if
-necessary.
+necessary, and counts the number of saturated visibilities.
 
 The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference

@@ -41,7 +41,7 @@
  *
  * SARAO's modification is licenced as follows:
  *******************************************************************************
- * Copyright (c) 2020-2021, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2022, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -586,11 +586,29 @@ void correlate(Visibilities *visibilities, const Samples *samples, unsigned batc
     doCorrelateRectangle<nrFragmentsY, true, true, true, true>(*visibilities, *samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 }
 
+// Clamp x to [-INT_MAX, INT_MAX] and return true if it was clamped
+__device__ bool saturate(long *x)
+{
+  if (*x < -INT_MAX) {
+    *x = -INT_MAX;
+    return true;
+  }
+  if (*x > INT_MAX) {
+    *x = INT_MAX;
+    return true;
+  }
+  return false;
+}
+
+#include <cooperative_groups.h>
+#include <cooperative_groups/reduce.h>
+
 // TODO: generalise to other values of NR_BITS
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32)
-void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned batches)
+void reduce(int2 * __restrict__ out, unsigned int * __restrict__ out_saturated, const long2 * __restrict__ in, unsigned batches)
 {
+  namespace cg = cooperative_groups;
   const unsigned int stride = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
   const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= stride)
@@ -601,10 +619,18 @@ void reduce(int2 * __restrict__ out, const long2 * __restrict__ in, unsigned bat
     sum.x += value.x;
     sum.y += value.y;
   }
-  // Apply saturation
-  sum.x = llmin(llmax(sum.x, -INT_MAX), INT_MAX);
-  sum.y = llmin(llmax(sum.y, -INT_MAX), INT_MAX);
+  // Apply saturation (note: | not || to avoid short-circuiting)
+  unsigned int saturated = saturate(&sum.x) | saturate(&sum.y);
+  /* Do some in-kernel reduction of the saturation count to reduce the number
+   * of atomic operations. Ideally this would be done for the whole thread
+   * block rather than just warp, but CUDA doesn't yet make that a one-liner,
+   * and the performance is not that critical.
+   */
+  auto group = cg::tiled_partition<32>(cg::this_thread_block());
+  saturated = cg::reduce(group, saturated, cg::plus<unsigned int>());
   out[idx] = make_complex((int) sum.x, (int) sum.y);
+  if (group.thread_rank() == 0)
+    atomicAdd(out_saturated, saturated);
 }
 
 } // extern "C++"

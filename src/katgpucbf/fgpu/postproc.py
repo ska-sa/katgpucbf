@@ -82,9 +82,11 @@ class Postproc(accel.Operation):
         Input channelised data for the two polarisations. These are formed by
         taking the complex-to-complex Fourier transform of the input
         reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
-    **out** : spectra // spectra_per_heap × channels × spectra_per_heap × 2 × 2, int8
+    **out** : spectra // spectra_per_heap × channels × spectra_per_heap × N_POLS × COMPLEX, int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.
+    **saturated** : heaps × N_POLS, uint32
+        Number of saturated complex values in **out**.
     **fine_delay** : spectra × 2, float32
         Fine delay in samples (one value per pol).
     **phase** : spectra × 2, float32
@@ -123,6 +125,7 @@ class Postproc(accel.Operation):
         self.spectra_per_heap = spectra_per_heap
         pols = accel.Dimension(N_POLS, exact=True)
         cplx = accel.Dimension(COMPLEX, exact=True)
+        heaps = spectra // spectra_per_heap
 
         in_shape = (
             accel.Dimension(spectra),
@@ -131,9 +134,8 @@ class Postproc(accel.Operation):
         )
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["out"] = accel.IOSlot(
-            (spectra // spectra_per_heap, template.channels, spectra_per_heap, pols, cplx), np.int8
-        )
+        self.slots["out"] = accel.IOSlot((heaps, template.channels, spectra_per_heap, pols, cplx), np.int8)
+        self.slots["saturated"] = accel.IOSlot((heaps, pols), np.uint32)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["gains"] = accel.IOSlot((template.channels, pols), np.complex64)
@@ -145,12 +147,15 @@ class Postproc(accel.Operation):
         groups_y = self.spectra_per_heap // block_y
         groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
+        saturated = self.buffer("saturated")
         in0 = self.buffer("in0")
         in1 = self.buffer("in1")
+        saturated.zero(self.command_queue)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
                 out.buffer,
+                saturated.buffer,
                 in0.buffer,
                 in1.buffer,
                 self.buffer("fine_delay").buffer,

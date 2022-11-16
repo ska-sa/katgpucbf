@@ -4,7 +4,7 @@
 #
 #    pip-compile qualification/requirements.in
 #
-aiokatcp==1.4.0
+aiokatcp==1.5.0
     # via -r qualification/requirements.in
 alabaster==0.7.12
     # via
@@ -230,7 +230,7 @@ pickleshare==0.7.5
     # via
     #   -r qualification/../requirements-dev.txt
     #   ipython
-pillow==9.2.0
+pillow==9.3.0
     # via matplotlib
 pip-tools==6.9.0
     # via -r qualification/../requirements-dev.txt

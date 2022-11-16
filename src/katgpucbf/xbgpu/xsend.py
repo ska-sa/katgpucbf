@@ -21,26 +21,72 @@ import math
 from collections.abc import Callable, Sequence
 from typing import Final
 
-import katsdpsigproc
 import katsdpsigproc.accel as accel
 import numpy as np
 import spead2
 import spead2.send.asyncio
+from katsdpsigproc.abc import AbstractContext
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID
+from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID, make_immediate
 from . import METRIC_NAMESPACE
 
 output_heaps_counter = Counter("output_x_heaps", "number of X-engine heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter(
     "output_x_bytes", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
 )
+output_visibilities_counter = Counter(
+    "output_x_visibilities", "number of scalar visibilities", namespace=METRIC_NAMESPACE
+)
+output_clipped_visibilities_counter = Counter(
+    "output_x_clipped_visibilities", "number of scalar visibilities that saturated", namespace=METRIC_NAMESPACE
+)
 incomplete_accum_counter = Counter(
     "output_x_incomplete_accs",
     "incomplete output accumulations because input data was incomplete",
     namespace=METRIC_NAMESPACE,
 )
+SEND_DTYPE = np.dtype(np.int32)
+
+
+class Heap:
+    """Hold all the data for a heap.
+
+    The content of the heap can change, but the class is frozen.
+    """
+
+    def __init__(
+        self, context: AbstractContext, n_channels_per_stream: int, n_baselines: int, channel_offset: int
+    ) -> None:
+        self.buffer: Final = accel.HostArray((n_channels_per_stream, n_baselines, COMPLEX), SEND_DTYPE, context=context)
+        self.saturated: Final = accel.HostArray((), np.uint32, context=context)
+        self._timestamp: Final = np.zeros((), dtype=">u8")  # Big-endian to be used in-place by the heap
+        self.future = asyncio.get_running_loop().create_future()
+        self.future.set_result(None)
+
+        self.heap: Final = spead2.send.Heap(FLAVOUR)
+        self.heap.add_item(make_immediate(TIMESTAMP_ID, self._timestamp))
+        self.heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
+        self.heap.add_item(
+            spead2.Item(
+                XENG_RAW_ID,
+                "xeng_raw",
+                "",
+                shape=self.buffer.shape,
+                dtype=self.buffer.dtype,
+                value=self.buffer,
+            )
+        )
+        self.heap.repeat_pointers = True
+
+    @property
+    def timestamp(self) -> int:  # noqa: D102
+        return int(self._timestamp[()])
+
+    @timestamp.setter
+    def timestamp(self, value: int) -> None:  # noqa: D102
+        self._timestamp[()] = value
 
 
 def make_stream(
@@ -80,57 +126,16 @@ def make_stream(
         )
 
 
-class BufferWrapper:
-    """
-    Holds a buffer object that has been configured so that it can be zero-copy transferred onto the network.
-
-    In order to preserve the zero-copy properties of the buffer, data can
-    only be copied to the buffer within this class, the buffer handle
-    cannot be overwritten. For example: ``buffer_wrapper.buffer = new_array``
-    will fail as it attempts to assign a new object to the buffer variable
-    while ``buffer_wrapper.buffer[:] = new_array`` will succeed as it
-    overwrites the values in the buffer, not the buffer itself.
-
-    There may be a better way to hold these buffer objects and prevent them
-    being overwritten other than wrapping them in an BufferWrapper but I could
-    not think of any at the time of writing.
-
-    Parameters
-    ----------
-    buffer
-        The array configured for zero-copy transfers.
-    """
-
-    def __init__(self, buffer: np.ndarray) -> None:
-        self._buffer: np.ndarray = buffer
-
-    @property
-    def buffer(self) -> np.ndarray:
-        """Return the buffer associated with this class."""
-        return self._buffer
-
-    @buffer.setter
-    def buffer(self, buffer) -> None:
-        """
-        Overwrite the buffer's handle - this functionality has been disabled.
-
-        Instead of overwriting the handle, copy to the buffer using array
-        indexing [:] instead.
-        """
-        raise AttributeError("Don't overwrite the buffer's handle! Copy to it instead using array indexing [:].")
-
-
 class XSend:
     """
     Class for turning baseline correlation products into SPEAD heaps and transmitting them.
 
     This class creates a queue of buffers that can be sent out onto the
     network. To get one of these buffers call :meth:`get_free_heap` - it will
-    return a buffer wrapped in a :class:`BufferWrapper` object. Once the
-    necessary data has been copied to the buffer and it is ready to be sent
-    onto the network, pass it back to this object using :meth:`send_heap`. This
-    object will create a limited number of buffers and keep recycling them -
-    avoiding any memory allocation at runtime.
+    return a buffer. Once the necessary data has been copied to the buffer and
+    it is ready to be sent onto the network, pass it back to this object using
+    :meth:`send_heap`. This object will create a limited number of buffers and
+    keep recycling them - avoiding any memory allocation at runtime.
 
     This has been designed to run in an asyncio loop, and :meth:`get_free_heap`
     function makes sure that the next buffer in the queue is not in flight
@@ -192,7 +197,7 @@ class XSend:
         dump_interval_s: float,
         send_rate_factor: float,
         channel_offset: int,
-        context: katsdpsigproc.abc.AbstractContext,
+        context: AbstractContext,
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
@@ -211,49 +216,26 @@ class XSend:
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
         self.n_channels_per_stream: Final[int] = n_channels_per_stream
-        self.n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
-        self.dump_interval_s: Final[float] = dump_interval_s
-        self.send_rate_factor: Final[float] = send_rate_factor
-        self._sample_bits: Final[int] = 32
+        n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
 
         # Multicast Stream Parameters
-        self.channel_offset: Final[int] = channel_offset
+        self.heap_payload_size_bytes = self.n_channels_per_stream * n_baselines * COMPLEX * SEND_DTYPE.itemsize
 
-        self.heap_payload_size_bytes: Final[int] = (
-            self.n_channels_per_stream * self.n_baselines * COMPLEX * self._sample_bits // 8
-        )
-        self.heap_shape: Final[tuple] = (self.n_channels_per_stream, self.n_baselines, COMPLEX)
-        self._n_send_heaps_in_flight: Final[int] = n_send_heaps_in_flight
+        self._heaps_queue: asyncio.Queue[Heap] = asyncio.Queue()
+        buffers: list[accel.HostArray] = []
 
-        self.context: Final[katsdpsigproc.abc.AbstractContext] = context
-
-        self._heaps_queue: asyncio.Queue[tuple[asyncio.Future, BufferWrapper]] = asyncio.Queue()
-        self.buffers: list[accel.HostArray] = []
-
-        for _ in range(self._n_send_heaps_in_flight):
-            # TODO: I'm not too happy about this hardcoded int32 here, but I don't
-            # have an object close by that I can get the dtype from.
-            buffer = accel.HostArray(self.heap_shape, np.int32, context=self.context)
-
-            # Create a dummy future object that is already marked as
-            # "done" Each buffer is paired with a future so these dummy ones
-            # are necessary for initial start up.
-            dummy_future: asyncio.Future = asyncio.Future()
-            dummy_future.set_result("")
-
-            self._heaps_queue.put_nowait((dummy_future, BufferWrapper(buffer)))
-
-            self.buffers.append(buffer)
+        for _ in range(n_send_heaps_in_flight):
+            heap = Heap(context, n_channels_per_stream, n_baselines, channel_offset)
+            self._heaps_queue.put_nowait(heap)
+            buffers.append(heap.buffer)
 
         # Transport-agnostic stream information
         packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
         packet_header_overhead_bytes = packets_per_heap * XSend.header_size
 
-        if self.dump_interval_s != 0:
+        if dump_interval_s != 0:
             send_rate_bytes_per_second = (
-                (self.heap_payload_size_bytes + packet_header_overhead_bytes)
-                / self.dump_interval_s
-                * self.send_rate_factor
+                (self.heap_payload_size_bytes + packet_header_overhead_bytes) / dump_interval_s * send_rate_factor
             )  # * send_rate_factor adds a buffer to the rate to compensate for any unexpected jitter
         else:
             # Pass zero to stream_config to send as fast as possible.
@@ -261,11 +243,11 @@ class XSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + XSend.header_size,
-            max_heaps=self._n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
+            max_heaps=n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )
-        self.source_stream = stream_factory(stream_config, self.buffers)
+        self.source_stream = stream_factory(stream_config, buffers)
         # Set heap count sequence to allow a receiver to ingest multiple
         # X-engine outputs, if they should so choose.
         self.source_stream.set_cnt_sequence(
@@ -273,78 +255,67 @@ class XSend:
             n_channels // n_channels_per_stream,
         )
 
-        self.item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
-        self.item_group.add_item(
+        item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+        item_group.add_item(
             FREQUENCY_ID,
             "frequency",  # Misleading name, but it's what the ICD specifies
             "Value of first channel in collections stored here.",
             shape=[],
             format=IMMEDIATE_FORMAT,
         )
-        self.item_group.add_item(
+        item_group.add_item(
             TIMESTAMP_ID,
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
             shape=[],
             format=IMMEDIATE_FORMAT,
         )
-        self.item_group.add_item(
+        item_group.add_item(
             XENG_RAW_ID,
             "xeng_raw",
             "Integrated baseline correlation products.",
-            shape=self.heap_shape,
-            dtype=np.int32,
+            shape=buffers[0].shape,
+            dtype=buffers[0].dtype,
         )
 
-        self.descriptor_heap = self.item_group.get_heap(descriptors="all", data="none")
+        self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
 
-    def send_heap(self, timestamp: int, buffer_wrapper: BufferWrapper) -> None:
-        """Take in a :class:`BufferWrapper` and send it as a SPEAD heap.
+    def send_heap(self, heap: Heap) -> None:
+        """Take in a buffer and send it as a SPEAD heap.
 
-        This function is non-blocking. There is no guarantee that a packet has
+        This function is non-blocking. There is no guarantee that a heap has
         been sent by the time the function completes.
 
         Parameters
         ----------
-        timestamp
-            The timestamp that will be assigned to the buffer when it is
-            encapsulated in a SPEAD heap.
-        buffer_wrapper
-            Wrapped buffer to sent as a SPEAD heap.
+        heap
+            Heap to send
         """
         if self.tx_enabled:
-            self.item_group["timestamp"].value = timestamp
-            self.item_group["frequency"].value = self.channel_offset
-            self.item_group["xeng_raw"].value = buffer_wrapper.buffer
-
-            heap_to_send = self.item_group.get_heap(descriptors="none", data="all")
-            # This flag forces the heap to include all item_group pointers in every
-            # packet belonging to a single heap instead of just in the first
-            # packet. This is done to duplicate the format of the packets out of
-            # the MeerKAT SKARABs.
-            heap_to_send.repeat_pointers = True
-
-            future = self.source_stream.async_send_heap(heap_to_send)
-            self._heaps_queue.put_nowait((future, buffer_wrapper))
+            saturated = int(heap.saturated)  # Save a copy before giving away the heap
+            heap.future = self.source_stream.async_send_heap(heap.heap)
+            self._heaps_queue.put_nowait(heap)
             # NOTE: It's not strictly true to say that the data has been sent at
             # this point; it's only been queued for sending. But it should be close
             # enough for monitoring data rates at the granularity that this is
             # typically done.
             output_heaps_counter.inc(1)
-            output_bytes_counter.inc(buffer_wrapper.buffer.nbytes)
+            output_bytes_counter.inc(heap.buffer.nbytes)
+            output_visibilities_counter.inc(heap.buffer.shape[0] * heap.buffer.shape[1])
+            output_clipped_visibilities_counter.inc(saturated)
         else:
             # :meth:`get_free_heap` still needs to await some Future before
-            # returning a buffer_wrapper.
-            flush_stream_task = asyncio.create_task(self.source_stream.async_flush())
-            self._heaps_queue.put_nowait((flush_stream_task, buffer_wrapper))
+            # returning a buffer.
+            heap.future = asyncio.create_task(self.source_stream.async_flush())
+            self._heaps_queue.put_nowait(heap)
 
-    async def get_free_heap(self) -> BufferWrapper:
+    async def get_free_heap(self) -> Heap:
         """
-        Return a :class:`BufferWrapper` object from the internal fifo queue when one is available.
+        Return a heap from the internal fifo queue when one is available.
 
-        There are a limited number of BufferWrapper in existence and
+        There are a limited number of heaps in existence and
         they are all stored with a future object. If the future is complete,
-        the buffer is not being used for sending and it will return the buffer
+        the buffer is not being used for sending and it will return the heap
         immediately. If the future is still busy, this function will wait
         asynchronously for the future to be done.
 
@@ -352,12 +323,12 @@ class XSend:
 
         Returns
         -------
-        buffer_wrapper
-            Free buffer wrapped in a :class:`BufferWrapper`.
+        heap
+            Free heap
         """
-        future, buffer_wrapper = await self._heaps_queue.get()
-        await asyncio.wait([future])
-        return buffer_wrapper
+        heap = await self._heaps_queue.get()
+        await asyncio.wait([heap.future])
+        return heap
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""

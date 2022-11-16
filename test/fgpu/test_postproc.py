@@ -49,6 +49,9 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, unzip_facto
     corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)
     # Split complex into real, imaginary
     corrected = corrected.view(np.float32).reshape(spectra, channels, 2)
+    # Count saturation per heap
+    saturated = np.sum(np.any(np.abs(corrected) > 127.0, axis=2), axis=1, dtype=np.uint32)
+    saturated = np.sum(saturated.reshape(-1, spectra_per_heap_out), axis=1)
     # Convert to integer
     corrected = np.rint(corrected)
     # Cast to integer with saturation
@@ -56,18 +59,28 @@ def postproc_host_pol(data, spectra, spectra_per_heap_out, channels, unzip_facto
     corrected = corrected.astype(np.int8)
     # Partial transpose
     reshaped = corrected.reshape(-1, spectra_per_heap_out, channels, 2)
-    return reshaped.transpose(0, 2, 1, 3)
+    return reshaped.transpose(0, 2, 1, 3), saturated
 
 
 def postproc_host(in0, in1, channels, unzip_factor, spectra_per_heap_out, spectra, fine_delay, fringe_phase, gains):
     """Aggregate both polarisation's postproc on the host CPU."""
-    out0 = postproc_host_pol(
-        in0, channels, unzip_factor, spectra_per_heap_out, spectra, fine_delay[:, 0], fringe_phase[:, 0], gains[:, 0]
-    )
-    out1 = postproc_host_pol(
-        in1, channels, unzip_factor, spectra_per_heap_out, spectra, fine_delay[:, 1], fringe_phase[:, 1], gains[:, 1]
-    )
-    return np.stack([out0, out1], axis=3)
+    out = []
+    saturated = []
+    in_array = [in0, in1]
+    for pol in range(N_POLS):
+        pol_out, pol_saturated = postproc_host_pol(
+            in_array[pol],
+            channels,
+            unzip_factor,
+            spectra_per_heap_out,
+            spectra,
+            fine_delay[:, pol],
+            fringe_phase[:, pol],
+            gains[:, pol],
+        )
+        out.append(pol_out)
+        saturated.append(pol_saturated)
+    return np.stack(out, axis=3), np.stack(saturated, axis=1)
 
 
 def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex64) -> np.ndarray:
@@ -96,7 +109,7 @@ def test_postproc(context: AbstractContext, command_queue: AbstractCommandQueue,
     h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
     h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (channels, N_POLS)))
 
-    expected = postproc_host(
+    expected, expected_saturated = postproc_host(
         h_in0, h_in1, spectra, spectra_per_heap_out, channels, unzip_factor, h_fine_delay, h_phase, h_gains
     )
 
@@ -111,6 +124,8 @@ def test_postproc(context: AbstractContext, command_queue: AbstractCommandQueue,
     fn.buffer("out").zero(command_queue)
     fn()
     h_out = fn.buffer("out").get(command_queue)
+    h_saturated = fn.buffer("saturated").get(command_queue)
 
     np.testing.assert_allclose(h_out, expected, atol=1)
+    np.testing.assert_equal(h_saturated, expected_saturated)
     assert np.min(h_out) == -127  # Ensure -128 gets clamped to -127

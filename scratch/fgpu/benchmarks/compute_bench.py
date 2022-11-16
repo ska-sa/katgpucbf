@@ -72,7 +72,7 @@ def main():
 
         def run():
             fn.run_frontend([fn.buffer("in0"), fn.buffer("in1")], [0, 0], 0, spectra)
-            fn.run_backend(fn.buffer("out"))
+            fn.run_backend(fn.buffer("out"), fn.buffer("saturated"))
 
         run()  # Warmup pass
         start = command_queue.enqueue_marker()

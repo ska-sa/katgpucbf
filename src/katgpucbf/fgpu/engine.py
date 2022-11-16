@@ -23,7 +23,6 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import cast
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -43,25 +42,19 @@ from .. import (
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
+    accel_utils,
 )
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
+from ..utils import DeviceStatusSensor
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
 logger = logging.getLogger(__name__)
-
-
-def _device_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.DeviceArray:
-    return accel.DeviceArray(context, slot.shape, slot.dtype, slot.required_padded_shape())
-
-
-def _host_allocate_slot(context: AbstractContext, slot: accel.IOSlot) -> accel.HostArray:
-    return accel.HostArray(slot.shape, slot.dtype, slot.required_padded_shape(), context=context)
 
 
 def _sample_models(
@@ -171,7 +164,7 @@ class InItem(QueueItem):
                 # initialising the item from the chunks.
                 samples = None
             else:
-                samples = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots[f"in{pol}"]))
+                samples = accel_utils.device_allocate_slot(compute.template.context, compute.slots[f"in{pol}"])
             self.pol_data.append(
                 PolInItem(
                     samples=samples,
@@ -241,6 +234,8 @@ class OutItem(QueueItem):
 
     #: Output data, a collection of spectra, arranged in memory by pol and by heap.
     spectra: accel.DeviceArray
+    #: Output saturation count, per pol
+    saturation: accel.DeviceArray
     #: Provides a scratch space for collecting per-spectrum fine delays while
     #: the `OutItem` is being prepared. When the `OutItem` is placed onto the
     #: queue it is copied to the `Compute`.
@@ -258,10 +253,11 @@ class OutItem(QueueItem):
     chunk: send.Chunk | None = None
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
-        self.spectra = _device_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["out"]))
-        self.fine_delay = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["fine_delay"]))
-        self.phase = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["phase"]))
-        self.gains = _host_allocate_slot(compute.template.context, cast(accel.IOSlot, compute.slots["gains"]))
+        self.spectra = accel_utils.device_allocate_slot(compute.template.context, compute.slots["out"])
+        self.saturated = accel_utils.device_allocate_slot(compute.template.context, compute.slots["saturated"])
+        self.fine_delay = accel_utils.host_allocate_slot(compute.template.context, compute.slots["fine_delay"])
+        self.phase = accel_utils.host_allocate_slot(compute.template.context, compute.slots["phase"])
+        self.gains = accel_utils.host_allocate_slot(compute.template.context, compute.slots["gains"])
         self.present = np.zeros(self.fine_delay.shape[0], dtype=bool)
         super().__init__(timestamp)
 
@@ -608,6 +604,7 @@ class Engine(aiokatcp.DeviceServer):
                 buf = np.frombuffer(dev_buffer, dtype=item.spectra.dtype).reshape(item.spectra.shape)
                 chunk = send.Chunk(
                     buf,
+                    saturated=item.saturated.empty_like(),
                     substreams=substreams,
                     feng_id=self.feng_id,
                 )
@@ -618,11 +615,13 @@ class Engine(aiokatcp.DeviceServer):
         spectra = self._compute.spectra
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
-            send_shape = (spectra // self.spectra_per_heap, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
+            heaps = spectra // self.spectra_per_heap
+            send_shape = (heaps, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
                         accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
+                        accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
                         substreams=substreams,
                         feng_id=self.feng_id,
                     )
@@ -717,6 +716,7 @@ class Engine(aiokatcp.DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+        sensors.add(DeviceStatusSensor(sensors))
 
     async def _next_in(self) -> InItem | None:
         """Load next InItem for processing.
@@ -844,10 +844,11 @@ class Engine(aiokatcp.DeviceServer):
             # TODO: only need to copy the relevant region, and can limit
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
+            # Without this, saturation counts can be wrong.
             self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
             self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
             self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
-            self._compute.run_backend(self._out_item.spectra)
+            self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
             self._out_item.add_marker(self._compute.command_queue)
             self._out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're
@@ -1130,6 +1131,7 @@ class Engine(aiokatcp.DeviceServer):
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
+                out_item.saturated.get_async(self._download_queue, chunk.saturated)
                 events = [self._download_queue.enqueue_marker()]
 
             chunk.timestamp = out_item.timestamp

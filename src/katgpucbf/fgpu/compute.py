@@ -154,6 +154,7 @@ class Compute(accel.OperationSequence):
             # pols so they can share memory.
             "weights": [f"pfb_fir{pol}:weights" for pol in range(N_POLS)],
             "out": ["postproc:out"],
+            "saturated": ["postproc:saturated"],
             "fine_delay": ["postproc:fine_delay"],
             "phase": ["postproc:phase"],
             "gains": ["postproc:gains"],
@@ -202,7 +203,7 @@ class Compute(accel.OperationSequence):
             self.pfb_fir[pol].spectra = spectra
             self.pfb_fir[pol]()
 
-    def run_backend(self, out: accel.DeviceArray) -> None:
+    def run_backend(self, out: accel.DeviceArray, saturated: accel.DeviceArray) -> None:
         """Run the FFT and postproc on the data which has been PFB-FIRed.
 
         Postproc incorporates fine-delay, requantisation and corner-turning.
@@ -212,7 +213,7 @@ class Compute(accel.OperationSequence):
         out
             Destination for the processed data.
         """
-        self.bind(out=out)
+        self.bind(out=out, saturated=saturated)
         # TODO: only bind relevant slots for backend
         self.ensure_all_bound()
         for fft_op in self.fft:
