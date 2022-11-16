@@ -106,7 +106,6 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         )
         if worst_status <= aiokatcp.Sensor.Status.NOMINAL:  # NOMINAL or UNKNOWN
             return (aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
-        elif worst_status == aiokatcp.Sensor.Status.WARN:
-            return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
-        else:
-            return (aiokatcp.Sensor.Status.ERROR, DeviceStatus.FAIL)
+        # We won't return FAIL because if the device is unusable, we probably
+        # won't be able to.
+        return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
