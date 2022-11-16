@@ -83,10 +83,10 @@ async def test_gains(
     end_time = loop.time()
     elapsed = end_time - start_time
     pdf_report.detail(f"Gains set in {elapsed:.3f}s")
-    # Disabled until we determine whether CBF-REQ-0200 is applicable - it
-    # currently fails.
-    # with check:
-    #     assert elapsed < 1, "Took too long to set gains"
+    # MKAT-ECP-277 specifies 300s between gain updates, but we'd like to be
+    # able to set gains faster than that. This is an arbitrary number.
+    with check:
+        assert elapsed < 30.0, "Took too long to set gains"
 
     pdf_report.step("Collect and compare results.")
     data = await next_chunk_data()
