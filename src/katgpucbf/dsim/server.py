@@ -197,7 +197,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
             return timestamp
 
-    async def request_signals(self, ctx, signals_str: str, period: int = None) -> int:
+    async def request_signals(self, ctx, signals_str: str, period: int | None = None) -> int:
         """Update the signals that are generated.
 
         Parameters
