@@ -67,7 +67,7 @@ def _sample_models(
     return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
 
 
-def generate_weights(channels: int, taps: int) -> np.ndarray:
+def generate_weights(channels: int, taps: int, w_cutoff: float) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
     The resulting weights are normalised such that the sum of
@@ -79,6 +79,8 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
         Number of channels in the PFB.
     taps
         Number of taps in the PFB-FIR.
+    w_cutoff
+        Scaling factor for the width of the channel response.
 
     Returns
     -------
@@ -90,7 +92,7 @@ def generate_weights(channels: int, taps: int) -> np.ndarray:
     window_size = step * taps
     idx = np.arange(window_size)
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
-    sinc = np.sinc((idx + 0.5) / step - taps / 2)
+    sinc = np.sinc(w_cutoff * ((idx + 0.5) / step - taps / 2))
     weights = hann * sinc
     # Work around https://github.com/numpy/numpy/issues/21898
     weights /= np.sqrt(np.sum(np.square(weights)))  # type: ignore[misc]
@@ -385,6 +387,8 @@ class Engine(aiokatcp.DeviceServer):
         Number of output channels to produce.
     taps
         Number of taps in each branch of the PFB-FIR.
+    w_cutoff
+        Scaling factor for the width of the channel response.
     max_delay_diff
         Maximum supported difference between delays across polarisations (in samples).
     gain
@@ -437,6 +441,7 @@ class Engine(aiokatcp.DeviceServer):
         spectra_per_heap: int,
         channels: int,
         taps: int,
+        w_cutoff: float,
         max_delay_diff: int,
         gain: complex,
         sync_epoch: float,
@@ -482,6 +487,7 @@ class Engine(aiokatcp.DeviceServer):
             spectra_per_heap=spectra_per_heap,
             channels=channels,
             taps=taps,
+            w_cutoff=w_cutoff,
             max_delay_diff=max_delay_diff,
         )
 
@@ -524,6 +530,7 @@ class Engine(aiokatcp.DeviceServer):
         spectra_per_heap: int,
         channels: int,
         taps: int,
+        w_cutoff: float,
         max_delay_diff: int,
     ) -> None:
         """Initialise ``self._compute`` and related resources."""
@@ -539,7 +546,7 @@ class Engine(aiokatcp.DeviceServer):
         template = ComputeTemplate(context, taps, channels)
         self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(compute_queue, generate_weights(channels, taps))
+        device_weights.set(compute_queue, generate_weights(channels, taps, w_cutoff))
 
     def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
