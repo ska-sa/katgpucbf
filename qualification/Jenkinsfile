@@ -73,10 +73,17 @@ pipeline {
          script {
            sh 'pip install -r qualification/requirements.txt'
            sh 'pip install --no-deps ".[qualification]" && pip check'
-           sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
-           COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
-           currentBuild.displayName = "#${BUILD_NUMBER} ($COMMIT_ID)"
-           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
+           try {
+             sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
+             COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
+           }
+           catch (Exception e) {
+             echo 'Exception occurred: ' + e.toString()
+           }
+           finally {
+             currentBuild.displayName = "#${BUILD_NUMBER} ($COMMIT_ID)"
+           }
          }
        }
     }
