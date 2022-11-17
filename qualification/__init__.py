@@ -47,6 +47,7 @@ from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
 from katgpucbf import COMPLEX
+from katgpucbf.utils import TimeConverter
 
 logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
@@ -213,6 +214,7 @@ class BaselineCorrelationProductsReceiver:
             for endpoint in endpoint_list_parser(7148)(correlator.sensors[f"{stream_name}-destination"].value.decode())
         ]
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
+        self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
 
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
@@ -349,14 +351,6 @@ class BaselineCorrelationProductsReceiver:
                 if len(chunks) == n:
                     return chunks
         raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
-
-    def timestamp_to_unix(self, timestamp: int) -> float:
-        """Convert an ADC timestamp to a UNIX time."""
-        return timestamp / self.scale_factor_timestamp + self.sync_time
-
-    def unix_to_timestamp(self, time: float) -> int:
-        """Convert a UNIX time to an ADC timestamp (rounding to nearest)."""
-        return round((time - self.sync_time) * self.scale_factor_timestamp)
 
 
 def create_baseline_correlation_product_receive_stream(

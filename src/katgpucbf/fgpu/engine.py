@@ -49,7 +49,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor
+from ..utils import DeviceStatusSensor, TimeConverter
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -461,7 +461,7 @@ class Engine(aiokatcp.DeviceServer):
         self.feng_id = feng_id
         self.n_ants = num_ants
         self.default_gain = gain
-        self.sync_epoch = sync_epoch
+        self.time_converter = TimeConverter(sync_epoch, adc_sample_rate)
         self.monitor = monitor
         self.use_vkgdr = use_vkgdr
 
@@ -1314,7 +1314,7 @@ class Engine(aiokatcp.DeviceServer):
         # of this delta and the delay_rate (same for phase).
         # This may be too small to be a concern, but if it is a concern,
         # then we'd need to compensate for that here.
-        start_sample_count = round((start_time - self.sync_epoch) * self.adc_sample_rate)
+        start_sample_count = round(self.time_converter.unix_to_adc(start_time))
         if start_sample_count < 0:
             raise aiokatcp.FailReply("Start time cannot be prior to the sync epoch")
 

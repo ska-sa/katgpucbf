@@ -132,7 +132,7 @@ class TestEngine:
         assert engine_server._src_interface == "127.0.0.1"
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
         assert engine_server.channels == CHANNELS
-        assert engine_server.sync_epoch == SYNC_EPOCH
+        assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
                 ("239.10.10.0", 7149),
