@@ -742,7 +742,7 @@ class TestEngine:
         assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == [524288, 1048576, 1572864]
 
     @pytest.mark.parametrize("tone_pol", [0, 1])
-    async def test_output_clip_metric(
+    async def test_output_clip_count(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
@@ -750,7 +750,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         tone_pol: int,
     ) -> None:
-        """Test that ``output_clipped_samples`` metric increases when a channel clips."""
+        """Test that ``output_clipped_samples`` metric and ``feng-clip-count`` sensor increase when a channel clips."""
         tone = CW(frac_channel=271 / CHANNELS, magnitude=110.0)
         for pol in range(N_POLS):
             # Set gain high enough to make the tone saturate
@@ -769,6 +769,12 @@ class TestEngine:
 
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
+        sensor = engine_server.sensors[f"input{tone_pol}-feng-clip-cnt"]
+        assert sensor.value == len(timestamps)
+        assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
+        sensor = engine_server.sensors[f"input{1 - tone_pol}-feng-clip-cnt"]
+        assert sensor.value == 0
+        assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
 
     def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
         """Patch :meth:`.Engine._next_in` to make a request partway through the stream.

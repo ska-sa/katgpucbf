@@ -706,6 +706,15 @@ class Engine(aiokatcp.DeviceServer):
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
+            sensors.add(
+                aiokatcp.Sensor(
+                    int,
+                    f"input{pol}-feng-clip-cnt",
+                    "Number of output samples that are saturated",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
         sensors.add(
             aiokatcp.Sensor(
                 int,
@@ -1152,7 +1161,7 @@ class Engine(aiokatcp.DeviceServer):
                 # We're not in PeerDirect mode
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
-            task = asyncio.create_task(chunk.send(stream, n_frames))
+            task = asyncio.create_task(chunk.send(stream, n_frames, self.time_converter, self.sensors))
             task.add_done_callback(partial(self._chunk_finished, chunk))
 
         if task:
