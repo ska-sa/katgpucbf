@@ -199,6 +199,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "2*channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
+    parser.add_argument("--w-cutoff", type=float, default=1.0, help="Scaling factor for channel width [%(default)s]")
     parser.add_argument(
         "--max-delay-diff",
         type=int,
@@ -281,6 +282,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         spectra_per_heap=args.spectra_per_heap,
         channels=args.channels,
         taps=args.taps,
+        w_cutoff=args.w_cutoff,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
