@@ -40,7 +40,7 @@ frequency bin). Specifically, if there are :math:`n` output channels and
 .. math::
 
    x_i = A\sin^2\left(\frac{\pi i}{w - 1}\right)
-         \operatorname{sinc}\left(\frac{i + \tfrac 12 - nt}{2n}\right),
+         \operatorname{sinc}\left(w_c\cdot \frac{i + \tfrac 12 - nt}{2n}\right),
 
 where :math:`i` runs from 0 to :math:`w - 1`. Here :math:`A` is a
 normalisation factor which is chosen such that :math:`\sum_i x_i^2 = 1`. This
@@ -48,6 +48,11 @@ ensures that given white Gaussian noise as input, the expected output power
 in a channel is the same as the expected input power in a digitised sample.
 Note that the input and output are treated as integers rather than as
 fixed-point values.
+
+The tuning parameter :math:`w_c` (specified by the :option:`!--w-cutoff`
+command-line option) scales the width of the response in the frequency domain.
+The default value is 1, which makes the width of the response (at -6dB)
+approximately equal the channel spacing.
 
 Correlation products
 --------------------
