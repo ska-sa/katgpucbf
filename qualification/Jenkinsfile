@@ -75,7 +75,7 @@ pipeline {
            sh 'pip install --no-deps ".[qualification]" && pip check'
            try {
              //sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
-             sh 'spead2_net_raw ytest -v -c qualification/pytest-jenkins.ini qualification // test exception
+             sh 'spead2_net_raw ytest -v -c qualification/pytest-jenkins.ini qualification' // test exception
              COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
              publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
            }
