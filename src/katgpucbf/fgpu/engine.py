@@ -1050,7 +1050,7 @@ class Engine(aiokatcp.DeviceServer):
                 sensor = self.sensors[f"input{pol}-dig-clip-cnt"]
                 sensor.set_value(
                     sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
-                    timestamp=chunk.timestamp + layout.chunk_samples,
+                    timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
                 )
             if self.use_vkgdr:
                 for pol_data, chunk in zip(in_item.pol_data, chunks):

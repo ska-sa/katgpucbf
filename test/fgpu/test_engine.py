@@ -31,6 +31,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InItem
+from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff
 from .test_recv import gen_heaps
@@ -736,10 +737,12 @@ class TestEngine:
         )
         # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
         # __eq__ and __repr__) so that it can be used in comparisons.
+        time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
+        expected_timestamps = [time_converter.adc_to_unix(t) for t in [524288, 1048576, 1572864]]
         assert [r.value for r in sensor_update_dict[sensors[0].name]] == [5000, 5000, 5000]
-        assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == [524288, 1048576, 1572864]
+        assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == expected_timestamps
         assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0, 10000]
-        assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == [524288, 1048576, 1572864]
+        assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == expected_timestamps
 
     @pytest.mark.parametrize("tone_pol", [0, 1])
     async def test_output_clip_count(
