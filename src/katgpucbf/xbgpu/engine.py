@@ -51,7 +51,6 @@ from .. import (
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
-    accel_utils,
 )
 from .. import recv as base_recv
 from ..monitor import Monitor
@@ -394,33 +393,22 @@ class XBEngine(DeviceServer):
         self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = self.monitor.make_queue("tx_item_queue", n_tx_items)
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = self.monitor.make_queue("tx_free_item_queue", n_tx_items)
 
+        allocator = accel.DeviceAllocator(self.context)
         for _ in range(n_rx_items):
-            buffer_device = accel_utils.device_allocate_slot(
-                self.context,
-                self.correlation.slots["in_samples"],
-            )
+            buffer_device = self.correlation.slots["in_samples"].allocate(allocator, bind=False)
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
-            buffer_device = accel_utils.device_allocate_slot(
-                self.context,
-                self.correlation.slots["out_visibilities"],
-            )
-            saturated = accel_utils.device_allocate_slot(
-                self.context,
-                self.correlation.slots["out_saturated"],
-            )
+            buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
+            saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
             present_ants = np.zeros(shape=(n_ants,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
-            buf = accel_utils.host_allocate_slot(
-                self.context,
-                self.correlation.slots["in_samples"],
-            )
+            buf = self.correlation.slots["in_samples"].allocate_host(self.context)
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
