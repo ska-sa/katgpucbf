@@ -51,7 +51,7 @@ idna==3.4
     # via yarl
 katsdpservices[aiomonitor]==1.2
     # via -r requirements.in
-katsdpsigproc[cuda]==1.4.3
+katsdpsigproc[cuda]==1.6.0
     # via -r requirements.in
 katsdptelstate==0.11
     # via -r requirements.in
