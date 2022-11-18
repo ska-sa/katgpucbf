@@ -42,7 +42,6 @@ from .. import (
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
-    accel_utils,
 )
 from .. import recv as base_recv
 from ..monitor import Monitor
@@ -166,7 +165,8 @@ class InItem(QueueItem):
                 # initialising the item from the chunks.
                 samples = None
             else:
-                samples = accel_utils.device_allocate_slot(compute.template.context, compute.slots[f"in{pol}"])
+                allocator = accel.DeviceAllocator(compute.template.context)
+                samples = compute.slots[f"in{pol}"].allocate(allocator, bind=False)
             self.pol_data.append(
                 PolInItem(
                     samples=samples,
@@ -255,11 +255,12 @@ class OutItem(QueueItem):
     chunk: send.Chunk | None = None
 
     def __init__(self, compute: Compute, timestamp: int = 0) -> None:
-        self.spectra = accel_utils.device_allocate_slot(compute.template.context, compute.slots["out"])
-        self.saturated = accel_utils.device_allocate_slot(compute.template.context, compute.slots["saturated"])
-        self.fine_delay = accel_utils.host_allocate_slot(compute.template.context, compute.slots["fine_delay"])
-        self.phase = accel_utils.host_allocate_slot(compute.template.context, compute.slots["phase"])
-        self.gains = accel_utils.host_allocate_slot(compute.template.context, compute.slots["gains"])
+        allocator = accel.DeviceAllocator(compute.template.context)
+        self.spectra = compute.slots["out"].allocate(allocator, bind=False)
+        self.saturated = compute.slots["saturated"].allocate(allocator, bind=False)
+        self.fine_delay = compute.slots["fine_delay"].allocate_host(compute.template.context)
+        self.phase = compute.slots["phase"].allocate_host(compute.template.context)
+        self.gains = compute.slots["gains"].allocate_host(compute.template.context)
         self.present = np.zeros(self.fine_delay.shape[0], dtype=bool)
         super().__init__(timestamp)
 
