@@ -861,13 +861,10 @@ def list_from_json(input_data: str) -> list:
     result_list : list
         A list containing the test results.
     """
-    if not isinstance(input_data, list):
-        result_list = []
-        with open(input_data) as fp:
-            for line in fp:
-                result_list.append(json.loads(line))
-    else:
-        result_list = input_data
+    result_list = []
+    with open(input_data) as fp:
+        for line in fp:
+            result_list.append(json.loads(line))
     return result_list
 
 
