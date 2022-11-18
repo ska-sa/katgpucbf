@@ -172,8 +172,12 @@ async def async_main() -> None:
 
     config = descriptors.create_config()
     interface_address = katsdpservices.get_interface_address(args.interface)
-    descriptor_stream = descriptors.make_descriptor_stream(
-        endpoints=endpoints, config=config, ttl=args.ttl, interface_address=interface_address
+    descriptor_stream = send.make_stream_base(
+        endpoints=endpoints,
+        config=config,
+        ttl=args.ttl,
+        interface_address=interface_address,
+        ibv=args.ibv,
     )
     descriptor_stream.set_cnt_sequence(1, 2)
 

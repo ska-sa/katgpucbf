@@ -18,6 +18,7 @@
 
 import asyncio
 import functools
+import ipaddress
 import itertools
 import time
 from collections.abc import Iterable, Sequence
@@ -142,6 +143,52 @@ class HeapSet:
         return cls(data)
 
 
+def _is_multicast(address: str) -> bool:
+    """Determine whether an address is a multicast address.
+
+    This makes the guess that anything that doesn't parse as an IP address is
+    a DNS name and that DNS names will resolve to unicast addresses.
+    """
+    try:
+        return ipaddress.ip_address(address).is_multicast
+    except ValueError:
+        return False
+
+
+def make_stream_base(
+    *,
+    config: spead2.send.StreamConfig,
+    endpoints: Iterable[tuple[str, int]],
+    ttl: int,
+    interface_address: str,
+    ibv: bool = False,
+    affinity: int = -1,
+    memory_regions: list | None = None,
+) -> "spead2.send.asyncio.AsyncStream":
+    """Create a spead2 stream for sending.
+
+    This is the low-level support for making either a data or a descriptor
+    stream. Refer to :func:`make_stream` for explanations of the arguments.
+    """
+    endpoints_list = list(endpoints)
+    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
+    if ibv:
+        ibv_config = spead2.send.UdpIbvConfig(
+            endpoints=endpoints_list,
+            interface_address=interface_address,
+            ttl=ttl,
+        )
+        if memory_regions is not None:
+            ibv_config.memory_regions = memory_regions
+        return spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config)
+    elif any(_is_multicast(endpoint[0]) for endpoint in endpoints_list):
+        return spead2.send.asyncio.UdpStream(
+            thread_pool, endpoints_list, config, ttl=ttl, interface_address=interface_address
+        )
+    else:
+        return spead2.send.asyncio.UdpStream(thread_pool, endpoints_list, config)
+
+
 def make_stream(
     *,
     endpoints: Iterable[tuple[str, int]],
@@ -189,19 +236,15 @@ def make_stream(
         max_packet_size=heap_size + preamble,
         max_heaps=max_heaps,
     )
-    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
-    if ibv:
-        ibv_config = spead2.send.UdpIbvConfig(
-            endpoints=list(endpoints),
-            interface_address=interface_address,
-            ttl=ttl,
-            memory_regions=[heap_set.data["payload"].data for heap_set in heap_sets],
-        )
-        return spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config)
-    else:
-        return spead2.send.asyncio.UdpStream(
-            thread_pool, list(endpoints), config, ttl=ttl, interface_address=interface_address
-        )
+    return make_stream_base(
+        config=config,
+        endpoints=endpoints,
+        ttl=ttl,
+        interface_address=interface_address,
+        ibv=ibv,
+        affinity=affinity,
+        memory_regions=[heap_set.data["payload"].data for heap_set in heap_sets],
+    )
 
 
 class Sender:
