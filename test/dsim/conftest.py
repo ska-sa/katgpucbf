@@ -139,7 +139,7 @@ def descriptor_send_stream(descriptor_inproc_queues: Sequence[spead2.InprocQueue
 
     config = descriptors.create_config()
     with mock.patch("spead2.send.asyncio.UdpStream", side_effect=mock_udp_stream):
-        return descriptors.make_descriptor_stream(
+        return send.make_stream_base(
             endpoints=[("invalid", -1) for _ in descriptor_inproc_queues],
             config=config,
             ttl=4,
