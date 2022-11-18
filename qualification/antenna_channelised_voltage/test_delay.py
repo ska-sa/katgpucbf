@@ -74,7 +74,7 @@ async def test_delay_application_time(
         pdf_report.detail("Set delays.")
         await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", target, *delays)
         pdf_report.step("Receive data for the corresponding dump.")
-        target_ts = receiver.unix_to_timestamp(target)
+        target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
         async for timestamp, chunk in receiver.complete_chunks(max_delay=0):
@@ -100,7 +100,7 @@ async def test_delay_application_time(
     # Estimate time at which delay was applied based on real:imaginary
     total = np.sum(np.abs(acc))
     load_frac = abs(acc[0]) / total  # Load time as fraction of the accumulation
-    load_time = receiver.timestamp_to_unix(target_acc_ts) + load_frac * receiver.int_time
+    load_time = receiver.time_converter.adc_to_unix(target_acc_ts) + load_frac * receiver.int_time
     delta = load_time - target
     pdf_report.detail(f"Estimated load time error: {delta * 1e6:.3f}µs.")
     with check:
@@ -224,7 +224,7 @@ async def test_delay_sensors(
     rng = np.random.default_rng(seed=31)
     now = await correlator.dsim_time()
     load_time = now + 2.0
-    load_ts = receiver.unix_to_timestamp(load_time)
+    load_ts = round(receiver.time_converter.unix_to_adc(load_time))
     for _ in range(receiver.n_inputs):
         delay = rng.uniform(-MAX_DELAY, MAX_DELAY)
         delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE)

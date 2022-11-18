@@ -28,6 +28,7 @@ import xarray as xr
 from prometheus_client import Counter, Gauge
 
 from .. import BYTE_BITS, spead
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 from .shared_array import SharedArray
 
@@ -211,13 +212,11 @@ class Sender:
         stream: "spead2.send.asyncio.AsyncStream",
         heap_set: HeapSet,
         heap_samples: int,
-        adc_sample_rate: float,
     ) -> None:
         self.stream = stream
         self.heap_set = heap_set
         self.heap_samples = heap_samples
-        self.sync_time = 0.0  # Dummy value; run() will initialise
-        self.adc_sample_rate = adc_sample_rate
+        self.time_converter = TimeConverter(0.0, 1.0)  # Dummy value; run() will initialise
         # The futures serve two functions:
         # - prevent concurrent access to the timestamps while they're being sent
         # - limiting the amount of data in flight
@@ -245,16 +244,15 @@ class Sender:
         await self.join()
 
     def _update_metrics(self, end_timestamp: int, heaps: int, bytes: int, _future: asyncio.Future) -> None:
-        elapsed = time.time() - self.sync_time
-        expected_elapsed = end_timestamp / self.adc_sample_rate
-        time_error_gauge.set(elapsed - expected_elapsed)
+        end_time = self.time_converter.adc_to_unix(end_timestamp)
+        time_error_gauge.set(time.time() - end_time)
         output_heaps_counter.inc(heaps)
         output_bytes_counter.inc(bytes)
 
-    async def run(self, first_timestamp: int, sync_time: float) -> None:
+    async def run(self, first_timestamp: int, time_converter: TimeConverter) -> None:
         """Send heaps continuously."""
         self._next_timestamp = first_timestamp
-        self.sync_time = sync_time
+        self.time_converter = time_converter
         # Prepare initial timestamps
         first_end_timestamp = first_timestamp + self.heap_set.data.dims["time"] * self.heap_samples
         self.heap_set.data["timestamps"][:] = np.arange(

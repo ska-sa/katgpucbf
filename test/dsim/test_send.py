@@ -29,9 +29,10 @@ from spead2 import ItemGroup
 from katgpucbf import DIG_HEAP_SAMPLES
 from katgpucbf.dsim import send
 from katgpucbf.send import DescriptorSender
+from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff, unpackbits
-from .conftest import N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
+from .conftest import ADC_SAMPLE_RATE, N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
 
 
 async def descriptor_recv(
@@ -123,7 +124,7 @@ async def test_sender(
 
     # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
-        await sender.run(0, time.time())
+        await sender.run(0, TimeConverter(time.time(), ADC_SAMPLE_RATE))
     for queue in inproc_queues:
         queue.stop()
 

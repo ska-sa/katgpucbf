@@ -35,7 +35,7 @@ from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
 from ..send import DescriptorSender
-from ..utils import add_signal_handlers
+from ..utils import TimeConverter, add_signal_handlers
 from . import descriptors, send, signal
 from .server import DeviceServer
 
@@ -128,18 +128,27 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def first_timestamp(sync_time: float, now: float, adc_sample_rate: float, align: int) -> tuple[int, float]:
+def first_timestamp(time_converter: TimeConverter, now: float, align: int) -> int:
     """Determine ADC timestamp for first sample and the time at which to start sending.
 
     The resulting value will be a multiple of `align`.
+
+    Parameters
+    ----------
+    time_converter
+        Time converter between UNIX timestamps and ADC samples
+    now
+        Lower bound on first timestamp, expressed as UNIX timestamp
+    align
+        Alignment requirement on the returned ADC sample count
     """
     # Convert to repeat count (rounding)
-    first_block = math.ceil((now - sync_time) * adc_sample_rate / align)
+    first_block = math.ceil(time_converter.unix_to_adc(now) / align)
     if first_block < 0:
         raise ValueError("sync time is in the future")
     # Convert to a sample count
     samples = first_block * align
-    return samples, sync_time + samples / adc_sample_rate
+    return samples
 
 
 async def async_main() -> None:
@@ -201,7 +210,7 @@ async def async_main() -> None:
     )
     # Set spead stream to have heap id in even numbers for dsim data.
     stream.set_cnt_sequence(2, 2)
-    sender = send.Sender(stream, heap_sets[0], args.heap_samples, args.adc_sample_rate)
+    sender = send.Sender(stream, heap_sets[0], args.heap_samples)
 
     server = DeviceServer(
         sender=sender,
@@ -223,12 +232,13 @@ async def async_main() -> None:
 
     add_signal_handlers(server)
 
-    timestamp = 0
-    if args.sync_time is not None:
-        timestamp, start_time = first_timestamp(args.sync_time, time.time(), args.adc_sample_rate, args.max_period)
-    else:
-        args.sync_time = time.time()
-        start_time = args.sync_time
+    now = time.time()
+    if args.sync_time is None:
+        args.sync_time = now
+    time_converter = TimeConverter(args.sync_time, args.adc_sample_rate)
+    timestamp = first_timestamp(time_converter, now, args.max_period)
+    start_time = time_converter.adc_to_unix(timestamp)
+
     logger.info("First timestamp will be %#x", timestamp)
     # Sleep until start_time. Python doesn't seem to have an interface
     # for sleeping until an absolute time, so this will be wrong by the
@@ -236,7 +246,7 @@ async def async_main() -> None:
     # asyncio.sleep, but that's small change.
     await asyncio.sleep(max(0, start_time - time.time()))
     logger.info("Starting transmission")
-    await asyncio.gather(sender.run(timestamp, args.sync_time), descriptor_task, server.join())
+    await asyncio.gather(sender.run(timestamp, time_converter), descriptor_task, server.join())
 
 
 def main() -> None:

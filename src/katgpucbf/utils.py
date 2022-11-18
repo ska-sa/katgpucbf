@@ -109,3 +109,35 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         # We won't return FAIL because if the device is unusable, we probably
         # won't be able to.
         return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
+
+
+class TimeConverter:
+    """Convert times between UNIX timestamps and ADC sample counts.
+
+    Note that because UNIX timestamps are handled as 64-bit floats, they are
+    only accurate to roughly microsecond precision, and will not round-trip
+    precisely.
+
+    Parameters
+    ----------
+    sync_epoch
+        UNIX timestamp corresponding to ADC timestamp 0
+    adc_sample_rate
+        Number of ADC samples per second
+
+    .. todo::
+
+       This does not yet handle leap-seconds correctly.
+    """
+
+    def __init__(self, sync_epoch: float, adc_sample_rate: float) -> None:
+        self.sync_epoch = sync_epoch
+        self.adc_sample_rate = adc_sample_rate
+
+    def unix_to_adc(self, timestamp: float) -> float:
+        """Convert a UNIX timestamp to an ADC sample count."""
+        return (timestamp - self.sync_epoch) * self.adc_sample_rate
+
+    def adc_to_unix(self, samples: float) -> float:
+        """Convert an ADC sample count to a UNIX timstamp."""
+        return samples / self.adc_sample_rate + self.sync_epoch

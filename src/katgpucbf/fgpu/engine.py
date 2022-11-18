@@ -49,7 +49,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor
+from ..utils import DeviceStatusSensor, TimeConverter
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -466,7 +466,7 @@ class Engine(aiokatcp.DeviceServer):
         self.feng_id = feng_id
         self.n_ants = num_ants
         self.default_gain = gain
-        self.sync_epoch = sync_epoch
+        self.time_converter = TimeConverter(sync_epoch, adc_sample_rate)
         self.monitor = monitor
         self.use_vkgdr = use_vkgdr
 
@@ -709,6 +709,15 @@ class Engine(aiokatcp.DeviceServer):
                     int,
                     f"input{pol}-dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    int,
+                    f"input{pol}-feng-clip-cnt",
+                    "Number of output samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
@@ -1048,7 +1057,7 @@ class Engine(aiokatcp.DeviceServer):
                 sensor = self.sensors[f"input{pol}-dig-clip-cnt"]
                 sensor.set_value(
                     sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
-                    timestamp=chunk.timestamp + layout.chunk_samples,
+                    timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
                 )
             if self.use_vkgdr:
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
@@ -1159,7 +1168,7 @@ class Engine(aiokatcp.DeviceServer):
                 # We're not in PeerDirect mode
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
-            task = asyncio.create_task(chunk.send(stream, n_frames))
+            task = asyncio.create_task(chunk.send(stream, n_frames, self.time_converter, self.sensors))
             task.add_done_callback(partial(self._chunk_finished, chunk))
 
         if task:
@@ -1321,7 +1330,7 @@ class Engine(aiokatcp.DeviceServer):
         # of this delta and the delay_rate (same for phase).
         # This may be too small to be a concern, but if it is a concern,
         # then we'd need to compensate for that here.
-        start_sample_count = round((start_time - self.sync_epoch) * self.adc_sample_rate)
+        start_sample_count = round(self.time_converter.unix_to_adc(start_time))
         if start_sample_count < 0:
             raise aiokatcp.FailReply("Start time cannot be prior to the sync epoch")
 

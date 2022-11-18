@@ -23,11 +23,13 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import spead2.send
 import spead2.send.asyncio
+from aiokatcp import SensorSet
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS
 from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
@@ -112,9 +114,9 @@ class Chunk:
         self._timestamp = 0
         #: Callback to return the chunk to the appropriate queue
         self.cleanup: Callable[[], None] | None = None
-        timestamp_step = spectra_per_heap * channels * 2
+        self._timestamp_step = spectra_per_heap * channels * 2
         #: Storage for timestamps in the SPEAD heaps.
-        self._timestamps = (np.arange(n_frames) * timestamp_step).astype(">u8")
+        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
         # The ... in indexing causes numpy to give a 0d array view, rather than
         # a scalar.
         self._frames = [
@@ -147,20 +149,30 @@ class Chunk:
             for pol in range(N_POLS):
                 output_clip_counter.labels(pol).inc(frame.saturated[pol])
 
-    async def send(self, stream: "spead2.send.asyncio.AsyncStream", frames: int) -> None:
+    async def send(
+        self, stream: "spead2.send.asyncio.AsyncStream", frames: int, time_converter: TimeConverter, sensors: SensorSet
+    ) -> None:
         """Transmit heaps on a SPEAD stream.
 
         Frames from 0 to `frames` - 1 are sent asynchronously.
         """
         futures = []
+        saturated = [0] * N_POLS
         for present, frame in zip(self.present[:frames], self._frames[:frames]):
             if present:
                 futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
                 futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
+                for pol in range(N_POLS):
+                    saturated[pol] += frame.saturated[pol]
             else:
                 skipped_heaps_counter.inc(len(frame.heaps))
         if futures:
             await asyncio.gather(*futures)
+        end_timestamp = self._timestamp + self._timestamp_step * len(self._frames)
+        end_time = time_converter.adc_to_unix(end_timestamp)
+        for pol in range(N_POLS):
+            sensor = sensors[f"input{pol}-feng-clip-cnt"]
+            sensor.set_value(sensor.value + saturated[pol], timestamp=end_time)
 
 
 def make_stream(

@@ -58,7 +58,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor
+from ..utils import DeviceStatusSensor, TimeConverter
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -292,7 +292,7 @@ class XBEngine(DeviceServer):
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
-        self.sync_epoch = sync_epoch
+        self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
@@ -738,7 +738,7 @@ class XBEngine(DeviceServer):
                 # *before* send_heap, because that gives away ownership of the
                 # heap.
                 end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
-                end_timestamp = end_adc_timestamp / self.adc_sample_rate_hz + self.sync_epoch
+                end_timestamp = self.time_converter.adc_to_unix(end_adc_timestamp)
                 clip_cnt_sensor = self.sensors["xeng-clip-cnt"]
                 clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
             self.send_stream.send_heap(heap)

@@ -31,6 +31,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InItem
+from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff
 from .test_recv import gen_heaps
@@ -132,7 +133,7 @@ class TestEngine:
         assert engine_server._src_interface == "127.0.0.1"
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
         assert engine_server.channels == CHANNELS
-        assert engine_server.sync_epoch == SYNC_EPOCH
+        assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
                 ("239.10.10.0", 7149),
@@ -736,13 +737,15 @@ class TestEngine:
         )
         # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
         # __eq__ and __repr__) so that it can be used in comparisons.
+        time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
+        expected_timestamps = [time_converter.adc_to_unix(t) for t in [524288, 1048576, 1572864]]
         assert [r.value for r in sensor_update_dict[sensors[0].name]] == [5000, 5000, 5000]
-        assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == [524288, 1048576, 1572864]
+        assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == expected_timestamps
         assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0, 10000]
-        assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == [524288, 1048576, 1572864]
+        assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == expected_timestamps
 
     @pytest.mark.parametrize("tone_pol", [0, 1])
-    async def test_output_clip_metric(
+    async def test_output_clip_count(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
@@ -750,7 +753,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         tone_pol: int,
     ) -> None:
-        """Test that ``output_clipped_samples`` metric increases when a channel clips."""
+        """Test that ``output_clipped_samples`` metric and ``feng-clip-count`` sensor increase when a channel clips."""
         tone = CW(frac_channel=271 / CHANNELS, magnitude=110.0)
         for pol in range(N_POLS):
             # Set gain high enough to make the tone saturate
@@ -769,6 +772,12 @@ class TestEngine:
 
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
+        sensor = engine_server.sensors[f"input{tone_pol}-feng-clip-cnt"]
+        assert sensor.value == len(timestamps)
+        assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
+        sensor = engine_server.sensors[f"input{1 - tone_pol}-feng-clip-cnt"]
+        assert sensor.value == 0
+        assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
 
     def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
         """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
