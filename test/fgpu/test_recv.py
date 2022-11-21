@@ -297,7 +297,7 @@ class TestChunkSets:
     async def sensors(self) -> aiokatcp.SensorSet:
         """Receiver sensors."""
         # This is an async fixture because make_sensors requires a running event loop
-        return make_sensors()
+        return make_sensors(1e6)  # Large timeout so that it doesn't affect the test
 
     @pytest.fixture
     def time_converter(self) -> TimeConverter:
@@ -404,9 +404,7 @@ class TestChunkSets:
         expected_clip_total = [sum(expected_clip[chunk_id, pol] for chunk_id in expected_ids) for pol in range(N_POLS)]
         assert get_sample_diffs("input_clipped_samples_total") == expected_clip_total
 
-        # Check sensors (TODO: this is vulnerable to the
-        # TimeoutSensorStatusObserver timing out during the test and changing
-        # the status).
+        # Check sensors
         sensor = sensors["input0-rx-timestamp"]
         assert sensor.value == 21 * layout.chunk_samples
         assert sensor.status == aiokatcp.Sensor.Status.NOMINAL

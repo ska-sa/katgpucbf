@@ -45,8 +45,6 @@ from . import METRIC_NAMESPACE
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
-#: Time (in seconds) after which receiver sensors change status if there are no updates
-SENSOR_TIMEOUT = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -214,8 +212,15 @@ def make_streams(
     return streams
 
 
-def make_sensors() -> aiokatcp.SensorSet:
-    """Create the sensors needed to hold receiver statistics."""
+def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
+    """Create the sensors needed to hold receiver statistics.
+
+    Parameters
+    ----------
+    sensor_timeout
+        Time (in seconds) without updates before sensors for received data go
+        into error and sensors for missing data become nominal.
+    """
     sensors = aiokatcp.SensorSet()
     for pol in range(N_POLS):
         timestamp_sensors: list[aiokatcp.Sensor] = [
@@ -235,7 +240,7 @@ def make_sensors() -> aiokatcp.SensorSet:
             ),
         ]
         for sensor in timestamp_sensors:
-            TimeoutSensorStatusObserver(sensor, SENSOR_TIMEOUT, aiokatcp.Sensor.Status.ERROR)
+            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.ERROR)
             sensors.add(sensor)
         missing_sensors: list[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
@@ -247,7 +252,7 @@ def make_sensors() -> aiokatcp.SensorSet:
             )
         ]
         for sensor in missing_sensors:
-            TimeoutSensorStatusObserver(sensor, SENSOR_TIMEOUT, aiokatcp.Sensor.Status.NOMINAL)
+            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.NOMINAL)
             sensors.add(sensor)
     return sensors
 
