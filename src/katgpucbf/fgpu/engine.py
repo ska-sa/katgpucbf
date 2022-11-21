@@ -48,11 +48,13 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
+#: Time (in seconds) after which receiver sensors change status if there are no updates
+RX_SENSOR_TIMEOUT = 1.0
 logger = logging.getLogger(__name__)
 
 
@@ -733,6 +735,39 @@ class Engine(aiokatcp.DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+
+        rx_timestamp_sensors: list[aiokatcp.Sensor] = [
+            aiokatcp.Sensor(
+                int,
+                "rx-timestamp",
+                "The timestamp (in samples) of the last chunk of data received from the digitiser",
+                default=-1,
+                initial_status=aiokatcp.Sensor.Status.ERROR,
+            ),
+            aiokatcp.Sensor(
+                float,
+                "rx-unixtime",
+                "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
+                default=-1.0,
+                initial_status=aiokatcp.Sensor.Status.ERROR,
+            ),
+        ]
+        for sensor in rx_timestamp_sensors:
+            TimeoutSensorStatusObserver(sensor, RX_SENSOR_TIMEOUT, aiokatcp.Sensor.Status.ERROR)
+            sensors.add(sensor)
+        rx_missing_sensors: list[aiokatcp.Sensor] = [
+            aiokatcp.Sensor(
+                float,
+                "rx-missing-unixtime",
+                "The timestamp (in UNIX time) of the last chunk of received data with missing packets",
+                default=-1.0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        ]
+        for sensor in rx_missing_sensors:
+            TimeoutSensorStatusObserver(sensor, RX_SENSOR_TIMEOUT, aiokatcp.Sensor.Status.NOMINAL)
+            sensors.add(sensor)
+
         sensors.add(DeviceStatusSensor(sensors))
 
     async def _next_in(self) -> InItem | None:
@@ -1037,6 +1072,12 @@ class Engine(aiokatcp.DeviceServer):
             The structure of the streams.
         """
         async for chunks in recv.chunk_sets(streams, layout):
+            unix_time = self.time_converter.adc_to_unix(chunks[0].timestamp)
+            self.sensors["rx-timestamp"].set_value(chunks[0].timestamp, timestamp=unix_time)
+            self.sensors["rx-unixtime"].set_value(unix_time, timestamp=unix_time)
+            if not all(np.all(chunk.present) for chunk in chunks):
+                self.sensors["rx-missing-unixtime"].set_value(unix_time, timestamp=unix_time)
+
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
