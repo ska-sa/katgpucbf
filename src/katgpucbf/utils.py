@@ -116,9 +116,9 @@ class TimeoutSensorStatusObserver:
     """Change the status of a sensor if it doesn't receive an update for a given time.
 
     Do not directly attach or detach this observer from the sensor (it does
-    this internally). It can be constructed and then simply discarded if there
-    is no need to cancel it. Alternatively, keep a reference and use
-    :meth:`cancel` to detach it.
+    this internally). It is not necessary to retain a reference to the object
+    unless you wish to interact with it later (for example, by calling
+    :meth:`cancel`).
 
     It must be constructed while there is a running event loop.
     """
