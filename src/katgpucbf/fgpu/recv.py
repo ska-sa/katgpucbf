@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import cast
 
+import aiokatcp
 import numba
 import numpy as np
 import spead2.recv.asyncio
@@ -37,12 +38,15 @@ from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
+from ..utils import TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
 #: heaps (which can happen with a multi-path network). 2 is sufficient provided heaps
 #: are not delayed by a whole chunk.
 MAX_CHUNKS = 2
+#: Time (in seconds) after which receiver sensors change status if there are no updates
+SENSOR_TIMEOUT = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -210,9 +214,49 @@ def make_streams(
     return streams
 
 
+def make_sensors() -> aiokatcp.SensorSet:
+    """Create the sensors needed to hold receiver statistics."""
+    sensors = aiokatcp.SensorSet()
+    for pol in range(N_POLS):
+        timestamp_sensors: list[aiokatcp.Sensor] = [
+            aiokatcp.Sensor(
+                int,
+                f"input{pol}-rx-timestamp",
+                "The timestamp (in samples) of the last chunk of data received from the digitiser",
+                default=-1,
+                initial_status=aiokatcp.Sensor.Status.ERROR,
+            ),
+            aiokatcp.Sensor(
+                float,
+                f"input{pol}-rx-unixtime",
+                "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
+                default=-1.0,
+                initial_status=aiokatcp.Sensor.Status.ERROR,
+            ),
+        ]
+        for sensor in timestamp_sensors:
+            TimeoutSensorStatusObserver(sensor, SENSOR_TIMEOUT, aiokatcp.Sensor.Status.ERROR)
+            sensors.add(sensor)
+        missing_sensors: list[aiokatcp.Sensor] = [
+            aiokatcp.Sensor(
+                float,
+                f"input{pol}-rx-missing-unixtime",
+                "The timestamp (in UNIX time) of the last chunk of received data with missing packets",
+                default=-1.0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        ]
+        for sensor in missing_sensors:
+            TimeoutSensorStatusObserver(sensor, SENSOR_TIMEOUT, aiokatcp.Sensor.Status.NOMINAL)
+            sensors.add(sensor)
+    return sensors
+
+
 async def chunk_sets(
     streams: list[spead2.recv.ChunkRingStream],
     layout: Layout,
+    sensors: aiokatcp.SensorSet,
+    time_converter: TimeConverter,
 ) -> AsyncGenerator[list[Chunk], None]:
     """Asynchronous generator yielding timestamp-matched sets of chunks.
 
@@ -231,6 +275,11 @@ async def chunk_sets(
         each represents a polarisation.
     layout
         Structure of the streams
+    sensors
+        Sensor set containing at least the sensors created by
+        :func:`make_sensors`.
+    time_converter
+        Converter to turn data timestamps into sensor timestamps.
     """
     n_pol = len(streams)
     # Working buffer to match up pairs of chunks from both pols. There is
@@ -271,6 +320,9 @@ async def chunk_sets(
                 layout.chunk_heaps,
                 lost,
             )
+            unix_time = time_converter.adc_to_unix(chunk.timestamp)
+            sensors[f"input{pol}-rx-timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+            sensors[f"input{pol}-rx-unixtime"].set_value(unix_time, timestamp=unix_time)
 
             buf[pol].append(chunk)
 
@@ -311,6 +363,9 @@ async def chunk_sets(
                     if new_missing > n_missing_heaps[pol]:
                         missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
                         n_missing_heaps[pol] = new_missing
+                        sensors[f"input{pol}-rx-missing-unixtime"].set_value(
+                            unix_time, timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
+                        )
 
                 yield out
     finally:

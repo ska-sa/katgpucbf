@@ -23,6 +23,7 @@ from collections.abc import Generator, Iterable, Sequence
 from typing import cast
 from unittest.mock import Mock
 
+import aiokatcp
 import numpy as np
 import pytest
 import spead2.recv.asyncio
@@ -30,7 +31,7 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
-from katgpucbf.fgpu.recv import Chunk, Layout
+from katgpucbf.fgpu.recv import Chunk, Layout, make_sensors
 from katgpucbf.spead import (
     ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
@@ -40,6 +41,7 @@ from katgpucbf.spead import (
     FLAVOUR,
     TIMESTAMP_ID,
 )
+from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff
 
@@ -291,7 +293,24 @@ class TestStream:
 class TestChunkSets:
     """Test :func:`.chunk_sets`."""
 
-    async def test(self, layout: Layout, caplog) -> None:  # noqa: D102
+    @pytest.fixture
+    async def sensors(self) -> aiokatcp.SensorSet:
+        """Receiver sensors."""
+        # This is an async fixture because make_sensors requires a running event loop
+        return make_sensors()
+
+    @pytest.fixture
+    def time_converter(self) -> TimeConverter:
+        """Time converter.
+
+        This is a simple implementation that keeps ADC and Unix timestamps
+        closely related to make tests easily readable.
+        """
+        return TimeConverter(1.0, 1000.0)
+
+    async def test(
+        self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter, caplog
+    ) -> None:  # noqa: D102
         streams = [Mock() for _ in range(N_POLS)]
         # Fake up stream stats
         config = spead2.recv.StreamConfig()
@@ -345,7 +364,9 @@ class TestChunkSets:
                 recv.stats_collector.add_stream(stream, labels=[str(pol)])
             sets = [
                 chunk_set
-                async for chunk_set in recv.chunk_sets(cast(list[spead2.recv.ChunkRingStream], streams), layout)
+                async for chunk_set in recv.chunk_sets(
+                    cast(list[spead2.recv.ChunkRingStream], streams), layout, sensors, time_converter
+                )
             ]
         assert caplog.record_tuples == [
             ("katgpucbf.fgpu.recv", logging.WARNING, "Chunk not matched: timestamp=0xb0000 pol=1")
@@ -382,3 +403,28 @@ class TestChunkSets:
         assert get_sample_diffs("input_metadata_heaps_total") == [321, 1321]
         expected_clip_total = [sum(expected_clip[chunk_id, pol] for chunk_id in expected_ids) for pol in range(N_POLS)]
         assert get_sample_diffs("input_clipped_samples_total") == expected_clip_total
+
+        # Check sensors (TODO: this is vulnerable to the
+        # TimeoutSensorStatusObserver timing out during the test and changing
+        # the status).
+        sensor = sensors["input0-rx-timestamp"]
+        assert sensor.value == 21 * layout.chunk_samples
+        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
+        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+        sensor = sensors["input1-rx-timestamp"]
+        assert sensor.value == 20 * layout.chunk_samples
+        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
+        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+        sensor = sensors["input0-rx-unixtime"]
+        assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
+        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
+        assert sensor.timestamp == sensor.value
+        sensor = sensors["input1-rx-unixtime"]
+        assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
+        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
+        assert sensor.timestamp == sensor.value
+        for pol in range(N_POLS):
+            sensor = sensors[f"input{pol}-rx-missing-unixtime"]
+            assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
+            assert sensor.status == aiokatcp.Sensor.Status.ERROR
+            assert sensor.timestamp == sensor.value
