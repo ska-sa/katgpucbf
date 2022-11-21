@@ -16,10 +16,11 @@
 
 """A collection of utility functions for katgpucbf."""
 
+import asyncio
 import ipaddress
 import logging
 import signal
-from asyncio import get_event_loop
+import weakref
 from collections import Counter
 from enum import Enum
 from typing import TypeVar
@@ -44,7 +45,7 @@ def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
             loop.remove_signal_handler(signum)
         server.halt()
 
-    loop = get_event_loop()
+    loop = asyncio.get_running_loop()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
 
@@ -109,6 +110,68 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         # We won't return FAIL because if the device is unusable, we probably
         # won't be able to.
         return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
+
+
+class TimeoutSensorStatusObserver:
+    """Change the status of a sensor if it doesn't receive an update for a given time.
+
+    Do not directly attach or detach this observer from the sensor (it does
+    this internally). It can be constructed and then simply discarded if there
+    is no need to cancel it. Alternatively, keep a reference and use
+    :meth:`cancel` to detach it.
+
+    It must be constructed while there is a running event loop.
+    """
+
+    def __init__(self, sensor: aiokatcp.Sensor, timeout: float, new_status: aiokatcp.Sensor.Status) -> None:
+        loop = asyncio.get_running_loop()
+        self._sensor = weakref.ref(sensor, self._cleanup)
+        self._new_status = new_status
+        self._timeout = timeout
+        self._cb_handle: asyncio.TimerHandle | None = None  # Callback to change status after timeout
+        if sensor.status != new_status:
+            self._cb_handle = loop.call_later(timeout, self._change_status)
+        sensor.attach(self)
+
+    def _cancel_cb(self) -> None:
+        """Cancel the callback handle, if any."""
+        if self._cb_handle is not None:
+            self._cb_handle.cancel()
+            self._cb_handle = None
+
+    def __call__(self, sensor: aiokatcp.Sensor, reading: aiokatcp.Reading) -> None:
+        """Sensor update callback (do not call directly)."""
+        # Cancel the countdown, and start a new one if appropriate.
+        self._cancel_cb()
+        if reading.status != self._new_status:
+            self._cb_handle = asyncio.get_running_loop().call_later(self._timeout, self._change_status)
+
+    def _change_status(self) -> None:
+        """Update the status of the sensor when the timeout expires."""
+        self._cb_handle = None
+        sensor = self._sensor()
+        # Check that the sensor wasn't deleted already. It's unlikely, because _cleanup will
+        # cancel the callback, but potentially there are race conditions.
+        if sensor is not None:
+            logger.debug("Changing sensor status of %s to %s after timeout", sensor.name, self._new_status)
+            timestamp = sensor.timestamp + self._timeout
+            sensor.set_value(sensor.value, status=self._new_status, timestamp=timestamp)
+
+    def _cleanup(self, weak_sensor: weakref.ReferenceType) -> None:
+        """Cancel the callback if the sensor is garbage collected.
+
+        This allows the observer to be garbage collected immediately; otherwise
+        it can only be collected once the timeout fires, because the event loop
+        holds a reference.
+        """
+        self._cancel_cb()
+
+    def cancel(self) -> None:
+        """Detach from the sensor and make no further updates to it."""
+        self._cancel_cb()
+        sensor = self._sensor()
+        if sensor is not None:
+            sensor.detach(self)
 
 
 class TimeConverter:
