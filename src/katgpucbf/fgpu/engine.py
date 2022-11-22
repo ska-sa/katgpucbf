@@ -55,6 +55,8 @@ from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_a
 
 #: Number of chunks before rx sensor status changes
 RX_SENSOR_TIMEOUT_CHUNKS = 10
+#: Minimum rx sensor status timeout in seconds
+RX_SENSOR_TIMEOUT_MIN = 1.0
 logger = logging.getLogger(__name__)
 
 
@@ -454,7 +456,9 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
-        self._populate_sensors(self.sensors, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+        self._populate_sensors(
+            self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+        )
 
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
