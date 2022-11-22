@@ -53,6 +53,10 @@ from . import SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
+#: Number of chunks before rx sensor status changes
+RX_SENSOR_TIMEOUT_CHUNKS = 10
+#: Minimum rx sensor status timeout in seconds
+RX_SENSOR_TIMEOUT_MIN = 1.0
 logger = logging.getLogger(__name__)
 
 
@@ -452,7 +456,9 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
-        self._populate_sensors(self.sensors)
+        self._populate_sensors(
+            self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+        )
 
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
@@ -683,7 +689,7 @@ class Engine(aiokatcp.DeviceServer):
         return N_POLS
 
     @staticmethod
-    def _populate_sensors(sensors: aiokatcp.SensorSet) -> None:
+    def _populate_sensors(sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an engine."""
         for pol in range(N_POLS):
             sensors.add(
@@ -723,6 +729,9 @@ class Engine(aiokatcp.DeviceServer):
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
+
+        for sensor in recv.make_sensors(rx_sensor_timeout).values():
+            sensors.add(sensor)
         sensors.add(
             aiokatcp.Sensor(
                 int,
@@ -733,6 +742,7 @@ class Engine(aiokatcp.DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+
         sensors.add(DeviceStatusSensor(sensors))
 
     async def _next_in(self) -> InItem | None:
@@ -1036,7 +1046,7 @@ class Engine(aiokatcp.DeviceServer):
         layout
             The structure of the streams.
         """
-        async for chunks in recv.chunk_sets(streams, layout):
+        async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
             with self.monitor.with_state("run_receive", "wait events"):
