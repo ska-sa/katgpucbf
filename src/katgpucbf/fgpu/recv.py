@@ -242,11 +242,12 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
         for sensor in timestamp_sensors:
             TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.ERROR)
             sensors.add(sensor)
+
         missing_sensors: list[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 float,
                 f"input{pol}-rx-missing-unixtime",
-                "The timestamp (in UNIX time) of the last chunk of received data with missing packets",
+                "The timestamp (in UNIX time) when missing data was last detected",
                 default=-1.0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
