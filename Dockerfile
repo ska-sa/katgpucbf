@@ -65,7 +65,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==22.3 setuptools==65.5.0 wheel==0.37.1
+RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that when we want to update we only have to do it in one place.
@@ -82,19 +82,11 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
     make -j && \
     make install
 
-# Build pycuda with a workaround to pin the numpy version. We then inject the
-# patched version into pip's wheel cache, at the place it would look for the
-# original pycuda wheel. The patch has been merged upstream, but not yet (Oct
-# 2022) released. Once a new release is in use in requirements.txt, this will
-# become useless as pip will look in a different place for the cached wheel,
-# but it won't break anything.
-#
-# A side benefit is that later stages that install pycuda will be quick as
-# they'll use the wheel.
-RUN pip wheel --no-deps "pycuda @ git+https://github.com/bmerry/pycuda@fcb925e3c697e326d70969aeb8851df86466db5f" && \
-    wheel_path="$HOME/.cache/pip/wheels/95/16/07/8e2ba8228e568968e7f19a2cdfa8a3c60bf47e385507a6a4e6/" && \
-    mkdir -p "$wheel_path" && \
-    mv pycuda-*.whl "$wheel_path"
+# Install and immediately uninstall pycuda. This causes pip to cache the
+# wheel it built, making it fast to install later (we uninstall so that the
+# Jenkins image has a clean environment to start from).
+RUN pip install --no-deps "$(grep '^pycuda==' /tmp/katgpucbf/requirements.txt)" && \
+    pip uninstall -y pycuda
 
 #######################################################################
 
