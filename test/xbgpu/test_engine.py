@@ -17,7 +17,7 @@
 """Unit tests for XBEngine module."""
 
 from collections.abc import Iterable
-from typing import AbstractSet, Callable, Final
+from typing import AbstractSet, AsyncGenerator, Callable, Final
 
 import aiokatcp
 import numpy as np
@@ -33,6 +33,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
+from katgpucbf.xbgpu.engine import XBEngine
 from katgpucbf.xbgpu.main import make_engine, parse_args
 
 from .. import PromDiff
@@ -347,60 +348,42 @@ class TestEngine:
 
         return device_results
 
-    @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna",
-        test_parameters.array_size,
-        test_parameters.num_channels,
-        test_parameters.num_spectra_per_heap,
-        [None, 0, 3],
-        filter=valid_end_to_end_combination,
-    )
-    async def test_xengine_end_to_end(
-        self,
-        context: AbstractContext,
-        mock_recv_streams: list[spead2.InprocQueue],
-        mock_send_stream: spead2.InprocQueue,
-        n_ants: int,
-        n_spectra_per_heap: int,
-        n_channels_total: int,
-        missing_antenna: int | None,
-    ):
-        """
-        End-to-end test for the XBEngine.
-
-        Simulated input data is generated and passed to the XBEngine, yielding
-        output results which are then verified.
-
-        The simulated data is not random, it is encoded based on certain
-        parameters, this allows the verification function to generate the
-        correct data to compare to the xbengine without performing the full
-        correlation algorithm, greatly improving processing time.
-
-        This test simulates an incomplete accumulation at the start of transmission
-        to ensure that the auto-resync logic works correctly. Data is also
-        generated from a timestamp starting after the first accumulation
-        boundary to more accurately test the setting of the first output
-        packet's timestamp (to be non-zero).
-        """
-        n_samples_between_spectra = 2 * n_channels_total
-
-        # Get a realistic number of engines, round up to the next power of 2.
+    @pytest.fixture
+    def n_engines(self, n_ants: int) -> int:
+        """Get a realistic number of engines by rounding up to the next power of 2."""
         n_engines = 1
         while n_engines < n_ants:
             n_engines *= 2
-        n_channels_per_stream = n_channels_total // n_engines
-        n_baselines = n_ants * (n_ants + 1) * 2
-        heap_accumulation_threshold = 4
-        first_accumulation_index = 123
-        n_full_accumulations = 3
-        n_total_accumulations = n_full_accumulations + 1
-        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
-        missing_antennas = set() if missing_antenna is None else {missing_antenna}
+        return n_engines
 
-        queue = mock_send_stream
-        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
-        recv_stream.add_inproc_reader(queue)
+    @pytest.fixture
+    def n_channels_per_stream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
+        return n_channels_total // n_engines
 
+    @pytest.fixture
+    def n_samples_between_spectra(self, n_channels_total: int) -> int:  # noqa: D102
+        # Will need to be updated for narrowband
+        return 2 * n_channels_total
+
+    @pytest.fixture
+    def recv_stream(self, mock_send_stream: spead2.InprocQueue) -> spead2.recv.asyncio.Stream:
+        """Stream on the receive end of the ``mock_send_stream`` fixture."""
+        stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
+        stream.add_inproc_reader(mock_send_stream)
+        return stream
+
+    @pytest.fixture
+    async def xbengine(
+        self,
+        context: AbstractContext,
+        n_ants: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_between_spectra: int,
+        n_spectra_per_heap: int,
+        heap_accumulation_threshold: int,
+    ) -> AsyncGenerator[XBEngine, None]:
+        """Create and start an engine based on the fixture values."""
         arglist = [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
@@ -420,9 +403,60 @@ class TestEngine:
             "239.10.11.4:7149",  # src
             "239.21.11.4:7149",  # dst
         ]
-
         args = parse_args(arglist)
         xbengine, _ = make_engine(context, args)
+        await xbengine.start()
+
+        yield xbengine
+
+        await xbengine.stop()
+
+    @pytest.mark.combinations(
+        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna",
+        test_parameters.array_size,
+        test_parameters.num_channels,
+        test_parameters.num_spectra_per_heap,
+        [None, 0, 3],
+        filter=valid_end_to_end_combination,
+    )
+    @pytest.mark.parametrize("heap_accumulation_threshold", [4])
+    async def test_xengine_end_to_end(
+        self,
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: spead2.InprocQueue,
+        recv_stream: spead2.recv.asyncio.Stream,
+        xbengine: XBEngine,
+        n_ants: int,
+        n_spectra_per_heap: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_between_spectra: int,
+        heap_accumulation_threshold: int,
+        missing_antenna: int | None,
+    ):
+        """
+        End-to-end test for the XBEngine.
+
+        Simulated input data is generated and passed to the XBEngine, yielding
+        output results which are then verified.
+
+        The simulated data is not random, it is encoded based on certain
+        parameters, this allows the verification function to generate the
+        correct data to compare to the xbengine without performing the full
+        correlation algorithm, greatly improving processing time.
+
+        This test simulates an incomplete accumulation at the start of transmission
+        to ensure that the auto-resync logic works correctly. Data is also
+        generated from a timestamp starting after the first accumulation
+        boundary to more accurately test the setting of the first output
+        packet's timestamp (to be non-zero).
+        """
+        n_baselines = n_ants * (n_ants + 1) * 2
+        first_accumulation_index = 123
+        n_full_accumulations = 3
+        n_total_accumulations = n_full_accumulations + 1
+        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
+        missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
@@ -433,8 +467,6 @@ class TestEngine:
             actual_sensor_updates.append((sensor_reading.value, sensor_reading.status))
 
         xbengine.sensors["synchronised"].attach(sensor_observer)
-
-        await xbengine.start()
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
@@ -523,13 +555,25 @@ class TestEngine:
 
         np.testing.assert_equal(actual_sensor_updates, expected_sensor_updates)
 
-        await xbengine.stop()
-
+    # This uses parametrize to set fixture values for the test rather than to
+    # create multiple tests.
+    @pytest.mark.parametrize("n_ants", [4])
+    @pytest.mark.parametrize("n_channels_total", [1024])
+    @pytest.mark.parametrize("n_spectra_per_heap", [256])
+    @pytest.mark.parametrize("heap_accumulation_threshold", [300])
     async def test_saturation(
         self,
         context: AbstractContext,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: spead2.InprocQueue,
+        recv_stream: spead2.recv.asyncio.Stream,
+        xbengine: XBEngine,
+        n_ants: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_between_spectra: int,
+        n_spectra_per_heap: int,
+        heap_accumulation_threshold: int,
     ):
         """Test saturation statistics.
 
@@ -538,43 +582,8 @@ class TestEngine:
            After the implementation is updated to avoid counting missing data
            as saturated, extend the test to check that.
         """
-        n_channels_total = 1024
-        n_samples_between_spectra = 2 * n_channels_total
-        n_ants = 4
-        n_engines = 16
-        n_spectra_per_heap = 256
-        heap_accumulation_threshold = 300
-        n_channels_per_stream = n_channels_total // n_engines
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         n_baselines = n_ants * (n_ants + 1) * 2
-
-        arglist = [
-            "--katcp-host=127.0.0.1",
-            "--katcp-port=0",
-            f"--adc-sample-rate={ADC_SAMPLE_RATE}",
-            f"--array-size={n_ants}",
-            f"--channels={n_channels_total}",
-            f"--channels-per-substream={n_channels_per_stream}",
-            f"--samples-between-spectra={n_samples_between_spectra}",
-            f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
-            f"--spectra-per-heap={n_spectra_per_heap}",
-            f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
-            f"--heap-accumulation-threshold={heap_accumulation_threshold}",
-            "--sync-epoch=1234567890",
-            "--src-interface=lo",
-            "--dst-interface=lo",
-            "--tx-enabled",
-            "239.10.11.4:7149",  # src
-            "239.21.11.4:7149",  # dst
-        ]
-        args = parse_args(arglist)
-        xbengine, _ = make_engine(context, args)
-
-        queue = mock_send_stream
-        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
-        recv_stream.add_inproc_reader(queue)
-
-        await xbengine.start()
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = timestamp_step * batch_index
