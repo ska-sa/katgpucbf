@@ -16,11 +16,15 @@
 
 <%include file="/port.mako"/>
 <%include file="unpack_10bit.mako"/>
+<%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 
 #define WGS ${wgs}
 #define TAPS ${taps}
 #define CHANNELS ${channels}
 #define UNZIP_FACTOR ${unzip_factor}
+
+${wg_reduce.define_scratch('unsigned long long', wgs, 'scratch_t', allow_shuffle=True)}
+${wg_reduce.define_function('unsigned long long', wgs, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
 /* Apply unzipping to an output index.
  */
@@ -129,5 +133,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         out[idx] = sum;
     }
 
-    atomicAdd(out_total_power, total_power);
+    // Reduce total_power across work items, to reduce the number of atomics needed.
+    LOCAL_DECL scratch_t scratch;
+    total_power = reduce(total_power, lid, &scratch);
+    if (lid == 0)
+        atomicAdd(out_total_power, total_power);
 }
