@@ -36,6 +36,7 @@ from .. import (
     BYTE_BITS,
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
+    DIG_SAMPLE_BITS,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -49,7 +50,7 @@ from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter
-from . import SAMPLE_BITS, recv, send
+from . import recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
@@ -466,7 +467,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.Layout(SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
+        self._src_layout = recv.Layout(DIG_SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_packet_samples = src_packet_samples
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
@@ -580,7 +581,7 @@ class Engine(aiokatcp.DeviceServer):
         )
         free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
         self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = self._src_layout.chunk_samples * SAMPLE_BITS // BYTE_BITS
+        chunk_bytes = self._src_layout.chunk_samples * DIG_SAMPLE_BITS // BYTE_BITS
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:

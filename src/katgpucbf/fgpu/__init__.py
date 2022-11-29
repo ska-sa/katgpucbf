@@ -18,5 +18,4 @@
 
 from typing import Final
 
-SAMPLE_BITS: Final = 10
 METRIC_NAMESPACE: Final = "fgpu"

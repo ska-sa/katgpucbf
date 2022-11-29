@@ -20,8 +20,7 @@ import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from katgpucbf import BYTE_BITS
-from katgpucbf.fgpu import SAMPLE_BITS
+from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
 from katgpucbf.fgpu.ddc import DDCTemplate, _TuningDict
 
 from .. import unpackbits
@@ -65,7 +64,7 @@ def test_ddc(
 ) -> None:
     """Test DDC kernel."""
     rng = np.random.default_rng(seed=1)
-    h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
+    h_in = rng.integers(0, 256, samples * DIG_SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
     mix_frequency = 0.21
     expected = ddc_host(h_in, weights, decimation, mix_frequency)
