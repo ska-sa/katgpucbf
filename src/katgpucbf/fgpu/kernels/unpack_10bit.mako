@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020-2021, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2022, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -24,9 +24,9 @@ DEVICE_FN int samples_to_bytes(int samples)
 }
 
 /* Get the 10-bit sample at the given index from the chunk of samples, shake off
- * the unwanted surrounding pieces, and return as a float.
+ * the unwanted surrounding pieces, and return as an integer.
  */
-DEVICE_FN float get_sample_10bit(const GLOBAL uchar * RESTRICT in, int idx)
+DEVICE_FN int get_sample_10bit(const GLOBAL uchar * RESTRICT in, int idx)
 {
     // We were given the sample number. Get the byte index.
     int byte_idx = samples_to_bytes(idx);

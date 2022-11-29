@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import math
 import numbers
 from collections import deque
 from collections.abc import Iterable, Sequence
@@ -28,7 +29,7 @@ import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
 import spead2.recv
-from katsdpsigproc.abc import AbstractContext, AbstractEvent
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 from katsdptelstate.endpoint import Endpoint
 
@@ -49,7 +50,7 @@ from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter
-from . import SAMPLE_BITS, recv, send
+from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
@@ -242,6 +243,8 @@ class OutItem(QueueItem):
     spectra: accel.DeviceArray
     #: Output saturation count, per pol
     saturation: accel.DeviceArray
+    #: Output sum of squared samples, per pol
+    dig_total_power: list[accel.DeviceArray]
     #: Provides a scratch space for collecting per-spectrum fine delays while
     #: the `OutItem` is being prepared. When the `OutItem` is placed onto the
     #: queue it is copied to the `Compute`.
@@ -262,6 +265,9 @@ class OutItem(QueueItem):
         allocator = accel.DeviceAllocator(compute.template.context)
         self.spectra = compute.slots["out"].allocate(allocator, bind=False)
         self.saturated = compute.slots["saturated"].allocate(allocator, bind=False)
+        self.dig_total_power = [
+            compute.slots[f"dig_total_power{pol}"].allocate(allocator, bind=False) for pol in range(N_POLS)
+        ]
         self.fine_delay = compute.slots["fine_delay"].allocate_host(compute.template.context)
         self.phase = compute.slots["phase"].allocate_host(compute.template.context)
         self.gains = compute.slots["gains"].allocate_host(compute.template.context)
@@ -273,9 +279,24 @@ class OutItem(QueueItem):
 
         Zero the item's timestamp, empty the event list and set number of
         spectra to zero.
+
+        This does *not* zero the dig_total_power counters. Use :meth:`reset_all`
+        for that.
         """
         super().reset(timestamp)
         self.n_spectra = 0
+
+    def reset_all(self, command_queue: AbstractCommandQueue, timestamp: int = 0) -> None:
+        """Fully reset the item.
+
+        In addition to the work done by :meth:`reset`, zero out GPU
+        accumulators, using the given command queue. No events are added
+        associated with this; it is assumed that the same command queue will
+        be used to subsequently operate on the accumulators.
+        """
+        self.reset(timestamp)
+        for buf in self.dig_total_power:
+            buf.zero(command_queue)
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -313,6 +334,14 @@ def format_complex(value: numbers.Complex) -> str:
     as a Python complex may not give exactly the same value.
     """
     return f"{value.real}{value.imag:+}j"
+
+
+def dig_pwr_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
+    """Compute status for dig-pwr-dbfs sensor."""
+    if DIG_POWER_DBFS_LOW <= value <= DIG_POWER_DBFS_HIGH:
+        return aiokatcp.Sensor.Status.NOMINAL
+    else:
+        return aiokatcp.Sensor.Status.WARN
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -520,6 +549,7 @@ class Engine(aiokatcp.DeviceServer):
             chunks=send_chunks,
         )
         self._out_item = self._out_free_queue.get_nowait()
+        self._out_item.reset_all(self._compute.command_queue)
 
         self.delay_models: list[MultiDelayModel] = []
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
@@ -722,6 +752,15 @@ class Engine(aiokatcp.DeviceServer):
             )
             sensors.add(
                 aiokatcp.Sensor(
+                    float,
+                    f"input{pol}-dig-pwr-dbfs",
+                    "Digitiser ADC average power",
+                    units="dBFS",
+                    status_func=dig_pwr_dbfs_status,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
                     int,
                     f"input{pol}-feng-clip-cnt",
                     "Number of output samples that are saturated",
@@ -843,7 +882,7 @@ class Engine(aiokatcp.DeviceServer):
 
         # Just make double-sure that all events associated with the item are past.
         item.enqueue_wait_for_events(self._compute.command_queue)
-        item.reset(new_timestamp)
+        item.reset_all(self._compute.command_queue, new_timestamp)
         return item
 
     async def _flush_out(self, new_timestamp: int) -> None:
@@ -876,6 +915,9 @@ class Engine(aiokatcp.DeviceServer):
             self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
             self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
             self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
+            # Note: we also need to wait for any frontend calls because they
+            # write directly to self._out_item.dig_total_power, but this
+            # marker will take care of that too.
             self._out_item.add_marker(self._compute.command_queue)
             self._out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're
@@ -987,7 +1029,9 @@ class Engine(aiokatcp.DeviceServer):
                     for pol_data in self._in_items[0].pol_data:
                         assert pol_data.samples is not None
                         samples.append(pol_data.samples)
-                    self._compute.run_frontend(samples, offsets, self._out_item.n_spectra, batch_spectra)
+                    self._compute.run_frontend(
+                        samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
+                    )
                     self._out_item.n_spectra += batch_spectra
                     # Work out which output spectra contain missing data.
                     self._out_item.present[out_slice] = True
@@ -1140,16 +1184,20 @@ class Engine(aiokatcp.DeviceServer):
         """
         task: asyncio.Future | None = None
         last_end_timestamp: int | None = None
+        context = self._compute.template.context
+        # Scratch space for transferring digitiser power
+        dig_total_power = [self._compute.slots[f"dig_total_power{pol}"].allocate_host(context) for pol in range(N_POLS)]
         while True:
             with self.monitor.with_state("run_transmit", "wait out_queue"):
                 out_item = await self._out_queue.get()
             if not out_item:
                 break
+            events = []
             if out_item.chunk is not None:
                 # We're using PeerDirect
                 chunk = out_item.chunk
                 chunk.cleanup = partial(self._out_free_queue.put_nowait, out_item)
-                events = out_item.events
+                events.extend(out_item.events)
             else:
                 with self.monitor.with_state("run_transmit", "wait send_free_queue"):
                     chunk = await self._send_free_queue.get()
@@ -1158,14 +1206,28 @@ class Engine(aiokatcp.DeviceServer):
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
-                out_item.saturated.get_async(self._download_queue, chunk.saturated)
-                events = [self._download_queue.enqueue_marker()]
+            out_item.saturated.get_async(self._download_queue, chunk.saturated)
+            for pol in range(N_POLS):
+                out_item.dig_total_power[pol].get_async(self._download_queue, dig_total_power[pol])
+            events.append(self._download_queue.enqueue_marker())
 
             chunk.timestamp = out_item.timestamp
             # Each frame is valid if all spectra in it are valid
             out_item.present.reshape(-1, self.spectra_per_heap).all(axis=-1, out=chunk.present)
             with self.monitor.with_state("run_transmit", "wait transfer"):
                 await async_wait_for_events(events)
+
+            for pol in range(N_POLS):
+                total_power = float(dig_total_power[pol])
+                avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
+                # Normalise relative to full scale. The factor of 2 is because we
+                # want 1.0 to correspond to a sine wave rather than a square wave.
+                avg_power /= ((1 << (SAMPLE_BITS - 1)) - 1) ** 2 / 2
+                avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
+                self.sensors[f"input{pol}-dig-pwr-dbfs"].set_value(
+                    avg_power_db, timestamp=self.time_converter.adc_to_unix(out_item.end_timestamp)
+                )
+
             n_frames = out_item.n_spectra // self.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
                 # Account for heaps skipped between the end of the previous out_item and the
