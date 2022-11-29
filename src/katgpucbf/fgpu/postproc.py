@@ -21,9 +21,9 @@ per-channel gains, requantisation and corner-turn through a mako-templated
 kernel.
 """
 
+from importlib import resources
 
 import numpy as np
-import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
@@ -55,12 +55,19 @@ class PostprocTemplate:
             raise ValueError("channels must be a multiple of unzip_factor")
         if unzip_factor not in {1, 2, 4}:
             raise ValueError("unzip_factor must be 1, 2 or 4")
-        program = accel.build(
-            context,
-            "kernels/postproc.mako",
-            {"block": self.block, "vtx": self.vtx, "vty": self.vty, "channels": channels, "unzip_factor": unzip_factor},
-            extra_dirs=[pkg_resources.resource_filename(__name__, "")],
-        )
+        with resources.as_file(resources.files(__package__)) as resource_dir:
+            program = accel.build(
+                context,
+                "kernels/postproc.mako",
+                {
+                    "block": self.block,
+                    "vtx": self.vtx,
+                    "vty": self.vty,
+                    "channels": channels,
+                    "unzip_factor": unzip_factor,
+                },
+                extra_dirs=[str(resource_dir)],
+            )
         self.kernel = program.get_kernel("postproc")
 
     def instantiate(

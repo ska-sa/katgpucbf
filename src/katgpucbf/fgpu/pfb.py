@@ -20,8 +20,9 @@ These classes handle the operation of the GPU in performing the PFB-FIR part
 through a mako-templated kernel.
 """
 
+from importlib import resources
+
 import numpy as np
-import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
@@ -58,12 +59,13 @@ class PFBFIRTemplate:
             raise ValueError("channels must be an even power of 2")
         if channels % unzip_factor != 0:
             raise ValueError("channels must be a multiple of unzip_factor")
-        program = accel.build(
-            context,
-            "kernels/pfb_fir.mako",
-            {"wgs": self.wgs, "taps": self.taps, "channels": channels, "unzip_factor": unzip_factor},
-            extra_dirs=[pkg_resources.resource_filename(__name__, "")],
-        )
+        with resources.as_file(resources.files(__package__)) as resource_dir:
+            program = accel.build(
+                context,
+                "kernels/pfb_fir.mako",
+                {"wgs": self.wgs, "taps": self.taps, "channels": channels, "unzip_factor": unzip_factor},
+                extra_dirs=[str(resource_dir)],
+            )
         self.kernel = program.get_kernel("pfb_fir")
 
     def instantiate(

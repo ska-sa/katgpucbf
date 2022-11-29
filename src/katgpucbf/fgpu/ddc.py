@@ -16,10 +16,10 @@
 
 """Digital down-conversion."""
 
+from importlib import resources
 from typing import TypedDict
 
 import numpy as np
-import pkg_resources
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
@@ -86,20 +86,21 @@ class DDCTemplate:
         if self._segment_samples * SAMPLE_BITS % 32:
             raise ValueError("segment_samples * SAMPLE_BITS must be a multiple of 32")
 
-        program = accel.build(
-            context,
-            "kernels/ddc.mako",
-            {
-                "wgs": self.wgs,
-                "taps": taps,
-                "decimation": decimation,
-                "coarsen": self._coarsen,
-                "sg_size": self._sg_size,
-                "sample_bits": SAMPLE_BITS,
-                "segment_samples": self._segment_samples,
-            },
-            extra_dirs=[pkg_resources.resource_filename(__name__, "")],
-        )
+        with resources.as_file(resources.files(__package__)) as resource_dir:
+            program = accel.build(
+                context,
+                "kernels/ddc.mako",
+                {
+                    "wgs": self.wgs,
+                    "taps": taps,
+                    "decimation": decimation,
+                    "coarsen": self._coarsen,
+                    "sg_size": self._sg_size,
+                    "sample_bits": SAMPLE_BITS,
+                    "segment_samples": self._segment_samples,
+                },
+                extra_dirs=[str(resource_dir)],
+            )
         self.kernel = program.get_kernel("ddc")
 
     def autotune(self, context: AbstractContext, taps: int, decimation: int) -> _TuningDict:
