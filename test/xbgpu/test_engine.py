@@ -553,7 +553,7 @@ class TestEngine:
         else:
             expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * n_full_accumulations
 
-        np.testing.assert_equal(actual_sensor_updates, expected_sensor_updates)
+        assert actual_sensor_updates == expected_sensor_updates
 
     # This uses parametrize to set fixture values for the test rather than to
     # create multiple tests.
