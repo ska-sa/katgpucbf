@@ -153,15 +153,6 @@ class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
     @staticmethod
-    def _clamp_to_127(input: int) -> np.int8:
-        """Clamp the output to [-127, 127] to support Tensor Cores."""
-        retval = np.int8(input)
-        if retval == -128:
-            return np.int8(-127)
-        else:
-            return retval
-
-    @staticmethod
     def _create_heaps(
         timestamp: int,
         batch_index: int,
@@ -236,12 +227,12 @@ class TestEngine:
                 # Generate the samples
                 sample_array[chan_index] = [
                     [
-                        TestEngine._clamp_to_127(sign * batch_index),
-                        TestEngine._clamp_to_127(sign * chan_index),
+                        bounded_int8(sign * batch_index),
+                        bounded_int8(sign * chan_index),
                     ],
                     [
-                        TestEngine._clamp_to_127(-sign * ant_index),
-                        TestEngine._clamp_to_127(-sign * chan_index),
+                        bounded_int8(-sign * ant_index),
+                        bounded_int8(-sign * chan_index),
                     ],
                 ]
 
