@@ -57,7 +57,7 @@ def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, 
     rng = np.random.default_rng(seed=1)
     h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
-    expected, expected_total_power = pfb_fir_host(h_in, channels, unzip_factor, weights)
+    expected_out, expected_total_power = pfb_fir_host(h_in, channels, unzip_factor, weights)
 
     template = pfb.PFBFIRTemplate(context, taps, channels, unzip_factor)
     fn = template.instantiate(command_queue, samples, spectra)
@@ -76,5 +76,5 @@ def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, 
     fn()
     h_out = fn.buffer("out").get(command_queue)
     h_total_power = fn.buffer("total_power").get(command_queue)[()]
-    np.testing.assert_allclose(h_out, expected, rtol=1e-5, atol=1e-3)
+    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-3)
     assert h_total_power == expected_total_power

@@ -50,7 +50,7 @@ from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter
-from . import SAMPLE_BITS, recv, send
+from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, SAMPLE_BITS, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
@@ -337,11 +337,11 @@ def format_complex(value: numbers.Complex) -> str:
 
 
 def dig_pwr_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
-    """Compute status for dig-pwr-dbfs sensor.
-
-    TODO: the thresholds are inherited from MeerKAT. Are they what we want?
-    """
-    return aiokatcp.Sensor.Status.NOMINAL if -32.0 <= value <= -22.0 else aiokatcp.Sensor.Status.WARN
+    """Compute status for dig-pwr-dbfs sensor."""
+    if DIG_POWER_DBFS_LOW <= value <= DIG_POWER_DBFS_HIGH:
+        return aiokatcp.Sensor.Status.NOMINAL
+    else:
+        return aiokatcp.Sensor.Status.WARN
 
 
 class Engine(aiokatcp.DeviceServer):
