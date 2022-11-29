@@ -153,6 +153,15 @@ class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
     @staticmethod
+    def _clamp_to_127(input: int) -> np.int8:
+        """Clamp the output to [-127, 127] to support Tensor Cores."""
+        retval = np.int8(input)
+        if retval == -128:
+            return np.int8(-127)
+        else:
+            return retval
+
+    @staticmethod
     def _create_heaps(
         timestamp: int,
         batch_index: int,
@@ -164,25 +173,24 @@ class TestEngine:
         """Generate a deterministic input for sending to the XBEngine.
 
         One heap is generated per antenna in the array. All heaps will have the
-        same timestamp. The 8-bit complex samples for both pols are grouped
-        together and encoded as a single 32-bit unsigned integer value. A heap is
-        composed of multiple channels. Per channel, all 32-bit values are kept
-        constant. This makes for faster verification with the downside being that
-        if samples within the channel range get mixed up, this will not be
-        detected.
+        same timestamp. A heap is composed of multiple channels. Per channel,
+        all values are kept constant. This makes for faster verification with
+        the downside being that if samples within the channel range get mixed
+        up, this will not be detected.
 
-        The coded 32-bit value is a combination of the antenna index, batch_index
-        and channel index. The sample value is equal to the following:
+        Each dual-pol complex sample is assigned as follows:
 
         .. code-block:: python
 
-            coded_sample_value = (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
-                                 (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
+            pol0_real = sign * batch_index
+            pol0_imag = sign * chan_index
+            pol1_real = -sign * ant_index
+            pol2_imag = -sign * chan_index
 
-        The sign value is 1 for even batch indices and -1 for odd ones for an even
+        The sign value is 1 for even batch indices and -1 for odd ones, for an even
         spread of positive and negative numbers. An added nuance is that these
-        8-bit values are clamped to -127 as -128 is not supported by the Tensor
-        Cores.
+        8-bit values are first case to np.int8, then clamped to -127 as -128 is
+        not supported by the Tensor Cores.
 
         This results in a deterministic expected output value without the need
         for a full CPU-side correlator.
@@ -210,65 +218,36 @@ class TestEngine:
         heaps
             A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
-        # 1. Define heap shapes needed to generate simulated data.
+        # Define heap shapes needed to generate simulated data.
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-        # The heaps shape has been modified with the COMPLEX dimension and n_pols
-        # dimension equal to 1 instead of 2. This is because we treat the two
-        # 8-bit complex samples for both pols as a single 32-bit value when
-        # generating the simulated data. We correct the shape before sending.
-        modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
 
-        # 2. Generate all the heaps for the different antennas.
+        # Generate all the heaps for the different antennas.
         heaps: list[spead2.send.HeapReference] = []
         for ant_index in range(n_ants):
-            sample_array = np.zeros(modified_heap_shape, np.uint32)
+            if ant_index in missing_antennas:
+                continue
+            sample_array = np.zeros(heap_shape, np.int8)
 
-            # 2.1 Generate the data for the heap iterating assigning a different value to each channel.
+            # Generate the data for the heap iterating assigning a different value to each channel.
             for chan_index in range(n_channels_per_stream):
-
-                # 2.1.1 Determine the sign modifier value
+                # Determine the sign modifier value
                 sign = 1 if batch_index % 2 == 0 else -1
 
-                def clamp_to_127(input: int) -> np.int8:
-                    """Clamp the output to [-127, 127] to support Tensor Cores."""
-                    retval = np.int8(input)
-                    if retval == -128:
-                        return np.int8(-127)
-                    else:
-                        return retval
-
-                # 2.1.1 Generate the samples to combine into a code word.
-                pol0_real = clamp_to_127(sign * batch_index)
-                pol0_imag = clamp_to_127(sign * chan_index)
-                pol1_real = clamp_to_127(-sign * ant_index)
-                pol1_imag = clamp_to_127(-sign * chan_index)
-
-                # 2.1.2 Combine values into a code word. The values are all cast
-                # to uint8s as when I was casting them to int8s, the sign
-                # extension would behave strangely and what I expected to be in
-                # the code word would be one bit off.
-                coded_sample_value = np.uint32(
-                    (np.uint8(pol1_imag) << 24)
-                    + (np.uint8(pol1_real) << 16)
-                    + (np.uint8(pol0_imag) << 8)
-                    + (np.uint8(pol0_real) << 0)
-                )
-
-                # 2.1.3 Set each sample in this channel to contain the same value.
-                sample_array[chan_index][:] = coded_sample_value
-
-            # 2.2 Change dtype and shape of the array back to the correct values
-            # required by the receiver. The data itself is not modified, its just
-            # how it is intepreted that is changed.
-            sample_array = sample_array.view(np.int8)
-            sample_array = np.reshape(sample_array, heap_shape)
+                # Generate the samples
+                sample_array[chan_index] = [
+                    [
+                        TestEngine._clamp_to_127(sign * batch_index),
+                        TestEngine._clamp_to_127(sign * chan_index),
+                    ],
+                    [
+                        TestEngine._clamp_to_127(-sign * ant_index),
+                        TestEngine._clamp_to_127(-sign * chan_index),
+                    ],
+                ]
 
             # Create the heap, add it to a list of HeapReferences.
             heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
-
-        for missing_antenna in sorted(missing_antennas, reverse=True):
-            del heaps[missing_antenna]
 
         return heaps
 
