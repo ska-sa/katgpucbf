@@ -68,6 +68,38 @@ def bounded_int8(val):
 
 
 @njit
+def feng_sample(batch: int, channel: int, antenna: int) -> np.ndarray:
+    """Compute a dummy F-engine dual-pol complex sample.
+
+    This is done in a deterministic way so that the expected result of the
+    correlation can be easily determined. The return value is integer, with
+    an extra axis for the real/imaginary parts of the complex numbers.
+
+    Each dual-pol complex sample is assigned as follows:
+
+    .. code-block:: python
+
+        pol0_real = sign * batch
+        pol0_imag = sign * channel
+        pol1_real = -sign * antenna
+        pol1_imag = -sign * channel
+
+    The sign value is 1 for even batch indices and -1 for odd ones, for an even
+    spread of positive and negative numbers. An added nuance is that these
+    8-bit values are first cast to np.int8, then clamped to -127 as -128 is
+    not supported by the Tensor Cores.
+    """
+    sign = 1 if batch % 2 == 0 else -1
+    return np.array(
+        [
+            [bounded_int8(sign * batch), bounded_int8(sign * channel)],
+            [bounded_int8(-sign * antenna), bounded_int8(-sign * channel)],
+        ],
+        dtype=np.int8,
+    )
+
+
+@njit
 def cmult_and_scale(a, b, c):
     """Multiply ``a`` and ``conj(b)``, and scale the result by ``c``.
 
@@ -107,26 +139,18 @@ def generate_expected_output(
         output_array[..., 1] = 1
         return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
-        sign = pow(-1, b)
         for c in range(channels):
-            h = np.empty((antennas, 2), np.int32)
-            v = np.empty((antennas, 2), np.int32)
+            in_data = np.empty((antennas, 2, 2), np.int32)
             for a in range(antennas):
-                # This process is a bit non-intuitive. Numba can handle Python's
-                # complex numbers, BUT, they are represented as floating-point,
-                # not integer. So we have helper functions here.
-                h[a, 0] = bounded_int8(sign * b)
-                h[a, 1] = bounded_int8(sign * c)
-                v[a, 0] = bounded_int8(-sign * a)
-                v[a, 1] = bounded_int8(-sign * c)
+                in_data[a] = feng_sample(b, c, a)
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
-                    if a1 != missing_antenna and a2 != missing_antenna:
-                        output_array[c, 4 * bl_idx + 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
-                        output_array[c, 4 * bl_idx + 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
-                        output_array[c, 4 * bl_idx + 2, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
-                        output_array[c, 4 * bl_idx + 3, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
+                    output_piece = output_array[c, 4 * bl_idx : 4 * bl_idx + 4, :]
+                    output_piece[0] += cmult_and_scale(in_data[a1, 0], in_data[a2, 0], n_spectra_per_heap)
+                    output_piece[1] += cmult_and_scale(in_data[a1, 1], in_data[a2, 0], n_spectra_per_heap)
+                    output_piece[2] += cmult_and_scale(in_data[a1, 0], in_data[a2, 1], n_spectra_per_heap)
+                    output_piece[3] += cmult_and_scale(in_data[a1, 1], in_data[a2, 1], n_spectra_per_heap)
 
     # Flag missing data
     for a2 in range(antennas):
@@ -167,21 +191,8 @@ class TestEngine:
         same timestamp. A heap is composed of multiple channels. Per channel,
         all values are kept constant. This makes for faster verification with
         the downside being that if samples within the channel range get mixed
-        up, this will not be detected.
-
-        Each dual-pol complex sample is assigned as follows:
-
-        .. code-block:: python
-
-            pol0_real = sign * batch_index
-            pol0_imag = sign * chan_index
-            pol1_real = -sign * ant_index
-            pol2_imag = -sign * chan_index
-
-        The sign value is 1 for even batch indices and -1 for odd ones, for an even
-        spread of positive and negative numbers. An added nuance is that these
-        8-bit values are first case to np.int8, then clamped to -127 as -128 is
-        not supported by the Tensor Cores.
+        up, this will not be detected. See :meth:`feng_sample` for the formula
+        used.
 
         This results in a deterministic expected output value without the need
         for a full CPU-side correlator.
@@ -221,20 +232,7 @@ class TestEngine:
 
             # Generate the data for the heap iterating assigning a different value to each channel.
             for chan_index in range(n_channels_per_stream):
-                # Determine the sign modifier value
-                sign = 1 if batch_index % 2 == 0 else -1
-
-                # Generate the samples
-                sample_array[chan_index] = [
-                    [
-                        bounded_int8(sign * batch_index),
-                        bounded_int8(sign * chan_index),
-                    ],
-                    [
-                        bounded_int8(-sign * ant_index),
-                        bounded_int8(-sign * chan_index),
-                    ],
-                ]
+                sample_array[chan_index] = feng_sample(batch_index, chan_index, ant_index)
 
             # Create the heap, add it to a list of HeapReferences.
             heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
