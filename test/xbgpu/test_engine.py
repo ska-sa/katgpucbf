@@ -17,7 +17,7 @@
 """Unit tests for XBEngine module."""
 
 from collections.abc import Iterable
-from typing import AbstractSet, Callable, Final
+from typing import AbstractSet, AsyncGenerator, Callable, Final
 
 import aiokatcp
 import numpy as np
@@ -33,6 +33,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
+from katgpucbf.xbgpu.engine import XBEngine
 from katgpucbf.xbgpu.main import make_engine, parse_args
 
 from .. import PromDiff
@@ -65,6 +66,38 @@ def bounded_int8(val):
     if val == -128:
         val += 1
     return np.int32(val)
+
+
+@njit
+def feng_sample(batch: int, channel: int, antenna: int) -> np.ndarray:
+    """Compute a dummy F-engine dual-pol complex sample.
+
+    This is done in a deterministic way so that the expected result of the
+    correlation can be easily determined. The return value is integer, with
+    an extra axis for the real/imaginary parts of the complex numbers.
+
+    Each dual-pol complex sample is assigned as follows:
+
+    .. code-block:: python
+
+        pol0_real = sign * batch
+        pol0_imag = sign * channel
+        pol1_real = -sign * antenna
+        pol1_imag = -sign * channel
+
+    The sign value is 1 for even batch indices and -1 for odd ones, for an even
+    spread of positive and negative numbers. An added nuance is that these
+    8-bit values are first cast to np.int8, then clamped to -127 as -128 is
+    not supported by the Tensor Cores.
+    """
+    sign = 1 if batch % 2 == 0 else -1
+    return np.array(
+        [
+            [bounded_int8(sign * batch), bounded_int8(sign * channel)],
+            [bounded_int8(-sign * antenna), bounded_int8(-sign * channel)],
+        ],
+        dtype=np.int8,
+    )
 
 
 @njit
@@ -107,26 +140,18 @@ def generate_expected_output(
         output_array[..., 1] = 1
         return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
-        sign = pow(-1, b)
         for c in range(channels):
-            h = np.empty((antennas, 2), np.int32)
-            v = np.empty((antennas, 2), np.int32)
+            in_data = np.empty((antennas, 2, 2), np.int32)
             for a in range(antennas):
-                # This process is a bit non-intuitive. Numba can handle Python's
-                # complex numbers, BUT, they are represented as floating-point,
-                # not integer. So we have helper functions here.
-                h[a, 0] = bounded_int8(sign * b)
-                h[a, 1] = bounded_int8(sign * c)
-                v[a, 0] = bounded_int8(-sign * a)
-                v[a, 1] = bounded_int8(-sign * c)
+                in_data[a] = feng_sample(b, c, a)
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
-                    if a1 != missing_antenna and a2 != missing_antenna:
-                        output_array[c, 4 * bl_idx + 0, :] += cmult_and_scale(h[a1], h[a2], n_spectra_per_heap)
-                        output_array[c, 4 * bl_idx + 1, :] += cmult_and_scale(v[a1], h[a2], n_spectra_per_heap)
-                        output_array[c, 4 * bl_idx + 2, :] += cmult_and_scale(h[a1], v[a2], n_spectra_per_heap)
-                        output_array[c, 4 * bl_idx + 3, :] += cmult_and_scale(v[a1], v[a2], n_spectra_per_heap)
+                    output_piece = output_array[c, 4 * bl_idx : 4 * bl_idx + 4, :]
+                    output_piece[0] += cmult_and_scale(in_data[a1, 0], in_data[a2, 0], n_spectra_per_heap)
+                    output_piece[1] += cmult_and_scale(in_data[a1, 1], in_data[a2, 0], n_spectra_per_heap)
+                    output_piece[2] += cmult_and_scale(in_data[a1, 0], in_data[a2, 1], n_spectra_per_heap)
+                    output_piece[3] += cmult_and_scale(in_data[a1, 1], in_data[a2, 1], n_spectra_per_heap)
 
     # Flag missing data
     for a2 in range(antennas):
@@ -164,25 +189,11 @@ class TestEngine:
         """Generate a deterministic input for sending to the XBEngine.
 
         One heap is generated per antenna in the array. All heaps will have the
-        same timestamp. The 8-bit complex samples for both pols are grouped
-        together and encoded as a single 32-bit unsigned integer value. A heap is
-        composed of multiple channels. Per channel, all 32-bit values are kept
-        constant. This makes for faster verification with the downside being that
-        if samples within the channel range get mixed up, this will not be
-        detected.
-
-        The coded 32-bit value is a combination of the antenna index, batch_index
-        and channel index. The sample value is equal to the following:
-
-        .. code-block:: python
-
-            coded_sample_value = (np.uint8(-sign * chan_index) << 24) + (np.uint8(-sign * ant_index) << 16) +
-                                 (np.uint8(sign * chan_index) << 8) + np.uint8(sign * batch_index)
-
-        The sign value is 1 for even batch indices and -1 for odd ones for an even
-        spread of positive and negative numbers. An added nuance is that these
-        8-bit values are clamped to -127 as -128 is not supported by the Tensor
-        Cores.
+        same timestamp. A heap is composed of multiple channels. Per channel,
+        all values are kept constant. This makes for faster verification with
+        the downside being that if samples within the channel range get mixed
+        up, this will not be detected. See :meth:`feng_sample` for the formula
+        used.
 
         This results in a deterministic expected output value without the need
         for a full CPU-side correlator.
@@ -210,65 +221,23 @@ class TestEngine:
         heaps
             A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
-        # 1. Define heap shapes needed to generate simulated data.
+        # Define heap shapes needed to generate simulated data.
         heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
-        # The heaps shape has been modified with the COMPLEX dimension and n_pols
-        # dimension equal to 1 instead of 2. This is because we treat the two
-        # 8-bit complex samples for both pols as a single 32-bit value when
-        # generating the simulated data. We correct the shape before sending.
-        modified_heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS // 2, COMPLEX // 2)
 
-        # 2. Generate all the heaps for the different antennas.
+        # Generate all the heaps for the different antennas.
         heaps: list[spead2.send.HeapReference] = []
         for ant_index in range(n_ants):
-            sample_array = np.zeros(modified_heap_shape, np.uint32)
+            if ant_index in missing_antennas:
+                continue
+            sample_array = np.zeros(heap_shape, np.int8)
 
-            # 2.1 Generate the data for the heap iterating assigning a different value to each channel.
+            # Generate the data for the heap iterating assigning a different value to each channel.
             for chan_index in range(n_channels_per_stream):
-
-                # 2.1.1 Determine the sign modifier value
-                sign = 1 if batch_index % 2 == 0 else -1
-
-                def clamp_to_127(input: int) -> np.int8:
-                    """Clamp the output to [-127, 127] to support Tensor Cores."""
-                    retval = np.int8(input)
-                    if retval == -128:
-                        return np.int8(-127)
-                    else:
-                        return retval
-
-                # 2.1.1 Generate the samples to combine into a code word.
-                pol0_real = clamp_to_127(sign * batch_index)
-                pol0_imag = clamp_to_127(sign * chan_index)
-                pol1_real = clamp_to_127(-sign * ant_index)
-                pol1_imag = clamp_to_127(-sign * chan_index)
-
-                # 2.1.2 Combine values into a code word. The values are all cast
-                # to uint8s as when I was casting them to int8s, the sign
-                # extension would behave strangely and what I expected to be in
-                # the code word would be one bit off.
-                coded_sample_value = np.uint32(
-                    (np.uint8(pol1_imag) << 24)
-                    + (np.uint8(pol1_real) << 16)
-                    + (np.uint8(pol0_imag) << 8)
-                    + (np.uint8(pol0_real) << 0)
-                )
-
-                # 2.1.3 Set each sample in this channel to contain the same value.
-                sample_array[chan_index][:] = coded_sample_value
-
-            # 2.2 Change dtype and shape of the array back to the correct values
-            # required by the receiver. The data itself is not modified, its just
-            # how it is intepreted that is changed.
-            sample_array = sample_array.view(np.int8)
-            sample_array = np.reshape(sample_array, heap_shape)
+                sample_array[chan_index] = feng_sample(batch_index, chan_index, ant_index)
 
             # Create the heap, add it to a list of HeapReferences.
             heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
-
-        for missing_antenna in sorted(missing_antennas, reverse=True):
-            del heaps[missing_antenna]
 
         return heaps
 
@@ -379,60 +348,42 @@ class TestEngine:
 
         return device_results
 
-    @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna",
-        test_parameters.array_size,
-        test_parameters.num_channels,
-        test_parameters.num_spectra_per_heap,
-        [None, 0, 3],
-        filter=valid_end_to_end_combination,
-    )
-    async def test_xengine_end_to_end(
-        self,
-        context: AbstractContext,
-        mock_recv_streams: list[spead2.InprocQueue],
-        mock_send_stream: spead2.InprocQueue,
-        n_ants: int,
-        n_spectra_per_heap: int,
-        n_channels_total: int,
-        missing_antenna: int | None,
-    ):
-        """
-        End-to-end test for the XBEngine.
-
-        Simulated input data is generated and passed to the XBEngine, yielding
-        output results which are then verified.
-
-        The simulated data is not random, it is encoded based on certain
-        parameters, this allows the verification function to generate the
-        correct data to compare to the xbengine without performing the full
-        correlation algorithm, greatly improving processing time.
-
-        This test simulates an incomplete accumulation at the start of transmission
-        to ensure that the auto-resync logic works correctly. Data is also
-        generated from a timestamp starting after the first accumulation
-        boundary to more accurately test the setting of the first output
-        packet's timestamp (to be non-zero).
-        """
-        n_samples_between_spectra = 2 * n_channels_total
-
-        # Get a realistic number of engines, round up to the next power of 2.
+    @pytest.fixture
+    def n_engines(self, n_ants: int) -> int:
+        """Get a realistic number of engines by rounding up to the next power of 2."""
         n_engines = 1
         while n_engines < n_ants:
             n_engines *= 2
-        n_channels_per_stream = n_channels_total // n_engines
-        n_baselines = n_ants * (n_ants + 1) * 2
-        heap_accumulation_threshold = 4
-        first_accumulation_index = 123
-        n_full_accumulations = 3
-        n_total_accumulations = n_full_accumulations + 1
-        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
-        missing_antennas = set() if missing_antenna is None else {missing_antenna}
+        return n_engines
 
-        queue = mock_send_stream
-        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
-        recv_stream.add_inproc_reader(queue)
+    @pytest.fixture
+    def n_channels_per_stream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
+        return n_channels_total // n_engines
 
+    @pytest.fixture
+    def n_samples_between_spectra(self, n_channels_total: int) -> int:  # noqa: D102
+        # Will need to be updated for narrowband
+        return 2 * n_channels_total
+
+    @pytest.fixture
+    def recv_stream(self, mock_send_stream: spead2.InprocQueue) -> spead2.recv.asyncio.Stream:
+        """Stream on the receive end of the ``mock_send_stream`` fixture."""
+        stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
+        stream.add_inproc_reader(mock_send_stream)
+        return stream
+
+    @pytest.fixture
+    async def xbengine(
+        self,
+        context: AbstractContext,
+        n_ants: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_between_spectra: int,
+        n_spectra_per_heap: int,
+        heap_accumulation_threshold: int,
+    ) -> AsyncGenerator[XBEngine, None]:
+        """Create and start an engine based on the fixture values."""
         arglist = [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
@@ -452,9 +403,60 @@ class TestEngine:
             "239.10.11.4:7149",  # src
             "239.21.11.4:7149",  # dst
         ]
-
         args = parse_args(arglist)
         xbengine, _ = make_engine(context, args)
+        await xbengine.start()
+
+        yield xbengine
+
+        await xbengine.stop()
+
+    @pytest.mark.combinations(
+        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna",
+        test_parameters.array_size,
+        test_parameters.num_channels,
+        test_parameters.num_spectra_per_heap,
+        [None, 0, 3],
+        filter=valid_end_to_end_combination,
+    )
+    @pytest.mark.parametrize("heap_accumulation_threshold", [4])
+    async def test_xengine_end_to_end(
+        self,
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: spead2.InprocQueue,
+        recv_stream: spead2.recv.asyncio.Stream,
+        xbengine: XBEngine,
+        n_ants: int,
+        n_spectra_per_heap: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_between_spectra: int,
+        heap_accumulation_threshold: int,
+        missing_antenna: int | None,
+    ):
+        """
+        End-to-end test for the XBEngine.
+
+        Simulated input data is generated and passed to the XBEngine, yielding
+        output results which are then verified.
+
+        The simulated data is not random, it is encoded based on certain
+        parameters, this allows the verification function to generate the
+        correct data to compare to the xbengine without performing the full
+        correlation algorithm, greatly improving processing time.
+
+        This test simulates an incomplete accumulation at the start of transmission
+        to ensure that the auto-resync logic works correctly. Data is also
+        generated from a timestamp starting after the first accumulation
+        boundary to more accurately test the setting of the first output
+        packet's timestamp (to be non-zero).
+        """
+        n_baselines = n_ants * (n_ants + 1) * 2
+        first_accumulation_index = 123
+        n_full_accumulations = 3
+        n_total_accumulations = n_full_accumulations + 1
+        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
+        missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
@@ -465,8 +467,6 @@ class TestEngine:
             actual_sensor_updates.append((sensor_reading.value, sensor_reading.status))
 
         xbengine.sensors["synchronised"].attach(sensor_observer)
-
-        await xbengine.start()
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
@@ -553,15 +553,27 @@ class TestEngine:
         else:
             expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * n_full_accumulations
 
-        np.testing.assert_equal(actual_sensor_updates, expected_sensor_updates)
+        assert actual_sensor_updates == expected_sensor_updates
 
-        await xbengine.stop()
-
+    # This uses parametrize to set fixture values for the test rather than to
+    # create multiple tests.
+    @pytest.mark.parametrize("n_ants", [4])
+    @pytest.mark.parametrize("n_channels_total", [1024])
+    @pytest.mark.parametrize("n_spectra_per_heap", [256])
+    @pytest.mark.parametrize("heap_accumulation_threshold", [300])
     async def test_saturation(
         self,
         context: AbstractContext,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: spead2.InprocQueue,
+        recv_stream: spead2.recv.asyncio.Stream,
+        xbengine: XBEngine,
+        n_ants: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
+        n_samples_between_spectra: int,
+        n_spectra_per_heap: int,
+        heap_accumulation_threshold: int,
     ):
         """Test saturation statistics.
 
@@ -570,43 +582,8 @@ class TestEngine:
            After the implementation is updated to avoid counting missing data
            as saturated, extend the test to check that.
         """
-        n_channels_total = 1024
-        n_samples_between_spectra = 2 * n_channels_total
-        n_ants = 4
-        n_engines = 16
-        n_spectra_per_heap = 256
-        heap_accumulation_threshold = 300
-        n_channels_per_stream = n_channels_total // n_engines
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         n_baselines = n_ants * (n_ants + 1) * 2
-
-        arglist = [
-            "--katcp-host=127.0.0.1",
-            "--katcp-port=0",
-            f"--adc-sample-rate={ADC_SAMPLE_RATE}",
-            f"--array-size={n_ants}",
-            f"--channels={n_channels_total}",
-            f"--channels-per-substream={n_channels_per_stream}",
-            f"--samples-between-spectra={n_samples_between_spectra}",
-            f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
-            f"--spectra-per-heap={n_spectra_per_heap}",
-            f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
-            f"--heap-accumulation-threshold={heap_accumulation_threshold}",
-            "--sync-epoch=1234567890",
-            "--src-interface=lo",
-            "--dst-interface=lo",
-            "--tx-enabled",
-            "239.10.11.4:7149",  # src
-            "239.21.11.4:7149",  # dst
-        ]
-        args = parse_args(arglist)
-        xbengine, _ = make_engine(context, args)
-
-        queue = mock_send_stream
-        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
-        recv_stream.add_inproc_reader(queue)
-
-        await xbengine.start()
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = timestamp_step * batch_index
