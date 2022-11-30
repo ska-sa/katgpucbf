@@ -20,12 +20,60 @@ import asyncio
 import gc
 import weakref
 from typing import AsyncGenerator, Generator
+from unittest import mock
 
 import aiokatcp
 import async_solipsism
 import pytest
 
-from katgpucbf.utils import TimeConverter, TimeoutSensorStatusObserver
+from katgpucbf.utils import DeviceStatus, DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
+
+
+class TestDeviceStatusSensor:
+    """Test :class:`.DeviceStatusSensor`.
+
+    This is a limited set of tests, because a lot of the functionality is inherited from aiokatcp.
+    """
+
+    @pytest.fixture
+    def mock_time(self, mocker) -> mock.Mock:
+        """Mock out time so that timestamps are predictable."""
+        return mocker.patch("time.time", return_value=1234567890.0)
+
+    @pytest.fixture
+    def sensors(self, mock_time: mock.Mock) -> aiokatcp.SensorSet:
+        """Create a collection of sensors."""
+        sensors = aiokatcp.SensorSet()
+        sensors.add(aiokatcp.Sensor(int, "sensor1", ""))
+        sensors.add(aiokatcp.Sensor(float, "sensor2", "", initial_status=aiokatcp.Sensor.Status.NOMINAL))
+        sensors.add(DeviceStatusSensor(sensors))
+        return sensors
+
+    def test_initial(self, sensors: aiokatcp.SensorSet) -> None:
+        """Test initial reading of the sensor."""
+        ds = sensors["device-status"]
+        assert ds.value == DeviceStatus.OK
+        assert ds.status == aiokatcp.Sensor.Status.NOMINAL
+        assert ds.timestamp == 1234567890.0
+
+    def test_early_out(self, sensors: aiokatcp.SensorSet, mock_time: mock.Mock) -> None:
+        """Update a sensor without changing status, and check that there is no change."""
+        ds = sensors["device-status"]
+        old = ds.reading
+        sensors["sensor2"].set_value(123.0, timestamp=2345678901.0)
+        assert ds.reading == old
+
+    def test_status_change(self, sensors: aiokatcp.SensorSet, mock_time: mock.Mock) -> None:
+        """Change the status of a sensor and check that device-status follows."""
+        ds = sensors["device-status"]
+        sensors["sensor1"].set_value(123, timestamp=2345678901.0, status=aiokatcp.Sensor.Status.WARN)
+        assert ds.value == DeviceStatus.DEGRADED
+        assert ds.status == aiokatcp.Sensor.Status.WARN
+        assert ds.timestamp == 2345678901.0
+        sensors["sensor1"].set_value(234, timestamp=3456789012.0, status=aiokatcp.Sensor.Status.NOMINAL)
+        assert ds.value == DeviceStatus.OK
+        assert ds.status == aiokatcp.Sensor.Status.NOMINAL
+        assert ds.timestamp == 3456789012.0
 
 
 class TestTimeoutSensorStatus:
