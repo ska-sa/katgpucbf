@@ -18,7 +18,6 @@
 
 from typing import Final
 
-SAMPLE_BITS: Final = 10
 METRIC_NAMESPACE: Final = "fgpu"
 
 # Range in which the dig-pwr-dbfs sensor is NOMINAL

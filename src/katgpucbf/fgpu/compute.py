@@ -25,8 +25,8 @@ import numpy as np
 from katsdpsigproc import accel, fft
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import N_POLS
-from . import SAMPLE_BITS, pfb, postproc
+from .. import DIG_SAMPLE_BITS, N_POLS
+from . import pfb, postproc
 
 
 class ComputeTemplate:
@@ -114,7 +114,7 @@ class Compute(accel.OperationSequence):
         spectra: int,
         spectra_per_heap: int,
     ) -> None:
-        self.sample_bits = SAMPLE_BITS
+        self.sample_bits = DIG_SAMPLE_BITS
         self.template = template
         self.samples = samples
         self.spectra = spectra

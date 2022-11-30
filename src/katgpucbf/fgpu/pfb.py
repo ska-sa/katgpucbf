@@ -26,8 +26,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import BYTE_BITS
-from . import SAMPLE_BITS
+from .. import BYTE_BITS, DIG_SAMPLE_BITS
 
 
 class PFBFIRTemplate:
@@ -95,7 +94,7 @@ class PFBFIR(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : samples * SAMPLE_BITS // BYTE_BITS, uint8
+    **in** : samples * DIG_SAMPLE_BITS // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
@@ -144,7 +143,7 @@ class PFBFIR(accel.Operation):
         self.samples = samples
         step = 2 * template.channels
         self.spectra = spectra  # Can be changed (TODO: documentation)
-        self.slots["in"] = accel.IOSlot((samples * SAMPLE_BITS // BYTE_BITS,), np.uint8)
+        self.slots["in"] = accel.IOSlot((samples * DIG_SAMPLE_BITS // BYTE_BITS,), np.uint8)
         self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
         self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
         self.slots["total_power"] = accel.IOSlot((), np.uint64)

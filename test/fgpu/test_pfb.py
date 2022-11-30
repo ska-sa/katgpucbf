@@ -20,8 +20,8 @@ import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from katgpucbf import BYTE_BITS
-from katgpucbf.fgpu import SAMPLE_BITS, pfb
+from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
+from katgpucbf.fgpu import pfb
 
 from .. import unpackbits
 
@@ -55,7 +55,7 @@ def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, 
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
     rng = np.random.default_rng(seed=1)
-    h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
+    h_in = rng.integers(0, 256, samples * DIG_SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
     expected_out, expected_total_power = pfb_fir_host(h_in, channels, unzip_factor, weights)
 

@@ -27,8 +27,8 @@ import pytest
 import spead2.send
 from numpy.typing import ArrayLike
 
-from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.fgpu import METRIC_NAMESPACE, SAMPLE_BITS
+from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
+from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InItem
 from katgpucbf.utils import TimeConverter
@@ -167,7 +167,7 @@ class TestEngine:
         return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
     def _pack_samples(self, samples: ArrayLike) -> np.ndarray:
-        """Pack 16-bit digitiser sample data down to SAMPLE_BITS bits.
+        """Pack 16-bit digitiser sample data down to DIG_SAMPLE_BITS bits.
 
         Parameters
         ----------
@@ -180,7 +180,7 @@ class TestEngine:
         bits = np.unpackbits(samples_int16.view(np.uint8)).reshape(samples_int16.shape + (16,))
         # Put all the bits back into bytes. packbits automatically flattens
         # the array, so we have to restore the desired shape.
-        return np.packbits(bits[..., -SAMPLE_BITS:]).reshape(samples_int16.shape[0], -1)
+        return np.packbits(bits[..., -DIG_SAMPLE_BITS:]).reshape(samples_int16.shape[0], -1)
 
     def _make_tone(self, n_samples: int, tone: CW, pol: int) -> np.ndarray:
         """Synthesize digitiser data containing a tone.
@@ -270,7 +270,7 @@ class TestEngine:
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
         assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
-        saturation_value = 2 ** (SAMPLE_BITS - 1) - 1
+        saturation_value = 2 ** (DIG_SAMPLE_BITS - 1) - 1
         saturated = np.abs(dig_data) >= saturation_value
         saturated = np.sum(saturated.reshape(N_POLS, -1, src_layout.heap_samples), axis=-1, dtype=np.uint16)
         dig_data = self._pack_samples(dig_data)
@@ -726,7 +726,7 @@ class TestEngine:
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 3 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
-        saturation_value = 2 ** (SAMPLE_BITS - 1) - 1
+        saturation_value = 2 ** (DIG_SAMPLE_BITS - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(
