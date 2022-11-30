@@ -19,3 +19,8 @@
 from typing import Final
 
 METRIC_NAMESPACE: Final = "fgpu"
+
+# Range in which the dig-pwr-dbfs sensor is NOMINAL
+# TODO these thresholds are inherited from MeerKAT. Are they what we want?
+DIG_POWER_DBFS_LOW: Final = -32.0
+DIG_POWER_DBFS_HIGH: Final = -22.0

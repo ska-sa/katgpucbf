@@ -16,11 +16,15 @@
 
 <%include file="/port.mako"/>
 <%include file="unpack_10bit.mako"/>
+<%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 
 #define WGS ${wgs}
 #define TAPS ${taps}
 #define CHANNELS ${channels}
 #define UNZIP_FACTOR ${unzip_factor}
+
+${wg_reduce.define_scratch('unsigned long long', wgs, 'scratch_t', allow_shuffle=True)}
+${wg_reduce.define_function('unsigned long long', wgs, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
 /* Apply unzipping to an output index.
  */
@@ -46,6 +50,7 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
  */
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,          // Output memory
+    GLOBAL unsigned long long * RESTRICT out_total_power,  // Sum of squares of samples (incremented)
     const GLOBAL uchar * RESTRICT in,     // Input data (digitiser samples)
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
     int n,                                // Size of the `out` array, to avoid going out-of-bounds.
@@ -77,6 +82,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
      * We assume we are not interested in the initial transient spectra.
      * We prime all but one of the taps with samples of data. The last one will
      * be filled in later as part of the main loop.
+     *
+     * These samples are deliberately not included in total_power, because they
+     * have already been counted by a previous workgroup (except for the very
+     * first samples in the stream, or after lost data, but that's a corner
+     * case not worth worrying about).
      */
     float samples[TAPS];
     for (int i = 0; i < TAPS - 1; i++)
@@ -95,6 +105,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     // output "spectra" worth of data.
     int rows = stepy / step;
 
+    unsigned long long total_power = 0;
     // Unrolling by factor of TAPS makes the sample index known at compile time.
 #pragma unroll ${taps}
     for (int i = 0; i < rows; i++)  // We'll be at our most memory-bandwidth-efficient if rows >> TAPS. Launching ~256K threads should ensure this.
@@ -109,7 +120,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
          * This, combined with the way they are then read out below, avoids
          * having to manually shift things along in the array each loop.
          */
-        samples[(i + TAPS - 1) % TAPS] = get_sample_10bit(in, in_offset + idx);
+        int sample = get_sample_10bit(in, in_offset + idx);
+        total_power += sample * sample;
+        samples[(i + TAPS - 1) % TAPS] = (float) sample;
 
         // Implement the actual FIR filter by multiplying samples by weights and summing.
         float sum = 0.0f;
@@ -119,4 +132,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         // Sum written out to global memory.
         out[idx] = sum;
     }
+
+    // Reduce total_power across work items, to reduce the number of atomics needed.
+    LOCAL_DECL scratch_t scratch;
+    total_power = reduce(total_power, lid, &scratch);
+    if (lid == 0)
+        atomicAdd(out_total_power, total_power);
 }

@@ -51,7 +51,7 @@ def main():
         fn.ensure_all_bound()
 
         h_weights = fn.buffer("weights").empty_like()
-        h_weights[:] = generate_weights(args.channels, args.taps)
+        h_weights[:] = generate_weights(args.channels, args.taps, 1.0)
         fn.buffer("weights").set(command_queue, h_weights)
 
         h_gains = fn.buffer("gains").empty_like()
@@ -71,7 +71,13 @@ def main():
             fn.buffer(name).zero(command_queue)
 
         def run():
-            fn.run_frontend([fn.buffer("in0"), fn.buffer("in1")], [0, 0], 0, spectra)
+            fn.run_frontend(
+                [fn.buffer("in0"), fn.buffer("in1")],
+                [fn.buffer("dig_total_power0"), fn.buffer("dig_total_power1")],
+                [0, 0],
+                0,
+                spectra,
+            )
             fn.run_backend(fn.buffer("out"), fn.buffer("saturated"))
 
         run()  # Warmup pass
