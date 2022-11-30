@@ -76,11 +76,16 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
     it's quick to identify if there's something wrong, or if everything is good.
     """
 
-    def __init__(self, target: aiokatcp.SensorSet) -> None:
+    def __init__(
+        self, target: aiokatcp.SensorSet, name: str = "device-status", description: str = "Overall engine health"
+    ) -> None:
         # We count the number of sensors with each possible status
         self._counts: Counter[aiokatcp.Sensor.Status] = Counter()
         super().__init__(
-            target=target, sensor_type=DeviceStatus, name="device-status", description="Overall engine health"
+            target=target,
+            sensor_type=DeviceStatus,
+            name=name,
+            description=description,
         )
 
     def update_aggregate(
