@@ -116,6 +116,11 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         # won't be able to.
         return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
 
+    def filter_aggregate(self, sensor: aiokatcp.Sensor) -> bool:  # noqa: D102
+        # Filter other aggregate sensors out. We don't need them because the
+        # underlying (normal) sensors are incorporated.
+        return not isinstance(sensor, aiokatcp.AggregateSensor)
+
 
 class TimeoutSensorStatusObserver:
     """Change the status of a sensor if it doesn't receive an update for a given time.
