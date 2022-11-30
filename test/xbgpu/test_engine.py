@@ -141,7 +141,7 @@ def generate_expected_output(
         return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         for c in range(channels):
-            in_data = np.empty((antennas, 2, 2), np.int32)
+            in_data = np.empty((antennas, N_POLS, COMPLEX), np.int32)
             for a in range(antennas):
                 in_data[a] = feng_sample(b, c, a)
             for a2 in range(antennas):
