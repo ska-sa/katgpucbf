@@ -76,11 +76,16 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
     it's quick to identify if there's something wrong, or if everything is good.
     """
 
-    def __init__(self, target: aiokatcp.SensorSet) -> None:
+    def __init__(
+        self, target: aiokatcp.SensorSet, name: str = "device-status", description: str = "Overall engine health"
+    ) -> None:
         # We count the number of sensors with each possible status
         self._counts: Counter[aiokatcp.Sensor.Status] = Counter()
         super().__init__(
-            target=target, sensor_type=DeviceStatus, name="device-status", description="Overall engine health"
+            target=target,
+            sensor_type=DeviceStatus,
+            name=name,
+            description=description,
         )
 
     def update_aggregate(
@@ -110,6 +115,11 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         # We won't return FAIL because if the device is unusable, we probably
         # won't be able to.
         return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
+
+    def filter_aggregate(self, sensor: aiokatcp.Sensor) -> bool:  # noqa: D102
+        # Filter other aggregate sensors out. We don't need them because the
+        # underlying (normal) sensors are incorporated.
+        return not isinstance(sensor, aiokatcp.AggregateSensor)
 
 
 class TimeoutSensorStatusObserver:

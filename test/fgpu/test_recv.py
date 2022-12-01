@@ -41,7 +41,7 @@ from katgpucbf.spead import (
     FLAVOUR,
     TIMESTAMP_ID,
 )
-from katgpucbf.utils import TimeConverter
+from katgpucbf.utils import DeviceStatus, TimeConverter
 
 from .. import PromDiff
 
@@ -426,3 +426,6 @@ class TestChunkSets:
             assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
             assert sensor.status == aiokatcp.Sensor.Status.ERROR
             assert sensor.timestamp == sensor.value
+        ds_sensor = sensors["rx.device-status"]
+        assert ds_sensor.value == DeviceStatus.DEGRADED
+        assert ds_sensor.status == aiokatcp.Sensor.Status.WARN
