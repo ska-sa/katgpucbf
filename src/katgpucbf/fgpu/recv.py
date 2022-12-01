@@ -256,9 +256,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
             TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.NOMINAL)
             sensors.add(sensor)
 
-        sensors.add(
-            DeviceStatusSensor(sensors, "rx.device-status", "F-engine is receiving a good, clean digitiser stream")
-        )
+    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "F-engine is receiving a good, clean digitiser stream"))
 
     return sensors
 
