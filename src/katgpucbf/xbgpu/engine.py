@@ -279,7 +279,6 @@ class XBEngine(DeviceServer):
         context: katsdpsigproc.abc.AbstractContext,
     ):
         super().__init__(katcp_host, katcp_port)
-        self.populate_sensors(self.sensors)
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -298,6 +297,9 @@ class XBEngine(DeviceServer):
         self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
         self.n_samples_between_spectra = n_samples_between_spectra
+        self.channel_offset_value = channel_offset_value
+
+        self.populate_sensors(self.sensors)
 
         self._src = src
         self._src_interface = src_interface
@@ -336,7 +338,6 @@ class XBEngine(DeviceServer):
             math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
-        self.channel_offset_value = channel_offset_value
 
         self.monitor = monitor
 
@@ -443,9 +444,19 @@ class XBEngine(DeviceServer):
             tx_enabled=self._init_tx_enabled,
         )
 
-    @staticmethod
-    def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
+    def populate_sensors(self, sensors: aiokatcp.SensorSet) -> None:
         """Define the sensors for an XBEngine."""
+        # Static sensors
+        sensors.add(
+            aiokatcp.Sensor(
+                str,
+                "chan-range",
+                "The range of channels processed by this XB-engine, inclusive",
+                default=f"({self.channel_offset_value},{self.channel_offset_value + self.n_channels_per_stream - 1})",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
+        # Dynamic sensors
         sensors.add(
             aiokatcp.Sensor(
                 bool,

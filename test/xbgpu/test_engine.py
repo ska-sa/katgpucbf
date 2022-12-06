@@ -458,6 +458,10 @@ class TestEngine:
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
+        range_start = n_channels_per_stream * CHANNEL_OFFSET
+        range_end = range_start + n_channels_per_stream - 1
+        assert xbengine.sensors["chan-range"].value == f"({range_start},{range_end})"
+
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
         actual_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
