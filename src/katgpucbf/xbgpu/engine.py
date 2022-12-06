@@ -451,7 +451,7 @@ class XBEngine(DeviceServer):
             aiokatcp.Sensor(
                 str,
                 "chan-range",
-                "The range of channels processed by this XB-engine",
+                "The range of channels processed by this XB-engine, inclusive",
                 default=f"({self.channel_offset_value},{self.channel_offset_value + self.n_channels_per_stream - 1})",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
