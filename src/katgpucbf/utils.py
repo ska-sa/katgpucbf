@@ -28,6 +28,8 @@ from typing import TypeVar
 import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
 
+from . import TIME_SYNC_TASK_NAME
+
 _T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
@@ -182,6 +184,76 @@ class TimeoutSensorStatusObserver:
         sensor = self._sensor()
         if sensor is not None:
             sensor.detach(self)
+
+
+def _esterror_status(value: float) -> aiokatcp.Sensor.Status:
+    # These thresholds are thumb-sucks.
+    if 0.0 <= value < 1e-3:  # Arbitrary threshold
+        return aiokatcp.Sensor.Status.NOMINAL
+    elif value < 5e-3:  # CBF-REQ-0203 specifies 5ms
+        return aiokatcp.Sensor.Status.WARN
+    else:
+        return aiokatcp.Sensor.Status.ERROR
+
+
+def _maxerror_status(value: float) -> aiokatcp.Sensor.Status:
+    # maxerror is an over-estimate (it makes very conservative assumptions
+    # about network asymmetry and skew in the clock source). Use conservative
+    # thresholds to avoid warnings when there isn't a stratum 1 time source
+    # in the same data centre. Experimentally, maximum error is < 10ms
+    # when synchronising between Cape Town and the Karoo.
+    if 0.0 <= value < 10e-3:
+        return aiokatcp.Sensor.Status.NOMINAL
+    elif value < 0.1:
+        return aiokatcp.Sensor.Status.WARN
+    else:
+        return aiokatcp.Sensor.Status.ERROR
+
+
+def _state_status(value: aiokatcp.ClockState) -> aiokatcp.Sensor.Status:
+    if value == aiokatcp.ClockState.OK:
+        return aiokatcp.Sensor.Status.NOMINAL
+    elif value == aiokatcp.ClockState.ERROR:
+        return aiokatcp.Sensor.Status.ERROR
+    else:
+        # Some form of leap second adjustment
+        return aiokatcp.Sensor.Status.WARN
+
+
+def add_time_sync_sensors(sensors: aiokatcp.SensorSet) -> asyncio.Task:
+    """Add a number of sensors to a device server to track time synchronisation.
+
+    This must be called with an event loop running. It returns a task that
+    keeps the sensors periodically updated.
+    """
+    mapping = {
+        "esterror": aiokatcp.Sensor(
+            float, "time.esterror", "Estimated time synchronisation error", units="s", status_func=_esterror_status
+        ),
+        "maxerror": aiokatcp.Sensor(
+            float, "time.maxerror", "Upper bound on time synchronisation error", units="s", status_func=_maxerror_status
+        ),
+        "state": aiokatcp.Sensor(aiokatcp.ClockState, "time.state", "Kernel clock state", status_func=_state_status),
+    }
+    for sensor in mapping.values():
+        sensors.add(sensor)
+
+    agg_sensor = aiokatcp.Sensor(bool, "time.synchronised", "Whether the host clock is synchronised within tolerances")
+    sensors.add(agg_sensor)
+    updater = aiokatcp.TimeSyncUpdater(mapping)
+
+    async def run() -> None:
+        while True:
+            updater.update()
+            good = all(sensor.status != aiokatcp.Sensor.Status.ERROR for sensor in mapping.values())
+            agg_sensor.set_value(
+                good,
+                status=aiokatcp.Sensor.Status.NOMINAL if good else aiokatcp.Sensor.Status.ERROR,
+                timestamp=mapping["state"].timestamp,
+            )
+            await asyncio.sleep(1)
+
+    return asyncio.create_task(run(), name=TIME_SYNC_TASK_NAME)
 
 
 class TimeConverter:
