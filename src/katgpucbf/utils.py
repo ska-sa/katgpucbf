@@ -226,7 +226,7 @@ def add_time_sync_sensors(sensors: aiokatcp.SensorSet) -> asyncio.Task:
     This must be called with an event loop running. It returns a task that
     keeps the sensors periodically updated.
     """
-    mapping = {
+    mapping: dict[str, aiokatcp.Sensor] = {
         "esterror": aiokatcp.Sensor(
             float, "time.esterror", "Estimated time synchronisation error", units="s", status_func=_esterror_status
         ),
