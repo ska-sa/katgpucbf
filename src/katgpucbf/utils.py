@@ -32,6 +32,17 @@ from . import TIME_SYNC_TASK_NAME
 
 _T = TypeVar("_T")
 
+# Sensor status threshold. These are mostly thumb-sucks.
+TIME_ESTERROR_WARN = 1e-3
+TIME_ESTERROR_ERROR = 5e-3  # CBF-REQ-0203 specifies 5ms
+# maxerror is an over-estimate (it makes very conservative assumptions
+# about network asymmetry and skew in the clock source). Use conservative
+# thresholds to avoid warnings when there isn't a stratum 1 time source
+# in the same data centre. Experimentally, maximum error is < 10ms
+# when synchronising between Cape Town and the Karoo.
+TIME_MAXERROR_WARN = 10e-3
+TIME_MAXERROR_ERROR = 0.1
+
 logger = logging.getLogger(__name__)
 
 
@@ -187,24 +198,18 @@ class TimeoutSensorStatusObserver:
 
 
 def _time_esterror_status(seconds: float) -> aiokatcp.Sensor.Status:
-    # These thresholds are thumb-sucks.
-    if 0.0 <= seconds < 1e-3:  # Arbitrary threshold
+    if 0.0 <= seconds < TIME_ESTERROR_WARN:
         return aiokatcp.Sensor.Status.NOMINAL
-    elif seconds < 5e-3:  # CBF-REQ-0203 specifies 5ms
+    elif seconds < TIME_ESTERROR_ERROR:
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
 
 
 def _time_maxerror_status(seconds: float) -> aiokatcp.Sensor.Status:
-    # maxerror is an over-estimate (it makes very conservative assumptions
-    # about network asymmetry and skew in the clock source). Use conservative
-    # thresholds to avoid warnings when there isn't a stratum 1 time source
-    # in the same data centre. Experimentally, maximum error is < 10ms
-    # when synchronising between Cape Town and the Karoo.
-    if 0.0 <= seconds < 10e-3:
+    if 0.0 <= seconds < TIME_MAXERROR_WARN:
         return aiokatcp.Sensor.Status.NOMINAL
-    elif seconds < 0.1:
+    elif seconds < TIME_MAXERROR_ERROR:
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
