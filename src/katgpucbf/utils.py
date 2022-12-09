@@ -264,6 +264,9 @@ def add_time_sync_sensors(sensors: aiokatcp.SensorSet) -> asyncio.Task:
                 status=aiokatcp.Sensor.Status.NOMINAL if good else aiokatcp.Sensor.Status.ERROR,
                 timestamp=mapping["state"].timestamp,
             )
+            # 1 second is pretty arbitrary. It's probably faster than
+            # necessary, but subscribers can always use a rate-limiting
+            # sampling strategy to reduce the rate of updates.
             await asyncio.sleep(1)
 
     return asyncio.create_task(run(), name=TIME_SYNC_TASK_NAME)
