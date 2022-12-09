@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -48,3 +48,4 @@ GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
 RECV_TASK_NAME: Final[str] = "Receiver Loop"
 SEND_TASK_NAME: Final[str] = "Sender Loop"
 DESCRIPTOR_TASK_NAME: Final[str] = "Descriptor Loop"
+TIME_SYNC_TASK_NAME: Final[str] = "Time Sync Check Loop"

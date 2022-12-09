@@ -50,7 +50,7 @@ from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter
+from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -486,6 +486,7 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
+        self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
         self._populate_sensors(
             self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
@@ -719,8 +720,7 @@ class Engine(aiokatcp.DeviceServer):
         """Number of polarisations."""
         return N_POLS
 
-    @staticmethod
-    def _populate_sensors(sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
+    def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an engine."""
         for pol in range(N_POLS):
             sensors.add(
@@ -784,6 +784,10 @@ class Engine(aiokatcp.DeviceServer):
         )
 
         sensors.add(DeviceStatusSensor(sensors))
+
+        time_sync_task = add_time_sync_sensors(sensors)
+        self.add_service_task(time_sync_task)
+        self._cancel_tasks.append(time_sync_task)
 
     async def _next_in(self) -> InItem | None:
         """Load next InItem for processing.
@@ -1462,8 +1466,9 @@ class Engine(aiokatcp.DeviceServer):
             (self.feng_id + 1) * descriptor_interval_s,
             all_substreams=True,
         )
-        self._descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
-        self.add_service_task(self._descriptor_task)
+        descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
+        self.add_service_task(descriptor_task)
+        self._cancel_tasks.append(descriptor_task)
 
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -1502,7 +1507,8 @@ class Engine(aiokatcp.DeviceServer):
         Also handle any Exceptions thrown unexpectedly in any of the
         processing loops.
         """
-        self._descriptor_task.cancel()
+        for task in self._cancel_tasks:
+            task.cancel()
         for stream in self._src_streams:
             stream.stop()
         # If any of the tasks are already done then we had an exception, and
@@ -1510,5 +1516,5 @@ class Engine(aiokatcp.DeviceServer):
         # neatly.
         if not any(task.done() for task in self.service_tasks):
             for task in self.service_tasks:
-                if task is not self._descriptor_task:
+                if task not in self._cancel_tasks:
                     await task

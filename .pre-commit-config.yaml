@@ -49,7 +49,7 @@ repos:
         types: []
         types_or: [python, pyi]
         additional_dependencies: [
-            'aiokatcp==1.5.1',
+            'aiokatcp==1.6.0',
             'dask==2022.10.0',
             'katsdpsigproc==1.6.1',
             'katsdptelstate==0.11',
