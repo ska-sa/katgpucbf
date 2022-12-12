@@ -280,8 +280,6 @@ pybtex-docutils==1.0.2
     # via
     #   -r qualification/../requirements-dev.txt
     #   sphinxcontrib-bibtex
-pycparser==2.21
-    # via -r qualification/../requirements-dev.txt
 pygelf==0.4.2
     # via katsdpservices
 pygments==2.13.0
