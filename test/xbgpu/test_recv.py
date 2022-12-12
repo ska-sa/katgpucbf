@@ -24,7 +24,7 @@ from collections.abc import Generator, Iterator
 import numpy as np
 import pytest
 import spead2.recv.asyncio
-from aiokatcp import SensorSet
+from aiokatcp import Sensor, SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
@@ -224,10 +224,7 @@ class TestStream:
             queue.stop()  # Flushes out the receive stream
             seen = 0
             empty_chunks = 0
-            chunk_timestamp_step = layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-            async for chunk in recv_chunks(
-                stream, chunk_timestamp_step=chunk_timestamp_step, sensors=sensors, time_converter=time_converter
-            ):
+            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 assert isinstance(chunk, Chunk)
                 with chunk:
                     if not np.any(chunk.present):
@@ -323,10 +320,7 @@ class TestStream:
             # NOTE: We have to use a 'manual' counter as there is a jump in
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
-            chunk_timestamp_step = layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-            async for chunk in recv_chunks(
-                stream, chunk_timestamp_step=chunk_timestamp_step, sensors=sensors, time_converter=time_converter
-            ):
+            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 with chunk:
                     # recv_chunks should filter out the phantom chunks created by
                     # spead2.
@@ -357,3 +351,25 @@ class TestStream:
             prom_diff.get_sample_diff("input_missing_heaps_total")
             == n_chunks_to_delete * layout.chunk_heaps + n_single_heaps_to_delete
         )
+
+        # Check sensors
+        sensor = sensors["input-rx-timestamp"]
+        # sensor.value should be of the last chunk sent
+        absolute_present_timestamp = expected_chunk_ids[-1] * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        assert sensor.value == absolute_present_timestamp
+        assert sensor.status == Sensor.Status.NOMINAL
+        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+        sensor = sensors["input-rx-unixtime"]
+        # Should be the same value as the previous sensor, but to unixtime
+        assert sensor.value == time_converter.adc_to_unix(absolute_present_timestamp)
+        assert sensor.status == Sensor.Status.NOMINAL
+        assert sensor.timestamp == sensor.value
+        sensor = sensors["input-rx-missing-unixtime"]
+        # sensor.value should be of the last chunk to go missing
+        absolute_missing_chunk_id = start_chunk_id + missing_chunk_ids[0] + n_chunks_to_delete
+        absolute_missing_timestamp = (
+            absolute_missing_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        )
+        assert sensor.value == time_converter.adc_to_unix(absolute_missing_timestamp)
+        assert sensor.status == Sensor.Status.ERROR
+        assert sensor.timestamp == sensor.value

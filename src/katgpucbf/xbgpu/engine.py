@@ -355,7 +355,7 @@ class XBEngine(DeviceServer):
             self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
-        layout = recv.Layout(
+        self._src_layout = recv.Layout(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
@@ -364,7 +364,7 @@ class XBEngine(DeviceServer):
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
         )
         self.receiver_stream = recv.make_stream(
-            layout=layout,
+            layout=self._src_layout,
             data_ringbuffer=data_ringbuffer,
             free_ringbuffer=free_ringbuffer,
             src_affinity=src_affinity,
@@ -497,7 +497,7 @@ class XBEngine(DeviceServer):
         """
         async for chunk in recv.recv_chunks(
             self.receiver_stream,
-            self.rx_heap_timestamp_step * self.heaps_per_fengine_per_chunk,
+            self._src_layout,
             self.sensors,
             self.time_converter,
         ):

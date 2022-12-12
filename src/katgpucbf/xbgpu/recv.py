@@ -250,7 +250,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
 
 async def recv_chunks(
     stream: spead2.recv.ChunkRingStream,
-    chunk_timestamp_step: int,
+    layout: Layout,
     sensors: SensorSet,
     time_converter: TimeConverter,
 ) -> AsyncGenerator[Chunk, None]:
@@ -262,8 +262,8 @@ async def recv_chunks(
     ----------
     stream
         Stream object handling reception of F-engine data.
-    chunk_timestamp_step
-        Timestamp as a number of samples contained in one entire Chunk.
+    layout
+        Structure of the stream.
     sensors
         Sensor set containing at least the sensors created by
         :func:`make_sensors`.
@@ -294,7 +294,7 @@ async def recv_chunks(
             valid_chunk_received = True
             prev_chunk_id = chunk.chunk_id - 1
 
-        chunk.timestamp = chunk.chunk_id * chunk_timestamp_step
+        chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         unix_time = time_converter.adc_to_unix(chunk.timestamp)
         sensors["input-rx-timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
         sensors["input-rx-unixtime"].set_value(unix_time, timestamp=unix_time)
