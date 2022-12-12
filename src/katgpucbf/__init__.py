@@ -39,10 +39,13 @@ SEND_RATE_FACTOR = 1.1
 # is better to minimise the number of packets/second to process.
 DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
-DEFAULT_KATCP_HOST = ""  # All interfaces
-DEFAULT_KATCP_PORT = 7147
-DIG_HEAP_SAMPLES = 4096
+DEFAULT_KATCP_HOST: Final = ""  # All interfaces
+DEFAULT_KATCP_PORT: Final = 7147
+DIG_HEAP_SAMPLES: Final = 4096
 DIG_SAMPLE_BITS: Final = 10
+# Update rate (expressed in seconds) for katcp sensors where the underlying value
+# may update extremely rapidly.
+SENSOR_UPDATE_TIME: Final = 1.0
 
 GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
 RECV_TASK_NAME: Final[str] = "Receiver Loop"
