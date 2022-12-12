@@ -25,8 +25,8 @@ import numpy as np
 from katsdpsigproc import accel, fft
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import N_POLS
-from . import SAMPLE_BITS, pfb, postproc
+from .. import DIG_SAMPLE_BITS, N_POLS
+from . import pfb, postproc
 
 
 class ComputeTemplate:
@@ -114,7 +114,7 @@ class Compute(accel.OperationSequence):
         spectra: int,
         spectra_per_heap: int,
     ) -> None:
-        self.sample_bits = SAMPLE_BITS
+        self.sample_bits = DIG_SAMPLE_BITS
         self.template = template
         self.samples = samples
         self.spectra = spectra
@@ -167,10 +167,16 @@ class Compute(accel.OperationSequence):
             # make them aliases to view the memory as different types.
             aliases[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
             compounds[f"fft_out{pol}"] = [f"fft{pol}:dest", f"postproc:in{pol}"]
+            compounds[f"dig_total_power{pol}"] = [f"pfb_fir{pol}:total_power"]
         super().__init__(command_queue, operations, compounds, aliases)
 
     def run_frontend(
-        self, samples: Sequence[accel.DeviceArray], in_offsets: Sequence[int], out_offset: int, spectra: int
+        self,
+        samples: Sequence[accel.DeviceArray],
+        dig_total_power: Sequence[accel.DeviceArray],
+        in_offsets: Sequence[int],
+        out_offset: int,
+        spectra: int,
     ) -> None:
         """Run the PFB-FIR on the received samples.
 
@@ -180,6 +186,9 @@ class Compute(accel.OperationSequence):
         ----------
         samples
             A pair of device arrays containing the samples, one for each pol.
+        dig_total_power
+            A pair of device arrays holding digitiser total power, one for each
+            pol. These are not zeroed.
         in_offsets
             Index of first sample in input array to process (one for each pol).
         out_offset
@@ -193,6 +202,7 @@ class Compute(accel.OperationSequence):
             raise ValueError(f"in_offsets must contain {N_POLS} elements")
         for pol in range(N_POLS):
             self.bind(**{f"in{pol}": samples[pol]})
+            self.bind(**{f"dig_total_power{pol}": dig_total_power[pol]})
         # TODO: only bind relevant slots for frontend
         self.ensure_all_bound()
         for pol in range(N_POLS):

@@ -23,8 +23,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import BYTE_BITS
-from . import SAMPLE_BITS
+from .. import BYTE_BITS, DIG_SAMPLE_BITS
 
 
 class _TuningDict(TypedDict):
@@ -83,8 +82,8 @@ class DDCTemplate:
             raise ValueError("decimation must be a multiple of sg_size")
         if self._group_in_size % self._segment_samples:
             raise ValueError("group_in_size must be a multiple of segment_samples (fix sg_size)")
-        if self._segment_samples * SAMPLE_BITS % 32:
-            raise ValueError("segment_samples * SAMPLE_BITS must be a multiple of 32")
+        if self._segment_samples * DIG_SAMPLE_BITS % 32:
+            raise ValueError("segment_samples * DIG_SAMPLE_BITS must be a multiple of 32")
 
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
@@ -96,7 +95,7 @@ class DDCTemplate:
                     "decimation": decimation,
                     "coarsen": self._coarsen,
                     "sg_size": self._sg_size,
-                    "sample_bits": SAMPLE_BITS,
+                    "sample_bits": DIG_SAMPLE_BITS,
                     "segment_samples": self._segment_samples,
                 },
                 extra_dirs=[str(resource_dir)],
@@ -141,7 +140,7 @@ class DDC(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : samples * SAMPLE_BITS // BYTE_BITS, uint8
+    **in** : samples * DIG_SAMPLE_BITS // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : out_samples, complex64
         Filtered and decimated output data
@@ -177,7 +176,7 @@ class DDC(accel.Operation):
         self.slots["in"] = accel.IOSlot(
             (
                 accel.Dimension(
-                    samples * SAMPLE_BITS // BYTE_BITS,
+                    samples * DIG_SAMPLE_BITS // BYTE_BITS,
                     alignment=4,
                 ),
             ),

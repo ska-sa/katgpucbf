@@ -26,8 +26,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import BYTE_BITS
-from . import SAMPLE_BITS
+from .. import BYTE_BITS, DIG_SAMPLE_BITS
 
 
 class PFBFIRTemplate:
@@ -95,12 +94,20 @@ class PFBFIR(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : samples * SAMPLE_BITS // BYTE_BITS, uint8
+    **in** : samples * DIG_SAMPLE_BITS // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
     **weights** : 2*channels*taps, float32
         The time-domain transfer function of the FIR filter to be applied.
+    **total_power** : uint64
+        Sum of squares of input samples. This will not include every input
+        sample. Rather, it will contain a specific tap from each PFB window
+        (currently, the last tap, but that is an implementation detail).
+
+        This is incremented rather than overwritten. It is the caller's
+        responsibility to zero it when desired, or alternatively to track
+        values before and after to measure the change.
 
     Raises
     ------
@@ -136,9 +143,10 @@ class PFBFIR(accel.Operation):
         self.samples = samples
         step = 2 * template.channels
         self.spectra = spectra  # Can be changed (TODO: documentation)
-        self.slots["in"] = accel.IOSlot((samples * SAMPLE_BITS // BYTE_BITS,), np.uint8)
+        self.slots["in"] = accel.IOSlot((samples * DIG_SAMPLE_BITS // BYTE_BITS,), np.uint8)
         self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
         self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
+        self.slots["total_power"] = accel.IOSlot((), np.uint64)
         self.in_offset = 0  # Number of samples to skip from the start of *in
         self.out_offset = 0  # Number of "spectra" to skip from the start of *out.
 
@@ -168,6 +176,7 @@ class PFBFIR(accel.Operation):
             self.template.kernel,
             [
                 self.buffer("out").buffer,
+                self.buffer("total_power").buffer,
                 self.buffer("in").buffer,
                 self.buffer("weights").buffer,
                 np.int32(out_n),

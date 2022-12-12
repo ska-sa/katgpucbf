@@ -20,8 +20,8 @@ import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from katgpucbf import BYTE_BITS
-from katgpucbf.fgpu import SAMPLE_BITS, pfb
+from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
+from katgpucbf.fgpu import pfb
 
 from .. import unpackbits
 
@@ -43,7 +43,8 @@ def pfb_fir_host(data, channels, unzip_factor, weights):
     out = out.reshape(-1, channels // unzip_factor, unzip_factor, 2)
     out = out.swapaxes(1, 2)
     out = out.reshape(-1, step)
-    return out
+    total_power = np.sum(np.square(decoded[step * (taps - 1) :].astype(np.int64)))
+    return out, total_power
 
 
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
@@ -54,15 +55,16 @@ def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, 
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
     rng = np.random.default_rng(seed=1)
-    h_in = rng.integers(0, 256, samples * SAMPLE_BITS // BYTE_BITS, np.uint8)
+    h_in = rng.integers(0, 256, samples * DIG_SAMPLE_BITS // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
-    expected = pfb_fir_host(h_in, channels, unzip_factor, weights)
+    expected_out, expected_total_power = pfb_fir_host(h_in, channels, unzip_factor, weights)
 
     template = pfb.PFBFIRTemplate(context, taps, channels, unzip_factor)
     fn = template.instantiate(command_queue, samples, spectra)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("weights").set(command_queue, weights)
+    fn.buffer("total_power").zero(command_queue)
     # Split into two parts to test the offsetting
     fn.in_offset = 0
     fn.out_offset = 0
@@ -73,4 +75,6 @@ def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, 
     fn.spectra = spectra - fn.spectra
     fn()
     h_out = fn.buffer("out").get(command_queue)
-    np.testing.assert_allclose(h_out, expected, rtol=1e-5, atol=1e-3)
+    h_total_power = fn.buffer("total_power").get(command_queue)[()]
+    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-3)
+    assert h_total_power == expected_total_power

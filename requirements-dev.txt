@@ -71,9 +71,7 @@ ipython==8.5.0
 jedi==0.18.1
     # via ipython
 jinja2==3.1.2
-    # via
-    #   -r requirements-dev.in
-    #   sphinx
+    # via sphinx
 latexcodec==2.0.1
     # via pybtex
 llvmlite==0.39.1
@@ -136,10 +134,6 @@ pybtex==0.24.0
     #   sphinxcontrib-bibtex
 pybtex-docutils==1.0.2
     # via sphinxcontrib-bibtex
-pycparser==2.21
-    # via
-    #   -c requirements.txt
-    #   -r requirements-dev.in
 pygments==2.13.0
     # via
     #   ipython

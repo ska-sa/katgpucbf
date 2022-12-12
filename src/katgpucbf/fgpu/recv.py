@@ -38,7 +38,7 @@ from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
-from ..utils import TimeConverter, TimeoutSensorStatusObserver
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -255,6 +255,9 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
         for sensor in missing_sensors:
             TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.NOMINAL)
             sensors.add(sensor)
+
+    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "F-engine is receiving a good, clean digitiser stream"))
+
     return sensors
 
 

@@ -418,6 +418,26 @@ transmission. It's important to (as far as possible) always run the back-end
 on the same amount of data, because cuFFT bakes the number of FFTs into its
 plan.
 
+Digitiser sample statistics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The PFB kernel also computes the average power of the incoming signal. Ideally
+that would be done by a separate kernel that processed each incoming sample
+exactly once. However, doing so would be expensive in memory bandwidth.
+Instead, we update statistics as samples are loaded for PFB calculations.
+
+Some care is needed to avoid double-counting due to overlapping PFB windows.
+The simplest way to add this to the existing code is that for each output
+spectrum, we include the last 2 × channels samples from the PFB window. In
+steady state operation and in the absence of coarse delay changes, this will
+count each sample exactly once. Coarse delay changes will cause some samples
+to be counted twice or not at all, but these are sufficiently rare that it is
+not likely to affect the statistics.
+
+Average power is updated at the granularity of output chunks. The PFB kernel
+updates a total power accumulator stored in the output item. This is performed
+using (64-bit) integer arithmetic, as this avoids the pitfalls of
+floating-point precision when accumulating a large number of samples.
+
 Network transmit
 ----------------
 The current transmit system is quite simple. A single spead2 stream is created,

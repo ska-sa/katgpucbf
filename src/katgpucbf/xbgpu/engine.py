@@ -58,7 +58,7 @@ from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter
+from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -280,6 +280,7 @@ class XBEngine(DeviceServer):
         context: katsdpsigproc.abc.AbstractContext,
     ):
         super().__init__(katcp_host, katcp_port)
+        self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -298,6 +299,7 @@ class XBEngine(DeviceServer):
         self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
         self.n_samples_between_spectra = n_samples_between_spectra
+        self.channel_offset_value = channel_offset_value
 
         self._src = src
         self._src_interface = src_interface
@@ -347,7 +349,6 @@ class XBEngine(DeviceServer):
             math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
-        self.channel_offset_value = channel_offset_value
 
         self.monitor = monitor
 
@@ -454,9 +455,19 @@ class XBEngine(DeviceServer):
             tx_enabled=self._init_tx_enabled,
         )
 
-    @staticmethod
-    def populate_sensors(sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
+    def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
+        # Static sensors
+        sensors.add(
+            aiokatcp.Sensor(
+                str,
+                "chan-range",
+                "The range of channels processed by this XB-engine, inclusive",
+                default=f"({self.channel_offset_value},{self.channel_offset_value + self.n_channels_per_stream - 1})",
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
+        # Dynamic sensors
         sensors.add(
             aiokatcp.Sensor(
                 bool,
@@ -481,6 +492,10 @@ class XBEngine(DeviceServer):
             sensors.add(sensor)
 
         sensors.add(DeviceStatusSensor(sensors))
+
+        time_sync_task = add_time_sync_sensors(sensors)
+        self.add_service_task(time_sync_task)
+        self._cancel_tasks.append(time_sync_task)
 
     async def _receiver_loop(self) -> None:
         """
@@ -788,8 +803,9 @@ class XBEngine(DeviceServer):
             self.send_stream.descriptor_heap,
             descriptor_interval_s,
         )
-        self._descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
-        self.add_service_task(self._descriptor_task)
+        descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
+        self.add_service_task(descriptor_task)
+        self._cancel_tasks.append(descriptor_task)
 
         base_recv.add_reader(
             self.receiver_stream,
@@ -814,12 +830,13 @@ class XBEngine(DeviceServer):
         Also handle any Exceptions thrown unexpectedly in any of the
         processing loops.
         """
-        self._descriptor_task.cancel()
+        for task in self._cancel_tasks:
+            task.cancel()
         self.receiver_stream.stop()
         # If any of the tasks are already done then we had an exception, and
         # waiting for the rest may hang as the shutdown path won't proceed
         # neatly.
         if not any(task.done() for task in self.service_tasks):
             for task in self.service_tasks:
-                if task is not self._descriptor_task:
+                if task not in self._cancel_tasks:
                     await task
