@@ -24,11 +24,13 @@ from collections.abc import Generator, Iterator
 import numpy as np
 import pytest
 import spead2.recv.asyncio
+from aiokatcp import SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
+from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
-from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, make_sensors, recv_chunks
 
 from .. import PromDiff
 
@@ -129,6 +131,21 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
 class TestStream:
     """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
 
+    @pytest.fixture
+    async def sensors(self) -> SensorSet:
+        """Receiver sensors."""
+        # This is an async fixture because make_sensors requires a running event loop
+        return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
+
+    @pytest.fixture
+    def time_converter(self) -> TimeConverter:
+        """Time converter.
+
+        This is a simple implementation that keeps ADC and Unix timestamps
+        closely related to make tests easily readable.
+        """
+        return TimeConverter(1.0, 1000.0)
+
     @pytest.mark.parametrize("reorder", [False, True])
     @pytest.mark.parametrize("timestamps", ["good", "bad"])
     async def test_basic(
@@ -139,6 +156,8 @@ class TestStream:
         queue: spead2.InprocQueue,
         reorder: bool,
         timestamps: str,
+        sensors: SensorSet,
+        time_converter: TimeConverter,
     ) -> None:
         """Send heaps and check that they arrive.
 
@@ -205,7 +224,10 @@ class TestStream:
             queue.stop()  # Flushes out the receive stream
             seen = 0
             empty_chunks = 0
-            async for chunk in recv_chunks(stream):
+            chunk_timestamp_step = layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+            async for chunk in recv_chunks(
+                stream, chunk_timestamp_step=chunk_timestamp_step, sensors=sensors, time_converter=time_converter
+            ):
                 assert isinstance(chunk, Chunk)
                 with chunk:
                     if not np.any(chunk.present):
@@ -237,6 +259,8 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
         queue: spead2.InprocQueue,
+        sensors: SensorSet,
+        time_converter: TimeConverter,
         caplog,
     ) -> None:
         """Test that the receiver handles missing heaps and Chunks.
@@ -299,7 +323,10 @@ class TestStream:
             # NOTE: We have to use a 'manual' counter as there is a jump in
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
-            async for chunk in recv_chunks(stream):
+            chunk_timestamp_step = layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+            async for chunk in recv_chunks(
+                stream, chunk_timestamp_step=chunk_timestamp_step, sensors=sensors, time_converter=time_converter
+            ):
                 with chunk:
                     # recv_chunks should filter out the phantom chunks created by
                     # spead2.

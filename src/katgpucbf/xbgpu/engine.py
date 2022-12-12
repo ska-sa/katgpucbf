@@ -55,6 +55,7 @@ from .. import (
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
+from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter
@@ -279,7 +280,6 @@ class XBEngine(DeviceServer):
         context: katsdpsigproc.abc.AbstractContext,
     ):
         super().__init__(katcp_host, katcp_port)
-        self.populate_sensors(self.sensors)
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -327,6 +327,17 @@ class XBEngine(DeviceServer):
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
+
+        self.populate_sensors(
+            self.sensors,
+            max(
+                RX_SENSOR_TIMEOUT_MIN,
+                RX_SENSOR_TIMEOUT_CHUNKS
+                * heaps_per_fengine_per_chunk
+                * self.rx_heap_timestamp_step
+                / adc_sample_rate_hz,
+            ),
+        )
 
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
@@ -444,7 +455,7 @@ class XBEngine(DeviceServer):
         )
 
     @staticmethod
-    def populate_sensors(sensors: aiokatcp.SensorSet) -> None:
+    def populate_sensors(sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         sensors.add(
             aiokatcp.Sensor(
@@ -465,6 +476,10 @@ class XBEngine(DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+
+        for sensor in recv.make_sensors(rx_sensor_timeout).values():
+            sensors.add(sensor)
+
         sensors.add(DeviceStatusSensor(sensors))
 
     async def _receiver_loop(self) -> None:
@@ -480,14 +495,18 @@ class XBEngine(DeviceServer):
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
-        async for chunk in recv.recv_chunks(self.receiver_stream):
-            timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.heaps_per_fengine_per_chunk
-
+        async for chunk in recv.recv_chunks(
+            self.receiver_stream,
+            self.rx_heap_timestamp_step * self.heaps_per_fengine_per_chunk,
+            self.sensors,
+            self.time_converter,
+        ):
             # Get a free rx_item that will contain the GPU buffer to which the
             # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
-            item.timestamp += timestamp
             item.chunk = chunk
+            # Need a seperate attribute as the chunk gets reset
+            item.timestamp += chunk.timestamp
             # Need to reshape chunk.present to get Heaps in one dimension
             item.present[:] = chunk.present.reshape(item.present.shape)
             # Initiate transfer from received chunk to rx_item buffer.
