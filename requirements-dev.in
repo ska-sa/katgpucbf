@@ -3,11 +3,9 @@ async-solipsism
 async-timeout
 coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 ipython
-jinja2
 numba
 pip-tools>=6.6.0
 pre-commit
-pycparser
 pytest
 pytest-asyncio
 pytest-cov

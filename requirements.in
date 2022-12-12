@@ -1,11 +1,10 @@
-aiohttp
 aiokatcp>=1.5.0
 dask
 katsdpservices[aiomonitor]>=1.2
 katsdpsigproc[CUDA]>=1.6.1
 katsdptelstate
 numpy
-prometheus-async
+prometheus-async[aiohttp]
 psutil  # Gives more accurate dask.system.CPU_COUNT
 pycuda
 pyparsing>=3.0.0
