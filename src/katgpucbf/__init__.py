@@ -26,25 +26,23 @@ except PackageNotFoundError:
     # Package wasn't installed yet?
     __version__ = "unknown"
 
-__all__ = ["__version__"]
-
 BYTE_BITS: Final = 8
 COMPLEX: Final = 2
 N_POLS: Final = 2
 SPEAD_DESCRIPTOR_INTERVAL_S: Final = 5
 SEND_RATE_FACTOR = 1.1
-# Biggest power of 2 that fits in a jumbo MTU. A power of 2 isn't required but
-# it can be convenient to have packet boundaries align with the natural
-# boundaries in the payload (for antenna-channelised-voltage output). Bigger
-# is better to minimise the number of packets/second to process.
+#: Biggest power of 2 that fits in a jumbo MTU. A power of 2 isn't required but
+#: it can be convenient to have packet boundaries align with the natural
+#: boundaries in the payload (for antenna-channelised-voltage output). Bigger
+#: is better to minimise the number of packets/second to process.
 DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
 DEFAULT_KATCP_HOST: Final = ""  # All interfaces
 DEFAULT_KATCP_PORT: Final = 7147
 DIG_HEAP_SAMPLES: Final = 4096
 DIG_SAMPLE_BITS: Final = 10
-# Minimum update period (in seconds) for katcp sensors where the underlying
-# value may update extremely rapidly.
+#: Minimum update period (in seconds) for katcp sensors where the underlying
+#: value may update extremely rapidly.
 MIN_SENSOR_UPDATE_PERIOD: Final = 1.0
 
 GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
