@@ -18,6 +18,7 @@
 
 import functools
 import logging
+import math
 from collections import deque
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
@@ -33,7 +34,7 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS, N_POLS
+from .. import BYTE_BITS, MIN_SENSOR_UPDATE_PERIOD, N_POLS
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
@@ -230,6 +231,8 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
                 "The timestamp (in samples) of the last chunk of data received from the digitiser",
                 default=-1,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
+                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
             aiokatcp.Sensor(
                 float,
@@ -237,6 +240,8 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
                 "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
                 default=-1.0,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
+                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
         ]
         for sensor in timestamp_sensors:
