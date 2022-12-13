@@ -42,7 +42,6 @@ import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
 from katsdpsigproc import accel
-from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     DESCRIPTOR_TASK_NAME,
@@ -53,6 +52,7 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
+from ..endpoint import Endpoint
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer

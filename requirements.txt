@@ -22,7 +22,6 @@ async-timeout==4.0.2
     # via
     #   aiohttp
     #   aiokatcp
-    #   redis
 attrs==22.1.0
     # via aiohttp
 cffi==1.15.1
@@ -37,23 +36,17 @@ decorator==5.1.1
     # via
     #   aiokatcp
     #   katsdpsigproc
-deprecated==1.2.13
-    # via redis
 frozenlist==1.3.1
     # via
     #   aiohttp
     #   aiosignal
 fsspec==2022.8.2
     # via dask
-hiredis==2.0.0
-    # via katsdptelstate
 idna==3.4
     # via yarl
 katsdpservices[aiomonitor]==1.2
     # via -r requirements.in
 katsdpsigproc[cuda]==1.6.1
-    # via -r requirements.in
-katsdptelstate==0.11
     # via -r requirements.in
 llvmlite==0.39.1
     # via numba
@@ -65,23 +58,18 @@ mako==1.2.3
     #   pycuda
 markupsafe==2.1.1
     # via mako
-msgpack==1.0.4
-    # via katsdptelstate
 multidict==6.0.2
     # via
     #   aiohttp
     #   yarl
 netifaces==0.11.0
-    # via
-    #   katsdpservices
-    #   katsdptelstate
+    # via katsdpservices
 numba==0.56.3
     # via katsdpsigproc
 numpy==1.23.4
     # via
     #   -r requirements.in
     #   katsdpsigproc
-    #   katsdptelstate
     #   numba
     #   pandas
     #   scipy
@@ -90,7 +78,6 @@ numpy==1.23.4
 packaging==21.3
     # via
     #   dask
-    #   redis
     #   xarray
 pandas==1.5.0
     # via
@@ -126,14 +113,10 @@ pytz==2022.4
     # via pandas
 pyyaml==6.0
     # via dask
-redis==4.3.4
-    # via katsdptelstate
 scipy==1.9.2
     # via katsdpsigproc
 six==1.16.0
-    # via
-    #   katsdptelstate
-    #   python-dateutil
+    # via python-dateutil
 spead2==3.11.1
     # via -r requirements.in
 terminaltables==3.1.10
@@ -150,9 +133,7 @@ typing-extensions==4.4.0
 vkgdr==0.1
     # via -r requirements.in
 wrapt==1.14.1
-    # via
-    #   deprecated
-    #   prometheus-async
+    # via prometheus-async
 xarray==2022.10.0
     # via -r requirements.in
 yarl==1.8.1

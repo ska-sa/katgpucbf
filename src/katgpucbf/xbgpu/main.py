@@ -39,11 +39,11 @@ import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, __version__
+from ..endpoint import endpoint_parser
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter

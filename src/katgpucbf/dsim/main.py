@@ -31,9 +31,9 @@ import katsdpservices
 import numpy as np
 import prometheus_async
 import pyparsing as pp
-from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
+from ..endpoint import endpoint_list_parser
 from ..send import DescriptorSender
 from ..utils import TimeConverter, add_signal_handlers
 from . import descriptors, send, signal

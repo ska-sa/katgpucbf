@@ -26,9 +26,9 @@ from enum import Enum
 from typing import TypeVar
 
 import aiokatcp
-from katsdptelstate.endpoint import endpoint_list_parser
 
 from . import TIME_SYNC_TASK_NAME
+from .endpoint import endpoint_list_parser
 
 _T = TypeVar("_T")
 

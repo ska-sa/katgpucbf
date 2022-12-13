@@ -39,7 +39,6 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
@@ -47,6 +46,7 @@ from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
 from katgpucbf import COMPLEX
+from katgpucbf.endpoint import endpoint_list_parser
 from katgpucbf.utils import TimeConverter
 
 logger = logging.getLogger(__name__)

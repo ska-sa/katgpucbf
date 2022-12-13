@@ -31,7 +31,6 @@ import numpy as np
 import spead2.recv
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
-from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     BYTE_BITS,
@@ -46,6 +45,7 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
+from ..endpoint import Endpoint
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..ringbuffer import ChunkRingbuffer

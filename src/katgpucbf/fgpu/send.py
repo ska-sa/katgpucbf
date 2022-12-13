@@ -24,10 +24,10 @@ import numpy as np
 import spead2.send
 import spead2.send.asyncio
 from aiokatcp import SensorSet
-from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS
+from ..endpoint import Endpoint
 from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
