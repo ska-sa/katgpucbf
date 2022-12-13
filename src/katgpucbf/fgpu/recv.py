@@ -235,7 +235,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
                 auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
             aiokatcp.Sensor(
-                float,
+                aiokatcp.core.Timestamp,
                 f"input{pol}-rx-unixtime",
                 "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
                 default=-1.0,
@@ -250,7 +250,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
 
         missing_sensors: list[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
-                float,
+                aiokatcp.core.Timestamp,
                 f"input{pol}-rx-missing-unixtime",
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=-1.0,

@@ -17,6 +17,7 @@
 """SPEAD receiver utilities."""
 import functools
 import logging
+import math
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import IntEnum
@@ -25,13 +26,14 @@ import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import Sensor, SensorSampler, SensorSet
+from aiokatcp.core import Timestamp
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS, COMPLEX, N_POLS
+from .. import BYTE_BITS, COMPLEX, MIN_SENSOR_UPDATE_PERIOD, N_POLS
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
@@ -220,13 +222,17 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
             "The timestamp (in samples) of the last chunk of data received from an F-engine",
             default=-1,
             initial_status=Sensor.Status.ERROR,
+            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
         ),
         Sensor(
-            float,
+            Timestamp,
             "input-rx-unixtime",
             "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
             default=-1.0,
             initial_status=Sensor.Status.ERROR,
+            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
         ),
     ]
     for sensor in timestamp_sensors:
@@ -235,7 +241,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
 
     missing_sensors: list[Sensor] = [
         Sensor(
-            float,
+            Timestamp,
             "input-rx-missing-unixtime",
             "The timestamp (in UNIX time) when missing data was last detected",
             default=-1.0,
@@ -294,6 +300,7 @@ async def recv_chunks(
             valid_chunk_received = True
             prev_chunk_id = chunk.chunk_id - 1
 
+        # TODO: Perhaps make this 'chunk timestamp step' a property of the Layout?
         chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         unix_time = time_converter.adc_to_unix(chunk.timestamp)
         sensors["input-rx-timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
