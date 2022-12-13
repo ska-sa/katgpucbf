@@ -89,8 +89,9 @@ pipeline {
   /* This post stage is configured to always run at the end of this pipeline,
    * regardless of the completion status. In this stage an email is sent to
    * the specified address with details of the Jenkins job and a PDF report
-   * containing the qualification test results. The final step removes the workspace when
-   * the build is complete.
+   * containing the qualification test results. Any runnning correlator part
+   * of the Jenkins qualification test that continues to run at this point will be
+   * stopped. The final step removes the workspace when the build is complete.
    */
   post {
     always {
@@ -107,6 +108,14 @@ pipeline {
       subject: 'Qualification Tests - katgpucbf - $BUILD_STATUS!',
       to: '$DEFAULT_RECIPIENTS'
 
+      script {
+        ARRAYS = sh(script: 'katcpcmd lab5.sdp.kat.ac.za:5001 product-list', returnStdout: true).trim()
+        echo "Currently Running Arrays: ${ARRAYS}"
+        if (ARRAYS.contains("jenkins_qualification_correlator")) {
+          sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_correlator 1'
+          echo "Destroying jenkins_qualification_correlator"
+        }
+      }
       cleanWs()
     }
   }
