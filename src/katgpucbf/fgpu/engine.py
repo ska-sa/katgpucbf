@@ -39,6 +39,7 @@ from .. import (
     DESCRIPTOR_TASK_NAME,
     DIG_SAMPLE_BITS,
     GPU_PROC_TASK_NAME,
+    MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
@@ -749,6 +750,8 @@ class Engine(aiokatcp.DeviceServer):
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -758,6 +761,8 @@ class Engine(aiokatcp.DeviceServer):
                     "Digitiser ADC average power",
                     units="dBFS",
                     status_func=dig_pwr_dbfs_status,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -767,6 +772,8 @@ class Engine(aiokatcp.DeviceServer):
                     "Number of output samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
 
