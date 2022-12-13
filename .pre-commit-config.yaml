@@ -67,14 +67,32 @@ repos:
     rev: 6.9.0
     hooks:
       - id: pip-compile
-        name: pip-compile requirements.in
-        args: [requirements.in]
-        files: ^requirements\.(in|txt)$
+        name: pip-compile requirements.txt
+        args:
+          - --output-file=requirements.txt
+          - --extra=gpu
+          - --extra=vkgdr
+          # Avoid putting extras in the output, so that it can be used for constraints
+          - --strip-extras
+          - setup.cfg
+          - requirements.in
+        files: '^(requirements\.(in|txt)|setup\.cfg)$'
       - id: pip-compile
-        name: pip-compile requirements-dev.in
-        args: [requirements-dev.in]
-        files: ^requirements(-dev)?\.(in|txt)$
+        name: pip-compile requirements-dev.txt
+        args:
+          - --output-file=requirements-dev.txt
+          - --extra=test
+          - --extra=doc
+          - --strip-extras
+          - setup.cfg
+          - requirements-dev.in
+        files: '^(requirements(-dev)?\.(in|txt)|setup\.cfg)$'
       - id: pip-compile
-        name: pip-compile qualification/requirements.in
-        args: [qualification/requirements.in]
-        files: .*requirements(-dev)?\.(in|txt)$
+        name: pip-compile qualification/requirements.txt
+        args:
+          - --output-file=qualification/requirements.txt
+          - --extra=qualification
+          - --strip-extras
+          - setup.cfg
+          - qualification/requirements.in
+        files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'
