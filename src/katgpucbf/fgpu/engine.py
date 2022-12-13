@@ -39,10 +39,10 @@ from .. import (
     DESCRIPTOR_TASK_NAME,
     DIG_SAMPLE_BITS,
     GPU_PROC_TASK_NAME,
+    MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
-    SENSOR_UPDATE_TIME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     __version__,
 )
@@ -751,7 +751,7 @@ class Engine(aiokatcp.DeviceServer):
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                     auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(SENSOR_UPDATE_TIME, math.inf),
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -762,7 +762,7 @@ class Engine(aiokatcp.DeviceServer):
                     units="dBFS",
                     status_func=dig_pwr_dbfs_status,
                     auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(SENSOR_UPDATE_TIME, math.inf),
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -773,7 +773,7 @@ class Engine(aiokatcp.DeviceServer):
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                     auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(SENSOR_UPDATE_TIME, math.inf),
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
 

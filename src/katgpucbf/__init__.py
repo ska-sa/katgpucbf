@@ -43,9 +43,9 @@ DEFAULT_KATCP_HOST: Final = ""  # All interfaces
 DEFAULT_KATCP_PORT: Final = 7147
 DIG_HEAP_SAMPLES: Final = 4096
 DIG_SAMPLE_BITS: Final = 10
-# Update rate (expressed in seconds) for katcp sensors where the underlying value
-# may update extremely rapidly.
-SENSOR_UPDATE_TIME: Final = 1.0
+# Minimum update period (in seconds) for katcp sensors where the underlying
+# value may update extremely rapidly.
+MIN_SENSOR_UPDATE_PERIOD: Final = 1.0
 
 GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
 RECV_TASK_NAME: Final[str] = "Receiver Loop"

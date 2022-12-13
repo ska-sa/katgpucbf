@@ -34,7 +34,7 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS, N_POLS, SENSOR_UPDATE_TIME
+from .. import BYTE_BITS, MIN_SENSOR_UPDATE_PERIOD, N_POLS
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
@@ -232,7 +232,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
                 default=-1,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
                 auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(SENSOR_UPDATE_TIME, math.inf),
+                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
             aiokatcp.Sensor(
                 float,
@@ -241,7 +241,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
                 default=-1.0,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
                 auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(SENSOR_UPDATE_TIME, math.inf),
+                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
         ]
         for sensor in timestamp_sensors:
