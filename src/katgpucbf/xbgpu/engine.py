@@ -520,7 +520,7 @@ class XBEngine(DeviceServer):
             # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
             item.chunk = chunk
-            # Need a seperate attribute as the chunk gets reset
+            # Need a separate attribute as the chunk gets reset
             item.timestamp += chunk.timestamp
             # Need to reshape chunk.present to get Heaps in one dimension
             item.present[:] = chunk.present.reshape(item.present.shape)

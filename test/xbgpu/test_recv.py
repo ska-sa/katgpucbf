@@ -137,15 +137,6 @@ class TestStream:
         # This is an async fixture because make_sensors requires a running event loop
         return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
 
-    @pytest.fixture
-    def time_converter(self) -> TimeConverter:
-        """Time converter.
-
-        This is a simple implementation that keeps ADC and Unix timestamps
-        closely related to make tests easily readable.
-        """
-        return TimeConverter(1.0, 1000.0)
-
     @pytest.mark.parametrize("reorder", [False, True])
     @pytest.mark.parametrize("timestamps", ["good", "bad"])
     async def test_basic(
@@ -361,7 +352,7 @@ class TestStream:
         assert sensor.status == Sensor.Status.NOMINAL
         assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
         sensor = sensors["input-rx-unixtime"]
-        # Should be the same value as the previous sensor, but to UNIX time
+        # Should be the same value as the previous sensor, but in UNIX time
         assert sensor.value == time_converter.adc_to_unix(absolute_present_timestamp)
         assert sensor.status == Sensor.Status.NOMINAL
         assert sensor.timestamp == sensor.value
