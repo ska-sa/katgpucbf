@@ -1,19 +1,2 @@
--r ../requirements-dev.txt
-aiokatcp
-async-timeout
-dask
-docutils
-katsdpservices
-katsdpsigproc
-katsdptelstate
-matplotlib
-numpy
-prometheus-api-client
-prometheus-async
-prometheus-client
-pylatex
-pytest
-pytest-check
-pytest-reportlog
-spead2>=3.11.0
-xarray
+-c ../requirements.txt
+-c ../requirements-dev.txt

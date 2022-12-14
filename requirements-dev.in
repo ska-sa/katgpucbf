@@ -1,18 +1,6 @@
 -c requirements.txt
-async-solipsism
-async-timeout
-coverage[toml]  # It's pulled in by pytest-cov, but I want the toml ability.
 ipython
-numba
 pip-tools>=6.6.0
 pre-commit
-pytest
-pytest-asyncio
 pytest-cov
-pytest-mock
 pytest-xdist  # Allows for pytest to launch multiple threads
-sphinx
-sphinx-rtd-theme
-sphinx-mathjax-offline
-sphinxcontrib-bibtex
-sphinxcontrib-tikz
