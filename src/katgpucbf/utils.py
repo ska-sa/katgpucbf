@@ -22,7 +22,6 @@ import logging
 import signal
 import weakref
 from collections import Counter
-from enum import Enum
 from typing import TypeVar
 
 import aiokatcp
@@ -74,15 +73,7 @@ def parse_source(value: str) -> list[tuple[str, int]] | str:
         return value
 
 
-class DeviceStatus(Enum):
-    """Discrete `device-status` readings."""
-
-    OK = 1
-    DEGRADED = 2
-    FAIL = 3
-
-
-class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
+class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[aiokatcp.DeviceStatus]):
     """Summary sensor for quickly ascertaining device status.
 
     This takes its value from the worst status of its target set of sensors, so
@@ -96,7 +87,7 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         self._counts: Counter[aiokatcp.Sensor.Status] = Counter()
         super().__init__(
             target=target,
-            sensor_type=DeviceStatus,
+            sensor_type=aiokatcp.DeviceStatus,
             name=name,
             description=description,
         )
@@ -106,7 +97,7 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         updated_sensor: aiokatcp.Sensor[_T] | None,
         reading: aiokatcp.Reading[_T] | None,
         old_reading: aiokatcp.Reading[_T] | None,
-    ) -> aiokatcp.Reading[DeviceStatus] | None:  # noqa: D102
+    ) -> aiokatcp.Reading[aiokatcp.DeviceStatus] | None:  # noqa: D102
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
         return super().update_aggregate(updated_sensor, reading, old_reading)
@@ -119,15 +110,15 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[DeviceStatus]):
         self._counts[reading.status] -= 1
         return True
 
-    def aggregate_compute(self) -> tuple[aiokatcp.Sensor.Status, DeviceStatus]:  # noqa: D102
+    def aggregate_compute(self) -> tuple[aiokatcp.Sensor.Status, aiokatcp.DeviceStatus]:  # noqa: D102
         worst_status = max(
             (status for status, count in self._counts.items() if count > 0), default=aiokatcp.Sensor.Status.NOMINAL
         )
         if worst_status <= aiokatcp.Sensor.Status.NOMINAL:  # NOMINAL or UNKNOWN
-            return (aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
+            return (aiokatcp.Sensor.Status.NOMINAL, aiokatcp.DeviceStatus.OK)
         # We won't return FAIL because if the device is unusable, we probably
         # won't be able to.
-        return (aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
+        return (aiokatcp.Sensor.Status.WARN, aiokatcp.DeviceStatus.DEGRADED)
 
     def filter_aggregate(self, sensor: aiokatcp.Sensor) -> bool:  # noqa: D102
         # Filter other aggregate sensors out. We don't need them because the

@@ -24,11 +24,11 @@ from collections.abc import Generator, Iterator
 import numpy as np
 import pytest
 import spead2.recv.asyncio
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import DeviceStatus, Sensor, SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
-from katgpucbf.utils import DeviceStatus, TimeConverter
+from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
 from katgpucbf.xbgpu.recv import Chunk, Layout, make_sensors, recv_chunks
 

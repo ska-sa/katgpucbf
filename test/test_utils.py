@@ -25,8 +25,9 @@ from unittest import mock
 import aiokatcp
 import async_solipsism
 import pytest
+from aiokatcp import DeviceStatus
 
-from katgpucbf.utils import DeviceStatus, DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
+from katgpucbf.utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 
 
 class TestDeviceStatusSensor:
