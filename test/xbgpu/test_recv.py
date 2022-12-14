@@ -24,11 +24,13 @@ from collections.abc import Generator, Iterator
 import numpy as np
 import pytest
 import spead2.recv.asyncio
+from aiokatcp import Sensor, SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
+from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
-from katgpucbf.xbgpu.recv import Chunk, Layout, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, make_sensors, recv_chunks
 
 from .. import PromDiff
 
@@ -129,6 +131,12 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
 class TestStream:
     """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
 
+    @pytest.fixture
+    async def sensors(self) -> SensorSet:
+        """Receiver sensors."""
+        # This is an async fixture because make_sensors requires a running event loop
+        return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
+
     @pytest.mark.parametrize("reorder", [False, True])
     @pytest.mark.parametrize("timestamps", ["good", "bad"])
     async def test_basic(
@@ -139,6 +147,8 @@ class TestStream:
         queue: spead2.InprocQueue,
         reorder: bool,
         timestamps: str,
+        sensors: SensorSet,
+        time_converter: TimeConverter,
     ) -> None:
         """Send heaps and check that they arrive.
 
@@ -205,7 +215,7 @@ class TestStream:
             queue.stop()  # Flushes out the receive stream
             seen = 0
             empty_chunks = 0
-            async for chunk in recv_chunks(stream):
+            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 assert isinstance(chunk, Chunk)
                 with chunk:
                     if not np.any(chunk.present):
@@ -237,6 +247,8 @@ class TestStream:
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
         queue: spead2.InprocQueue,
+        sensors: SensorSet,
+        time_converter: TimeConverter,
         caplog,
     ) -> None:
         """Test that the receiver handles missing heaps and Chunks.
@@ -299,7 +311,7 @@ class TestStream:
             # NOTE: We have to use a 'manual' counter as there is a jump in
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
-            async for chunk in recv_chunks(stream):
+            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 with chunk:
                     # recv_chunks should filter out the phantom chunks created by
                     # spead2.
@@ -308,12 +320,13 @@ class TestStream:
                     received_chunk_presence[seen, :] = chunk.present
                     seen += 1
 
+        absolute_missing_chunk_id = start_chunk_id + missing_chunk_ids[0] + n_chunks_to_delete
         assert caplog.record_tuples == [
             (
                 "katgpucbf.xbgpu.recv",
                 logging.WARNING,
                 f"Receiver missed {n_chunks_to_delete} chunks. Expected ID: {start_chunk_id + missing_chunk_ids[0]}, "
-                f"received ID: {start_chunk_id + missing_chunk_ids[0] + n_chunks_to_delete}.",
+                f"received ID: {absolute_missing_chunk_id}.",
             )
         ]
 
@@ -330,3 +343,24 @@ class TestStream:
             prom_diff.get_sample_diff("input_missing_heaps_total")
             == n_chunks_to_delete * layout.chunk_heaps + n_single_heaps_to_delete
         )
+
+        # Check sensors
+        sensor = sensors["input-rx-timestamp"]
+        # sensor.value should be of the last chunk sent
+        absolute_present_timestamp = expected_chunk_ids[-1] * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        assert sensor.value == absolute_present_timestamp
+        assert sensor.status == Sensor.Status.NOMINAL
+        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+        sensor = sensors["input-rx-unixtime"]
+        # Should be the same value as the previous sensor, but in UNIX time
+        assert sensor.value == time_converter.adc_to_unix(absolute_present_timestamp)
+        assert sensor.status == Sensor.Status.NOMINAL
+        assert sensor.timestamp == sensor.value
+        sensor = sensors["input-rx-missing-unixtime"]
+        # sensor.value should be of the last chunk to go missing
+        absolute_missing_timestamp = (
+            absolute_missing_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        )
+        assert sensor.value == time_converter.adc_to_unix(absolute_missing_timestamp)
+        assert sensor.status == Sensor.Status.ERROR
+        assert sensor.timestamp == sensor.value

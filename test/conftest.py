@@ -48,6 +48,8 @@ from typing import Any
 import pytest
 import spead2
 
+from katgpucbf.utils import TimeConverter
+
 pytest_plugins = ["katsdpsigproc.pytest_plugin"]
 
 
@@ -157,3 +159,13 @@ def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
 
     mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
     return queues
+
+
+@pytest.fixture
+def time_converter() -> TimeConverter:
+    """Time converter.
+
+    This is a simple implementation that keeps ADC and Unix timestamps
+    closely related to make tests easily readable.
+    """
+    return TimeConverter(1.0, 1000.0)

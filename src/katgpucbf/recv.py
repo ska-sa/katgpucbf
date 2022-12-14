@@ -40,6 +40,11 @@ user_data_type = types.Record.make_c_struct(
     ]
 )
 
+#: Number of chunks before rx sensor status changes
+RX_SENSOR_TIMEOUT_CHUNKS = 10
+#: Minimum rx sensor status timeout in seconds
+RX_SENSOR_TIMEOUT_MIN = 1.0
+
 
 class Chunk(spead2.recv.Chunk):
     """Collection of heaps passed to the GPU at one time.

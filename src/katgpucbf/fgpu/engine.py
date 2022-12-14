@@ -49,6 +49,7 @@ from .. import (
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
+from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
@@ -56,10 +57,6 @@ from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 
-#: Number of chunks before rx sensor status changes
-RX_SENSOR_TIMEOUT_CHUNKS = 10
-#: Minimum rx sensor status timeout in seconds
-RX_SENSOR_TIMEOUT_MIN = 1.0
 logger = logging.getLogger(__name__)
 
 

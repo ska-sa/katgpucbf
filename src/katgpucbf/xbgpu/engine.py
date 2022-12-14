@@ -55,6 +55,7 @@ from .. import (
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..queue_item import QueueItem
+from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
@@ -300,8 +301,6 @@ class XBEngine(DeviceServer):
         self.n_samples_between_spectra = n_samples_between_spectra
         self.channel_offset_value = channel_offset_value
 
-        self.populate_sensors(self.sensors)
-
         self._src = src
         self._src_interface = src_interface
         self._src_ibv = src_ibv
@@ -331,6 +330,17 @@ class XBEngine(DeviceServer):
         # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
 
+        self.populate_sensors(
+            self.sensors,
+            max(
+                RX_SENSOR_TIMEOUT_MIN,
+                RX_SENSOR_TIMEOUT_CHUNKS
+                * heaps_per_fengine_per_chunk
+                * self.rx_heap_timestamp_step
+                / adc_sample_rate_hz,
+            ),
+        )
+
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # Sets the number of batches of heaps to store per chunk
@@ -346,7 +356,7 @@ class XBEngine(DeviceServer):
             self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
-        layout = recv.Layout(
+        self._src_layout = recv.Layout(
             n_ants=self.n_ants,
             n_channels_per_stream=self.n_channels_per_stream,
             n_spectra_per_heap=self.n_spectra_per_heap,
@@ -355,7 +365,7 @@ class XBEngine(DeviceServer):
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
         )
         self.receiver_stream = recv.make_stream(
-            layout=layout,
+            layout=self._src_layout,
             data_ringbuffer=data_ringbuffer,
             free_ringbuffer=free_ringbuffer,
             src_affinity=src_affinity,
@@ -445,7 +455,7 @@ class XBEngine(DeviceServer):
             tx_enabled=self._init_tx_enabled,
         )
 
-    def populate_sensors(self, sensors: aiokatcp.SensorSet) -> None:
+    def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Static sensors
         sensors.add(
@@ -477,6 +487,10 @@ class XBEngine(DeviceServer):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+
+        for sensor in recv.make_sensors(rx_sensor_timeout).values():
+            sensors.add(sensor)
+
         sensors.add(DeviceStatusSensor(sensors))
 
         time_sync_task = add_time_sync_sensors(sensors)
@@ -496,14 +510,18 @@ class XBEngine(DeviceServer):
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
-        async for chunk in recv.recv_chunks(self.receiver_stream):
-            timestamp = chunk.chunk_id * self.rx_heap_timestamp_step * self.heaps_per_fengine_per_chunk
-
+        async for chunk in recv.recv_chunks(
+            self.receiver_stream,
+            self._src_layout,
+            self.sensors,
+            self.time_converter,
+        ):
             # Get a free rx_item that will contain the GPU buffer to which the
             # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
-            item.timestamp += timestamp
             item.chunk = chunk
+            # Need a separate attribute as the chunk gets reset
+            item.timestamp = chunk.timestamp
             # Need to reshape chunk.present to get Heaps in one dimension
             item.present[:] = chunk.present.reshape(item.present.shape)
             # Initiate transfer from received chunk to rx_item buffer.

@@ -17,6 +17,7 @@
 """SPEAD receiver utilities."""
 import functools
 import logging
+import math
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import IntEnum
@@ -25,16 +26,19 @@ import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
+from aiokatcp import Sensor, SensorSampler, SensorSet
+from aiokatcp.core import Timestamp
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS, COMPLEX, N_POLS
+from .. import BYTE_BITS, COMPLEX, MIN_SENSOR_UPDATE_PERIOD, N_POLS
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
+from ..utils import TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -201,10 +205,76 @@ def make_stream(
     return stream
 
 
-async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chunk, None]:
+def make_sensors(sensor_timeout: float) -> SensorSet:
+    """Create the sensors needed to hold receiver statistics.
+
+    Parameters
+    ----------
+    sensor_timeout
+        Time (in seconds) without updates before sensors for received data go
+        into error and sensors for missing data becoming nominal.
+    """
+    sensors = SensorSet()
+    timestamp_sensors: list[Sensor] = [
+        Sensor(
+            int,
+            "input-rx-timestamp",
+            "The timestamp (in samples) of the last chunk of data received from an F-engine",
+            default=-1,
+            initial_status=Sensor.Status.ERROR,
+            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+        ),
+        Sensor(
+            Timestamp,
+            "input-rx-unixtime",
+            "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
+            default=Timestamp(-1.0),
+            initial_status=Sensor.Status.ERROR,
+            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+        ),
+    ]
+    for sensor in timestamp_sensors:
+        TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.ERROR)
+        sensors.add(sensor)
+
+    missing_sensors: list[Sensor] = [
+        Sensor(
+            Timestamp,
+            "input-rx-missing-unixtime",
+            "The timestamp (in UNIX time) when missing data was last detected",
+            default=Timestamp(-1.0),
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    ]
+    for sensor in missing_sensors:
+        TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.NOMINAL)
+        sensors.add(sensor)
+    return sensors
+
+
+async def recv_chunks(
+    stream: spead2.recv.ChunkRingStream,
+    layout: Layout,
+    sensors: SensorSet,
+    time_converter: TimeConverter,
+) -> AsyncGenerator[Chunk, None]:
     """Retrieve chunks from the ringbuffer, updating metrics as they are received.
 
     The returned chunks are yielded from this asynchronous generator.
+
+    Parameters
+    ----------
+    stream
+        Stream object handling reception of F-engine data.
+    layout
+        Structure of the stream.
+    sensors
+        Sensor set containing at least the sensors created by
+        :func:`make_sensors`.
+    time_converter
+        Converter to turn data timestamps into sensor timestamps.
     """
     ringbuffer = stream.data_ringbuffer
     prev_chunk_id = -1
@@ -230,6 +300,12 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
             valid_chunk_received = True
             prev_chunk_id = chunk.chunk_id - 1
 
+        # TODO: Perhaps make this 'chunk timestamp step' a property of the Layout?
+        chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        unix_time = time_converter.adc_to_unix(chunk.timestamp)
+        sensors["input-rx-timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+        sensors["input-rx-unixtime"].set_value(Timestamp(unix_time), timestamp=unix_time)
+
         # Check if we've missed any chunks
         expected_chunk_id = prev_chunk_id + 1
         if chunk.chunk_id != expected_chunk_id:
@@ -241,6 +317,13 @@ async def recv_chunks(stream: spead2.recv.ChunkRingStream) -> AsyncGenerator[Chu
                 chunk.chunk_id,
             )
             dropped_heaps += missed_chunks * expected_heaps
+
+        if dropped_heaps > 0:
+            sensors["input-rx-missing-unixtime"].set_value(
+                Timestamp(unix_time), Sensor.Status.ERROR, timestamp=unix_time
+            )
+
+        # Increment Prometheus counters
         missing_heaps_counter.inc(dropped_heaps)
         heaps_counter.inc(received_heaps)
         chunks_counter.inc(1)

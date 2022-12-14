@@ -299,15 +299,6 @@ class TestChunkSets:
         # This is an async fixture because make_sensors requires a running event loop
         return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
 
-    @pytest.fixture
-    def time_converter(self) -> TimeConverter:
-        """Time converter.
-
-        This is a simple implementation that keeps ADC and Unix timestamps
-        closely related to make tests easily readable.
-        """
-        return TimeConverter(1.0, 1000.0)
-
     async def test(
         self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter, caplog
     ) -> None:  # noqa: D102
