@@ -27,6 +27,7 @@ import aiokatcp
 import numpy as np
 import pytest
 import spead2.recv.asyncio
+from aiokatcp import DeviceStatus
 from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
@@ -41,7 +42,7 @@ from katgpucbf.spead import (
     FLAVOUR,
     TIMESTAMP_ID,
 )
-from katgpucbf.utils import DeviceStatus, TimeConverter
+from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff
 
