@@ -38,7 +38,7 @@ from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
-from ..utils import TimeConverter, TimeoutSensorStatusObserver
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -251,6 +251,9 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
     for sensor in missing_sensors:
         TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.NOMINAL)
         sensors.add(sensor)
+
+    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "XB-engine is receiving a good, clean F-engine stream"))
+
     return sensors
 
 

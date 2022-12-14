@@ -28,7 +28,7 @@ from aiokatcp import Sensor, SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
-from katgpucbf.utils import TimeConverter
+from katgpucbf.utils import DeviceStatus, TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
 from katgpucbf.xbgpu.recv import Chunk, Layout, make_sensors, recv_chunks
 
@@ -364,3 +364,6 @@ class TestStream:
         assert sensor.value == time_converter.adc_to_unix(absolute_missing_timestamp)
         assert sensor.status == Sensor.Status.ERROR
         assert sensor.timestamp == sensor.value
+        ds_sensor = sensors["rx.device-status"]
+        assert ds_sensor.value == DeviceStatus.DEGRADED
+        assert ds_sensor.status == Sensor.Status.WARN
