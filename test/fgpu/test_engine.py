@@ -578,7 +578,7 @@ class TestEngine:
     ) -> None:
         """Test loading several future delay models."""
         # Set up infrastructure for testing delay sensor updates
-        delay_sensors = [engine_server.sensors[f"input{pol}-delay"] for pol in range(N_POLS)]
+        delay_sensors = [engine_server.sensors[f"input{pol}.delay"] for pol in range(N_POLS)]
         sensor_updates_dict = self._watch_sensors(delay_sensors)
 
         # To keep things simple, we'll just use phase, not delay.
@@ -722,7 +722,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
     ) -> None:
         """Test that the ``dig-clip-cnt`` sensors are set correctly."""
-        sensors = [engine_server.sensors[f"input{pol}-dig-clip-cnt"] for pol in range(N_POLS)]
+        sensors = [engine_server.sensors[f"input{pol}.dig-clip-cnt"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 3 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)

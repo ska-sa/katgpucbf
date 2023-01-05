@@ -74,7 +74,7 @@ class TestKatcpRequests:
         """Test that the command-line gain is set correctly."""
         reply, _informs = await engine_client.request("gain", pol)
         assert reply == [b"0.125+0.0j"]
-        sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+        sensor_value = await get_sensor(engine_client, f"input{pol}.eq")
         assert sensor_value == "[0.125+0.0j]"
 
     @pytest.mark.parametrize("pol", range(N_POLS))
@@ -86,7 +86,7 @@ class TestKatcpRequests:
         assert_valid_complex(value)
         assert complex(value) == pytest.approx(0.2 - 3j)
 
-        sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+        sensor_value = await get_sensor(engine_client, f"input{pol}.eq")
         assert_valid_complex_list(sensor_value)
         assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
         np.testing.assert_equal(engine_server.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
@@ -135,7 +135,7 @@ class TestKatcpRequests:
         reply, _informs = await engine_client.request("gain-all", "0.2-3j")
         assert reply == []
         for pol in range(N_POLS):
-            sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+            sensor_value = await get_sensor(engine_client, f"input{pol}.eq")
             assert_valid_complex_list(sensor_value)
             assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
             np.testing.assert_equal(engine_server.gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
@@ -147,7 +147,7 @@ class TestKatcpRequests:
         assert reply == []
         for pol in range(N_POLS):
             np.testing.assert_equal(engine_server.gains[:, pol], gains)
-            sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+            sensor_value = await get_sensor(engine_client, f"input{pol}.eq")
             assert_valid_complex_list(sensor_value)
             np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)
 
@@ -156,7 +156,7 @@ class TestKatcpRequests:
         await engine_client.request("gain-all", "2+3j")
         await engine_client.request("gain-all", "default")
         for pol in range(N_POLS):
-            sensor_value = await get_sensor(engine_client, f"input{pol}-eq")
+            sensor_value = await get_sensor(engine_client, f"input{pol}.eq")
             assert sensor_value == "[0.125+0.0j]"
 
     async def test_gain_all_empty(self, engine_client: aiokatcp.Client) -> None:
@@ -186,7 +186,7 @@ class TestKatcpRequests:
             model(1)
 
         for pol in range(N_POLS):
-            sensor_reading = await get_sensor(engine_client, f"input{pol}-delay")
+            sensor_reading = await get_sensor(engine_client, f"input{pol}.delay")
             sensor_values = sensor_reading[1:-1].split(",")[1:]  # Drop the timestamp
             sensor_values = (float(field.strip()) for field in sensor_values)
 

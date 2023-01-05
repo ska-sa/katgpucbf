@@ -677,7 +677,7 @@ class Engine(aiokatcp.DeviceServer):
         """Initialise the delays and gains."""
         for pol in range(N_POLS):
             delay_model = MultiDelayModel(
-                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}-delay"])
+                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}.delay"])
             )
             self.delay_models.append(delay_model)
 
@@ -1118,7 +1118,7 @@ class Engine(aiokatcp.DeviceServer):
                 # Update the digitiser saturation count (the "extra" fields holds
                 # per-heap values).
                 assert chunk.extra is not None
-                sensor = self.sensors[f"input{pol}-dig-clip-cnt"]
+                sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
                 sensor.set_value(
                     sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
                     timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
@@ -1233,7 +1233,7 @@ class Engine(aiokatcp.DeviceServer):
                 # want 1.0 to correspond to a sine wave rather than a square wave.
                 avg_power /= ((1 << (DIG_SAMPLE_BITS - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                self.sensors[f"input{pol}-dig-pwr-dbfs"].set_value(
+                self.sensors[f"input{pol}.dig-pwr-dbfs"].set_value(
                     avg_power_db, timestamp=self.time_converter.adc_to_unix(out_item.end_timestamp)
                 )
 
