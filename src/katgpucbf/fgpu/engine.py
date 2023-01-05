@@ -1314,7 +1314,7 @@ class Engine(aiokatcp.DeviceServer):
         if np.all(gains == gains[0]):
             # All the values are the same, so it can be reported as a single value
             gains = gains[:1]
-        self.sensors[f"input{input}-eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
+        self.sensors[f"input{input}.eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
 
     def _parse_gains(self, *values: str, allow_default: bool) -> np.ndarray:
         """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.
