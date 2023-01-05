@@ -775,7 +775,7 @@ class TestEngine:
         sensor = engine_server.sensors[f"input{tone_pol}.feng-clip-cnt"]
         assert sensor.value == len(timestamps)
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
-        sensor = engine_server.sensors[f"input{1 - tone_pol}-feng-clip-cnt"]
+        sensor = engine_server.sensors[f"input{1 - tone_pol}.feng-clip-cnt"]
         assert sensor.value == 0
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
 
