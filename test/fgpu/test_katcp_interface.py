@@ -107,7 +107,7 @@ class TestKatcpRequests:
         reply_array = np.array([complex(aiokatcp.decode(str, value)) for value in reply])
         np.testing.assert_equal(reply_array, gains)
 
-        sensor_value = await get_sensor(engine_client, "input0-eq")
+        sensor_value = await get_sensor(engine_client, "input0.eq")
         assert_valid_complex_list(sensor_value)
         np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)
 

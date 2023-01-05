@@ -772,7 +772,7 @@ class TestEngine:
 
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
-        sensor = engine_server.sensors[f"input{tone_pol}-feng-clip-cnt"]
+        sensor = engine_server.sensors[f"input{tone_pol}.feng-clip-cnt"]
         assert sensor.value == len(timestamps)
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
         sensor = engine_server.sensors[f"input{1 - tone_pol}-feng-clip-cnt"]
