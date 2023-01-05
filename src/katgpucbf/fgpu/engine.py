@@ -724,7 +724,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     str,
-                    f"input{pol}-eq",
+                    f"input{pol}.eq",
                     "For this input, the complex, unitless, per-channel digital scaling factors "
                     "implemented prior to requantisation",
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -733,7 +733,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     str,
-                    f"input{pol}-delay",
+                    f"input{pol}.delay",
                     "The delay settings for this input: (loadmcnt <ADC sample "
                     "count when model was loaded>, delay <in seconds>, "
                     "delay-rate <unit-less or, seconds-per-second>, "
@@ -743,7 +743,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"input{pol}-dig-clip-cnt",
+                    f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -754,7 +754,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     float,
-                    f"input{pol}-dig-pwr-dbfs",
+                    f"input{pol}.dig-pwr-dbfs",
                     "Digitiser ADC average power",
                     units="dBFS",
                     status_func=dig_pwr_dbfs_status,
@@ -765,7 +765,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"input{pol}-feng-clip-cnt",
+                    f"input{pol}.feng-clip-cnt",
                     "Number of output samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
