@@ -198,20 +198,20 @@ class BaselineCorrelationProductsReceiver:
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
-        self.n_bls = correlator.sensors[f"{stream_name}-n-bls"].value
-        self.n_chans_per_substream = correlator.sensors[f"{stream_name}-n-chans-per-substream"].value
-        self.n_bits_per_sample = correlator.sensors[f"{stream_name}-xeng-out-bits-per-sample"].value
-        self.n_spectra_per_acc = correlator.sensors[f"{stream_name}-n-accs"].value
-        self.int_time = correlator.sensors[f"{stream_name}-int-time"].value
-        self.spectra_per_heap = correlator.sensors[f"{acv_name}-spectra-per-heap"].value
-        self.n_samples_between_spectra = correlator.sensors[f"{acv_name}-n-samples-between-spectra"].value
-        self.bls_ordering = ast.literal_eval(correlator.sensors[f"{stream_name}-bls-ordering"].value.decode())
-        self.sync_time = correlator.sensors[f"{acv_name}-sync-time"].value
-        self.scale_factor_timestamp = correlator.sensors[f"{acv_name}-scale-factor-timestamp"].value
-        self.bandwidth = correlator.sensors[f"{acv_name}-bandwidth"].value
+        self.n_bls = correlator.sensors[f"{stream_name}.n-bls"].value
+        self.n_chans_per_substream = correlator.sensors[f"{stream_name}.n-chans-per-substream"].value
+        self.n_bits_per_sample = correlator.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc = correlator.sensors[f"{stream_name}.n-accs"].value
+        self.int_time = correlator.sensors[f"{stream_name}.int-time"].value
+        self.spectra_per_heap = correlator.sensors[f"{acv_name}.spectra-per-heap"].value
+        self.n_samples_between_spectra = correlator.sensors[f"{acv_name}.n-samples-between-spectra"].value
+        self.bls_ordering = ast.literal_eval(correlator.sensors[f"{stream_name}.bls-ordering"].value.decode())
+        self.sync_time = correlator.sensors[f"{acv_name}.sync-time"].value
+        self.scale_factor_timestamp = correlator.sensors[f"{acv_name}.scale-factor-timestamp"].value
+        self.bandwidth = correlator.sensors[f"{acv_name}.bandwidth"].value
         self.multicast_endpoints = [
             (endpoint.host, endpoint.port)
-            for endpoint in endpoint_list_parser(7148)(correlator.sensors[f"{stream_name}-destination"].value.decode())
+            for endpoint in endpoint_list_parser(7148)(correlator.sensors[f"{stream_name}.destination"].value.decode())
         ]
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
