@@ -397,24 +397,24 @@ class TestChunkSets:
         assert get_sample_diffs("input_clipped_samples_total") == expected_clip_total
 
         # Check sensors
-        sensor = sensors["input0-rx-timestamp"]
+        sensor = sensors["input0.rx-timestamp"]
         assert sensor.value == 21 * layout.chunk_samples
         assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
         assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
-        sensor = sensors["input1-rx-timestamp"]
+        sensor = sensors["input1.rx-timestamp"]
         assert sensor.value == 20 * layout.chunk_samples
         assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
         assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
-        sensor = sensors["input0-rx-unixtime"]
+        sensor = sensors["input0.rx-unixtime"]
         assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
         assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
         assert sensor.timestamp == sensor.value
-        sensor = sensors["input1-rx-unixtime"]
+        sensor = sensors["input1.rx-unixtime"]
         assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
         assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
         assert sensor.timestamp == sensor.value
         for pol in range(N_POLS):
-            sensor = sensors[f"input{pol}-rx-missing-unixtime"]
+            sensor = sensors[f"input{pol}.rx-missing-unixtime"]
             assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
             assert sensor.status == aiokatcp.Sensor.Status.ERROR
             assert sensor.timestamp == sensor.value
