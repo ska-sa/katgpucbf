@@ -21,7 +21,7 @@ import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf import BYTE_BITS
-from katgpucbf.fgpu import pfb
+from katgpucbf.fgpu import DIG_SAMPLE_BITS_VALID, pfb
 
 from .. import unpackbits
 
@@ -49,7 +49,7 @@ def pfb_fir_host(data, channels, dig_sample_bits, unzip_factor, weights):
 
 @pytest.mark.combinations(
     "dig_sample_bits,unzip_factor",
-    [2, 3, 4, 5, 6, 7, 8, 10, 12, 16],
+    DIG_SAMPLE_BITS_VALID,
     [1, 2, 4],
 )
 def test_pfb_fir(

@@ -37,7 +37,6 @@ from .. import (
     BYTE_BITS,
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
-    DIG_SAMPLE_BITS,
     GPU_PROC_TASK_NAME,
     MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
@@ -475,6 +474,7 @@ class Engine(aiokatcp.DeviceServer):
         channels: int,
         taps: int,
         w_cutoff: float,
+        dig_sample_bits: int,
         max_delay_diff: int,
         gain: complex,
         sync_epoch: float,
@@ -495,7 +495,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.Layout(DIG_SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
+        self._src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_packet_samples = src_packet_samples
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
@@ -580,7 +580,7 @@ class Engine(aiokatcp.DeviceServer):
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         samples = self._src_layout.chunk_samples + extra_samples
 
-        template = ComputeTemplate(context, taps, channels, DIG_SAMPLE_BITS)
+        template = ComputeTemplate(context, taps, channels, self._src_layout.sample_bits)
         self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps, w_cutoff))
@@ -610,7 +610,7 @@ class Engine(aiokatcp.DeviceServer):
         )
         free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
         self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = self._src_layout.chunk_samples * DIG_SAMPLE_BITS // BYTE_BITS
+        chunk_bytes = self._src_layout.chunk_samples * self._src_layout.sample_bits // BYTE_BITS
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
@@ -1231,7 +1231,7 @@ class Engine(aiokatcp.DeviceServer):
                 avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
                 # Normalise relative to full scale. The factor of 2 is because we
                 # want 1.0 to correspond to a sine wave rather than a square wave.
-                avg_power /= ((1 << (DIG_SAMPLE_BITS - 1)) - 1) ** 2 / 2
+                avg_power /= ((1 << (self._src_layout.sample_bits - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
                 self.sensors[f"input{pol}-dig-pwr-dbfs"].set_value(
                     avg_power_db, timestamp=self.time_converter.adc_to_unix(out_item.end_timestamp)
