@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -157,10 +157,10 @@ class InItem(QueueItem):
     #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
-    sample_bits: int
+    dig_sample_bits: int
 
     def __init__(self, compute: Compute, timestamp: int = 0, *, packet_samples: int, use_vkgdr: bool = False) -> None:
-        self.sample_bits = compute.sample_bits
+        self.dig_sample_bits = compute.dig_sample_bits
         self.pol_data = []
         present_size = accel.divup(compute.samples, packet_samples)
         for pol in range(N_POLS):
@@ -197,7 +197,7 @@ class InItem(QueueItem):
         :attr:`PolInData.samples`.
         """
         assert self.pol_data[0].samples is not None
-        return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.sample_bits
+        return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.dig_sample_bits
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -580,7 +580,7 @@ class Engine(aiokatcp.DeviceServer):
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         samples = self._src_layout.chunk_samples + extra_samples
 
-        template = ComputeTemplate(context, taps, channels)
+        template = ComputeTemplate(context, taps, channels, DIG_SAMPLE_BITS)
         self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps, w_cutoff))
@@ -700,9 +700,9 @@ class Engine(aiokatcp.DeviceServer):
         return self._compute.spectra_per_heap
 
     @property
-    def sample_bits(self) -> int:  # noqa: D401
+    def dig_sample_bits(self) -> int:  # noqa: D401
         """Bitwidth of the incoming digitiser samples."""
-        return self._compute.sample_bits
+        return self._compute.dig_sample_bits
 
     @property
     def spectra_samples(self) -> int:  # noqa: D401
@@ -841,7 +841,7 @@ class Engine(aiokatcp.DeviceServer):
             chunk_packets = self._in_items[0].n_samples // self._src_packet_samples
             copy_packets = len(self._in_items[0].pol_data[0].present) - chunk_packets
             if (await self._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
-                sample_bits = self._in_items[0].sample_bits
+                sample_bits = self._in_items[0].dig_sample_bits
                 copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
                 copy_samples = min(copy_samples, self._in_items[1].n_samples)
                 copy_bytes = copy_samples * sample_bits // BYTE_BITS
@@ -1109,7 +1109,7 @@ class Engine(aiokatcp.DeviceServer):
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
+            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.dig_sample_bits
 
             transfer_events = []
             for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):

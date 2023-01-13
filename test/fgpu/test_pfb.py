@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2021, 2023 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
+from katgpucbf import BYTE_BITS
 from katgpucbf.fgpu import pfb
 
 from .. import unpackbits
@@ -28,12 +28,12 @@ from .. import unpackbits
 pytestmark = [pytest.mark.cuda_only]
 
 
-def pfb_fir_host(data, channels, unzip_factor, weights):
+def pfb_fir_host(data, channels, dig_sample_bits, unzip_factor, weights):
     """Apply a PFB-FIR filter to a set of data on the host."""
     step = 2 * channels
     assert len(weights) % step == 0
     taps = len(weights) // step
-    decoded = unpackbits(data)
+    decoded = unpackbits(data, dig_sample_bits)
     window_size = 2 * channels * taps
     out = np.empty((len(decoded) // step - taps + 1, step), np.float32)
     for i in range(0, len(out)):
@@ -47,19 +47,25 @@ def pfb_fir_host(data, channels, unzip_factor, weights):
     return out, total_power
 
 
-@pytest.mark.parametrize("unzip_factor", [1, 2, 4])
-def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int) -> None:
+@pytest.mark.combinations(
+    "dig_sample_bits,unzip_factor",
+    [2, 3, 4, 5, 6, 7, 8, 10, 12, 16],
+    [1, 2, 4],
+)
+def test_pfb_fir(
+    context: AbstractContext, command_queue: AbstractCommandQueue, dig_sample_bits: int, unzip_factor: int
+) -> None:
     """Test the GPU PFB-FIR for numerical correctness."""
     taps = 16
     spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
     rng = np.random.default_rng(seed=1)
-    h_in = rng.integers(0, 256, samples * DIG_SAMPLE_BITS // BYTE_BITS, np.uint8)
+    h_in = rng.integers(0, 256, samples * dig_sample_bits // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
-    expected_out, expected_total_power = pfb_fir_host(h_in, channels, unzip_factor, weights)
+    expected_out, expected_total_power = pfb_fir_host(h_in, channels, dig_sample_bits, unzip_factor, weights)
 
-    template = pfb.PFBFIRTemplate(context, taps, channels, unzip_factor)
+    template = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, unzip_factor)
     fn = template.instantiate(command_queue, samples, spectra)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
@@ -76,5 +82,5 @@ def test_pfb_fir(context: AbstractContext, command_queue: AbstractCommandQueue, 
     fn()
     h_out = fn.buffer("out").get(command_queue)
     h_total_power = fn.buffer("total_power").get(command_queue)[()]
-    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-3)
+    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-6 * 2**dig_sample_bits)
     assert h_total_power == expected_total_power

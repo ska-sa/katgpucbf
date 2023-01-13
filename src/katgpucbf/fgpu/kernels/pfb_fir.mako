@@ -21,7 +21,7 @@
 #define TAPS ${taps}
 #define CHANNELS ${channels}
 #define UNZIP_FACTOR ${unzip_factor}
-#define DIG_SAMPLE_BITS 10
+#define DIG_SAMPLE_BITS ${dig_sample_bits}
 
 <%include file="unpack.mako"/>
 
