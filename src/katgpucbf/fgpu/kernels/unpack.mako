@@ -103,7 +103,9 @@ DEVICE_FN int get_sample_1b(const GLOBAL uchar * RESTRICT in, unsigned int idx)
 // Get a packed sample from the buffer
 DEVICE_FN int get_sample(const GLOBAL uchar * RESTRICT in, unsigned int idx)
 {
-    if (DIG_SAMPLE_BITS == 2 || DIG_SAMPLE_BITS == 4)
+    if (DIG_SAMPLE_BITS == 8)
+        return ((const GLOBAL char *) in)[idx];
+    else if (DIG_SAMPLE_BITS == 2 || DIG_SAMPLE_BITS == 4)
         return get_sample_1b(in, idx);
     else
         return get_sample_2b(in, idx);
