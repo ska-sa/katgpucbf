@@ -91,10 +91,12 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
      * case not worth worrying about).
      */
     float samples[TAPS];
+    unpack_t unpack;
+    unpack_init(&unpack, in, in_offset);
     for (int i = 0; i < TAPS - 1; i++)
     {
-        samples[i] = get_sample(in, in_offset);
-        in_offset += step;  // and we shift the in_offset along, this makes the indexing simpler later.
+        samples[i] = unpack_read(&unpack);
+        unpack_advance(&unpack, step);
     }
 
     // Load the relevant weights for this branch of the PFB-FIR.
@@ -122,7 +124,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
          * This, combined with the way they are then read out below, avoids
          * having to manually shift things along in the array each loop.
          */
-        int sample = get_sample(in, in_offset + idx);
+        int sample = unpack_read(&unpack);
+        unpack_advance(&unpack, step);
         total_power += sample * sample;
         samples[(i + TAPS - 1) % TAPS] = (float) sample;
 
