@@ -234,7 +234,7 @@ async def test_delay_sensors(
         delay_tuples.append((load_ts, delay, delay_rate, phase, phase_rate))
 
     def delay_sensor_value(label: str) -> tuple:
-        return literal_eval(correlator.sensors[f"antenna_channelised_voltage.{label}-delay"].value.decode())
+        return literal_eval(correlator.sensors[f"antenna_channelised_voltage.{label}.delay"].value.decode())
 
     pdf_report.step("Load delays.")
     pdf_report.detail(f"Set delays to load at {load_time} (timestamp {load_ts}).")
