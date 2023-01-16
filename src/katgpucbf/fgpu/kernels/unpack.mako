@@ -22,7 +22,7 @@
  */
 
 /* Return the byte index in the chunk where the start of a sample will
- * be. The sample will be spread over two successive bytes but we just need to
+ * be. The sample may be spread over two successive bytes but we just need to
  * know where the first one is.
  */
 DEVICE_FN unsigned int samples_to_bytes(unsigned int samples)
@@ -47,6 +47,9 @@ DEVICE_FN unsigned int samples_to_bytes(unsigned int samples)
         addr += samples >> 1;
         break;
     default:
+        /* The Python code checks that the buffer has at most 2^29 samples,
+         * to ensure that this will not overflow.
+         */
         addr += samples * (DIG_SAMPLE_BITS % 8) / 8;
         break;
     }
@@ -64,49 +67,50 @@ DEVICE_FN int extract_bits(int value, int shift)
     return (value << shift) >> (32 - DIG_SAMPLE_BITS);
 }
 
-/* Get the bit sample at the given index from the chunk of samples, shake off
- * the unwanted surrounding pieces, and return as an integer.
- *
- * This version is appropriate when the samples may span two bytes. It is
- * intended for internal use only.
+/* An "address" for a sample. It contains a pointer to the first byte
+ * of the sample and a shift value to pass to extract_bits.
  */
-DEVICE_FN int get_sample_2b(const GLOBAL uchar * RESTRICT in, unsigned int idx)
+struct unpack_t
 {
-    // We were given the sample number. Get the byte index.
-    unsigned int byte_idx = samples_to_bytes(idx);
+    const GLOBAL uchar *ptr;
+    int shift;
+};
 
-    // We need two bytes to make sure we get all the bits of the sample.
-    // TODO: probably better to make this `int32_t` instead of just `int`?
-    // TODO: this may read past the end for 3/5/6/7-bit samples.
-    int raw = (in[byte_idx] << 8) + in[byte_idx + 1];
-
-    /* Number of bits to shift left to bring the MSB of the sample to the MSB
-     * of the 16-bit value. Note that while the multiplication can overflow,
-     * that's well-defined int C for unsigned integers (it wraps).
-     */
-    unsigned int shift_left = (DIG_SAMPLE_BITS % 8) * idx % 8;
-
-    // int is 32-bit in CUDA, and we want to shift our 16-bit value to the top.
-    return extract_bits(raw, shift_left + 16);
+/* Initialise an unpack_t, given the pointer to the base of the array and
+ * the sample index.
+ */
+DEVICE_FN void unpack_init(unpack_t *unpack, const GLOBAL uchar *in, unsigned int idx)
+{
+    int shift = (DIG_SAMPLE_BITS % 8) * idx % 8;
+    if (DIG_SAMPLE_BITS == 2 || DIG_SAMPLE_BITS == 4)
+        shift += 24;  // To shift an 8-bit value to the top of a 32-bit value
+    else
+        shift += 16;  // To shift a 16-bit value to the top of a 32-bit value
+    unpack->shift = shift;
+    unpack->ptr = in + samples_to_bytes(idx);
 }
 
-// Like get_sample_1b, but for cases where the sample is guaranteed to reside in 1 byte
-DEVICE_FN int get_sample_1b(const GLOBAL uchar * RESTRICT in, unsigned int idx)
-{
-    // See comments in get_sample_2b for explanations
-    unsigned int byte_idx = samples_to_bytes(idx);
-    int raw = in[byte_idx];
-    unsigned int shift_left = DIG_SAMPLE_BITS * idx % 8;
-    return extract_bits(raw, shift_left + 24);
-}
-
-// Get a packed sample from the buffer
-DEVICE_FN int get_sample(const GLOBAL uchar * RESTRICT in, unsigned int idx)
+// Dereference an unpack_t to get the sample value
+DEVICE_FN int unpack_read(const unpack_t *unpack)
 {
     if (DIG_SAMPLE_BITS == 8)
-        return ((const GLOBAL char *) in)[idx];
-    else if (DIG_SAMPLE_BITS == 2 || DIG_SAMPLE_BITS == 4)
-        return get_sample_1b(in, idx);
+        return *(const GLOBAL char *) unpack->ptr;
     else
-        return get_sample_2b(in, idx);
+    {
+        int raw;
+        if (DIG_SAMPLE_BITS == 2 || DIG_SAMPLE_BITS == 4)
+            raw = unpack->ptr[0];
+        else
+            raw = (unpack->ptr[0] << 8) + unpack->ptr[1];
+        return extract_bits(raw, unpack->shift);
+    }
+}
+
+/* Increment an unpack_t by a given number of samples. The number of
+ * samples must be a whole number of bytes (which in practice means
+ * it should be a multiple of 8).
+ */
+DEVICE_FN void unpack_advance(unpack_t *unpack, unsigned int dist)
+{
+    unpack->ptr += samples_to_bytes(dist);
 }
