@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -27,7 +27,7 @@ def test_compute(context, command_queue):
 
     .. todo:: This isn't a proper test, just a smoke test.
     """
-    template = compute.ComputeTemplate(context, 4, 32768)
+    template = compute.ComputeTemplate(context, 4, 32768, 10)
     fn = template.instantiate(command_queue, 100000000, 1280, 256)
     fn.ensure_all_bound()
     fn()

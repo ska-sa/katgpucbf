@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020-2022, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2023, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -15,13 +15,15 @@
  ******************************************************************************/
 
 <%include file="/port.mako"/>
-<%include file="unpack_10bit.mako"/>
 <%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 
 #define WGS ${wgs}
 #define TAPS ${taps}
 #define CHANNELS ${channels}
 #define UNZIP_FACTOR ${unzip_factor}
+#define DIG_SAMPLE_BITS ${dig_sample_bits}
+
+<%include file="unpack.mako"/>
 
 ${wg_reduce.define_scratch('unsigned long long', wgs, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('unsigned long long', wgs, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
@@ -91,7 +93,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     float samples[TAPS];
     for (int i = 0; i < TAPS - 1; i++)
     {
-        samples[i] = get_sample_10bit(in, in_offset);
+        samples[i] = get_sample(in, in_offset);
         in_offset += step;  // and we shift the in_offset along, this makes the indexing simpler later.
     }
 
@@ -120,7 +122,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
          * This, combined with the way they are then read out below, avoids
          * having to manually shift things along in the array each loop.
          */
-        int sample = get_sample_10bit(in, in_offset + idx);
+        int sample = get_sample(in, in_offset + idx);
         total_power += sample * sample;
         samples[(i + TAPS - 1) % TAPS] = (float) sample;
 

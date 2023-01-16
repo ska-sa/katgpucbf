@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -25,7 +25,7 @@ import numpy as np
 from katsdpsigproc import accel, fft
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import DIG_SAMPLE_BITS, N_POLS
+from .. import N_POLS
 from . import pfb, postproc
 
 
@@ -45,14 +45,16 @@ class ComputeTemplate:
         The number of taps that you want the resulting PFB-FIRs to have.
     channels
         Number of channels into which the input data will be decomposed.
+    dig_sample_bits
+        Number of bits per digitiser sample.
     """
 
-    def __init__(self, context: AbstractContext, taps: int, channels: int) -> None:
+    def __init__(self, context: AbstractContext, taps: int, channels: int, dig_sample_bits: int) -> None:
         self.context = context
         self.taps = taps
         self.channels = channels
         self.unzip_factor = 4 if channels >= 8 else 1
-        self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, self.unzip_factor)
+        self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, self.unzip_factor)
         self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor)
 
     def instantiate(
@@ -114,7 +116,7 @@ class Compute(accel.OperationSequence):
         spectra: int,
         spectra_per_heap: int,
     ) -> None:
-        self.sample_bits = DIG_SAMPLE_BITS
+        self.dig_sample_bits = template.pfb_fir.dig_sample_bits
         self.template = template
         self.samples = samples
         self.spectra = spectra

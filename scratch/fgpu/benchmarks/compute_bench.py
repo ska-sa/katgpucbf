@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,7 +21,7 @@ import argparse
 import numpy as np
 from katsdpsigproc import accel
 
-from katgpucbf import N_POLS
+from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu.compute import ComputeTemplate
 from katgpucbf.fgpu.engine import generate_weights
 
@@ -32,13 +32,15 @@ def main():
     parser.add_argument("--samples", type=int, default=16 * 1024 * 1024)
     parser.add_argument("--channels", type=int, default=32768)
     parser.add_argument("--spectra-per-heap", type=int, default=256)
-    parser.add_argument("--passes", type=int, default=10)
+    parser.add_argument("--dig-sample-bits", type=int, default=DIG_SAMPLE_BITS)
+    parser.add_argument("--passes", type=int, default=1000)
+    parser.add_argument("--kernel", choices=["all", "pfb_fir", "fft", "postproc"], default="all")
     args = parser.parse_args()
 
     rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
-        template = ComputeTemplate(context, args.taps, args.channels)
+        template = ComputeTemplate(context, args.taps, args.channels, args.dig_sample_bits)
         command_queue = context.create_tuning_command_queue()
         extra_samples = (args.taps - 1) * args.channels * 2
         spectra = args.samples // (args.channels * 2)
@@ -70,7 +72,17 @@ def main():
         for name in ["fine_delay", "phase"]:
             fn.buffer(name).zero(command_queue)
 
-        def run():
+        def run_pfb_fir():
+            fn.pfb_fir[0].spectra = spectra
+            fn.pfb_fir[0]()
+
+        def run_fft():
+            fn.fft[0]()
+
+        def run_postproc():
+            fn.postproc()
+
+        def run_all():
             fn.run_frontend(
                 [fn.buffer("in0"), fn.buffer("in1")],
                 [fn.buffer("dig_total_power0"), fn.buffer("dig_total_power1")],
@@ -80,6 +92,7 @@ def main():
             )
             fn.run_backend(fn.buffer("out"), fn.buffer("saturated"))
 
+        run = locals()[f"run_{args.kernel}"]
         run()  # Warmup pass
         start = command_queue.enqueue_marker()
         for _ in range(args.passes):

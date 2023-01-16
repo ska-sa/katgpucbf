@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -33,7 +33,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InItem
 from katgpucbf.utils import TimeConverter
 
-from .. import PromDiff
+from .. import PromDiff, packbits
 from .test_recv import gen_heaps
 
 logger = logging.getLogger(__name__)
@@ -166,22 +166,6 @@ class TestEngine:
         config = spead2.send.StreamConfig(max_packet_size=9000)  # Just needs to be bigger than the heaps
         return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
-    def _pack_samples(self, samples: ArrayLike) -> np.ndarray:
-        """Pack 16-bit digitiser sample data down to DIG_SAMPLE_BITS bits.
-
-        Parameters
-        ----------
-        samples
-            A 2xN array of sample data
-        """
-        # Force to int16, and big endian so the bits come out in the right order
-        samples_int16 = np.asarray(samples, dtype=">i2")
-        # Unpack the bits into a new axis, so that we can toss out the top 6
-        bits = np.unpackbits(samples_int16.view(np.uint8)).reshape(samples_int16.shape + (16,))
-        # Put all the bits back into bytes. packbits automatically flattens
-        # the array, so we have to restore the desired shape.
-        return np.packbits(bits[..., -DIG_SAMPLE_BITS:]).reshape(samples_int16.shape[0], -1)
-
     def _make_tone(self, n_samples: int, tone: CW, pol: int) -> np.ndarray:
         """Synthesize digitiser data containing a tone.
 
@@ -270,10 +254,10 @@ class TestEngine:
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
         assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
-        saturation_value = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        saturation_value = 2 ** (src_layout.sample_bits - 1) - 1
         saturated = np.abs(dig_data) >= saturation_value
         saturated = np.sum(saturated.reshape(N_POLS, -1, src_layout.heap_samples), axis=-1, dtype=np.uint16)
-        dig_data = self._pack_samples(dig_data)
+        dig_data = packbits(dig_data, src_layout.sample_bits)
         dig_stream = self._make_digitiser(mock_recv_streams)
         heap_gens = [
             gen_heaps(
@@ -498,12 +482,22 @@ class TestEngine:
                 data[CHANNELS // 2 + 1] = 0
             np.testing.assert_equal(data, pytest.approx(0, abs=tol))
 
+    # Just test 2 values for dig_sample_bits; it gets expensive otherwise
+    # Also just do it for one test, as a sanity check.
+    @pytest.mark.parametrize(
+        "dig_sample_bits",
+        [
+            DIG_SAMPLE_BITS,
+            pytest.param(12, marks=pytest.mark.cmdline_args("--dig-sample-bits=12")),
+        ],
+    )
     async def test_delay_phase_rate(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
+        dig_sample_bits: int,
     ) -> None:
         """Test that delay rate and phase rate setting works."""
         # One tone at centre frequency to test the absolute phase, and one at another
@@ -726,7 +720,7 @@ class TestEngine:
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 3 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
-        saturation_value = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        saturation_value = 2 ** (engine_server.dig_sample_bits - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(

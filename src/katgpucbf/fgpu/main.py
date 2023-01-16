@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -35,9 +35,18 @@ from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, __version__
+from .. import (
+    DEFAULT_KATCP_HOST,
+    DEFAULT_KATCP_PORT,
+    DEFAULT_PACKET_PAYLOAD_BYTES,
+    DEFAULT_TTL,
+    DIG_SAMPLE_BITS,
+    N_POLS,
+    __version__,
+)
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..utils import add_signal_handlers, parse_source
+from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 
 _T = TypeVar("_T")
@@ -206,6 +215,14 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=1048576,
         help="Maximum supported difference between delays across polarisations (in samples) [%(default)s]",
     )
+    parser.add_argument(
+        "--dig-sample-bits",
+        type=int,
+        default=DIG_SAMPLE_BITS,
+        choices=DIG_SAMPLE_BITS_VALID,
+        metavar="BITS",
+        help="Number of bits per digitised sample [%(default)s]",
+    )
     parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
     parser.add_argument(
         "--sync-epoch",
@@ -283,6 +300,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         channels=args.channels,
         taps=args.taps,
         w_cutoff=args.w_cutoff,
+        dig_sample_bits=args.dig_sample_bits,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
