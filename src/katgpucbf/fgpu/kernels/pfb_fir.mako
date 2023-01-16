@@ -53,7 +53,7 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,          // Output memory
     GLOBAL unsigned long long * RESTRICT out_total_power,  // Sum of squares of samples (incremented)
-    const GLOBAL uchar * RESTRICT in,     // Input data (digitiser samples)
+    const GLOBAL unsigned char * RESTRICT in,     // Input data (digitiser samples)
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
     int n,                                // Size of the `out` array, to avoid going out-of-bounds.
     int stepy,                            // Size of data that will be worked on by a single thread-block.
@@ -61,7 +61,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     int out_offset           // Number of samples to skip from the start of *out. Must be a multiple of `step` to make sense.
 )
 {
-    const int step = 2 * CHANNELS;
+    const unsigned int step = 2 * CHANNELS;
     // Figure out where our thread block has to work.
     int group_x = get_group_id(0);
     int group_y = get_group_id(1);
@@ -78,7 +78,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 
     // can't skip individual (input) samples with pointer arithmetic, so track in_offset
     in_offset += offset;
-    n -= offset;
+    n -= group_y * stepy;
 
     /* Here we fill up the taps of the FIR before we bother to do any outputs.
      * We assume we are not interested in the initial transient spectra.
@@ -93,9 +93,12 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     float samples[TAPS];
     unpack_t unpack;
     unpack_init(&unpack, in, in_offset);
+
+#pragma unroll
     for (int i = 0; i < TAPS - 1; i++)
     {
-        samples[i] = unpack_read(&unpack);
+        // Load the sample (write to i + 1 because we start the main loop by shuffling down)
+        samples[i + 1] = unpack_read(&unpack);
         unpack_advance(&unpack, step);
     }
 
@@ -107,35 +110,34 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 
     // This thread will process the same equivalent sample in `rows` successive
     // output "spectra" worth of data.
-    int rows = stepy / step;
+    int rows = min(n, stepy) / step;
 
     unsigned long long total_power = 0;
-    // Unrolling by factor of TAPS makes the sample index known at compile time.
-#pragma unroll ${taps}
-    for (int i = 0; i < rows; i++)  // We'll be at our most memory-bandwidth-efficient if rows >> TAPS. Launching ~256K threads should ensure this.
+    // We'll be at our most memory-bandwidth-efficient if rows >> TAPS.
+    // Launching ~256K threads should ensure this.
+    for (int i = 0; i < rows; i++)
     {
-        int idx = i * step;
-        if (idx >= n) // Edge case - chunk size might not be a perfect multiple of number of rows.
-            break;
-
-        /* Each FIR output sample only needs one new sample, and TAPS-1 old ones.
-         * This line reads the new one in over the oldest one (or the one we
-         * missed above, in the case of the first loop) using this modulo trick.
-         * This, combined with the way they are then read out below, avoids
-         * having to manually shift things along in the array each loop.
-         */
+        // Load the raw data for the sample
         int sample = unpack_read(&unpack);
         unpack_advance(&unpack, step);
+
+        // Shuffle down the samples to make room for the new one
+        for (int j = 0; j < TAPS - 1; j++)
+            samples[j] = samples[j + 1];
+
+        /* Each FIR output sample only needs one new sample, and TAPS-1 old
+         * ones. Read the new one into the array, and also use it to compute
+         * total power.
+         */
         total_power += sample * sample;
-        samples[(i + TAPS - 1) % TAPS] = (float) sample;
+        samples[TAPS - 1] = (float) sample;
 
         // Implement the actual FIR filter by multiplying samples by weights and summing.
-        float sum = 0.0f;
-        for (int j = 0; j < TAPS; j++)
-            // [(i + j) % TAPS] matches the sample with the appropriate weight.
-            sum += rweights[j] * samples[(i + j) % TAPS];
+        float sum = rweights[0] * samples[0];
+        for (int j = 1; j < TAPS; j++)
+            sum += rweights[j] * samples[j];
         // Sum written out to global memory.
-        out[idx] = sum;
+        out[i * step] = sum;
     }
 
     // Reduce total_power across work items, to reduce the number of atomics needed.
