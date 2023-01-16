@@ -345,18 +345,18 @@ class TestStream:
         )
 
         # Check sensors
-        sensor = sensors["input.rx-timestamp"]
+        sensor = sensors["rx.timestamp"]
         # sensor.value should be of the last chunk sent
         absolute_present_timestamp = expected_chunk_ids[-1] * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         assert sensor.value == absolute_present_timestamp
         assert sensor.status == Sensor.Status.NOMINAL
         assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
-        sensor = sensors["input.rx-unixtime"]
+        sensor = sensors["rx.unixtime"]
         # Should be the same value as the previous sensor, but in UNIX time
         assert sensor.value == time_converter.adc_to_unix(absolute_present_timestamp)
         assert sensor.status == Sensor.Status.NOMINAL
         assert sensor.timestamp == sensor.value
-        sensor = sensors["input.rx-missing-unixtime"]
+        sensor = sensors["rx.missing-unixtime"]
         # sensor.value should be of the last chunk to go missing
         absolute_missing_timestamp = (
             absolute_missing_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk

@@ -471,7 +471,7 @@ class XBEngine(DeviceServer):
         sensors.add(
             aiokatcp.Sensor(
                 bool,
-                "synchronised",
+                "rx.synchronised",
                 "For the latest accumulation, was data present from all F-Engines.",
                 default=False,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
@@ -552,7 +552,7 @@ class XBEngine(DeviceServer):
             tx_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
-        self.sensors["synchronised"].value = bool(tx_item.present_ants.all())
+        self.sensors["rx.synchronised"].value = bool(tx_item.present_ants.all())
 
         self.correlation.reduce()
         tx_item.add_marker(self._proc_command_queue)
