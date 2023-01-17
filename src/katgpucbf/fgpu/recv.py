@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -227,7 +227,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
         timestamp_sensors: list[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 int,
-                f"input{pol}-rx-timestamp",
+                f"input{pol}.rx.timestamp",
                 "The timestamp (in samples) of the last chunk of data received from the digitiser",
                 default=-1,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
@@ -236,7 +236,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
             ),
             aiokatcp.Sensor(
                 aiokatcp.core.Timestamp,
-                f"input{pol}-rx-unixtime",
+                f"input{pol}.rx.unixtime",
                 "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.ERROR,
@@ -251,7 +251,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
         missing_sensors: list[aiokatcp.Sensor] = [
             aiokatcp.Sensor(
                 aiokatcp.core.Timestamp,
-                f"input{pol}-rx-missing-unixtime",
+                f"input{pol}.rx.missing-unixtime",
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -335,8 +335,8 @@ async def chunk_sets(
                 lost,
             )
             unix_time = time_converter.adc_to_unix(chunk.timestamp)
-            sensors[f"input{pol}-rx-timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-            sensors[f"input{pol}-rx-unixtime"].set_value(aiokatcp.core.Timestamp(unix_time), timestamp=unix_time)
+            sensors[f"input{pol}.rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+            sensors[f"input{pol}.rx.unixtime"].set_value(aiokatcp.core.Timestamp(unix_time), timestamp=unix_time)
 
             buf[pol].append(chunk)
 
@@ -377,7 +377,7 @@ async def chunk_sets(
                     if new_missing > n_missing_heaps[pol]:
                         missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
                         n_missing_heaps[pol] = new_missing
-                        sensors[f"input{pol}-rx-missing-unixtime"].set_value(
+                        sensors[f"input{pol}.rx.missing-unixtime"].set_value(
                             aiokatcp.core.Timestamp(unix_time), timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
                         )
 

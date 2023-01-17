@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -171,7 +171,7 @@ class Chunk:
         end_timestamp = self._timestamp + self._timestamp_step * len(self._frames)
         end_time = time_converter.adc_to_unix(end_timestamp)
         for pol in range(N_POLS):
-            sensor = sensors[f"input{pol}-feng-clip-cnt"]
+            sensor = sensors[f"input{pol}.feng-clip-cnt"]
             sensor.set_value(sensor.value + saturated[pol], timestamp=end_time)
 
 

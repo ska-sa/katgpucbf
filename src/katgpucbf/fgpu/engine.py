@@ -681,7 +681,7 @@ class Engine(aiokatcp.DeviceServer):
         """Initialise the delays and gains."""
         for pol in range(N_POLS):
             delay_model = MultiDelayModel(
-                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}-delay"])
+                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}.delay"])
             )
             self.delay_models.append(delay_model)
 
@@ -728,7 +728,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     str,
-                    f"input{pol}-eq",
+                    f"input{pol}.eq",
                     "For this input, the complex, unitless, per-channel digital scaling factors "
                     "implemented prior to requantisation",
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -737,7 +737,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     str,
-                    f"input{pol}-delay",
+                    f"input{pol}.delay",
                     "The delay settings for this input: (loadmcnt <ADC sample "
                     "count when model was loaded>, delay <in seconds>, "
                     "delay-rate <unit-less or, seconds-per-second>, "
@@ -747,7 +747,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"input{pol}-dig-clip-cnt",
+                    f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -758,7 +758,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     float,
-                    f"input{pol}-dig-pwr-dbfs",
+                    f"input{pol}.dig-pwr-dbfs",
                     "Digitiser ADC average power",
                     units="dBFS",
                     status_func=dig_pwr_dbfs_status,
@@ -769,7 +769,7 @@ class Engine(aiokatcp.DeviceServer):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"input{pol}-feng-clip-cnt",
+                    f"input{pol}.feng-clip-cnt",
                     "Number of output samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -1122,7 +1122,7 @@ class Engine(aiokatcp.DeviceServer):
                 # Update the digitiser saturation count (the "extra" fields holds
                 # per-heap values).
                 assert chunk.extra is not None
-                sensor = self.sensors[f"input{pol}-dig-clip-cnt"]
+                sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
                 sensor.set_value(
                     sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
                     timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
@@ -1237,7 +1237,7 @@ class Engine(aiokatcp.DeviceServer):
                 # want 1.0 to correspond to a sine wave rather than a square wave.
                 avg_power /= ((1 << (self._src_layout.sample_bits - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                self.sensors[f"input{pol}-dig-pwr-dbfs"].set_value(
+                self.sensors[f"input{pol}.dig-pwr-dbfs"].set_value(
                     avg_power_db, timestamp=self.time_converter.adc_to_unix(out_item.end_timestamp)
                 )
 
@@ -1318,7 +1318,7 @@ class Engine(aiokatcp.DeviceServer):
         if np.all(gains == gains[0]):
             # All the values are the same, so it can be reported as a single value
             gains = gains[:1]
-        self.sensors[f"input{input}-eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
+        self.sensors[f"input{input}.eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
 
     def _parse_gains(self, *values: str, allow_default: bool) -> np.ndarray:
         """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.

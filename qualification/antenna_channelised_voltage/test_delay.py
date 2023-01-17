@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -198,8 +198,8 @@ async def test_delay_application_rate(correlator: CorrelatorRemoteControl, pdf_r
     enough.
     """
     pdf_report.step("Query rate of spectra.")
-    n_samples_between_spectra = correlator.sensors["antenna_channelised_voltage-n-samples-between-spectra"].value
-    scale_factor_timestamp = correlator.sensors["antenna_channelised_voltage-scale-factor-timestamp"].value
+    n_samples_between_spectra = correlator.sensors["antenna_channelised_voltage.n-samples-between-spectra"].value
+    scale_factor_timestamp = correlator.sensors["antenna_channelised_voltage.scale-factor-timestamp"].value
     rate = scale_factor_timestamp / n_samples_between_spectra
     pdf_report.detail(f"There are {rate:.3f} spectra per second.")
     assert rate >= 2500.0
@@ -234,7 +234,7 @@ async def test_delay_sensors(
         delay_tuples.append((load_ts, delay, delay_rate, phase, phase_rate))
 
     def delay_sensor_value(label: str) -> tuple:
-        return literal_eval(correlator.sensors[f"antenna_channelised_voltage-{label}-delay"].value.decode())
+        return literal_eval(correlator.sensors[f"antenna_channelised_voltage.{label}.delay"].value.decode())
 
     pdf_report.step("Load delays.")
     pdf_report.detail(f"Set delays to load at {load_time} (timestamp {load_ts}).")
