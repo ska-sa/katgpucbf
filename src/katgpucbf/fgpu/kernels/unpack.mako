@@ -72,14 +72,14 @@ DEVICE_FN int extract_bits(int value, int shift)
  */
 struct unpack_t
 {
-    const GLOBAL uchar *ptr;
+    const GLOBAL unsigned char *ptr;
     int shift;
 };
 
 /* Initialise an unpack_t, given the pointer to the base of the array and
  * the sample index.
  */
-DEVICE_FN void unpack_init(unpack_t *unpack, const GLOBAL uchar *in, unsigned int idx)
+DEVICE_FN void unpack_init(unpack_t *unpack, const GLOBAL unsigned char *in, unsigned int idx)
 {
     int shift = (DIG_SAMPLE_BITS % 8) * idx % 8;
     if (DIG_SAMPLE_BITS == 2 || DIG_SAMPLE_BITS == 4)

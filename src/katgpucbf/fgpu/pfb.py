@@ -159,10 +159,9 @@ class PFBFIR(accel.Operation):
         self.samples = samples
         step = 2 * template.channels
         self.spectra = spectra  # Can be changed (TODO: documentation)
-        # get_sample_2b may read one byte past the end if samples are less than
-        # 1 byte. 1-, 2- or 4-bit samples use get_sample_1b so are not
-        # affected.
-        in_padding = 1 if template.dig_sample_bits in {3, 5, 6, 7} else 0
+        # Some load operations can run past the end. Not all dig_sample_bits
+        # need padding, but it's simplest just to provide it unconditionally.
+        in_padding = 1
         in_bytes = samples * template.dig_sample_bits // BYTE_BITS
         self.slots["in"] = accel.IOSlot((accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),), np.uint8)
         self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
