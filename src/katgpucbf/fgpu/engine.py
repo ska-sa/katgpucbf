@@ -614,7 +614,9 @@ class Engine(aiokatcp.DeviceServer):
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
-                    device_bytes = self._compute.slots[f"in{pol}"].required_bytes()
+                    slot = self._compute.slots[f"in{pol}"]
+                    assert isinstance(slot, accel.IOSlot)
+                    device_bytes = slot.required_bytes()
                     with context:
                         mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
                     buf = np.array(mem, copy=False).view(np.uint8)
@@ -622,7 +624,9 @@ class Engine(aiokatcp.DeviceServer):
                     # of the following chunk, but we don't need that in the host
                     # mapping.
                     buf = buf[:chunk_bytes]
-                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
+                    device_array = accel.DeviceArray(
+                        context, slot.shape, np.uint8, padded_shape=(device_bytes,), raw=mem
+                    )
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
                     device_array = None
