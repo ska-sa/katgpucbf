@@ -104,7 +104,7 @@ def generate_config(args: argparse.Namespace) -> dict:
             dig_names.append(name)
             if args.digitiser_address is None:
                 config["outputs"][name] = {
-                    "type": "sim.dig.raw_antenna_voltage",
+                    "type": "sim.dig.baseband_voltage",
                     "band": args.band,
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
@@ -112,7 +112,7 @@ def generate_config(args: argparse.Namespace) -> dict:
                 }
             else:
                 config["inputs"][name] = {
-                    "type": "dig.raw_antenna_voltage",
+                    "type": "dig.baseband_voltage",
                     "band": args.band,
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
