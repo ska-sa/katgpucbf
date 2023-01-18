@@ -193,6 +193,9 @@ class PFBFIR(accel.Operation):
         # Re-compute work_spectra to balance the load
         work_spectra = accel.divup(self.spectra, groupsy)
         stepy = work_spectra * step
+        # Rounding up may have left some workgroups with nothing to do, so recalculate
+        # groupsy again.
+        groupsy = accel.divup(self.spectra, work_spectra)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
