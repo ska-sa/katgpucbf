@@ -182,17 +182,17 @@ class PFBFIR(accel.Operation):
         if self.out_offset + self.spectra > out_buffer.shape[0]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
-        # We divide up the work so that there are sufficient threads to keep the GPU busy.
-        # Aim for 256K workitems i.e. step * (out_n / stepy) == 256K
-        # See pfb_fir.mako's comments for more info.
-
-        # We might not need the entire capacity of the out slot,
-        # e.g. if we are shutting down.
-        out_n = step * self.spectra
-
-        stepy = accel.roundup(accel.divup(step * out_n, 256 * 1024), step)
-        groupsx = step // self.template.wgs
-        groupsy = accel.divup(out_n, stepy)
+        # Try to ensure that each workitem has enough work to do to amortise
+        # the overhead of loading the initial taps. Each workitem should
+        # contribute to work_spectra outputs.
+        work_spectra = self.template.taps * 8
+        # Number of workgroups along the time axis to match this
+        groupsy = accel.divup(self.spectra, work_spectra)
+        # Keep a minimum of 128K workitems, to avoid starving the GPU for work.
+        groupsy = max(groupsy, accel.divup(128 * 1024, step))
+        # Re-compute work_spectra to balance the load
+        work_spectra = accel.divup(self.spectra, groupsy)
+        stepy = work_spectra * step
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
@@ -200,11 +200,11 @@ class PFBFIR(accel.Operation):
                 self.buffer("total_power").buffer,
                 self.buffer("in").buffer,
                 self.buffer("weights").buffer,
-                np.int32(out_n),
+                np.int32(step * self.spectra),
                 np.int32(stepy),
                 np.int32(self.in_offset),
                 np.int32(self.out_offset * step),  # Must be a multiple of step to make sense.
             ],
-            global_size=(groupsx * self.template.wgs, groupsy),
+            global_size=(step, groupsy),
             local_size=(self.template.wgs, 1),
         )
