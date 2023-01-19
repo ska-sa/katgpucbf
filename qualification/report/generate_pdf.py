@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -739,7 +739,7 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
             config_table.add_hline()
 
 
-def document_from_list(result_list: list) -> Document:
+def document_from_list(result_list: list, doc_id: str) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
     Parameters
@@ -762,6 +762,7 @@ def document_from_list(result_list: list) -> Document:
     today = date.today()  # TODO: should store inside the JSON
     doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
+    doc.set_variable("docId", doc_id)
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
@@ -875,11 +876,17 @@ def main():
     parser.add_argument("input", help="Output of pytest --report-log=...")
     parser.add_argument("pdf", help="PDF file to write")
     parser.add_argument("-c", "--commit-id", action="store_true", help="Output commit ID of katgpucbf image")
+    parser.add_argument(
+        "--report-doc-id",
+        help="Document number to write to the qualification test report",
+        type=str,
+        default="E1200-0000-005",
+    )
     args = parser.parse_args()
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
-    doc = document_from_list(result_list)
+    doc = document_from_list(result_list, args.report_doc_id)
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
     with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
