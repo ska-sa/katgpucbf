@@ -762,6 +762,7 @@ def document_from_list(result_list: list) -> Document:
     today = date.today()  # TODO: should store inside the JSON
     doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
+    doc.set_variable("docId", test_configuration.params["ReportDocnum"])
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
     doc.append(Command("title", "Integration Test Report"))
     doc.append(Command("makekatdocbeginning"))
