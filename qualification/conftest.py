@@ -68,13 +68,6 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addoption(
         "--image-override", action="append", required=True, metavar="NAME:IMAGE:TAG", help="Override a single image"
     )
-    parser.addoption(
-        "--report-docnum",
-        help="Document number to write to the qualification test report",
-        type=str,
-        default="E1200-0000-005",
-    )
-
     for option in ini_options:
         parser.addini(*option)
 
@@ -113,7 +106,6 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
         {
             "$report_type": "TestConfiguration",
             "Tester": config.getini("tester"),
-            "ReportDocnum": config.getoption("report_docnum"),
             "Test Suite Git Info": git_information,
         },
     )
