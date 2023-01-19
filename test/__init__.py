@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,7 @@ import numpy as np
 import prometheus_client
 from numpy.typing import NDArray
 
-from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
 
 
 class PromDiff:
@@ -134,9 +134,31 @@ def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> n
         dtype = np.dtype(np.int64)
     else:
         raise ValueError("sample_bits is too large")
+    if data.size * BYTE_BITS % sample_bits:
+        raise ValueError("data does not contain a whole number of samples")
     bits = np.unpackbits(data).reshape(-1, sample_bits)
     # Replicate the high (sign) bit
     extra = np.tile(bits[:, 0:1], (1, 8 * dtype.itemsize - sample_bits))
     combined = np.hstack([extra, bits])
     packed = np.packbits(combined)
     return packed.view(dtype.newbyteorder(">")).astype(dtype)
+
+
+def packbits(data: np.ndarray, sample_bits: int = DIG_SAMPLE_BITS) -> NDArray[np.uint8]:
+    """Pack a bit-packed array of signed big-endian integers.
+
+    This is the inverse of :meth:`unpackbits`, but it also handles
+    multidimensional inputs, packing along the last dimension.
+    """
+    assert data.dtype.kind == "i"
+    if sample_bits > 8 * data.dtype.itemsize:
+        raise ValueError("sample_bits is too large")
+    if sample_bits * data.shape[-1] % BYTE_BITS:
+        raise ValueError("packing the last axis of data does not produce a whole number of bytes")
+    # Force to big endian. Also force C-contiguous since .view requires it
+    data = np.require(data, dtype=data.dtype.newbyteorder(">"), requirements="C")
+    bits = np.unpackbits(data.view(np.uint8), axis=-1).reshape(data.shape + (8 * data.dtype.itemsize,))
+    # Strip off the unused bits and flatten out the extra axis
+    bits = bits[..., -sample_bits:]
+    bits = bits.reshape(bits.shape[:-2] + (-1,))
+    return np.packbits(bits, axis=-1)

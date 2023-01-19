@@ -470,7 +470,7 @@ class TestEngine:
             """Record sensor updates in a list for later comparison."""
             actual_sensor_updates.append((sensor_reading.value, sensor_reading.status))
 
-        xbengine.sensors["synchronised"].attach(sensor_observer)
+        xbengine.sensors["rx.synchronised"].attach(sensor_observer)
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step

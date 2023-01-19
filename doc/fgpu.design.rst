@@ -41,7 +41,7 @@ implementing this is particularly complex, and is discussed separately in
 
 Decode
 ^^^^^^
-Digitiser samples are 10-bit and stored compactly. While it is possible to
+Digitiser samples are bit-packed integers. While it is possible to
 write a dedicated kernel for decoding that makes efficient accesses to memory
 (using contiguous word-size loads), it is faster overall to do the decoding as
 part of the PFB filter because it avoids a round trip to memory. For the
@@ -49,15 +49,25 @@ PFB, the decode is done in a very simple manner:
 
  1. Determine the two bytes that hold the sample.
  2. Load them and combine them into a 16-bit value.
- 3. Shift left to place the desired 10 bits in the high bits.
+ 3. Shift left to place the desired bits in the high bits.
  4. Shift right to sign extend.
  5. Convert to float.
 
 While many bytes get loaded twice (because they hold bits from two samples),
 the cache is able to prevent this affecting DRAM bandwidth.
 
-The narrowband digital down conversion also decodes the 10-bit samples, but this
-is discussed :ref:`separately <ddc-load>`.
+For the above to work, every sample needs to be entirely contained within two
+bytes. This will be the case for up to 10 bits, as well as for 12- or 16-bit
+samples, and hence these are the values supported. For 3-, 5-, 6- and 7-bit
+samples, the sample will sometimes but not always be contained in a single
+byte; in these cases an extraneous byte is loaded. This could be the byte
+following the end of the buffer; to handle this, a padding byte is added to
+avoid illegal memory accesses. For 2-, 4- and 8-bit samples, the value will
+always be contained in a single byte, and a simplified code path is used in
+these cases.
+
+The narrowband digital down conversion also decodes the packed samples, but
+this is discussed :ref:`separately <ddc-load>`.
 
 Polyphase Filter Bank
 ^^^^^^^^^^^^^^^^^^^^^
@@ -559,7 +569,8 @@ Loading and unpacking
 Initially (prior to the outer loop mentioned above), each work item loads the
 packed 10-bit samples for some number of input samples into registers (between
 them they load all :c:macro:`LOAD_SIZE` samples). To save space, these are
-unpacked only as needed.
+unpacked only as needed. At present, this kernel only supports 10-bit samples,
+and not the other sample sizes supported by the wide-band PFB kernel.
 
 To simplify alignment, the input samples are divided
 into :dfn:`segments` of 16 consecutive samples, which consumes 20 bytes or

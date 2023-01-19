@@ -37,7 +37,6 @@ from .. import (
     BYTE_BITS,
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
-    DIG_SAMPLE_BITS,
     GPU_PROC_TASK_NAME,
     MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
@@ -157,10 +156,10 @@ class InItem(QueueItem):
     #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
-    sample_bits: int
+    dig_sample_bits: int
 
     def __init__(self, compute: Compute, timestamp: int = 0, *, packet_samples: int, use_vkgdr: bool = False) -> None:
-        self.sample_bits = compute.sample_bits
+        self.dig_sample_bits = compute.dig_sample_bits
         self.pol_data = []
         present_size = accel.divup(compute.samples, packet_samples)
         for pol in range(N_POLS):
@@ -197,7 +196,7 @@ class InItem(QueueItem):
         :attr:`PolInData.samples`.
         """
         assert self.pol_data[0].samples is not None
-        return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.sample_bits
+        return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.dig_sample_bits
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -475,6 +474,7 @@ class Engine(aiokatcp.DeviceServer):
         channels: int,
         taps: int,
         w_cutoff: float,
+        dig_sample_bits: int,
         max_delay_diff: int,
         gain: complex,
         sync_epoch: float,
@@ -495,7 +495,7 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.Layout(DIG_SAMPLE_BITS, src_packet_samples, chunk_samples, mask_timestamp)
+        self._src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self._src_packet_samples = src_packet_samples
         self.adc_sample_rate = adc_sample_rate
         self.send_rate_factor = send_rate_factor
@@ -580,7 +580,7 @@ class Engine(aiokatcp.DeviceServer):
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         samples = self._src_layout.chunk_samples + extra_samples
 
-        template = ComputeTemplate(context, taps, channels)
+        template = ComputeTemplate(context, taps, channels, self._src_layout.sample_bits)
         self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(channels, taps, w_cutoff))
@@ -610,11 +610,13 @@ class Engine(aiokatcp.DeviceServer):
         )
         free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
         self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = self._src_layout.chunk_samples * DIG_SAMPLE_BITS // BYTE_BITS
+        chunk_bytes = self._src_layout.chunk_samples * self._src_layout.sample_bits // BYTE_BITS
         for pol, stream in enumerate(self._src_streams):
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
-                    device_bytes = self._compute.slots[f"in{pol}"].required_bytes()
+                    slot = self._compute.slots[f"in{pol}"]
+                    assert isinstance(slot, accel.IOSlot)
+                    device_bytes = slot.required_bytes()
                     with context:
                         mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
                     buf = np.array(mem, copy=False).view(np.uint8)
@@ -622,7 +624,9 @@ class Engine(aiokatcp.DeviceServer):
                     # of the following chunk, but we don't need that in the host
                     # mapping.
                     buf = buf[:chunk_bytes]
-                    device_array = accel.DeviceArray(context, (device_bytes,), np.uint8, raw=mem)
+                    device_array = accel.DeviceArray(
+                        context, slot.shape, np.uint8, padded_shape=(device_bytes,), raw=mem
+                    )
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
                     device_array = None
@@ -700,9 +704,9 @@ class Engine(aiokatcp.DeviceServer):
         return self._compute.spectra_per_heap
 
     @property
-    def sample_bits(self) -> int:  # noqa: D401
+    def dig_sample_bits(self) -> int:  # noqa: D401
         """Bitwidth of the incoming digitiser samples."""
-        return self._compute.sample_bits
+        return self._compute.dig_sample_bits
 
     @property
     def spectra_samples(self) -> int:  # noqa: D401
@@ -841,7 +845,7 @@ class Engine(aiokatcp.DeviceServer):
             chunk_packets = self._in_items[0].n_samples // self._src_packet_samples
             copy_packets = len(self._in_items[0].pol_data[0].present) - chunk_packets
             if (await self._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
-                sample_bits = self._in_items[0].sample_bits
+                sample_bits = self._in_items[0].dig_sample_bits
                 copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
                 copy_samples = min(copy_samples, self._in_items[1].n_samples)
                 copy_bytes = copy_samples * sample_bits // BYTE_BITS
@@ -1109,7 +1113,7 @@ class Engine(aiokatcp.DeviceServer):
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.sample_bits
+            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.dig_sample_bits
 
             transfer_events = []
             for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
@@ -1231,7 +1235,7 @@ class Engine(aiokatcp.DeviceServer):
                 avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
                 # Normalise relative to full scale. The factor of 2 is because we
                 # want 1.0 to correspond to a sine wave rather than a square wave.
-                avg_power /= ((1 << (DIG_SAMPLE_BITS - 1)) - 1) ** 2 / 2
+                avg_power /= ((1 << (self._src_layout.sample_bits - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
                 self.sensors[f"input{pol}.dig-pwr-dbfs"].set_value(
                     avg_power_db, timestamp=self.time_converter.adc_to_unix(out_item.end_timestamp)

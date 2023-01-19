@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -26,7 +26,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import BYTE_BITS, DIG_SAMPLE_BITS
+from .. import BYTE_BITS
 
 
 class PFBFIRTemplate:
@@ -40,18 +40,25 @@ class PFBFIRTemplate:
         The number of taps that you want the resulting PFB-FIRs to have.
     channels
         Number of channels into which the input data will be decomposed.
+    dig_sample_bits
+        Bits per digitiser sample.
     unzip_factor
         The output is reordered so that every unzip_factor'ith pair of
         outputs is placed contiguously.
     """
 
-    def __init__(self, context: AbstractContext, taps: int, channels: int, unzip_factor: int = 1) -> None:
+    def __init__(
+        self, context: AbstractContext, taps: int, channels: int, dig_sample_bits: int, unzip_factor: int = 1
+    ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
         self.wgs = 128
         self.taps = taps
         self.channels = channels
+        self.dig_sample_bits = dig_sample_bits
         self.unzip_factor = unzip_factor
+        if dig_sample_bits < 2 or (dig_sample_bits > 10 and dig_sample_bits not in {12, 16}):
+            raise ValueError("dig_sample_bits must be 2-10, 12 or 16")
         if (2 * channels) % self.wgs != 0:
             raise ValueError(f"2*channels must be a multiple of {self.wgs}")
         if channels <= 1 or channels & (channels - 1):
@@ -62,7 +69,13 @@ class PFBFIRTemplate:
             program = accel.build(
                 context,
                 "kernels/pfb_fir.mako",
-                {"wgs": self.wgs, "taps": self.taps, "channels": channels, "unzip_factor": unzip_factor},
+                {
+                    "wgs": self.wgs,
+                    "taps": self.taps,
+                    "channels": channels,
+                    "dig_sample_bits": dig_sample_bits,
+                    "unzip_factor": unzip_factor,
+                },
                 extra_dirs=[str(resource_dir)],
             )
         self.kernel = program.get_kernel("pfb_fir")
@@ -94,7 +107,7 @@ class PFBFIR(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : samples * DIG_SAMPLE_BITS // BYTE_BITS, uint8
+    **in** : samples * dig_sample_bits // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
@@ -139,11 +152,18 @@ class PFBFIR(accel.Operation):
         super().__init__(command_queue)
         if samples % BYTE_BITS != 0:
             raise ValueError(f"samples must be a multiple of {BYTE_BITS}")
+        if samples > 2**29:
+            # This ensures no overflow in samples_to_bytes in the kernel
+            raise ValueError("at most 2**29 samples are supported")
         self.template = template
         self.samples = samples
         step = 2 * template.channels
         self.spectra = spectra  # Can be changed (TODO: documentation)
-        self.slots["in"] = accel.IOSlot((samples * DIG_SAMPLE_BITS // BYTE_BITS,), np.uint8)
+        # Some load operations can run past the end. Not all dig_sample_bits
+        # need padding, but it's simplest just to provide it unconditionally.
+        in_padding = 1
+        in_bytes = samples * template.dig_sample_bits // BYTE_BITS
+        self.slots["in"] = accel.IOSlot((accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),), np.uint8)
         self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
         self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
         self.slots["total_power"] = accel.IOSlot((), np.uint64)
@@ -156,22 +176,26 @@ class PFBFIR(accel.Operation):
         step = 2 * self.template.channels
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
-        if self.in_offset + step * (self.spectra + self.template.taps - 1) > in_buffer.shape[0]:
+        in_buffer_samples = in_buffer.shape[0] * BYTE_BITS / self.template.dig_sample_bits
+        if self.in_offset + step * (self.spectra + self.template.taps - 1) > in_buffer_samples:
             raise IndexError("Input buffer does not contain sufficient samples")
         if self.out_offset + self.spectra > out_buffer.shape[0]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
-        # We divide up the work so that there are sufficient threads to keep the GPU busy.
-        # Aim for 256K workitems i.e. step * (out_n / stepy) == 256K
-        # See pfb_fir.mako's comments for more info.
-
-        # We might not need the entire capacity of the out slot,
-        # e.g. if we are shutting down.
-        out_n = step * self.spectra
-
-        stepy = accel.roundup(accel.divup(step * out_n, 256 * 1024), step)
-        groupsx = step // self.template.wgs
-        groupsy = accel.divup(out_n, stepy)
+        # Try to ensure that each workitem has enough work to do to amortise
+        # the overhead of loading the initial taps. Each workitem should
+        # contribute to work_spectra outputs.
+        work_spectra = self.template.taps * 8
+        # Number of workgroups along the time axis to match this
+        groupsy = accel.divup(self.spectra, work_spectra)
+        # Keep a minimum of 128K workitems, to avoid starving the GPU for work.
+        groupsy = max(groupsy, accel.divup(128 * 1024, step))
+        # Re-compute work_spectra to balance the load
+        work_spectra = accel.divup(self.spectra, groupsy)
+        stepy = work_spectra * step
+        # Rounding up may have left some workgroups with nothing to do, so recalculate
+        # groupsy again.
+        groupsy = accel.divup(self.spectra, work_spectra)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
@@ -179,11 +203,11 @@ class PFBFIR(accel.Operation):
                 self.buffer("total_power").buffer,
                 self.buffer("in").buffer,
                 self.buffer("weights").buffer,
-                np.int32(out_n),
+                np.int32(step * self.spectra),
                 np.int32(stepy),
                 np.int32(self.in_offset),
                 np.int32(self.out_offset * step),  # Must be a multiple of step to make sense.
             ],
-            global_size=(groupsx * self.template.wgs, groupsy),
+            global_size=(step, groupsy),
             local_size=(self.template.wgs, 1),
         )

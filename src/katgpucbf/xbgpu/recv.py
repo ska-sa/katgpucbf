@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -218,7 +218,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
     timestamp_sensors: list[Sensor] = [
         Sensor(
             int,
-            "input-rx-timestamp",
+            "rx.timestamp",
             "The timestamp (in samples) of the last chunk of data received from an F-engine",
             default=-1,
             initial_status=Sensor.Status.ERROR,
@@ -227,7 +227,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
         ),
         Sensor(
             Timestamp,
-            "input-rx-unixtime",
+            "rx.unixtime",
             "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
             default=Timestamp(-1.0),
             initial_status=Sensor.Status.ERROR,
@@ -242,7 +242,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
     missing_sensors: list[Sensor] = [
         Sensor(
             Timestamp,
-            "input-rx-missing-unixtime",
+            "rx.missing-unixtime",
             "The timestamp (in UNIX time) when missing data was last detected",
             default=Timestamp(-1.0),
             initial_status=Sensor.Status.NOMINAL,
@@ -306,8 +306,8 @@ async def recv_chunks(
         # TODO: Perhaps make this 'chunk timestamp step' a property of the Layout?
         chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         unix_time = time_converter.adc_to_unix(chunk.timestamp)
-        sensors["input-rx-timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-        sensors["input-rx-unixtime"].set_value(Timestamp(unix_time), timestamp=unix_time)
+        sensors["rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+        sensors["rx.unixtime"].set_value(Timestamp(unix_time), timestamp=unix_time)
 
         # Check if we've missed any chunks
         expected_chunk_id = prev_chunk_id + 1
@@ -322,9 +322,7 @@ async def recv_chunks(
             dropped_heaps += missed_chunks * expected_heaps
 
         if dropped_heaps > 0:
-            sensors["input-rx-missing-unixtime"].set_value(
-                Timestamp(unix_time), Sensor.Status.ERROR, timestamp=unix_time
-            )
+            sensors["rx.missing-unixtime"].set_value(Timestamp(unix_time), Sensor.Status.ERROR, timestamp=unix_time)
 
         # Increment Prometheus counters
         missing_heaps_counter.inc(dropped_heaps)
