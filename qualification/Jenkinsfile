@@ -78,7 +78,7 @@ pipeline {
            }
            finally {
              COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json test -c', returnStdout: true)
-             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report / Procedure', reportDir: '', reportFiles: 'test_report.pdf, report.json', reportTitles: 'test_report.pdf, report.json'])
+             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report / Procedure', reportDir: '', reportFiles: 'test_procedure.pdf test_report.pdf, report.json', reportTitles: 'test_report.pdf, report.json'])
              currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
            }
          }
