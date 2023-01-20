@@ -739,7 +739,7 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
             config_table.add_hline()
 
 
-def document_from_list(result_list: list, doc_id: str) -> Document:
+def document_from_list(result_list: list, report_doc_id: str, procedure_doc_id: str) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
     Parameters
@@ -755,39 +755,63 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
     test_configuration, results = parse(result_list)
     requirements_verified = extract_requirements_verified(results)
 
-    report_doc = Document(
-        document_options=["11pt", "english", "twoside"],
-        inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
-    )
+    procedure_doc, report_doc = [
+        Document(
+            document_options=["11pt", "english", "twoside"],
+            inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
+        )
+        for _ in range(2)
+    ]
     today = date.today()  # TODO: should store inside the JSON
-    report_doc.set_variable("theAuthor", "DSP Team")
-    report_doc.set_variable("docDate", today.strftime("%d %B %Y"))
-    report_doc.set_variable("docId", doc_id)
-    report_doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
-    report_doc.append(Command("title", "Integration Test Report"))
-    report_doc.append(Command("makekatdocbeginning"))
 
-    _doc_requirements_verified(report_doc, requirements_verified)
+    procedure_doc.set_variable("docId", procedure_doc_id)
+    procedure_doc.append(Command("title", "Integration Test Procedure"))
+
+    report_doc.set_variable("docId", report_doc_id)
+    report_doc.append(Command("title", "Integration Test Report"))
+
+    for doc in [procedure_doc, report_doc]:
+        doc.set_variable("theAuthor", "DSP Team")
+        doc.set_variable("docDate", today.strftime("%d %B %Y"))
+        doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
+        doc.append(Command("makekatdocbeginning"))
+
+        _doc_requirements_verified(doc, requirements_verified)
 
     _doc_test_configuration(report_doc, test_configuration)
 
     with report_doc.create(Section("Result Summary")) as summary_section:
         _doc_result_summary(summary_section, results)
 
-    with report_doc.create(Section("Detailed Test Results")) as detailed_results:
+    with (
+        report_doc.create(Section("Detailed Test Results")) as detailed_results,
+        procedure_doc.create(Section("Test Procedures")) as procedures,
+    ):
         for result in results:
-            with detailed_results.create(Subsection(result.full_text_name, label=result.name)):
+            with detailed_results.create(Subsection(result.full_text_name, label=result.name)), procedures.create(
+                Subsection(result.full_text_name, label=result.name)
+            ):
                 detailed_results.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
-                with detailed_results.create(Subsubsection("Requirements Verified")) as requirements_sec:
-                    _doc_requirements(requirements_sec, result.requirements)
+                procedures.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
+                with (
+                    detailed_results.create(Subsubsection("Requirements Verified")) as report_requirements_sec,
+                    procedures.create(Subsubsection("Requirements Verified")) as procedure_requirements_sec,
+                ):
+                    _doc_requirements(report_requirements_sec, result.requirements)
+                    _doc_requirements(procedure_requirements_sec, result.requirements)
                 with detailed_results.create(Subsubsection("Results")) as results_sec:
                     _doc_outcome(results_sec, test_configuration, result)
-                with detailed_results.create(Subsubsection("Test Detail", label=False)) as test_detail:
+                with (
+                    detailed_results.create(Subsubsection("Test Detail", label=False)) as test_detail,
+                    procedures.create(Subsubsection("Test Procedure")) as test_procedure,
+                ):
                     with test_detail.create(LongTable(r"|l|p{0.7\linewidth}|")) as detail_table:
                         detail_table.add_hline()
                         assert result.start_time is not None
                         for step in result.steps:
                             detail_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
+                            test_procedure.append(step.message)
+                            test_procedure.append("\n\n")
                             detail_table.add_hline()
                             for item in step.items:
                                 if isinstance(item, Detail):
@@ -824,7 +848,7 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
                             for message in result.failure_messages:
                                 failure_message.append(message)
 
-    return report_doc
+    return procedure_doc, report_doc
 
 
 def test_image_commit(result_list: list) -> str:
@@ -886,10 +910,11 @@ def main():
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
-    report_doc = document_from_list(result_list, args.report_doc_id)
+    procedure_doc, report_doc = document_from_list(result_list, args.report_doc_id, "E1200-0000-004")
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
     report_name = args.pdf + "_report"
+    procedure_name = args.pdf + "_procedure"
     with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
         # TODO: latexmk uses Perl, which has different string parsing to
         # Python. If the path contains both a single quote and a special
@@ -902,6 +927,7 @@ def main():
         os.environ.setdefault("buf_size", "2000000")
         os.environ.setdefault("extra_mem_top", "50000000")
         report_doc.generate_pdf(report_name, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
+        procedure_doc.generate_pdf(procedure_name, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
 
 
 if __name__ == "__main__":
