@@ -774,24 +774,24 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
     with report_doc.create(Section("Result Summary")) as summary_section:
         _doc_result_summary(summary_section, results)
 
-    with report_doc.create(Section("Detailed Test Results")) as section:
+    with report_doc.create(Section("Detailed Test Results")) as detailed_results:
         for result in results:
-            with section.create(Subsection(result.full_text_name, label=result.name)):
-                section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
-                with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
+            with detailed_results.create(Subsection(result.full_text_name, label=result.name)):
+                detailed_results.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
+                with detailed_results.create(Subsubsection("Requirements Verified")) as requirements_sec:
                     _doc_requirements(requirements_sec, result.requirements)
-                with section.create(Subsubsection("Results")) as results_sec:
+                with detailed_results.create(Subsubsection("Results")) as results_sec:
                     _doc_outcome(results_sec, test_configuration, result)
-                with section.create(Subsubsection("Procedure", label=False)) as procedure:
-                    with section.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
-                        procedure_table.add_hline()
+                with detailed_results.create(Subsubsection("Test Detail", label=False)) as test_detail:
+                    with test_detail.create(LongTable(r"|l|p{0.7\linewidth}|")) as detail_table:
+                        detail_table.add_hline()
                         assert result.start_time is not None
                         for step in result.steps:
-                            procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
-                            procedure_table.add_hline()
+                            detail_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
+                            detail_table.add_hline()
                             for item in step.items:
                                 if isinstance(item, Detail):
-                                    procedure_table.add_row(
+                                    detail_table.add_row(
                                         [
                                             f"{readable_duration(item.timestamp - result.start_time)}",
                                             item.message,
@@ -806,7 +806,7 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
                                     cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
                                     cell += "\n" + item.message + "\n"
                                     cell += r"\end{lstlisting}\end{Bflushleft}"
-                                    procedure_table.add_row(
+                                    detail_table.add_row(
                                         [
                                             f"{readable_duration(item.timestamp - result.start_time)}",
                                             NoEscape(cell),
@@ -816,11 +816,11 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
                                     mp = MiniPage(width=NoEscape(r"\textwidth"))
                                     mp.append(NoEscape(r"\center"))
                                     mp.append(NoEscape(item.code))
-                                    procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
-                                procedure_table.add_hline()
+                                    detail_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                                detail_table.add_hline()
 
                     if result.failure_messages:
-                        with procedure.create(LstListing()) as failure_message:
+                        with test_detail.create(LstListing()) as failure_message:
                             for message in result.failure_messages:
                                 failure_message.append(message)
 
