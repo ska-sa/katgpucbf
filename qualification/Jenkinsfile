@@ -77,8 +77,8 @@ pipeline {
              sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
            }
            finally {
-             COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
-             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
+             COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json test -c', returnStdout: true)
+             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report / Procedure', reportDir: '', reportFiles: 'test_report.pdf, report.json', reportTitles: 'test_report.pdf, report.json'])
              currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
            }
          }

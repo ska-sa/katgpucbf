@@ -755,26 +755,26 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
     test_configuration, results = parse(result_list)
     requirements_verified = extract_requirements_verified(results)
 
-    doc = Document(
+    report_doc = Document(
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
     today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", "DSP Team")
-    doc.set_variable("docDate", today.strftime("%d %B %Y"))
-    doc.set_variable("docId", doc_id)
-    doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
-    doc.append(Command("title", "Integration Test Report"))
-    doc.append(Command("makekatdocbeginning"))
+    report_doc.set_variable("theAuthor", "DSP Team")
+    report_doc.set_variable("docDate", today.strftime("%d %B %Y"))
+    report_doc.set_variable("docId", doc_id)
+    report_doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
+    report_doc.append(Command("title", "Integration Test Report"))
+    report_doc.append(Command("makekatdocbeginning"))
 
-    _doc_requirements_verified(doc, requirements_verified)
+    _doc_requirements_verified(report_doc, requirements_verified)
 
-    _doc_test_configuration(doc, test_configuration)
+    _doc_test_configuration(report_doc, test_configuration)
 
-    with doc.create(Section("Result Summary")) as summary_section:
+    with report_doc.create(Section("Result Summary")) as summary_section:
         _doc_result_summary(summary_section, results)
 
-    with doc.create(Section("Detailed Test Results")) as section:
+    with report_doc.create(Section("Detailed Test Results")) as section:
         for result in results:
             with section.create(Subsection(result.full_text_name, label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
@@ -824,7 +824,7 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
                             for message in result.failure_messages:
                                 failure_message.append(message)
 
-    return doc
+    return report_doc
 
 
 def test_image_commit(result_list: list) -> str:
@@ -886,9 +886,10 @@ def main():
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
-    doc = document_from_list(result_list, args.report_doc_id)
+    report_doc = document_from_list(result_list, args.report_doc_id)
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
+    report_name = args.pdf + "_report"
     with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
         # TODO: latexmk uses Perl, which has different string parsing to
         # Python. If the path contains both a single quote and a special
@@ -900,7 +901,7 @@ def main():
         # to handle the reams of text generated for plots.
         os.environ.setdefault("buf_size", "2000000")
         os.environ.setdefault("extra_mem_top", "50000000")
-        doc.generate_pdf(args.pdf, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
+        report_doc.generate_pdf(report_name, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
 
 
 if __name__ == "__main__":
