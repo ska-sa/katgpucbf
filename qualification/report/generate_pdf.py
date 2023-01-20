@@ -37,6 +37,7 @@ from docutils.core import publish_parts
 from pylatex import (
     Command,
     Document,
+    Enumerate,
     LongTable,
     MiniPage,
     MultiColumn,
@@ -805,14 +806,16 @@ def document_from_list(result_list: list, report_doc_id: str, procedure_doc_id: 
                     detailed_results.create(Subsubsection("Test Detail", label=False)) as test_detail,
                     procedures.create(Subsubsection("Test Procedure")) as test_procedure,
                 ):
-                    with test_detail.create(LongTable(r"|l|p{0.7\linewidth}|")) as detail_table:
+                    with (
+                        test_detail.create(LongTable(r"|l|p{0.7\linewidth}|")) as detail_table,
+                        test_procedure.create(Enumerate()) as test_steps,
+                    ):
                         detail_table.add_hline()
                         assert result.start_time is not None
                         for step in result.steps:
                             detail_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
-                            test_procedure.append(step.message)
-                            test_procedure.append("\n\n")
                             detail_table.add_hline()
+                            test_steps.add_item(step.message)
                             for item in step.items:
                                 if isinstance(item, Detail):
                                     detail_table.add_row(
