@@ -130,7 +130,7 @@ class TestEngine:
           correctly populated.
         """
         assert engine_server._port == 0
-        assert engine_server._src_interface == "127.0.0.1"
+        assert engine_server._src_interface == ["127.0.0.1"] * N_POLS
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
         assert engine_server.channels == CHANNELS
         assert engine_server.time_converter.sync_epoch == SYNC_EPOCH

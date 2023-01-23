@@ -53,7 +53,9 @@ _T = TypeVar("_T")
 logger = logging.getLogger(__name__)
 
 
-def comma_split(base_type: Callable[[str], _T], count: int | None = None) -> Callable[[str], list[_T]]:
+def comma_split(
+    base_type: Callable[[str], _T], count: int | None = None, allow_single=False
+) -> Callable[[str], list[_T]]:
     """Return a function to split a comma-delimited str into a list of type _T.
 
     This function is used to parse lists of CPU core numbers, which come from
@@ -68,12 +70,18 @@ def comma_split(base_type: Callable[[str], _T], count: int | None = None) -> Cal
     count
         How many of them you expect to be in the list. `None` means the list
         could be any length.
+    allow_single
+        If true (defaults to false), allow a single value to be used when
+        `count` is greater than 1. In this case, it will be repeated `count`
+        times.
     """
 
     def func(value: str) -> list[_T]:  # noqa: D102
         parts = value.split(",")
         n = len(parts)
-        if count is not None and n != count:
+        if count is not None and n == 1 and allow_single:
+            parts = parts * count
+        elif count is not None and n != count:
             raise ValueError(f"Expected {count} comma-separated fields, received {n}")
         return [base_type(part) for part in parts]
 
@@ -109,7 +117,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Network port on which to serve Prometheus metrics [none]",
     )
     add_aiomonitor_arguments(parser)
-    parser.add_argument("--src-interface", type=get_interface_address, help="Name of input network device")
+    parser.add_argument(
+        "--src-interface",
+        type=comma_split(get_interface_address, N_POLS, allow_single=True),
+        help="Name(s) of input network device",
+    )
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
         "--src-affinity",
@@ -136,7 +148,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Size of network receive buffer (per pol) [96MiB]",
     )
     parser.add_argument(
-        "--dst-interface", type=get_interface_address, required=True, help="Name of output network device"
+        "--dst-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
     )
     parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no]")

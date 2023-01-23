@@ -90,6 +90,20 @@ class Frame:
             self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
 
 
+def _multi_send(
+    streams: list["spead2.send.asyncio.AsyncStream"], heaps: list[spead2.send.HeapReference]
+) -> asyncio.Future:
+    if len(streams) == 1:  # Most common case
+        return streams[0].async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+    else:
+        futures = []
+        for i, stream in enumerate(streams):
+            first = i * len(heaps) // len(streams)
+            last = (i + 1) * len(heaps) // len(streams)
+            futures.append(stream.async_send_heaps(heaps[first:last], spead2.send.GroupMode.ROUND_ROBIN))
+        return asyncio.gather(*futures)
+
+
 class Chunk:
     """An array of frames, spanning multiple timestamps."""
 
@@ -150,17 +164,24 @@ class Chunk:
                 output_clip_counter.labels(pol).inc(frame.saturated[pol])
 
     async def send(
-        self, stream: "spead2.send.asyncio.AsyncStream", frames: int, time_converter: TimeConverter, sensors: SensorSet
+        self,
+        streams: list["spead2.send.asyncio.AsyncStream"],
+        frames: int,
+        time_converter: TimeConverter,
+        sensors: SensorSet,
     ) -> None:
-        """Transmit heaps on a SPEAD stream.
+        """Transmit heaps over SPEAD streams.
 
-        Frames from 0 to `frames` - 1 are sent asynchronously.
+        Frames from 0 to `frames` - 1 are sent asynchronously. The frames are
+        distributed over the streams in a round-robin fashion (but if the
+        number of streams does not divide into the number of frames, there will
+        be imbalances, because it always starts with the first stream).
         """
         futures = []
         saturated = [0] * N_POLS
         for present, frame in zip(self.present[:frames], self._frames[:frames]):
             if present:
-                futures.append(stream.async_send_heaps(frame.heaps, spead2.send.GroupMode.ROUND_ROBIN))
+                futures.append(_multi_send(streams, frame.heaps))
                 futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
                 for pol in range(N_POLS):
                     saturated[pol] += frame.saturated[pol]
@@ -175,10 +196,10 @@ class Chunk:
             sensor.set_value(sensor.value + saturated[pol], timestamp=end_time)
 
 
-def make_stream(
+def make_streams(
     *,
     endpoints: list[Endpoint],
-    interface: str,
+    interfaces: list[str],
     ttl: int,
     ibv: bool,
     packet_payload: int,
@@ -192,35 +213,42 @@ def make_stream(
     spectra_per_heap: int,
     channels: int,
     chunks: Sequence[Chunk],
-) -> "spead2.send.asyncio.AsyncStream":
+) -> list["spead2.send.asyncio.AsyncStream"]:
     """Create an asynchronous SPEAD stream for transmission."""
     dtype = chunks[0].data.dtype
     thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     memory_regions: list[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
-    rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor
+    rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor / len(interfaces)
     config = spead2.send.StreamConfig(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
         # Adding len(endpoints) to accommodate descriptors sent for each substream
         max_heaps=(len(chunks) * spectra // spectra_per_heap * len(endpoints)) + len(endpoints),
     )
-    stream: "spead2.send.asyncio.AsyncStream"
+    streams: list["spead2.send.asyncio.AsyncStream"]
     if ibv:
-        ibv_config = spead2.send.UdpIbvConfig(
-            endpoints=[(ep.host, ep.port) for ep in endpoints],
-            interface_address=interface,
-            ttl=ttl,
-            comp_vector=comp_vector,
-            memory_regions=memory_regions,
-        )
-        stream = spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config)
+        ibv_configs = [
+            spead2.send.UdpIbvConfig(
+                endpoints=[(ep.host, ep.port) for ep in endpoints],
+                interface_address=interface,
+                ttl=ttl,
+                comp_vector=comp_vector,
+                memory_regions=memory_regions,
+            )
+            for interface in interfaces
+        ]
+        streams = [spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config) for ibv_config in ibv_configs]
     else:
-        stream = spead2.send.asyncio.UdpStream(
-            thread_pool, [(ep.host, ep.port) for ep in endpoints], config, ttl=ttl, interface_address=interface
-        )
-    stream.set_cnt_sequence(feng_id, num_ants)
-    return stream
+        streams = [
+            spead2.send.asyncio.UdpStream(
+                thread_pool, [(ep.host, ep.port) for ep in endpoints], config, ttl=ttl, interface_address=interface
+            )
+            for interface in interfaces
+        ]
+    for i, stream in enumerate(streams):
+        stream.set_cnt_sequence((i << 40) + feng_id, num_ants)
+    return streams
 
 
 def make_descriptor_heap(
