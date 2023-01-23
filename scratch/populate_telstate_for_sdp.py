@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -101,7 +101,7 @@ async def main():
                 converter.set("instrument_dev_name", "dummy")
                 # TODO: get sky centre frequency from digitiser config?
                 converter.set("center_freq", 1284e6)
-            elif stream["type"] == "sim.dig.raw_antenna_voltage" and name.endswith("h"):
+            elif stream["type"] == "sim.dig.baseband_voltage" and name.endswith("h"):
                 # Both pols are represented, but we're only interested in one per antenna.
                 converter = SensorConverter(client, telstate, name[:-1])
                 converter.set("observer", stream["antenna"])

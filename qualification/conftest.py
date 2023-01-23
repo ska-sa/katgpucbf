@@ -249,7 +249,7 @@ async def _correlator_config_and_description(
             name = f"{dsim_name}{pol}"
             dig_names.append(name)
             config["outputs"][name] = {
-                "type": "sim.dig.raw_antenna_voltage",
+                "type": "sim.dig.baseband_voltage",
                 "band": band,
                 "adc_sample_rate": adc_sample_rate,
                 "centre_frequency": centre_frequency,
