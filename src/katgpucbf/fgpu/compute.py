@@ -150,10 +150,6 @@ class Compute(accel.OperationSequence):
         operations.append(("postproc", self.postproc))
 
         compounds = {
-            # fft0:work_area and fft1:work_area are just scratchpad memory.
-            # Since the FFTs are run sequentially they won't interfere with
-            # each other, i.e., fft0 is finished by the time fft1 starts.
-            "fft_work": [f"fft{pol}:work_area" for pol in range(N_POLS)],
             # We expect the weights on the PFB-FIR taps to be the same for both
             # pols so they can share memory.
             "weights": [f"pfb_fir{pol}:weights" for pol in range(N_POLS)],
