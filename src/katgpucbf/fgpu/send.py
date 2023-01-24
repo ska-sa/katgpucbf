@@ -93,6 +93,14 @@ class Frame:
 def _multi_send(
     streams: list["spead2.send.asyncio.AsyncStream"], heaps: list[spead2.send.HeapReference]
 ) -> asyncio.Future:
+    """Send a list of heaps across several streams.
+
+    The list of heaps is broken into contiguous blocks, with each block sent to
+    one stream.
+
+    This returns a future, rather than being a coroutine. Thus, it should not
+    be wrapped with :func:`asyncio.create_task`.
+    """
     if len(streams) == 1:  # Most common case
         return streams[0].async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
     else:
@@ -172,10 +180,10 @@ class Chunk:
     ) -> None:
         """Transmit heaps over SPEAD streams.
 
-        Frames from 0 to `frames` - 1 are sent asynchronously. The frames are
-        distributed over the streams in a round-robin fashion (but if the
-        number of streams does not divide into the number of frames, there will
-        be imbalances, because it always starts with the first stream).
+        Frames from 0 to `frames` - 1 are sent asynchronously. The contents of
+        each frames are distributed over the streams. If the number of streams
+        does not divide into the number of destination endpoints, there will be
+        imbalances, because the partitioning is the same for every frame.
         """
         futures = []
         saturated = [0] * N_POLS
@@ -214,7 +222,12 @@ def make_streams(
     channels: int,
     chunks: Sequence[Chunk],
 ) -> list["spead2.send.asyncio.AsyncStream"]:
-    """Create an asynchronous SPEAD stream for transmission."""
+    """Create asynchronous SPEAD streams for transmission.
+
+    Each stream is configured with substreams for all the end-points. They
+    differ only in the network interface used (there is one per interface).
+    Thus, they can be used interchangeably for load-balancing purposes.
+    """
     dtype = chunks[0].data.dtype
     thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     memory_regions: list[object] = [chunk.data for chunk in chunks]
@@ -247,6 +260,10 @@ def make_streams(
             for interface in interfaces
         ]
     for i, stream in enumerate(streams):
+        # Ensure that streams do not interfere with each other or with those of
+        # other F-engines. This assumes that there are at most 256
+        # interfaces. IDs may get reused after 2^40/num_ants heaps, which should
+        # be much larger than a receiver's window.
         stream.set_cnt_sequence((i << 40) + feng_id, num_ants)
     return streams
 
