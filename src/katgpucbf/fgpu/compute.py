@@ -231,6 +231,11 @@ class Compute(accel.OperationSequence):
             fft_op()
         # FFTs are spread across the queues, but postproc runs in queue 0, so
         # queue 0 must wait for all other queues.
-        markers = [self.command_queues[pol].enqueue_marker() for pol in range(1, N_POLS)]
+        markers = [command_queue.enqueue_marker() for command_queue in self.command_queues[1:]]
         self.command_queues[0].enqueue_wait_for_events(markers)
         self.postproc()
+        # Synchronize with the other queues again, so that the next FFT on pol1
+        # can't start until the postproc completes.
+        marker = self.postproc.command_queue.enqueue_marker()
+        for command_queue in self.command_queues[1:]:
+            command_queue.enqueue_wait_for_events([marker])
