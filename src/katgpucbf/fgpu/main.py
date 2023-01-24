@@ -264,6 +264,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     for src in args.src:
         if not isinstance(src, str) and args.src_interface is None:
             parser.error("Live source requires --src-interface")
+    if len(args.dst) % len(args.dst_interface) != 0:
+        parser.error("number of destinations must be divisible by number of destination interfaces")
     return args
 
 
