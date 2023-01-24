@@ -116,7 +116,7 @@ class PolInItem:
     chunk: recv.Chunk | None = None
 
 
-class InItem:
+class InItem(QueueItem):
     """Item for use in input queues.
 
     This Item references GPU memory regions for input samples from both
@@ -129,12 +129,12 @@ class InItem:
 
         # In the receive function
         my_in_item.pol_data[pol].samples.set_region(...)  # start copying sample data to the GPU,
-        my_in_item.add_marker(command_queue)
+        my_in_item.add_marker(command_queue, pol)
         self._in_queue.put_nowait(my_in_item)
         ...
         # in the processing function
         next_in_item = await self._in_queue.get() # get the item from the queue
-        next_in_item.enqueue_wait_for_events(command_queue) # wait for its data to be completely copied
+        next_in_item.enqueue_wait_for_events(command_queue, pol) # wait for its data to be completely copied
         ... # carry on executing kernels or whatever needs to be done with the data
 
     Parameters
@@ -153,8 +153,6 @@ class InItem:
 
     #: Per-polarisation data
     pol_data: list[PolInItem]
-    #: Per-polarisation event tracking and synchronisation
-    pol_events: list[QueueItem]
     #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
@@ -179,17 +177,15 @@ class InItem:
                     present_cumsum=np.zeros(present_size + 1, np.uint32),
                 )
             )
-        self.pol_events = [QueueItem(timestamp) for _ in range(N_POLS)]
-        self.reset(timestamp)
+        super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the item.
 
-        Zero the timestamp, empty the event lists and set number of samples to
+        Zero the timestamp, empty the event list and set number of samples to
         zero.
         """
-        for events in self.pol_events:
-            events.reset(timestamp)
+        super().reset(timestamp)
         self.n_samples = 0
 
     @property
@@ -203,19 +199,9 @@ class InItem:
         return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.dig_sample_bits
 
     @property
-    def timestamp(self) -> int:  # noqa: D401
-        """First timestamp in the item."""
-        return self.pol_events[0].timestamp
-
-    @property
     def end_timestamp(self) -> int:  # noqa: D401
         """Past-the-end (i.e. latest plus 1) timestamp of the item."""
         return self.timestamp + self.n_samples
-
-    async def async_wait_for_events(self) -> None:
-        """Wait for all the events in the individual polarisations."""
-        for events in self.pol_events:
-            await events.async_wait_for_events()
 
 
 class OutItem(QueueItem):
@@ -826,8 +812,8 @@ class Engine(aiokatcp.DeviceServer):
             #       f'{self._in_items[-1].n_samples} samples')
 
             # Make sure that all events associated with the item are past.
-            for events, command_queue in zip(self._in_items[-1].pol_events, self._compute.command_queues):
-                events.enqueue_wait_for_events(command_queue)
+            for pol, command_queue in enumerate(self._compute.command_queues):
+                self._in_items[-1].enqueue_wait_for_events(command_queue, pol)
         else:
             # To keep _run_processing simple, it may make further calls to
             # _next_in after receiving a None. To keep things simple, put
@@ -900,8 +886,8 @@ class Engine(aiokatcp.DeviceServer):
                 pol_data.chunk = None
             asyncio.create_task(self._push_recv_chunks(chunks, events))
         else:
-            for pol_events, event in zip(item.pol_events, events):
-                pol_events.events.append(event)
+            for pol, event in enumerate(events):
+                item.add_event(event, pol)
         self._in_free_queue.put_nowait(item)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
@@ -1151,7 +1137,7 @@ class Engine(aiokatcp.DeviceServer):
                 self._in_queue.put_nowait(in_item)
             else:
                 # Copy each pol chunk to the right place on the GPU.
-                for pol_events, pol_data, chunk in zip(in_item.pol_events, in_item.pol_data, chunks):
+                for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
                     assert pol_data.samples is not None
                     pol_data.samples.set_region(
                         self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
@@ -1159,7 +1145,7 @@ class Engine(aiokatcp.DeviceServer):
                     transfer_events.append(self._upload_queue.enqueue_marker())
                     # Put events on the queue so that _run_processing() knows when to
                     # start.
-                    pol_events.events.append(transfer_events[-1])
+                    in_item.add_event(transfer_events[-1], pol)
 
                 self._in_queue.put_nowait(in_item)
 
@@ -1226,12 +1212,12 @@ class Engine(aiokatcp.DeviceServer):
                 # We're using PeerDirect
                 chunk = out_item.chunk
                 chunk.cleanup = partial(self._out_free_queue.put_nowait, out_item)
-                events.extend(out_item.events)
+                events.extend(out_item.get_events())
             else:
                 with self.monitor.with_state("run_transmit", "wait send_free_queue"):
                     chunk = await self._send_free_queue.get()
                 chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
-                self._download_queue.enqueue_wait_for_events(out_item.events)
+                self._download_queue.enqueue_wait_for_events(out_item.get_events())
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
