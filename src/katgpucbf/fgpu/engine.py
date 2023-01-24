@@ -284,16 +284,16 @@ class OutItem(QueueItem):
         super().reset(timestamp)
         self.n_spectra = 0
 
-    def reset_all(self, command_queue: AbstractCommandQueue, timestamp: int = 0) -> None:
+    def reset_all(self, command_queues: Iterable[AbstractCommandQueue], timestamp: int = 0) -> None:
         """Fully reset the item.
 
         In addition to the work done by :meth:`reset`, zero out GPU
         accumulators, using the given command queue. No events are added
-        associated with this; it is assumed that the same command queue will
+        associated with this; it is assumed that the same command queues will
         be used to subsequently operate on the accumulators.
         """
         self.reset(timestamp)
-        for buf in self.dig_total_power:
+        for buf, command_queue in zip(self.dig_total_power, command_queues):
             buf.zero(command_queue)
 
     @property
@@ -549,7 +549,7 @@ class Engine(aiokatcp.DeviceServer):
             chunks=send_chunks,
         )
         self._out_item = self._out_free_queue.get_nowait()
-        self._out_item.reset_all(self._compute.command_queues[0])
+        self._out_item.reset_all(self._compute.command_queues)
 
         self.delay_models: list[MultiDelayModel] = []
         self.gains = np.zeros((self.channels, self.pols), np.complex64)
@@ -850,11 +850,13 @@ class Engine(aiokatcp.DeviceServer):
                 copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
                 copy_samples = min(copy_samples, self._in_items[1].n_samples)
                 copy_bytes = copy_samples * sample_bits // BYTE_BITS
-                for pol_data0, pol_data1 in zip(self._in_items[0].pol_data, self._in_items[1].pol_data):
+                for command_queue, pol_data0, pol_data1 in zip(
+                    self._compute.command_queues, self._in_items[0].pol_data, self._in_items[1].pol_data
+                ):
                     assert pol_data0.samples is not None
                     assert pol_data1.samples is not None
                     pol_data1.samples.copy_region(
-                        self._compute.command_queue,
+                        command_queue,
                         pol_data0.samples,
                         np.s_[:copy_bytes],
                         np.s_[-copy_bytes:],
@@ -876,6 +878,10 @@ class Engine(aiokatcp.DeviceServer):
     def _pop_in(self) -> None:
         """Remove the oldest InItem."""
         item = self._in_items.popleft()
+        # These events will enforce more synchronisation than strictly
+        # necessary, because they also wait for any backend operations that
+        # happen to have been scheduled on the command queues. But the code
+        # is complex enough as it is without trying to finesse that.
         events = [queue.enqueue_marker() for queue in self._compute.command_queues]
         if self.use_vkgdr:
             chunks = []
@@ -895,9 +901,12 @@ class Engine(aiokatcp.DeviceServer):
         with self.monitor.with_state("run_processing", "wait out_free_queue"):
             item = await self._out_free_queue.get()
 
-        # Just make double-sure that all events associated with the item are past.
-        item.enqueue_wait_for_events(self._compute.command_queue)
-        item.reset_all(self._compute.command_queue, new_timestamp)
+        # Just make double-sure that all events associated with the item are
+        # past. This should be a no-op because out items are only placed on the
+        # free queue after all work on them has completed.
+        for command_queue in self._compute.command_queues:
+            item.enqueue_wait_for_events(command_queue)
+        item.reset_all(self._compute.command_queues, new_timestamp)
         return item
 
     async def _flush_out(self, new_timestamp: int) -> None:
@@ -926,14 +935,15 @@ class Engine(aiokatcp.DeviceServer):
             # postprocessing to the relevant range (the FFT size is baked into
             # the plan, so is harder to modify on the fly).
             # Without this, saturation counts can be wrong.
-            self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
-            self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
-            self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
+            self._compute.buffer("fine_delay").set_async(self._compute.command_queues[0], self._out_item.fine_delay)
+            self._compute.buffer("phase").set_async(self._compute.command_queues[0], self._out_item.phase)
+            self._compute.buffer("gains").set_async(self._compute.command_queues[0], self._out_item.gains)
             self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
             # Note: we also need to wait for any frontend calls because they
             # write directly to self._out_item.dig_total_power, but this
-            # marker will take care of that too.
-            self._out_item.add_marker(self._compute.command_queue)
+            # marker will take care of that too, because run_backend
+            # cross-synchronises the per-pol command queues.
+            self._out_item.add_marker(self._compute.command_queues[0])
             self._out_queue.put_nowait(self._out_item)
             # TODO: could set it to None, since we only need it when we're
             # ready to flush again?
@@ -1108,9 +1118,11 @@ class Engine(aiokatcp.DeviceServer):
         async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
-            with self.monitor.with_state("run_receive", "wait events"):
-                # Make sure all the item's events are past.
-                await in_item.async_wait_for_events()
+            # Make sure all the item's events are complete before overwriting
+            # the data. This is not needed for vkgdr because in that case it's
+            # handled by _push_recv_chunks.
+            if not self.use_vkgdr:
+                in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunks[0].timestamp)
 
             # In steady-state, chunks should be the same size, but during
