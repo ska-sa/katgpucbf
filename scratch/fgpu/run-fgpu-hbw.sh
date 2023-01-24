@@ -18,11 +18,10 @@ feng_id="0"
 
 export CUDA_VISIBLE_DEVICES="$cuda1"
 
-#    --src-chunk-samples 67108864 \
-#    --dst-chunk-jones 33554432 \
 set -x
 exec spead2_net_raw taskset -c $other_affinity fgpu \
-    --use-vkgdr \
+    --src-chunk-samples 67108864 \
+    --dst-chunk-jones 33554432 \
     --src-interface $iface1,$iface2 --src-ibv \
     --dst-interface $iface1,$iface2 --dst-ibv \
     --src-affinity $src_affinity --src-comp-vector=$src_comp \
