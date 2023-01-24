@@ -17,6 +17,7 @@
 """Smoke test for Compute class."""
 import pytest
 
+from katgpucbf import N_POLS
 from katgpucbf.fgpu import compute
 
 pytestmark = [pytest.mark.cuda_only]
@@ -28,6 +29,6 @@ def test_compute(context, command_queue):
     .. todo:: This isn't a proper test, just a smoke test.
     """
     template = compute.ComputeTemplate(context, 4, 32768, 10)
-    fn = template.instantiate(command_queue, 100000000, 1280, 256)
+    fn = template.instantiate([command_queue] * N_POLS, 100000000, 1280, 256)
     fn.ensure_all_bound()
     fn()

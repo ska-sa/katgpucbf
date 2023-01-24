@@ -59,13 +59,13 @@ class ComputeTemplate:
 
     def instantiate(
         self,
-        command_queue: AbstractCommandQueue,
+        command_queues: list[AbstractCommandQueue],
         samples: int,
         spectra: int,
         spectra_per_heap: int,
     ) -> "Compute":  # We have to put the return type in quotes because we haven't declared the `Compute` class yet.
         """Generate a :class:`Compute` object based on the template."""
-        return Compute(self, command_queue, samples, spectra, spectra_per_heap)
+        return Compute(self, command_queues, samples, spectra, spectra_per_heap)
 
 
 class Compute(accel.OperationSequence):
@@ -96,9 +96,10 @@ class Compute(accel.OperationSequence):
     ----------
     template
         Template for the channelisation operation sequence.
-    command_queue
-        The GPU command queue (typically this will be a CUDA Stream) on which
-        actual processing operations are to be scheduled.
+    command_queues
+        The GPU command queues (typically these will be a CUDA Streams) on which
+        actual processing operations are to be scheduled. There must be one
+        per polarisation.
     samples
         Number of samples in each input chunk (per polarisation), including
         padding samples.
@@ -111,11 +112,12 @@ class Compute(accel.OperationSequence):
     def __init__(
         self,
         template: ComputeTemplate,
-        command_queue: AbstractCommandQueue,
+        command_queues: list[AbstractCommandQueue],
         samples: int,
         spectra: int,
         spectra_per_heap: int,
     ) -> None:
+        assert len(command_queues) == N_POLS
         self.dig_sample_bits = template.pfb_fir.dig_sample_bits
         self.template = template
         self.samples = samples
@@ -123,7 +125,7 @@ class Compute(accel.OperationSequence):
         self.spectra_per_heap = spectra_per_heap
 
         # PFB-FIR and FFT each happen for each polarisation.
-        self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for pol in range(N_POLS)]
+        self.pfb_fir = [template.pfb_fir.instantiate(command_queues[pol], samples, spectra) for pol in range(N_POLS)]
         fft_shape = (spectra, template.unzip_factor, template.channels // template.unzip_factor)
         fft_template = fft.FftTemplate(
             template.context,
@@ -134,11 +136,11 @@ class Compute(accel.OperationSequence):
             fft_shape,
             fft_shape,
         )
-        self.fft = [fft_template.instantiate(command_queue, fft.FftMode.FORWARD) for pol in range(N_POLS)]
+        self.fft = [fft_template.instantiate(command_queues[pol], fft.FftMode.FORWARD) for pol in range(N_POLS)]
 
         # Postproc is single though because it involves the corner turn which
         # combines the two pols.
-        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap)
+        self.postproc = template.postproc.instantiate(command_queues[0], spectra, spectra_per_heap)
 
         operations: list[tuple[str, accel.Operation]] = []
         for pol in range(N_POLS):
@@ -170,7 +172,8 @@ class Compute(accel.OperationSequence):
             aliases[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
             compounds[f"fft_out{pol}"] = [f"fft{pol}:dest", f"postproc:in{pol}"]
             compounds[f"dig_total_power{pol}"] = [f"pfb_fir{pol}:total_power"]
-        super().__init__(command_queue, operations, compounds, aliases)
+        self.command_queues = command_queues
+        super().__init__(command_queues[0], operations, compounds, aliases)
 
     def run_frontend(
         self,
@@ -230,4 +233,8 @@ class Compute(accel.OperationSequence):
         self.ensure_all_bound()
         for fft_op in self.fft:
             fft_op()
+        # FFTs are spread across the queues, but postproc runs in queue 0, so
+        # queue 0 must wait for all other queues.
+        markers = [self.command_queues[pol].enqueue_marker() for pol in range(1, N_POLS)]
+        self.command_queues[0].enqueue_wait_for_events(markers)
         self.postproc()
