@@ -364,7 +364,7 @@ class Engine(aiokatcp.DeviceServer):
     srcs
         A list of source endpoints for the incoming data.
     src_interface
-        IP address of the network device to use for input.
+        IP addresses of the network devices to use for input.
     src_ibv
         Use ibverbs for input.
     src_affinity
@@ -380,7 +380,7 @@ class Engine(aiokatcp.DeviceServer):
     dst
         A list of destination endpoints for the outgoing data.
     dst_interface
-        IP address of the network device to use for output.
+        IP addresses of the network devices to use for output.
     dst_ttl
         TTL for outgoing packets.
     dst_ibv
@@ -451,14 +451,14 @@ class Engine(aiokatcp.DeviceServer):
         katcp_port: int,
         context: AbstractContext,
         srcs: list[str | list[tuple[str, int]]],
-        src_interface: str | None,
+        src_interface: list[str] | None,
         src_ibv: bool,
         src_affinity: list[int],
         src_comp_vector: list[int],
         src_packet_samples: int,
         src_buffer: int,
         dst: list[Endpoint],
-        dst_interface: str,
+        dst_interface: list[str],
         dst_ttl: int,
         dst_ibv: bool,
         dst_packet_payload: int,
@@ -531,9 +531,9 @@ class Engine(aiokatcp.DeviceServer):
         self._init_recv(src_affinity, monitor)
 
         send_chunks = self._init_send(len(dst), use_peerdirect)
-        self._send_stream = send.make_stream(
+        self._send_streams = send.make_streams(
             endpoints=dst,
-            interface=dst_interface,
+            interfaces=dst_interface,
             ttl=dst_ttl,
             ibv=dst_ibv,
             packet_payload=dst_packet_payload,
@@ -1175,7 +1175,7 @@ class Engine(aiokatcp.DeviceServer):
         except Exception:
             logger.exception("Error sending chunk")
 
-    async def _run_transmit(self, stream: "spead2.send.asyncio.AsyncStream") -> None:
+    async def _run_transmit(self, streams: list["spead2.send.asyncio.AsyncStream"]) -> None:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without PeerDirect. In the
@@ -1192,8 +1192,8 @@ class Engine(aiokatcp.DeviceServer):
 
         Parameters
         ----------
-        stream
-            The stream transmitting data.
+        streams
+            The streams transmitting data.
         """
         task: asyncio.Future | None = None
         last_end_timestamp: int | None = None
@@ -1247,14 +1247,14 @@ class Engine(aiokatcp.DeviceServer):
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
                 skipped_frames = skipped_samples // (self.spectra_per_heap * self.spectra_samples)
-                send.skipped_heaps_counter.inc(skipped_frames * stream.num_substreams)
+                send.skipped_heaps_counter.inc(skipped_frames * streams[0].num_substreams)
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:
                 # We're not in PeerDirect mode
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
-            task = asyncio.create_task(chunk.send(stream, n_frames, self.time_converter, self.sensors))
+            task = asyncio.create_task(chunk.send(streams, n_frames, self.time_converter, self.sensors))
             task.add_done_callback(partial(self._chunk_finished, chunk))
 
         if task:
@@ -1264,8 +1264,8 @@ class Engine(aiokatcp.DeviceServer):
                 pass  # It's already logged by the chunk_finished callback
         stop_heap = spead2.send.Heap(send.FLAVOUR)
         stop_heap.add_end()
-        for substream_index in range(stream.num_substreams):
-            await stream.async_send_heap(stop_heap, substream_index=substream_index)
+        for substream_index in range(streams[0].num_substreams):
+            await streams[0].async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
 
     def delay_update_timestamp(self) -> int:
@@ -1468,7 +1468,7 @@ class Engine(aiokatcp.DeviceServer):
         # Create the descriptor task first to ensure descriptors will be sent
         # before any data makes its way through the pipeline.
         descriptor_sender = DescriptorSender(
-            self._send_stream,
+            self._send_streams[0],
             self._descriptor_heap,
             self.n_ants * descriptor_interval_s,
             (self.feng_id + 1) * descriptor_interval_s,
@@ -1482,7 +1482,7 @@ class Engine(aiokatcp.DeviceServer):
             base_recv.add_reader(
                 stream,
                 src=self._srcs[pol],
-                interface=self._src_interface,
+                interface=self._src_interface[pol] if self._src_interface is not None else None,
                 ibv=self._src_ibv,
                 comp_vector=self._src_comp_vector[pol],
                 buffer=self._src_buffer,
@@ -1501,7 +1501,7 @@ class Engine(aiokatcp.DeviceServer):
         self.add_service_task(recv_task)
 
         send_task = asyncio.create_task(
-            self._run_transmit(self._send_stream),
+            self._run_transmit(self._send_streams),
             name=SEND_TASK_NAME,
         )
         self.add_service_task(send_task)

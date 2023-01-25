@@ -450,12 +450,22 @@ floating-point precision when accumulating a large number of samples.
 
 Network transmit
 ----------------
-The current transmit system is quite simple. A single spead2 stream is created,
-with one substream per multicast destination. For each output chunk, memory
-together with a set of heaps is created in advance. The heaps are carefully
-constructed so that they reference numpy arrays (including for the timestamps),
-rather than copying data into spead2. This allows heaps to be recycled for new
-data without having to create new heap objects.
+The current transmit system is quite simple. By default a single spead2 stream
+is created, with one substream per multicast destination. For each output
+chunk, memory together with a set of heaps is created in advance. The heaps are
+carefully constructed so that they reference numpy arrays (including for the
+timestamps), rather than copying data into spead2. This allows heaps to be
+recycled for new data without having to create new heap objects.
+
+If the traffic for a single engine exceeds the bandwidth of the network
+interface, it is necessary to distribute it over multiple interfaces. In this
+case, several spead2 streams are created (one per interface). Each of them has
+a substream for every multicast destination, but they are not all used (the
+duplication simplifies indexing). When heaps are transmitted, a stream is
+selected for each heap to balance the load. Descriptors and stop heaps are
+just sent through the first stream for simplicity. This scheme assumes that
+all the interfaces are connected to the same network and hence it does not
+matter which interface is used other than for load balancing.
 
 PeerDirect
 ^^^^^^^^^^

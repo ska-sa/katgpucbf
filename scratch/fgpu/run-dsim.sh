@@ -5,8 +5,8 @@ set -e -u
 # Load variables for machine-specific config
 . ../config/$(hostname -s).sh
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 0|1|2|3" 1>&2
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 0|1|2|3 [args...]" 1>&2
     exit 2
 fi
 
@@ -30,6 +30,7 @@ nproc="$(nproc)"
 cpu1="$(($nproc * $1 / 4))"
 cpu2="$(($cpu1 + 1))"
 addresses="239.102.$1.64+7:7148 239.102.$1.72+7:7148"
+shift
 
 set -x
 exec spead2_net_raw taskset -c $cpu2 dsim \
@@ -40,4 +41,4 @@ exec spead2_net_raw taskset -c $cpu2 dsim \
     --ttl 2 \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
-    $addresses
+    $addresses "$@"
