@@ -1106,9 +1106,11 @@ class Engine(aiokatcp.DeviceServer):
         async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
-            with self.monitor.with_state("run_receive", "wait events"):
-                # Make sure all the item's events are past.
-                await in_item.async_wait_for_events()
+            # Make sure all the item's events are complete before overwriting
+            # the data. This is not needed for vkgdr because in that case it's
+            # handled by _push_recv_chunks.
+            if not self.use_vkgdr:
+                in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunks[0].timestamp)
 
             # In steady-state, chunks should be the same size, but during
