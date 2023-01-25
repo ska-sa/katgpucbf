@@ -507,7 +507,7 @@ class Engine(aiokatcp.DeviceServer):
         self.use_vkgdr = use_vkgdr
 
         # Tuning knobs not exposed via arguments
-        n_in = 3
+        n_in = 4
         n_send = 4
         n_out = n_send if use_peerdirect else 2
 
