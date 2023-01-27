@@ -507,7 +507,7 @@ class Engine(aiokatcp.DeviceServer):
         self.use_vkgdr = use_vkgdr
 
         # Tuning knobs not exposed via arguments
-        n_in = 3
+        n_in = 4
         n_send = 4
         n_out = n_send if use_peerdirect else 2
 
@@ -875,7 +875,6 @@ class Engine(aiokatcp.DeviceServer):
     def _pop_in(self) -> None:
         """Remove the oldest InItem."""
         item = self._in_items.popleft()
-        event = self._compute.command_queue.enqueue_marker()
         if self.use_vkgdr:
             chunks = []
             for pol_data in item.pol_data:
@@ -883,9 +882,7 @@ class Engine(aiokatcp.DeviceServer):
                 assert pol_data.chunk is not None
                 chunks.append(pol_data.chunk)
                 pol_data.chunk = None
-            asyncio.create_task(self._push_recv_chunks(chunks, event))
-        else:
-            item.events.append(event)
+            asyncio.create_task(self._push_recv_chunks(chunks, item.events))
         self._in_free_queue.put_nowait(item)
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
@@ -940,12 +937,12 @@ class Engine(aiokatcp.DeviceServer):
             self._out_item.timestamp = new_timestamp
 
     @staticmethod
-    async def _push_recv_chunks(chunks: Iterable[recv.Chunk], event: AbstractEvent) -> None:
+    async def _push_recv_chunks(chunks: Iterable[recv.Chunk], events: Iterable[AbstractEvent]) -> None:
         """Return chunks to the streams once `event` has fired.
 
         This is only used when using vkgdr.
         """
-        await async_wait_for_events([event])
+        await async_wait_for_events(events)
         for chunk in chunks:
             chunk.recycle()
 
@@ -1045,6 +1042,9 @@ class Engine(aiokatcp.DeviceServer):
                     self._compute.run_frontend(
                         samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
                     )
+                    # Replace events rather than adding to it, since this event
+                    # will be sequenced after any prior events
+                    self._in_items[0].events = [self._compute.command_queue.enqueue_marker()]
                     self._out_item.n_spectra += batch_spectra
                     # Work out which output spectra contain missing data.
                     self._out_item.present[out_slice] = True
@@ -1106,9 +1106,11 @@ class Engine(aiokatcp.DeviceServer):
         async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
-            with self.monitor.with_state("run_receive", "wait events"):
-                # Make sure all the item's events are past.
-                await in_item.async_wait_for_events()
+            # Make sure all the item's events are complete before overwriting
+            # the data. This is not needed for vkgdr because in that case it's
+            # handled by _push_recv_chunks.
+            if not self.use_vkgdr:
+                in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunks[0].timestamp)
 
             # In steady-state, chunks should be the same size, but during
