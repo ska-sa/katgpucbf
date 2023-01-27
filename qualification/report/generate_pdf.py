@@ -55,6 +55,7 @@ from pylatex.lists import Description
 from pylatex.package import Package
 from pylatex.utils import bold, escape_latex
 
+DEFAULT_DOC_ID = "E1200-0000-005-dev"  # We default to the report, not the procedure
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
@@ -877,16 +878,16 @@ def main():
     parser.add_argument("pdf", help="PDF file to write")
     parser.add_argument("-c", "--commit-id", action="store_true", help="Output commit ID of katgpucbf image")
     parser.add_argument(
-        "--report-doc-id",
+        "--doc-id",
         help="Document number to write to the qualification test report",
         type=str,
-        default="E1200-0000-005",
+        default=DEFAULT_DOC_ID,
     )
     args = parser.parse_args()
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
-    doc = document_from_list(result_list, args.report_doc_id)
+    doc = document_from_list(result_list, args.doc_id)
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
     with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
