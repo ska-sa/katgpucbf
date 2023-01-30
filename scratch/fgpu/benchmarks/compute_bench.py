@@ -36,7 +36,10 @@ def main():
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--kernel", choices=["all", "pfb_fir", "fft", "postproc"], default="all")
     parser.add_argument(
-        "--sem", type=int, metavar="N", help="Measure after every N iterations to estimate SEM (standard error in the mean)"
+        "--sem",
+        type=int,
+        metavar="N",
+        help="Measure after every N iterations to estimate SEM (standard error in the mean)",
     )
     args = parser.parse_args()
     if args.sem is not None:
