@@ -35,7 +35,18 @@ def main():
     parser.add_argument("--dig-sample-bits", type=int, default=DIG_SAMPLE_BITS)
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--kernel", choices=["all", "pfb_fir", "fft", "postproc"], default="all")
+    parser.add_argument(
+        "--sem",
+        type=int,
+        metavar="N",
+        help="Measure after every N iterations to estimate SEM (standard error in the mean)",
+    )
     args = parser.parse_args()
+    if args.sem is not None:
+        if args.sem <= 0:
+            parser.error("--sem must be positive")
+        if args.passes % args.sem != 0:
+            parser.error("--sem must divide into --passes")
 
     rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
@@ -94,13 +105,27 @@ def main():
 
         run = locals()[f"run_{args.kernel}"]
         run()  # Warmup pass
-        start = command_queue.enqueue_marker()
-        for _ in range(args.passes):
+
+        markers = [command_queue.enqueue_marker()]
+        for i in range(args.passes):
             run()
-        stop = command_queue.enqueue_marker()
+            if args.sem is not None and (i + 1) % args.sem == 0:
+                markers.append(command_queue.enqueue_marker())
+        if args.sem is None:
+            markers.append(command_queue.enqueue_marker())
         command_queue.finish()
-        average = stop.time_since(start) / args.passes
-        print(f"{average * 1000:.3f} ms")
+        average = markers[-1].time_since(markers[0]) / args.passes
+        if args.sem is not None:
+            times = []
+            for i in range(1, len(markers)):
+                times.append(markers[i].time_since(markers[i - 1]))
+            # Standard error in the mean of elements of times
+            measure_sem = np.std(times, ddof=1) / np.sqrt(len(times))
+            # Standard error in `average`
+            sem = measure_sem / args.sem
+            print(f"{average * 1000:.5f} ± {sem * 1000:.5f} ms")
+        else:
+            print(f"{average * 1000:.5f} ms")
 
 
 if __name__ == "__main__":
