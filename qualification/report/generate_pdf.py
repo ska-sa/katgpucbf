@@ -897,14 +897,12 @@ def main():
     parser.add_argument("--generate-procedure-doc", action="store_false", dest="make_report", default=True)
     parser.add_argument(
         "--doc-id",
-        help="Document number to write to the qualification test report",
+        help="Document number to write to the resulting PDF",
         type=str,
-        default=DEFAULT_DOC_ID,
     )
     args = parser.parse_args()
-    if args.make_report is False and args.doc_id == DEFAULT_DOC_ID:
-        # The user has opted to make a procedure instead, but not explicitly supplied an ID.
-        args.doc_id = DEFAULT_PROCEDURE_DOC_ID
+    if args.doc_id is None:
+        args.doc_id = DEFAULT_DOC_ID if args.make_report else DEFAULT_PROCEDURE_DOC_ID
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
