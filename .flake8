@@ -9,14 +9,22 @@ max-complexity = 15
 # specify errors/checks to ignore
 # this list is tailored to work well with the black formatter
 ignore =
-	E203, # 'whitespace before :' error
-	W503  # 'line break before binary operator' error
+	# 'whitespace before :' error
+	E203,
+	# 'line break before binary operator' error
+	W503
 
 # specify which checks to enable
 select =
-	C, # complexity checks
-	E, # pep8 errors
-	F, # pyflakes fatals
-	W, # pep8 warnings
-	B, # bugbear checks for design issues (requires flake8-bugbear)
-	N  # pep8 naming (requires pep8-naming)
+	# complexity checks
+	C,
+	# pep8 errors
+	E,
+	# pyflakes fatals
+	F,
+	# pep8 warnings
+	W,
+	# bugbear checks for design issues (requires flake8-bugbear)
+	B,
+	# pep8 naming (requires pep8-naming)
+	N
