@@ -56,7 +56,7 @@ from pylatex.lists import Description
 from pylatex.package import Package
 from pylatex.utils import bold, escape_latex
 
-DEFAULT_REPORT_DOC_ID = "E1200-0000-005-dev"  # We default to the report, not the procedure
+DEFAULT_REPORT_DOC_ID = "E1200-0000-005-dev"
 DEFAULT_PROCEDURE_DOC_ID = "E1200-0000-004"
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
