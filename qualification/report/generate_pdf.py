@@ -37,6 +37,7 @@ from docutils.core import publish_parts
 from pylatex import (
     Command,
     Document,
+    Enumerate,
     LongTable,
     MiniPage,
     MultiColumn,
@@ -55,6 +56,8 @@ from pylatex.lists import Description
 from pylatex.package import Package
 from pylatex.utils import bold, escape_latex
 
+DEFAULT_REPORT_DOC_ID = "E1200-0000-005-dev"
+DEFAULT_PROCEDURE_DOC_ID = "E1200-0000-004"
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
@@ -739,18 +742,23 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
             config_table.add_hline()
 
 
-def document_from_list(result_list: list, doc_id: str) -> Document:
+def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
     Parameters
     ----------
     result_list
         A list containing the test results.
+    doc_id
+        The document number that will be embedded into the PDF output.
+    make_report
+        Make a report rather than a procedure if true, a procedure rather than
+        a report if false.
 
     Returns
     -------
     doc
-        A document
+        A PyLatex document
     """
     test_configuration, results = parse(result_list)
     requirements_verified = extract_requirements_verified(results)
@@ -764,65 +772,75 @@ def document_from_list(result_list: list, doc_id: str) -> Document:
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.set_variable("docId", doc_id)
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
-    doc.append(Command("title", "Integration Test Report"))
+    doc.append(Command("title", f"Integration Test {'Report' if make_report else 'Procedure'}"))
     doc.append(Command("makekatdocbeginning"))
 
     _doc_requirements_verified(doc, requirements_verified)
 
-    _doc_test_configuration(doc, test_configuration)
+    if make_report:
+        _doc_test_configuration(doc, test_configuration)
 
-    with doc.create(Section("Result Summary")) as summary_section:
-        _doc_result_summary(summary_section, results)
+        with doc.create(Section("Result Summary")) as summary_section:
+            _doc_result_summary(summary_section, results)
 
-    with doc.create(Section("Detailed Test Results")) as section:
+    with doc.create(Section("Detailed Test Results" if make_report else "Test Procedures")) as section:
         for result in results:
             with section.create(Subsection(result.full_text_name, label=result.name)):
                 section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
                 with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
                     _doc_requirements(requirements_sec, result.requirements)
-                with section.create(Subsubsection("Results")) as results_sec:
-                    _doc_outcome(results_sec, test_configuration, result)
-                with section.create(Subsubsection("Procedure", label=False)) as procedure:
-                    with section.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
-                        procedure_table.add_hline()
-                        assert result.start_time is not None
-                        for step in result.steps:
-                            procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
-                            procedure_table.add_hline()
-                            for item in step.items:
-                                if isinstance(item, Detail):
-                                    procedure_table.add_row(
-                                        [
-                                            f"{readable_duration(item.timestamp - result.start_time)}",
-                                            item.message,
-                                        ]
-                                    )
-                                elif isinstance(item, Failure):
-                                    # add_row doesn't seem to have a way to put
-                                    # more than one sequential command into a
-                                    # cell. Just construct the cell by hand.
-                                    # Without the Bflushleft there is (for some
-                                    # reason) a lot of extra vertical space.
-                                    cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
-                                    cell += "\n" + item.message + "\n"
-                                    cell += r"\end{lstlisting}\end{Bflushleft}"
-                                    procedure_table.add_row(
-                                        [
-                                            f"{readable_duration(item.timestamp - result.start_time)}",
-                                            NoEscape(cell),
-                                        ]
-                                    )
-                                elif isinstance(item, Figure):
-                                    mp = MiniPage(width=NoEscape(r"\textwidth"))
-                                    mp.append(NoEscape(r"\center"))
-                                    mp.append(NoEscape(item.code))
-                                    procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
-                                procedure_table.add_hline()
 
-                    if result.failure_messages:
-                        with procedure.create(LstListing()) as failure_message:
-                            for message in result.failure_messages:
-                                failure_message.append(message)
+                if make_report:
+                    with section.create(Subsubsection("Results")) as results_sec:
+                        _doc_outcome(results_sec, test_configuration, result)
+
+                with section.create(Subsubsection("Procedure", label=False)) as procedure:
+                    if make_report:
+                        with procedure.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
+                            procedure_table.add_hline()
+                            assert result.start_time is not None
+                            for step in result.steps:
+                                procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
+                                procedure_table.add_hline()
+                                for item in step.items:
+                                    if isinstance(item, Detail):
+                                        procedure_table.add_row(
+                                            [
+                                                f"{readable_duration(item.timestamp - result.start_time)}",
+                                                item.message,
+                                            ]
+                                        )
+                                    elif isinstance(item, Failure):
+                                        # add_row doesn't seem to have a way to put
+                                        # more than one sequential command into a
+                                        # cell. Just construct the cell by hand.
+                                        # Without the Bflushleft there is (for some
+                                        # reason) a lot of extra vertical space.
+                                        cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
+                                        cell += "\n" + item.message + "\n"
+                                        cell += r"\end{lstlisting}\end{Bflushleft}"
+                                        procedure_table.add_row(
+                                            [
+                                                f"{readable_duration(item.timestamp - result.start_time)}",
+                                                NoEscape(cell),
+                                            ]
+                                        )
+                                    elif isinstance(item, Figure):
+                                        mp = MiniPage(width=NoEscape(r"\textwidth"))
+                                        mp.append(NoEscape(r"\center"))
+                                        mp.append(NoEscape(item.code))
+                                        procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                                    procedure_table.add_hline()
+
+                        if result.failure_messages:
+                            with procedure.create(LstListing()) as failure_message:
+                                for message in result.failure_messages:
+                                    failure_message.append(message)
+
+                    else:
+                        with procedure.create(Enumerate()) as test_steps:
+                            for step in result.steps:
+                                test_steps.add_item(step.message)
 
     return doc
 
@@ -877,16 +895,23 @@ def main():
     parser.add_argument("pdf", help="PDF file to write")
     parser.add_argument("-c", "--commit-id", action="store_true", help="Output commit ID of katgpucbf image")
     parser.add_argument(
-        "--report-doc-id",
-        help="Document number to write to the qualification test report",
+        "--generate-procedure-doc",
+        action="store_false",
+        dest="make_report",
+        help="Generate a procedure document, rather than the default report",
+    )
+    parser.add_argument(
+        "--doc-id",
+        help="Document number to write to the resulting PDF",
         type=str,
-        default="E1200-0000-005",
     )
     args = parser.parse_args()
+    if args.doc_id is None:
+        args.doc_id = DEFAULT_REPORT_DOC_ID if args.make_report else DEFAULT_PROCEDURE_DOC_ID
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
-    doc = document_from_list(result_list, args.report_doc_id)
+    doc = document_from_list(result_list, args.doc_id, make_report=args.make_report)
     if args.pdf.endswith(".pdf"):
         args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
     with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
