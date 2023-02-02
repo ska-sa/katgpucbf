@@ -1,5 +1,6 @@
-# Changelog
+Changelog
+---------
 
-## 0.1
-- Initial tagged release. Wideband correlator functionality is considered
-  stable, pending further shakedowns.
+.. rubric:: Version 0.1
+
+- Initial release. Wideband correlator functionality is considered stable.
