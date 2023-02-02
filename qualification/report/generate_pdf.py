@@ -56,7 +56,7 @@ from pylatex.lists import Description
 from pylatex.package import Package
 from pylatex.utils import bold, escape_latex
 
-DEFAULT_DOC_ID = "E1200-0000-005-dev"  # We default to the report, not the procedure
+DEFAULT_REPORT_DOC_ID = "E1200-0000-005-dev"  # We default to the report, not the procedure
 DEFAULT_PROCEDURE_DOC_ID = "E1200-0000-004"
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
@@ -894,7 +894,12 @@ def main():
     parser.add_argument("input", help="Output of pytest --report-log=...")
     parser.add_argument("pdf", help="PDF file to write")
     parser.add_argument("-c", "--commit-id", action="store_true", help="Output commit ID of katgpucbf image")
-    parser.add_argument("--generate-procedure-doc", action="store_false", dest="make_report", default=True)
+    parser.add_argument(
+        "--generate-procedure-doc",
+        action="store_false",
+        dest="make_report",
+        help="Generate a procedure document, rather than the default report",
+    )
     parser.add_argument(
         "--doc-id",
         help="Document number to write to the resulting PDF",
@@ -902,7 +907,7 @@ def main():
     )
     args = parser.parse_args()
     if args.doc_id is None:
-        args.doc_id = DEFAULT_DOC_ID if args.make_report else DEFAULT_PROCEDURE_DOC_ID
+        args.doc_id = DEFAULT_REPORT_DOC_ID if args.make_report else DEFAULT_PROCEDURE_DOC_ID
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
