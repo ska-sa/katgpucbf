@@ -771,8 +771,9 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
     doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
     doc.set_variable("docId", doc_id)
+    doc.set_variable("docType", f"Qualification Test {'Report' if make_report else 'Procedure'}")
     doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
-    doc.append(Command("title", f"Integration Test {'Report' if make_report else 'Procedure'}"))
+    doc.append(Command("title", f"MeerKAT Extension CBF Qualification Test {'Report' if make_report else 'Procedure'}"))
     doc.append(Command("makekatdocbeginning"))
 
     _doc_requirements_verified(doc, requirements_verified)
