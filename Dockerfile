@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1
 
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -173,5 +173,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
 COPY --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+# Remove all the banner text that ends up in the logs
+RUN rm -- /opt/nvidia/entrypoint.d/*
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
 ENV PATH=/venv/bin:$PATH
