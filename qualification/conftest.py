@@ -62,6 +62,8 @@ ini_options = [
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
+    IniOption(name="channels", help="Space-separated list of channel counts to test", type="args", default=["8192"]),
+    IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
 ]
 
 
@@ -125,6 +127,11 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             values = [min(max_antennas, DEFAULT_ANTENNAS)]
         values = [value for value in values if value <= max_antennas]
         metafunc.parametrize("n_antennas", values, indirect=True)
+    if "band" in metafunc.fixturenames:
+        metafunc.parametrize("band", metafunc.config.getini("bands"), indirect=True)
+    if "n_channels" in metafunc.fixturenames:
+        values = [int(value) for value in metafunc.config.getini("channels")]
+        metafunc.parametrize("n_channels", values, indirect=True)
 
 
 # Need to redefine this from pytest-asyncio to have it at package scope
@@ -147,16 +154,13 @@ def n_dsims() -> int:  # noqa: D401
     return 1
 
 
-@pytest.fixture(scope="package", params=[8192])
+@pytest.fixture(scope="package")
 def n_channels(request: pytest.FixtureRequest) -> int:  # noqa: D401
     """Number of channels for the channeliser."""
     return request.param
 
 
-@pytest.fixture(
-    scope="package",
-    params=["l"],
-)
+@pytest.fixture(scope="package")
 def band(request) -> str:  # noqa: D104
     """Band ID."""
     return request.param
