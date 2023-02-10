@@ -41,6 +41,8 @@ from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+DEFAULT_ANTENNAS = 4  #: Number of antennas for antenna_channelised_voltage tests
+FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
@@ -59,6 +61,9 @@ ini_options = [
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default="false"),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
+    IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
+    IniOption(name="channels", help="Space-separated list of channel counts to test", type="args", default=["8192"]),
+    IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
 ]
 
 
@@ -111,6 +116,26 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     )
 
 
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Dynamically parametrize number of antennas etc based on command line arguments."""
+    if "n_antennas" in metafunc.fixturenames:
+        rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
+        max_antennas = int(metafunc.config.getini("max_antennas"))
+        if rel_path.parts[0] == "baseline_correlation_products":
+            values = FULL_ANTENNAS
+        else:
+            values = [min(max_antennas, DEFAULT_ANTENNAS)]
+        values = [value for value in values if value <= max_antennas]
+        metafunc.parametrize("n_antennas", values, indirect=True)
+    if "band" in metafunc.fixturenames:
+        metafunc.parametrize("band", metafunc.config.getini("bands"), indirect=True)
+    if "n_channels" in metafunc.fixturenames:
+        # NB: don't try to convert the string-typed values to integers here.
+        # It will generate new int objects each time, causing pytest to treat
+        # them as different and hence it won't reuse the fixture between tests.
+        metafunc.parametrize("n_channels", metafunc.config.getini("channels"), indirect=True)
+
+
 # Need to redefine this from pytest-asyncio to have it at package scope
 @pytest.fixture(scope="package")
 def event_loop():  # noqa: D103
@@ -120,30 +145,24 @@ def event_loop():  # noqa: D103
 
 
 @pytest.fixture(scope="package")
-def n_antennas():  # noqa: D401
+def n_antennas(request: pytest.FixtureRequest):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
-    return 4
+    return request.param
 
 
 @pytest.fixture(scope="package")
-def n_dsims():  # noqa: D401
+def n_dsims() -> int:  # noqa: D401
     """Number of simulated digitisers."""
     return 1
 
 
-@pytest.fixture(
-    scope="package",
-    params=[8192],
-)
-def n_channels(request):  # noqa: D401
+@pytest.fixture(scope="package")
+def n_channels(request: pytest.FixtureRequest) -> int:  # noqa: D401
     """Number of channels for the channeliser."""
-    return request.param
+    return int(request.param)
 
 
-@pytest.fixture(
-    scope="package",
-    params=["l"],
-)
+@pytest.fixture(scope="package")
 def band(request) -> str:  # noqa: D104
     """Band ID."""
     return request.param
