@@ -130,8 +130,10 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "band" in metafunc.fixturenames:
         metafunc.parametrize("band", metafunc.config.getini("bands"), indirect=True)
     if "n_channels" in metafunc.fixturenames:
-        values = [int(value) for value in metafunc.config.getini("channels")]
-        metafunc.parametrize("n_channels", values, indirect=True)
+        # NB: don't try to convert the string-typed values to integers here.
+        # It will generate new int objects each time, causing pytest to treat
+        # them as different and hence it won't reuse the fixture between tests.
+        metafunc.parametrize("n_channels", metafunc.config.getini("channels"), indirect=True)
 
 
 # Need to redefine this from pytest-asyncio to have it at package scope
@@ -157,7 +159,7 @@ def n_dsims() -> int:  # noqa: D401
 @pytest.fixture(scope="package")
 def n_channels(request: pytest.FixtureRequest) -> int:  # noqa: D401
     """Number of channels for the channeliser."""
-    return request.param
+    return int(request.param)
 
 
 @pytest.fixture(scope="package")
