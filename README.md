@@ -5,8 +5,11 @@ developed for the MeerKAT Extension Radio Telescope by the South African Radio
 Astronomy Observatory (SARAO). A B-engine for beamforming is planned, but not
 yet included.
 
-Detailed documentation can be found in the [`doc/`](doc/) folder, and can be
-built with Sphinx. Included is also a [guide for development](doc/dev-guide.rst).
+Detailed documentation can be found on
+[readthedocs](https://katgpucbf.readthedocs.io), including a [guide for
+development](https://katgpucbf.readthedocs.io/en/latest/dev-guide.html).
+The documentation sources are in the [`doc/`](doc/) folder, and can be
+built with Sphinx.
 
 ## Requirements
 The following requirements are what we consider to be the minimum for making use
