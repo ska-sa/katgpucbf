@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -136,7 +136,7 @@ async def sample_tone_response(
 ) -> np.ndarray:
     """Measure power response to tones.
 
-    The input arrays are broadcast with each other. The rest has the same
+    The input arrays are broadcast with each other. The result has the same
     dimensions plus an axis for frequency in the response.
 
     Parameters
@@ -149,15 +149,12 @@ async def sample_tone_response(
     receiver
         Receiver for obtaining the output data.
     """
-    # Identify auto-correlation baselines corresponding to the dsim outputs.
+    # Identify baselines using the two pols from each dsim.
     # The fixtures set up a one-to-one relationship between dsims and antennas.
-    # katsdpcontroller ensures that the dsim is started with V pol first and
-    # the fixtures put V pol first in the axis ordering, so this is fairly
-    # straightforward.
     assert len(receiver.input_labels) == N_POLS * len(receiver.correlator.dsim_clients)
-    autos = []
-    for inp in receiver.input_labels:
-        autos.append(receiver.bls_ordering.index((inp, inp)))
+    corrs = []
+    for i in range(0, len(receiver.input_labels), 2):
+        corrs.append(receiver.bls_ordering.index((receiver.input_labels[i], receiver.input_labels[i + 1])))
 
     channel_width = receiver.bandwidth / receiver.n_chans
     freqs = np.asarray(rel_freqs) * channel_width  # Baseband, which is what dsims work on
@@ -165,32 +162,27 @@ async def sample_tone_response(
     out_shape = np.broadcast_shapes(freqs.shape, amplitude.shape) + (receiver.n_chans,)
     out = np.empty(out_shape, np.int32)
     # Each element is an (out_index, signal_spec) pair. When it fills up to the
-    # number of inputs available, `flush` is called.
+    # number of antennas available, `flush` is called.
     tasks: list[tuple[tuple[int, ...], str]] = []
 
     async def flush() -> None:
         """Execute all the work in `tasks`."""
-        # Each dsim has two inputs. Simplify handling an odd number of tasks
-        # (in the last batch) by just duplicating the last task. We'll end up
-        # writing to the output twice, but it's not a big performance issue.
-        while len(tasks) % N_POLS:
-            tasks.append(tasks[-1])
         requests = []
-        n_dsims = len(tasks) // N_POLS
-        for i in range(n_dsims):
-            signal = ""
-            for j in range(N_POLS):
-                signal += tasks[i * N_POLS + j][1]
+        for i in range(len(tasks)):
+            signal = tasks[i][1] * N_POLS
             requests.append(asyncio.create_task(receiver.correlator.dsim_clients[i].request("signals", signal)))
         await asyncio.gather(*requests)
         _, data = await receiver.next_complete_chunk()
-        for task, bl_idx in zip(tasks, autos):
-            out[task[0]] = data[:, bl_idx, 0]  # Only keep real part
+        for task, bl_idx in zip(tasks, corrs):
+            # In the absence of noise this should be purely real, but
+            # due to quantization noise it is complex. Take the absolute
+            # value.
+            out[task[0]] = np.hypot(data[:, bl_idx, 0], data[:, bl_idx, 1])
 
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
             tasks.append((it.multi_index, f"cw({a}, {f});"))
-            if len(tasks) == receiver.n_inputs:
+            if len(tasks) == len(receiver.correlator.dsim_clients):
                 await flush()
                 tasks = []
     if tasks:

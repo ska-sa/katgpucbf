@@ -41,7 +41,7 @@ from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
-DEFAULT_ANTENNAS = 4  #: Number of antennas for antenna_channelised_voltage tests
+DEFAULT_ANTENNAS = 8  #: Number of antennas for antenna_channelised_voltage tests
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 
 

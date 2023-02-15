@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -115,7 +115,7 @@ async def test_channel_shape(
     x = np.linspace(-2.5, 2.5, len(db_plot))
 
     for xticks, ymin, title in [
-        (np.arange(-2.5, 2.6, 0.5), -100, "Channel response"),
+        (np.arange(-2.5, 2.6, 0.5), -150, "Channel response"),
         (np.arange(-0.5, 0.55, 0.1), -1.5, "Channel response (zoomed)"),
     ]:
         fig = Figure()
