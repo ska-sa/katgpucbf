@@ -18,6 +18,7 @@
 import io
 import logging
 import time
+from typing import Any
 
 import matplotlib.figure
 import matplotlib.ticker
@@ -62,11 +63,16 @@ class POTLocator(matplotlib.ticker.Locator):
 
 
 class Reporter:
-    """Provides mechanisms to log steps taken in a test."""
+    """Provides mechanisms to log steps taken in a test.
 
-    def __init__(self, data: list) -> None:
+    If `raw_data` is true, raw data from line plots in figures will
+    be added to the report.
+    """
+
+    def __init__(self, data: list, raw_data: bool = False) -> None:
         self._data = data
         self._cur_step: list | None = None
+        self._raw_data = raw_data
 
     def config(self, **kwargs) -> None:
         """Report the test configuration."""
@@ -104,7 +110,10 @@ class Reporter:
         """
         if self._cur_step is None:
             raise ValueError("Cannot have figure without a current step")
-        self._cur_step.append({"$msg_type": "figure", "code": code, "data": data})
+        value: dict[str, Any] = {"$msg_type": "figure", "code": code}
+        if self._raw_data:
+            value["data"] = data
+        self._cur_step.append(value)
 
     def figure(self, figure: matplotlib.figure.Figure) -> None:
         """Add a matplotlib figure to the report.
