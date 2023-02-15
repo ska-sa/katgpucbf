@@ -58,12 +58,13 @@ ini_options = [
         name="prometheus_url", help="URL to Prometheus server for querying hardware configuration", type="string"
     ),
     IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
-    IniOption(name="use_ibv", help="Use ibverbs", type="bool", default="false"),
+    IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
     IniOption(name="channels", help="Space-separated list of channel counts to test", type="args", default=["8192"]),
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
+    IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
 ]
 
 
@@ -87,7 +88,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
     config.addinivalue_line("markers", "name(name): human-readable name for the test")
     for option in ini_options:
-        assert config.getini(option.name), f"{option.name} missing from pytest.ini"
+        assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
 
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:
@@ -191,7 +192,7 @@ def pdf_report(request, monkeypatch) -> Reporter:
     if name_marker is not None:
         data[0]["test_name"] = name_marker.args[0]
     request.node.user_properties.append(("pdf_report_data", data))
-    reporter = Reporter(data)
+    reporter = Reporter(data, raw_data=request.config.getini("raw_data"))
     orig_log_failure = pytest_check.check_methods.log_failure
     orig_get_full_context = pytest_check.check_methods.get_full_context
 
