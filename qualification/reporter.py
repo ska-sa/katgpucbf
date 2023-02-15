@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -96,7 +96,7 @@ class Reporter:
             raise ValueError("Cannot have failure without a current step")
         self._cur_step.append({"$msg_type": "failure", "message": message, "timestamp": time.time()})
 
-    def raw_figure(self, code: str) -> None:
+    def raw_figure(self, code: str, data: list = []) -> None:  # noqa: B006
         """Add raw LaTeX to the document.
 
         It will be set inside a minipage and is intended for figures, but could
@@ -104,7 +104,7 @@ class Reporter:
         """
         if self._cur_step is None:
             raise ValueError("Cannot have figure without a current step")
-        self._cur_step.append({"$msg_type": "figure", "code": code})
+        self._cur_step.append({"$msg_type": "figure", "code": code, "data": data})
 
     def figure(self, figure: matplotlib.figure.Figure) -> None:
         """Add a matplotlib figure to the report.
@@ -114,6 +114,10 @@ class Reporter:
         figure
             The figure to plot
         """
+        data = []
+        for ax in figure.axes:
+            for line in ax.get_lines():
+                data.append(line.get_xydata().tolist())
         content = io.StringIO()
         figure.savefig(content, format="pgf", backend="pgf")
-        self.raw_figure(content.getvalue())
+        self.raw_figure(content.getvalue(), data=data)
