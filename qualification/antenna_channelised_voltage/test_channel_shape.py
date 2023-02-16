@@ -111,11 +111,11 @@ async def test_channel_shape(
     with np.errstate(divide="ignore"):  # Avoid warnings when taking log of 0
         db = 10 * np.log10(hdr_data / peak)
     # Slice out 5 channels, centred on the chosen one
-    db_plot = db[(base_channel - 2) * resolution : (base_channel + 3) * resolution + 1]
-    x = np.linspace(-2.5, 2.5, len(db_plot))
+    db_plot = db[(base_channel - 3) * resolution : (base_channel + 4) * resolution + 1]
+    x = np.linspace(-3.5, 3.5, len(db_plot))
 
     for xticks, ymin, title in [
-        (np.arange(-2.5, 2.6, 0.5), -150, "Channel response"),
+        (np.arange(-3.5, 3.6, 0.5), -150, "Channel response"),
         (np.arange(-0.5, 0.55, 0.1), -1.5, "Channel response (zoomed)"),
     ]:
         fig = Figure()
