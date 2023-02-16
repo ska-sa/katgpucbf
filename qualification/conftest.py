@@ -172,7 +172,7 @@ def band(request) -> str:  # noqa: D104
 @pytest.fixture(scope="package")
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
-    return 0.5
+    return 8.0
 
 
 @pytest.fixture(autouse=True)

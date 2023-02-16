@@ -304,7 +304,7 @@ class BaselineCorrelationProductsReceiver:
         min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: float | None = 10.0,
+        timeout: float | None = 40.0,
     ) -> tuple[int, NDArray[np.int32]]:
         """Return the data from the next complete chunk from the stream.
 
@@ -327,7 +327,7 @@ class BaselineCorrelationProductsReceiver:
         min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: float | None = 10.0,
+        timeout: float | None = 40.0,
     ) -> list[tuple[int, katgpucbf.recv.Chunk]]:
         """Obtain `n` consecutive complete chunks from the stream.
 
