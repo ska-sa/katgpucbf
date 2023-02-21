@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -57,7 +57,8 @@ async def test_accum_length(
     delta_s = delta / receiver.scale_factor_timestamp
     pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms.")
     with check:
-        assert delta_s == receiver.int_time
+        # pytest.approx just to allow for floating-point rounding
+        assert delta_s == pytest.approx(receiver.int_time, rel=1e-15)
 
     pdf_report.step("Compare power against expected value.")
     # Sum over channels, but use only one baseline and real part because
