@@ -81,6 +81,7 @@ pipeline {
                  sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
              } catch (Exception ex) {
                  echo "Couldn't generate report / procedure documents: ${ex}"
+                 throw ex;
              } finally {
                  publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf', reportTitles: 'procedure.pdf'])
                  publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf', reportTitles: 'report.json'])
