@@ -78,8 +78,8 @@ pipeline {
        }
      }
 
-    stage('Publish test results') {
-      steps {
+    post {
+      always {
         junit 'result.xml'
         script {
             try {
