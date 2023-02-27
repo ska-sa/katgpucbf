@@ -77,7 +77,7 @@ async def test_delay_application_time(
         target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
-        async for timestamp, chunk in receiver.complete_chunks(max_delay=0):
+        async for timestamp, chunk in receiver.complete_chunks(min_timestamp=target_acc_ts):
             with chunk:
                 pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
                 total = np.sum(chunk.data[:, bl_idx, :], axis=0)  # Sum over channels
