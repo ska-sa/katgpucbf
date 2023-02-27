@@ -266,7 +266,7 @@ class BaselineCorrelationProductsReceiver:
         Parameters
         ----------
         min_timestamp
-            Chunks with a timestamp less then this value are discarded. If the
+            Chunks with a timestamp less than this value are discarded. If the
             default of ``None`` is used, a value is computed via
             :meth:`CorrelatorRemoteControl.steady_state_timestamp`.
         all_timestamps
