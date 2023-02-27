@@ -18,6 +18,7 @@
 
 """Generate a PDF based on the intermediate JSON output."""
 import argparse
+import copy
 import json
 import logging
 import os
@@ -444,8 +445,9 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
 
         if line["$report_type"] != "TestReport":
             continue
-        # _from_json is an "experimental" function.
-        report = pytest.TestReport._from_json(line)
+        # _from_json is an "experimental" function. It also mutates its argument,
+        # so we have to copy it to avoid altering input_data.
+        report = pytest.TestReport._from_json(copy.deepcopy(line))
         nodeid = report.nodeid
         if not results or results[-1].nodeid != nodeid:
             # It's the first time we've seen this nodeid (otherwise we merge
