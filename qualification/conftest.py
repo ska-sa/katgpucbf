@@ -241,9 +241,6 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 async def _correlator_config_and_description(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
 ) -> tuple[dict, dict]:
-    # Adapted from `sim_correlator.py` but with logic for using multiple dsims
-    # removed. For the time being, we're going to use a single dsim for
-    # consistency with MeerKAT's qualification testing.
 
     config: dict = {
         "version": "3.1",
