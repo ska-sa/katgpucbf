@@ -1,2 +1,3 @@
 -c ../requirements.txt
 -c ../requirements-dev.txt
+pytest-custom_exit_code
