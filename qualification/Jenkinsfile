@@ -126,8 +126,6 @@ pipeline {
       to: '$DEFAULT_RECIPIENTS'
 
       script {
-
-
         ARRAYS = sh(script: 'katcpcmd lab5.sdp.kat.ac.za:5001 product-list', returnStdout: true).trim()
         echo "Currently Running Arrays: ${ARRAYS}"
         if (ARRAYS.contains("jenkins_qualification_correlator")) {
