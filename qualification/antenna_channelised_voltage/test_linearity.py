@@ -38,9 +38,6 @@ async def test_linearity(
     receiver = receive_baseline_correlation_products
     pdf_report.step("Capture channelised data for various input CW scales and check linearity.")
 
-    pdf_report.step("provoke failure")
-    assert False
-
     pdf_report.step("Select a range of CW scales for testing.")
     cw_scales = [0.5**i for i in range(10)]
     pdf_report.detail(f"CW scales: {cw_scales}")
