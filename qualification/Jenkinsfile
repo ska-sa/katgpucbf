@@ -81,16 +81,20 @@ pipeline {
      stage('Publish results') {
        steps {
          script {
+           // Compress and publish json file so that at least we have that.
            sh 'xz --keep --force -T 0 report.json'
            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz', reportTitles: 'report.json.xz'])
 
+           // Generate and publish test report
            COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
            currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
+           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf', reportTitles: 'report.json'])
+
+           // If that worked, we can probably generate and publish a procedure as well
+           sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf', reportTitles: 'procedure.pdf'])
 
-           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf', reportTitles: 'report.json'])
-           sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
-
+           // Since everything is generated, we don't need the original anymore
            sh 'rm -f report.json'
          }
        }
