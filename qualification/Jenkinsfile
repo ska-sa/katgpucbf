@@ -77,7 +77,25 @@ pipeline {
          }
        }
      }
-  }
+
+     stage('Publish results') {
+       steps {
+         script {
+           sh 'xz --keep --force -T 0 report.json'
+           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz', reportTitles: 'report.json.xz'])
+
+           COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+           currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
+           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf', reportTitles: 'procedure.pdf'])
+
+           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf', reportTitles: 'report.json'])
+           sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
+
+           sh 'rm -f report.json'
+         }
+       }
+     }
+   }
 
   /* This post stage is configured to always run at the end of this pipeline,
    * regardless of the completion status. In this stage an email is sent to
@@ -105,17 +123,6 @@ pipeline {
 
       script {
 
-        try {
-            COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
-            sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
-        } finally {
-            currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
-            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf', reportTitles: 'procedure.pdf'])
-            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf', reportTitles: 'report.json'])
-            // If for some reason, the report generation fails, still publish the intermediate json.
-            sh 'xz -f -T 0 report.json'
-            publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz', reportTitles: 'report.json.xz'])
-        }
 
         ARRAYS = sh(script: 'katcpcmd lab5.sdp.kat.ac.za:5001 product-list', returnStdout: true).trim()
         echo "Currently Running Arrays: ${ARRAYS}"
