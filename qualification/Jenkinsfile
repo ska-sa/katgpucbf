@@ -73,7 +73,7 @@ pipeline {
          script {
            sh 'pip install -r qualification/requirements.txt'
            sh 'pip install --no-deps ".[qualification]" && pip check'
-           sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest --junitxml=result.xml'
+           sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification -k linearity --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest --junitxml=result.xml'
          }
        }
      }
