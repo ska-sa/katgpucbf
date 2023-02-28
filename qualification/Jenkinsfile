@@ -94,7 +94,7 @@ pipeline {
 
      stage('Publish results') {
        steps {
-         junit 'result.xml'
+         junit testResults: 'result.xml', skipPublishingChecks: true
 
          // Compress and publish json file so that at least we have that.
          sh 'xz --keep --force -T 0 report.json'
