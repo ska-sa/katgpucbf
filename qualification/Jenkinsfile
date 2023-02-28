@@ -110,9 +110,6 @@ pipeline {
          // If that worked, we can probably generate and publish a procedure as well
          sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
          publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf'])
-
-         // Since everything is generated, we don't need the original anymore
-         sh 'rm -f report.json'
        }
      }
    }
@@ -147,6 +144,8 @@ pipeline {
           sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_correlator 1'
         }
       }
+    }
+    cleanup {
       cleanWs()
     }
   }
