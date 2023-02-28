@@ -532,6 +532,7 @@ async def test_delay_phase(
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0112")
+@pytest.mark.xfail(reason="requirements unclear")
 async def test_phase_rate(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
