@@ -63,6 +63,12 @@ pipeline {
   }
 
   stages {
+    stage('Install requirements to run qualification tests') {
+      steps {
+         sh 'pip install -r qualification/requirements.txt'
+         sh 'pip install --no-deps ".[qualification]" && pip check'
+      }
+    }
 
     /* This stage executes the qualification tests on the latest docker image
      * of katgpucbf that has been previously unit-tested, and generates a report of the
@@ -70,30 +76,52 @@ pipeline {
      */
     stage('Run qualification tests') {
        steps {
-         script {
-           sh 'pip install -r qualification/requirements.txt'
-           sh 'pip install --no-deps ".[qualification]" && pip check'
-           try {
-             sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest'
-           }
-           finally {
-             COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
-             sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
-             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf, report.json', reportTitles: 'report.pdf, report.json'])
-             publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf', reportTitles: 'procedure.pdf'])
-             currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
-           }
-         }
+         /* Run the actual pytest.
+          * Jenkins will not run subsequent steps if pytest returns a non-zero
+          * exit code. Passing --suppress-tests-failed-exit-code causes the
+          * exit code to be zero if there are failed tests, so that we can still
+          * get the report in that case. The junit step will detect the failed
+          * tests and mark the build as unstable.
+          */
+         sh '''
+           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification\
+           --suppress-tests-failed-exit-code \
+           --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest \
+           --junitxml=result.xml
+         '''
        }
-    }
-  }
+     }
+
+     stage('Publish results') {
+       steps {
+         // skipPublishingChecks because it's a feature we don't use.
+         // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
+         junit testResults: 'result.xml', skipPublishingChecks: true
+
+         // Compress and publish json file so that at least we have that.
+         sh 'xz --keep --force -T 0 report.json'
+         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz'])
+
+         script {
+           // Generate and publish test report
+           COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+           currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
+         }
+         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf'])
+
+         // If that worked, we can probably generate and publish a procedure as well
+         sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
+         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf'])
+       }
+     }
+   }
 
   /* This post stage is configured to always run at the end of this pipeline,
    * regardless of the completion status. In this stage an email is sent to
    * the specified address with details of the Jenkins job and a PDF report
    * containing the qualification test results. Any runnning correlator part
    * of the Jenkins qualification test that continues to run at this point will be
-   * stopped. The final step removes the workspace when the build is complete.
+   * stopped.
    */
   post {
     always {
@@ -118,6 +146,9 @@ pipeline {
           sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_correlator 1'
         }
       }
+    }
+    // The final step removes the workspace when the build is complete.
+    cleanup {
       cleanWs()
     }
   }
