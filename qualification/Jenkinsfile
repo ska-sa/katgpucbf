@@ -63,6 +63,12 @@ pipeline {
   }
 
   stages {
+    stage('Install requirements to run qualification tests') {
+      steps {
+         sh 'pip install -r qualification/requirements.txt'
+         sh 'pip install --no-deps ".[qualification]" && pip check'
+      }
+    }
 
     /* This stage executes the qualification tests on the latest docker image
      * of katgpucbf that has been previously unit-tested, and generates a report of the
@@ -70,33 +76,43 @@ pipeline {
      */
     stage('Run qualification tests') {
        steps {
-         script {
-           sh 'pip install -r qualification/requirements.txt'
-           sh 'pip install --no-deps ".[qualification]" && pip check'
-           sh 'spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification --suppress-tests-failed-exit-code --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest --junitxml=result.xml'
-         }
+         /* Run the actual pytest.
+          * --supprress-tests-failed-exit-code argument does what it says, in
+          * case of failed tests, a nonzero exit code is produced, but that
+          * disrupts the Jenkins pipeline including generation of reports which
+          * we don't want to disrupt. JUnit takes care of actually reporting the
+          * results.
+          */
+         sh '''
+           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification\
+           --suppress-tests-failed-exit-code \
+           --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest \
+           --junitxml=result.xml
+         '''
        }
      }
 
      stage('Publish results') {
        steps {
-         script {
-           // Compress and publish json file so that at least we have that.
-           sh 'xz --keep --force -T 0 report.json'
-           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz', reportTitles: 'report.json.xz'])
+         junit 'result.xml'
 
+         // Compress and publish json file so that at least we have that.
+         sh 'xz --keep --force -T 0 report.json'
+         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz'])
+
+         script {
            // Generate and publish test report
            COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
            currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
-           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf', reportTitles: 'report.json'])
-
-           // If that worked, we can probably generate and publish a procedure as well
-           sh(script: 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc')
-           publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf', reportTitles: 'procedure.pdf'])
-
-           // Since everything is generated, we don't need the original anymore
-           sh 'rm -f report.json'
          }
+         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf'])
+
+         // If that worked, we can probably generate and publish a procedure as well
+         sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
+         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf'])
+
+         // Since everything is generated, we don't need the original anymore
+         sh 'rm -f report.json'
        }
      }
    }
@@ -110,8 +126,6 @@ pipeline {
    */
   post {
     always {
-      junit 'result.xml'
-
       emailext attachLog: true,
       attachmentsPattern: 'report.pdf',
       body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
