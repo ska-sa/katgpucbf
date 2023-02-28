@@ -136,6 +136,16 @@ def readable_duration(duration: float) -> str:
             return f"{int(duration)} h {minutes} m {seconds:.3f} s"
 
 
+def outcome_color(outcome: str) -> str:
+    """Get LaTeX color to use for a given outcome."""
+    if outcome == "passed":
+        return "green"
+    elif outcome == "failed":
+        return "red"
+    else:
+        return "black"
+
+
 class DocumentClass(docutils.writers.latex2e.DocumentClass):
     """Override docutils to demote all sections by two levels."""
 
@@ -216,7 +226,8 @@ class Result:
     blurb: str = ""
     requirements: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
-    outcome: Literal["passed", "failed", "skipped"] = "failed"
+    outcome: Literal["passed", "failed", "skipped", "xfail"] = "failed"
+    xfail_reason: str | None = None
     failure_messages: list[str] = field(default_factory=list)
     start_time: float | None = None
     duration: float = 0.0
@@ -465,6 +476,9 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
         # If teardown fails, the whole test should be seen as failing
         if report.outcome != "passed" or report.when == "call":
             result.outcome = report.outcome
+            if report.outcome == "skipped" and report.wasxfail is not None:
+                result.outcome = "xfail"
+                result.xfail_reason = report.wasxfail
         # The test duration will be the sum of setup, call and teardown.
         result.duration += report.duration
         if report.longrepr is not None:
@@ -694,7 +708,7 @@ def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
                 [
                     Hyperref(Marker(result.name, prefix="subsec"), result.text_name),
                     result.parameters,
-                    TextColor("green" if result.outcome == "passed" else "red", result.outcome),
+                    TextColor(outcome_color(result.outcome), result.outcome),
                     readable_duration(result.duration),
                 ]
             )
@@ -719,7 +733,10 @@ def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
 
 def _doc_outcome(section: Container, test_configuration: TestConfiguration, result: Result) -> None:
     section.append("Outcome: ")
-    section.append(TextColor("green" if result.outcome == "passed" else "red", result.outcome.upper()))
+    section.append(TextColor(outcome_color(result.outcome), result.outcome.upper()))
+    if result.xfail_reason:
+        section.append(NoEscape(r"\ "))
+        section.append(f"({result.xfail_reason})")
     section.append(Command("hspace", "1cm"))
     assert result.start_time is not None
     section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time)).strftime('%T')}")

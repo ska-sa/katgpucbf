@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -77,3 +77,12 @@ def test_check(pdf_report: Reporter) -> None:
     pdf_report.step("Expect some good things")
     with check:
         assert 1 == 1
+
+
+@pytest.mark.xfail(reason="Waived")
+def test_xfail(pdf_report: Reporter) -> None:
+    """Do a test that's expected to fail."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that 1 == 2")
+    with check:
+        assert 1 == 2
