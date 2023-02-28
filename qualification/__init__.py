@@ -340,7 +340,7 @@ class BaselineCorrelationProductsReceiver:
         """
         chunks: list[tuple[int, katgpucbf.recv.Chunk]] = []
         async with async_timeout.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(all_timestamps=True):
+            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, all_timestamps=True):
                 if chunk is None:
                     # Throw away failed attempt at getting an adjacent set
                     for _, old_chunk in chunks:
