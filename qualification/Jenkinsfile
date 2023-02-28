@@ -77,7 +77,7 @@ pipeline {
     stage('Run qualification tests') {
        steps {
          /* Run the actual pytest.
-          * --supprress-tests-failed-exit-code argument does what it says, in
+          * --suppress-tests-failed-exit-code argument does what it says, in
           * case of failed tests, a nonzero exit code is produced, but that
           * disrupts the Jenkins pipeline including generation of reports which
           * we don't want to disrupt. JUnit takes care of actually reporting the
