@@ -272,7 +272,7 @@ pytest-asyncio==0.19.0
 pytest-check==1.0.10
     # via katgpucbf (setup.cfg)
 pytest-custom-exit-code==0.3.0
-    # via -r qualification/requirements.in
+    # via katgpucbf (setup.cfg)
 pytest-reportlog==0.1.2
     # via katgpucbf (setup.cfg)
 python-dateutil==2.8.2
