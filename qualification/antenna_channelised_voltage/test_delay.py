@@ -271,7 +271,7 @@ def check_phases(
     actual = actual[1:]
     expected = expected[1:]
     delta = wrap_angle(actual - expected)
-    max_error = np.max(delta)
+    max_error = np.max(np.abs(delta))
     rms_error = np.sqrt(np.mean(np.square(delta)))
     pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f}°.")
     pdf_report.detail(f"RMS error over channels is {np.rad2deg(rms_error):.5f}°.")
