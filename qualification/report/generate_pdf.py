@@ -738,9 +738,9 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
         section.append(NoEscape(r"\ "))
         section.append(f"({result.xfail_reason})")
     section.append(Command("hspace", "1cm"))
-    assert result.start_time is not None
-    section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time)).strftime('%T')}")
-    section.append(Command("hspace", "1cm"))
+    if result.start_time is not None:
+        section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time)).strftime('%T')}")
+        section.append(Command("hspace", "1cm"))
     section.append(f"Duration: {readable_duration(result.duration)} seconds\n")
 
     with section.create(LongTable(r"|l|p{0.4\linewidth}|")) as config_table:
@@ -818,8 +818,8 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
                     if make_report:
                         with procedure.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
                             procedure_table.add_hline()
-                            assert result.start_time is not None
                             for step in result.steps:
+                                assert result.start_time is not None
                                 procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
                                 procedure_table.add_hline()
                                 for item in step.items:
