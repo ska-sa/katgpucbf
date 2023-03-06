@@ -140,7 +140,10 @@ pipeline {
     }
 
     stage('Build and push Docker image') {
-      when { not { changeRequest() }}
+      when {
+        not { changeRequest() }
+        equals expected: "SUCCESS", actual: currentBuild.currentResult
+      }
       environment {
         DOCKER_BUILDKIT = '1'
       }
