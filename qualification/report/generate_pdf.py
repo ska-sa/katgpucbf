@@ -786,6 +786,7 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
+    doc.packages.add(Package("hyperref", "colorlinks,linkcolor=blue"))
     today = date.today()  # TODO: should store inside the JSON
     doc.set_variable("theAuthor", "DSP Team")
     doc.set_variable("docDate", today.strftime("%d %B %Y"))
