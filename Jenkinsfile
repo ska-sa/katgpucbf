@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021-2022, National Research Foundation (SARAO)
+ * Copyright (c) 2021-2023, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -108,14 +108,14 @@ pipeline {
           when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
           options { timeout(time: 10, unit: 'MINUTES') }
           steps {
-            sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch'
+            sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
           }
         }
         stage('Run pytest (full)') {
           when { anyOf { changeRequest target: 'main'; branch 'main' } }
           options { timeout(time: 60, unit: 'MINUTES') }
           steps {
-            sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch'
+            sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
           }
         }
 
@@ -140,7 +140,10 @@ pipeline {
     }
 
     stage('Build and push Docker image') {
-      when { not { changeRequest() }}
+      when {
+        not { changeRequest() }
+        equals expected: "SUCCESS", actual: currentBuild.currentResult
+      }
       environment {
         DOCKER_BUILDKIT = '1'
       }
