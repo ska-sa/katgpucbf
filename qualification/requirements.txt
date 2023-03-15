@@ -129,7 +129,7 @@ katsdpsigproc==1.6.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-katsdptelstate==0.11
+katsdptelstate==0.13
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -176,7 +176,6 @@ netifaces==0.11.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdpservices
-    #   katsdptelstate
 numba==0.56.3
     # via
     #   -c qualification/../requirements-dev.txt
