@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -188,6 +188,7 @@ async def async_main() -> None:
 
     if args.dither_seed is None:
         args.dither_seed = np.random.SeedSequence().entropy  # Generate a random seed
+        assert isinstance(args.dither_seed, int)  # Keeps mypy happy
 
     # Enable real-time scheduling after creating signal_service (which spawns a
     # bunch of processes we don't want to have it) but before creating the send
