@@ -136,7 +136,7 @@ katsdpsigproc==1.6.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
-katsdptelstate==0.11
+katsdptelstate==0.13
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -175,7 +175,6 @@ netifaces==0.11.0
     # via
     #   -c requirements.txt
     #   katsdpservices
-    #   katsdptelstate
 nodeenv==1.7.0
     # via pre-commit
 numba==0.56.3
