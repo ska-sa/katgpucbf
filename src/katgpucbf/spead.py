@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -38,7 +38,10 @@ DIGITISER_STATUS_SATURATION_COUNT_SHIFT = 32
 #: SPEAD flavour used for all send streams
 FLAVOUR = spead2.Flavour(4, 64, 48, 0)
 
-# Format for immediate items
+#: Default UDP port
+DEFAULT_PORT = 7148
+
+#: Format for immediate items
 IMMEDIATE_FORMAT = [("u", FLAVOUR.heap_address_bits)]
 
 

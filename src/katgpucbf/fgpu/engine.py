@@ -31,7 +31,6 @@ import numpy as np
 import spead2.recv
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
-from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     BYTE_BITS,
@@ -55,6 +54,7 @@ from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, recv, send
 from .compute import Compute, ComputeTemplate
 from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
+from .output import Output, WidebandOutput
 
 logger = logging.getLogger(__name__)
 
@@ -377,8 +377,6 @@ class Engine(aiokatcp.DeviceServer):
         The number of samples per digitiser packet.
     src_buffer
         The size of the network receive buffer (per polarisation).
-    dst
-        A list of destination endpoints for the outgoing data.
     dst_interface
         IP addresses of the network devices to use for output.
     dst_ttl
@@ -393,6 +391,9 @@ class Engine(aiokatcp.DeviceServer):
     dst_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
+    outputs
+        Output streams to generate. At present this must be a single
+        WidebandOutput.
     adc_sample_rate
         Digitiser sampling rate (in Hz), used to determine transmission rate.
     send_rate_factor
@@ -415,12 +416,6 @@ class Engine(aiokatcp.DeviceServer):
         digitiser data.
     spectra_per_heap
         Number of spectra in each output heap.
-    channels
-        Number of output channels to produce.
-    taps
-        Number of taps in each branch of the PFB-FIR.
-    w_cutoff
-        Scaling factor for the width of the channel response.
     max_delay_diff
         Maximum supported difference between delays across polarisations (in samples).
     gain
@@ -457,13 +452,13 @@ class Engine(aiokatcp.DeviceServer):
         src_comp_vector: list[int],
         src_packet_samples: int,
         src_buffer: int,
-        dst: list[Endpoint],
         dst_interface: list[str],
         dst_ttl: int,
         dst_ibv: bool,
         dst_packet_payload: int,
         dst_affinity: int,
         dst_comp_vector: int,
+        outputs: list[Output],
         adc_sample_rate: float,
         send_rate_factor: float,
         feng_id: int,
@@ -471,9 +466,6 @@ class Engine(aiokatcp.DeviceServer):
         chunk_samples: int,
         spectra: int,
         spectra_per_heap: int,
-        channels: int,
-        taps: int,
-        w_cutoff: float,
         dig_sample_bits: int,
         max_delay_diff: int,
         gain: complex,
@@ -488,6 +480,10 @@ class Engine(aiokatcp.DeviceServer):
         self._populate_sensors(
             self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
+
+        # Narrowband is not supported yet
+        assert len(outputs) == 1
+        assert isinstance(outputs[0], WidebandOutput)
 
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
@@ -521,18 +517,18 @@ class Engine(aiokatcp.DeviceServer):
             context=context,
             spectra=spectra,
             spectra_per_heap=spectra_per_heap,
-            channels=channels,
-            taps=taps,
-            w_cutoff=w_cutoff,
+            channels=outputs[0].channels,
+            taps=outputs[0].taps,
+            w_cutoff=outputs[0].w_cutoff,
             max_delay_diff=max_delay_diff,
         )
 
         self._in_items: deque[InItem] = deque()
         self._init_recv(src_affinity, monitor)
 
-        send_chunks = self._init_send(len(dst), use_peerdirect)
+        send_chunks = self._init_send(len(outputs[0].dst), use_peerdirect)
         self._send_streams = send.make_streams(
-            endpoints=dst,
+            endpoints=outputs[0].dst,
             interfaces=dst_interface,
             ttl=dst_ttl,
             ibv=dst_ibv,
@@ -545,18 +541,18 @@ class Engine(aiokatcp.DeviceServer):
             num_ants=num_ants,
             spectra=spectra,
             spectra_per_heap=spectra_per_heap,
-            channels=channels,
+            channels=outputs[0].channels,
             chunks=send_chunks,
         )
         self._out_item = self._out_free_queue.get_nowait()
         self._out_item.reset_all(self._compute.command_queue)
 
         self.delay_models: list[MultiDelayModel] = []
-        self.gains = np.zeros((self.channels, self.pols), np.complex64)
+        self.gains = np.zeros((outputs[0].channels, self.pols), np.complex64)
         self._init_delay_gain()
 
         self._descriptor_heap = send.make_descriptor_heap(
-            channels_per_substream=channels // len(dst),
+            channels_per_substream=outputs[0].channels // len(outputs[0].dst),
             spectra_per_heap=spectra_per_heap,
         )
 

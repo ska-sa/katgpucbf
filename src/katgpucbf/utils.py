@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -28,6 +28,7 @@ import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME
+from .spead import DEFAULT_PORT
 
 _T = TypeVar("_T")
 
@@ -65,7 +66,7 @@ def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
 def parse_source(value: str) -> list[tuple[str, int]] | str:
     """Parse a string into a list of IP endpoints."""
     try:
-        endpoints = endpoint_list_parser(7148)(value)
+        endpoints = endpoint_list_parser(DEFAULT_PORT)(value)
         for endpoint in endpoints:
             ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
         return [(ep.host, ep.port) for ep in endpoints]

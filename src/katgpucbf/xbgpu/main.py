@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -45,6 +45,7 @@ from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
+from ..spead import DEFAULT_PORT
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
 
@@ -209,7 +210,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
-    parser.add_argument("dst", type=endpoint_parser(7148), help="Multicast address data is sent on.")
+    parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), help="Multicast address data is sent on.")
 
     args = parser.parse_args(arglist)
 
