@@ -80,6 +80,8 @@ def comma_split(
 
     def func(value: str) -> list[_T]:  # noqa: D102
         parts = value.split(",")
+        if parts == [""]:
+            parts = []
         n = len(parts)
         if count is not None and n == 1 and allow_single:
             parts = parts * count
