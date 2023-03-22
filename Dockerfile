@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:11.7.1-devel-ubuntu22.04 as base
+FROM nvidia/cuda:12.0.1-devel-ubuntu22.04 as base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final

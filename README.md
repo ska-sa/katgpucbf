@@ -25,5 +25,5 @@ generations. Other platforms may well work, but have not been tested.
 ### Software
 * Ubuntu 22.04
 * Python 3.10.
-* CUDA version 11.4. (Most early development was done using 10.1, which may
+* CUDA version 12.0.1. (Most early development was done using 10.1, which may
   still work but has not been tested for some time.)

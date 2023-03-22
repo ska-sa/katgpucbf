@@ -110,7 +110,7 @@ psutil==5.9.2
     # via -r requirements.in
 pycparser==2.21
     # via cffi
-pycuda==2022.2
+pycuda==2022.2.1
     # via katsdpsigproc
 pygelf==0.4.2
     # via katsdpservices
