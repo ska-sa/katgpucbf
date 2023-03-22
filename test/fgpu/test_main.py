@@ -19,7 +19,8 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
-from katgpucbf.fgpu.main import comma_split, parse_narrowband
+from katgpucbf.fgpu.main import comma_split, parse_args, parse_narrowband
+from katgpucbf.fgpu.output import NarrowbandOutput
 
 
 class TestCommaSplit:
@@ -92,3 +93,35 @@ class TestParseNarrowband:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--narrowband: channels specified twice"):
             parse_narrowband("channels=8,channels=9,decimation=8,dst=239.1.2.3+1:7148")
+
+
+class TestParseArgs:
+    """Test :func:`.katgpucbf.fgpu.main.parse_args`."""
+
+    def test_narrowband_defaults(self) -> None:
+        """Test that missing narrowband config is taken from the global config."""
+        raw_args = [
+            "--src-interface=lo",
+            "--dst-interface=lo",
+            "--adc-sample-rate=1712000000.0",
+            "--channels=1024",
+            "--sync-epoch=0",
+            "--taps=64",
+            "--w-cutoff=0.9",
+            "--narrowband=dst=239.1.0.0+1,channels=32768,decimation=8,taps=4,w_cutoff=0.8",
+            "--narrowband=dst=239.2.0.0+0:7149,channels=8192,decimation=16",
+            "239.0.1.0+7:7148",
+            "239.0.2.0+7:7148",
+            "239.0.3.0+7:7148",
+        ]
+        args = parse_args(raw_args)
+        assert args.narrowband == [
+            NarrowbandOutput(
+                dst=[Endpoint("239.1.0.0", 7148), Endpoint("239.1.0.1", 7148)],
+                channels=32768,
+                decimation=8,
+                taps=4,
+                w_cutoff=0.8,
+            ),
+            NarrowbandOutput(dst=[Endpoint("239.2.0.0", 7149)], channels=8192, decimation=16, taps=64, w_cutoff=0.9),
+        ]

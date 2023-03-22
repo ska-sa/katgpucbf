@@ -336,8 +336,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         if "taps" not in output:
             output["taps"] = args.taps
         if "w_cutoff" not in output:
-            output["taps"] = args.w_cutoff
-    args.narrowband = [NarrowbandOutput(*output) for output in args.narrowband]
+            output["w_cutoff"] = args.w_cutoff
+    args.narrowband = [NarrowbandOutput(**output) for output in args.narrowband]
 
     return args
 
