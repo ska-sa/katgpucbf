@@ -200,6 +200,7 @@ class Chunk:
         end_timestamp = self._timestamp + self._timestamp_step * len(self._frames)
         end_time = time_converter.adc_to_unix(end_timestamp)
         for pol in range(N_POLS):
+            # TODO[nb]:
             sensor = sensors[f"input{pol}.feng-clip-cnt"]
             sensor.set_value(sensor.value + saturated[pol], timestamp=end_time)
 
@@ -217,9 +218,7 @@ def make_streams(
     send_rate_factor: float,
     feng_id: int,
     num_ants: int,
-    spectra: int,
-    spectra_per_heap: int,
-    channels: int,
+    data_heaps: int,
     chunks: Sequence[Chunk],
 ) -> list["spead2.send.asyncio.AsyncStream"]:
     """Create asynchronous SPEAD streams for transmission.
@@ -237,7 +236,7 @@ def make_streams(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
         # Adding len(endpoints) to accommodate descriptors sent for each substream
-        max_heaps=(len(chunks) * spectra // spectra_per_heap * len(endpoints)) + len(endpoints),
+        max_heaps=data_heaps + len(endpoints),
     )
     streams: list["spead2.send.asyncio.AsyncStream"]
     if ibv:
