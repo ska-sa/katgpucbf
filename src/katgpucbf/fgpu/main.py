@@ -25,7 +25,7 @@ import argparse
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
-from typing import TypeVar
+from typing import TypedDict, TypeVar
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -33,7 +33,7 @@ import prometheus_async
 from katsdpservices import get_interface_address
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import endpoint_list_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
     DEFAULT_KATCP_HOST,
@@ -45,9 +45,11 @@ from .. import (
     __version__,
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
+from ..spead import DEFAULT_PORT
 from ..utils import add_signal_handlers, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
+from .output import NarrowbandOutput, WidebandOutput
 
 _T = TypeVar("_T")
 logger = logging.getLogger(__name__)
@@ -78,6 +80,8 @@ def comma_split(
 
     def func(value: str) -> list[_T]:  # noqa: D102
         parts = value.split(",")
+        if parts == [""]:
+            parts = []
         n = len(parts)
         if count is not None and n == 1 and allow_single:
             parts = parts * count
@@ -86,6 +90,55 @@ def comma_split(
         return [base_type(part) for part in parts]
 
     return func
+
+
+class NarrowbandOutputDict(TypedDict, total=False):
+    """Configuration options for a narrowband output.
+
+    Unlike :class:`NarrowbandOutput`, all the fields are optional, so that it
+    can be built up incrementally. They must all be filled in before using it
+    to construct a :class:`NarrowbandOutput`.
+    """
+
+    channels: int
+    decimation: int
+    dst: list[Endpoint]
+    taps: int
+    w_cutoff: float
+
+
+def parse_narrowband(value: str) -> NarrowbandOutputDict:
+    """Parse a string with a narrowband configuration.
+
+    The string has a comma-separated list of key=value pairs. See
+    :class:`NarrowbandOutputDict` for the valid keys and types. The following
+    keys are required:
+
+    - channels
+    - decimation
+    - dst
+    """
+    kws: NarrowbandOutputDict = {}
+    for part in value.split(","):
+        match part.split("=", 1):
+            case [key, data]:
+                match key:
+                    case _ if key in kws:
+                        raise ValueError(f"--narrowband: {key} specified twice")
+                    case "channels" | "decimation" | "taps":
+                        kws[key] = int(data)
+                    case "w_cutoff":
+                        kws[key] = float(data)
+                    case "dst":
+                        kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
+                    case _:
+                        raise ValueError(f"--narrowband: unknown key {key}")
+            case _:
+                raise ValueError(f"--narrowband: missing '=' in {part}")
+    for key in ["channels", "decimation", "dst"]:
+        if key not in kws:
+            raise ValueError(f"--narrowband: {key} is missing")
+    return kws
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -99,6 +152,17 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         arguments from ``sys.argv`` will be used.
     """
     parser = argparse.ArgumentParser(prog="fgpu")
+    parser.add_argument(
+        "--narrowband",
+        type=parse_narrowband,
+        default=[],
+        action="append",
+        metavar="KEY=VALUE[,KEY=VALUE...]",
+        help=(
+            "Add a narrowband output (may be repeated). The required keys are: decimation, channels, dst. "
+            "Optional keys: taps, w_cutoff (default to the global options)"
+        ),
+    )
     parser.add_argument(
         "--katcp-host",
         type=str,
@@ -256,7 +320,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, nargs=N_POLS, help="Source endpoints (or pcap file)")
-    parser.add_argument("dst", type=endpoint_list_parser(7148), help="Destination endpoints")
+    parser.add_argument("dst", type=endpoint_list_parser(DEFAULT_PORT), help="Destination endpoints")
     args = parser.parse_args(arglist)
 
     if args.use_peerdirect and not args.dst_ibv:
@@ -266,6 +330,15 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             parser.error("Live source requires --src-interface")
     if len(args.dst) % len(args.dst_interface) != 0:
         parser.error("number of destinations must be divisible by number of destination interfaces")
+
+    # Convert narrowband from NarrowbandOutputDict to NarrowbandOutput
+    for output in args.narrowband:
+        if "taps" not in output:
+            output["taps"] = args.taps
+        if "w_cutoff" not in output:
+            output["w_cutoff"] = args.w_cutoff
+    args.narrowband = [NarrowbandOutput(**output) for output in args.narrowband]
+
     return args
 
 
@@ -286,6 +359,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         monitor = NullMonitor()
 
     chunk_jones = accel.roundup(args.dst_chunk_jones, args.channels * args.spectra_per_heap)
+    wideband = WidebandOutput(channels=args.channels, taps=args.taps, w_cutoff=args.w_cutoff, dst=args.dst)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -297,13 +371,13 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         src_comp_vector=args.src_comp_vector,
         src_packet_samples=args.src_packet_samples,
         src_buffer=args.src_buffer,
-        dst=args.dst,
         dst_interface=args.dst_interface,
         dst_ttl=args.dst_ttl,
         dst_ibv=args.dst_ibv,
         dst_packet_payload=args.dst_packet_payload,
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
+        outputs=[wideband] + args.narrowband,
         adc_sample_rate=args.adc_sample_rate,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,
@@ -311,9 +385,6 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         chunk_samples=args.src_chunk_samples,
         spectra=chunk_jones // args.channels,
         spectra_per_heap=args.spectra_per_heap,
-        channels=args.channels,
-        taps=args.taps,
-        w_cutoff=args.w_cutoff,
         dig_sample_bits=args.dig_sample_bits,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,

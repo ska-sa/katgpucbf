@@ -12,6 +12,7 @@ Submodules
    katgpucbf.fgpu.delay
    katgpucbf.fgpu.engine
    katgpucbf.fgpu.main
+   katgpucbf.fgpu.output
    katgpucbf.fgpu.pfb
    katgpucbf.fgpu.postproc
    katgpucbf.fgpu.recv

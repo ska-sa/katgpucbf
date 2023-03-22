@@ -47,6 +47,7 @@ from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
 from katgpucbf import COMPLEX
+from katgpucbf.spead import DEFAULT_PORT
 from katgpucbf.utils import TimeConverter
 
 logger = logging.getLogger(__name__)
@@ -211,7 +212,9 @@ class BaselineCorrelationProductsReceiver:
         self.bandwidth = correlator.sensors[f"{acv_name}.bandwidth"].value
         self.multicast_endpoints = [
             (endpoint.host, endpoint.port)
-            for endpoint in endpoint_list_parser(7148)(correlator.sensors[f"{stream_name}.destination"].value.decode())
+            for endpoint in endpoint_list_parser(DEFAULT_PORT)(
+                correlator.sensors[f"{stream_name}.destination"].value.decode()
+            )
         ]
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
