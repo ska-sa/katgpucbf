@@ -419,7 +419,7 @@ class Pipeline:
         self.gains = np.zeros((output.channels, self.pols), np.complex64)
         self._init_delay_gain()
 
-        self._descriptor_heap = send.make_descriptor_heap(
+        self.descriptor_heap = send.make_descriptor_heap(
             channels_per_substream=output.channels // len(output.dst),
             spectra_per_heap=engine.spectra_per_heap,
         )
@@ -1502,7 +1502,7 @@ class Engine(aiokatcp.DeviceServer):
         for pipeline in self._pipelines:
             descriptor_sender = DescriptorSender(
                 self._send_streams[0],
-                pipeline._descriptor_heap,  # TODO[nb]: make public
+                pipeline.descriptor_heap,
                 self.n_ants * descriptor_interval_s,
                 (self.feng_id + 1) * descriptor_interval_s,
                 all_substreams=True,  # TODO[nb]: need to restrict to the relevant substreams
