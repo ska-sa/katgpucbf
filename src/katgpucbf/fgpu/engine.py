@@ -160,6 +160,8 @@ class InItem(QueueItem):
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
     dig_sample_bits: int
+    #: Number of pipelines still using this item
+    refcount: int
 
     def __init__(
         self,
@@ -189,6 +191,7 @@ class InItem(QueueItem):
                     present_cumsum=np.zeros(present_size + 1, np.uint32),
                 )
             )
+        self.refcount = 0
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -533,7 +536,6 @@ class Pipeline:
 
     def _pop_in(self) -> None:
         """Remove the current InItem."""
-        # TODO[nb]: needs to be re-worked with refcounting
         assert self._in_item is not None
         self.engine.free_in_item(self._in_item)
         self._in_item = None
@@ -1207,16 +1209,18 @@ class Engine(aiokatcp.DeviceServer):
         sensor.value = max(sensor.value, timestamp)
 
     def free_in_item(self, item: InItem) -> None:
-        """Return an InItem to the free queue."""
-        if self.use_vkgdr:
-            chunks = []
-            for pol_data in item.pol_data:
-                pol_data.samples = None
-                assert pol_data.chunk is not None
-                chunks.append(pol_data.chunk)
-                pol_data.chunk = None
-            asyncio.create_task(self._push_recv_chunks(chunks, item.events))
-        self._in_free_queue.put_nowait(item)
+        """Return an InItem to the free queue if its refcount hits zero."""
+        item.refcount -= 1
+        if item.refcount == 0:
+            if self.use_vkgdr:
+                chunks = []
+                for pol_data in item.pol_data:
+                    pol_data.samples = None
+                    assert pol_data.chunk is not None
+                    chunks.append(pol_data.chunk)
+                    pol_data.chunk = None
+                asyncio.create_task(self._push_recv_chunks(chunks, item.events))
+            self._in_free_queue.put_nowait(item)
 
     @staticmethod
     async def _push_recv_chunks(chunks: Iterable[recv.Chunk], events: Iterable[AbstractEvent]) -> None:
@@ -1231,12 +1235,14 @@ class Engine(aiokatcp.DeviceServer):
     def _add_in_item(self, item: InItem) -> None:
         """Push an :class:`InItem` to all the pipelines.
 
-        This also takes care of computing `present_cumsum`.
+        This also takes care of computing `present_cumsum` and initialising
+        the refcount.
         """
         # np.cumsum doesn't provide an initial zero, so we output starting at
         # position 1.
         for pol_data in item.pol_data:
             np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
+        item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
             pipeline.add_in_item(item)
 
