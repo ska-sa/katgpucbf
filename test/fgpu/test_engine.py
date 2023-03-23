@@ -30,7 +30,7 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine, InItem
+from katgpucbf.fgpu.engine import Engine, InItem, Pipeline
 from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff, packbits
@@ -773,8 +773,8 @@ class TestEngine:
         assert sensor.value == 0
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
 
-    def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
-        """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
+    def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
+        """Patch Pipeline._fill_in` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
@@ -783,17 +783,18 @@ class TestEngine:
         counter = 0
         timestamp = []
 
-        async def next_in(self) -> InItem | None:
-            nonlocal counter
-            counter += 1
-            if counter == 6:
-                await engine_client.request(*request)
-                _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
-                timestamp.append(int(informs[0].arguments[4]))
-            return await orig_next_in(self)
+        async def fill_in(self) -> InItem | None:
+            if self._in_item is None:
+                nonlocal counter
+                counter += 1
+                if counter == 6:
+                    await engine_client.request(*request)
+                    _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
+                    timestamp.append(int(informs[0].arguments[4]))
+            return await orig_fill_in(self)
 
-        orig_next_in = Engine._next_in
-        monkeypatch.setattr(Engine, "_next_in", next_in)
+        orig_fill_in = Pipeline._fill_in
+        monkeypatch.setattr(Pipeline, "_fill_in", fill_in)
         return timestamp
 
     async def test_steady_state_gain(
@@ -809,7 +810,7 @@ class TestEngine:
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
-        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "gain-all", 0)
+        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "gain-all", 0)
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -841,7 +842,7 @@ class TestEngine:
         n_samples = 8 * CHUNK_SAMPLES
         dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
 
-        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "delays", SYNC_EPOCH, "0,0:3,0", "0,0:3,0")
+        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "delays", SYNC_EPOCH, "0,0:3,0", "0,0:3,0")
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,

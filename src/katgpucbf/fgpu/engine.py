@@ -21,7 +21,6 @@ import itertools
 import logging
 import math
 import numbers
-from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -393,10 +392,11 @@ class Pipeline:
 
         self.engine = engine
         self.output = output
+        self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue("in_queue", engine.n_in)
         self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue("out_queue", n_out)
         self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue("out_free_queue", n_out)
         self._send_free_queue: asyncio.Queue[send.Chunk] = engine.monitor.make_queue("send_free_queue", n_send)
-        self._in_items: deque[InItem] = deque()
+        self._in_item: InItem | None = None
 
         # Initialise self._compute
         compute_queue = context.create_command_queue()
@@ -409,7 +409,7 @@ class Pipeline:
         # Initialize sending
         self.send_chunks = self._init_send(len(output.dst), engine.use_peerdirect)
         self._out_item = self._out_free_queue.get_nowait()
-        self._out_item.reset_all(self._compute.command_queue)
+        self._out_item.reset_all(compute_queue)
 
         # Initialize delays and gains
         self.delay_models: list[MultiDelayModel] = []
@@ -507,71 +507,36 @@ class Pipeline:
 
     def add_in_item(self, item: InItem) -> None:
         """Append a newly-received :class:`~.InItem`."""
-        self._in_items.append(item)
-        # print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
-        #       f'{self._in_items[-1].n_samples} samples')
+        self._in_queue.put_nowait(item)
 
-        # Make sure that all events associated with the item are past.
-        self._in_items[-1].enqueue_wait_for_events(self._compute.command_queue)
+    def shutdown(self) -> None:
+        """Start graceful shutdown after the final call to :meth:`add_in_item`."""
+        self._in_queue.put_nowait(None)
 
-    async def _fill_in(self) -> bool:
-        """Load sufficient InItems to continue processing.
+    async def _fill_in(self) -> InItem | None:
+        """Populate :attr:`_in_item` to continue processing.
 
-        Tries to get at least two items into ``self._in_items``, and if
-        loading a second item that is adjacent to the first, copies the overlap
-        region.
-
-        Returns true if processing can proceed, false if the stream is
-        exhausted.
+        Retrieve the next :class:`InItem` from the queue if necessary. Returns the
+        current :class:`InItem`, or ``None`` if there isn't one.
         """
-        if len(self._in_items) == 0:
-            if not (await self.engine._next_in()):
-                return False
-        if len(self._in_items) == 1:
-            # Copy the head of the new chunk to the tail of the older chunk
-            # to allow for PFB windows to fit and for some protection against
-            # sharp changes in delay.
-            #
-            # This could only fail if we'd lost a whole input chunk of
-            # data from the digitiser. In that case the data we'd like
-            # to copy is missing so we can't do this step.
-            #
-            # TODO[nb]: This will need to be reworked to be done by the engine.
-            chunk_packets = self._in_items[0].n_samples // self.engine.src_layout.heap_samples
-            copy_packets = len(self._in_items[0].pol_data[0].present) - chunk_packets
-            if (await self.engine._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
-                sample_bits = self._in_items[0].dig_sample_bits
-                copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
-                copy_samples = min(copy_samples, self._in_items[1].n_samples)
-                copy_bytes = copy_samples * sample_bits // BYTE_BITS
-                for pol_data0, pol_data1 in zip(self._in_items[0].pol_data, self._in_items[1].pol_data):
-                    assert pol_data0.samples is not None
-                    assert pol_data1.samples is not None
-                    pol_data1.samples.copy_region(
-                        self._compute.command_queue,
-                        pol_data0.samples,
-                        np.s_[:copy_bytes],
-                        np.s_[-copy_bytes:],
-                    )
-                    pol_data0.present[-copy_packets:] = pol_data1.present[:copy_packets]
-                self._in_items[0].n_samples += copy_samples
+        if self._in_item is None:
+            with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait in_queue"):
+                self._in_item = await self._in_queue.get()
+            if self._in_item is None:
+                # shutdown was called, and there are no more items. Push the None
+                # back into the queue so that if we call this method again we'll
+                # see it again instead of blocking forever.
+                self._in_queue.put_nowait(None)
             else:
-                for pol_data in self._in_items[0].pol_data:
-                    pol_data.present[-copy_packets:] = 0  # Mark tail as absent, for each pol
-            # Update the cumulative sums. Note that during shutdown this may be
-            # done more than once, but since it is shutdown the performance
-            # implications aren't too important.
-            # np.cumsum doesn't provide an initial zero, so we output starting at
-            # position 1.
-            for pol_data in self._in_items[0].pol_data:
-                np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
-        return True
+                self._in_item.enqueue_wait_for_events(self._compute.command_queue)
+        return self._in_item
 
     def _pop_in(self) -> None:
-        """Remove the oldest InItem."""
+        """Remove the current InItem."""
         # TODO[nb]: needs to be re-worked with refcounting
-        item = self._in_items.popleft()
-        self.engine.free_in_item(item)
+        assert self._in_item is not None
+        self.engine.free_in_item(self._in_item)
+        self._in_item = None
 
     async def _next_out(self, new_timestamp: int) -> OutItem:
         """Grab the next free OutItem in the queue."""
@@ -627,27 +592,24 @@ class Pipeline:
     async def run_processing(self) -> None:
         """Do the hard work of the F-engine.
 
-        This function takes place entirely on the GPU. First, a little bit of
-        the next chunk is copied to the end of the previous one, to allow for
-        the overlap required by the PFB. Coarse delay happens. Then a batch FFT
-        operation is applied, and finally, fine-delay, phase correction,
-        quantisation and corner-turn are performed.
+        This function takes place entirely on the GPU. Coarse delay happens.
+        Then a batch FFT operation is applied, and finally, fine-delay, phase
+        correction, quantisation and corner-turn are performed.
         """
-        while await self._fill_in():
+        while (in_item := await self._fill_in()) is not None:
             # If the input starts too late for the next expected timestamp,
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
             start_timestamp = self._out_item.end_timestamp
             orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
-            if min(orig_start_timestamps) < self._in_items[0].timestamp:
+            if min(orig_start_timestamps) < in_item.timestamp:
                 align = self.engine.spectra_per_heap * self.spectra_samples
                 # This loop is needed because MultiDelayModel is not necessarily
                 # monotonic, and so simply taking the larger of the two skip
                 # results does not guarantee a suitable timestamp.
-                while min(orig_start_timestamps) < self._in_items[0].timestamp:
+                while min(orig_start_timestamps) < in_item.timestamp:
                     start_timestamp = max(
-                        model.skip(self._in_items[0].timestamp, start_timestamp + 1, align)
-                        for model in self.delay_models
+                        model.skip(in_item.timestamp, start_timestamp + 1, align) for model in self.delay_models
                     )
                     orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
                 await self._flush_out(start_timestamp)
@@ -661,7 +623,7 @@ class Pipeline:
             # `timestamp`. `offset` is the sample index corresponding to
             # `orig_timestamp` within the InItem.
             start_coarse_delays = [start_timestamp - orig_timestamp for orig_timestamp in orig_start_timestamps]
-            offsets = [orig_timestamp - self._in_items[0].timestamp for orig_timestamp in orig_start_timestamps]
+            offsets = [orig_timestamp - in_item.timestamp for orig_timestamp in orig_start_timestamps]
 
             # Identify a block of frontend work. We can grow it until
             # - we run out of the current input array;
@@ -670,9 +632,7 @@ class Pipeline:
             # We speculatively calculate delays until one of the first two is
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
-            max_end_in = (
-                self._in_items[0].end_timestamp + min(start_coarse_delays) - self.taps * self.spectra_samples + 1
-            )
+            max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.taps * self.spectra_samples + 1
             max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
@@ -714,7 +674,7 @@ class Pipeline:
                     # kernel are in radians/PI.
                     self._out_item.phase[out_slice] = phase.T / np.pi
                     samples = []
-                    for pol_data in self._in_items[0].pol_data:
+                    for pol_data in in_item.pol_data:
                         assert pol_data.samples is not None
                         samples.append(pol_data.samples)
                     self._compute.run_frontend(
@@ -722,11 +682,11 @@ class Pipeline:
                     )
                     # Replace events rather than adding to it, since this event
                     # will be sequenced after any prior events
-                    self._in_items[0].events = [self._compute.command_queue.enqueue_marker()]
+                    in_item.events = [self._compute.command_queue.enqueue_marker()]
                     self._out_item.n_spectra += batch_spectra
                     # Work out which output spectra contain missing data.
                     self._out_item.present[out_slice] = True
-                    for pol, pol_data in enumerate(self._in_items[0].pol_data):
+                    for pol, pol_data in enumerate(in_item.pol_data):
                         # Offset in the chunk of the first sample for each spectrum
                         first_offset = np.arange(
                             offsets[pol],
@@ -750,8 +710,6 @@ class Pipeline:
 
             if end_timestamp >= max_end_in:
                 # We've exhausted the input buffer.
-                # TODO: should maybe also do this if _in_items[1] would work
-                # just as well and we've filled the output buffer.
                 self._pop_in()
         # Timestamp mostly doesn't matter because we're finished, but if a
         # katcp request arrives at this point we want to ensure the
@@ -1083,17 +1041,18 @@ class Engine(aiokatcp.DeviceServer):
         self.use_peerdirect = use_peerdirect
 
         # Tuning knobs not exposed via arguments
-        n_in = 4
+        self.n_in = 4
 
         self._upload_queue = context.create_command_queue()
+        # For copying head of each chunk to the tail of the previous chunk
+        self._copy_queue = context.create_command_queue()
 
         extra_samples = max_delay_diff + max(output.taps * output.spectra_samples for output in outputs)
         if extra_samples > self.src_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.samples = self.src_layout.chunk_samples + extra_samples
 
-        self._in_queue: asyncio.Queue[InItem | None] = monitor.make_queue("in_queue", n_in)
-        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
+        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
         self._pipelines = [Pipeline(output, self, context) for output in outputs]
@@ -1249,26 +1208,6 @@ class Engine(aiokatcp.DeviceServer):
         sensor = self.sensors["steady-state-timestamp"]
         sensor.value = max(sensor.value, timestamp)
 
-    async def _next_in(self) -> InItem | None:
-        """Load next InItem for processing.
-
-        Move the next :class:`InItem` from the `_in_queue` to `_in_items`, where
-        it will be picked up by the processing.
-        """
-        with self.monitor.with_state("run_processing", "wait in_queue"):
-            item = await self._in_queue.get()
-
-        if item is not None:
-            for pipeline in self._pipelines:
-                pipeline.add_in_item(item)
-        else:
-            # To keep run_processing simple, it may make further calls to
-            # _next_in after receiving a None. To keep things simple, put
-            # a None back into the queue so that the next call also gets
-            # None rather than hanging.
-            self._in_queue.put_nowait(None)
-        return item
-
     def free_in_item(self, item: InItem) -> None:
         """Return an InItem to the free queue."""
         if self.use_vkgdr:
@@ -1291,6 +1230,53 @@ class Engine(aiokatcp.DeviceServer):
         for chunk in chunks:
             chunk.recycle()
 
+    def _add_in_item(self, item: InItem) -> None:
+        """Push an :class:`InItem` to all the pipelines.
+
+        This also takes care of computing `present_cumsum`.
+        """
+        # np.cumsum doesn't provide an initial zero, so we output starting at
+        # position 1.
+        for pol_data in item.pol_data:
+            np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
+        for pipeline in self._pipelines:
+            pipeline.add_in_item(item)
+
+    def _copy_tail(self, prev_item: InItem, in_item: InItem | None) -> None:
+        """Copy the head of `in_item` to the tail of `prev_item`.
+
+        This allows for PFB windows to fit and for some protection against
+        sharp changes in delay.
+
+        If `in_item` is ``None`` or is not contiguous (in timestamp) with
+        `prev_item` then the tail of `prev_item` is instead marked as absent.
+        This can happen if we lose a whole input chunk from the digitiser.
+        """
+        chunk_heaps = prev_item.n_samples // self.src_layout.heap_samples
+        copy_heaps = len(prev_item.pol_data[0].present) - chunk_heaps
+        if in_item is not None and prev_item.end_timestamp == in_item.timestamp:
+            sample_bits = self.src_layout.sample_bits
+            copy_samples = prev_item.capacity - prev_item.n_samples
+            copy_samples = min(copy_samples, in_item.n_samples)
+            copy_bytes = copy_samples * sample_bits // BYTE_BITS
+            # Must wait for the upload to complete before the copy starts
+            self._copy_queue.enqueue_wait_for_events(in_item.events)
+            for pol_data0, pol_data1 in zip(prev_item.pol_data, in_item.pol_data):
+                assert pol_data0.samples is not None
+                assert pol_data1.samples is not None
+                pol_data1.samples.copy_region(
+                    self._copy_queue,
+                    pol_data0.samples,
+                    np.s_[:copy_bytes],
+                    np.s_[-copy_bytes:],
+                )
+                pol_data0.present[-copy_heaps:] = pol_data1.present[:copy_heaps]
+            prev_item.n_samples += copy_samples
+            prev_item.add_marker(self._copy_queue)
+        else:
+            for pol_data in prev_item.pol_data:
+                pol_data.present[-copy_heaps:] = 0  # Mark tail as absent, for each pol
+
     async def _run_receive(self, streams: list[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
@@ -1300,6 +1286,10 @@ class Engine(aiokatcp.DeviceServer):
         awaited, and then the chunk containers are returned to the receiver
         stream so that the memory need not be expensively re-allocated every
         time.
+
+        Additionally, the start of each chunk is copied to the tail of the
+        previous chunk, and only then is the previous chunk pushed to the
+        queues.
 
         In the GPU-direct case, <TODO clarify once I understand better>.
 
@@ -1311,6 +1301,7 @@ class Engine(aiokatcp.DeviceServer):
         layout
             The structure of the streams.
         """
+        prev_item = None
         async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
@@ -1329,7 +1320,7 @@ class Engine(aiokatcp.DeviceServer):
             for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
                 # Copy the present flags (synchronously).
                 pol_data.present[: len(chunk.present)] = chunk.present
-                # Update the digitiser saturation count (the "extra" fields holds
+                # Update the digitiser saturation count (the "extra" field holds
                 # per-heap values).
                 assert chunk.extra is not None
                 sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
@@ -1342,7 +1333,6 @@ class Engine(aiokatcp.DeviceServer):
                     assert pol_data.samples is None
                     pol_data.samples = chunk.device  # type: ignore
                     pol_data.chunk = chunk
-                self._in_queue.put_nowait(in_item)
             else:
                 # Copy each pol chunk to the right place on the GPU.
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
@@ -1351,12 +1341,16 @@ class Engine(aiokatcp.DeviceServer):
                         self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
-
                 # Put events on the queue so that run_processing() knows when to
                 # start.
                 in_item.events.extend(transfer_events)
-                self._in_queue.put_nowait(in_item)
 
+            if prev_item is not None:
+                self._copy_tail(prev_item, in_item)
+                self._add_in_item(prev_item)
+            prev_item = in_item
+
+            if not self.use_vkgdr:
                 # Wait until the copy is done, and then give the chunks of memory
                 # back to the receiver streams for reuse.
                 # NB: we don't use the Chunk context manager, because if
@@ -1367,8 +1361,15 @@ class Engine(aiokatcp.DeviceServer):
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])
                     chunks[pol].recycle()
+
+        if prev_item is not None:
+            # Flush the final chunk to the pipelines
+            self._copy_tail(prev_item, None)  # Mark tail as absent
+            self._add_in_item(prev_item)
+
         logger.debug("run_receive completed")
-        self._in_queue.put_nowait(None)
+        for pipeline in self._pipelines:
+            pipeline.shutdown()
 
     async def request_gain(self, ctx, input: int, *values: str) -> tuple[str, ...]:
         """Set or query the eq gains.
