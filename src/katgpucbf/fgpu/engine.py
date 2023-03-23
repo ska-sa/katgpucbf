@@ -1029,7 +1029,6 @@ class Engine(aiokatcp.DeviceServer):
         self._src_ibv = src_ibv
         self.src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self.adc_sample_rate = adc_sample_rate
-        self.send_rate_factor = send_rate_factor
         self.feng_id = feng_id
         self.n_ants = num_ants
         self.spectra_per_heap = spectra_per_heap
