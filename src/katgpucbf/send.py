@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+from typing import Iterable
 
 import spead2.send.asyncio
 
@@ -44,9 +45,9 @@ class DescriptorSender:
     first_interval
         Delay (in seconds) immediately after starting. If not specified, it
         defaults to `interval`.
-    all_substreams
-        Send descriptors to all substreams if true, otherwise default behaviour
-        is to send only to the first substream.
+    substreams
+        Substream indexes to which descriptors are sent. If not specified,
+        send only to the first substream.
     """
 
     def __init__(
@@ -56,13 +57,11 @@ class DescriptorSender:
         interval: float,
         first_interval: float | None = None,
         *,
-        all_substreams: bool = False,
+        substreams: Iterable[int] = (0,),
     ) -> None:
         self._stream = stream
         self._heap_reference_list = spead2.send.HeapReferenceList(
-            [spead2.send.HeapReference(descriptors, substream_index=i) for i in range(stream.num_substreams)]
-            if all_substreams
-            else [spead2.send.HeapReference(descriptors, substream_index=0)]
+            [spead2.send.HeapReference(descriptors, substream_index=i) for i in substreams]
         )
         self._interval = interval
         self._first_interval = interval if first_interval is None else first_interval

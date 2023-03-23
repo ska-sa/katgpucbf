@@ -63,19 +63,19 @@ class Frame:
     feng_id
         Value to put in ``feng_id`` SPEAD item
     substreams
-        Number of substreams into which the channels are divided
+        Substream indices into which the channels are divided
     """
 
     def __init__(
-        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, substreams: int, feng_id: int
+        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, substreams: Sequence[int], feng_id: int
     ) -> None:
         channels = data.shape[0]
-        assert channels % substreams == 0
-        channels_per_substream = channels // substreams
+        assert channels % len(substreams) == 0
+        channels_per_substream = channels // len(substreams)
         self.heaps = []
         self.data = data
         self.saturated = saturated
-        for i in range(substreams):
+        for i, substream_index in enumerate(substreams):
             start_channel = i * channels_per_substream
             heap = spead2.send.Heap(FLAVOUR)
             heap.repeat_pointers = True
@@ -87,7 +87,7 @@ class Frame:
             heap.add_item(
                 spead2.Item(FENG_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data)
             )
-            self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
+            self.heaps.append(spead2.send.HeapReference(heap, substream_index=substream_index))
 
 
 def _multi_send(
@@ -120,13 +120,13 @@ class Chunk:
         data: np.ndarray,
         saturated: np.ndarray,
         *,
-        substreams: int,
+        substreams: Sequence[int],
         feng_id: int,
     ) -> None:
         n_frames = data.shape[0]
         channels = data.shape[1]
         spectra_per_heap = data.shape[2]
-        if channels % substreams != 0:
+        if channels % len(substreams) != 0:
             raise ValueError("substreams must divide into channels")
         self.data = data
         self.saturated = saturated

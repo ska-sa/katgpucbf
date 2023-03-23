@@ -388,13 +388,15 @@ def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> n
 class Pipeline:
     """Processing pipeline for a single output stream."""
 
-    def __init__(self, output: Output, engine: "Engine", context: AbstractContext) -> None:
+    def __init__(self, output: Output, engine: "Engine", context: AbstractContext, substreams: Sequence[int]) -> None:
         # Tuning knobs not exposed via arguments
         n_send = 4
         n_out = n_send if engine.use_peerdirect else 2
 
         self.engine = engine
         self.output = output
+        self.substreams = substreams
+        assert len(substreams) == len(output.dst)
         self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue("in_queue", engine.n_in)
         self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue("out_queue", n_out)
         self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue("out_free_queue", n_out)
@@ -410,7 +412,7 @@ class Pipeline:
         device_weights.set(compute_queue, generate_weights(output.channels, output.taps, output.w_cutoff))
 
         # Initialize sending
-        self.send_chunks = self._init_send(len(output.dst), engine.use_peerdirect)
+        self.send_chunks = self._init_send(substreams, engine.use_peerdirect)
         self._out_item = self._out_free_queue.get_nowait()
         self._out_item.reset_all(compute_queue)
 
@@ -420,7 +422,7 @@ class Pipeline:
         self._init_delay_gain()
 
         self.descriptor_heap = send.make_descriptor_heap(
-            channels_per_substream=output.channels // len(output.dst),
+            channels_per_substream=output.channels // len(substreams),
             spectra_per_heap=engine.spectra_per_heap,
         )
 
@@ -436,7 +438,7 @@ class Pipeline:
         for pol in range(N_POLS):
             self.set_gains(pol, np.full(self.output.channels, self.engine.default_gain, dtype=np.complex64))
 
-    def _init_send(self, substreams: int, use_peerdirect: bool) -> list[send.Chunk]:
+    def _init_send(self, substreams: Sequence[int], use_peerdirect: bool) -> list[send.Chunk]:
         """Initialise the send side of the pipeline."""
         send_chunks: list[send.Chunk] = []
         for _ in range(self._out_free_queue.maxsize):
@@ -809,7 +811,7 @@ class Pipeline:
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
                 skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.spectra_samples)
-                send.skipped_heaps_counter.inc(skipped_frames * streams[0].num_substreams)
+                send.skipped_heaps_counter.inc(skipped_frames * len(self.substreams))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:
@@ -826,7 +828,7 @@ class Pipeline:
                 pass  # It's already logged by the chunk_finished callback
         stop_heap = spead2.send.Heap(send.FLAVOUR)
         stop_heap.add_end()
-        for substream_index in range(streams[0].num_substreams):
+        for substream_index in self.substreams:
             await streams[0].async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
 
@@ -1054,7 +1056,13 @@ class Engine(aiokatcp.DeviceServer):
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
-        self._pipelines = [Pipeline(output, self, context) for output in outputs]
+        first_substream = 0
+        self._pipelines = []
+        for output in outputs:
+            last_substream = first_substream + len(output.dst)
+            substreams = range(first_substream, last_substream)
+            self._pipelines.append(Pipeline(output, self, context, substreams))
+            first_substream = last_substream
 
         all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
         rate_scale = sum(output.send_rate_factor for output in outputs)
@@ -1505,7 +1513,7 @@ class Engine(aiokatcp.DeviceServer):
                 pipeline.descriptor_heap,
                 self.n_ants * descriptor_interval_s,
                 (self.feng_id + 1) * descriptor_interval_s,
-                all_substreams=True,  # TODO[nb]: need to restrict to the relevant substreams
+                substreams=pipeline.substreams,
             )
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
