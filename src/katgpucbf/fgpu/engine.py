@@ -401,6 +401,7 @@ class Pipeline:
         # Initialise self._compute
         context = engine.upload_queue.context
         compute_queue = context.create_command_queue()
+        self._download_queue = context.create_command_queue()
         template = ComputeTemplate(context, output.taps, output.channels, engine.src_layout.sample_bits)
         self._compute = template.instantiate(compute_queue, engine.samples, self.spectra, engine.spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
@@ -817,14 +818,14 @@ class Pipeline:
                 with self.engine.monitor.with_state(func_name, "wait send_free_queue"):
                     chunk = await self._send_free_queue.get()
                 chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
-                self.engine.download_queue.enqueue_wait_for_events(out_item.events)
+                self._download_queue.enqueue_wait_for_events(out_item.events)
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
-                out_item.spectra.get_async(self.engine.download_queue, chunk.data)
-            out_item.saturated.get_async(self.engine.download_queue, chunk.saturated)
+                out_item.spectra.get_async(self._download_queue, chunk.data)
+            out_item.saturated.get_async(self._download_queue, chunk.saturated)
             for pol in range(N_POLS):
-                out_item.dig_total_power[pol].get_async(self.engine.download_queue, dig_total_power[pol])
-            events.append(self.engine.download_queue.enqueue_marker())
+                out_item.dig_total_power[pol].get_async(self._download_queue, dig_total_power[pol])
+            events.append(self._download_queue.enqueue_marker())
 
             chunk.timestamp = out_item.timestamp
             # Each frame is valid if all spectra in it are valid
@@ -1087,7 +1088,6 @@ class Engine(aiokatcp.DeviceServer):
         n_in = 4
 
         self.upload_queue = context.create_command_queue()
-        self.download_queue = context.create_command_queue()
 
         extra_samples = max_delay_diff + max(output.taps * output.spectra_samples for output in outputs)
         if extra_samples > self.src_layout.chunk_samples:
