@@ -354,12 +354,12 @@ def dig_pwr_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
         return aiokatcp.Sensor.Status.WARN
 
 
-def _parse_gains(*values: str, channels: int, default_gain: complex, allow_default: bool) -> np.ndarray:
+def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> np.ndarray:
     """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.
 
     If a single value is given it is expanded to a value per channel. If
-    `allow_default` is true, the string "default" may be given to restore
-    the default gains set via command line.
+    `default_gain` is not ``None``, the string "default" may be given to
+    restore the default gains set via command line.
 
     The caller must ensure that `values` contains either 1 or `channels`
     items. :meth:`request_gain` handles the case where no values are given
@@ -368,7 +368,7 @@ def _parse_gains(*values: str, channels: int, default_gain: complex, allow_defau
     Failures are reported by raising an appropriate
     :exc:`aiokatcp.FailReply`.
     """
-    if allow_default and values == ("default",):
+    if default_gain is not None and values == ("default",):
         gains = np.full(channels, default_gain, dtype=np.complex64)
     else:
         try:
@@ -1393,7 +1393,7 @@ class Engine(aiokatcp.DeviceServer):
         if not values:
             gains = pipeline.gains[:, input]
         else:
-            gains = _parse_gains(*values, channels=output.channels, default_gain=self.default_gain, allow_default=False)
+            gains = _parse_gains(*values, channels=output.channels, default_gain=None)
             pipeline.set_gains(input, gains)
 
         # Return the current values.
@@ -1416,7 +1416,7 @@ class Engine(aiokatcp.DeviceServer):
         output = pipeline.output
         if len(values) not in {1, output.channels}:
             raise aiokatcp.FailReply(f"invalid number of values provided (must be 1 or {output.channels})")
-        gains = _parse_gains(*values, channels=output.channels, default_gain=self.default_gain, allow_default=True)
+        gains = _parse_gains(*values, channels=output.channels, default_gain=self.default_gain)
         for i in range(N_POLS):
             pipeline.set_gains(i, gains)
 
