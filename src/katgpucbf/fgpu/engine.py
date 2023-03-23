@@ -355,7 +355,7 @@ def dig_pwr_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
         return aiokatcp.Sensor.Status.WARN
 
 
-def _parse_gains(self, *values: str, channels: int, default_gain: complex, allow_default: bool) -> np.ndarray:
+def _parse_gains(*values: str, channels: int, default_gain: complex, allow_default: bool) -> np.ndarray:
     """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.
 
     If a single value is given it is expanded to a value per channel. If

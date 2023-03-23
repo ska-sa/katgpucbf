@@ -171,7 +171,9 @@ class TestKatcpRequests:
             await engine_client.request("gain-all")
 
     @pytest.mark.parametrize("correct_delay_strings", [("3.76e-9,0.12e-9:7.322,1.91", "2.67e-9,0.02e-9:5.678,1.81")])
-    async def test_delay_model_update_correct(self, engine_server, engine_client, correct_delay_strings):
+    async def test_delay_model_update_correct(
+        self, engine_server: Engine, engine_client: aiokatcp.Client, correct_delay_strings: tuple[str, str]
+    ) -> None:
         """Test correctly-formed delay strings and validate the updates.
 
         The validation is done by comparing it against the corresponding delay sensor readings.
@@ -188,7 +190,8 @@ class TestKatcpRequests:
         # The delay model won't become current until some data is received, but
         # we're not simulating any. Poke the delay model manually to make it
         # update the sensor.
-        for model in engine_server.delay_models:
+        # TODO[nb]: need to update for multiple pipelines
+        for model in engine_server._pipelines[0].delay_models:
             model(1)
 
         for pol in range(N_POLS):
@@ -209,7 +212,9 @@ class TestKatcpRequests:
             "3.76,pear:7.322,1.91",  # Non-float value for delay rate
         ],
     )
-    async def test_delay_model_update_malformed(self, engine_client, malformed_delay_string):
+    async def test_delay_model_update_malformed(
+        self, engine_client: aiokatcp.Client, malformed_delay_string: str
+    ) -> None:
         """Test that a malformed delay model is rejected.
 
         We test for various combinations of malformations of the delay string.
@@ -218,7 +223,7 @@ class TestKatcpRequests:
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("delays", start_time, malformed_delay_string, malformed_delay_string)
 
-    async def test_delay_model_update_missing_argument(self, engine_client):
+    async def test_delay_model_update_missing_argument(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay request with a missing argument is rejected."""
         with pytest.raises(aiokatcp.FailReply):
             # Missing start time argument
@@ -227,13 +232,13 @@ class TestKatcpRequests:
             # Only one of the two models
             await engine_client.request("delays", SYNC_EPOCH, "3.76,0.12:7.322,1.91")
 
-    async def test_delay_model_update_too_many_arguments(self, engine_client):
+    async def test_delay_model_update_too_many_arguments(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay request with too many arguments is rejected."""
         coeffs = "3.76,0.12:7.322,1.91"
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs, coeffs)
 
-    async def test_delay_model_update_before_sync_epoch(self, engine_client):
+    async def test_delay_model_update_before_sync_epoch(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay model loaded prior to the sync epoch is rejected."""
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("delays", SYNC_EPOCH - 1.0, "0,0:0,0", "0,0:0,0")
