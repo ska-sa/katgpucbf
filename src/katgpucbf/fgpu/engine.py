@@ -680,9 +680,7 @@ class Pipeline:
                     self._compute.run_frontend(
                         samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
                     )
-                    # Replace events rather than adding to it, since this event
-                    # will be sequenced after any prior events
-                    in_item.events = [self._compute.command_queue.enqueue_marker()]
+                    in_item.add_marker(self._compute.command_queue)
                     self._out_item.n_spectra += batch_spectra
                     # Work out which output spectra contain missing data.
                     self._out_item.present[out_slice] = True
