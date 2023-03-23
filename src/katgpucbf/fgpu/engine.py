@@ -1058,7 +1058,7 @@ class Engine(aiokatcp.DeviceServer):
         self._pipelines = [Pipeline(output, self, context) for output in outputs]
 
         all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
-        rate_scale = sum(1.0 / output.send_rate_factor() for output in outputs)
+        rate_scale = sum(output.send_rate_factor for output in outputs)
         data_heaps = sum(pipeline.data_heaps for pipeline in self._pipelines)
         send_chunks = list(itertools.chain.from_iterable(pipeline.send_chunks for pipeline in self._pipelines))
         self._send_streams = send.make_streams(

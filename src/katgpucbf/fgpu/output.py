@@ -32,6 +32,7 @@ class Output(ABC):
     w_cutoff: float
     dst: list[Endpoint]
 
+    @property
     @abstractmethod
     def send_rate_factor(self) -> float:
         """Output stream rate, relative to a wideband stream."""
@@ -52,6 +53,7 @@ class Output(ABC):
 class WidebandOutput(Output):
     """Static configuration for a wideband output stream."""
 
+    @property
     def send_rate_factor(self) -> float:  # noqa: D102
         return 1.0
 
@@ -66,6 +68,7 @@ class NarrowbandOutput(Output):
 
     decimation: int
 
+    @property
     def send_rate_factor(self) -> float:  # noqa: D102
         return 1.0 / self.decimation
 
