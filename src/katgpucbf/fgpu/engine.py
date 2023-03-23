@@ -428,7 +428,7 @@ class Pipeline:
 
     def _init_delay_gain(self) -> None:
         """Initialise the delays and gains."""
-        # TODO: create per-pipeline sensors
+        # TODO[nb]: create per-pipeline sensors
         for pol in range(N_POLS):
             delay_model = MultiDelayModel(
                 callback_func=partial(self.update_delay_sensor, delay_sensor=self.engine.sensors[f"input{pol}.delay"])
