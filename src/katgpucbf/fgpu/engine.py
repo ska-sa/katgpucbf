@@ -386,7 +386,7 @@ def _parse_gains(*values: str, channels: int, default_gain: complex, allow_defau
 class Pipeline:
     """Processing pipeline for a single output stream."""
 
-    def __init__(self, output: Output, engine: "Engine") -> None:
+    def __init__(self, output: Output, engine: "Engine", context: AbstractContext) -> None:
         # Tuning knobs not exposed via arguments
         n_send = 4
         n_out = n_send if engine.use_peerdirect else 2
@@ -399,7 +399,6 @@ class Pipeline:
         self._in_items: deque[InItem] = deque()
 
         # Initialise self._compute
-        context = engine.upload_queue.context
         compute_queue = context.create_command_queue()
         self._download_queue = context.create_command_queue()
         template = ComputeTemplate(context, output.taps, output.channels, engine.src_layout.sample_bits)
@@ -1077,7 +1076,6 @@ class Engine(aiokatcp.DeviceServer):
         self.n_ants = num_ants
         self.spectra_per_heap = spectra_per_heap
         self.chunk_jones = chunk_jones
-        self.max_delay_diff = max_delay_diff
         self.default_gain = gain
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate)
         self.monitor = monitor
@@ -1087,7 +1085,7 @@ class Engine(aiokatcp.DeviceServer):
         # Tuning knobs not exposed via arguments
         n_in = 4
 
-        self.upload_queue = context.create_command_queue()
+        self._upload_queue = context.create_command_queue()
 
         extra_samples = max_delay_diff + max(output.taps * output.spectra_samples for output in outputs)
         if extra_samples > self.src_layout.chunk_samples:
@@ -1098,7 +1096,7 @@ class Engine(aiokatcp.DeviceServer):
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
         self._init_recv(src_affinity, monitor)
 
-        self._pipelines = [Pipeline(output, self) for output in outputs]
+        self._pipelines = [Pipeline(output, self, context) for output in outputs]
 
         all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
         rate_scale = sum(1.0 / output.send_rate_factor() for output in outputs)
@@ -1125,7 +1123,7 @@ class Engine(aiokatcp.DeviceServer):
         src_chunks_per_stream = 4
         ringbuffer_capacity = src_chunks_per_stream * N_POLS
 
-        context = self.upload_queue.context
+        context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
             self._in_free_queue.put_nowait(InItem(context, self.src_layout, self.samples, use_vkgdr=self.use_vkgdr))
 
@@ -1320,7 +1318,7 @@ class Engine(aiokatcp.DeviceServer):
             # the data. This is not needed for vkgdr because in that case it's
             # handled by _push_recv_chunks.
             if not self.use_vkgdr:
-                in_item.enqueue_wait_for_events(self.upload_queue)
+                in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunks[0].timestamp)
 
             # In steady-state, chunks should be the same size, but during
@@ -1350,9 +1348,9 @@ class Engine(aiokatcp.DeviceServer):
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
                     assert pol_data.samples is not None
                     pol_data.samples.set_region(
-                        self.upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
+                        self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
-                    transfer_events.append(self.upload_queue.enqueue_marker())
+                    transfer_events.append(self._upload_queue.enqueue_marker())
 
                 # Put events on the queue so that run_processing() knows when to
                 # start.
