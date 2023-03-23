@@ -37,8 +37,8 @@ class Output(ABC):
         """Output stream rate, relative to a wideband stream."""
         raise NotImplementedError  # pragma: nocover
 
-    @abstractmethod
     @property
+    @abstractmethod
     def spectra_samples(self) -> int:
         """Number of incoming digitiser samples needed per spectrum.
 

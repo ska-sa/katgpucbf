@@ -1087,10 +1087,6 @@ class Engine(aiokatcp.DeviceServer):
         # Tuning knobs not exposed via arguments
         n_in = 4
 
-        self._in_queue: asyncio.Queue[InItem | None] = monitor.make_queue("in_queue", n_in)
-        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
-        self._init_recv(src_affinity, monitor)
-
         self.upload_queue = context.create_command_queue()
         self.download_queue = context.create_command_queue()
 
@@ -1098,6 +1094,11 @@ class Engine(aiokatcp.DeviceServer):
         if extra_samples > self.src_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.samples = self.src_layout.chunk_samples + extra_samples
+
+        self._in_queue: asyncio.Queue[InItem | None] = monitor.make_queue("in_queue", n_in)
+        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
+        self._init_recv(src_affinity, monitor)
+
         self.outputs = outputs
         self._pipelines = [Pipeline(output, self) for output in outputs]
 
@@ -1498,16 +1499,19 @@ class Engine(aiokatcp.DeviceServer):
         """
         # Create the descriptor task first to ensure descriptors will be sent
         # before any data makes its way through the pipeline.
-        descriptor_sender = DescriptorSender(
-            self._send_streams[0],
-            self._descriptor_heap,
-            self.n_ants * descriptor_interval_s,
-            (self.feng_id + 1) * descriptor_interval_s,
-            all_substreams=True,
-        )
-        descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
-        self.add_service_task(descriptor_task)
-        self._cancel_tasks.append(descriptor_task)
+        for pipeline in self._pipelines:
+            descriptor_sender = DescriptorSender(
+                self._send_streams[0],
+                pipeline._descriptor_heap,  # TODO[nb]: make public
+                self.n_ants * descriptor_interval_s,
+                (self.feng_id + 1) * descriptor_interval_s,
+                all_substreams=True,  # TODO[nb]: need to restrict to the relevant substreams
+            )
+            descriptor_task = asyncio.create_task(
+                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
+            )
+            self.add_service_task(descriptor_task)
+            self._cancel_tasks.append(descriptor_task)
 
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(

@@ -132,7 +132,7 @@ class TestEngine:
         assert engine_server._port == 0
         assert engine_server._src_interface == ["127.0.0.1"] * N_POLS
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
-        assert engine_server.channels == CHANNELS
+        assert engine_server._pipelines[0].channels == CHANNELS
         assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
@@ -250,7 +250,7 @@ class TestEngine:
             Labels for the time axis of `data`
         """
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
-        src_layout = engine._src_layout
+        src_layout = engine.src_layout
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
         assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
@@ -385,7 +385,7 @@ class TestEngine:
         for pol in range(N_POLS):
             await engine_client.request("gain", pol, *(str(gain) for gain in gains[:, pol]))
 
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tones[0], 0) + self._make_tone(n_samples, tones[1], 1)
         dig_data[:, 1::2] *= -1  # Down-convert to baseband
@@ -450,7 +450,7 @@ class TestEngine:
         pfb_window = CHANNELS * 2 * TAPS
         dig_data = np.concatenate([self._make_tone(pfb_window, tone, 0) for tone in tones], axis=1)
         # Add some extra data to fill out the last output heap
-        padding = np.zeros((2, engine_server._src_layout.chunk_samples), dig_data.dtype)
+        padding = np.zeros((2, engine_server.src_layout.chunk_samples), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
@@ -504,7 +504,7 @@ class TestEngine:
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
         tones = [CW(frac_channel=channel / CHANNELS, magnitude=110) for channel in tone_channels]
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
         dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
@@ -578,7 +578,7 @@ class TestEngine:
         # To keep things simple, we'll just use phase, not delay.
         tone_channel = CHANNELS // 2
         tone = CW(frac_channel=0.5, magnitude=110)
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tone, 0)
 
@@ -753,7 +753,7 @@ class TestEngine:
             # Set gain high enough to make the tone saturate
             await engine_client.request("gain", pol, GAIN * 2)
 
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
