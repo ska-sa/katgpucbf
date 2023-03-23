@@ -720,7 +720,7 @@ class TestEngine:
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 3 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
-        saturation_value = 2 ** (engine_server.dig_sample_bits - 1) - 1
+        saturation_value = 2 ** (engine_server.src_layout.sample_bits - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(

@@ -1076,7 +1076,6 @@ class Engine(aiokatcp.DeviceServer):
         self.n_ants = num_ants
         self.spectra_per_heap = spectra_per_heap
         self.chunk_jones = chunk_jones
-        self.dig_sample_bits = dig_sample_bits
         self.max_delay_diff = max_delay_diff
         self.default_gain = gain
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate)
@@ -1099,7 +1098,6 @@ class Engine(aiokatcp.DeviceServer):
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
         self._init_recv(src_affinity, monitor)
 
-        self.outputs = outputs
         self._pipelines = [Pipeline(output, self) for output in outputs]
 
         all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
@@ -1327,7 +1325,7 @@ class Engine(aiokatcp.DeviceServer):
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.dig_sample_bits
+            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.src_layout.sample_bits
 
             transfer_events = []
             for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
