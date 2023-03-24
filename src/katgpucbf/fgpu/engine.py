@@ -397,10 +397,12 @@ class Pipeline:
         self.output = output
         self.substreams = substreams
         assert len(substreams) == len(output.dst)
-        self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue("in_queue", engine.n_in)
-        self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue("out_queue", n_out)
-        self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue("out_free_queue", n_out)
-        self._send_free_queue: asyncio.Queue[send.Chunk] = engine.monitor.make_queue("send_free_queue", n_send)
+        self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue(f"{output.name}.in_queue", engine.n_in)
+        self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue(f"{output.name}.out_queue", n_out)
+        self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue(f"{output.name}.out_free_queue", n_out)
+        self._send_free_queue: asyncio.Queue[send.Chunk] = engine.monitor.make_queue(
+            f"{output.name}.send_free_queue", n_send
+        )
         self._in_item: InItem | None = None
 
         # Initialise self._compute
