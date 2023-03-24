@@ -1233,7 +1233,7 @@ class Engine(aiokatcp.DeviceServer):
 
     @staticmethod
     async def _push_recv_chunks(chunks: Iterable[recv.Chunk], events: Iterable[AbstractEvent]) -> None:
-        """Return chunks to the streams once `event` has fired.
+        """Return chunks to the streams once `events` have fired.
 
         This is only used when using vkgdr.
         """
