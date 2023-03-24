@@ -36,6 +36,7 @@ from . import METRIC_NAMESPACE
 PREAMBLE_SIZE = 72
 #: Data type of the output payload
 SEND_DTYPE = np.dtype(np.int8)
+# TODO[nb]: add label for the stream name
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 output_samples_counter = Counter("output_samples", "number of samples transmitted", namespace=METRIC_NAMESPACE)
