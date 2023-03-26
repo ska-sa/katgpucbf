@@ -400,6 +400,11 @@ def _parse_host(msg: dict) -> tuple[str, Host]:
             cpus[int(labels["package"])] = labels["model_name"]
         elif metric_name == "node_memory_MemTotal_bytes":
             ram = int(value)
+            # Round ram to the nearest MiB. For unknown reasons, some machines
+            # have a few KiB more or less RAM available than others even when
+            # the hardware is identical, and this rounding helps coalesce
+            # them in the report.
+            ram = round(value / 2**20) * 2**20
         elif metric_name == "node_ethtool_info":
             interfaces.append(_parse_interface(labels))
         elif metric_name == "DCGM_FI_DEV_FB_TOTAL":
