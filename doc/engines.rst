@@ -81,10 +81,11 @@ The general operation of the DSP engines is illustrated in the diagram below:
 
 .. tikz:: Data Flow. Double-headed arrows represent data passed through a
    queue and returned via a free queue.
-   :libs: chains
+   :libs: chains, fit
 
    \tikzset{proc/.style={draw, rounded corners, minimum width=4.5cm, minimum height=1cm},
-            pproc/.style={proc, minimum width=2cm},
+            pproc-base/.style={minimum width=2cm, minimum height=1cm},
+            pproc/.style={proc, pproc-base},
             flow/.style={->, >=latex, thick},
             queue/.style={flow, <->},
             fqueue/.style={queue, color=blue}}
@@ -109,7 +110,7 @@ The general operation of the DSP engines is illustrated in the diagram below:
      \node[pproc, draw=none, anchor=east,
            start chain=tx\s-1 going below, on chain=tx\s-1] (transmit\s-1) at (transmit\s.east) {};
      \foreach \i in {0, 1} {
-       \node[pproc, on chain=tx\s-\i] (outstream\s-\i) {Stream};
+       \node[pproc-base, on chain=tx\s-\i] (outstream\s-\i) {};
        \draw[flow] (transmit\s-\i) -- (outstream\s-\i);
      }
      \draw[queue] (align) -- (process\s);
@@ -117,6 +118,8 @@ The general operation of the DSP engines is illustrated in the diagram below:
      \draw[queue] (download\s) -- (transmit\s);
      \end{scope}
    }
+   \node[proc, fit=(outstream0-0) (outstream1-1), inner sep=0pt, outer sep=0pt] (outstream) {};
+   \node at (outstream.center) {Stream};
    \foreach \i in {0, 1} {
      \node[pproc, on chain=rx\i] (receive\i) {Receive};
      \node[pproc, on chain=rx\i] (stream\i) {Stream};
@@ -127,6 +130,13 @@ The general operation of the DSP engines is illustrated in the diagram below:
 
 The F-engine uses two input streams and aligns two incoming polarisations, but
 in the XB-engine there is only one.
+
+There might not always be multiple processing pipelines. When they exist, they
+are to support multiple outputs generated from the same input, such as wide-
+and narrow-band F-engines, or multiple beams. A single stream is used so that
+all the outputs go through a single thread (and hence only one core is needed
+for sending) and a single rate-limiter (preventing micro-bursts if each
+pipeline sends data at the same time).
 
 Chunking
 ^^^^^^^^
