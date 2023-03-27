@@ -143,12 +143,10 @@ class InItem(QueueItem):
         CUDA context in which to allocate memory.
     layout
         Layout of the source stream.
-    samples
+    n_samples
         Number of digitised samples to hold, per polarisation
     timestamp
         Timestamp of the oldest digitiser sample represented in the data.
-    packet_samples
-        Number of samples per digitiser packet (for sizing :attr:`PolInItem.present`).
     use_vkgdr
         Use vkgdr to write sample data directly to the GPU rather than staging in
         host memory.
@@ -167,15 +165,15 @@ class InItem(QueueItem):
         self,
         context: AbstractContext,
         layout: recv.Layout,
-        samples: int,
+        n_samples: int,
         timestamp: int = 0,
         *,
         use_vkgdr: bool = False,
     ) -> None:
         self.dig_sample_bits = layout.sample_bits
         self.pol_data = []
-        present_size = accel.divup(samples, layout.heap_samples)
-        data_size = samples * self.dig_sample_bits // BYTE_BITS
+        present_size = accel.divup(n_samples, layout.heap_samples)
+        data_size = n_samples * self.dig_sample_bits // BYTE_BITS
         for _pol in range(N_POLS):
             if use_vkgdr:
                 # Memory belongs to the chunks, and we set samples when
@@ -409,7 +407,7 @@ class Pipeline:
         compute_queue = context.create_command_queue()
         self._download_queue = context.create_command_queue()
         template = ComputeTemplate(context, output.taps, output.channels, engine.src_layout.sample_bits)
-        self._compute = template.instantiate(compute_queue, engine.samples, self.spectra, engine.spectra_per_heap)
+        self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(output.channels, output.taps, output.w_cutoff))
 
@@ -508,7 +506,7 @@ class Pipeline:
         return self.output.spectra_samples
 
     @property
-    def data_heaps(self) -> int:
+    def n_data_heaps(self) -> int:
         """Maximum number of data heaps that can be in flight."""
         return len(self.send_chunks) * self.spectra // self.engine.spectra_per_heap * len(self.output.dst)
 
@@ -952,9 +950,8 @@ class Engine(aiokatcp.DeviceServer):
         not to collide with other antennas transmitting to the same X-engine.
     chunk_samples
         Number of samples in each input chunk, excluding padding samples.
-    spectra
-        Number of spectra that will be produced from a chunk of incoming
-        digitiser data.
+    chunk_jones
+        Number of Jones vectorsin each output chunk.
     spectra_per_heap
         Number of spectra in each output heap.
     max_delay_diff
@@ -1053,7 +1050,7 @@ class Engine(aiokatcp.DeviceServer):
         extra_samples = max_delay_diff + max(output.taps * output.spectra_samples for output in outputs)
         if extra_samples > self.src_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        self.samples = self.src_layout.chunk_samples + extra_samples
+        self.n_samples = self.src_layout.chunk_samples + extra_samples
 
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
@@ -1068,7 +1065,7 @@ class Engine(aiokatcp.DeviceServer):
 
         all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
         rate_scale = sum(output.send_rate_factor for output in outputs)
-        data_heaps = sum(pipeline.data_heaps for pipeline in self._pipelines)
+        n_data_heaps = sum(pipeline.n_data_heaps for pipeline in self._pipelines)
         send_chunks = list(itertools.chain.from_iterable(pipeline.send_chunks for pipeline in self._pipelines))
         self._send_streams = send.make_streams(
             endpoints=all_endpoints,
@@ -1082,7 +1079,7 @@ class Engine(aiokatcp.DeviceServer):
             send_rate_factor=send_rate_factor * rate_scale,
             feng_id=feng_id,
             num_ants=num_ants,
-            data_heaps=data_heaps,
+            n_data_heaps=n_data_heaps,
             chunks=send_chunks,
         )
 
@@ -1093,7 +1090,7 @@ class Engine(aiokatcp.DeviceServer):
 
         context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
-            self._in_free_queue.put_nowait(InItem(context, self.src_layout, self.samples, use_vkgdr=self.use_vkgdr))
+            self._in_free_queue.put_nowait(InItem(context, self.src_layout, self.n_samples, use_vkgdr=self.use_vkgdr))
 
         if self.use_vkgdr:
             import vkgdr.pycuda
@@ -1113,7 +1110,7 @@ class Engine(aiokatcp.DeviceServer):
         for stream in self._src_streams:
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
-                    array_bytes = self.samples * self.src_layout.sample_bits // BYTE_BITS
+                    array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
                     device_bytes = array_bytes + 1  # Compute requires 1 byte of padding
                     with context:
                         mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)

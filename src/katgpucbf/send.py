@@ -46,7 +46,7 @@ class DescriptorSender:
         Delay (in seconds) immediately after starting. If not specified, it
         defaults to `interval`.
     substreams
-        Substream indexes to which descriptors are sent. If not specified,
+        Substream indices to which descriptors are sent. If not specified,
         send only to the first substream.
     """
 

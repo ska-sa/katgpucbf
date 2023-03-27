@@ -219,7 +219,7 @@ def make_streams(
     send_rate_factor: float,
     feng_id: int,
     num_ants: int,
-    data_heaps: int,
+    n_data_heaps: int,
     chunks: Sequence[Chunk],
 ) -> list["spead2.send.asyncio.AsyncStream"]:
     """Create asynchronous SPEAD streams for transmission.
@@ -237,7 +237,7 @@ def make_streams(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
         # Adding len(endpoints) to accommodate descriptors sent for each substream
-        max_heaps=data_heaps + len(endpoints),
+        max_heaps=n_data_heaps + len(endpoints),
     )
     streams: list["spead2.send.asyncio.AsyncStream"]
     if ibv:
