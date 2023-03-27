@@ -951,7 +951,7 @@ class Engine(aiokatcp.DeviceServer):
     chunk_samples
         Number of samples in each input chunk, excluding padding samples.
     chunk_jones
-        Number of Jones vectorsin each output chunk.
+        Number of Jones vectors in each output chunk.
     spectra_per_heap
         Number of spectra in each output heap.
     max_delay_diff
