@@ -119,9 +119,9 @@ autoclass_content = "both"
 
 todo_include_todos = True
 
-# Adds \usetikzlibrary{...} to the latex preamble. We need "chains" for
-# rendering flowcharts.
-tikz_tikzlibraries = "chains"
+# Adds \usetikzlibrary{...} to the latex preamble. We need "chains" and
+# "fit" for rendering flowcharts.
+tikz_tikzlibraries = "chains,fit"
 
 # Force MathJax to render as SVG rather than CHTML, to work around
 # https://github.com/mathjax/MathJax/issues/2701
