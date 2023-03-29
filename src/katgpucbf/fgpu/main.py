@@ -126,6 +126,7 @@ class NarrowbandOutputDict(OutputDict, total=False):
     See :class:`OutputDict` for further information.
     """
 
+    centre_frequency: float
     decimation: int
 
 
@@ -193,12 +194,15 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
 
     - name
     - channels
+    - centre_frequency
     - decimation
     - dst
     """
 
     def field_callback(kws: NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
+            case "centre_frequency":
+                kws[key] = float(data)
             case "decimation":
                 kws[key] = int(data)
             case _:
@@ -207,7 +211,7 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
     try:
         kws: NarrowbandOutputDict = {}
         _parse_stream(value, kws, field_callback)
-        for key in ["decimation"]:
+        for key in ["centre_frequency", "decimation"]:
             if key not in kws:
                 raise ValueError(f"{key} is missing")
     except ValueError as exc:
@@ -233,7 +237,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help=(
-            "Add a narrowband output (may be repeated). The required keys are: name, decimation, channels, dst. "
+            "Add a narrowband output (may be repeated). "
+            "The required keys are: name, centre_frequency, decimation, channels, dst. "
             f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}]"
         ),
     )
