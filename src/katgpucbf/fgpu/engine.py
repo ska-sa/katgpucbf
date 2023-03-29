@@ -869,7 +869,7 @@ class Pipeline:
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
                 skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.spectra_samples)
-                send.skipped_heaps_counter.inc(skipped_frames * len(self.substreams))
+                send.skipped_heaps_counter.labels(self.output.name).inc(skipped_frames * len(self.substreams))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:

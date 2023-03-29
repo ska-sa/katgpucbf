@@ -705,12 +705,20 @@ class TestEngine:
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
-        assert prom_diff.get_sample_diff("output_heaps_total") == output_heaps
+        assert prom_diff.get_sample_diff("output_heaps_total", {"stream": "wideband"}) == output_heaps
         frame_samples = channels * spectra_per_heap * N_POLS
         frame_size = frame_samples * COMPLEX * np.dtype(np.int8).itemsize
-        assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(dst_present) * frame_size
-        assert prom_diff.get_sample_diff("output_samples_total") == np.sum(dst_present) * frame_samples
-        assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~dst_present) * n_substreams
+        assert (
+            prom_diff.get_sample_diff("output_bytes_total", {"stream": "wideband"}) == np.sum(dst_present) * frame_size
+        )
+        assert (
+            prom_diff.get_sample_diff("output_samples_total", {"stream": "wideband"})
+            == np.sum(dst_present) * frame_samples
+        )
+        assert (
+            prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": "wideband"})
+            == np.sum(~dst_present) * n_substreams
+        )
 
     async def test_dig_clip_cnt_sensors(
         self,
@@ -768,8 +776,13 @@ class TestEngine:
                 dig_data,
             )
 
-        assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
-        assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
+        assert prom_diff.get_sample_diff(
+            "output_clipped_samples_total", {"stream": "wideband", "pol": f"{tone_pol}"}
+        ) == len(timestamps)
+        assert (
+            prom_diff.get_sample_diff("output_clipped_samples_total", {"stream": "wideband", "pol": f"{1 - tone_pol}"})
+            == 0
+        )
         sensor = engine_server.sensors[f"wideband.input{tone_pol}.feng-clip-cnt"]
         assert sensor.value == len(timestamps)
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
