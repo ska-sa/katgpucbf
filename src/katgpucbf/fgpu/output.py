@@ -66,6 +66,7 @@ class WidebandOutput(Output):
 class NarrowbandOutput(Output):
     """Static configuration for a narrowband stream."""
 
+    centre_frequency: float
     decimation: int
 
     @property

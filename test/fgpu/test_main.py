@@ -60,18 +60,22 @@ class TestParseNarrowband:
 
     def test_minimal(self) -> None:
         """Test with the minimum required arguments."""
-        assert parse_narrowband("name=foo,channels=1024,decimation=8,dst=239.1.2.3+1:7148") == {
+        assert parse_narrowband("name=foo,channels=1024,centre_frequency=400e6,decimation=8,dst=239.1.2.3+1:7148") == {
             "name": "foo",
             "channels": 1024,
+            "centre_frequency": 400e6,
             "decimation": 8,
             "dst": [Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
         }
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_narrowband("name=foo,channels=1024,decimation=8,taps=8,w_cutoff=0.5,dst=239.1.2.3+1:7148") == {
+        assert parse_narrowband(
+            "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,w_cutoff=0.5,dst=239.1.2.3+1:7148"
+        ) == {
             "name": "foo",
             "channels": 1024,
+            "centre_frequency": 400e6,
             "decimation": 8,
             "taps": 8,
             "w_cutoff": 0.5,
@@ -81,10 +85,11 @@ class TestParseNarrowband:
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("name", "channels=1024,decimation=8,dst=239.1.2.3+1:7148"),
-            ("channels", "name=foo,decimation=8,dst=239.1.2.3+1:7148"),
-            ("decimation", "name=foo,channels=1024,dst=239.1.2.3+1:7148"),
-            ("dst", "name=foo,channels=1024,decimation=8"),
+            ("name", "channels=1024,centre_frequency=400e6,decimation=8,dst=239.1.2.3+1:7148"),
+            ("channels", "name=foo,centre_frequency=400e6,decimation=8,dst=239.1.2.3+1:7148"),
+            ("centre_frequency", "name=foo,channels=1024,decimation=8,dst=239.1.2.3+1:7148"),
+            ("decimation", "name=foo,channels=1024,centre_frequency=400e6,dst=239.1.2.3+1:7148"),
+            ("dst", "name=foo,channels=1024,centre_frequency=400e6,decimation=8"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
@@ -95,7 +100,7 @@ class TestParseNarrowband:
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--narrowband: channels specified twice"):
-            parse_narrowband("name=foo,channels=8,channels=9,decimation=8,dst=239.1.2.3+1:7148")
+            parse_narrowband("name=foo,channels=8,channels=9,centre_frequency=400e6,decimation=8,dst=239.1.2.3+1:7148")
 
 
 class TestParseArgs:
@@ -109,8 +114,11 @@ class TestParseArgs:
             "--adc-sample-rate=1712000000.0",
             "--sync-epoch=0",
             "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9",
-            "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,decimation=8,taps=4,w_cutoff=0.8",
-            "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,decimation=16",
+            (
+                "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,"
+                "centre_frequency=400e6,decimation=8,taps=4,w_cutoff=0.8"
+            ),
+            "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,centre_frequency=300e6,decimation=16",
             "239.0.1.0+7:7148",
             "239.0.2.0+7:7148",
         ]
@@ -127,11 +135,18 @@ class TestParseArgs:
                 name="nb0",
                 dst=[Endpoint("239.1.0.0", 7148), Endpoint("239.1.0.1", 7148)],
                 channels=32768,
+                centre_frequency=400e6,
                 decimation=8,
                 taps=4,
                 w_cutoff=0.8,
             ),
             NarrowbandOutput(
-                name="nb1", dst=[Endpoint("239.2.0.0", 7149)], channels=8192, decimation=16, taps=16, w_cutoff=1.0
+                name="nb1",
+                dst=[Endpoint("239.2.0.0", 7149)],
+                channels=8192,
+                centre_frequency=300e6,
+                decimation=16,
+                taps=16,
+                w_cutoff=1.0,
             ),
         ]
