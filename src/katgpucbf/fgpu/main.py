@@ -24,6 +24,7 @@ actual running of the processing.
 import argparse
 import asyncio
 import logging
+import math
 from collections.abc import Callable, Sequence
 from typing import TypedDict, TypeVar
 
@@ -52,7 +53,10 @@ from .engine import Engine
 from .output import NarrowbandOutput, WidebandOutput
 
 _T = TypeVar("_T")
+_OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
+DEFAULT_TAPS = 16
+DEFAULT_W_CUTOFF = 1.0
 
 
 def comma_split(
@@ -92,20 +96,92 @@ def comma_split(
     return func
 
 
-class NarrowbandOutputDict(TypedDict, total=False):
-    """Configuration options for a narrowband output.
+class OutputDict(TypedDict, total=False):
+    """Configuration options for an output stream.
 
-    Unlike :class:`NarrowbandOutput`, all the fields are optional, so that it
-    can be built up incrementally. They must all be filled in before using it
-    to construct a :class:`NarrowbandOutput`.
+    Unlike :class:`WidebandOutput` or :class:`NarrowbandOutput`, all the fields
+    are optional, so that it can be built up incrementally. They must all be
+    filled in before using it to construct an :class:`Output`.
     """
 
     name: str
     channels: int
-    decimation: int
     dst: list[Endpoint]
     taps: int
     w_cutoff: float
+
+
+class WidebandOutputDict(OutputDict, total=False):
+    """Configuration options for a wideband output.
+
+    See :class:`OutputDict` for further information.
+    """
+
+    pass
+
+
+class NarrowbandOutputDict(OutputDict, total=False):
+    """Configuration options for a narrowband output.
+
+    See :class:`OutputDict` for further information.
+    """
+
+    decimation: int
+
+
+def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
+    """Parse a wideband or narrowband stream description.
+
+    This populates `kws` (which should initially be empty) from key=value pairs
+    in `value`. It handles the common fields directly, and type-specific fields
+    are handled by a provided field callback. The callback is invoked with
+    `kws`, the key and the value. If it does not recognise the key, it should
+    raise ValueError.
+    """
+    for part in value.split(","):
+        match part.split("=", 1):
+            case [key, data]:
+                match key:
+                    case _ if key in kws:
+                        raise ValueError(f"{key} specified twice")
+                    case "name":
+                        kws[key] = data
+                    case "channels" | "taps":
+                        kws[key] = int(data)
+                    case "w_cutoff":
+                        kws[key] = float(data)
+                    case "dst":
+                        kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
+                    case _:
+                        field_callback(kws, key, data)
+            case _:
+                raise ValueError(f"missing '=' in {part}")
+    for key in ["name", "channels", "dst"]:
+        if key not in kws:
+            raise ValueError(f"{key} is missing")
+
+
+def parse_wideband(value: str) -> WidebandOutputDict:
+    """Parse a string with a wideband configuration.
+
+    The string has a comma-separated list of key=value pairs. See
+    :class:`WidebandOutputDict` for the valid keys and types. The following
+    keys are required:
+
+    - name
+    - channels
+    - dst
+    """
+
+    def field_callback(kws: WidebandOutputDict, key: str, data: str) -> None:
+        raise ValueError(f"unknown key {key}")
+
+    try:
+        kws: WidebandOutputDict = {}
+        _parse_stream(value, kws, field_callback)
+    except ValueError as exc:
+        raise ValueError(f"--wideband: {exc}") from exc
+    return kws
 
 
 def parse_narrowband(value: str) -> NarrowbandOutputDict:
@@ -120,28 +196,22 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
     - decimation
     - dst
     """
-    kws: NarrowbandOutputDict = {}
-    for part in value.split(","):
-        match part.split("=", 1):
-            case [key, data]:
-                match key:
-                    case _ if key in kws:
-                        raise ValueError(f"--narrowband: {key} specified twice")
-                    case "name":
-                        kws[key] = data
-                    case "channels" | "decimation" | "taps":
-                        kws[key] = int(data)
-                    case "w_cutoff":
-                        kws[key] = float(data)
-                    case "dst":
-                        kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
-                    case _:
-                        raise ValueError(f"--narrowband: unknown key {key}")
+
+    def field_callback(kws: NarrowbandOutputDict, key: str, data: str) -> None:
+        match key:
+            case "decimation":
+                kws[key] = int(data)
             case _:
-                raise ValueError(f"--narrowband: missing '=' in {part}")
-    for key in ["name", "channels", "decimation", "dst"]:
-        if key not in kws:
-            raise ValueError(f"--narrowband: {key} is missing")
+                raise ValueError(f"unknown key {key}")
+
+    try:
+        kws: NarrowbandOutputDict = {}
+        _parse_stream(value, kws, field_callback)
+        for key in ["decimation"]:
+            if key not in kws:
+                raise ValueError(f"{key} is missing")
+    except ValueError as exc:
+        raise ValueError(f"--narrowband: {exc}") from exc
     return kws
 
 
@@ -164,7 +234,18 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help=(
             "Add a narrowband output (may be repeated). The required keys are: name, decimation, channels, dst. "
-            "Optional keys: taps, w_cutoff (default to the global options)"
+            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}]"
+        ),
+    )
+    parser.add_argument(
+        "--wideband",
+        type=parse_wideband,
+        default=[],
+        action="append",
+        metavar="KEY=VALUE[,KEY=VALUE...]",
+        help=(
+            "Add a wideband output (may be repeated). The required keys are: name, channels, dst. "
+            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}]"
         ),
     )
     parser.add_argument(
@@ -264,7 +345,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=65536,
         help="The number of antennas in the array. [%(default)s]",
     )
-    parser.add_argument("--channels", type=int, required=True, help="Number of output channels to produce")
     parser.add_argument(
         "--spectra-per-heap",
         type=int,
@@ -287,8 +367,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Number of Jones vectors in output chunks. If not a multiple of "
         "2*channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
     )
-    parser.add_argument("--taps", type=int, default=16, help="Number of taps in polyphase filter bank [%(default)s]")
-    parser.add_argument("--w-cutoff", type=float, default=1.0, help="Scaling factor for channel width [%(default)s]")
     parser.add_argument(
         "--max-delay-diff",
         type=int,
@@ -324,7 +402,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, nargs=N_POLS, help="Source endpoints (or pcap file)")
-    parser.add_argument("dst", type=endpoint_list_parser(DEFAULT_PORT), help="Destination endpoints")
     args = parser.parse_args(arglist)
 
     if args.use_peerdirect and not args.dst_ibv:
@@ -332,21 +409,28 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     for src in args.src:
         if not isinstance(src, str) and args.src_interface is None:
             parser.error("Live source requires --src-interface")
-    if len(args.dst) % len(args.dst_interface) != 0:
-        parser.error("number of destinations must be divisible by number of destination interfaces")
 
-    # Convert narrowband from NarrowbandOutputDict to NarrowbandOutput
-    used_names = {"wideband"}
-    for output in args.narrowband:
-        name = output["name"]
-        if name in used_names:
-            parser.error(f"output name {name} used twice")
-        used_names.add(name)
-        if "taps" not in output:
-            output["taps"] = args.taps
-        if "w_cutoff" not in output:
-            output["w_cutoff"] = args.w_cutoff
-    args.narrowband = [NarrowbandOutput(**output) for output in args.narrowband]
+    # Convert from *OutputDict to *Output
+    used_names = set()
+    args.outputs = []
+    for output_group in [args.wideband, args.narrowband]:
+        for output in output_group:
+            name = output["name"]
+            if name in used_names:
+                parser.error(f"output name {name} used twice")
+            if len(output["dst"]) % len(args.dst_interface) != 0:
+                parser.error(f"{name}: number of destinations must be divisible by number of destination interfaces")
+            used_names.add(name)
+            if "taps" not in output:
+                output["taps"] = DEFAULT_TAPS
+            if "w_cutoff" not in output:
+                output["w_cutoff"] = DEFAULT_W_CUTOFF
+            if output_group is args.wideband:
+                args.outputs.append(WidebandOutput(**output))
+            else:
+                args.outputs.append(NarrowbandOutput(**output))
+    if not args.outputs:
+        parser.error("At least one --wideband or --narrowband argument is required")
 
     return args
 
@@ -367,10 +451,8 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    chunk_jones = accel.roundup(args.dst_chunk_jones, args.channels * args.spectra_per_heap)
-    wideband = WidebandOutput(
-        name="wideband", channels=args.channels, taps=args.taps, w_cutoff=args.w_cutoff, dst=args.dst
-    )
+    channels_lcm = math.lcm(*(output.channels for output in args.outputs))
+    chunk_jones = accel.roundup(args.dst_chunk_jones, channels_lcm * args.spectra_per_heap)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -388,7 +470,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         dst_packet_payload=args.dst_packet_payload,
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
-        outputs=[wideband] + args.narrowband,
+        outputs=args.outputs,
         adc_sample_rate=args.adc_sample_rate,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,

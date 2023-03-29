@@ -27,11 +27,11 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --src-affinity $src_affinity --src-comp-vector=$src_comp \
     --dst-affinity $dst_affinity --dst-comp-vector=$dst_comp \
     --adc-sample-rate ${adc_sample_rate:-7000000000} \
-    --channels ${channels:-32768} \
     --spectra-per-heap ${spectra_per_heap:-256} \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
     --sync-epoch 0 \
     --array-size ${array_size:-8} \
     --feng-id "$feng_id" \
-    $srcs $dst "$@"
+    --wideband "name=wideband,channels=${channels:-32768},dst=$dst" \
+    $srcs "$@"
