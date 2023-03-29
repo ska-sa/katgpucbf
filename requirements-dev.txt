@@ -80,10 +80,6 @@ decorator==5.1.1
     #   aiokatcp
     #   ipython
     #   katsdpsigproc
-deprecated==1.2.13
-    # via
-    #   -c requirements.txt
-    #   redis
 distlib==0.3.6
     # via virtualenv
 docutils==0.17.1
@@ -199,7 +195,6 @@ packaging==21.3
     #   build
     #   dask
     #   pytest
-    #   redis
     #   sphinx
     #   xarray
 pandas==1.5.0
@@ -312,7 +307,7 @@ pyyaml==6.0
     #   dask
     #   pre-commit
     #   pybtex
-redis==4.3.4
+redis==4.5.3
     # via
     #   -c requirements.txt
     #   katsdptelstate
@@ -403,7 +398,6 @@ wheel==0.38.4
 wrapt==1.14.1
     # via
     #   -c requirements.txt
-    #   deprecated
     #   prometheus-async
 xarray==2022.10.0
     # via
