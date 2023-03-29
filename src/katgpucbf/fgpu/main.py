@@ -100,6 +100,7 @@ class NarrowbandOutputDict(TypedDict, total=False):
     to construct a :class:`NarrowbandOutput`.
     """
 
+    name: str
     channels: int
     decimation: int
     dst: list[Endpoint]
@@ -114,6 +115,7 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
     :class:`NarrowbandOutputDict` for the valid keys and types. The following
     keys are required:
 
+    - name
     - channels
     - decimation
     - dst
@@ -125,6 +127,8 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
                 match key:
                     case _ if key in kws:
                         raise ValueError(f"--narrowband: {key} specified twice")
+                    case "name":
+                        kws[key] = data
                     case "channels" | "decimation" | "taps":
                         kws[key] = int(data)
                     case "w_cutoff":
@@ -135,7 +139,7 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
                         raise ValueError(f"--narrowband: unknown key {key}")
             case _:
                 raise ValueError(f"--narrowband: missing '=' in {part}")
-    for key in ["channels", "decimation", "dst"]:
+    for key in ["name", "channels", "decimation", "dst"]:
         if key not in kws:
             raise ValueError(f"--narrowband: {key} is missing")
     return kws
@@ -159,7 +163,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help=(
-            "Add a narrowband output (may be repeated). The required keys are: decimation, channels, dst. "
+            "Add a narrowband output (may be repeated). The required keys are: name, decimation, channels, dst. "
             "Optional keys: taps, w_cutoff (default to the global options)"
         ),
     )
@@ -332,7 +336,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("number of destinations must be divisible by number of destination interfaces")
 
     # Convert narrowband from NarrowbandOutputDict to NarrowbandOutput
+    used_names = {"wideband"}
     for output in args.narrowband:
+        name = output["name"]
+        if name in used_names:
+            parser.error(f"output name {name} used twice")
+        used_names.add(name)
         if "taps" not in output:
             output["taps"] = args.taps
         if "w_cutoff" not in output:
@@ -359,7 +368,9 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         monitor = NullMonitor()
 
     chunk_jones = accel.roundup(args.dst_chunk_jones, args.channels * args.spectra_per_heap)
-    wideband = WidebandOutput(channels=args.channels, taps=args.taps, w_cutoff=args.w_cutoff, dst=args.dst)
+    wideband = WidebandOutput(
+        name="wideband", channels=args.channels, taps=args.taps, w_cutoff=args.w_cutoff, dst=args.dst
+    )
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -383,7 +394,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         feng_id=args.feng_id,
         num_ants=args.array_size,
         chunk_samples=args.src_chunk_samples,
-        spectra=chunk_jones // args.channels,
+        chunk_jones=chunk_jones,
         spectra_per_heap=args.spectra_per_heap,
         dig_sample_bits=args.dig_sample_bits,
         max_delay_diff=args.max_delay_diff,

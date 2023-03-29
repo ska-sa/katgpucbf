@@ -30,7 +30,7 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine, InItem
+from katgpucbf.fgpu.engine import Engine, InItem, Pipeline
 from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff, packbits
@@ -132,7 +132,7 @@ class TestEngine:
         assert engine_server._port == 0
         assert engine_server._src_interface == ["127.0.0.1"] * N_POLS
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
-        assert engine_server.channels == CHANNELS
+        assert engine_server._pipelines[0].channels == CHANNELS
         assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
@@ -250,7 +250,7 @@ class TestEngine:
             Labels for the time axis of `data`
         """
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
-        src_layout = engine._src_layout
+        src_layout = engine.src_layout
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
         assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
@@ -385,7 +385,7 @@ class TestEngine:
         for pol in range(N_POLS):
             await engine_client.request("gain", pol, *(str(gain) for gain in gains[:, pol]))
 
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tones[0], 0) + self._make_tone(n_samples, tones[1], 1)
         dig_data[:, 1::2] *= -1  # Down-convert to baseband
@@ -450,7 +450,7 @@ class TestEngine:
         pfb_window = CHANNELS * 2 * TAPS
         dig_data = np.concatenate([self._make_tone(pfb_window, tone, 0) for tone in tones], axis=1)
         # Add some extra data to fill out the last output heap
-        padding = np.zeros((2, engine_server._src_layout.chunk_samples), dig_data.dtype)
+        padding = np.zeros((2, engine_server.src_layout.chunk_samples), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
@@ -504,7 +504,7 @@ class TestEngine:
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
         tones = [CW(frac_channel=channel / CHANNELS, magnitude=110) for channel in tone_channels]
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
         dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
@@ -578,7 +578,7 @@ class TestEngine:
         # To keep things simple, we'll just use phase, not delay.
         tone_channel = CHANNELS // 2
         tone = CW(frac_channel=0.5, magnitude=110)
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tone, 0)
 
@@ -720,7 +720,7 @@ class TestEngine:
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 3 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
-        saturation_value = 2 ** (engine_server.dig_sample_bits - 1) - 1
+        saturation_value = 2 ** (engine_server.src_layout.sample_bits - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(
@@ -753,7 +753,7 @@ class TestEngine:
             # Set gain high enough to make the tone saturate
             await engine_client.request("gain", pol, GAIN * 2)
 
-        src_layout = engine_server._src_layout
+        src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
@@ -773,8 +773,8 @@ class TestEngine:
         assert sensor.value == 0
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
 
-    def _patch_next_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
-        """Patch :meth:`.Engine._next_in` to make a request partway through the stream.
+    def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
+        """Patch Pipeline._fill_in` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
@@ -783,17 +783,18 @@ class TestEngine:
         counter = 0
         timestamp = []
 
-        async def next_in(self) -> InItem | None:
-            nonlocal counter
-            counter += 1
-            if counter == 6:
-                await engine_client.request(*request)
-                _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
-                timestamp.append(int(informs[0].arguments[4]))
-            return await orig_next_in(self)
+        async def fill_in(self) -> InItem | None:
+            if self._in_item is None:
+                nonlocal counter
+                counter += 1
+                if counter == 6:
+                    await engine_client.request(*request)
+                    _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
+                    timestamp.append(int(informs[0].arguments[4]))
+            return await orig_fill_in(self)
 
-        orig_next_in = Engine._next_in
-        monkeypatch.setattr(Engine, "_next_in", next_in)
+        orig_fill_in = Pipeline._fill_in
+        monkeypatch.setattr(Pipeline, "_fill_in", fill_in)
         return timestamp
 
     async def test_steady_state_gain(
@@ -809,7 +810,7 @@ class TestEngine:
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
-        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "gain-all", 0)
+        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "gain-all", 0)
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -841,7 +842,7 @@ class TestEngine:
         n_samples = 8 * CHUNK_SAMPLES
         dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
 
-        timestamp_list = self._patch_next_in(monkeypatch, engine_client, "delays", SYNC_EPOCH, "0,0:3,0", "0,0:3,0")
+        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "delays", SYNC_EPOCH, "0,0:3,0", "0,0:3,0")
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,

@@ -36,6 +36,7 @@ from . import METRIC_NAMESPACE
 PREAMBLE_SIZE = 72
 #: Data type of the output payload
 SEND_DTYPE = np.dtype(np.int8)
+# TODO[nb]: add label for the stream name
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
 output_samples_counter = Counter("output_samples", "number of samples transmitted", namespace=METRIC_NAMESPACE)
@@ -63,19 +64,19 @@ class Frame:
     feng_id
         Value to put in ``feng_id`` SPEAD item
     substreams
-        Number of substreams into which the channels are divided
+        Substream indices into which the channels are divided
     """
 
     def __init__(
-        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, substreams: int, feng_id: int
+        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, substreams: Sequence[int], feng_id: int
     ) -> None:
         channels = data.shape[0]
-        assert channels % substreams == 0
-        channels_per_substream = channels // substreams
+        assert channels % len(substreams) == 0
+        channels_per_substream = channels // len(substreams)
         self.heaps = []
         self.data = data
         self.saturated = saturated
-        for i in range(substreams):
+        for i, substream_index in enumerate(substreams):
             start_channel = i * channels_per_substream
             heap = spead2.send.Heap(FLAVOUR)
             heap.repeat_pointers = True
@@ -87,7 +88,7 @@ class Frame:
             heap.add_item(
                 spead2.Item(FENG_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data)
             )
-            self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
+            self.heaps.append(spead2.send.HeapReference(heap, substream_index=substream_index))
 
 
 def _multi_send(
@@ -120,13 +121,13 @@ class Chunk:
         data: np.ndarray,
         saturated: np.ndarray,
         *,
-        substreams: int,
+        substreams: Sequence[int],
         feng_id: int,
     ) -> None:
         n_frames = data.shape[0]
         channels = data.shape[1]
         spectra_per_heap = data.shape[2]
-        if channels % substreams != 0:
+        if channels % len(substreams) != 0:
             raise ValueError("substreams must divide into channels")
         self.data = data
         self.saturated = saturated
@@ -200,6 +201,7 @@ class Chunk:
         end_timestamp = self._timestamp + self._timestamp_step * len(self._frames)
         end_time = time_converter.adc_to_unix(end_timestamp)
         for pol in range(N_POLS):
+            # TODO[nb]:
             sensor = sensors[f"input{pol}.feng-clip-cnt"]
             sensor.set_value(sensor.value + saturated[pol], timestamp=end_time)
 
@@ -217,9 +219,7 @@ def make_streams(
     send_rate_factor: float,
     feng_id: int,
     num_ants: int,
-    spectra: int,
-    spectra_per_heap: int,
-    channels: int,
+    n_data_heaps: int,
     chunks: Sequence[Chunk],
 ) -> list["spead2.send.asyncio.AsyncStream"]:
     """Create asynchronous SPEAD streams for transmission.
@@ -237,7 +237,7 @@ def make_streams(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
         # Adding len(endpoints) to accommodate descriptors sent for each substream
-        max_heaps=(len(chunks) * spectra // spectra_per_heap * len(endpoints)) + len(endpoints),
+        max_heaps=n_data_heaps + len(endpoints),
     )
     streams: list["spead2.send.asyncio.AsyncStream"]
     if ibv:

@@ -16,26 +16,50 @@
 
 """Data structures capturing static configuration of a single output stream."""
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from katsdptelstate.endpoint import Endpoint
 
 
 @dataclass
-class Output:
+class Output(ABC):
     """Static configuration for an output stream."""
 
+    name: str
     channels: int
     taps: int
     w_cutoff: float
     dst: list[Endpoint]
+
+    @property
+    @abstractmethod
+    def send_rate_factor(self) -> float:
+        """Output stream rate, relative to a wideband stream."""
+        raise NotImplementedError  # pragma: nocover
+
+    @property
+    @abstractmethod
+    def spectra_samples(self) -> int:
+        """Number of incoming digitiser samples needed per spectrum.
+
+        Note that this is the spacing between spectra. Each spectrum uses
+        an overlapping window with more samples than this.
+        """
+        raise NotImplementedError  # pragma: nocover
 
 
 @dataclass
 class WidebandOutput(Output):
     """Static configuration for a wideband output stream."""
 
-    pass
+    @property
+    def send_rate_factor(self) -> float:  # noqa: D102
+        return 1.0
+
+    @property
+    def spectra_samples(self) -> int:  # noqa: D102
+        return 2 * self.channels
 
 
 @dataclass
@@ -43,3 +67,11 @@ class NarrowbandOutput(Output):
     """Static configuration for a narrowband stream."""
 
     decimation: int
+
+    @property
+    def send_rate_factor(self) -> float:  # noqa: D102
+        return 1.0 / self.decimation
+
+    @property
+    def spectra_samples(self) -> int:  # noqa: D102
+        return 2 * self.channels * self.decimation

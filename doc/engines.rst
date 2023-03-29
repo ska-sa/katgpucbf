@@ -81,41 +81,62 @@ The general operation of the DSP engines is illustrated in the diagram below:
 
 .. tikz:: Data Flow. Double-headed arrows represent data passed through a
    queue and returned via a free queue.
-   :libs: chains
+   :libs: chains, fit
 
    \tikzset{proc/.style={draw, rounded corners, minimum width=4.5cm, minimum height=1cm},
-            pproc/.style={proc, minimum width=2cm},
+            pproc-base/.style={minimum width=2cm, minimum height=1cm},
+            pproc/.style={proc, pproc-base},
             flow/.style={->, >=latex, thick},
             queue/.style={flow, <->},
             fqueue/.style={queue, color=blue}}
-   \node[proc, start chain=going below, on chain] (align) {Align, copy to GPU};
+   \begin{scope}[start chain=chain going below]
+   \node[proc, on chain] (align) {Align, copy to GPU};
    \node[pproc, draw=none, anchor=west,
          start chain=rx0 going above, on chain=rx0] (align0) at (align.west) {};
    \node[pproc, draw=none, anchor=east,
          start chain=rx1 going above, on chain=rx1] (align1) at (align.east) {};
-   \node[proc, on chain] (process) {GPU processing};
-   \node[proc, on chain] (download) {Copy from GPU};
-   \node[proc, on chain] (transmit) {Transmit};
-   \node[pproc, draw=none, anchor=west,
-         start chain=tx0 going below, on chain=tx0] (transmit0) at (transmit.west) {};
-   \node[pproc, draw=none, anchor=east,
-         start chain=tx1 going below, on chain=tx1] (transmit1) at (transmit.east) {};
+   \begin{scope}[start branch=stream0 going below]
+     \node[proc, on chain=going below left] (process0) {GPU processing};
+   \end{scope}
+   \begin{scope}[start branch=stream1 going below]
+     \node[proc, on chain=going below right] (process1) {GPU processing};
+   \end{scope}
+   \foreach \s in {0, 1} {
+     \begin{scope}[continue chain=chain/stream\s]
+     \node[proc, on chain] (download\s) {Copy from GPU};
+     \node[proc, on chain] (transmit\s) {Transmit};
+     \node[pproc, draw=none, anchor=west,
+           start chain=tx\s-0 going below, on chain=tx\s-0] (transmit\s-0) at (transmit\s.west) {};
+     \node[pproc, draw=none, anchor=east,
+           start chain=tx\s-1 going below, on chain=tx\s-1] (transmit\s-1) at (transmit\s.east) {};
+     \foreach \i in {0, 1} {
+       \node[pproc-base, on chain=tx\s-\i] (outstream\s-\i) {};
+       \draw[flow] (transmit\s-\i) -- (outstream\s-\i);
+     }
+     \draw[queue] (align) -- (process\s);
+     \draw[queue] (process\s) -- (download\s);
+     \draw[queue] (download\s) -- (transmit\s);
+     \end{scope}
+   }
+   \node[proc, fit=(outstream0-0) (outstream1-1), inner sep=0pt, outer sep=0pt] (outstream) {};
+   \node at (outstream.center) {Stream};
    \foreach \i in {0, 1} {
      \node[pproc, on chain=rx\i] (receive\i) {Receive};
      \node[pproc, on chain=rx\i] (stream\i) {Stream};
-     \node[pproc, on chain=tx\i] (outstream\i) {Stream};
-   }
-   \foreach \i in {0, 1} {
      \draw[flow] (stream\i) -- (receive\i);
      \draw[queue] (receive\i) -- (align\i);
-     \draw[flow] (transmit\i) -- (outstream\i);
    }
-   \draw[queue] (align) -- (process);
-   \draw[queue] (process) -- (download);
-   \draw[queue] (download) -- (transmit);
+   \end{scope}
 
 The F-engine uses two input streams and aligns two incoming polarisations, but
 in the XB-engine there is only one.
+
+There might not always be multiple processing pipelines. When they exist, they
+are to support multiple outputs generated from the same input, such as wide-
+and narrow-band F-engines, or multiple beams. A single stream is used so that
+all the outputs go through a single thread (and hence only one core is needed
+for sending) and a single rate-limiter (preventing micro-bursts if each
+pipeline sends data at the same time).
 
 Chunking
 ^^^^^^^^
@@ -143,6 +164,14 @@ approach allows all memory to be allocated up front. Slow components thus
 cause back-pressure on up-stream components by not returning buffers through
 the free queue fast enough. The number of buffers needs to be large enough to
 smooth out jitter in processing times.
+
+A special case is the split from the receiver into multiple processing
+pipelines. In this case each processing pipeline has an incoming queue with new
+data (and each buffer is placed in each of these queues), but a single queue
+for returning free buffers. Since a buffer can only be placed on the free queue
+once it has been processed by all the pipelines, a reference count is held with
+the buffer to track how many usages it has. This should not be confused with
+the Python interpreter's reference count, although the purpose is similar.
 
 Transfers and events
 ^^^^^^^^^^^^^^^^^^^^

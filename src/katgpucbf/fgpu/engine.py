@@ -17,10 +17,10 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
+import itertools
 import logging
 import math
 import numbers
-from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -139,13 +139,14 @@ class InItem(QueueItem):
 
     Parameters
     ----------
-    compute
-        F-engine Operation Sequence detailing the computation operations which
-        will take place on the data in :attr:`PolInItem.samples`.
+    context
+        CUDA context in which to allocate memory.
+    layout
+        Layout of the source stream.
+    n_samples
+        Number of digitised samples to hold, per polarisation
     timestamp
         Timestamp of the oldest digitiser sample represented in the data.
-    packet_samples
-        Number of samples per digitiser packet (for sizing :attr:`PolInItem.present`).
     use_vkgdr
         Use vkgdr to write sample data directly to the GPU rather than staging in
         host memory.
@@ -157,26 +158,38 @@ class InItem(QueueItem):
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
     dig_sample_bits: int
+    #: Number of pipelines still using this item
+    refcount: int
 
-    def __init__(self, compute: Compute, timestamp: int = 0, *, packet_samples: int, use_vkgdr: bool = False) -> None:
-        self.dig_sample_bits = compute.dig_sample_bits
+    def __init__(
+        self,
+        context: AbstractContext,
+        layout: recv.Layout,
+        n_samples: int,
+        timestamp: int = 0,
+        *,
+        use_vkgdr: bool = False,
+    ) -> None:
+        self.dig_sample_bits = layout.sample_bits
         self.pol_data = []
-        present_size = accel.divup(compute.samples, packet_samples)
-        for pol in range(N_POLS):
+        present_size = accel.divup(n_samples, layout.heap_samples)
+        data_size = n_samples * self.dig_sample_bits // BYTE_BITS
+        for _pol in range(N_POLS):
             if use_vkgdr:
                 # Memory belongs to the chunks, and we set samples when
                 # initialising the item from the chunks.
-                samples = None
+                sample_data = None
             else:
-                allocator = accel.DeviceAllocator(compute.template.context)
-                samples = compute.slots[f"in{pol}"].allocate(allocator, bind=False)
+                # Compute requires 1 byte of padding
+                sample_data = accel.DeviceArray(context, (data_size,), np.uint8, padded_shape=(data_size + 1,))
             self.pol_data.append(
                 PolInItem(
-                    samples=samples,
+                    samples=sample_data,
                     present=np.zeros(present_size, dtype=bool),
                     present_cumsum=np.zeros(present_size + 1, np.uint32),
                 )
             )
+        self.refcount = 0
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -342,6 +355,532 @@ def dig_pwr_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
         return aiokatcp.Sensor.Status.WARN
 
 
+def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> np.ndarray:
+    """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.
+
+    If a single value is given it is expanded to a value per channel. If
+    `default_gain` is not ``None``, the string "default" may be given to
+    restore the default gains set via command line.
+
+    The caller must ensure that `values` contains either 1 or `channels`
+    items. :meth:`request_gain` handles the case where no values are given
+    for querying existing gains.
+
+    Failures are reported by raising an appropriate
+    :exc:`aiokatcp.FailReply`.
+    """
+    if default_gain is not None and values == ("default",):
+        gains = np.full(channels, default_gain, dtype=np.complex64)
+    else:
+        try:
+            gains = np.array([complex(v) for v in values], dtype=np.complex64)
+        except ValueError:
+            raise aiokatcp.FailReply("invalid formatting of complex number")
+    if not np.all(np.isfinite(gains)):
+        raise aiokatcp.FailReply("non-finite gains are not permitted")
+    if len(gains) == 1:
+        gains = gains.repeat(channels)
+    return gains
+
+
+class Pipeline:
+    """Processing pipeline for a single output stream."""
+
+    def __init__(self, output: Output, engine: "Engine", context: AbstractContext, substreams: Sequence[int]) -> None:
+        # Tuning knobs not exposed via arguments
+        n_send = 4
+        n_out = n_send if engine.use_peerdirect else 2
+
+        self.engine = engine
+        self.output = output
+        self.substreams = substreams
+        assert len(substreams) == len(output.dst)
+        self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue(f"{output.name}.in_queue", engine.n_in)
+        self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue(f"{output.name}.out_queue", n_out)
+        self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue(f"{output.name}.out_free_queue", n_out)
+        self._send_free_queue: asyncio.Queue[send.Chunk] = engine.monitor.make_queue(
+            f"{output.name}.send_free_queue", n_send
+        )
+        self._in_item: InItem | None = None
+
+        # Initialise self._compute
+        compute_queue = context.create_command_queue()
+        self._download_queue = context.create_command_queue()
+        template = ComputeTemplate(context, output.taps, output.channels, engine.src_layout.sample_bits)
+        self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
+        device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
+        device_weights.set(compute_queue, generate_weights(output.channels, output.taps, output.w_cutoff))
+
+        # Initialize sending
+        self.send_chunks = self._init_send(substreams, engine.use_peerdirect)
+        self._out_item = self._out_free_queue.get_nowait()
+        self._out_item.reset_all(compute_queue)
+
+        # Initialize delays and gains
+        self.delay_models: list[MultiDelayModel] = []
+        self.gains = np.zeros((output.channels, self.pols), np.complex64)
+        self._init_delay_gain()
+
+        self.descriptor_heap = send.make_descriptor_heap(
+            channels_per_substream=output.channels // len(substreams),
+            spectra_per_heap=engine.spectra_per_heap,
+        )
+
+    def _init_delay_gain(self) -> None:
+        """Initialise the delays and gains."""
+        # TODO[nb]: create per-pipeline sensors
+        for pol in range(N_POLS):
+            delay_model = MultiDelayModel(
+                callback_func=partial(self.update_delay_sensor, delay_sensor=self.engine.sensors[f"input{pol}.delay"])
+            )
+            self.delay_models.append(delay_model)
+
+        for pol in range(N_POLS):
+            self.set_gains(pol, np.full(self.output.channels, self.engine.default_gain, dtype=np.complex64))
+
+    def _init_send(self, substreams: Sequence[int], use_peerdirect: bool) -> list[send.Chunk]:
+        """Initialise the send side of the pipeline."""
+        send_chunks: list[send.Chunk] = []
+        for _ in range(self._out_free_queue.maxsize):
+            item = OutItem(self._compute)
+            if use_peerdirect:
+                dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
+                # buf is structurally a numpy array, but the pointer in it is a CUDA
+                # pointer and so actually trying to use it as such will cause a
+                # segfault.
+                buf = np.frombuffer(dev_buffer, dtype=item.spectra.dtype).reshape(item.spectra.shape)
+                chunk = send.Chunk(
+                    buf,
+                    saturated=item.saturated.empty_like(),
+                    substreams=substreams,
+                    feng_id=self.engine.feng_id,
+                )
+                item.chunk = chunk
+                send_chunks.append(chunk)
+            self._out_free_queue.put_nowait(item)
+
+        spectra = self._compute.spectra
+        if not use_peerdirect:
+            # When using PeerDirect, the chunks are created along with the items
+            heaps = spectra // self.engine.spectra_per_heap
+            send_shape = (heaps, self.channels, self.engine.spectra_per_heap, N_POLS, COMPLEX)
+            for _ in range(self._send_free_queue.maxsize):
+                send_chunks.append(
+                    send.Chunk(
+                        accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
+                        accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
+                        substreams=substreams,
+                        feng_id=self.engine.feng_id,
+                    )
+                )
+                self._send_free_queue.put_nowait(send_chunks[-1])
+        return send_chunks
+
+    @property
+    def spectra(self) -> int:  # noqa: D401
+        """Number of spectra per output chunk."""
+        return self.engine.chunk_jones // self.output.channels
+
+    @property
+    def pols(self) -> int:  # noqa: D401
+        """Number of polarisations."""
+        return N_POLS
+
+    @property
+    def channels(self) -> int:  # noqa: D401
+        """Number of channels into which the incoming signal is decomposed."""
+        return self._compute.template.channels
+
+    @property
+    def taps(self) -> int:  # noqa: D401
+        """Number of taps in the PFB-FIR filter."""
+        return self._compute.template.taps
+
+    @property
+    def spectra_samples(self) -> int:  # noqa: D401
+        """Number of incoming digitiser samples needed per spectrum.
+
+        Note that this is the spacing between spectra. Each spectrum uses
+        an overlapping window with more samples than this.
+        """
+        return self.output.spectra_samples
+
+    @property
+    def n_data_heaps(self) -> int:
+        """Maximum number of data heaps that can be in flight."""
+        return len(self.send_chunks) * self.spectra // self.engine.spectra_per_heap * len(self.output.dst)
+
+    def add_in_item(self, item: InItem) -> None:
+        """Append a newly-received :class:`~.InItem`."""
+        self._in_queue.put_nowait(item)
+
+    def shutdown(self) -> None:
+        """Start graceful shutdown after the final call to :meth:`add_in_item`."""
+        self._in_queue.put_nowait(None)
+
+    async def _fill_in(self) -> InItem | None:
+        """Populate :attr:`_in_item` to continue processing.
+
+        Retrieve the next :class:`InItem` from the queue if necessary. Returns the
+        current :class:`InItem`, or ``None`` if there isn't one.
+        """
+        if self._in_item is None:
+            with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait in_queue"):
+                self._in_item = await self._in_queue.get()
+            if self._in_item is None:
+                # shutdown was called, and there are no more items. Push the None
+                # back into the queue so that if we call this method again we'll
+                # see it again instead of blocking forever.
+                self._in_queue.put_nowait(None)
+            else:
+                self._in_item.enqueue_wait_for_events(self._compute.command_queue)
+        return self._in_item
+
+    def _pop_in(self) -> None:
+        """Remove the current InItem."""
+        assert self._in_item is not None
+        self.engine.free_in_item(self._in_item)
+        self._in_item = None
+
+    async def _next_out(self, new_timestamp: int) -> OutItem:
+        """Grab the next free OutItem in the queue."""
+        with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait out_free_queue"):
+            item = await self._out_free_queue.get()
+
+        # Just make double-sure that all events associated with the item are past.
+        item.enqueue_wait_for_events(self._compute.command_queue)
+        item.reset_all(self._compute.command_queue, new_timestamp)
+        return item
+
+    async def _flush_out(self, new_timestamp: int) -> None:
+        """Start the backend processing and prepare the data for transmission.
+
+        Kick off the `run_backend()` processing, and put an event on the
+        relevant command queue. This lets the next coroutine (run_transmit) know
+        that the backend processing is finished, and the data can be transmitted
+        out.
+
+        Parameters
+        ----------
+        new_timestamp
+            The timestamp that will immediately follow the current OutItem.
+        """
+        # Round down to a multiple of accs (don't send heap with partial
+        # data).
+        accs = self._out_item.n_spectra // self.engine.spectra_per_heap
+        self._out_item.n_spectra = accs * self.engine.spectra_per_heap
+        if self._out_item.n_spectra > 0:
+            # Take a copy of the gains synchronously. This avoids race conditions
+            # with gains being updated at the same time as they're in the
+            # middle of being transferred.
+            self._out_item.gains[:] = self.gains
+            # TODO: only need to copy the relevant region, and can limit
+            # postprocessing to the relevant range (the FFT size is baked into
+            # the plan, so is harder to modify on the fly).
+            # Without this, saturation counts can be wrong.
+            self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
+            self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
+            self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
+            self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
+            # Note: we also need to wait for any frontend calls because they
+            # write directly to self._out_item.dig_total_power, but this
+            # marker will take care of that too.
+            self._out_item.add_marker(self._compute.command_queue)
+            self._out_queue.put_nowait(self._out_item)
+            # TODO: could set it to None, since we only need it when we're
+            # ready to flush again?
+            self._out_item = await self._next_out(new_timestamp)
+        else:
+            self._out_item.timestamp = new_timestamp
+
+    async def run_processing(self) -> None:
+        """Do the hard work of the F-engine.
+
+        This function takes place entirely on the GPU. Coarse delay happens.
+        Then a batch FFT operation is applied, and finally, fine-delay, phase
+        correction, quantisation and corner-turn are performed.
+        """
+        while (in_item := await self._fill_in()) is not None:
+            # If the input starts too late for the next expected timestamp,
+            # we need to skip ahead to the next heap after the start, and
+            # flush what we already have.
+            start_timestamp = self._out_item.end_timestamp
+            orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
+            if min(orig_start_timestamps) < in_item.timestamp:
+                align = self.engine.spectra_per_heap * self.spectra_samples
+                # This loop is needed because MultiDelayModel is not necessarily
+                # monotonic, and so simply taking the larger of the two skip
+                # results does not guarantee a suitable timestamp.
+                while min(orig_start_timestamps) < in_item.timestamp:
+                    start_timestamp = max(
+                        model.skip(in_item.timestamp, start_timestamp + 1, align) for model in self.delay_models
+                    )
+                    orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
+                await self._flush_out(start_timestamp)
+            # When we add new spectra they must follow contiguously for any
+            # that we've already buffered.
+            assert start_timestamp == self._out_item.end_timestamp
+
+            # Compute the coarse delay for the first sample.
+            # `orig_timestamp` is the timestamp of first sample from the input
+            # to process in the PFB to produce the output spectrum with
+            # `timestamp`. `offset` is the sample index corresponding to
+            # `orig_timestamp` within the InItem.
+            start_coarse_delays = [start_timestamp - orig_timestamp for orig_timestamp in orig_start_timestamps]
+            offsets = [orig_timestamp - in_item.timestamp for orig_timestamp in orig_start_timestamps]
+
+            # Identify a block of frontend work. We can grow it until
+            # - we run out of the current input array;
+            # - we fill up the output array; or
+            # - the coarse delay changes.
+            # We speculatively calculate delays until one of the first two is
+            # met, then truncate if we observe a coarse delay change. Note:
+            # max_end_in is computed assuming the coarse delay does not change.
+            max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.taps * self.spectra_samples + 1
+            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
+            max_end = min(max_end_in, max_end_out)
+            # Speculatively evaluate until one of the first two conditions is met
+            timestamps = np.arange(start_timestamp, max_end, self.spectra_samples)
+            orig_timestamps, fine_delays, phase = _sample_models(
+                self.delay_models, start_timestamp, max_end, self.spectra_samples
+            )
+            # timestamps can be empty if we fast-forwarded the output right over the
+            # end of the current input item, and it causes problems if we don't check
+            # for it (argmax of an empty sequence).
+            if timestamps.size:
+                for pol in range(len(orig_timestamps)):
+                    coarse_delays = timestamps - orig_timestamps[pol]
+                    # Uses fact that argmax returns first maximum i.e. first true value
+                    delay_change = int(np.argmax(coarse_delays != start_coarse_delays[pol]))
+                    if coarse_delays[delay_change] != start_coarse_delays[pol]:
+                        logger.debug(
+                            "Coarse delay on pol %d changed from %d to %d at %d",
+                            pol,
+                            start_coarse_delays[pol],
+                            coarse_delays[delay_change],
+                            orig_timestamps[pol, delay_change],
+                        )
+                        timestamps = timestamps[:delay_change]
+                        orig_timestamps = orig_timestamps[:, :delay_change]
+                        fine_delays = fine_delays[:, :delay_change]
+                        phase = phase[:, :delay_change]
+                batch_spectra = orig_timestamps.shape[1]
+
+                # Here we run the "frontend" which handles:
+                # - 10-bit to float conversion
+                # - Coarse delay
+                # - The PFB-FIR.
+                if batch_spectra > 0:
+                    logging.debug("Processing %d spectra", batch_spectra)
+                    out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
+                    self._out_item.fine_delay[out_slice] = fine_delays.T
+                    # Divide by pi because the arguments of sincospif() used in the
+                    # kernel are in radians/PI.
+                    self._out_item.phase[out_slice] = phase.T / np.pi
+                    samples = []
+                    for pol_data in in_item.pol_data:
+                        assert pol_data.samples is not None
+                        samples.append(pol_data.samples)
+                    self._compute.run_frontend(
+                        samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
+                    )
+                    in_item.add_marker(self._compute.command_queue)
+                    self._out_item.n_spectra += batch_spectra
+                    # Work out which output spectra contain missing data.
+                    self._out_item.present[out_slice] = True
+                    for pol, pol_data in enumerate(in_item.pol_data):
+                        # Offset in the chunk of the first sample for each spectrum
+                        first_offset = np.arange(
+                            offsets[pol],
+                            offsets[pol] + batch_spectra * self.spectra_samples,
+                            self.spectra_samples,
+                        )
+                        # Offset of the last sample (inclusive, rather than past-the-end)
+                        last_offset = first_offset + self.taps * self.spectra_samples - 1
+                        first_packet = first_offset // self.engine.src_layout.heap_samples
+                        # last_packet is exclusive
+                        last_packet = last_offset // self.engine.src_layout.heap_samples + 1
+                        present_packets = pol_data.present_cumsum[last_packet] - pol_data.present_cumsum[first_packet]
+                        self._out_item.present[out_slice] &= present_packets == last_packet - first_packet
+
+            # The _flush_out method calls the "backend" which triggers the FFT
+            # and postproc operations.
+            end_timestamp = self._out_item.end_timestamp
+            if end_timestamp >= max_end_out:
+                # We've filled up the output buffer.
+                await self._flush_out(end_timestamp)
+
+            if end_timestamp >= max_end_in:
+                # We've exhausted the input buffer.
+                self._pop_in()
+        # Timestamp mostly doesn't matter because we're finished, but if a
+        # katcp request arrives at this point we want to ensure the
+        # steady-state-timestamp sensor is updated to a later timestamp than
+        # anything we'll actually send.
+        await self._flush_out(self._out_item.end_timestamp)
+        logger.debug("run_processing completed")
+        self._out_queue.put_nowait(None)
+
+    def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
+        """Return a chunk to the free queue after it has completed transmission.
+
+        This is intended to be used as a callback on an :class:`asyncio.Future`.
+        """
+        if chunk.cleanup is not None:
+            chunk.cleanup()
+            chunk.cleanup = None  # Potentially helps break reference cycles
+        try:
+            future.result()  # No result, but want the exception
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Error sending chunk")
+
+    async def run_transmit(self, streams: list["spead2.send.asyncio.AsyncStream"]) -> None:
+        """Get the processed data from the GPU to the Network.
+
+        This could be done either with or without PeerDirect. In the
+        non-PeerDirect case, :class:`OutItem` objects are pulled from the
+        `_out_queue`. We wait for the events that mark the end of the processing,
+        then copy the data to host memory before turning it over to the
+        :obj:`sender` for transmission on the network. The "empty" item is then
+        returned to :meth:`run_processing` via the `_out_free_queue`, and once
+        the chunk has been transmitted it is returned to `_send_free_queue`.
+
+        In the PeerDirect case, the item and the chunk are bound together and
+        share memory. In this case `_send_free_queue` is unused. The item is
+        only returned to `_out_free_queue` once it has been fully transmitted.
+
+        Parameters
+        ----------
+        streams
+            The streams transmitting data.
+        """
+        task: asyncio.Future | None = None
+        last_end_timestamp: int | None = None
+        context = self._compute.template.context
+        func_name = f"{self.output.name}.run_transmit"
+        # Scratch space for transferring digitiser power
+        dig_total_power = [self._compute.slots[f"dig_total_power{pol}"].allocate_host(context) for pol in range(N_POLS)]
+        while True:
+            with self.engine.monitor.with_state(func_name, "wait out_queue"):
+                out_item = await self._out_queue.get()
+            if not out_item:
+                break
+            events = []
+            if out_item.chunk is not None:
+                # We're using PeerDirect
+                chunk = out_item.chunk
+                chunk.cleanup = partial(self._out_free_queue.put_nowait, out_item)
+                events.extend(out_item.events)
+            else:
+                with self.engine.monitor.with_state(func_name, "wait send_free_queue"):
+                    chunk = await self._send_free_queue.get()
+                chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
+                self._download_queue.enqueue_wait_for_events(out_item.events)
+                assert isinstance(chunk.data, accel.HostArray)
+                # TODO: use get_region since it might be partial
+                out_item.spectra.get_async(self._download_queue, chunk.data)
+            out_item.saturated.get_async(self._download_queue, chunk.saturated)
+            for pol in range(N_POLS):
+                out_item.dig_total_power[pol].get_async(self._download_queue, dig_total_power[pol])
+            events.append(self._download_queue.enqueue_marker())
+
+            chunk.timestamp = out_item.timestamp
+            # Each frame is valid if all spectra in it are valid
+            out_item.present.reshape(-1, self.engine.spectra_per_heap).all(axis=-1, out=chunk.present)
+            with self.engine.monitor.with_state(func_name, "wait transfer"):
+                await async_wait_for_events(events)
+
+            for pol in range(N_POLS):
+                total_power = float(dig_total_power[pol])
+                avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
+                # Normalise relative to full scale. The factor of 2 is because we
+                # want 1.0 to correspond to a sine wave rather than a square wave.
+                avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
+                avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
+                # TODO[nb]: needs to be computed (or at least set) by just one of
+                # the streams.
+                self.engine.sensors[f"input{pol}.dig-pwr-dbfs"].set_value(
+                    avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
+                )
+
+            n_frames = out_item.n_spectra // self.engine.spectra_per_heap
+            if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
+                # Account for heaps skipped between the end of the previous out_item and the
+                # start of the current one.
+                skipped_samples = out_item.timestamp - last_end_timestamp
+                skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.spectra_samples)
+                send.skipped_heaps_counter.inc(skipped_frames * len(self.substreams))
+            last_end_timestamp = out_item.end_timestamp
+            out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
+            if out_item.chunk is None:
+                # We're not in PeerDirect mode
+                # (when we are the cleanup callback returns the item)
+                self._out_free_queue.put_nowait(out_item)
+            task = asyncio.create_task(chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors))
+            task.add_done_callback(partial(self._chunk_finished, chunk))
+
+        if task:
+            try:
+                await task
+            except Exception:
+                pass  # It's already logged by the chunk_finished callback
+        stop_heap = spead2.send.Heap(send.FLAVOUR)
+        stop_heap.add_end()
+        for substream_index in self.substreams:
+            await streams[0].async_send_heap(stop_heap, substream_index=substream_index)
+        logger.debug("run_transmit completed")
+
+    def delay_update_timestamp(self) -> int:
+        """Return a timestamp by which an update to the delay model will take effect."""
+        # end_timestamp is updated whenever delays are written into the out_item
+        return self._out_item.end_timestamp
+
+    def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
+        """Update the delay sensor upon loading of a new model.
+
+        Accepting the delay_models as a read-only Sequence from the
+        MultiDelayModel, even though we only need the first one to update
+        the sensor.
+
+        The delay and phase-rate values need to be scaled back to their
+        original values (delay (s), phase-rate (rad/s)).
+        """
+        logger.debug("Updating delay sensor: %s", delay_sensor.name)
+
+        orig_delay = delay_models[0].delay / self.engine.adc_sample_rate
+        phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
+        orig_phase = wrap_angle(delay_models[0].phase - 0.5 * np.pi * delay_models[0].delay)
+        orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.engine.adc_sample_rate
+        delay_sensor.value = (
+            f"({delay_models[0].start}, "
+            f"{orig_delay}, "
+            f"{delay_models[0].delay_rate}, "
+            f"{orig_phase}, "
+            f"{orig_phase_rate})"
+        )
+
+    def set_gains(self, input: int, gains: np.ndarray) -> None:
+        """Set the eq gains for one polarisation and update the sensor.
+
+        The `gains` must contain one entry per channel; the shortcut of
+        supplying a single value is handled by :meth:`request_gain`.
+        """
+        self.gains[:, input] = gains
+        # This timestamp is conservative: self._out_item.timestamp is almost
+        # always valid, except while _flush_out is waiting to update
+        # self._out_item. If a less conservative answer is needed, one would
+        # need to track a separate timestamp in the class that is updated
+        # as gains are copied to the OutItem.
+        self.engine._update_steady_state_timestamp(self._out_item.end_timestamp)
+        if np.all(gains == gains[0]):
+            # All the values are the same, so it can be reported as a single value
+            gains = gains[:1]
+        # TODO[nb]: Will need to be namespaced with self.output.name
+        self.engine.sensors[f"input{input}.eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
+
+
 class Engine(aiokatcp.DeviceServer):
     """Top-level class running the whole thing.
 
@@ -411,9 +950,8 @@ class Engine(aiokatcp.DeviceServer):
         not to collide with other antennas transmitting to the same X-engine.
     chunk_samples
         Number of samples in each input chunk, excluding padding samples.
-    spectra
-        Number of spectra that will be produced from a chunk of incoming
-        digitiser data.
+    chunk_jones
+        Number of Jones vectors in each output chunk.
     spectra_per_heap
         Number of spectra in each output heap.
     max_delay_diff
@@ -464,7 +1002,7 @@ class Engine(aiokatcp.DeviceServer):
         feng_id: int,
         num_ants: int,
         chunk_samples: int,
-        spectra: int,
+        chunk_jones: int,
         spectra_per_heap: int,
         dig_sample_bits: int,
         max_delay_diff: int,
@@ -482,8 +1020,7 @@ class Engine(aiokatcp.DeviceServer):
         )
 
         # Narrowband is not supported yet
-        assert len(outputs) == 1
-        assert isinstance(outputs[0], WidebandOutput)
+        assert all(isinstance(x, WidebandOutput) for x in outputs)
 
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
@@ -491,44 +1028,47 @@ class Engine(aiokatcp.DeviceServer):
         self._src_interface = src_interface
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
-        self._src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
-        self._src_packet_samples = src_packet_samples
+        self.src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
         self.adc_sample_rate = adc_sample_rate
-        self.send_rate_factor = send_rate_factor
         self.feng_id = feng_id
         self.n_ants = num_ants
+        self.spectra_per_heap = spectra_per_heap
+        self.chunk_jones = chunk_jones
         self.default_gain = gain
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate)
         self.monitor = monitor
         self.use_vkgdr = use_vkgdr
+        self.use_peerdirect = use_peerdirect
 
         # Tuning knobs not exposed via arguments
-        n_in = 4
-        n_send = 4
-        n_out = n_send if use_peerdirect else 2
+        self.n_in = 4
 
-        self._in_queue: asyncio.Queue[InItem | None] = monitor.make_queue("in_queue", n_in)
-        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", n_in)
-        self._out_queue: asyncio.Queue[OutItem | None] = monitor.make_queue("out_queue", n_out)
-        self._out_free_queue: asyncio.Queue[OutItem] = monitor.make_queue("out_free_queue", n_out)
-        self._send_free_queue: asyncio.Queue[send.Chunk] = monitor.make_queue("send_free_queue", n_send)
+        self._upload_queue = context.create_command_queue()
+        # For copying head of each chunk to the tail of the previous chunk
+        self._copy_queue = context.create_command_queue()
 
-        self._init_compute(
-            context=context,
-            spectra=spectra,
-            spectra_per_heap=spectra_per_heap,
-            channels=outputs[0].channels,
-            taps=outputs[0].taps,
-            w_cutoff=outputs[0].w_cutoff,
-            max_delay_diff=max_delay_diff,
-        )
+        extra_samples = max_delay_diff + max(output.taps * output.spectra_samples for output in outputs)
+        if extra_samples > self.src_layout.chunk_samples:
+            raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
+        self.n_samples = self.src_layout.chunk_samples + extra_samples
 
-        self._in_items: deque[InItem] = deque()
+        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
-        send_chunks = self._init_send(len(outputs[0].dst), use_peerdirect)
+        first_substream = 0
+        self._pipelines = []
+        for output in outputs:
+            last_substream = first_substream + len(output.dst)
+            substreams = range(first_substream, last_substream)
+            self._pipelines.append(Pipeline(output, self, context, substreams))
+            first_substream = last_substream
+
+        all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
+        rate_scale = sum(output.send_rate_factor for output in outputs)
+        n_data_heaps = sum(pipeline.n_data_heaps for pipeline in self._pipelines)
+        send_chunks = list(itertools.chain.from_iterable(pipeline.send_chunks for pipeline in self._pipelines))
         self._send_streams = send.make_streams(
-            endpoints=outputs[0].dst,
+            endpoints=all_endpoints,
             interfaces=dst_interface,
             ttl=dst_ttl,
             ibv=dst_ibv,
@@ -536,62 +1076,22 @@ class Engine(aiokatcp.DeviceServer):
             affinity=dst_affinity,
             comp_vector=dst_comp_vector,
             adc_sample_rate=adc_sample_rate,
-            send_rate_factor=send_rate_factor,
+            send_rate_factor=send_rate_factor * rate_scale,
             feng_id=feng_id,
             num_ants=num_ants,
-            spectra=spectra,
-            spectra_per_heap=spectra_per_heap,
-            channels=outputs[0].channels,
+            n_data_heaps=n_data_heaps,
             chunks=send_chunks,
         )
-        self._out_item = self._out_free_queue.get_nowait()
-        self._out_item.reset_all(self._compute.command_queue)
-
-        self.delay_models: list[MultiDelayModel] = []
-        self.gains = np.zeros((outputs[0].channels, self.pols), np.complex64)
-        self._init_delay_gain()
-
-        self._descriptor_heap = send.make_descriptor_heap(
-            channels_per_substream=outputs[0].channels // len(outputs[0].dst),
-            spectra_per_heap=spectra_per_heap,
-        )
-
-    def _init_compute(
-        self,
-        context: AbstractContext,
-        spectra: int,
-        spectra_per_heap: int,
-        channels: int,
-        taps: int,
-        w_cutoff: float,
-        max_delay_diff: int,
-    ) -> None:
-        """Initialise ``self._compute`` and related resources."""
-        compute_queue = context.create_command_queue()
-        self._upload_queue = context.create_command_queue()
-        self._download_queue = context.create_command_queue()
-
-        extra_samples = max_delay_diff + taps * channels * 2
-        if extra_samples > self._src_layout.chunk_samples:
-            raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        samples = self._src_layout.chunk_samples + extra_samples
-
-        template = ComputeTemplate(context, taps, channels, self._src_layout.sample_bits)
-        self._compute = template.instantiate(compute_queue, samples, spectra, spectra_per_heap)
-        device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(compute_queue, generate_weights(channels, taps, w_cutoff))
 
     def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
         src_chunks_per_stream = 4
         ringbuffer_capacity = src_chunks_per_stream * N_POLS
 
+        context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
-            self._in_free_queue.put_nowait(
-                InItem(self._compute, packet_samples=self._src_packet_samples, use_vkgdr=self.use_vkgdr)
-            )
+            self._in_free_queue.put_nowait(InItem(context, self.src_layout, self.n_samples, use_vkgdr=self.use_vkgdr))
 
-        context = self._compute.template.context
         if self.use_vkgdr:
             import vkgdr.pycuda
 
@@ -605,14 +1105,13 @@ class Engine(aiokatcp.DeviceServer):
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
         free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
-        self._src_streams = recv.make_streams(self._src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = self._src_layout.chunk_samples * self._src_layout.sample_bits // BYTE_BITS
-        for pol, stream in enumerate(self._src_streams):
+        self._src_streams = recv.make_streams(self.src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
+        chunk_bytes = self.src_layout.chunk_samples * self.src_layout.sample_bits // BYTE_BITS
+        for stream in self._src_streams:
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
-                    slot = self._compute.slots[f"in{pol}"]
-                    assert isinstance(slot, accel.IOSlot)
-                    device_bytes = slot.required_bytes()
+                    array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
+                    device_bytes = array_bytes + 1  # Compute requires 1 byte of padding
                     with context:
                         mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
                     buf = np.array(mem, copy=False).view(np.uint8)
@@ -621,7 +1120,7 @@ class Engine(aiokatcp.DeviceServer):
                     # mapping.
                     buf = buf[:chunk_bytes]
                     device_array = accel.DeviceArray(
-                        context, slot.shape, np.uint8, padded_shape=(device_bytes,), raw=mem
+                        context, (array_bytes,), np.uint8, padded_shape=(device_bytes,), raw=mem
                     )
                 else:
                     buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
@@ -629,94 +1128,11 @@ class Engine(aiokatcp.DeviceServer):
                 chunk = recv.Chunk(
                     data=buf,
                     device=device_array,
-                    present=np.zeros(self._src_layout.chunk_samples // self._src_packet_samples, np.uint8),
-                    extra=np.zeros(self._src_layout.chunk_samples // self._src_packet_samples, np.uint16),
+                    present=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint8),
+                    extra=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint16),
                     stream=stream,
                 )
                 chunk.recycle()  # Make available to the stream
-
-    def _init_send(self, substreams: int, use_peerdirect: bool) -> list[send.Chunk]:
-        """Initialise the send side of the engine, with the exception of ``_send_stream``."""
-        send_chunks: list[send.Chunk] = []
-        for _ in range(self._out_free_queue.maxsize):
-            item = OutItem(self._compute)
-            if use_peerdirect:
-                dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
-                # buf is structurally a numpy array, but the pointer in it is a CUDA
-                # pointer and so actually trying to use it as such will cause a
-                # segfault.
-                buf = np.frombuffer(dev_buffer, dtype=item.spectra.dtype).reshape(item.spectra.shape)
-                chunk = send.Chunk(
-                    buf,
-                    saturated=item.saturated.empty_like(),
-                    substreams=substreams,
-                    feng_id=self.feng_id,
-                )
-                item.chunk = chunk
-                send_chunks.append(chunk)
-            self._out_free_queue.put_nowait(item)
-
-        spectra = self._compute.spectra
-        if not use_peerdirect:
-            # When using PeerDirect, the chunks are created along with the items
-            heaps = spectra // self.spectra_per_heap
-            send_shape = (heaps, self.channels, self.spectra_per_heap, N_POLS, COMPLEX)
-            for _ in range(self._send_free_queue.maxsize):
-                send_chunks.append(
-                    send.Chunk(
-                        accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
-                        accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
-                        substreams=substreams,
-                        feng_id=self.feng_id,
-                    )
-                )
-                self._send_free_queue.put_nowait(send_chunks[-1])
-        return send_chunks
-
-    def _init_delay_gain(self) -> None:
-        """Initialise the delays and gains."""
-        for pol in range(N_POLS):
-            delay_model = MultiDelayModel(
-                callback_func=partial(self.update_delay_sensor, delay_sensor=self.sensors[f"input{pol}.delay"])
-            )
-            self.delay_models.append(delay_model)
-
-        for pol in range(N_POLS):
-            self.set_gains(pol, np.full(self.channels, self.default_gain, dtype=np.complex64))
-
-    @property
-    def channels(self) -> int:  # noqa: D401
-        """Number of channels into which the incoming signal is decomposed."""
-        return self._compute.template.channels
-
-    @property
-    def taps(self) -> int:  # noqa: D401
-        """Number of taps in the PFB-FIR filter."""
-        return self._compute.template.taps
-
-    @property
-    def spectra_per_heap(self) -> int:  # noqa: D401
-        """The number of spectra which will be transmitted per output heap."""
-        return self._compute.spectra_per_heap
-
-    @property
-    def dig_sample_bits(self) -> int:  # noqa: D401
-        """Bitwidth of the incoming digitiser samples."""
-        return self._compute.dig_sample_bits
-
-    @property
-    def spectra_samples(self) -> int:  # noqa: D401
-        """Number of incoming digitiser samples needed per spectrum.
-
-        Note that this is the spacing between spectra. Each spectrum uses
-        an overlapping window with more samples than this.
-        """
-        return 2 * self.channels
-
-    @property
-    def pols(self) -> int:  # noqa: D401
-        """Number of polarisations."""
-        return N_POLS
 
     def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an engine."""
@@ -793,148 +1209,28 @@ class Engine(aiokatcp.DeviceServer):
         self.add_service_task(time_sync_task)
         self._cancel_tasks.append(time_sync_task)
 
-    async def _next_in(self) -> InItem | None:
-        """Load next InItem for processing.
+    def _update_steady_state_timestamp(self, timestamp: int) -> None:
+        """Update the ``steady-state-timestamp`` sensor to at least a given value."""
+        sensor = self.sensors["steady-state-timestamp"]
+        sensor.value = max(sensor.value, timestamp)
 
-        Move the next :class:`InItem` from the `_in_queue` to `_in_items`, where
-        it will be picked up by the processing.
-        """
-        with self.monitor.with_state("run_processing", "wait in_queue"):
-            item = await self._in_queue.get()
-
-        if item is not None:
-            self._in_items.append(item)
-            # print(f'Received input with timestamp {self._in_items[-1].timestamp}, '
-            #       f'{self._in_items[-1].n_samples} samples')
-
-            # Make sure that all events associated with the item are past.
-            self._in_items[-1].enqueue_wait_for_events(self._compute.command_queue)
-        else:
-            # To keep _run_processing simple, it may make further calls to
-            # _next_in after receiving a None. To keep things simple, put
-            # a None back into the queue so that the next call also gets
-            # None rather than hanging.
-            self._in_queue.put_nowait(None)
-        return item
-
-    async def _fill_in(self) -> bool:
-        """Load sufficient InItems to continue processing.
-
-        Tries to get at least two items into ``self._in_items``, and if
-        loading a second item that is adjacent to the first, copies the overlap
-        region.
-
-        Returns true if processing can proceed, false if the stream is
-        exhausted.
-        """
-        if len(self._in_items) == 0:
-            if not (await self._next_in()):
-                return False
-        if len(self._in_items) == 1:
-            # Copy the head of the new chunk to the tail of the older chunk
-            # to allow for PFB windows to fit and for some protection against
-            # sharp changes in delay.
-            #
-            # This could only fail if we'd lost a whole input chunk of
-            # data from the digitiser. In that case the data we'd like
-            # to copy is missing so we can't do this step.
-            chunk_packets = self._in_items[0].n_samples // self._src_packet_samples
-            copy_packets = len(self._in_items[0].pol_data[0].present) - chunk_packets
-            if (await self._next_in()) and self._in_items[0].end_timestamp == self._in_items[1].timestamp:
-                sample_bits = self._in_items[0].dig_sample_bits
-                copy_samples = self._in_items[0].capacity - self._in_items[0].n_samples
-                copy_samples = min(copy_samples, self._in_items[1].n_samples)
-                copy_bytes = copy_samples * sample_bits // BYTE_BITS
-                for pol_data0, pol_data1 in zip(self._in_items[0].pol_data, self._in_items[1].pol_data):
-                    assert pol_data0.samples is not None
-                    assert pol_data1.samples is not None
-                    pol_data1.samples.copy_region(
-                        self._compute.command_queue,
-                        pol_data0.samples,
-                        np.s_[:copy_bytes],
-                        np.s_[-copy_bytes:],
-                    )
-                    pol_data0.present[-copy_packets:] = pol_data1.present[:copy_packets]
-                self._in_items[0].n_samples += copy_samples
-            else:
-                for pol_data in self._in_items[0].pol_data:
-                    pol_data.present[-copy_packets:] = 0  # Mark tail as absent, for each pol
-            # Update the cumulative sums. Note that during shutdown this may be
-            # done more than once, but since it is shutdown the performance
-            # implications aren't too important.
-            # np.cumsum doesn't provide an initial zero, so we output starting at
-            # position 1.
-            for pol_data in self._in_items[0].pol_data:
-                np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
-        return True
-
-    def _pop_in(self) -> None:
-        """Remove the oldest InItem."""
-        item = self._in_items.popleft()
-        if self.use_vkgdr:
-            chunks = []
-            for pol_data in item.pol_data:
-                pol_data.samples = None
-                assert pol_data.chunk is not None
-                chunks.append(pol_data.chunk)
-                pol_data.chunk = None
-            asyncio.create_task(self._push_recv_chunks(chunks, item.events))
-        self._in_free_queue.put_nowait(item)
-
-    async def _next_out(self, new_timestamp: int) -> OutItem:
-        """Grab the next free OutItem in the queue."""
-        with self.monitor.with_state("run_processing", "wait out_free_queue"):
-            item = await self._out_free_queue.get()
-
-        # Just make double-sure that all events associated with the item are past.
-        item.enqueue_wait_for_events(self._compute.command_queue)
-        item.reset_all(self._compute.command_queue, new_timestamp)
-        return item
-
-    async def _flush_out(self, new_timestamp: int) -> None:
-        """Start the backend processing and prepare the data for transmission.
-
-        Kick off the `run_backend()` processing, and put an event on the
-        relevant command queue. This lets the next coroutine (_run_transmit) know
-        that the backend processing is finished, and the data can be transmitted
-        out.
-
-        Parameters
-        ----------
-        new_timestamp
-            The timestamp that will immediately follow the current OutItem.
-        """
-        # Round down to a multiple of accs (don't send heap with partial
-        # data).
-        accs = self._out_item.n_spectra // self.spectra_per_heap
-        self._out_item.n_spectra = accs * self.spectra_per_heap
-        if self._out_item.n_spectra > 0:
-            # Take a copy of the gains synchronously. This avoids race conditions
-            # with gains being updated at the same time as they're in the
-            # middle of being transferred.
-            self._out_item.gains[:] = self.gains
-            # TODO: only need to copy the relevant region, and can limit
-            # postprocessing to the relevant range (the FFT size is baked into
-            # the plan, so is harder to modify on the fly).
-            # Without this, saturation counts can be wrong.
-            self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
-            self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
-            self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
-            self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
-            # Note: we also need to wait for any frontend calls because they
-            # write directly to self._out_item.dig_total_power, but this
-            # marker will take care of that too.
-            self._out_item.add_marker(self._compute.command_queue)
-            self._out_queue.put_nowait(self._out_item)
-            # TODO: could set it to None, since we only need it when we're
-            # ready to flush again?
-            self._out_item = await self._next_out(new_timestamp)
-        else:
-            self._out_item.timestamp = new_timestamp
+    def free_in_item(self, item: InItem) -> None:
+        """Return an InItem to the free queue if its refcount hits zero."""
+        item.refcount -= 1
+        if item.refcount == 0:
+            if self.use_vkgdr:
+                chunks = []
+                for pol_data in item.pol_data:
+                    pol_data.samples = None
+                    assert pol_data.chunk is not None
+                    chunks.append(pol_data.chunk)
+                    pol_data.chunk = None
+                asyncio.create_task(self._push_recv_chunks(chunks, item.events))
+            self._in_free_queue.put_nowait(item)
 
     @staticmethod
     async def _push_recv_chunks(chunks: Iterable[recv.Chunk], events: Iterable[AbstractEvent]) -> None:
-        """Return chunks to the streams once `event` has fired.
+        """Return chunks to the streams once `events` have fired.
 
         This is only used when using vkgdr.
         """
@@ -942,142 +1238,54 @@ class Engine(aiokatcp.DeviceServer):
         for chunk in chunks:
             chunk.recycle()
 
-    async def _run_processing(self) -> None:
-        """Do the hard work of the F-engine.
+    def _add_in_item(self, item: InItem) -> None:
+        """Push an :class:`InItem` to all the pipelines.
 
-        This function takes place entirely on the GPU. First, a little bit of
-        the next chunk is copied to the end of the previous one, to allow for
-        the overlap required by the PFB. Coarse delay happens. Then a batch FFT
-        operation is applied, and finally, fine-delay, phase correction,
-        quantisation and corner-turn are performed.
+        This also takes care of computing `present_cumsum` and initialising
+        the refcount.
         """
-        while await self._fill_in():
-            # If the input starts too late for the next expected timestamp,
-            # we need to skip ahead to the next heap after the start, and
-            # flush what we already have.
-            start_timestamp = self._out_item.end_timestamp
-            orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
-            if min(orig_start_timestamps) < self._in_items[0].timestamp:
-                align = self.spectra_per_heap * self.spectra_samples
-                # This loop is needed because MultiDelayModel is not necessarily
-                # monotonic, and so simply taking the larger of the two skip
-                # results does not guarantee a suitable timestamp.
-                while min(orig_start_timestamps) < self._in_items[0].timestamp:
-                    start_timestamp = max(
-                        model.skip(self._in_items[0].timestamp, start_timestamp + 1, align)
-                        for model in self.delay_models
-                    )
-                    orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
-                await self._flush_out(start_timestamp)
-            # When we add new spectra they must follow contiguously for any
-            # that we've already buffered.
-            assert start_timestamp == self._out_item.end_timestamp
+        # np.cumsum doesn't provide an initial zero, so we output starting at
+        # position 1.
+        for pol_data in item.pol_data:
+            np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
+        item.refcount = len(self._pipelines)
+        for pipeline in self._pipelines:
+            pipeline.add_in_item(item)
 
-            # Compute the coarse delay for the first sample.
-            # `orig_timestamp` is the timestamp of first sample from the input
-            # to process in the PFB to produce the output spectrum with
-            # `timestamp`. `offset` is the sample index corresponding to
-            # `orig_timestamp` within the InItem.
-            start_coarse_delays = [start_timestamp - orig_timestamp for orig_timestamp in orig_start_timestamps]
-            offsets = [orig_timestamp - self._in_items[0].timestamp for orig_timestamp in orig_start_timestamps]
+    def _copy_tail(self, prev_item: InItem, in_item: InItem | None) -> None:
+        """Copy the head of `in_item` to the tail of `prev_item`.
 
-            # Identify a block of frontend work. We can grow it until
-            # - we run out of the current input array;
-            # - we fill up the output array; or
-            # - the coarse delay changes.
-            # We speculatively calculate delays until one of the first two is
-            # met, then truncate if we observe a coarse delay change. Note:
-            # max_end_in is computed assuming the coarse delay does not change.
-            max_end_in = (
-                self._in_items[0].end_timestamp + min(start_coarse_delays) - self.taps * self.spectra_samples + 1
-            )
-            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
-            max_end = min(max_end_in, max_end_out)
-            # Speculatively evaluate until one of the first two conditions is met
-            timestamps = np.arange(start_timestamp, max_end, self.spectra_samples)
-            orig_timestamps, fine_delays, phase = _sample_models(
-                self.delay_models, start_timestamp, max_end, self.spectra_samples
-            )
-            # timestamps can be empty if we fast-forwarded the output right over the
-            # end of the current input item, and it causes problems if we don't check
-            # for it (argmax of an empty sequence).
-            if timestamps.size:
-                for pol in range(len(orig_timestamps)):
-                    coarse_delays = timestamps - orig_timestamps[pol]
-                    # Uses fact that argmax returns first maximum i.e. first true value
-                    delay_change = int(np.argmax(coarse_delays != start_coarse_delays[pol]))
-                    if coarse_delays[delay_change] != start_coarse_delays[pol]:
-                        logger.debug(
-                            "Coarse delay on pol %d changed from %d to %d at %d",
-                            pol,
-                            start_coarse_delays[pol],
-                            coarse_delays[delay_change],
-                            orig_timestamps[pol, delay_change],
-                        )
-                        timestamps = timestamps[:delay_change]
-                        orig_timestamps = orig_timestamps[:, :delay_change]
-                        fine_delays = fine_delays[:, :delay_change]
-                        phase = phase[:, :delay_change]
-                batch_spectra = orig_timestamps.shape[1]
+        This allows for PFB windows to fit and for some protection against
+        sharp changes in delay.
 
-                # Here we run the "frontend" which handles:
-                # - 10-bit to float conversion
-                # - Coarse delay
-                # - The PFB-FIR.
-                if batch_spectra > 0:
-                    logging.debug("Processing %d spectra", batch_spectra)
-                    out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
-                    self._out_item.fine_delay[out_slice] = fine_delays.T
-                    # Divide by pi because the arguments of sincospif() used in the
-                    # kernel are in radians/PI.
-                    self._out_item.phase[out_slice] = phase.T / np.pi
-                    samples = []
-                    for pol_data in self._in_items[0].pol_data:
-                        assert pol_data.samples is not None
-                        samples.append(pol_data.samples)
-                    self._compute.run_frontend(
-                        samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
-                    )
-                    # Replace events rather than adding to it, since this event
-                    # will be sequenced after any prior events
-                    self._in_items[0].events = [self._compute.command_queue.enqueue_marker()]
-                    self._out_item.n_spectra += batch_spectra
-                    # Work out which output spectra contain missing data.
-                    self._out_item.present[out_slice] = True
-                    for pol, pol_data in enumerate(self._in_items[0].pol_data):
-                        # Offset in the chunk of the first sample for each spectrum
-                        first_offset = np.arange(
-                            offsets[pol],
-                            offsets[pol] + batch_spectra * self.spectra_samples,
-                            self.spectra_samples,
-                        )
-                        # Offset of the last sample (inclusive, rather than past-the-end)
-                        last_offset = first_offset + self.taps * self.spectra_samples - 1
-                        first_packet = first_offset // self._src_packet_samples
-                        # last_packet is exclusive
-                        last_packet = last_offset // self._src_packet_samples + 1
-                        present_packets = pol_data.present_cumsum[last_packet] - pol_data.present_cumsum[first_packet]
-                        self._out_item.present[out_slice] &= present_packets == last_packet - first_packet
-
-            # The _flush_out method calls the "backend" which triggers the FFT
-            # and postproc operations.
-            end_timestamp = self._out_item.end_timestamp
-            if end_timestamp >= max_end_out:
-                # We've filled up the output buffer.
-                await self._flush_out(end_timestamp)
-
-            if end_timestamp >= max_end_in:
-                # We've exhausted the input buffer.
-                # TODO: should maybe also do this if _in_items[1] would work
-                # just as well and we've filled the output buffer.
-                self._pop_in()
-        # Timestamp mostly doesn't matter because we're finished, but if a
-        # katcp request arrives at this point we want to ensure the
-        # steady-state-timestamp sensor is updated to a later timestamp than
-        # anything we'll actually send.
-        await self._flush_out(self._out_item.end_timestamp)
-        logger.debug("_run_processing completed")
-        self._out_queue.put_nowait(None)
+        If `in_item` is ``None`` or is not contiguous (in timestamp) with
+        `prev_item` then the tail of `prev_item` is instead marked as absent.
+        This can happen if we lose a whole input chunk from the digitiser.
+        """
+        chunk_heaps = prev_item.n_samples // self.src_layout.heap_samples
+        copy_heaps = len(prev_item.pol_data[0].present) - chunk_heaps
+        if in_item is not None and prev_item.end_timestamp == in_item.timestamp:
+            sample_bits = self.src_layout.sample_bits
+            copy_samples = prev_item.capacity - prev_item.n_samples
+            copy_samples = min(copy_samples, in_item.n_samples)
+            copy_bytes = copy_samples * sample_bits // BYTE_BITS
+            # Must wait for the upload to complete before the copy starts
+            self._copy_queue.enqueue_wait_for_events(in_item.events)
+            for pol_data0, pol_data1 in zip(prev_item.pol_data, in_item.pol_data):
+                assert pol_data0.samples is not None
+                assert pol_data1.samples is not None
+                pol_data1.samples.copy_region(
+                    self._copy_queue,
+                    pol_data0.samples,
+                    np.s_[:copy_bytes],
+                    np.s_[-copy_bytes:],
+                )
+                pol_data0.present[-copy_heaps:] = pol_data1.present[:copy_heaps]
+            prev_item.n_samples += copy_samples
+            prev_item.add_marker(self._copy_queue)
+        else:
+            for pol_data in prev_item.pol_data:
+                pol_data.present[-copy_heaps:] = 0  # Mark tail as absent, for each pol
 
     async def _run_receive(self, streams: list[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
@@ -1089,6 +1297,10 @@ class Engine(aiokatcp.DeviceServer):
         stream so that the memory need not be expensively re-allocated every
         time.
 
+        Additionally, the start of each chunk is copied to the tail of the
+        previous chunk, and only then is the previous chunk pushed to the
+        queues.
+
         In the GPU-direct case, <TODO clarify once I understand better>.
 
         Parameters
@@ -1099,6 +1311,7 @@ class Engine(aiokatcp.DeviceServer):
         layout
             The structure of the streams.
         """
+        prev_item = None
         async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
@@ -1111,13 +1324,13 @@ class Engine(aiokatcp.DeviceServer):
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.dig_sample_bits
+            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.src_layout.sample_bits
 
             transfer_events = []
             for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
                 # Copy the present flags (synchronously).
                 pol_data.present[: len(chunk.present)] = chunk.present
-                # Update the digitiser saturation count (the "extra" fields holds
+                # Update the digitiser saturation count (the "extra" field holds
                 # per-heap values).
                 assert chunk.extra is not None
                 sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
@@ -1130,7 +1343,6 @@ class Engine(aiokatcp.DeviceServer):
                     assert pol_data.samples is None
                     pol_data.samples = chunk.device  # type: ignore
                     pol_data.chunk = chunk
-                self._in_queue.put_nowait(in_item)
             else:
                 # Copy each pol chunk to the right place on the GPU.
                 for pol_data, chunk in zip(in_item.pol_data, chunks):
@@ -1139,12 +1351,16 @@ class Engine(aiokatcp.DeviceServer):
                         self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
                     )
                     transfer_events.append(self._upload_queue.enqueue_marker())
-
-                # Put events on the queue so that _run_processing() knows when to
+                # Put events on the queue so that run_processing() knows when to
                 # start.
                 in_item.events.extend(transfer_events)
-                self._in_queue.put_nowait(in_item)
 
+            if prev_item is not None:
+                self._copy_tail(prev_item, in_item)
+                self._add_in_item(prev_item)
+            prev_item = in_item
+
+            if not self.use_vkgdr:
                 # Wait until the copy is done, and then give the chunks of memory
                 # back to the receiver streams for reuse.
                 # NB: we don't use the Chunk context manager, because if
@@ -1155,195 +1371,15 @@ class Engine(aiokatcp.DeviceServer):
                     with self.monitor.with_state("run_receive", "wait transfer"):
                         await async_wait_for_events([transfer_events[pol]])
                     chunks[pol].recycle()
+
+        if prev_item is not None:
+            # Flush the final chunk to the pipelines
+            self._copy_tail(prev_item, None)  # Mark tail as absent
+            self._add_in_item(prev_item)
+
         logger.debug("run_receive completed")
-        self._in_queue.put_nowait(None)
-
-    def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
-        """Return a chunk to the free queue after it has completed transmission.
-
-        This is intended to be used as a callback on an :class:`asyncio.Future`.
-        """
-        if chunk.cleanup is not None:
-            chunk.cleanup()
-            chunk.cleanup = None  # Potentially helps break reference cycles
-        try:
-            future.result()  # No result, but want the exception
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception("Error sending chunk")
-
-    async def _run_transmit(self, streams: list["spead2.send.asyncio.AsyncStream"]) -> None:
-        """Get the processed data from the GPU to the Network.
-
-        This could be done either with or without PeerDirect. In the
-        non-PeerDirect case, :class:`OutItem` objects are pulled from the
-        `_out_queue`. We wait for the events that mark the end of the processing,
-        then copy the data to host memory before turning it over to the
-        :obj:`sender` for transmission on the network. The "empty" item is then
-        returned to :meth:`_run_processing` via the `_out_free_queue`, and once
-        the chunk has been transmitted it is returned to `_send_free_queue`.
-
-        In the PeerDirect case, the item and the chunk are bound together and
-        share memory. In this case `_send_free_queue` is unused. The item is
-        only returned to `_out_free_queue` once it has been fully transmitted.
-
-        Parameters
-        ----------
-        streams
-            The streams transmitting data.
-        """
-        task: asyncio.Future | None = None
-        last_end_timestamp: int | None = None
-        context = self._compute.template.context
-        # Scratch space for transferring digitiser power
-        dig_total_power = [self._compute.slots[f"dig_total_power{pol}"].allocate_host(context) for pol in range(N_POLS)]
-        while True:
-            with self.monitor.with_state("run_transmit", "wait out_queue"):
-                out_item = await self._out_queue.get()
-            if not out_item:
-                break
-            events = []
-            if out_item.chunk is not None:
-                # We're using PeerDirect
-                chunk = out_item.chunk
-                chunk.cleanup = partial(self._out_free_queue.put_nowait, out_item)
-                events.extend(out_item.events)
-            else:
-                with self.monitor.with_state("run_transmit", "wait send_free_queue"):
-                    chunk = await self._send_free_queue.get()
-                chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
-                self._download_queue.enqueue_wait_for_events(out_item.events)
-                assert isinstance(chunk.data, accel.HostArray)
-                # TODO: use get_region since it might be partial
-                out_item.spectra.get_async(self._download_queue, chunk.data)
-            out_item.saturated.get_async(self._download_queue, chunk.saturated)
-            for pol in range(N_POLS):
-                out_item.dig_total_power[pol].get_async(self._download_queue, dig_total_power[pol])
-            events.append(self._download_queue.enqueue_marker())
-
-            chunk.timestamp = out_item.timestamp
-            # Each frame is valid if all spectra in it are valid
-            out_item.present.reshape(-1, self.spectra_per_heap).all(axis=-1, out=chunk.present)
-            with self.monitor.with_state("run_transmit", "wait transfer"):
-                await async_wait_for_events(events)
-
-            for pol in range(N_POLS):
-                total_power = float(dig_total_power[pol])
-                avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
-                # Normalise relative to full scale. The factor of 2 is because we
-                # want 1.0 to correspond to a sine wave rather than a square wave.
-                avg_power /= ((1 << (self._src_layout.sample_bits - 1)) - 1) ** 2 / 2
-                avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                self.sensors[f"input{pol}.dig-pwr-dbfs"].set_value(
-                    avg_power_db, timestamp=self.time_converter.adc_to_unix(out_item.end_timestamp)
-                )
-
-            n_frames = out_item.n_spectra // self.spectra_per_heap
-            if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
-                # Account for heaps skipped between the end of the previous out_item and the
-                # start of the current one.
-                skipped_samples = out_item.timestamp - last_end_timestamp
-                skipped_frames = skipped_samples // (self.spectra_per_heap * self.spectra_samples)
-                send.skipped_heaps_counter.inc(skipped_frames * streams[0].num_substreams)
-            last_end_timestamp = out_item.end_timestamp
-            out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
-            if out_item.chunk is None:
-                # We're not in PeerDirect mode
-                # (when we are the cleanup callback returns the item)
-                self._out_free_queue.put_nowait(out_item)
-            task = asyncio.create_task(chunk.send(streams, n_frames, self.time_converter, self.sensors))
-            task.add_done_callback(partial(self._chunk_finished, chunk))
-
-        if task:
-            try:
-                await task
-            except Exception:
-                pass  # It's already logged by the chunk_finished callback
-        stop_heap = spead2.send.Heap(send.FLAVOUR)
-        stop_heap.add_end()
-        for substream_index in range(streams[0].num_substreams):
-            await streams[0].async_send_heap(stop_heap, substream_index=substream_index)
-        logger.debug("run_transmit completed")
-
-    def delay_update_timestamp(self) -> int:
-        """Return a timestamp by which an update to the delay model will take effect."""
-        # end_timestamp is updated whenever delays are written into the out_item
-        return self._out_item.end_timestamp
-
-    def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
-        """Update the delay sensor upon loading of a new model.
-
-        Accepting the delay_models as a read-only Sequence from the
-        MultiDelayModel, even though we only need the first one to update
-        the sensor.
-
-        The delay and phase-rate values need to be scaled back to their
-        original values (delay (s), phase-rate (rad/s)).
-        """
-        logger.debug("Updating delay sensor: %s", delay_sensor.name)
-
-        orig_delay = delay_models[0].delay / self.adc_sample_rate
-        phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
-        orig_phase = wrap_angle(delay_models[0].phase - 0.5 * np.pi * delay_models[0].delay)
-        orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.adc_sample_rate
-        delay_sensor.value = (
-            f"({delay_models[0].start}, "
-            f"{orig_delay}, "
-            f"{delay_models[0].delay_rate}, "
-            f"{orig_phase}, "
-            f"{orig_phase_rate})"
-        )
-
-    def _update_steady_state_timestamp(self, timestamp: int) -> None:
-        """Update the ``steady-state-timestamp`` sensor to at least a given value."""
-        sensor = self.sensors["steady-state-timestamp"]
-        sensor.value = max(sensor.value, timestamp)
-
-    def set_gains(self, input: int, gains: np.ndarray) -> None:
-        """Set the eq gains for one polarisation and update the sensor.
-
-        The `gains` must contain one entry per channel; the shortcut of
-        supplying a single value is handled by :meth:`request_gain`.
-        """
-        self.gains[:, input] = gains
-        # This timestamp is conservative: self._out_item.timestamp is almost
-        # always valid, except while _flush_out is waiting to update
-        # self._out_item. If a less conservative answer is needed, one would
-        # need to track a separate timestamp in the class that is updated
-        # as gains are copied to the OutItem.
-        self._update_steady_state_timestamp(self._out_item.end_timestamp)
-        if np.all(gains == gains[0]):
-            # All the values are the same, so it can be reported as a single value
-            gains = gains[:1]
-        self.sensors[f"input{input}.eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
-
-    def _parse_gains(self, *values: str, allow_default: bool) -> np.ndarray:
-        """Parse the gains passed to :meth:`request-gain` or :meth:`request-gain-all`.
-
-        If a single value is given it is expanded to a value per channel. If
-        `allow_default` is true, the string "default" may be given to restore
-        the default gains set via command line.
-
-        The caller must ensure that `values` contains either 1 or `channels`
-        items. :meth:`request_gain` handles the case where no values are given
-        for querying existing gains.
-
-        Failures are reported by raising an appropriate
-        :exc:`aiokatcp.FailReply`.
-        """
-        if allow_default and values == ("default",):
-            gains = np.full(self.channels, self.default_gain, dtype=np.complex64)
-        else:
-            try:
-                gains = np.array([complex(v) for v in values], dtype=np.complex64)
-            except ValueError:
-                raise aiokatcp.FailReply("invalid formatting of complex number")
-        if not np.all(np.isfinite(gains)):
-            raise aiokatcp.FailReply("non-finite gains are not permitted")
-        if len(gains) == 1:
-            gains = gains.repeat(self.channels)
-        return gains
+        for pipeline in self._pipelines:
+            pipeline.shutdown()
 
     async def request_gain(self, ctx, input: int, *values: str) -> tuple[str, ...]:
         """Set or query the eq gains.
@@ -1358,15 +1394,17 @@ class Engine(aiokatcp.DeviceServer):
             Complex values. There must either be a single value (used for all
             channels), or a value per channel.
         """
+        pipeline = self._pipelines[0]  # TODO[nb]: need to add a request argument
+        output = pipeline.output
         if not 0 <= input < N_POLS:
             raise aiokatcp.FailReply("input is out of range")
-        if len(values) not in {0, 1, self.channels}:
-            raise aiokatcp.FailReply(f"invalid number of values provided (must be 0, 1 or {self.channels})")
+        if len(values) not in {0, 1, output.channels}:
+            raise aiokatcp.FailReply(f"invalid number of values provided (must be 0, 1 or {output.channels})")
         if not values:
-            gains = self.gains[:, input]
+            gains = pipeline.gains[:, input]
         else:
-            gains = self._parse_gains(*values, allow_default=False)
-            self.set_gains(input, gains)
+            gains = _parse_gains(*values, channels=output.channels, default_gain=None)
+            pipeline.set_gains(input, gains)
 
         # Return the current values.
         # If they're all the same, we can return just a single value.
@@ -1384,11 +1422,13 @@ class Engine(aiokatcp.DeviceServer):
             channels), or a value per channel, or ``"default"`` to reset gains
             to the default.
         """
-        if len(values) not in {1, self.channels}:
-            raise aiokatcp.FailReply(f"invalid number of values provided (must be 1 or {self.channels})")
-        gains = self._parse_gains(*values, allow_default=True)
+        pipeline = self._pipelines[0]  # TODO[nb]: need to add a request argument
+        output = pipeline.output
+        if len(values) not in {1, output.channels}:
+            raise aiokatcp.FailReply(f"invalid number of values provided (must be 1 or {output.channels})")
+        gains = _parse_gains(*values, channels=output.channels, default_gain=self.default_gain)
         for i in range(N_POLS):
-            self.set_gains(i, gains)
+            pipeline.set_gains(i, gains)
 
     async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model.
@@ -1405,8 +1445,9 @@ class Engine(aiokatcp.DeviceServer):
             b = float(b_str)
             return a, b
 
-        if len(delays) != len(self.delay_models):
-            raise aiokatcp.FailReply(f"wrong number of delay coefficient sets (expected {len(self.delay_models)})")
+        pipeline = self._pipelines[0]  # TODO[nb]: need to add a request argument
+        if len(delays) != len(pipeline.delay_models):
+            raise aiokatcp.FailReply(f"wrong number of delay coefficient sets (expected {len(pipeline.delay_models)})")
 
         # This will round the start time of the new delay model to the nearest
         # ADC sample. If the start time given doesn't coincide with an ADC sample,
@@ -1444,9 +1485,9 @@ class Engine(aiokatcp.DeviceServer):
                 )
             )
 
-        for delay_model, new_linear_model in zip(self.delay_models, new_linear_models):
+        for delay_model, new_linear_model in zip(pipeline.delay_models, new_linear_models):
             delay_model.add(new_linear_model)
-        self._update_steady_state_timestamp(self.delay_update_timestamp())
+        self._update_steady_state_timestamp(pipeline.delay_update_timestamp())
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
@@ -1465,16 +1506,19 @@ class Engine(aiokatcp.DeviceServer):
         """
         # Create the descriptor task first to ensure descriptors will be sent
         # before any data makes its way through the pipeline.
-        descriptor_sender = DescriptorSender(
-            self._send_streams[0],
-            self._descriptor_heap,
-            self.n_ants * descriptor_interval_s,
-            (self.feng_id + 1) * descriptor_interval_s,
-            all_substreams=True,
-        )
-        descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
-        self.add_service_task(descriptor_task)
-        self._cancel_tasks.append(descriptor_task)
+        for pipeline in self._pipelines:
+            descriptor_sender = DescriptorSender(
+                self._send_streams[0],
+                pipeline.descriptor_heap,
+                self.n_ants * descriptor_interval_s,
+                (self.feng_id + 1) * descriptor_interval_s,
+                substreams=pipeline.substreams,
+            )
+            descriptor_task = asyncio.create_task(
+                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
+            )
+            self.add_service_task(descriptor_task)
+            self._cancel_tasks.append(descriptor_task)
 
         for pol, stream in enumerate(self._src_streams):
             base_recv.add_reader(
@@ -1486,23 +1530,24 @@ class Engine(aiokatcp.DeviceServer):
                 buffer=self._src_buffer,
             )
 
-        proc_task = asyncio.create_task(
-            self._run_processing(),
-            name=GPU_PROC_TASK_NAME,
-        )
-        self.add_service_task(proc_task)
-
         recv_task = asyncio.create_task(
-            self._run_receive(self._src_streams, self._src_layout),
+            self._run_receive(self._src_streams, self.src_layout),
             name=RECV_TASK_NAME,
         )
         self.add_service_task(recv_task)
 
-        send_task = asyncio.create_task(
-            self._run_transmit(self._send_streams),
-            name=SEND_TASK_NAME,
-        )
-        self.add_service_task(send_task)
+        for pipeline in self._pipelines:
+            proc_task = asyncio.create_task(
+                pipeline.run_processing(),
+                name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
+            )
+            self.add_service_task(proc_task)
+
+            send_task = asyncio.create_task(
+                pipeline.run_transmit(self._send_streams),
+                name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
+            )
+            self.add_service_task(send_task)
 
         await super().start()
 
