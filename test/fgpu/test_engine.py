@@ -570,7 +570,7 @@ class TestEngine:
     ) -> None:
         """Test loading several future delay models."""
         # Set up infrastructure for testing delay sensor updates
-        delay_sensors = [engine_server.sensors[f"input{pol}.delay"] for pol in range(N_POLS)]
+        delay_sensors = [engine_server.sensors[f"wideband.input{pol}.delay"] for pol in range(N_POLS)]
         sensor_updates_dict = self._watch_sensors(delay_sensors)
 
         # To keep things simple, we'll just use phase, not delay.
@@ -770,10 +770,10 @@ class TestEngine:
 
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
         assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
-        sensor = engine_server.sensors[f"input{tone_pol}.feng-clip-cnt"]
+        sensor = engine_server.sensors[f"wideband.input{tone_pol}.feng-clip-cnt"]
         assert sensor.value == len(timestamps)
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
-        sensor = engine_server.sensors[f"input{1 - tone_pol}.feng-clip-cnt"]
+        sensor = engine_server.sensors[f"wideband.input{1 - tone_pol}.feng-clip-cnt"]
         assert sensor.value == 0
         assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
 
