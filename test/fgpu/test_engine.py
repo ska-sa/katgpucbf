@@ -103,7 +103,6 @@ class TestEngine:
         "--katcp-port=0",
         "--src-interface=lo",
         "--dst-interface=lo",
-        f"--channels={CHANNELS}",
         f"--sync-epoch={SYNC_EPOCH}",
         f"--src-chunk-samples={CHUNK_SAMPLES}",
         f"--dst-chunk-jones={CHUNK_JONES}",
@@ -111,13 +110,12 @@ class TestEngine:
         f"--spectra-per-heap={SPECTRA_PER_HEAP}",
         f"--src-packet-samples={PACKET_SAMPLES}",
         f"--feng-id={FENG_ID}",
-        f"--taps={TAPS}",
         f"--adc-sample-rate={ADC_SAMPLE_RATE}",
         f"--gain={GAIN}",
         "--send-rate-factor=0",  # Infinitely fast
+        f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS},taps={TAPS}",
         "239.10.10.0+7:7149",  # src1
         "239.10.10.8+7:7149",  # src2
-        "239.10.11.0+15:7149",  # dst
     ]
 
     def test_engine_required_arguments(self, engine_server: Engine) -> None:
@@ -622,7 +620,13 @@ class TestEngine:
     @pytest.mark.parametrize(
         "channels",
         [
-            pytest.param(channels, marks=pytest.mark.cmdline_args(f"--channels={channels}"))
+            pytest.param(
+                channels,
+                marks=pytest.mark.cmdline_args(
+                    f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={channels},taps={TAPS}",
+                    remove_outputs=True,
+                ),
+            )
             for channels in [64, 2048, 8192]
         ],
     )

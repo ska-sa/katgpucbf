@@ -20,7 +20,7 @@ import pytest
 from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf.fgpu.main import comma_split, parse_args, parse_narrowband
-from katgpucbf.fgpu.output import NarrowbandOutput
+from katgpucbf.fgpu.output import NarrowbandOutput, WidebandOutput
 
 
 class TestCommaSplit:
@@ -107,18 +107,22 @@ class TestParseArgs:
             "--src-interface=lo",
             "--dst-interface=lo",
             "--adc-sample-rate=1712000000.0",
-            "--channels=1024",
             "--sync-epoch=0",
-            "--taps=64",
-            "--w-cutoff=0.9",
+            "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9",
             "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,decimation=8,taps=4,w_cutoff=0.8",
             "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,decimation=16",
             "239.0.1.0+7:7148",
             "239.0.2.0+7:7148",
-            "239.0.3.0+7:7148",
         ]
         args = parse_args(raw_args)
-        assert args.narrowband == [
+        assert args.outputs == [
+            WidebandOutput(
+                name="wideband",
+                dst=[Endpoint("239.0.3.0", 7148), Endpoint("239.0.3.1", 7148)],
+                channels=1024,
+                taps=64,
+                w_cutoff=0.9,
+            ),
             NarrowbandOutput(
                 name="nb0",
                 dst=[Endpoint("239.1.0.0", 7148), Endpoint("239.1.0.1", 7148)],
@@ -128,6 +132,6 @@ class TestParseArgs:
                 w_cutoff=0.8,
             ),
             NarrowbandOutput(
-                name="nb1", dst=[Endpoint("239.2.0.0", 7149)], channels=8192, decimation=16, taps=64, w_cutoff=0.9
+                name="nb1", dst=[Endpoint("239.2.0.0", 7149)], channels=8192, decimation=16, taps=16, w_cutoff=1.0
             ),
         ]
