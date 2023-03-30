@@ -819,14 +819,17 @@ class Pipeline:
                 # We're not in PeerDirect mode
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
-            task = asyncio.create_task(self._chunk_send_and_cleanup(streams, n_frames, chunk))
+            task = asyncio.create_task(
+                self._chunk_send_and_cleanup(streams, n_frames, chunk),
+                name="Chunk Send and Cleanup Task",
+            )
             self.engine.add_service_task(task)
 
         if task:
             try:
                 await task
             except Exception:
-                pass  # It's already logged by the chunk_finished callback
+                pass  # It's already logged by chunk_send_and_cleanup
         stop_heap = spead2.send.Heap(send.FLAVOUR)
         stop_heap.add_end()
         for substream_index in self.substreams:
@@ -1226,7 +1229,10 @@ class Engine(aiokatcp.DeviceServer):
                     assert pol_data.chunk is not None
                     chunks.append(pol_data.chunk)
                     pol_data.chunk = None
-                task = asyncio.create_task(self._push_recv_chunks(chunks, item.events))
+                task = asyncio.create_task(
+                    self._push_recv_chunks(chunks, item.events),
+                    name="Receive Chunk Recycle Task",
+                )
                 self.add_service_task(task)
             self._in_free_queue.put_nowait(item)
 
