@@ -724,10 +724,22 @@ class Pipeline:
     async def _chunk_send_and_cleanup(
         self, streams: list["spead2.send.asyncio.AsyncStream"], n_frames: int, chunk: send.Chunk
     ) -> None:
-        """Return a chunk to the free queue after it has completed transmission."""
+        """Transmit a chunk's data and return it to the free queue.
+
+        The returning of the chunk to the free queue happens whether the data
+        transmission was successful or not.
+
+        Parameters
+        ----------
+        streams
+            The streams transmitting data.
+        n_frames
+            Number of frames of data to be transmitted.
+        chunk
+            :class:`~send.Chunk` used to facilitate data transmission.
+        """
         try:
-            task = asyncio.create_task(chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors))
-            await task
+            await chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors)
         except asyncio.CancelledError:
             pass
         except Exception:
