@@ -419,6 +419,7 @@ class Pipeline:
         # Initialize delays and gains
         self.delay_models: list[MultiDelayModel] = []
         self.gains = np.zeros((output.channels, self.pols), np.complex64)
+        self._populate_sensors()
         self._init_delay_gain()
 
         self.descriptor_heap = send.make_descriptor_heap(
@@ -426,13 +427,59 @@ class Pipeline:
             spectra_per_heap=engine.spectra_per_heap,
         )
 
+    def _populate_sensors(self) -> None:
+        sensors = self.engine.sensors
+        for pol in range(N_POLS):
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{self.output.name}.input{pol}.eq",
+                    "For this input, the complex, unitless, per-channel digital scaling factors "
+                    "implemented prior to requantisation",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{self.output.name}.input{pol}.delay",
+                    "The delay settings for this input: (loadmcnt <ADC sample "
+                    "count when model was loaded>, delay <in seconds>, "
+                    "delay-rate <unit-less or, seconds-per-second>, "
+                    "phase <radians>, phase-rate <radians per second>).",
+                )
+            )
+            # TODO[nb]: it may be better to make this a single sensor and
+            # have only one of the pipelines update it.
+            sensors.add(
+                aiokatcp.Sensor(
+                    float,
+                    f"{self.output.name}.input{pol}.dig-pwr-dbfs",
+                    "Digitiser ADC average power",
+                    units="dBFS",
+                    status_func=dig_pwr_dbfs_status,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    int,
+                    f"{self.output.name}.input{pol}.feng-clip-cnt",
+                    "Number of output samples that are saturated",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+                )
+            )
+
     def _init_delay_gain(self) -> None:
         """Initialise the delays and gains."""
-        # TODO[nb]: create per-pipeline sensors
         for pol in range(N_POLS):
-            delay_model = MultiDelayModel(
-                callback_func=partial(self.update_delay_sensor, delay_sensor=self.engine.sensors[f"input{pol}.delay"])
-            )
+            delay_sensor = self.engine.sensors[f"{self.output.name}.input{pol}.delay"]
+            callback_func = partial(self.update_delay_sensor, delay_sensor=delay_sensor)
+            delay_model = MultiDelayModel(callback_func)
             self.delay_models.append(delay_model)
 
         for pol in range(N_POLS):
@@ -739,7 +786,7 @@ class Pipeline:
             :class:`~send.Chunk` used to facilitate data transmission.
         """
         try:
-            await chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors)
+            await chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors, self.output.name)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -812,9 +859,7 @@ class Pipeline:
                 # want 1.0 to correspond to a sine wave rather than a square wave.
                 avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                # TODO[nb]: needs to be computed (or at least set) by just one of
-                # the streams.
-                self.engine.sensors[f"input{pol}.dig-pwr-dbfs"].set_value(
+                self.engine.sensors[f"{self.output.name}.input{pol}.dig-pwr-dbfs"].set_value(
                     avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                 )
 
@@ -893,8 +938,8 @@ class Pipeline:
         if np.all(gains == gains[0]):
             # All the values are the same, so it can be reported as a single value
             gains = gains[:1]
-        # TODO[nb]: Will need to be namespaced with self.output.name
-        self.engine.sensors[f"input{input}.eq"].value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
+        sensor = self.engine.sensors[f"{self.output.name}.input{input}.eq"]
+        sensor.value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -1151,54 +1196,13 @@ class Engine(aiokatcp.DeviceServer):
                 chunk.recycle()  # Make available to the stream
 
     def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
-        """Define the sensors for an engine."""
+        """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
-            sensors.add(
-                aiokatcp.Sensor(
-                    str,
-                    f"input{pol}.eq",
-                    "For this input, the complex, unitless, per-channel digital scaling factors "
-                    "implemented prior to requantisation",
-                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                )
-            )
-            sensors.add(
-                aiokatcp.Sensor(
-                    str,
-                    f"input{pol}.delay",
-                    "The delay settings for this input: (loadmcnt <ADC sample "
-                    "count when model was loaded>, delay <in seconds>, "
-                    "delay-rate <unit-less or, seconds-per-second>, "
-                    "phase <radians>, phase-rate <radians per second>).",
-                )
-            )
             sensors.add(
                 aiokatcp.Sensor(
                     int,
                     f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
-                    default=0,
-                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
-                )
-            )
-            sensors.add(
-                aiokatcp.Sensor(
-                    float,
-                    f"input{pol}.dig-pwr-dbfs",
-                    "Digitiser ADC average power",
-                    units="dBFS",
-                    status_func=dig_pwr_dbfs_status,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
-                )
-            )
-            sensors.add(
-                aiokatcp.Sensor(
-                    int,
-                    f"input{pol}.feng-clip-cnt",
-                    "Number of output samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                     auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
