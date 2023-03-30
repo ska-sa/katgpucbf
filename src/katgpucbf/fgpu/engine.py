@@ -768,20 +768,33 @@ class Pipeline:
         logger.debug("run_processing completed")
         self._out_queue.put_nowait(None)
 
-    def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
-        """Return a chunk to the free queue after it has completed transmission.
+    async def _chunk_send_and_cleanup(
+        self, streams: list["spead2.send.asyncio.AsyncStream"], n_frames: int, chunk: send.Chunk
+    ) -> None:
+        """Transmit a chunk's data and return it to the free queue.
 
-        This is intended to be used as a callback on an :class:`asyncio.Future`.
+        The returning of the chunk to the free queue happens whether the data
+        transmission was successful or not.
+
+        Parameters
+        ----------
+        streams
+            The streams transmitting data.
+        n_frames
+            Number of frames of data to be transmitted.
+        chunk
+            :class:`~send.Chunk` used to facilitate data transmission.
         """
-        if chunk.cleanup is not None:
-            chunk.cleanup()
-            chunk.cleanup = None  # Potentially helps break reference cycles
         try:
-            future.result()  # No result, but want the exception
+            await chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors, self.output.name)
         except asyncio.CancelledError:
             pass
         except Exception:
             logger.exception("Error sending chunk")
+        finally:
+            if chunk.cleanup is not None:
+                chunk.cleanup()
+                chunk.cleanup = None  # Potentially helps break reference cycles
 
     async def run_transmit(self, streams: list["spead2.send.asyncio.AsyncStream"]) -> None:
         """Get the processed data from the GPU to the Network.
@@ -864,15 +877,16 @@ class Pipeline:
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(
-                chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors, self.output.name)
+                self._chunk_send_and_cleanup(streams, n_frames, chunk),
+                name="Chunk Send and Cleanup Task",
             )
-            task.add_done_callback(partial(self._chunk_finished, chunk))
+            self.engine.add_service_task(task)
 
         if task:
             try:
                 await task
             except Exception:
-                pass  # It's already logged by the chunk_finished callback
+                pass  # It's already logged by _chunk_send_and_cleanup
         stop_heap = spead2.send.Heap(send.FLAVOUR)
         stop_heap.add_end()
         for substream_index in self.substreams:
@@ -1231,7 +1245,11 @@ class Engine(aiokatcp.DeviceServer):
                     assert pol_data.chunk is not None
                     chunks.append(pol_data.chunk)
                     pol_data.chunk = None
-                asyncio.create_task(self._push_recv_chunks(chunks, item.events))
+                task = asyncio.create_task(
+                    self._push_recv_chunks(chunks, item.events),
+                    name="Receive Chunk Recycle Task",
+                )
+                self.add_service_task(task)
             self._in_free_queue.put_nowait(item)
 
     @staticmethod
