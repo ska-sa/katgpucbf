@@ -841,7 +841,7 @@ class Pipeline:
             try:
                 await task
             except Exception:
-                pass  # It's already logged by chunk_send_and_cleanup
+                pass  # It's already logged by _chunk_send_and_cleanup
         stop_heap = spead2.send.Heap(send.FLAVOUR)
         stop_heap.add_end()
         for substream_index in self.substreams:
