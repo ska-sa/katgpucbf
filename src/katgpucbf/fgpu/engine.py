@@ -721,20 +721,21 @@ class Pipeline:
         logger.debug("run_processing completed")
         self._out_queue.put_nowait(None)
 
-    def _chunk_finished(self, chunk: send.Chunk, future: asyncio.Future) -> None:
-        """Return a chunk to the free queue after it has completed transmission.
-
-        This is intended to be used as a callback on an :class:`asyncio.Future`.
-        """
-        if chunk.cleanup is not None:
-            chunk.cleanup()
-            chunk.cleanup = None  # Potentially helps break reference cycles
+    async def _chunk_send_and_cleanup(
+        self, streams: list["spead2.send.asyncio.AsyncStream"], n_frames: int, chunk: send.Chunk
+    ) -> None:
+        """Return a chunk to the free queue after it has completed transmission."""
         try:
-            future.result()  # No result, but want the exception
+            task = asyncio.create_task(chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors))
+            await task
         except asyncio.CancelledError:
             pass
         except Exception:
             logger.exception("Error sending chunk")
+        finally:
+            if chunk.cleanup is not None:
+                chunk.cleanup()
+                chunk.cleanup = None  # Potentially helps break reference cycles
 
     async def run_transmit(self, streams: list["spead2.send.asyncio.AsyncStream"]) -> None:
         """Get the processed data from the GPU to the Network.
@@ -818,8 +819,8 @@ class Pipeline:
                 # We're not in PeerDirect mode
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
-            task = asyncio.create_task(chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors))
-            task.add_done_callback(partial(self._chunk_finished, chunk))
+            task = asyncio.create_task(self._chunk_send_and_cleanup(streams, n_frames, chunk))
+            self.engine.add_service_task(task)
 
         if task:
             try:
@@ -1225,7 +1226,8 @@ class Engine(aiokatcp.DeviceServer):
                     assert pol_data.chunk is not None
                     chunks.append(pol_data.chunk)
                     pol_data.chunk = None
-                asyncio.create_task(self._push_recv_chunks(chunks, item.events))
+                task = asyncio.create_task(self._push_recv_chunks(chunks, item.events))
+                self.add_service_task(task)
             self._in_free_queue.put_nowait(item)
 
     @staticmethod
