@@ -374,14 +374,14 @@ class TestEngine:
         phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
         phase_correction = -phase
         coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
-        await engine_client.request("delays", SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", "wideband", SYNC_EPOCH, *coeffs)
 
         # Use constant-magnitude gains to avoid throwing off the magnitudes
         rng = np.random.default_rng(123)
         gain_phase = rng.uniform(0, 2 * np.pi, (CHANNELS, N_POLS))
         gains = GAIN * np.exp(1j * gain_phase).astype(np.complex64)
         for pol in range(N_POLS):
-            await engine_client.request("gain", pol, *(str(gain) for gain in gains[:, pol]))
+            await engine_client.request("gain", "wideband", pol, *(str(gain) for gain in gains[:, pol]))
 
         src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
@@ -454,7 +454,7 @@ class TestEngine:
         # Crank up the gain so that leakage is measurable
         gain = 100 / COHERENT_SCALE
         for pol in range(N_POLS):
-            await engine_client.request("gain", pol, gain)
+            await engine_client.request("gain", "wideband", pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
         # attenuation is ≤ 2x (twice) the pass band width.
         #
@@ -513,7 +513,7 @@ class TestEngine:
         phase_rate_per_sample = np.array([30, 32.5]) / n_samples
         phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
         coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
-        await engine_client.request("delays", SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", "wideband", SYNC_EPOCH, *coeffs)
 
         first_timestamp = 100 * src_layout.chunk_samples
         end_delay = round(min(delay_rate) * n_samples)
@@ -585,7 +585,7 @@ class TestEngine:
         update_phases = [1.0, 0.2, -0.2, -2.0, 0.0]
         for time, phase in zip(update_times, update_phases):
             coeffs = f"0.0,0.0:{phase},0.0"
-            await engine_client.request("delays", SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
+            await engine_client.request("delays", "wideband", SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
 
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
@@ -763,7 +763,7 @@ class TestEngine:
         tone = CW(frac_channel=271 / CHANNELS, magnitude=110.0)
         for pol in range(N_POLS):
             # Set gain high enough to make the tone saturate
-            await engine_client.request("gain", pol, GAIN * 2)
+            await engine_client.request("gain", "wideband", pol, GAIN * 2)
 
         src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
@@ -827,7 +827,7 @@ class TestEngine:
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
-        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "gain-all", 0)
+        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "gain-all", "wideband", 0)
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -859,7 +859,9 @@ class TestEngine:
         n_samples = 8 * CHUNK_SAMPLES
         dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
 
-        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "delays", SYNC_EPOCH, "0,0:3,0", "0,0:3,0")
+        timestamp_list = self._patch_fill_in(
+            monkeypatch, engine_client, "delays", "wideband", SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
+        )
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
