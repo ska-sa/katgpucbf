@@ -241,16 +241,16 @@ dsim
 
 fgpu
 ^^^^
-:samp:`?gain {input} [{values}...]`
+:samp:`?gain {stream} {input} [{values}...]`
     Set the complex gains. This has the same semantics as the equivalent
     katsdpcontroller command, but :samp:`{input}` must be 0 or 1 to select
     the input polarisation.
 
-:samp:`?gain-all {values}...`
+:samp:`?gain-all {stream} {values}...`
     Set the complex gains for both inputs. This has the same semantics as the
     equivalent katsdpcontroller command.
 
-:samp:`?delays {start-time} {values}...`
+:samp:`?delays {stream} {start-time} {values}...`
     Set the delay polynomials. This has the same semantics as the equivalent
     katsdpcontroller command, but takes exactly two delay model
     specifications (for the two polarisations).

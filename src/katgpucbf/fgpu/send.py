@@ -36,15 +36,18 @@ from . import METRIC_NAMESPACE
 PREAMBLE_SIZE = 72
 #: Data type of the output payload
 SEND_DTYPE = np.dtype(np.int8)
-# TODO[nb]: add label for the stream name
-output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
-output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
-output_samples_counter = Counter("output_samples", "number of samples transmitted", namespace=METRIC_NAMESPACE)
+output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE)
+output_bytes_counter = Counter(
+    "output_bytes", "number of payload bytes transmitted", ["stream"], namespace=METRIC_NAMESPACE
+)
+output_samples_counter = Counter(
+    "output_samples", "number of samples transmitted", ["stream"], namespace=METRIC_NAMESPACE
+)
 skipped_heaps_counter = Counter(
-    "output_skipped_heaps", "heaps not sent because input data was incomplete", namespace=METRIC_NAMESPACE
+    "output_skipped_heaps", "heaps not sent because input data was incomplete", ["stream"], namespace=METRIC_NAMESPACE
 )
 output_clip_counter = Counter(
-    "output_clipped_samples", "number of samples that were saturated", ["pol"], namespace=METRIC_NAMESPACE
+    "output_clipped_samples", "number of samples that were saturated", ["stream", "pol"], namespace=METRIC_NAMESPACE
 )
 
 
@@ -164,13 +167,13 @@ class Chunk:
         self._timestamp = value
 
     @staticmethod
-    def _inc_counters(frame: Frame, future: asyncio.Future) -> None:
+    def _inc_counters(frame: Frame, output_name: str, future: asyncio.Future) -> None:
         if not future.cancelled() and future.exception() is None:
-            output_heaps_counter.inc(len(frame.heaps))
-            output_bytes_counter.inc(frame.data.nbytes)
-            output_samples_counter.inc(frame.data.size // COMPLEX)
+            output_heaps_counter.labels(output_name).inc(len(frame.heaps))
+            output_bytes_counter.labels(output_name).inc(frame.data.nbytes)
+            output_samples_counter.labels(output_name).inc(frame.data.size // COMPLEX)
             for pol in range(N_POLS):
-                output_clip_counter.labels(pol).inc(frame.saturated[pol])
+                output_clip_counter.labels(output_name, pol).inc(frame.saturated[pol])
 
     async def send(
         self,
@@ -192,11 +195,11 @@ class Chunk:
         for present, frame in zip(self.present[:frames], self._frames[:frames]):
             if present:
                 futures.append(_multi_send(streams, frame.heaps))
-                futures[-1].add_done_callback(functools.partial(self._inc_counters, frame))
+                futures[-1].add_done_callback(functools.partial(self._inc_counters, frame, output_name))
                 for pol in range(N_POLS):
                     saturated[pol] += frame.saturated[pol]
             else:
-                skipped_heaps_counter.inc(len(frame.heaps))
+                skipped_heaps_counter.labels(output_name).inc(len(frame.heaps))
         if futures:
             await asyncio.gather(*futures)
         end_timestamp = self._timestamp + self._timestamp_step * len(self._frames)
