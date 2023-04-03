@@ -41,7 +41,7 @@ from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
-DEFAULT_ANTENNAS = 8  #: Number of antennas for antenna-channelised-voltage tests
+DEFAULT_ANTENNAS = 8  #: Number of antennas for antenna_channelised_voltage tests
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 
 
@@ -122,7 +122,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "n_antennas" in metafunc.fixturenames:
         rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
         max_antennas = int(metafunc.config.getini("max_antennas"))
-        if rel_path.parts[0] == "baseline-correlation-products":
+        if rel_path.parts[0] == "baseline_correlation_products":
             values = FULL_ANTENNAS
         else:
             values = [min(max_antennas, DEFAULT_ANTENNAS)]
