@@ -53,7 +53,7 @@ async def test_linearity(
     gain = compute_tone_gain(receiver=receiver, amplitude=max(cw_scales), target_voltage=110)
 
     pdf_report.detail(f"Setting gain to: {gain}")
-    await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
+    await correlator.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
     base_corr_prod = await sample_tone_response(
         rel_freqs=sel_chan_center,

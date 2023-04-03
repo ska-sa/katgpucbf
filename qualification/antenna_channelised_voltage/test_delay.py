@@ -72,7 +72,7 @@ async def test_delay_application_time(
         target = now + advance
         delays = ["0,0:0,0", f"0,0:{math.pi / 2},0"] * receiver.n_ants
         pdf_report.detail("Set delays.")
-        await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", target, *delays)
+        await correlator.product_controller_client.request("delays", "antenna-channelised-voltage", target, *delays)
         pdf_report.step("Receive data for the corresponding dump.")
         target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
@@ -91,7 +91,7 @@ async def test_delay_application_time(
         pdf_report.detail("Did not receive all the expected chunks; reset delay and try again.")
         delays = ["0,0:0,0", "0,0:0,0"] * receiver.n_ants
         await correlator.product_controller_client.request(
-            "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
+            "delays", "antenna-channelised-voltage", receiver.sync_time, *delays
         )
     else:
         pytest.fail(f"Give up after {attempts} attempts.")
@@ -136,7 +136,7 @@ async def test_delay_enable_disable(
     async def set_delays(delays: list[str]) -> None:
         start = asyncio.get_running_loop().time()
         await correlator.product_controller_client.request(
-            "delays", "antenna_channelised_voltage", receiver.sync_time, *delays
+            "delays", "antenna-channelised-voltage", receiver.sync_time, *delays
         )
         finish = asyncio.get_running_loop().time()
         elapsed.append(finish - start)
@@ -153,7 +153,7 @@ async def test_delay_enable_disable(
     pdf_report.detail(f"Set signal to {signal} on both pols.")
     await correlator.dsim_clients[0].request("signals", f"common={signal}; common; common;")
     pdf_report.detail(f"Set gain to {gain} for all inputs.")
-    await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
+    await correlator.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
     pdf_report.step("Check that phase compensation can be enabled.")
     pdf_report.detail("Apply 90 degree phase to one pol")
@@ -198,8 +198,8 @@ async def test_delay_application_rate(correlator: CorrelatorRemoteControl, pdf_r
     enough.
     """
     pdf_report.step("Query rate of spectra.")
-    n_samples_between_spectra = correlator.sensors["antenna_channelised_voltage.n-samples-between-spectra"].value
-    scale_factor_timestamp = correlator.sensors["antenna_channelised_voltage.scale-factor-timestamp"].value
+    n_samples_between_spectra = correlator.sensors["antenna-channelised-voltage.n-samples-between-spectra"].value
+    scale_factor_timestamp = correlator.sensors["antenna-channelised-voltage.scale-factor-timestamp"].value
     rate = scale_factor_timestamp / n_samples_between_spectra
     pdf_report.detail(f"There are {rate:.3f} spectra per second.")
     assert rate >= 2500.0
@@ -234,11 +234,11 @@ async def test_delay_sensors(
         delay_tuples.append((load_ts, delay, delay_rate, phase, phase_rate))
 
     def delay_sensor_value(label: str) -> tuple:
-        return literal_eval(correlator.sensors[f"antenna_channelised_voltage.{label}.delay"].value.decode())
+        return literal_eval(correlator.sensors[f"antenna-channelised-voltage.{label}.delay"].value.decode())
 
     pdf_report.step("Load delays.")
     pdf_report.detail(f"Set delays to load at {load_time} (timestamp {load_ts}).")
-    await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", load_time, *delay_strs)
+    await correlator.product_controller_client.request("delays", "antenna-channelised-voltage", load_time, *delay_strs)
     await asyncio.sleep(0.1)  # Allow time for any invalid sensor updates to propagate
     pdf_report.detail("Check that sensors do not reflect the future.")
     for label in receiver.input_labels:
@@ -360,7 +360,7 @@ async def _test_delay_phase_fixed(
     for i in range(len(delay_phases)):
         pdf_report.detail(f"Set delay model to {delay_spec[i]} on input {i}")
     await correlator.product_controller_client.request(
-        "delays", "antenna_channelised_voltage", receiver.sync_time, *delay_spec
+        "delays", "antenna-channelised-voltage", receiver.sync_time, *delay_spec
     )
 
     pdf_report.step("Verify results")
@@ -424,7 +424,7 @@ async def _test_delay_phase_rate(
         delay_spec[i] = f"0,{delay_rate}:0,{phase_rate}"
         pdf_report.detail(f"Set delay model to {delay_spec[i]} on input {i}")
     now = await correlator.dsim_time()
-    await correlator.product_controller_client.request("delays", "antenna_channelised_voltage", now, *delay_spec)
+    await correlator.product_controller_client.request("delays", "antenna-channelised-voltage", now, *delay_spec)
 
     pdf_report.step("Collect two consecutive accumulations.")
     timestamps = []

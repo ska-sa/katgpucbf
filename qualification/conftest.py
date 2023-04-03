@@ -122,7 +122,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "n_antennas" in metafunc.fixturenames:
         rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
         max_antennas = int(metafunc.config.getini("max_antennas"))
-        if rel_path.parts[0] == "baseline_correlation_products":
+        if rel_path.parts[0] == "baseline-correlation-products":
             values = FULL_ANTENNAS
         else:
             values = [min(max_antennas, DEFAULT_ANTENNAS)]
