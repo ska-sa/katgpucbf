@@ -307,7 +307,7 @@ pyyaml==6.0
     #   dask
     #   pre-commit
     #   pybtex
-redis==4.5.3
+redis==4.5.4
     # via
     #   -c requirements.txt
     #   katsdptelstate

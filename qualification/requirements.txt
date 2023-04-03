@@ -290,7 +290,7 @@ pyyaml==6.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-redis==4.5.3
+redis==4.5.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt

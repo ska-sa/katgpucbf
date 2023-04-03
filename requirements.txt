@@ -123,7 +123,7 @@ pytz==2022.4
     # via pandas
 pyyaml==6.0
     # via dask
-redis==4.5.3
+redis==4.5.4
     # via katsdptelstate
 scipy==1.9.2
     # via katsdpsigproc

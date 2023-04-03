@@ -63,7 +63,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
-    parser.add_argument("--develop", action="store_true", help="Run without specialised hardware")
+    parser.add_argument(
+        "--develop",
+        nargs="?",
+        const=True,
+        help="Pass development options in the config. Use comma separation, or omit the arg to enable all.",
+    )
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
     )
@@ -93,8 +98,13 @@ def generate_config(args: argparse.Namespace) -> dict:
             name, image = override.split(":", 1)
             image_overrides[name] = image
         config["config"]["image_overrides"] = image_overrides
-    if args.develop:
-        config["config"]["develop"] = True
+    if args.develop is not None:
+        if args.develop is True or args.develop == "":
+            # Use passed --develop with no argument or --develop= with empty argument
+            config["config"]["develop"] = True
+        else:
+            # User passed a comma-separated list of options
+            config["config"]["develop"] = {key: True for key in args.develop.split(",")}
     next_dig_ip = args.digitiser_address
     dig_names = []
     for ant_index in range(args.digitisers):

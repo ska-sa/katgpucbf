@@ -869,7 +869,7 @@ class Pipeline:
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
                 skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.spectra_samples)
-                send.skipped_heaps_counter.inc(skipped_frames * len(self.substreams))
+                send.skipped_heaps_counter.labels(self.output.name).inc(skipped_frames * len(self.substreams))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:
@@ -1405,20 +1405,37 @@ class Engine(aiokatcp.DeviceServer):
         for pipeline in self._pipelines:
             pipeline.shutdown()
 
-    async def request_gain(self, ctx, input: int, *values: str) -> tuple[str, ...]:
+    def _request_pipeline(self, stream_name: str) -> Pipeline:
+        """Find the pipeline related to a katcp request.
+
+        Raises
+        ------
+        FailReply
+            If the `stream_name` is not a known output.
+        """
+        # Note: this takes O(n) time, but as there are expected to be less than 10
+        # pipelines it is probably not worth keeping a dictionary.
+        for pipeline in self._pipelines:
+            if pipeline.output.name == stream_name:
+                return pipeline
+        raise aiokatcp.FailReply(f"no output stream called {stream_name!r}")
+
+    async def request_gain(self, ctx, stream_name: str, input: int, *values: str) -> tuple[str, ...]:
         """Set or query the eq gains.
 
         If no values are provided, the gains are simply returned.
 
         Parameters
         ----------
+        stream_name
+            Output stream name
         input
             Input number (0 or 1)
         values
             Complex values. There must either be a single value (used for all
             channels), or a value per channel.
         """
-        pipeline = self._pipelines[0]  # TODO[nb]: need to add a request argument
+        pipeline = self._request_pipeline(stream_name)
         output = pipeline.output
         if not 0 <= input < N_POLS:
             raise aiokatcp.FailReply("input is out of range")
@@ -1436,17 +1453,19 @@ class Engine(aiokatcp.DeviceServer):
             gains = gains[:1]
         return tuple(format_complex(gain) for gain in gains)
 
-    async def request_gain_all(self, ctx, *values: str) -> None:
+    async def request_gain_all(self, ctx, stream_name: str, *values: str) -> None:
         """Set the eq gains for all inputs.
 
         Parameters
         ----------
+        stream_name
+            Output stream name
         values
             Complex values. There must either be a single value (used for all
             channels), or a value per channel, or ``"default"`` to reset gains
             to the default.
         """
-        pipeline = self._pipelines[0]  # TODO[nb]: need to add a request argument
+        pipeline = self._request_pipeline(stream_name)
         output = pipeline.output
         if len(values) not in {1, output.channels}:
             raise aiokatcp.FailReply(f"invalid number of values provided (must be 1 or {output.channels})")
@@ -1454,7 +1473,7 @@ class Engine(aiokatcp.DeviceServer):
         for i in range(N_POLS):
             pipeline.set_gains(i, gains)
 
-    async def request_delays(self, ctx, start_time: aiokatcp.Timestamp, *delays: str) -> None:
+    async def request_delays(self, ctx, stream_name: str, start_time: aiokatcp.Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model.
 
         .. todo::
@@ -1469,7 +1488,7 @@ class Engine(aiokatcp.DeviceServer):
             b = float(b_str)
             return a, b
 
-        pipeline = self._pipelines[0]  # TODO[nb]: need to add a request argument
+        pipeline = self._request_pipeline(stream_name)
         if len(delays) != len(pipeline.delay_models):
             raise aiokatcp.FailReply(f"wrong number of delay coefficient sets (expected {len(pipeline.delay_models)})")
 

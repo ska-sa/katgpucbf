@@ -71,7 +71,7 @@ class TestKatcpRequests:
     @pytest.mark.parametrize("pol", range(N_POLS))
     async def test_initial_gain(self, engine_client: aiokatcp.Client, pol: int) -> None:
         """Test that the command-line gain is set correctly."""
-        reply, _informs = await engine_client.request("gain", pol)
+        reply, _informs = await engine_client.request("gain", "wideband", pol)
         assert reply == [b"0.125+0.0j"]
         sensor_value = await get_sensor(engine_client, f"wideband.input{pol}.eq")
         assert sensor_value == "[0.125+0.0j]"
@@ -80,7 +80,7 @@ class TestKatcpRequests:
     async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine, pol: int) -> None:
         """Test that the eq gain is correctly set with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
-        reply, _informs = await engine_client.request("gain", pol, "0.2-3j")
+        reply, _informs = await engine_client.request("gain", "wideband", pol, "0.2-3j")
         assert len(reply) == 1
         value = aiokatcp.decode(str, reply[0])
         assert_valid_complex(value)
@@ -100,7 +100,7 @@ class TestKatcpRequests:
         # test.
         # TODO[nb]: need to update for multiple pipelines
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
-        reply, _informs = await engine_client.request("gain", 0, *(str(gain) for gain in gains))
+        reply, _informs = await engine_client.request("gain", "wideband", 0, *(str(gain) for gain in gains))
         np.testing.assert_equal(engine_server._pipelines[0].gains[:, 0], gains)
         assert len(reply) == CHANNELS
         for value in reply:
@@ -115,26 +115,31 @@ class TestKatcpRequests:
     async def test_gain_not_complex(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if a value passed to ``?gain`` is not a finite complex number."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain", 0, "i am not a complex number")
+            await engine_client.request("gain", "wideband", 0, "i am not a complex number")
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain", 0, "nan")
+            await engine_client.request("gain", "wideband", 0, "nan")
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain", 0, "inf+infj")
+            await engine_client.request("gain", "wideband", 0, "inf+infj")
 
     async def test_gain_bad_input(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if the input number passed to ``?gain`` is not a finite complex number."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain", 2)
+            await engine_client.request("gain", "wideband", 2)
+
+    async def test_gain_bad_output(self, engine_client: aiokatcp.Client) -> None:
+        """Test that an error is raised if ``?gain`` is used with a bad stream name."""
+        with pytest.raises(aiokatcp.FailReply, match="badstream"):
+            await engine_client.request("gain", "badstream", 0)
 
     async def test_gain_wrong_length(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if ``?gain`` is used with the wrong number of arguments."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain", 0, "1", "2")
+            await engine_client.request("gain", "wideband", 0, "1", "2")
 
     async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
         """Test that ``?gain-all`` works correctly with a vector of values."""
         # TODO[nb]: need to update for multiple pipelines
-        reply, _informs = await engine_client.request("gain-all", "0.2-3j")
+        reply, _informs = await engine_client.request("gain-all", "wideband", "0.2-3j")
         assert reply == []
         for pol in range(N_POLS):
             sensor_value = await get_sensor(engine_client, f"wideband.input{pol}.eq")
@@ -148,7 +153,7 @@ class TestKatcpRequests:
         """Test that ``?gain-all`` works correctly with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
-        reply, _informs = await engine_client.request("gain-all", *(str(gain) for gain in gains))
+        reply, _informs = await engine_client.request("gain-all", "wideband", *(str(gain) for gain in gains))
         assert reply == []
         for pol in range(N_POLS):
             np.testing.assert_equal(engine_server._pipelines[0].gains[:, pol], gains)
@@ -158,8 +163,8 @@ class TestKatcpRequests:
 
     async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
         """Test ``?gain-all default``."""
-        await engine_client.request("gain-all", "2+3j")
-        await engine_client.request("gain-all", "default")
+        await engine_client.request("gain-all", "wideband", "2+3j")
+        await engine_client.request("gain-all", "wideband", "default")
         for pol in range(N_POLS):
             sensor_value = await get_sensor(engine_client, f"wideband.input{pol}.eq")
             assert sensor_value == "[0.125+0.0j]"
@@ -167,7 +172,12 @@ class TestKatcpRequests:
     async def test_gain_all_empty(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if ``?gain-all`` is used with no values."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("gain-all")
+            await engine_client.request("gain-all", "wideband")
+
+    async def test_gain_all_bad_output(self, engine_client: aiokatcp.Client) -> None:
+        """Test that an error is raised if ``?gain-all`` is used with an unknown output."""
+        with pytest.raises(aiokatcp.FailReply, match="badstream"):
+            await engine_client.request("gain-all", "badstream", "1")
 
     @pytest.mark.parametrize("correct_delay_strings", [("3.76e-9,0.12e-9:7.322,1.91", "2.67e-9,0.02e-9:5.678,1.81")])
     async def test_delay_model_update_correct(
@@ -185,7 +195,9 @@ class TestKatcpRequests:
             return delay, delay_rate, wrap_angle(phase), phase_rate
 
         start_time = SYNC_EPOCH
-        await engine_client.request("delays", start_time, correct_delay_strings[0], correct_delay_strings[1])
+        await engine_client.request(
+            "delays", "wideband", start_time, correct_delay_strings[0], correct_delay_strings[1]
+        )
         # The delay model won't become current until some data is received, but
         # we're not simulating any. Poke the delay model manually to make it
         # update the sensor.
@@ -220,24 +232,26 @@ class TestKatcpRequests:
         """
         start_time = SYNC_EPOCH + 10
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("delays", start_time, malformed_delay_string, malformed_delay_string)
+            await engine_client.request(
+                "delays", "wideband", start_time, malformed_delay_string, malformed_delay_string
+            )
 
     async def test_delay_model_update_missing_argument(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay request with a missing argument is rejected."""
         with pytest.raises(aiokatcp.FailReply):
             # Missing start time argument
-            await engine_client.request("delays", "3.76,0.12:7.322,1.91")
+            await engine_client.request("delays", "wideband", "3.76,0.12:7.322,1.91")
         with pytest.raises(aiokatcp.FailReply):
             # Only one of the two models
-            await engine_client.request("delays", SYNC_EPOCH, "3.76,0.12:7.322,1.91")
+            await engine_client.request("delays", "wideband", SYNC_EPOCH, "3.76,0.12:7.322,1.91")
 
     async def test_delay_model_update_too_many_arguments(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay request with too many arguments is rejected."""
         coeffs = "3.76,0.12:7.322,1.91"
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("delays", SYNC_EPOCH, coeffs, coeffs, coeffs)
+            await engine_client.request("delays", "wideband", SYNC_EPOCH, coeffs, coeffs, coeffs)
 
     async def test_delay_model_update_before_sync_epoch(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay model loaded prior to the sync epoch is rejected."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("delays", SYNC_EPOCH - 1.0, "0,0:0,0", "0,0:0,0")
+            await engine_client.request("delays", "wideband", SYNC_EPOCH - 1.0, "0,0:0,0", "0,0:0,0")
