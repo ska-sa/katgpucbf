@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -119,11 +119,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(self._steady_state_sensor)
         self.sensors.add(
             aiokatcp.Sensor(
-                int,
+                str,
                 "dither-seed",
                 "Random seed used in dithering for quantisation",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                default=dither_seed,
+                default=str(dither_seed),
             )
         )
         self.sensors.add(
