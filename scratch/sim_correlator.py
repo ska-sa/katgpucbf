@@ -135,7 +135,7 @@ def generate_config(args: argparse.Namespace) -> dict:
 
     config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
-        "src-streams": ["antenna-channelised-voltage"],
+        "src_streams": ["antenna-channelised-voltage"],
         "int_time": args.int_time,
     }
     if args.last_stage == "x":
