@@ -143,7 +143,7 @@ def generate_config(args: argparse.Namespace) -> dict:
 
     config["outputs"]["sdp_l0"] = {
         "type": "sdp.vis",
-        "src-streams": ["baseline-correlation-products"],
+        "src_streams": ["baseline-correlation-products"],
         "output_int_time": args.int_time,
         "excise": False,
         "archive": False,
