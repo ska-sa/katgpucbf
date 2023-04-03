@@ -41,7 +41,7 @@ from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
-DEFAULT_ANTENNAS = 8  #: Number of antennas for antenna_channelised_voltage tests
+DEFAULT_ANTENNAS = 8  #: Number of antennas for antenna-channelised-voltage tests
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 
 
@@ -122,7 +122,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "n_antennas" in metafunc.fixturenames:
         rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
         max_antennas = int(metafunc.config.getini("max_antennas"))
-        if rel_path.parts[0] == "baseline_correlation_products":
+        if rel_path.parts[0] == "baseline-correlation-products":
             values = FULL_ANTENNAS
         else:
             values = [min(max_antennas, DEFAULT_ANTENNAS)]
@@ -243,7 +243,7 @@ async def _correlator_config_and_description(
 ) -> tuple[dict, dict]:
 
     config: dict = {
-        "version": "3.1",
+        "version": "3.4",
         "config": {},
         "inputs": {},
         "outputs": {},
@@ -272,16 +272,16 @@ async def _correlator_config_and_description(
                 "centre_frequency": centre_frequency,
                 "antenna": f"{dsim_name}, 0:0:0, 0:0:0, 0, 0",
             }
-    config["outputs"]["antenna_channelised_voltage"] = {
+    config["outputs"]["antenna-channelised-voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * n_antennas)],
         # m8xx is used to avoid possible confusion with real antennas
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
     }
-    config["outputs"]["baseline_correlation_products"] = {
+    config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
-        "src_streams": ["antenna_channelised_voltage"],
+        "src_streams": ["antenna-channelised-voltage"],
         "int_time": int_time,
     }
 
@@ -498,7 +498,7 @@ async def receive_baseline_correlation_products(
 
     receiver = BaselineCorrelationProductsReceiver(
         correlator=correlator,
-        stream_name="baseline_correlation_products",
+        stream_name="baseline-correlation-products",
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
