@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -27,8 +27,11 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Callable, Sequence
+from typing import Generic, TypeVar
 
 import numpy as np
+
+_DM = TypeVar("_DM", bound="AbstractDelayModel")
 
 
 def wrap_angle(angle):
@@ -271,3 +274,42 @@ class MultiDelayModel(AbstractDelayModel):
         self._models.append(model)
         if len(self._models) == 1 and self.callback_func is not None:
             self.callback_func(self._models)
+
+
+class AlignedDelayModel(AbstractDelayModel, Generic[_DM]):
+    """Wrap another delay model and enforce an alignment on original timestamp.
+
+    Note that this can cause residual delays to be larger than 1.
+    """
+
+    def __init__(self, base: _DM, align: int) -> None:
+        self.base = base
+        self.align = align
+
+    def range(self, start: int, stop: int, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:  # noqa: D102
+        orig, residual, phase = self.base.range(start, stop, step)
+        if self.align == 1:
+            # Fast path to make the no-op case cheap
+            return orig, residual, phase
+        if self.align % 2 == 0:
+            # Use the sign of the residual to break ties in the direction that
+            # minimises the updated residual.
+            sign = np.empty_like(residual, dtype=np.int64)
+            np.sign(residual, out=sign, casting="unsafe")
+            aligned = (2 * orig + self.align - sign) // (2 * self.align) * self.align
+        else:
+            # With odd `align`, there are no ties to break
+            aligned = (orig + self.align // 2) // self.align * self.align
+        residual += aligned - orig
+        return aligned, residual, phase
+
+    def skip(self, target: int, start: int, step: int) -> int:  # noqa: D102
+        target = _round_up(target, self.align)
+        # If base has an orig_time of target - align/2, it could round either
+        # way (depending on the residual), so it might be the timestamp we
+        # need.
+        t = self.base.skip(target - self.align // 2, start, step)
+        if self(t)[0] >= target:
+            return t
+        # If not, this will definitely round to at least the target
+        return self.base.skip(target - self.align // 2 + 1, start, step)
