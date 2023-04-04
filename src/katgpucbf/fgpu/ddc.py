@@ -71,6 +71,7 @@ class DDCTemplate:
         self._segment_samples = tuning["segment_samples"]
         self.taps = taps
         self.subsampling = subsampling
+        self.input_sample_bits = DIG_SAMPLE_BITS
 
         self._group_out_size = self.wgs // self._sg_size * self._coarsen
         self._group_in_size = self._group_out_size * subsampling

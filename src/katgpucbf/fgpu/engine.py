@@ -406,7 +406,9 @@ class Pipeline:
         # Initialise self._compute
         compute_queue = context.create_command_queue()
         self._download_queue = context.create_command_queue()
-        template = ComputeTemplate(context, output.taps, output.channels, engine.src_layout.sample_bits)
+        template = ComputeTemplate(
+            context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=None
+        )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_weights.set(compute_queue, generate_weights(output.channels, output.taps, output.w_cutoff))
@@ -728,7 +730,7 @@ class Pipeline:
                     for pol_data in in_item.pol_data:
                         assert pol_data.samples is not None
                         samples.append(pol_data.samples)
-                    self._compute.run_frontend(
+                    self._compute.run_wideband_frontend(
                         samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
                     )
                     in_item.add_marker(self._compute.command_queue)
