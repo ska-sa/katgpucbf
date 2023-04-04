@@ -52,7 +52,7 @@ async def test_baseline_correlation_products(
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
-        await pc_client.request("gain-all", "antenna_channelised_voltage", "0")
+        await pc_client.request("gain-all", "antenna-channelised-voltage", "0")
         pdf_report.detail("Compute gains to enable one baseline per channel.")
         gains = {}
         for i in range(start_idx, end_idx):
@@ -63,7 +63,7 @@ async def test_baseline_correlation_products(
                 gains[inp][channel] = 1.0
         pdf_report.detail("Set gains.")
         for inp, g in gains.items():
-            await pc_client.request("gain", "antenna_channelised_voltage", inp, *g)
+            await pc_client.request("gain", "antenna-channelised-voltage", inp, *g)
 
         _, data = await receiver.next_complete_chunk()
         everything_is_awesome = True

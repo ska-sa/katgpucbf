@@ -642,8 +642,8 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
     patterns = [
         ("Product controller", re.compile("product_controller")),
         ("DSim {i}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
-        ("F-engine {i}", re.compile(r"f\.antenna_channelised_voltage\.(\d+)")),
-        ("XB-engine {i}", re.compile(r"xb\.baseline_correlation_products\.(\d+)")),
+        ("F-engine {i}", re.compile(r"f\.antenna-channelised-voltage\.(\d+)")),
+        ("XB-engine {i}", re.compile(r"xb\.baseline-correlation-products\.(\d+)")),
     ]
     for i, correlator in enumerate(correlators, start=1):
         with section.create(

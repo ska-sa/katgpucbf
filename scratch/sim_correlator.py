@@ -133,7 +133,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     if args.last_stage == "d":
         return config
 
-    config["outputs"]["antenna_channelised_voltage"] = {
+    config["outputs"]["antenna-channelised-voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
         # Cycle through digitisers as necessary
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * args.antennas)],
@@ -143,9 +143,9 @@ def generate_config(args: argparse.Namespace) -> dict:
     if args.last_stage == "f":
         return config
 
-    config["outputs"]["baseline_correlation_products"] = {
+    config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
-        "src_streams": ["antenna_channelised_voltage"],
+        "src_streams": ["antenna-channelised-voltage"],
         "int_time": args.int_time,
     }
     if args.last_stage == "x":
@@ -153,7 +153,7 @@ def generate_config(args: argparse.Namespace) -> dict:
 
     config["outputs"]["sdp_l0"] = {
         "type": "sdp.vis",
-        "src_streams": ["baseline_correlation_products"],
+        "src_streams": ["baseline-correlation-products"],
         "output_int_time": args.int_time,
         "excise": False,
         "archive": False,
@@ -181,7 +181,7 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
 
         print("Enabling baseline correlation products transmission...")
         product_client = await aiokatcp.Client.connect(product_host, product_port)
-        await product_client.request("capture-start", "baseline_correlation_products")
+        await product_client.request("capture-start", "baseline-correlation-products")
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

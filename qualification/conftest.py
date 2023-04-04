@@ -243,7 +243,7 @@ async def _correlator_config_and_description(
 ) -> tuple[dict, dict]:
 
     config: dict = {
-        "version": "3.1",
+        "version": "3.4",
         "config": {},
         "inputs": {},
         "outputs": {},
@@ -272,16 +272,16 @@ async def _correlator_config_and_description(
                 "centre_frequency": centre_frequency,
                 "antenna": f"{dsim_name}, 0:0:0, 0:0:0, 0, 0",
             }
-    config["outputs"]["antenna_channelised_voltage"] = {
+    config["outputs"]["antenna-channelised-voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * n_antennas)],
         # m8xx is used to avoid possible confusion with real antennas
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
     }
-    config["outputs"]["baseline_correlation_products"] = {
+    config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
-        "src_streams": ["antenna_channelised_voltage"],
+        "src_streams": ["antenna-channelised-voltage"],
         "int_time": int_time,
     }
 
@@ -498,7 +498,7 @@ async def receive_baseline_correlation_products(
 
     receiver = BaselineCorrelationProductsReceiver(
         correlator=correlator,
-        stream_name="baseline_correlation_products",
+        stream_name="baseline-correlation-products",
         interface_address=interface_address,
         use_ibv=use_ibv,
     )

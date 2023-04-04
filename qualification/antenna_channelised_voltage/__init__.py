@@ -78,7 +78,7 @@ async def sample_tone_response_hdr(
     # whose power is low enough not to saturate.
     for i in range(iterations):
         pdf_report.detail(f"Set gain to {gain}.")
-        await correlator.product_controller_client.request("gain-all", "antenna_channelised_voltage", gain)
+        await correlator.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
         data = await sample_tone_response(rel_freqs, amplitude, receiver)
         data = data.astype(np.float64)

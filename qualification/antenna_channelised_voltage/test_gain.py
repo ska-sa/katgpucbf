@@ -76,7 +76,7 @@ async def test_gains(
     for input_gain, input_label in zip(gains_text, receiver.input_labels):
         await correlator.product_controller_client.request(
             "gain",
-            "antenna_channelised_voltage",
+            "antenna-channelised-voltage",
             input_label,
             *input_gain,
         )
