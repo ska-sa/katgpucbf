@@ -15,18 +15,26 @@
  ******************************************************************************/
 
 <%include file="/port.mako"/>
-<%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 
 #define WGS ${wgs}
 #define TAPS ${taps}
 #define CHANNELS ${channels}
 #define UNZIP_FACTOR ${unzip_factor}
-#define DIG_SAMPLE_BITS ${dig_sample_bits}
+#define INPUT_SAMPLE_BITS ${input_sample_bits}
+#define WEIGHT_INDEX_SHIFT ${1 if complex_input else 0}
+
+% if complex_input:
+
+<%include file="unpack_float.mako"/>
+
+% else:
 
 <%include file="unpack.mako"/>
-
+<%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 ${wg_reduce.define_scratch('unsigned long long', wgs, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('unsigned long long', wgs, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
+
+% endif
 
 /* Apply unzipping to an output index.
  */
@@ -49,11 +57,19 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
  * rectangle of data into local memory, transpose, and work from there. While
  * local memory is smaller than the register file, multiple threads will read
  * the same value.
+ *
+ * When the input is complex, all the parameters and internal indexing treat
+ * it as if it were real, just with each pair of adjacent reals using the same
+ * weight.
  */
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     GLOBAL float * RESTRICT out,          // Output memory
+% if complex_input:
+    const GLOBAL float * RESTRICT in,     // Input data (down-converted samples)
+% else:
     GLOBAL unsigned long long * RESTRICT out_total_power,  // Sum of squares of samples (incremented)
     const GLOBAL unsigned char * RESTRICT in,     // Input data (digitiser samples)
+% endif
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
     int n,                                // Size of the `out` array, to avoid going out-of-bounds.
     int stepy,                            // Size of data that will be worked on by a single thread-block.
@@ -103,22 +119,26 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     }
 
     // Load the relevant weights for this branch of the PFB-FIR.
+    // With complex_input, we shift the index to allow a single weight
+    // to apply to both the real and imaginary components.
     float rweights[TAPS];
 #pragma unroll
     for (int i = 0; i < TAPS; i++)
-        rweights[i] = weights[i * step + pos];
+        rweights[i] = weights[(i * step + pos) >> WEIGHT_INDEX_SHIFT];
 
     // This thread will process the same equivalent sample in `rows` successive
     // output "spectra" worth of data.
     int rows = min(n, stepy) / step;
 
+% if not complex_input:
     unsigned long long total_power = 0;
+% endif
     // We'll be at our most memory-bandwidth-efficient if rows >> TAPS.
     // Launching ~256K threads should ensure this.
     for (int i = 0; i < rows; i++)
     {
         // Load the raw data for the sample
-        int sample = unpack_read(&unpack);
+        sample_t sample = unpack_read(&unpack);
         unpack_advance(&unpack, step);
 
         // Shuffle down the samples to make room for the new one
@@ -129,7 +149,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
          * ones. Read the new one into the array, and also use it to compute
          * total power.
          */
+% if not complex_input:
         total_power += sample * sample;
+% endif
         samples[TAPS - 1] = (float) sample;
 
         // Implement the actual FIR filter by multiplying samples by weights and summing.
@@ -140,9 +162,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         out[i * step] = sum;
     }
 
+% if not complex_input:
     // Reduce total_power across work items, to reduce the number of atomics needed.
     LOCAL_DECL scratch_t scratch;
     total_power = reduce(total_power, lid, &scratch);
     if (lid == 0)
         atomicAdd(out_total_power, total_power);
+% endif
 }

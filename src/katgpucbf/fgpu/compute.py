@@ -116,7 +116,7 @@ class Compute(accel.OperationSequence):
         spectra: int,
         spectra_per_heap: int,
     ) -> None:
-        self.dig_sample_bits = template.pfb_fir.dig_sample_bits
+        self.dig_sample_bits = template.pfb_fir.input_sample_bits
         self.template = template
         self.samples = samples
         self.spectra = spectra

@@ -27,6 +27,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS
+from . import DIG_SAMPLE_BITS_VALID
 
 
 class PFBFIRTemplate:
@@ -40,25 +41,41 @@ class PFBFIRTemplate:
         The number of taps that you want the resulting PFB-FIRs to have.
     channels
         Number of channels into which the input data will be decomposed.
-    dig_sample_bits
-        Bits per digitiser sample.
+    input_sample_bits
+        Bits per input sample. If `complex_input` is true, the input values
+        are floating-point complex numbers and this is the number of bits in
+        the complex value (and must equal 64). Otherwise, the inputs are
+        packed integers, and the value must be in
+        :data:`DIG_SAMPLE_BITS_VALID`.
     unzip_factor
         The output is reordered so that every unzip_factor'ith pair of
         outputs is placed contiguously.
     """
 
     def __init__(
-        self, context: AbstractContext, taps: int, channels: int, dig_sample_bits: int, unzip_factor: int = 1
+        self,
+        context: AbstractContext,
+        taps: int,
+        channels: int,
+        input_sample_bits: int,
+        unzip_factor: int = 1,
+        *,
+        complex_input: bool = False,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
         self.wgs = 128
         self.taps = taps
         self.channels = channels
-        self.dig_sample_bits = dig_sample_bits
+        self.input_sample_bits = input_sample_bits
         self.unzip_factor = unzip_factor
-        if dig_sample_bits < 2 or (dig_sample_bits > 10 and dig_sample_bits not in {12, 16}):
-            raise ValueError("dig_sample_bits must be 2-10, 12 or 16")
+        self.complex_input = complex_input
+        if complex_input:
+            if input_sample_bits != 64:
+                raise ValueError("input_sample_bits must be 64 when complex_input is true")
+        else:
+            if input_sample_bits not in DIG_SAMPLE_BITS_VALID:
+                raise ValueError("input_sample_bits must be 2-10, 12 or 16 when complex_input is false")
         if (2 * channels) % self.wgs != 0:
             raise ValueError(f"2*channels must be a multiple of {self.wgs}")
         if channels <= 1 or channels & (channels - 1):
@@ -73,8 +90,9 @@ class PFBFIRTemplate:
                     "wgs": self.wgs,
                     "taps": self.taps,
                     "channels": channels,
-                    "dig_sample_bits": dig_sample_bits,
+                    "input_sample_bits": input_sample_bits,
                     "unzip_factor": unzip_factor,
+                    "complex_input": complex_input,
                 },
                 extra_dirs=[str(resource_dir)],
             )
@@ -107,8 +125,10 @@ class PFBFIR(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : samples * dig_sample_bits // BYTE_BITS, uint8
-        Input digitiser samples in a big chunk.
+    The slots depend on ``template.complex_input``. If it is false, then they are
+
+    **in** : samples * input_sample_bits // BYTE_BITS, uint8
+        Input samples in a big chunk.
     **out** : spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
     **weights** : 2*channels*taps, float32
@@ -122,11 +142,24 @@ class PFBFIR(accel.Operation):
         responsibility to zero it when desired, or alternatively to track
         values before and after to measure the change.
 
+    Otherwise, they are
+
+    **in** : samples, complex64
+        Input samples
+    **out** : spectra × channels, complex64
+        See above
+    **weights** : channels*taps, float32
+        See above
+
     Raises
     ------
     ValueError
-        If ``samples`` is not a multiple of 8, or if ``2*channels`` is not a
-        multiple of the workgroup size (currently 128).
+        If ``samples`` is not a multiple of 8 and ``complex_input`` is false
+    ValueError
+        If ``2*channels`` is not a multiple of the workgroup size (currently
+        128).
+    ValueError
+        If ``samples`` is too large (more than 2**29)
 
     Parameters
     ----------
@@ -137,7 +170,7 @@ class PFBFIR(accel.Operation):
         :class:`katsdpsigproc.cuda.CommandQueue` which wraps a CUDA Stream) on
         which actual processing operations are to be scheduled.
     samples
-        Number of samples that will be processed each time the operation is run.
+        Number of input samples that will be processed each time the operation is run.
     spectra
         Number of spectra that we will get from each chunk of samples.
     """
@@ -150,34 +183,44 @@ class PFBFIR(accel.Operation):
         spectra: int,
     ) -> None:
         super().__init__(command_queue)
-        if samples % BYTE_BITS != 0:
+        if not template.complex_input and samples % BYTE_BITS != 0:
             raise ValueError(f"samples must be a multiple of {BYTE_BITS}")
         if samples > 2**29:
             # This ensures no overflow in samples_to_bytes in the kernel
             raise ValueError("at most 2**29 samples are supported")
         self.template = template
         self.samples = samples
-        step = 2 * template.channels
         self.spectra = spectra  # Can be changed (TODO: documentation)
-        # Some load operations can run past the end. Not all dig_sample_bits
-        # need padding, but it's simplest just to provide it unconditionally.
-        in_padding = 1
-        in_bytes = samples * template.dig_sample_bits // BYTE_BITS
-        self.slots["in"] = accel.IOSlot((accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),), np.uint8)
-        self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
-        self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
-        self.slots["total_power"] = accel.IOSlot((), np.uint64)
+        if template.complex_input:
+            self.slots["in"] = accel.IOSlot((samples,), np.complex64)
+            self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(template.channels, exact=True)), np.complex64)
+            self.slots["weights"] = accel.IOSlot((template.channels * template.taps,), np.float32)
+        else:
+            step = 2 * template.channels
+            # Some load operations can run past the end. Not all input_sample_bits
+            # need padding, but it's simplest just to provide it unconditionally.
+            in_padding = 1
+            in_bytes = samples * template.input_sample_bits // BYTE_BITS
+            self.slots["in"] = accel.IOSlot(
+                (accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),), np.uint8
+            )
+            self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
+            self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
+            self.slots["total_power"] = accel.IOSlot((), np.uint64)
         self.in_offset = 0  # Number of samples to skip from the start of *in
         self.out_offset = 0  # Number of "spectra" to skip from the start of *out.
 
     def _run(self) -> None:
         if self.spectra == 0:
             return
-        step = 2 * self.template.channels
+        rps = 2 if self.template.complex_input else 1  # real values per sample
+        real_step = 2 * self.template.channels  # step size in real values
+        sample_step = real_step // rps  # step size in samples
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
-        in_buffer_samples = in_buffer.shape[0] * BYTE_BITS / self.template.dig_sample_bits
-        if self.in_offset + step * (self.spectra + self.template.taps - 1) > in_buffer_samples:
+        in_buffer_bytes = in_buffer.shape[0] * in_buffer.dtype.itemsize
+        in_buffer_samples = in_buffer_bytes * BYTE_BITS // self.template.input_sample_bits
+        if self.in_offset + sample_step * (self.spectra + self.template.taps - 1) > in_buffer_samples:
             raise IndexError("Input buffer does not contain sufficient samples")
         if self.out_offset + self.spectra > out_buffer.shape[0]:
             raise IndexError("Output buffer does not contain sufficient spectra")
@@ -189,25 +232,28 @@ class PFBFIR(accel.Operation):
         # Number of workgroups along the time axis to match this
         groupsy = accel.divup(self.spectra, work_spectra)
         # Keep a minimum of 128K workitems, to avoid starving the GPU for work.
-        groupsy = max(groupsy, accel.divup(128 * 1024, step))
+        groupsy = max(groupsy, accel.divup(128 * 1024, real_step))
         # Re-compute work_spectra to balance the load
         work_spectra = accel.divup(self.spectra, groupsy)
-        stepy = work_spectra * step
+        stepy = work_spectra * real_step
         # Rounding up may have left some workgroups with nothing to do, so recalculate
         # groupsy again.
         groupsy = accel.divup(self.spectra, work_spectra)
+        args = [
+            self.buffer("out").buffer,
+            self.buffer("in").buffer,
+            self.buffer("weights").buffer,
+            np.int32(real_step * self.spectra),
+            np.int32(stepy),
+            np.int32(self.in_offset * rps),
+            np.int32(self.out_offset * real_step),  # Must be a multiple of real_step to make sense.
+        ]
+        if not self.template.complex_input:
+            args.insert(1, self.buffer("total_power").buffer)
+
         self.command_queue.enqueue_kernel(
             self.template.kernel,
-            [
-                self.buffer("out").buffer,
-                self.buffer("total_power").buffer,
-                self.buffer("in").buffer,
-                self.buffer("weights").buffer,
-                np.int32(step * self.spectra),
-                np.int32(stepy),
-                np.int32(self.in_offset),
-                np.int32(self.out_offset * step),  # Must be a multiple of step to make sense.
-            ],
-            global_size=(step, groupsy),
+            args,
+            global_size=(real_step, groupsy),
             local_size=(self.template.wgs, 1),
         )

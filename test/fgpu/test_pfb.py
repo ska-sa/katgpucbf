@@ -28,12 +28,12 @@ from .. import unpackbits
 pytestmark = [pytest.mark.cuda_only]
 
 
-def pfb_fir_host(data, channels, dig_sample_bits, unzip_factor, weights):
-    """Apply a PFB-FIR filter to a set of data on the host."""
+def pfb_fir_host_real(data, channels, input_sample_bits, unzip_factor, weights):
+    """Apply a PFB-FIR filter to a set of packed real data on the host."""
     step = 2 * channels
     assert len(weights) % step == 0
     taps = len(weights) // step
-    decoded = unpackbits(data, dig_sample_bits)
+    decoded = unpackbits(data, input_sample_bits)
     window_size = 2 * channels * taps
     out = np.empty((len(decoded) // step - taps + 1, step), np.float32)
     for i in range(0, len(out)):
@@ -47,25 +47,42 @@ def pfb_fir_host(data, channels, dig_sample_bits, unzip_factor, weights):
     return out, total_power
 
 
+def pfb_fir_host_complex(data, channels, unzip_factor, weights):
+    """Apply a PFB-FIR filter to a set of complex data on the host."""
+    assert len(weights) % channels == 0
+    assert len(data) % channels == 0
+    taps = len(weights) // channels
+    window_size = channels * taps
+    out = np.empty((len(data) // channels - taps + 1, channels), np.complex64)
+    for i in range(0, len(out)):
+        windowed = data[i * channels : i * channels + window_size] * weights
+        out[i] = np.sum(windowed.reshape(-1, channels), axis=0)
+    # Unzip
+    out = out.reshape(-1, channels // unzip_factor, unzip_factor)
+    out = out.swapaxes(1, 2)
+    out = out.reshape(-1, channels)
+    return out
+
+
 @pytest.mark.combinations(
-    "dig_sample_bits,unzip_factor",
+    "input_sample_bits,unzip_factor",
     DIG_SAMPLE_BITS_VALID,
     [1, 2, 4],
 )
-def test_pfb_fir(
-    context: AbstractContext, command_queue: AbstractCommandQueue, dig_sample_bits: int, unzip_factor: int
+def test_pfb_fir_real(
+    context: AbstractContext, command_queue: AbstractCommandQueue, input_sample_bits: int, unzip_factor: int
 ) -> None:
-    """Test the GPU PFB-FIR for numerical correctness."""
+    """Test the real GPU PFB-FIR for numerical correctness."""
     taps = 16
     spectra = 3123
     channels = 4096
     samples = 2 * channels * (spectra + taps - 1)
     rng = np.random.default_rng(seed=1)
-    h_in = rng.integers(0, 256, samples * dig_sample_bits // BYTE_BITS, np.uint8)
+    h_in = rng.integers(0, 256, samples * input_sample_bits // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
-    expected_out, expected_total_power = pfb_fir_host(h_in, channels, dig_sample_bits, unzip_factor, weights)
+    expected_out, expected_total_power = pfb_fir_host_real(h_in, channels, input_sample_bits, unzip_factor, weights)
 
-    template = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, unzip_factor)
+    template = pfb.PFBFIRTemplate(context, taps, channels, input_sample_bits, unzip_factor)
     fn = template.instantiate(command_queue, samples, spectra)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
@@ -82,5 +99,35 @@ def test_pfb_fir(
     fn()
     h_out = fn.buffer("out").get(command_queue)
     h_total_power = fn.buffer("total_power").get(command_queue)[()]
-    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-6 * 2**dig_sample_bits)
+    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-6 * 2**input_sample_bits)
     assert h_total_power == expected_total_power
+
+
+@pytest.mark.parametrize("unzip_factor", [1, 2, 4])
+def test_pfb_fir_complex(context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int) -> None:
+    taps = 16
+    spectra = 3123
+    channels = 4096
+    samples = channels * (spectra + taps - 1)
+    rng = np.random.default_rng(seed=1)
+    h_in = rng.normal(0.0, 128.0, size=samples) + 1j * rng.normal(0.0, 128.0, size=samples)
+    h_in = h_in.astype(np.complex64)
+    weights = rng.uniform(-1.0, 1.0, (channels * taps,)).astype(np.float32)
+    expected_out = pfb_fir_host_complex(h_in, channels, unzip_factor, weights)
+
+    template = pfb.PFBFIRTemplate(context, taps, channels, 64, unzip_factor, complex_input=True)
+    fn = template.instantiate(command_queue, samples, spectra)
+    fn.ensure_all_bound()
+    fn.buffer("in").set(command_queue, h_in)
+    fn.buffer("weights").set(command_queue, weights)
+    # Split into two parts to test the offsetting
+    fn.in_offset = 0
+    fn.out_offset = 0
+    fn.spectra = 1003
+    fn()
+    fn.in_offset = fn.spectra * channels
+    fn.out_offset = fn.spectra
+    fn.spectra = spectra - fn.spectra
+    fn()
+    h_out = fn.buffer("out").get(command_queue)
+    np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-3)
