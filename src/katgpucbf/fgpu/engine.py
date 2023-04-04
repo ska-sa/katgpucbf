@@ -51,10 +51,10 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, recv, send
-from .compute import Compute, ComputeTemplate
-from .delay import AbstractDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
-from .output import Output, WidebandOutput
+from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
+from .compute import Compute, ComputeTemplate, NarrowbandConfig
+from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
+from .output import NarrowbandOutput, Output
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def _sample_models(
     return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
 
 
-def generate_weights(channels: int, taps: int, w_cutoff: float) -> np.ndarray:
+def generate_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
     The resulting weights are normalised such that the sum of
@@ -77,8 +77,8 @@ def generate_weights(channels: int, taps: int, w_cutoff: float) -> np.ndarray:
 
     Parameters
     ----------
-    channels
-        Number of channels in the PFB.
+    step
+        Number of samples per spectrum.
     taps
         Number of taps in the PFB-FIR.
     w_cutoff
@@ -90,7 +90,6 @@ def generate_weights(channels: int, taps: int, w_cutoff: float) -> np.ndarray:
         Array containing the weights for the PFB-FIR filters, as
         single-precision floats.
     """
-    step = 2 * channels
     window_size = step * taps
     idx = np.arange(window_size)
     hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
@@ -180,8 +179,9 @@ class InItem(QueueItem):
                 # initialising the item from the chunks.
                 sample_data = None
             else:
-                # Compute requires 1 byte of padding
-                sample_data = accel.DeviceArray(context, (data_size,), np.uint8, padded_shape=(data_size + 1,))
+                sample_data = accel.DeviceArray(
+                    context, (data_size,), np.uint8, padded_shape=(data_size + INPUT_CHUNK_PADDING,)
+                )
             self.pol_data.append(
                 PolInItem(
                     samples=sample_data,
@@ -246,6 +246,8 @@ class OutItem(QueueItem):
     compute
         F-engine Operation Sequence detailing the DSP happening on the data,
         including details for buffers, context, shapes, slots, etc.
+    spectra_samples
+        Number of ADC samples between spectra.
     timestamp
         Timestamp of the first spectrum in the `OutItem`.
     """
@@ -269,10 +271,12 @@ class OutItem(QueueItem):
     present: np.ndarray
     #: Number of spectra contained in :attr:`spectra`.
     n_spectra: int
+    #: Number of ADC samples between spectra
+    spectra_samples: int
     #: Corresponding chunk for transmission (only used in PeerDirect mode).
     chunk: send.Chunk | None = None
 
-    def __init__(self, compute: Compute, timestamp: int = 0) -> None:
+    def __init__(self, compute: Compute, spectra_samples: int, timestamp: int = 0) -> None:
         allocator = accel.DeviceAllocator(compute.template.context)
         self.spectra = compute.slots["out"].allocate(allocator, bind=False)
         self.saturated = compute.slots["saturated"].allocate(allocator, bind=False)
@@ -283,6 +287,7 @@ class OutItem(QueueItem):
         self.phase = compute.slots["phase"].allocate_host(compute.template.context)
         self.gains = compute.slots["gains"].allocate_host(compute.template.context)
         self.present = np.zeros(self.fine_delay.shape[0], dtype=bool)
+        self.spectra_samples = spectra_samples
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -315,7 +320,7 @@ class OutItem(QueueItem):
 
         Following Python's normal exclusive-end convention.
         """
-        return self.timestamp + self.n_spectra * 2 * self.channels
+        return self.timestamp + self.n_spectra * self.spectra_samples
 
     @property
     def channels(self) -> int:  # noqa: D401
@@ -406,12 +411,22 @@ class Pipeline:
         # Initialise self._compute
         compute_queue = context.create_command_queue()
         self._download_queue = context.create_command_queue()
+        if isinstance(output, NarrowbandOutput):
+            narrowband_config = NarrowbandConfig(
+                decimation=output.decimation,
+                taps=256,  # TODO[nb]: make it configurable
+                mix_frequency=-output.centre_frequency / engine.adc_sample_rate,
+            )
+        else:
+            narrowband_config = None
         template = ComputeTemplate(
-            context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=None
+            context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=narrowband_config
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
         device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(compute_queue, generate_weights(output.channels, output.taps, output.w_cutoff))
+        device_weights.set(
+            compute_queue, generate_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff)
+        )
 
         # Initialize sending
         self.send_chunks = self._init_send(substreams, engine.use_peerdirect)
@@ -419,7 +434,7 @@ class Pipeline:
         self._out_item.reset_all(compute_queue)
 
         # Initialize delays and gains
-        self.delay_models: list[MultiDelayModel] = []
+        self.delay_models: list[AlignedDelayModel[MultiDelayModel]] = []
         self.gains = np.zeros((output.channels, self.pols), np.complex64)
         self._populate_sensors()
         self._init_delay_gain()
@@ -481,7 +496,7 @@ class Pipeline:
         for pol in range(N_POLS):
             delay_sensor = self.engine.sensors[f"{self.output.name}.input{pol}.delay"]
             callback_func = partial(self.update_delay_sensor, delay_sensor=delay_sensor)
-            delay_model = MultiDelayModel(callback_func)
+            delay_model = AlignedDelayModel(MultiDelayModel(callback_func), self.output.subsampling)
             self.delay_models.append(delay_model)
 
         for pol in range(N_POLS):
@@ -491,7 +506,7 @@ class Pipeline:
         """Initialise the send side of the pipeline."""
         send_chunks: list[send.Chunk] = []
         for _ in range(self._out_free_queue.maxsize):
-            item = OutItem(self._compute)
+            item = OutItem(self._compute, self.output.spectra_samples)
             if use_peerdirect:
                 dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
                 # buf is structurally a numpy array, but the pointer in it is a CUDA
@@ -583,6 +598,13 @@ class Pipeline:
                 self._in_queue.put_nowait(None)
             else:
                 self._in_item.enqueue_wait_for_events(self._compute.command_queue)
+                if isinstance(self.output, NarrowbandOutput):
+                    samples = []
+                    for pol_data in self._in_item.pol_data:
+                        assert pol_data.samples is not None
+                        samples.append(pol_data.samples)
+                    self._compute.run_ddc(samples, self._in_item.timestamp)
+                    self._in_item.add_marker(self._compute.command_queue)
         return self._in_item
 
     def _pop_in(self) -> None:
@@ -649,7 +671,17 @@ class Pipeline:
         Then a batch FFT operation is applied, and finally, fine-delay, phase
         correction, quantisation and corner-turn are performed.
         """
+        # Compute number of original samples that go into producing each spectrum
+        full_window = self.taps * self.spectra_samples
+        if self._compute.template.ddc is not None:
+            # It's narrowband
+            full_window += self._compute.template.ddc.taps - self._compute.template.ddc.subsampling
+        # This is guaranteed by the way subsampling is defined; this assertion
+        # is really as a reminder to the reader.
+        assert self.spectra_samples % self.output.subsampling == 0
         while (in_item := await self._fill_in()) is not None:
+            # TODO[nb]: add earlier checks to ensure this will be the case
+            assert in_item.timestamp % self.output.subsampling == 0
             # If the input starts too late for the next expected timestamp,
             # we need to skip ahead to the next heap after the start, and
             # flush what we already have.
@@ -666,7 +698,7 @@ class Pipeline:
                     )
                     orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
                 await self._flush_out(start_timestamp)
-            # When we add new spectra they must follow contiguously for any
+            # When we add new spectra they must follow contiguously from any
             # that we've already buffered.
             assert start_timestamp == self._out_item.end_timestamp
 
@@ -677,6 +709,8 @@ class Pipeline:
             # `orig_timestamp` within the InItem.
             start_coarse_delays = [start_timestamp - orig_timestamp for orig_timestamp in orig_start_timestamps]
             offsets = [orig_timestamp - in_item.timestamp for orig_timestamp in orig_start_timestamps]
+            # Convert from original samples to post-DDC samples
+            pfb_offsets = [offset // self.output.subsampling for offset in offsets]
 
             # Identify a block of frontend work. We can grow it until
             # - we run out of the current input array;
@@ -685,7 +719,7 @@ class Pipeline:
             # We speculatively calculate delays until one of the first two is
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
-            max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.taps * self.spectra_samples + 1
+            max_end_in = in_item.end_timestamp + min(start_coarse_delays) - full_window + 1
             max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
@@ -716,7 +750,7 @@ class Pipeline:
                 batch_spectra = orig_timestamps.shape[1]
 
                 # Here we run the "frontend" which handles:
-                # - 10-bit to float conversion
+                # - 10-bit to float conversion (wideband only)
                 # - Coarse delay
                 # - The PFB-FIR.
                 if batch_spectra > 0:
@@ -730,10 +764,19 @@ class Pipeline:
                     for pol_data in in_item.pol_data:
                         assert pol_data.samples is not None
                         samples.append(pol_data.samples)
-                    self._compute.run_wideband_frontend(
-                        samples, self._out_item.dig_total_power, offsets, self._out_item.n_spectra, batch_spectra
-                    )
-                    in_item.add_marker(self._compute.command_queue)
+                    if isinstance(self.output, NarrowbandOutput):
+                        self._compute.run_narrowband_frontend(pfb_offsets, self._out_item.n_spectra, batch_spectra)
+                    else:
+                        self._compute.run_wideband_frontend(
+                            samples,
+                            self._out_item.dig_total_power,
+                            pfb_offsets,
+                            self._out_item.n_spectra,
+                            batch_spectra,
+                        )
+                        # Only add the marker for wideband. In the narrowband case, only
+                        # the DDC kernel depends on the digitiser samples.
+                        in_item.add_marker(self._compute.command_queue)
                     self._out_item.n_spectra += batch_spectra
                     # Work out which output spectra contain missing data.
                     self._out_item.present[out_slice] = True
@@ -745,7 +788,7 @@ class Pipeline:
                             self.spectra_samples,
                         )
                         # Offset of the last sample (inclusive, rather than past-the-end)
-                        last_offset = first_offset + self.taps * self.spectra_samples - 1
+                        last_offset = first_offset + full_window - 1
                         first_packet = first_offset // self.engine.src_layout.heap_samples
                         # last_packet is exclusive
                         last_packet = last_offset // self.engine.src_layout.heap_samples + 1
@@ -1082,9 +1125,6 @@ class Engine(aiokatcp.DeviceServer):
             self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
 
-        # Narrowband is not supported yet
-        assert all(isinstance(x, WidebandOutput) for x in outputs)
-
         # Attributes copied or initialised from arguments
         self._srcs = list(srcs)
         self._src_comp_vector = list(src_comp_vector)
@@ -1174,7 +1214,7 @@ class Engine(aiokatcp.DeviceServer):
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
                     array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
-                    device_bytes = array_bytes + 1  # Compute requires 1 byte of padding
+                    device_bytes = array_bytes + INPUT_CHUNK_PADDING
                     with context:
                         mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
                     buf = np.array(mem, copy=False).view(np.uint8)
@@ -1531,7 +1571,7 @@ class Engine(aiokatcp.DeviceServer):
             )
 
         for delay_model, new_linear_model in zip(pipeline.delay_models, new_linear_models):
-            delay_model.add(new_linear_model)
+            delay_model.base.add(new_linear_model)
         self._update_steady_state_timestamp(pipeline.delay_update_timestamp())
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:

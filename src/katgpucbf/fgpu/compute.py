@@ -214,6 +214,7 @@ class Compute(accel.OperationSequence):
             else:
                 compounds[f"in{pol}"] = [f"ddc{pol}:in"]
                 compounds[f"subsampled{pol}"] = [f"ddc{pol}:out", f"pfb_fir{pol}:in"]
+                compounds[f"dig_total_power{pol}"] = [f"ddc{pol}:total_power"]
             # pfb_firN:out is an array of real values (in wideband) while
             # fftN:src reinterprets it as an array of complex values. We thus
             # have to make them aliases to view the memory as different

@@ -27,7 +27,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS
-from . import DIG_SAMPLE_BITS_VALID
+from . import DIG_SAMPLE_BITS_VALID, INPUT_CHUNK_PADDING
 
 
 class PFBFIRTemplate:
@@ -222,7 +222,10 @@ class PFBFIR(accel.Operation):
             step = 2 * template.channels
             # Some load operations can run past the end. Not all input_sample_bits
             # need padding, but it's simplest just to provide it unconditionally.
-            in_padding = 1
+            # The actual padding needed is only 1 byte, but we use
+            # INPUT_CHUNK_PADDING so that the Compute operation ends up with the
+            # desired padded size.
+            in_padding = INPUT_CHUNK_PADDING
             in_bytes = samples * template.input_sample_bits // BYTE_BITS
             self.slots["in"] = accel.IOSlot(
                 (accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),), np.uint8
