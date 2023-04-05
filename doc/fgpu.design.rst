@@ -544,12 +544,19 @@ performed:
 2. The signal is convolved with a low-pass filter. This eliminates the
    unwanted parts of the band, to the extent possible with a FIR filter.
 
-3. The signal is decimated (every Nth sample is retained), reducing the data
+3. The signal is subsampled (every Nth sample is retained), reducing the data
    rate. The low-pass filter above limits aliasing.
 
 For efficiency, all three operations are implemented in the same kernel. In
-particular, the filtered samples that would be removed by decimation are never
+particular, the filtered samples that would be removed by subsampling are never
 actually computed.
+
+.. note::
+   To avoid confusion, the "subsampling factor" is the ratio of original to
+   retained samples in the subsampling step, while the "decimation factor" is
+   the factor by which the bandwidth is reduced. Because the mixing turns a
+   real signal into a complex signal, the subsampling factor is twice the
+   decimation factor.
 
 The kernel is one of the more complex in katgpucbf. Simpler implementations
 tend to have low performance because the target GPUs (NVIDIA Ampere

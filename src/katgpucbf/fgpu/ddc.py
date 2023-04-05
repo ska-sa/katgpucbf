@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -44,42 +44,44 @@ class DDCTemplate:
         The GPU context that we'll operate in
     taps
         Number of taps in the FIR filter
-    decimation
+    subsampling
         Fraction of samples to retain after filtering
 
     Raises
     ------
     ValueError
-        If `taps` is not a multiple of `decimation`
+        If `taps` is not a multiple of `subsampling`
     """
 
-    def __init__(self, context: AbstractContext, taps: int, decimation: int, tuning: _TuningDict | None = None) -> None:
+    def __init__(
+        self, context: AbstractContext, taps: int, subsampling: int, tuning: _TuningDict | None = None
+    ) -> None:
         if taps <= 0:
             raise ValueError("taps must be positive")
-        if decimation <= 0:
-            raise ValueError("decimation must be positive")
-        if taps % decimation != 0:
-            raise ValueError("taps must be a multiple of decimation")
+        if subsampling <= 0:
+            raise ValueError("subsampling must be positive")
+        if taps % subsampling != 0:
+            raise ValueError("taps must be a multiple of subsampling")
         if tuning is None:
-            tuning = self.autotune(context, taps, decimation)
+            tuning = self.autotune(context, taps, subsampling)
         self.context = context
         self.wgs = tuning["wgs"]
         self._sg_size = tuning["sg_size"]
         self._coarsen = tuning["coarsen"]
         self._segment_samples = tuning["segment_samples"]
         self.taps = taps
-        self.decimation = decimation
+        self.subsampling = subsampling
 
         self._group_out_size = self.wgs // self._sg_size * self._coarsen
-        self._group_in_size = self._group_out_size * decimation
-        self._load_size = self._group_in_size + taps - decimation
+        self._group_in_size = self._group_out_size * subsampling
+        self._load_size = self._group_in_size + taps - subsampling
         self._segments = (self._load_size - 1) // (self._segment_samples * self.wgs) + 1
 
         # Sanity check the tuning parameters
         if self.wgs % self._sg_size:
             raise ValueError("wgs must be a multiple of sg_size")
-        if self.decimation % self._sg_size:
-            raise ValueError("decimation must be a multiple of sg_size")
+        if self.subsampling % self._sg_size:
+            raise ValueError("subsampling must be a multiple of sg_size")
         if self._group_in_size % self._segment_samples:
             raise ValueError("group_in_size must be a multiple of segment_samples (fix sg_size)")
         if self._segment_samples * DIG_SAMPLE_BITS % 32:
@@ -92,7 +94,7 @@ class DDCTemplate:
                 {
                     "wgs": self.wgs,
                     "taps": taps,
-                    "decimation": decimation,
+                    "subsampling": subsampling,
                     "coarsen": self._coarsen,
                     "sg_size": self._sg_size,
                     "sample_bits": DIG_SAMPLE_BITS,
@@ -102,7 +104,7 @@ class DDCTemplate:
             )
         self.kernel = program.get_kernel("ddc")
 
-    def autotune(self, context: AbstractContext, taps: int, decimation: int) -> _TuningDict:
+    def autotune(self, context: AbstractContext, taps: int, subsampling: int) -> _TuningDict:
         """Determine tuning parameters.
 
         .. todo::
@@ -113,7 +115,7 @@ class DDCTemplate:
         coarsen = 9
         sg_size = 2
         segment_samples = 16
-        while sg_size > 1 and decimation % sg_size != 0:
+        while sg_size > 1 and subsampling % sg_size != 0:
             sg_size //= 2
         return {"wgs": wgs, "coarsen": coarsen, "sg_size": sg_size, "segment_samples": segment_samples}
 
@@ -143,7 +145,7 @@ class DDC(accel.Operation):
     **in** : samples * DIG_SAMPLE_BITS // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : out_samples, complex64
-        Filtered and decimated output data
+        Filtered and subsampled output data
     **weights** : taps, float32
         Baseband filter coefficients. If the filter is asymmetric, the
         coefficients must be reversed: the first element gets
@@ -172,7 +174,7 @@ class DDC(accel.Operation):
             raise ValueError("samples must be at least the number of filter taps")
         self.template = template
         self.samples = samples
-        self.out_samples = accel.divup(samples - template.taps + 1, template.decimation)
+        self.out_samples = accel.divup(samples - template.taps + 1, template.subsampling)
         self.slots["in"] = accel.IOSlot(
             (
                 accel.Dimension(

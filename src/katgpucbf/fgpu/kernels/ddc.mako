@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022, National Research Foundation (SARAO)
+ * Copyright (c) 2022-2023, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -33,16 +33,16 @@
  * - GROUP_IN_SIZE must be a multiple of SEGMENT_SAMPLES
  * - SEGMENT_SAMPLES * SAMPLE_BITS must be a multiple of 32
  * - WGS must be a multiple of SG_SIZE
- * - TAPS must be a multiple of DECIMATION
+ * - TAPS must be a multiple of SUBSAMPLING
  * - SEGMENT_SAMPLES must be a multiple of SG_SIZE
- * - DECIMATION must be a multiple of SG_SIZE
+ * - SUBSAMPLING must be a multiple of SG_SIZE
  * - COARSEN should be odd for best performance
  * - SG_SIZE should be a power of two for best performance
  */
 
 #define WGS ${wgs}
 #define TAPS ${taps}
-#define DECIMATION ${decimation}
+#define SUBSAMPLING ${subsampling}
 #define COARSEN ${coarsen}
 #define SG_SIZE ${sg_size}
 #define SAMPLE_BITS ${sample_bits}
@@ -53,30 +53,30 @@
 // Number of output samples
 #define GROUP_OUT_SIZE (COARSEN * (WGS / SG_SIZE))
 // Stride of input samples between workgroups
-#define GROUP_IN_SIZE (GROUP_OUT_SIZE * DECIMATION)
+#define GROUP_IN_SIZE (GROUP_OUT_SIZE * SUBSAMPLING)
 // Number of input samples to load in this workgroup
-#define LOAD_SIZE (GROUP_IN_SIZE + TAPS - DECIMATION)
+#define LOAD_SIZE (GROUP_IN_SIZE + TAPS - SUBSAMPLING)
 // Load-size expressed in 32-bit words (rounding up)
 #define LOAD_WORDS ((LOAD_SIZE - 1) * SAMPLE_BITS / 32 + 1)
 // Number of segments to load per work-item
 #define SEGMENTS ((LOAD_SIZE - 1) / (SEGMENT_SAMPLES * WGS) + 1)
 /* Number of contiguous samples that take turns occupying a tile
- * (must divide both SEGMENT_SAMPLES and DECIMATION, and be a multiple
- * of SG_SIZE). This implementation is pessimistic when DECIMATION is
+ * (must divide both SEGMENT_SAMPLES and SUBSAMPLING, and be a multiple
+ * of SG_SIZE). This implementation is pessimistic when SUBSAMPLING is
  * neither a factor nor multiple of SEGMENT_SAMPLES, but that's not expected to
  * be a common case.
  */
-#if DECIMATION % SEGMENT_SAMPLES == 0
+#if SUBSAMPLING % SEGMENT_SAMPLES == 0
 # define TILE_SAMPLES SEGMENT_SAMPLES
-#elif SEGMENT_SAMPLES % DECIMATION == 0
-# define TILE_SAMPLES DECIMATION
+#elif SEGMENT_SAMPLES % SUBSAMPLING == 0
+# define TILE_SAMPLES SUBSAMPLING
 #else
 # define TILE_SAMPLES SG_SIZE
 #endif
 // Number of tiles to store in local memory
 #define TILES (LOAD_SIZE / TILE_SAMPLES)
 #define TILES_PER_SEGMENT (SEGMENT_SAMPLES / TILE_SAMPLES)
-#define TILES_PER_DECIMATION (DECIMATION / TILE_SAMPLES)
+#define TILES_PER_SUBSAMPLING (SUBSAMPLING / TILE_SAMPLES)
 
 ${wg_reduce.define_scratch('float', sg_size, 'scratch_t', allow_shuffle=True)}
 ${wg_reduce.define_function('float', sg_size, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
@@ -203,27 +203,27 @@ DEVICE_FN static void filter(
     int phase, int sg_group, int sg_rank)
 {
 #pragma unroll
-    for (int dphase = 0; dphase < DECIMATION; dphase += TILE_SAMPLES)
+    for (int dphase = 0; dphase < SUBSAMPLING; dphase += TILE_SAMPLES)
     {
-        // Sample within the decimation group for the first work item in
+        // Sample within the SUBSAMPLING group for the first work item in
         // the subgroup
         int total_phase = phase + dphase;
         // Holds a sliding window of samples which get multiplied by the
         // sample weights.
         float2 samples[COARSEN];
-        int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_DECIMATION);
+        int tile_index_base = total_phase / TILE_SAMPLES + sg_group * (COARSEN * TILES_PER_SUBSAMPLING);
 #pragma unroll
         for (int j = 0; j < COARSEN - 1; j++)
         {
             // Prime the pipeline
-            samples[j] = tiles[tile_index_base + j * TILES_PER_DECIMATION].samples[sg_rank];
+            samples[j] = tiles[tile_index_base + j * TILES_PER_SUBSAMPLING].samples[sg_rank];
         }
 #pragma unroll
-        for (int i = 0; i < TAPS / DECIMATION; i++)
+        for (int i = 0; i < TAPS / SUBSAMPLING; i++)
         {
-            int tap = i * DECIMATION + total_phase + sg_rank;
+            int tap = i * SUBSAMPLING + total_phase + sg_rank;
             float w = weights[tap];
-            samples[COARSEN - 1] = tiles[tile_index_base + (i + COARSEN - 1) * TILES_PER_DECIMATION].samples[sg_rank];
+            samples[COARSEN - 1] = tiles[tile_index_base + (i + COARSEN - 1) * TILES_PER_SUBSAMPLING].samples[sg_rank];
             for (int j = 0; j < COARSEN; j++)
             {
                 sums[j].x += w * samples[j].x;
