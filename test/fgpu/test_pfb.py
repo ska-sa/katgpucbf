@@ -118,7 +118,7 @@ def test_pfb_fir_complex(context: AbstractContext, command_queue: AbstractComman
     weights = rng.uniform(-1.0, 1.0, (CHANNELS * TAPS,)).astype(np.float32)
     expected_out = pfb_fir_host_complex(h_in, CHANNELS, unzip_factor, weights)
 
-    template = pfb.PFBFIRTemplate(context, TAPS, CHANNELS, 64, unzip_factor, complex_input=True)
+    template = pfb.PFBFIRTemplate(context, TAPS, CHANNELS, 32, unzip_factor, complex_input=True)
     fn = template.instantiate(command_queue, samples, SPECTRA)
     fn.ensure_all_bound()
     h_out = _pfb_fir(fn, h_in, weights, CHANNELS)

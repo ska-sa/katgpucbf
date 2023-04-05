@@ -49,16 +49,33 @@ class PFBFIRTemplate:
     channels
         Number of channels into which the input data will be decomposed.
     input_sample_bits
-        Bits per input sample. If `complex_input` is true, the input values
-        are floating-point complex numbers and this is the number of bits in
-        the complex value (and must equal 64). Otherwise, the inputs are
-        packed integers, and the value must be in
+        Bits per each component of input. If `complex_input` is true, the input
+        values are floating-point complex numbers and this must equal 32.
+        Otherwise, the inputs are packed integers, and the value must be in
         :data:`DIG_SAMPLE_BITS_VALID`.
     unzip_factor
         The output is reordered so that every unzip_factor'ith pair of
-        outputs is placed contiguously.
+        outputs (or single complex output, if `complex_input` is true) is
+        placed contiguously.
     complex_input
         Operation mode (see above).
+
+    Raises
+    ------
+    ValueError
+        If ``taps`` is not positive.
+    ValueError
+        If ``complex_input`` is true and ``input_sample_bits`` is not 32.
+    ValueError
+        If ``complex_input`` is false and ``input_sample_bits`` is not in
+        :data:`.DIG_SAMPLE_BITS_VALID`.
+    ValueError
+        If ``channels`` is not an even power of 2.
+    ValueError
+        If ``channels`` is not a multiple of ``unzip_factor``.
+    ValueError
+        If ``2*channels`` is not a multiple of the workgroup size (currently
+        128).
     """
 
     def __init__(
@@ -80,8 +97,8 @@ class PFBFIRTemplate:
         self.unzip_factor = unzip_factor
         self.complex_input = complex_input
         if complex_input:
-            if input_sample_bits != 64:
-                raise ValueError("input_sample_bits must be 64 when complex_input is true")
+            if input_sample_bits != 32:
+                raise ValueError("input_sample_bits must be 32 when complex_input is true")
         else:
             if input_sample_bits not in DIG_SAMPLE_BITS_VALID:
                 raise ValueError("input_sample_bits must be 2-10, 12 or 16 when complex_input is false")
@@ -165,9 +182,6 @@ class PFBFIR(accel.Operation):
     ValueError
         If ``samples`` is not a multiple of 8 and ``complex_input`` is false
     ValueError
-        If ``2*channels`` is not a multiple of the workgroup size (currently
-        128).
-    ValueError
         If ``samples`` is too large (more than 2**29)
 
     Parameters
@@ -228,7 +242,7 @@ class PFBFIR(accel.Operation):
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
         in_buffer_bytes = in_buffer.shape[0] * in_buffer.dtype.itemsize
-        in_buffer_samples = in_buffer_bytes * BYTE_BITS // self.template.input_sample_bits
+        in_buffer_samples = in_buffer_bytes * BYTE_BITS // (self.template.input_sample_bits * rps)
         if self.in_offset + sample_step * (self.spectra + self.template.taps - 1) > in_buffer_samples:
             raise IndexError("Input buffer does not contain sufficient samples")
         if self.out_offset + self.spectra > out_buffer.shape[0]:
