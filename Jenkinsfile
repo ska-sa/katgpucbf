@@ -164,6 +164,8 @@ pipeline {
             dockerImage.push()
           }
         }
+        // Remove the built and pushed Docker image from host
+        sh "docker rmi \$(docker images --quiet --filter label=org.opencontainers.image.revision=${env.GIT_COMMIT})"
       }
     }
   }
@@ -187,7 +189,6 @@ pipeline {
       recipientProviders: [developers(), requestor(), culprits()],
       subject: '$PROJECT_NAME - $BUILD_STATUS!',
       to: '$DEFAULT_RECIPIENTS'
-
 
       cleanWs()
     }
