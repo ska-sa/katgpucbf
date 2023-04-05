@@ -154,14 +154,12 @@ class Compute(accel.OperationSequence):
         # DDC, PFB-FIR and FFT each happen for each polarisation.
         if template.ddc is None:
             # Wideband
-            self.dig_sample_bits = template.pfb_fir.input_sample_bits
             self.ddc: list[ddc.DDC] | None = None
         else:
             # Narrowband
             assert template.narrowband is not None
             if samples % template.ddc.subsampling != 0:
                 raise ValueError(f"samples {samples} must be a multiple of subsampling {template.ddc.subsampling}")
-            self.dig_sample_bits = template.ddc.input_sample_bits
             self.ddc = [template.ddc.instantiate(command_queue, samples) for _ in range(N_POLS)]
             for pol in range(N_POLS):
                 self.ddc[pol].mix_frequency = template.narrowband.mix_frequency
