@@ -26,6 +26,9 @@ from katgpucbf.fgpu import DIG_SAMPLE_BITS_VALID, pfb
 from .. import unpackbits
 
 pytestmark = [pytest.mark.cuda_only]
+TAPS = 16
+SPECTRA = 3123
+CHANNELS = 4096
 
 
 def pfb_fir_host_real(data, channels, input_sample_bits, unzip_factor, weights):
@@ -64,6 +67,23 @@ def pfb_fir_host_complex(data, channels, unzip_factor, weights):
     return out
 
 
+def _pfb_fir(fn: pfb.PFBFIR, h_in: np.ndarray, weights: np.ndarray, step: int) -> np.ndarray:
+    """Run common parts of the different PFB tests and return output on the host."""
+    command_queue = fn.command_queue
+    fn.buffer("in").set(command_queue, h_in)
+    fn.buffer("weights").set(command_queue, weights)
+    # Split into two parts to test the offsetting
+    fn.in_offset = 0
+    fn.out_offset = 0
+    fn.spectra = 1003
+    fn()
+    fn.in_offset = fn.spectra * step
+    fn.out_offset = fn.spectra
+    fn.spectra = SPECTRA - fn.spectra
+    fn()
+    return fn.buffer("out").get(command_queue)
+
+
 @pytest.mark.combinations(
     "input_sample_bits,unzip_factor",
     DIG_SAMPLE_BITS_VALID,
@@ -73,31 +93,17 @@ def test_pfb_fir_real(
     context: AbstractContext, command_queue: AbstractCommandQueue, input_sample_bits: int, unzip_factor: int
 ) -> None:
     """Test the real GPU PFB-FIR for numerical correctness."""
-    taps = 16
-    spectra = 3123
-    channels = 4096
-    samples = 2 * channels * (spectra + taps - 1)
+    samples = 2 * CHANNELS * (SPECTRA + TAPS - 1)
     rng = np.random.default_rng(seed=1)
     h_in = rng.integers(0, 256, samples * input_sample_bits // BYTE_BITS, np.uint8)
-    weights = rng.uniform(-1.0, 1.0, (2 * channels * taps,)).astype(np.float32)
-    expected_out, expected_total_power = pfb_fir_host_real(h_in, channels, input_sample_bits, unzip_factor, weights)
+    weights = rng.uniform(-1.0, 1.0, (2 * CHANNELS * TAPS,)).astype(np.float32)
+    expected_out, expected_total_power = pfb_fir_host_real(h_in, CHANNELS, input_sample_bits, unzip_factor, weights)
 
-    template = pfb.PFBFIRTemplate(context, taps, channels, input_sample_bits, unzip_factor)
-    fn = template.instantiate(command_queue, samples, spectra)
+    template = pfb.PFBFIRTemplate(context, TAPS, CHANNELS, input_sample_bits, unzip_factor)
+    fn = template.instantiate(command_queue, samples, SPECTRA)
     fn.ensure_all_bound()
-    fn.buffer("in").set(command_queue, h_in)
-    fn.buffer("weights").set(command_queue, weights)
     fn.buffer("total_power").zero(command_queue)
-    # Split into two parts to test the offsetting
-    fn.in_offset = 0
-    fn.out_offset = 0
-    fn.spectra = 1003
-    fn()
-    fn.in_offset = fn.spectra * 2 * channels
-    fn.out_offset = fn.spectra
-    fn.spectra = spectra - fn.spectra
-    fn()
-    h_out = fn.buffer("out").get(command_queue)
+    h_out = _pfb_fir(fn, h_in, weights, 2 * CHANNELS)
     h_total_power = fn.buffer("total_power").get(command_queue)[()]
     np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-6 * 2**input_sample_bits)
     assert h_total_power == expected_total_power
@@ -105,29 +111,15 @@ def test_pfb_fir_real(
 
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 def test_pfb_fir_complex(context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int) -> None:
-    taps = 16
-    spectra = 3123
-    channels = 4096
-    samples = channels * (spectra + taps - 1)
+    samples = CHANNELS * (SPECTRA + TAPS - 1)
     rng = np.random.default_rng(seed=1)
     h_in = rng.normal(0.0, 128.0, size=samples) + 1j * rng.normal(0.0, 128.0, size=samples)
     h_in = h_in.astype(np.complex64)
-    weights = rng.uniform(-1.0, 1.0, (channels * taps,)).astype(np.float32)
-    expected_out = pfb_fir_host_complex(h_in, channels, unzip_factor, weights)
+    weights = rng.uniform(-1.0, 1.0, (CHANNELS * TAPS,)).astype(np.float32)
+    expected_out = pfb_fir_host_complex(h_in, CHANNELS, unzip_factor, weights)
 
-    template = pfb.PFBFIRTemplate(context, taps, channels, 64, unzip_factor, complex_input=True)
-    fn = template.instantiate(command_queue, samples, spectra)
+    template = pfb.PFBFIRTemplate(context, TAPS, CHANNELS, 64, unzip_factor, complex_input=True)
+    fn = template.instantiate(command_queue, samples, SPECTRA)
     fn.ensure_all_bound()
-    fn.buffer("in").set(command_queue, h_in)
-    fn.buffer("weights").set(command_queue, weights)
-    # Split into two parts to test the offsetting
-    fn.in_offset = 0
-    fn.out_offset = 0
-    fn.spectra = 1003
-    fn()
-    fn.in_offset = fn.spectra * channels
-    fn.out_offset = fn.spectra
-    fn.spectra = spectra - fn.spectra
-    fn()
-    h_out = fn.buffer("out").get(command_queue)
+    h_out = _pfb_fir(fn, h_in, weights, CHANNELS)
     np.testing.assert_allclose(h_out, expected_out, rtol=1e-5, atol=1e-3)

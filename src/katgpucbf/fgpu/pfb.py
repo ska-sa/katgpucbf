@@ -33,6 +33,13 @@ from . import DIG_SAMPLE_BITS_VALID
 class PFBFIRTemplate:
     """Template for the PFB-FIR operation.
 
+    The operation can operate in two different modes. In the first mode
+    (intended for a wideband channeliser), the input contains real digitiser
+    samples (bit-packed integers). In the second mode (intended for a
+    narrowband channeliser), the digitiser samples have already been
+    preprocessed and the PFB operates on complex-valued inputs (floating
+    point). The mode is selected with the `complex_input` parameter.
+
     Parameters
     ----------
     context
@@ -50,6 +57,8 @@ class PFBFIRTemplate:
     unzip_factor
         The output is reordered so that every unzip_factor'ith pair of
         outputs is placed contiguously.
+    complex_input
+        Operation mode (see above).
     """
 
     def __init__(
@@ -239,7 +248,7 @@ class PFBFIR(accel.Operation):
         # Rounding up may have left some workgroups with nothing to do, so recalculate
         # groupsy again.
         groupsy = accel.divup(self.spectra, work_spectra)
-        args = [
+        kernel_args = [
             self.buffer("out").buffer,
             self.buffer("in").buffer,
             self.buffer("weights").buffer,
@@ -249,11 +258,11 @@ class PFBFIR(accel.Operation):
             np.int32(self.out_offset * real_step),  # Must be a multiple of real_step to make sense.
         ]
         if not self.template.complex_input:
-            args.insert(1, self.buffer("total_power").buffer)
+            kernel_args.insert(1, self.buffer("total_power").buffer)
 
         self.command_queue.enqueue_kernel(
             self.template.kernel,
-            args,
+            kernel_args,
             global_size=(real_step, groupsy),
             local_size=(self.template.wgs, 1),
         )
