@@ -208,7 +208,9 @@ def test_aligned_range(linear: LinearDelayModel, aligned: AlignedDelayModel, ali
     time2, residual2, phase2 = aligned.range(13000, 14000, 3)
     time3, residual3, phase3 = aligned_odd.range(13000, 14000, 3)
     np.testing.assert_allclose(time1 - residual1, time2 - residual2)
+    np.testing.assert_allclose(time1 - residual1, time3 - residual3)
     np.testing.assert_allclose(phase1, phase2)
+    np.testing.assert_allclose(phase1, phase3)
     # Check that original times are aligned
     np.testing.assert_equal(time2 % 16, 0)
     np.testing.assert_equal(time3 % 17, 0)
