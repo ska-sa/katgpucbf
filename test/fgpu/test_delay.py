@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,7 +22,13 @@ from functools import partial
 import numpy as np
 import pytest
 
-from katgpucbf.fgpu.delay import LinearDelayModel, MultiDelayModel, NonMonotonicQueryWarning, wrap_angle
+from katgpucbf.fgpu.delay import (
+    AlignedDelayModel,
+    LinearDelayModel,
+    MultiDelayModel,
+    NonMonotonicQueryWarning,
+    wrap_angle,
+)
 
 
 @pytest.mark.parametrize(
@@ -68,6 +74,16 @@ def multi(linear, mdelay_callback_list) -> MultiDelayModel:
     out.add(LinearDelayModel(30000, 50.5, -0.0025, 0.5, 0.01))
     out.add(LinearDelayModel(50000, 2000.0, 0.25, -0.5, -0.1))
     return out
+
+
+@pytest.fixture
+def aligned(linear: LinearDelayModel) -> AlignedDelayModel:
+    return AlignedDelayModel(linear, 16)
+
+
+@pytest.fixture
+def aligned_odd(linear: LinearDelayModel) -> AlignedDelayModel:
+    return AlignedDelayModel(linear, 17)
 
 
 def test_linear_call(linear: LinearDelayModel) -> None:
@@ -184,3 +200,33 @@ def test_range_empty(request, model) -> None:
     assert time.shape == (0,)
     assert residual.shape == (0,)
     assert phase.shape == (0,)
+
+
+def test_aligned_range(linear: LinearDelayModel, aligned: AlignedDelayModel, aligned_odd: AlignedDelayModel) -> None:
+    """Test :meth:`.AlignedDelayModel.range`."""
+    time1, residual1, phase1 = linear.range(13000, 14000, 3)
+    time2, residual2, phase2 = aligned.range(13000, 14000, 3)
+    time3, residual3, phase3 = aligned_odd.range(13000, 14000, 3)
+    np.testing.assert_allclose(time1 - residual1, time2 - residual2)
+    np.testing.assert_allclose(time1 - residual1, time3 - residual3)
+    np.testing.assert_allclose(phase1, phase2)
+    np.testing.assert_allclose(phase1, phase3)
+    # Check that original times are aligned
+    np.testing.assert_equal(time2 % 16, 0)
+    np.testing.assert_equal(time3 % 17, 0)
+    # Check that residuals are not too big
+    assert np.max(np.abs(residual2)) <= 8 + 1e-6
+    assert np.max(np.abs(residual3)) <= 8.5 + 1e-6
+
+
+@pytest.mark.parametrize("step", [1, 4, 5, 100])
+def test_aligned_skip(aligned: AlignedDelayModel, step: int) -> None:
+    """Test :meth:`.AlignedDelayModel.skip`."""
+    start = 13100
+    for target in range(13000, 13500):
+        t = aligned.skip(target, start, step)
+        orig = aligned(t)[0]
+        assert orig >= target
+        assert t % step == 0
+        assert orig % 16 == 0
+        assert t - step < start or aligned(t - step)[0] < target
