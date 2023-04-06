@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -41,9 +41,15 @@ class PostprocTemplate:
         Number of channels in each spectrum.
     unzip_factor
         Radix of the final Cooley-Tukey FFT step performed by the kernel.
+    complex_pfb
+        If true, the PFB is a complex-to-complex transform, and no
+        real-to-complex fixup is needed. Additionally, the DC channel is
+        considered to be the centre of the band i.e. it is written to the
+        middle of the output rather than the start (and similarly, gains for
+        it are loaded from the middle of the gain array etc).
     """
 
-    def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1) -> None:
+    def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1, *, complex_pfb: bool) -> None:
         self.block = 32
         self.vtx = 1
         self.vty = 1
@@ -65,6 +71,7 @@ class PostprocTemplate:
                     "vty": self.vty,
                     "channels": channels,
                     "unzip_factor": unzip_factor,
+                    "complex_pfb": complex_pfb,
                 },
                 extra_dirs=[str(resource_dir)],
             )

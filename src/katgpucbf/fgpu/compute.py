@@ -78,7 +78,9 @@ class ComputeTemplate:
         self.channels = channels
         self.narrowband = narrowband
         self.unzip_factor = 4 if channels >= 8 else 1
-        self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor)
+        self.postproc = postproc.PostprocTemplate(
+            context, channels, self.unzip_factor, complex_pfb=narrowband is not None
+        )
         if narrowband is None:
             self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, self.unzip_factor)
             self.ddc: ddc.DDCTemplate | None = None

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020-2022, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2023, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -16,9 +16,6 @@
 
 <%include file="/port.mako"/>
 <%namespace name="transpose" file="/transpose_base.mako"/>
-<%!
-    import math
-%>
 
 #define CHANNELS ${channels}
 #define n ${unzip_factor}
@@ -30,6 +27,12 @@
 DEVICE_FN float2 cmul(float2 a, float2 b)
 {
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+// a * conj(b)
+DEVICE_FN float2 cmulc(float2 a, float2 b)
+{
+    return make_float2(a.x * b.x + a.y * b.y, a.y * b.x - a.x * b.y);
 }
 
 DEVICE_FN float2 cadd(float2 a, float2 b)
@@ -94,25 +97,28 @@ DEVICE_FN void float4_to_float2_array(float4 v, float2 out[2])
     out[1] = make_float2(v.z, v.w);
 }
 
-/* The mini_fftN functions are FFTs for small fixed sizes. */
+/* The mini_fftN functions are FFTs for small fixed sizes. Use sign=-1 for
+ * a forward transform, sign=1 for a reverse transform (the normalisation
+ * is not changed though).
+ */
 
-DEVICE_FN void mini_fft1(const float2 in[1], float2 out[1])
+DEVICE_FN void mini_fft1(const float2 in[1], float2 out[1], int sign)
 {
     out[0] = in[0];
 }
 
-DEVICE_FN void mini_fft2(const float2 in[2], float2 out[2])
+DEVICE_FN void mini_fft2(const float2 in[2], float2 out[2], int sign)
 {
     out[0] = cadd(in[0], in[1]);
     out[1] = csub(in[0], in[1]);
 }
 
-DEVICE_FN void mini_fft4(const float2 in[4], float2 out[4])
+DEVICE_FN void mini_fft4(const float2 in[4], float2 out[4], int sign)
 {
     float2 apc = cadd(in[0], in[2]);  // a + c (where inputs are a, b, c, d)
     float2 amc = csub(in[0], in[2]);  // a - c
     float2 bpd = cadd(in[1], in[3]);  // b + d
-    float2 jdmjb = make_float2(in[1].y - in[3].y, in[3].x - in[1].x);  // jd - jb
+    float2 jdmjb = make_float2(sign * (in[3].y - in[1].y), sign * (in[1].x - in[3].x));  // (j*sign)(b - d)
     out[0] = cadd(apc, bpd);
     out[1] = cadd(amc, jdmjb);
     out[2] = csub(apc, bpd);
@@ -137,8 +143,10 @@ DEVICE_FN void twiddle(int s, float2 Zr[2][2][n])
         float2 t;
         sincospif(angle, &t.y, &t.x);
         for (int pol = 0; pol < 2; pol++)
-            for (int i = 0; i < 2; i++)
-                Zr[pol][i][r] = cmul(Zr[pol][i][r], t);
+        {
+            Zr[pol][0][r] = cmul(Zr[pol][0][r], t);
+            Zr[pol][1][r] = cmulc(Zr[pol][1][r], t);
+        }
     }
 }
 
@@ -146,14 +154,14 @@ DEVICE_FN void twiddle(int s, float2 Zr[2][2][n])
  * of the same raw data.
  *
  * @param      z    Complex-to-complex transform of some channel k
- * @param      zn   Conjugation of channel -k
+ * @param      zn   Complex-to-complex transform of channel -k
  * @param      rot  exp(-pi * j * k / CHANNELS)
  * @param[out] out  Real-to-complex transform at channels k and CHANNELS - k
  */
 DEVICE_FN void fix_r2c(float2 z, float2 zn, float2 rot, float2 out[2])
 {
-    float2 u = cadd(z, zn);
-    float2 v = make_float2(z.y - zn.y, zn.x - z.x);  // (z - zn) / j
+    float2 u = make_float2(z.x + zn.x, z.y - zn.y);  // z + conj(zn)
+    float2 v = make_float2(z.y + zn.y, zn.x - z.x);  // (z - conj(zn)) / j
     float2 r = cmul(v, rot);
     out[0] = make_float2(0.5 * (u.x + r.x), 0.5 * (u.y + r.y));
     out[1] = make_float2(0.5 * (u.x - r.x), -0.5 * (u.y - r.y));
@@ -165,8 +173,7 @@ DEVICE_FN void fix_r2c(float2 z, float2 zn, float2 rot, float2 out[2])
  *                 +/-(pm + s) where 0 <= p < n.
  * @param      in  Pointers to raw input for this spectrum, indexed by
  *                 polarisation
- * @param[out] Z   Result, indexed by pol, +/- s, p. The negative channels are
- *                 conjugated.
+ * @param[out] Z   Result, indexed by pol, +/- s, p.
  */
 DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
 {
@@ -177,17 +184,14 @@ DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
         for (int pol = 0; pol < 2; pol++)
             load_data(in[pol], s[i], Zr[pol][i]);
 
-    // Conjugate the negative channel
-    for (int pol = 0; pol < 2; pol++)
-        for (int r = 0; r < n; r++)
-            Zr[pol][1][r].y = -Zr[pol][1][r].y;
-
     twiddle(s[0], Zr);
 
     // Final pass of C2C transform
     for (int pol = 0; pol < 2; pol++)
-        for (int i = 0; i < 2; i++)
-            mini_fft(Zr[pol][i], Z[pol][i]);
+    {
+        mini_fft(Zr[pol][0], Z[pol][0], -1);
+        mini_fft(Zr[pol][1], Z[pol][1], 1);  // sign flipped because we're dealing with negative frequencies
+    }
 }
 
 /* Load/compute the real-to-complex Fourier transform of the input.
@@ -221,16 +225,41 @@ DEVICE_FN void finish_fft(int s, const GLOBAL float2 *in[2], float2 X[2][2][n])
 
 /* Apply delay model.
  *
- * @param          k      Channel
  * @param          gain   Gain for the channel
  * @param          phase  Total phase rotation in radians
  * @param[in,out]  X      Channelised voltage, indexed by pol
  */
-DEVICE_FN float2 apply_delay_gain(int k, float2 gain, float phase, float2 X)
+DEVICE_FN float2 apply_delay_gain(float2 gain, float phase, float2 X)
 {
     float2 rot;
     sincospif(phase, &rot.y, &rot.x);
     return cmul(cmul(X, rot), gain);
+}
+
+/* Compute index in the output array.
+ *
+ * @param          k      Channel number, in the range [0, CHANNELS)
+ */
+DEVICE_FN int wrap_index(int k)
+{
+% if complex_pfb:
+    return (k + CHANNELS / 2) & (CHANNELS - 1);
+% else:
+    return k;
+% endif
+}
+
+/* Turn a channel index into a delay scale factor
+ *
+ * @param          k      Channel number, in the range [0, CHANNELS)
+ */
+DEVICE_FN int delay_channel(int k)
+{
+% if complex_pfb:
+    return (k >= CHANNELS / 2) ? k - CHANNELS : k;
+% else:
+    return k;
+% endif
 }
 
 /* Kernel that handles:
@@ -302,8 +331,14 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                 for (int i = 0; i < 2; i++)
                 {
                     float2 g[2];
-                    // & to avoid overflow in edge cases
+                    // & to avoid overflow in edge cases. When complex_pfb, shift
+                    // by CHANNELS / 2 since negative frequency gains are
+                    // stored at lower addresses.
+% if complex_pfb:
+                    int ch = (i ? CHANNELS / 2 - k : CHANNELS / 2 + k) & (CHANNELS - 1);
+% else:
                     int ch = (i ? -k : k) & (CHANNELS - 1);
+% endif
                     float4_to_float2_array(gains[ch], g);
                     for (int pol = 0; pol < 2; pol++)
                         l_gains[p][pol][i][coords.lx] = g[pol];
@@ -319,8 +354,12 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
             int spectrum = z * spectra_per_heap + ${r};
             int base_addr = spectrum * CHANNELS;
             const GLOBAL float2 *in[2] = {in0 + base_addr, in1 + base_addr};
-            float2 X[2][2][n];   // Final real-to-complex Fourier transform
+            float2 X[2][2][n];   // Final Fourier transform
+% if complex_pfb:
+            finish_c2c(s, in, X);
+% else:
             finish_fft(s, in, X);
+% endif
 
             float delay[2], ph[2];
             float2_to_array(fine_delay[spectrum], delay);
@@ -345,13 +384,13 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                     if (i == 1 && (s == 0 || s * 2 == m))
                         continue;
                     const float delay_scale = -1.0f / CHANNELS;
-                    float channel_scale = delay_scale * k[i];
+                    float channel_scale = delay_scale * delay_channel(k[i]);
                     float2 out[2];
                     for (int pol = 0; pol < 2; pol++)
                     {
                         float2 g = l_gains[p][pol][i][coords.lx];
                         float phase = delay[pol] * channel_scale + ph[pol];
-                        out[pol] = apply_delay_gain(k[i], g, phase, X[pol][i][p]);
+                        out[pol] = apply_delay_gain(g, phase, X[pol][i][p]);
                     }
 
                     // Interleave polarisations. Quantise at the same time.
@@ -377,9 +416,9 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
             for (int p = 0; p < n; p++)
             {
                 int k = p * m + s;
-                base[k * out_stride] = scratch[p][0].arr[${lr}][${lc}];
+                base[wrap_index(k) * out_stride] = scratch[p][0].arr[${lr}][${lc}];
                 if (s != 0 && s * 2 != m)  // Skip the duplicates (calculation was skipped)
-                    base[(CHANNELS - k) * out_stride] = scratch[p][1].arr[${lr}][${lc}];
+                    base[wrap_index(CHANNELS - k) * out_stride] = scratch[p][1].arr[${lr}][${lc}];
             }
         }
     }
