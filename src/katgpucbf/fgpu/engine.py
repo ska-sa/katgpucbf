@@ -28,6 +28,7 @@ from functools import partial
 import aiokatcp
 import katsdpsigproc.accel as accel
 import numpy as np
+import scipy.signal
 import spead2.recv
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
@@ -69,7 +70,7 @@ def _sample_models(
     return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
 
 
-def generate_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
+def generate_pfb_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
     The resulting weights are normalised such that the sum of
@@ -97,6 +98,28 @@ def generate_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
     weights = hann * sinc
     # Work around https://github.com/numpy/numpy/issues/21898
     weights /= np.sqrt(np.sum(np.square(weights)))  # type: ignore[misc]
+    return weights.astype(np.float32)
+
+
+def generate_ddc_weights(taps: int, w_pass: float, w_stop: float, weight_pass: float) -> np.ndarray:
+    """Generate equiripple filter weights for the narrowband low-pass filter.
+
+    The resulting weights are normalised such that the sum of squares is 1.
+
+    Parameters
+    ----------
+    taps
+        Number of taps in the filter
+    w_pass
+        Passband width
+    w_stop
+        Passband width plus transition width
+    weight_pass
+        Weight given to the passband in the filter design (relative to stopband
+        weight of 1.0).
+    """
+    weights = scipy.signal.remez(taps, [0, w_pass, w_stop, 0.5], [1.0, 0.0], [weight_pass, 1.0], maxiter=1000)
+    weights /= np.sqrt(np.sum(np.square(weights)))
     return weights.astype(np.float32)
 
 
@@ -414,7 +437,7 @@ class Pipeline:
         if isinstance(output, NarrowbandOutput):
             narrowband_config = NarrowbandConfig(
                 decimation=output.decimation,
-                taps=256,  # TODO[nb]: make it configurable
+                taps=output.ddc_taps,
                 mix_frequency=-output.centre_frequency / engine.adc_sample_rate,
             )
         else:
@@ -423,10 +446,16 @@ class Pipeline:
             context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=narrowband_config
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
-        device_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
-        device_weights.set(
-            compute_queue, generate_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff)
+        device_pfb_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
+        device_pfb_weights.set(
+            compute_queue,
+            generate_pfb_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff),
         )
+        if isinstance(output, NarrowbandOutput):
+            device_ddc_weights = self._compute.slots["ddc_weights"].allocate(accel.DeviceAllocator(context))
+            device_ddc_weights.set(
+                compute_queue, generate_ddc_weights(output.ddc_taps, output.w_pass, output.w_stop, output.weight_pass)
+            )
 
         # Initialize sending
         self.send_chunks = self._init_send(substreams, engine.use_peerdirect)

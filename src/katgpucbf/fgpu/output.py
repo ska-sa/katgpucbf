@@ -78,6 +78,10 @@ class NarrowbandOutput(Output):
 
     centre_frequency: float
     decimation: int
+    ddc_taps: int
+    w_pass: float
+    w_stop: float
+    weight_pass: float
 
     @property
     def send_rate_factor(self) -> float:  # noqa: D102

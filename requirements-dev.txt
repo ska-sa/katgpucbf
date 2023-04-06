@@ -316,6 +316,7 @@ requests==2.28.1
 scipy==1.9.2
     # via
     #   -c requirements.txt
+    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
 six==1.16.0
     # via
