@@ -54,6 +54,12 @@ class Output(ABC):
         """Number of digitiser samples between PFB input samples."""
         raise NotImplementedError  # pragma: nocover
 
+    @property
+    @abstractmethod
+    def window(self) -> int:
+        """Number of digitiser samples that contribute to each output spectrum."""
+        raise NotImplementedError  # pragma: nocover
+
 
 @dataclass
 class WidebandOutput(Output):
@@ -70,6 +76,10 @@ class WidebandOutput(Output):
     @property
     def subsampling(self) -> int:  # noqa: D102
         return 1
+
+    @property
+    def window(self) -> int:  # noqa: D102
+        return self.taps * self.spectra_samples
 
 
 @dataclass
@@ -94,3 +104,7 @@ class NarrowbandOutput(Output):
     @property
     def subsampling(self) -> int:  # noqa: D102
         return 2 * self.decimation
+
+    @property
+    def window(self) -> int:  # noqa: D102
+        return self.taps * self.spectra_samples + self.ddc_taps - self.subsampling

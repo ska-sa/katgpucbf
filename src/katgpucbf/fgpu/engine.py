@@ -700,11 +700,6 @@ class Pipeline:
         Then a batch FFT operation is applied, and finally, fine-delay, phase
         correction, quantisation and corner-turn are performed.
         """
-        # Compute number of original samples that go into producing each spectrum
-        full_window = self.taps * self.spectra_samples
-        if self._compute.template.ddc is not None:
-            # It's narrowband
-            full_window += self._compute.template.ddc.taps - self._compute.template.ddc.subsampling
         # This is guaranteed by the way subsampling is defined; this assertion
         # is really as a reminder to the reader.
         assert self.spectra_samples % self.output.subsampling == 0
@@ -748,7 +743,7 @@ class Pipeline:
             # We speculatively calculate delays until one of the first two is
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
-            max_end_in = in_item.end_timestamp + min(start_coarse_delays) - full_window + 1
+            max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.output.window + 1
             max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
@@ -817,7 +812,7 @@ class Pipeline:
                             self.spectra_samples,
                         )
                         # Offset of the last sample (inclusive, rather than past-the-end)
-                        last_offset = first_offset + full_window - 1
+                        last_offset = first_offset + self.output.window - 1
                         first_packet = first_offset // self.engine.src_layout.heap_samples
                         # last_packet is exclusive
                         last_packet = last_offset // self.engine.src_layout.heap_samples + 1
