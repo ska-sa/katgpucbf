@@ -64,6 +64,11 @@ COHERENT_SCALE = CHANNELS / np.sqrt(2 * CHANNELS)
 GAIN = np.float32(1 / COHERENT_SCALE)  # Default value passed to ?gain command
 
 
+@pytest.fixture
+def channels() -> int:
+    return CHANNELS
+
+
 @dataclass
 class CW:
     r"""Specification of a cosine wave.
@@ -104,18 +109,18 @@ class TestEngine:
     @pytest.fixture(
         params=[
             pytest.param(
-                f"--wideband=name=test_stream,dst=239.10.11.0+15:7149,channels={CHANNELS},taps={TAPS}",
+                f"--wideband=name=test_stream,dst=239.10.11.0+15:7149,taps={TAPS}",
                 id="wideband",
             ),
             pytest.param(
-                f"--narrowband=name=test_stream,dst=239.10.11.0+15:7149,channels={CHANNELS},taps={TAPS},"
+                f"--narrowband=name=test_stream,dst=239.10.11.0+15:7149,taps={TAPS},"
                 "decimation=8,centre_frequency=400e6",
                 id="narrowband",
             ),
         ]
     )
-    def output_arg(self, request) -> str:
-        return request.param
+    def output_arg(self, channels: int, request) -> str:
+        return f"{request.param},channels={channels}"
 
     @pytest.fixture
     def output(self, output_arg: str) -> Output:
@@ -658,19 +663,7 @@ class TestEngine:
                 np.testing.assert_allclose(sensor_values[3], expected_phase)
 
     # Test with spectra_samples less than, equal to and greater than src-packet-samples
-    @pytest.mark.parametrize(
-        "channels",
-        [
-            pytest.param(
-                channels,
-                marks=pytest.mark.cmdline_args(
-                    f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={channels},taps={TAPS}",
-                    remove_outputs=True,
-                ),
-            )
-            for channels in [64, 2048, 8192]
-        ],
-    )
+    @pytest.mark.parametrize("channels", [64, 2048, 8192])
     # Use small spectra-per-heap to get finer-grained testing of which spectra
     # were ditched. Fewer would be better, but there are internal alignment
     # requirements.

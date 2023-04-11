@@ -95,9 +95,6 @@ async def engine_server(
     tested.
 
     Extra command-line arguments can be added using a ``cmdline_args`` marker.
-    If a keyword-only `remove_outputs` argument is set to true, any existing
-    arguments starting with ``--wideband=`` or ``--narrowband=`` are removed
-    first.
     """
     arglist = list(engine_arglist)  # Copy, to ensure we don't alter original
     if request.node.get_closest_marker("use_vkgdr"):
@@ -107,9 +104,6 @@ async def engine_server(
     # that more specific markers append options to the end, overriding those
     # added by less-specific markers.
     for marker in reversed(list(request.node.iter_markers("cmdline_args"))):
-        if marker.kwargs.get("remove_outputs"):
-            raise NotImplementedError("remove_outputs needs to be replaced")
-            arglist = [arg for arg in arglist if not arg.startswith(("--wideband=", "--narrowband="))]
         arglist.extend(marker.args)
 
     args = parse_args(arglist)
