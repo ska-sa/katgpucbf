@@ -33,7 +33,7 @@ from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InItem, Pipeline
 from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
-from katgpucbf.fgpu.output import Output
+from katgpucbf.fgpu.output import NarrowbandOutput, Output
 from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff, packbits
@@ -533,6 +533,9 @@ class TestEngine:
         dig_sample_bits: int,
     ) -> None:
         """Test that delay rate and phase rate setting works."""
+        # TODO[nb]: Narrowband doesn't support non-default dig_sample_bits yet
+        if isinstance(output, NarrowbandOutput) and dig_sample_bits != DIG_SAMPLE_BITS:
+            pytest.skip(f"narrowband does not support dig_sample_bits={dig_sample_bits}")
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
