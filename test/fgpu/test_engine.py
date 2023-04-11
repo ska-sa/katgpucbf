@@ -323,6 +323,7 @@ class TestEngine:
             dst_present_mask = np.ones(dst_present, dtype=bool)
         else:
             dst_present_mask = dst_present
+        assert np.sum(dst_present_mask) > 0
 
         data = np.zeros((channels, len(dst_present_mask) * spectra_per_heap, N_POLS, COMPLEX), np.int8)
         channels_per_substream = channels // n_out_streams
