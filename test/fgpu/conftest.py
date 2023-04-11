@@ -80,7 +80,12 @@ def check_vkgdr(context: AbstractContext) -> None:
 
 @pytest.fixture
 async def engine_server(
-    request, mock_recv_streams, mock_send_stream, recv_max_chunks_one, context: AbstractContext
+    request,
+    engine_arglist: list[str],
+    mock_recv_streams,
+    mock_send_stream,
+    recv_max_chunks_one,
+    context: AbstractContext,
 ) -> AsyncGenerator[Engine, None]:
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
@@ -94,7 +99,7 @@ async def engine_server(
     arguments starting with ``--wideband=`` or ``--narrowband=`` are removed
     first.
     """
-    arglist = list(request.cls.engine_arglist)
+    arglist = list(engine_arglist)  # Copy, to ensure we don't alter original
     if request.node.get_closest_marker("use_vkgdr"):
         check_vkgdr(context)
         arglist.append("--use-vkgdr")

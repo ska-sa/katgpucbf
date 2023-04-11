@@ -98,25 +98,27 @@ class CW:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
-    engine_arglist = [
-        "--katcp-host=127.0.0.1",
-        "--katcp-port=0",
-        "--src-interface=lo",
-        "--dst-interface=lo",
-        f"--sync-epoch={SYNC_EPOCH}",
-        f"--src-chunk-samples={CHUNK_SAMPLES}",
-        f"--dst-chunk-jones={CHUNK_JONES}",
-        f"--max-delay-diff={MAX_DELAY_DIFF}",
-        f"--spectra-per-heap={SPECTRA_PER_HEAP}",
-        f"--src-packet-samples={PACKET_SAMPLES}",
-        f"--feng-id={FENG_ID}",
-        f"--adc-sample-rate={ADC_SAMPLE_RATE}",
-        f"--gain={GAIN}",
-        "--send-rate-factor=0",  # Infinitely fast
-        f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS},taps={TAPS}",
-        "239.10.10.0+7:7149",  # src1
-        "239.10.10.8+7:7149",  # src2
-    ]
+    @pytest.fixture
+    def engine_arglist(self) -> list[str]:
+        return [
+            "--katcp-host=127.0.0.1",
+            "--katcp-port=0",
+            "--src-interface=lo",
+            "--dst-interface=lo",
+            f"--sync-epoch={SYNC_EPOCH}",
+            f"--src-chunk-samples={CHUNK_SAMPLES}",
+            f"--dst-chunk-jones={CHUNK_JONES}",
+            f"--max-delay-diff={MAX_DELAY_DIFF}",
+            f"--spectra-per-heap={SPECTRA_PER_HEAP}",
+            f"--src-packet-samples={PACKET_SAMPLES}",
+            f"--feng-id={FENG_ID}",
+            f"--adc-sample-rate={ADC_SAMPLE_RATE}",
+            f"--gain={GAIN}",
+            "--send-rate-factor=0",  # Infinitely fast
+            f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS},taps={TAPS}",
+            "239.10.10.0+7:7149",  # src1
+            "239.10.10.8+7:7149",  # src2
+        ]
 
     def test_engine_required_arguments(self, engine_server: Engine) -> None:
         """Test proper setting of required arguments.
