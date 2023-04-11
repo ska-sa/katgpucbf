@@ -167,11 +167,11 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
             raise ValueError(f"{key} is missing")
 
 
-def parse_wideband(value: str) -> WidebandOutputDict:
+def parse_wideband(value: str) -> WidebandOutput:
     """Parse a string with a wideband configuration.
 
     The string has a comma-separated list of key=value pairs. See
-    :class:`WidebandOutputDict` for the valid keys and types. The following
+    :class:`WidebandOutput` for the valid keys and types. The following
     keys are required:
 
     - name
@@ -185,16 +185,17 @@ def parse_wideband(value: str) -> WidebandOutputDict:
     try:
         kws: WidebandOutputDict = {}
         _parse_stream(value, kws, field_callback)
+        kws = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, **kws}  # type: ignore
     except ValueError as exc:
         raise ValueError(f"--wideband: {exc}") from exc
-    return kws
+    return WidebandOutput(**kws)
 
 
-def parse_narrowband(value: str) -> NarrowbandOutputDict:
+def parse_narrowband(value: str) -> NarrowbandOutput:
     """Parse a string with a narrowband configuration.
 
     The string has a comma-separated list of key=value pairs. See
-    :class:`NarrowbandOutputDict` for the valid keys and types. The following
+    :class:`NarrowbandOutput` for the valid keys and types. The following
     keys are required:
 
     - name
@@ -230,12 +231,13 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
             kws = {"w_pass": 0.348 / 16, "w_stop": 0.574 / 16, "weight_pass": 0.015, **kws}  # type: ignore
         elif kws.get("decimation") == 16:
             kws = {"w_pass": 0.215 / 32, "w_stop": 0.629 / 32, "weight_pass": 0.033, **kws}  # type: ignore
+        kws = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, "ddc_taps": DEFAULT_DDC_TAPS, **kws}  # type: ignore
         for key in ["centre_frequency", "decimation", "w_pass", "w_stop", "weight_pass"]:
             if key not in kws:
                 raise ValueError(f"{key} is missing")
     except ValueError as exc:
         raise ValueError(f"--narrowband: {exc}") from exc
-    return kws
+    return NarrowbandOutput(**kws)
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -441,19 +443,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     args.outputs = []
     for output_group in [args.wideband, args.narrowband]:
         for output in output_group:
-            name = output["name"]
-            if name in used_names:
+            name = output.name
+            if output.name in used_names:
                 parser.error(f"output name {name} used twice")
-            if len(output["dst"]) % len(args.dst_interface) != 0:
+            if len(output.dst) % len(args.dst_interface) != 0:
                 parser.error(f"{name}: number of destinations must be divisible by number of destination interfaces")
             used_names.add(name)
-            # Set defaults (listing **output allows defaults to be overridden)
-            output = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, **output}
-            if output_group is args.wideband:
-                args.outputs.append(WidebandOutput(**output))
-            else:
-                output = {"ddc_taps": DEFAULT_DDC_TAPS, **output}
-                args.outputs.append(NarrowbandOutput(**output))
+            args.outputs.append(output)
     if not args.outputs:
         parser.error("At least one --wideband or --narrowband argument is required")
 
