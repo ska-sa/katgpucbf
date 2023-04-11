@@ -868,7 +868,7 @@ class TestEngine:
         monkeypatch,
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?gain``."""
-        n_samples = 8 * CHUNK_SAMPLES
+        n_samples = max(8 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
@@ -903,7 +903,7 @@ class TestEngine:
         monkeypatch,
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?delays``."""
-        n_samples = 8 * CHUNK_SAMPLES
+        n_samples = max(8 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
         dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
 
         timestamp_list = self._patch_fill_in(
