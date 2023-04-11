@@ -547,6 +547,7 @@ class Pipeline:
                     saturated=item.saturated.empty_like(),
                     substreams=substreams,
                     feng_id=self.engine.feng_id,
+                    spectra_samples=self.output.spectra_samples,
                 )
                 item.chunk = chunk
                 send_chunks.append(chunk)
@@ -564,6 +565,7 @@ class Pipeline:
                         accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
                         substreams=substreams,
                         feng_id=self.engine.feng_id,
+                        spectra_samples=self.output.spectra_samples,
                     )
                 )
                 self._send_free_queue.put_nowait(send_chunks[-1])

@@ -126,6 +126,7 @@ class Chunk:
         *,
         substreams: Sequence[int],
         feng_id: int,
+        spectra_samples: int,
     ) -> None:
         n_frames = data.shape[0]
         channels = data.shape[1]
@@ -140,7 +141,7 @@ class Chunk:
         self._timestamp = 0
         #: Callback to return the chunk to the appropriate queue
         self.cleanup: Callable[[], None] | None = None
-        self._timestamp_step = spectra_per_heap * channels * 2
+        self._timestamp_step = spectra_per_heap * spectra_samples
         #: Storage for timestamps in the SPEAD heaps.
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
         # The ... in indexing causes numpy to give a 0d array view, rather than
