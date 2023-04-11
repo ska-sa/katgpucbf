@@ -360,7 +360,7 @@ class TestEngine:
         # Convert to complex for analysis
         data_cplx = data[..., 0] + 1j * data[..., 1]
         assert expected_first_timestamp is not None
-        timestamps = np.arange(data_cplx.shape[1], dtype=np.int64) * (channels * 2) + expected_first_timestamp
+        timestamps = np.arange(data_cplx.shape[1], dtype=np.int64) * output.spectra_samples + expected_first_timestamp
         return data_cplx, timestamps
 
     # One delay value is tested with vkgdr, another with smaller output chunks
