@@ -103,6 +103,16 @@ class CW:
         return self.magnitude * np.cos(np.pi * self.frac_channel * (t - self.delay) + self.phase)
 
 
+def frac_channel(output: Output, channel: int) -> float:
+    """Convert a channel number to a `frac_channel` parameter for :class:`CW`."""
+    if isinstance(output, NarrowbandOutput):
+        # Convert centre frequency to a frac_channel
+        offset = output.centre_frequency / (ADC_SAMPLE_RATE / 2)
+        return (channel - output.channels // 2) / (output.channels * output.decimation) + offset
+    else:
+        return channel / output.channels
+
+
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
@@ -112,9 +122,10 @@ class TestEngine:
                 f"--wideband=name=test_stream,dst=239.10.11.0+15:7149,taps={TAPS}",
                 id="wideband",
             ),
+            # Centre frequency is a multiple of the channel width
             pytest.param(
                 f"--narrowband=name=test_stream,dst=239.10.11.0+15:7149,taps={TAPS},"
-                "decimation=8,centre_frequency=400e6",
+                "decimation=8,centre_frequency=339077148.4375",
                 id="narrowband",
             ),
         ]
@@ -398,8 +409,13 @@ class TestEngine:
         # happens in MeerKAT L-band.
         tone_channels = [64, 271]
         tones = [
-            CW(frac_channel=1 + tone_channels[0] / CHANNELS, magnitude=80.0, delay=-delay_samples[0]),
-            CW(frac_channel=1 + tone_channels[1] / CHANNELS, magnitude=110.0, phase=1.23, delay=-delay_samples[1]),
+            CW(frac_channel=1 + frac_channel(output, tone_channels[0]), magnitude=80.0, delay=-delay_samples[0]),
+            CW(
+                frac_channel=1 + frac_channel(output, tone_channels[1]),
+                magnitude=110.0,
+                phase=1.23,
+                delay=-delay_samples[1],
+            ),
         ]
         delay_s = np.array(delay_samples) / ADC_SAMPLE_RATE
         sky_centre_frequency = 0.75 * ADC_SAMPLE_RATE
@@ -545,7 +561,7 @@ class TestEngine:
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
-        tones = [CW(frac_channel=channel / CHANNELS, magnitude=110) for channel in tone_channels]
+        tones = [CW(frac_channel=frac_channel(output, channel), magnitude=110) for channel in tone_channels]
         src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
@@ -801,7 +817,7 @@ class TestEngine:
         tone_pol: int,
     ) -> None:
         """Test that ``output_clipped_samples`` metric and ``feng-clip-count`` sensor increase when a channel clips."""
-        tone = CW(frac_channel=271 / CHANNELS, magnitude=110.0)
+        tone = CW(frac_channel=frac_channel(output, 271), magnitude=110.0)
         for pol in range(N_POLS):
             # Set gain high enough to make the tone saturate
             await engine_client.request("gain", "test_stream", pol, GAIN * 2)
