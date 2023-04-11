@@ -108,6 +108,7 @@ async def engine_server(
     # added by less-specific markers.
     for marker in reversed(list(request.node.iter_markers("cmdline_args"))):
         if marker.kwargs.get("remove_outputs"):
+            raise NotImplementedError("remove_outputs needs to be replaced")
             arglist = [arg for arg in arglist if not arg.startswith(("--wideband=", "--narrowband="))]
         arglist.extend(marker.args)
 
