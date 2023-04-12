@@ -415,7 +415,7 @@ class TestEngine:
             tone_data = out_data[tone_channels[pol], :, pol]
             expected_mag = tones[pol].magnitude * COHERENT_SCALE * GAIN
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
-            np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, 2))
+            np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, abs=3))
             # The frequency corresponds to an integer number of cycles per
             # spectrum, so the phase will be consistent across spectra.
             # The accuracy is limited by the quantisation.
