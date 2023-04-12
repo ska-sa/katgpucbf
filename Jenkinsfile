@@ -163,9 +163,11 @@ pipeline {
           docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
             dockerImage.push()
           }
+        dockerImage.id
         }
+        dockerImage.id
         // Remove the built and pushed Docker image from host
-        sh "docker rmi \$(docker images --quiet --filter label=org.opencontainers.image.revision=${env.GIT_COMMIT})"
+        //sh "docker rmi \$(docker images --quiet --filter label=org.opencontainers.image.revision=${env.GIT_COMMIT})"
       }
     }
   }
