@@ -55,7 +55,7 @@ from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
-from .output import NarrowbandOutput, Output
+from .output import NarrowbandOutput, Output, WidebandOutput
 
 logger = logging.getLogger(__name__)
 
@@ -782,10 +782,20 @@ class Pipeline:
                 if batch_spectra > 0:
                     logging.debug("Processing %d spectra", batch_spectra)
                     out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
-                    self._out_item.fine_delay[out_slice] = fine_delays.T
+                    self._out_item.fine_delay[out_slice] = fine_delays.T / self.output.subsampling
+                    # The phase is referenced to the centre frequency, but
+                    # coarse delay in wideband affects the phase of the centre
+                    # frequency (each sample shifts it by pi/2) and this
+                    # needs to be corrected for. In narrowband the centre
+                    # frequency is shifted to DC by the mixer and no correction
+                    # is needed.
+                    phase = phase.T
+                    if isinstance(self.output, WidebandOutput):
+                        phase += 0.5 * np.pi * (np.array(start_coarse_delays) % 4)
+                        phase = wrap_angle(phase)
                     # Divide by pi because the arguments of sincospif() used in the
                     # kernel are in radians/PI.
-                    self._out_item.phase[out_slice] = phase.T / np.pi
+                    self._out_item.phase[out_slice] = phase / np.pi
                     samples = []
                     for pol_data in in_item.pol_data:
                         assert pol_data.samples is not None
@@ -982,9 +992,8 @@ class Pipeline:
         logger.debug("Updating delay sensor: %s", delay_sensor.name)
 
         orig_delay = delay_models[0].delay / self.engine.adc_sample_rate
-        phase_rate_correction = 0.5 * np.pi * delay_models[0].delay_rate
-        orig_phase = wrap_angle(delay_models[0].phase - 0.5 * np.pi * delay_models[0].delay)
-        orig_phase_rate = (delay_models[0].phase_rate - phase_rate_correction) * self.engine.adc_sample_rate
+        orig_phase = delay_models[0].phase
+        orig_phase_rate = delay_models[0].phase_rate * self.engine.adc_sample_rate
         delay_sensor.value = (
             f"({delay_models[0].start}, "
             f"{orig_delay}, "
@@ -1578,21 +1587,13 @@ class Engine(aiokatcp.DeviceServer):
             phase, phase_rate = comma_string_to_float(phase_str)
 
             delay_samples = delay * self.adc_sample_rate
-            # For compatibility with MeerKAT, the phase given is the net change in
-            # phase for the centre frequency, including delay, and we need to
-            # compensate for the effect of the delay at that frequency. The centre
-            # frequency is 4 samples per cycle, so each sample of delay reduces
-            # phase by pi/2 radians.
-            delay_phase_correction = 0.5 * np.pi * delay_samples
-            phase += delay_phase_correction
-            phase_rate_correction = 0.5 * np.pi * delay_rate
             new_linear_models.append(
                 LinearDelayModel(
                     start_sample_count,
                     delay_samples,
                     delay_rate,
                     phase,
-                    phase_rate / self.adc_sample_rate + phase_rate_correction,
+                    phase_rate / self.adc_sample_rate,
                 )
             )
 

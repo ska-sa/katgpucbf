@@ -47,9 +47,7 @@ def postproc_host_pol(
         # Throw out last channel (Nyquist frequency)
         data = data_rfft.astype(np.complex64)[:, :channels]
     # Compute delay phases
-    channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :]
-    if complex_pfb:
-        channel_idx -= channels / 2
+    channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :] - channels / 2
     m2jpi = np.complex64(-2j * np.pi)
     phase = np.exp(m2jpi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
     assert phase.dtype == np.complex64

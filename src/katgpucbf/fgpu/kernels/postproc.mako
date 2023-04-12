@@ -258,7 +258,7 @@ DEVICE_FN int delay_channel(int k)
 % if complex_pfb:
     return (k >= CHANNELS / 2) ? k - CHANNELS : k;
 % else:
-    return k;
+    return k - CHANNELS / 2;
 % endif
 }
 
