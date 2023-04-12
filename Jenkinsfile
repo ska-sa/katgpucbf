@@ -165,7 +165,7 @@ pipeline {
           }
         dockerImage.id
         }
-        dockerImage.id
+        //dockerImage.id
         // Remove the built and pushed Docker image from host
         //sh "docker rmi \$(docker images --quiet --filter label=org.opencontainers.image.revision=${env.GIT_COMMIT})"
       }
