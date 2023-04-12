@@ -164,6 +164,7 @@ pipeline {
             dockerImage.push()
           }
         imageID = dockerImage.id
+        echo "Image ID = ${imageID}"
         }
         //dockerImage.id
         // Remove the built and pushed Docker image from host
