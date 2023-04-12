@@ -161,7 +161,7 @@ class Compute(accel.OperationSequence):
             # Narrowband
             assert template.narrowband is not None
             if samples % template.ddc.subsampling != 0:
-                raise ValueError(f"samples {samples} must be a multiple of subsampling {template.ddc.subsampling}")
+                raise ValueError(f"samples ({samples}) must be a multiple of subsampling ({template.ddc.subsampling})")
             self.ddc = [template.ddc.instantiate(command_queue, samples) for _ in range(N_POLS)]
             for pol in range(N_POLS):
                 self.ddc[pol].mix_frequency = template.narrowband.mix_frequency
