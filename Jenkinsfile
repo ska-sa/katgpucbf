@@ -163,8 +163,7 @@ pipeline {
           docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
             dockerImage.push()
           }
-        imageID = dockerImage.id
-        echo "Image ID = ${imageID}"
+        sh "docker rmi ${dockerImage.id}"
         }
         //dockerImage.id
         // Remove the built and pushed Docker image from host
