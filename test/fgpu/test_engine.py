@@ -197,7 +197,7 @@ class TestEngine:
             return 0.0
 
     @pytest.fixture
-    def engine_arglist(self, output_arg: str, default_gain: np.float32) -> list[str]:
+    def engine_arglist(self, output: Output, output_arg: str, default_gain: np.float32) -> list[str]:
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
@@ -205,7 +205,7 @@ class TestEngine:
             "--dst-interface=lo",
             f"--sync-epoch={SYNC_EPOCH}",
             f"--src-chunk-samples={CHUNK_SAMPLES}",
-            f"--dst-chunk-jones={CHUNK_JONES}",
+            f"--dst-chunk-jones={CHUNK_JONES // output.decimation}",
             f"--max-delay-diff={MAX_DELAY_DIFF}",
             f"--spectra-per-heap={SPECTRA_PER_HEAP}",
             f"--src-packet-samples={PACKET_SAMPLES}",
@@ -674,9 +674,8 @@ class TestEngine:
         )
 
         # Adjust expected phase from the centre frequency to the other channel
-        channel_bw = ADC_SAMPLE_RATE / 2 / CHANNELS
-        if isinstance(output, NarrowbandOutput):
-            channel_bw /= output.decimation
+        bw = ADC_SAMPLE_RATE / 2 / output.decimation
+        channel_bw = bw / CHANNELS
         expected_phase -= (
             2 * np.pi * (tone_channels[1] - tone_channels[0]) * channel_bw * delay_rate * (timestamps / ADC_SAMPLE_RATE)
         )
@@ -945,7 +944,7 @@ class TestEngine:
             if self._in_item is None:
                 nonlocal counter
                 counter += 1
-                if counter == 6:
+                if counter == 12:
                     await engine_client.request(*request)
                     _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
                     timestamp.append(int(informs[0].arguments[4]))
@@ -965,7 +964,7 @@ class TestEngine:
         monkeypatch,
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?gain``."""
-        n_samples = max(8 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
+        n_samples = max(16 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
@@ -1000,7 +999,7 @@ class TestEngine:
         monkeypatch,
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?delays``."""
-        n_samples = max(8 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
+        n_samples = max(16 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
         dig_data = self._make_tone(n_samples, CW(frac_channel=frac_channel(output, CHANNELS // 2), magnitude=100), 0)
 
         timestamp_list = self._patch_fill_in(
