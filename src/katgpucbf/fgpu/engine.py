@@ -1188,7 +1188,7 @@ class Engine(aiokatcp.DeviceServer):
         # For copying head of each chunk to the tail of the previous chunk
         self._copy_queue = context.create_command_queue()
 
-        extra_samples = max_delay_diff + max(output.taps * output.spectra_samples for output in outputs)
+        extra_samples = max_delay_diff + max(output.window for output in outputs)
         if extra_samples > self.src_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.n_samples = self.src_layout.chunk_samples + extra_samples
