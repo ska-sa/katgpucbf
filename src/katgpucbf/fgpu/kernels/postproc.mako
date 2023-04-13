@@ -270,8 +270,10 @@ DEVICE_FN int delay_channel(int k)
  * - 8-bit quantisation
  * - Interleaving of polarisations
  *
- * The kernel assumes that the actual delay (in fractions of a sample?) has
- * been calculated, calculates the per-channel phasor and applies it.
+ * The kernel assumes that the actual delay has been calculated, calculates the
+ * per-channel phasor and applies it. The fine delay is expressed in terms of
+ * the phase slope, and must be scaled to the change in phase across the output
+ * band.
  *
  * See fgpu.design.rst for more detailed explanations of what this kernel is
  * doing (particularly with regards to FFTs), as well as the meanings of many

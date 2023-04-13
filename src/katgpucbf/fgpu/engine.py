@@ -782,7 +782,10 @@ class Pipeline:
                 if batch_spectra > 0:
                     logging.debug("Processing %d spectra", batch_spectra)
                     out_slice = np.s_[self._out_item.n_spectra : self._out_item.n_spectra + batch_spectra]
-                    self._out_item.fine_delay[out_slice] = fine_delays.T / self.output.subsampling
+                    # Convert units of fine delay from digitiser samples to phase slope
+                    # across the band. Narrowband has `decimation` times less bandwidth,
+                    # so the phase change across the band is that much less.
+                    self._out_item.fine_delay[out_slice] = fine_delays.T / self.output.decimation
                     # The phase is referenced to the centre frequency, but
                     # coarse delay in wideband affects the phase of the centre
                     # frequency (each sample shifts it by pi/2) and this
