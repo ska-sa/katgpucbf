@@ -391,7 +391,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=2**23,
         metavar="VECTORS",
         help="Number of Jones vectors in output chunks. If not a multiple of "
-        "2*channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
+        "channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument(
         "--max-delay-diff",
