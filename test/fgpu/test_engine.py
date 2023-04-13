@@ -24,6 +24,7 @@ from functools import partial
 import aiokatcp
 import numpy as np
 import pytest
+import scipy.signal
 import spead2.send
 from katsdpsigproc.accel import roundup
 from numpy.typing import ArrayLike
@@ -31,8 +32,8 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine, InItem, Pipeline
-from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
+from katgpucbf.fgpu.engine import Engine, InItem, Pipeline, generate_ddc_weights, generate_pfb_weights
+from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS, parse_narrowband, parse_wideband
 from katgpucbf.fgpu.output import NarrowbandOutput, Output
 from katgpucbf.utils import TimeConverter
 
@@ -57,11 +58,6 @@ PACKET_SAMPLES = 4096
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
-# Expected frequency-domain magnitude for a tone with time-domain magnitude 1
-# when the eq gain is 1. The factor sqrt(2 * CHANNELS) is an approximation of
-# the normalisation factor applied to the PFB weights.
-COHERENT_SCALE = CHANNELS / np.sqrt(2 * CHANNELS)
-GAIN = np.float32(1 / COHERENT_SCALE)  # Default value passed to ?gain command
 
 
 @pytest.fixture
@@ -142,7 +138,36 @@ class TestEngine:
             return parse_narrowband(arg_value)
 
     @pytest.fixture
-    def engine_arglist(self, output_arg: str) -> list[str]:
+    def coherent_scale(self, output: Output) -> np.ndarray:
+        """Gain for tones.
+
+        Expected frequency-domain magnitude for a tone with time-domain
+        magnitude 1 when the eq gain is 1. The array is 1D, indexed by
+        channel.
+        """
+        pfb = generate_pfb_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff)
+        gain = np.repeat(np.sum(pfb), output.channels)
+        if isinstance(output, NarrowbandOutput):
+            ddc = generate_ddc_weights(output.ddc_taps, output.w_pass, output.w_stop, output.weight_pass)
+            response = np.fft.fftshift(scipy.signal.freqz(ddc, worN=output.spectra_samples, whole=True)[1])
+            # Discard higher frequencies
+            response = response[
+                (output.spectra_samples - output.channels) // 2 : (output.spectra_samples + output.channels) // 2
+            ]
+            gain *= np.abs(response)
+        # Factor of 2 is because the power is split between the positive and
+        # negative frequencies, and only the positive frequency is returned.
+        return gain / 2
+
+    @pytest.fixture
+    def default_gain(self, coherent_scale: np.ndarray) -> np.float32:
+        """Default value passed to ``?gain`` command."""
+        # Centre chain gets defined power. In narrowband, other channels will
+        # have less power.
+        return np.float32(1 / coherent_scale[len(coherent_scale) // 2])
+
+    @pytest.fixture
+    def engine_arglist(self, output_arg: str, default_gain: np.float32) -> list[str]:
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
@@ -156,7 +181,7 @@ class TestEngine:
             f"--src-packet-samples={PACKET_SAMPLES}",
             f"--feng-id={FENG_ID}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
-            f"--gain={GAIN}",
+            f"--gain={default_gain}",
             "--send-rate-factor=0",  # Infinitely fast
             output_arg,
             "239.10.10.0+7:7149",  # src1
@@ -399,26 +424,47 @@ class TestEngine:
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         output: Output,
+        coherent_scale: np.ndarray,
+        default_gain: np.float32,
         delay_samples: tuple[float, float],
     ) -> None:
         """Put in tones at channel centre frequencies, with delays and gains, and check the result."""
-        # Delay the tone by a negative amount, then compensate with a positive delay.
-        # (delay_samples and delay_s are correction terms).
+        if isinstance(output, NarrowbandOutput):
+            # Narrowband introduces extra delay via the low-pass filter. We
+            # correct for this by shifting the tone. That *doesn't* shift the
+            # mixer, so we need to adjust the expected phase for that too.
+            # The 0.5 + is because we're simulating the second Nyquist zone
+            # and applying an additional mixer at the Nyquist frequency.
+            extra_delay_samples = (DEFAULT_DDC_TAPS - 1) / 2
+            extra_phase = wrap_angle(
+                -2 * np.pi * (0.5 + output.centre_frequency / ADC_SAMPLE_RATE) * extra_delay_samples
+            )
+        else:
+            extra_delay_samples = 0.0
+            extra_phase = 0.0
+        # Delay the tone by a negative amount, then compensate with a positive
+        # delay (delay_samples and delay_s are correction terms).
         # The tones are placed in the second Nyquist zone (the "1 +" in
         # frac_channel) then down-converted to baseband, simulating what
         # happens in MeerKAT L-band.
         tone_channels = [64, 271]
         tones = [
-            CW(frac_channel=1 + frac_channel(output, tone_channels[0]), magnitude=80.0, delay=-delay_samples[0]),
+            CW(
+                frac_channel=1 + frac_channel(output, tone_channels[0]),
+                magnitude=110.0,
+                delay=-delay_samples[0] + extra_delay_samples,
+            ),
             CW(
                 frac_channel=1 + frac_channel(output, tone_channels[1]),
-                magnitude=110.0,
+                magnitude=80.0,
                 phase=1.23,
-                delay=-delay_samples[1],
+                delay=-delay_samples[1] + extra_delay_samples,
             ),
         ]
         delay_s = np.array(delay_samples) / ADC_SAMPLE_RATE
         sky_centre_frequency = 0.75 * ADC_SAMPLE_RATE
+        if isinstance(output, NarrowbandOutput):
+            sky_centre_frequency += output.centre_frequency - 0.25 * ADC_SAMPLE_RATE
         # Compute phase correction to compensate for the down-conversion.
         # (delay_s is negated here because in the original it is the signal
         # delay rather than the correction).
@@ -431,7 +477,7 @@ class TestEngine:
         # Use constant-magnitude gains to avoid throwing off the magnitudes
         rng = np.random.default_rng(123)
         gain_phase = rng.uniform(0, 2 * np.pi, (CHANNELS, N_POLS))
-        gains = GAIN * np.exp(1j * gain_phase).astype(np.complex64)
+        gains = default_gain * np.exp(1j * gain_phase).astype(np.complex64)
         for pol in range(N_POLS):
             await engine_client.request("gain", "test_stream", pol, *(str(gain) for gain in gains[:, pol]))
 
@@ -467,13 +513,13 @@ class TestEngine:
         # Check for the tones
         for pol in range(2):
             tone_data = out_data[tone_channels[pol], :, pol]
-            expected_mag = tones[pol].magnitude * COHERENT_SCALE * GAIN
+            expected_mag = tones[pol].magnitude * coherent_scale[tone_channels[pol]] * default_gain
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, abs=3))
             # The frequency corresponds to an integer number of cycles per
             # spectrum, so the phase will be consistent across spectra.
             # The accuracy is limited by the quantisation.
-            expected_phase = wrap_angle(tones[pol].phase + gain_phase[tone_channels[pol], pol])
+            expected_phase = wrap_angle(tones[pol].phase + gain_phase[tone_channels[pol], pol] + extra_phase)
             np.testing.assert_equal(np.angle(tone_data), pytest.approx(expected_phase, abs=0.01))
             # Suppress the tone and check that everything is now zero (the
             # spectral leakage should be below the quantisation threshold).
@@ -487,6 +533,8 @@ class TestEngine:
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         output: Output,
+        coherent_scale: np.ndarray,
+        default_gain: np.float32,
     ) -> None:
         """Test leakage from tones that are not in the frequency centre."""
         # Rather than parametrize the test (which would be slow), send in
@@ -500,14 +548,13 @@ class TestEngine:
             CW(frac_channel=(CHANNELS // 2 - 0.5 + (i + 0.5) / n_tones) / CHANNELS, magnitude=500)
             for i in range(n_tones)
         ]
-        pfb_window = CHANNELS * 2 * TAPS
-        dig_data = np.concatenate([self._make_tone(pfb_window, tone, 0) for tone in tones], axis=1)
+        dig_data = np.concatenate([self._make_tone(output.window, tone, 0) for tone in tones], axis=1)
         # Add some extra data to fill out the last output heap
         padding = np.zeros((2, engine_server.src_layout.chunk_samples), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
-        gain = 100 / COHERENT_SCALE
+        gain = 100 * default_gain
         for pol in range(N_POLS):
             await engine_client.request("gain", "test_stream", pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
@@ -515,7 +562,7 @@ class TestEngine:
         #
         # The division by 20 (not 10) is because we're dealing with voltage,
         # not power.
-        tol = 10 ** (-53 / 20) * (tones[0].magnitude * COHERENT_SCALE) * gain
+        tol = 10 ** (-53 / 20) * (tones[0].magnitude * coherent_scale[CHANNELS // 2]) * gain
 
         out_data, _ = await self._send_data(
             mock_recv_streams,
@@ -814,13 +861,14 @@ class TestEngine:
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         output: Output,
+        default_gain: np.float32,
         tone_pol: int,
     ) -> None:
         """Test that ``output_clipped_samples`` metric and ``feng-clip-count`` sensor increase when a channel clips."""
         tone = CW(frac_channel=frac_channel(output, 271), magnitude=110.0)
         for pol in range(N_POLS):
             # Set gain high enough to make the tone saturate
-            await engine_client.request("gain", "test_stream", pol, GAIN * 2)
+            await engine_client.request("gain", "test_stream", pol, default_gain * 2)
 
         src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
