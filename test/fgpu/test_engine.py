@@ -864,7 +864,7 @@ class TestEngine:
         """Test that the ``dig-clip-cnt`` sensors are set correctly."""
         sensors = [engine_server.sensors[f"input{pol}.dig-clip-cnt"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
-        n_samples = 3 * CHUNK_SAMPLES
+        n_samples = 9 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
         saturation_value = 2 ** (engine_server.src_layout.sample_bits - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
@@ -879,10 +879,10 @@ class TestEngine:
         # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
         # __eq__ and __repr__) so that it can be used in comparisons.
         time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
-        expected_timestamps = [time_converter.adc_to_unix(t) for t in [524288, 1048576, 1572864]]
-        assert [r.value for r in sensor_update_dict[sensors[0].name]] == [5000, 5000, 5000]
+        expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
+        assert [r.value for r in sensor_update_dict[sensors[0].name]] == [5000] * 9
         assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == expected_timestamps
-        assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0, 10000]
+        assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0] + [10000] * 7
         assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == expected_timestamps
 
     @pytest.mark.parametrize("tone_pol", [0, 1])
