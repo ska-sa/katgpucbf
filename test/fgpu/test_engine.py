@@ -99,7 +99,7 @@ class CW:
         return self.magnitude * np.cos(np.pi * self.frac_channel * (t - self.delay) + self.phase)
 
 
-def frac_channel(output: Output, channel: int) -> float:
+def frac_channel(output: Output, channel: float) -> float:
     """Convert a channel number to a `frac_channel` parameter for :class:`CW`."""
     if isinstance(output, NarrowbandOutput):
         # Convert centre frequency to a frac_channel
@@ -562,18 +562,24 @@ class TestEngine:
         """Test leakage from tones that are not in the frequency centre."""
         # Rather than parametrize the test (which would be slow), send in
         # lots of different tones at different times. Each tone is maintained
-        # for a full PFB window, and we just discard the outputs corresponding
-        # to times that mix the tones. The tones are all placed in the centre
-        # channel, but linearly spaced over the frequencies in that channel's
-        # frequency bin.
-        n_tones = 1024  # Note: must lead to sending a whole number of chunks
+        # for at least full window, and we just discard the outputs
+        # corresponding to times that mix the tones. The tones are all placed
+        # in the centre channel, but linearly spaced over the frequencies in
+        # that channel's frequency bin.
+        n_tones = 128
+        # We want to start each tone on a spectrum boundary
+        step = roundup(output.window, output.spectra_samples)
         tones = [
-            CW(frac_channel=(CHANNELS // 2 - 0.5 + (i + 0.5) / n_tones) / CHANNELS, magnitude=500)
+            CW(frac_channel=frac_channel(output, CHANNELS // 2 - 0.5 + (i + 0.5) / n_tones), magnitude=500)
             for i in range(n_tones)
         ]
-        dig_data = np.concatenate([self._make_tone(output.window, tone, 0) for tone in tones], axis=1)
-        # Add some extra data to fill out the last output heap
-        padding = np.zeros((2, engine_server.src_layout.chunk_samples), dig_data.dtype)
+        dig_data = np.concatenate([self._make_tone(step, tone, 0) for tone in tones], axis=1)
+        # Add some extra data to align to an input heap, and to fill out the
+        # last output chunk.
+        output_chunk_samples = engine_server.chunk_jones * 2 * output.decimation
+        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine_server.src_layout.chunk_samples)
+        n_pad = padded_size - dig_data.shape[1]
+        padding = np.zeros((2, n_pad), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
 
         # Crank up the gain so that leakage is measurable
@@ -596,7 +602,9 @@ class TestEngine:
         )
         for i in range(n_tones):
             # Get the data for the PFB window that holds the tone
-            data = out_data[:, i * TAPS, 0]
+            data = out_data[:, i * (step // output.spectra_samples), 0]
+            # Check that the tone was in the right place (it should saturate)
+            assert np.abs(data[CHANNELS // 2]) >= 127
             # Blank out the channel that is expected to have the tone, and
             # the nearer adjacent one (with is within the 2x tolerance).
             data[CHANNELS // 2] = 0
