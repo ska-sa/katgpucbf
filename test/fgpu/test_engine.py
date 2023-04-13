@@ -923,12 +923,17 @@ class TestEngine:
             )
             == 0
         )
+
+        # Compute the expected timestamp. The timestamp is associated with the
+        # output chunk, so we need to round up to output chunk size.
+        last_timestamp = roundup(timestamps[-1] + 1, engine_server.chunk_jones * output.decimation * 2)
+
         sensor = engine_server.sensors[f"test_stream.input{tone_pol}.feng-clip-cnt"]
         assert sensor.value == len(timestamps)
-        assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
+        assert sensor.timestamp == SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE
         sensor = engine_server.sensors[f"test_stream.input{1 - tone_pol}.feng-clip-cnt"]
         assert sensor.value == 0
-        assert sensor.timestamp == SYNC_EPOCH + n_samples / ADC_SAMPLE_RATE
+        assert sensor.timestamp == SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE
 
     def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
         """Patch Pipeline._fill_in` to make a request partway through the stream.
