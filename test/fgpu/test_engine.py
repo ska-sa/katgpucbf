@@ -33,7 +33,7 @@ from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InItem, Pipeline, generate_ddc_weights, generate_pfb_weights
-from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS, parse_narrowband, parse_wideband
+from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
 from katgpucbf.fgpu.output import NarrowbandOutput, Output
 from katgpucbf.utils import TimeConverter
 
@@ -165,6 +165,36 @@ class TestEngine:
         # Centre chain gets defined power. In narrowband, other channels will
         # have less power.
         return np.float32(1 / coherent_scale[len(coherent_scale) // 2])
+
+    @pytest.fixture
+    def extra_delay_samples(self, output: Output) -> float:
+        """Extra samples by which to delay tones for narrowband tests.
+
+        The narrowband pipeline uses a low-pass filter, which affects phase
+        because the output timestamp corresponds to the first sample rather
+        than the centre of mass of the filter. To compensate for this:
+
+        - tones must be delayed by this much; and
+        - tones phases must be increased by :meth:`extra_phase` (because the
+          mixer is *not* shifted)
+        """
+        if isinstance(output, NarrowbandOutput):
+            return (output.ddc_taps - 1) / 2
+        else:
+            return 0.0
+
+    @pytest.fixture
+    def extra_phase(self, output: Output, extra_delay_samples: float) -> float:
+        """Extra phase due to narrowband low-pass filter.
+
+        See :meth:`extra_delay_samples` for details. Note that this is valid
+        only for baseband tones. If tones are generated in sky frequencies and
+        shifted, a further correction is needed.
+        """
+        if isinstance(output, NarrowbandOutput):
+            return wrap_angle(2 * np.pi * (output.centre_frequency / ADC_SAMPLE_RATE) * extra_delay_samples)
+        else:
+            return 0.0
 
     @pytest.fixture
     def engine_arglist(self, output_arg: str, default_gain: np.float32) -> list[str]:
@@ -426,38 +456,31 @@ class TestEngine:
         output: Output,
         coherent_scale: np.ndarray,
         default_gain: np.float32,
+        extra_delay_samples: float,
+        extra_phase: float,
         delay_samples: tuple[float, float],
     ) -> None:
         """Put in tones at channel centre frequencies, with delays and gains, and check the result."""
-        if isinstance(output, NarrowbandOutput):
-            # Narrowband introduces extra delay via the low-pass filter. We
-            # correct for this by shifting the tone. That *doesn't* shift the
-            # mixer, so we need to adjust the expected phase for that too.
-            # The 0.5 + is because we're simulating the second Nyquist zone
-            # and applying an additional mixer at the Nyquist frequency.
-            extra_delay_samples = (DEFAULT_DDC_TAPS - 1) / 2
-            extra_phase = wrap_angle(
-                -2 * np.pi * (0.5 + output.centre_frequency / ADC_SAMPLE_RATE) * extra_delay_samples
-            )
-        else:
-            extra_delay_samples = 0.0
-            extra_phase = 0.0
+        # extra_phase is for baseband, but we're simulating the second Nyquist zone
+        extra_phase += np.pi * extra_delay_samples
         # Delay the tone by a negative amount, then compensate with a positive
         # delay (delay_samples and delay_s are correction terms).
         # The tones are placed in the second Nyquist zone (the "1 +" in
         # frac_channel) then down-converted to baseband, simulating what
         # happens in MeerKAT L-band.
         tone_channels = [64, 271]
+        tone_phases = [0.0, 1.23]
         tones = [
             CW(
                 frac_channel=1 + frac_channel(output, tone_channels[0]),
                 magnitude=110.0,
+                phase=tone_phases[0] + extra_phase,
                 delay=-delay_samples[0] + extra_delay_samples,
             ),
             CW(
                 frac_channel=1 + frac_channel(output, tone_channels[1]),
                 magnitude=80.0,
-                phase=1.23,
+                phase=tone_phases[1] + extra_phase,
                 delay=-delay_samples[1] + extra_delay_samples,
             ),
         ]
@@ -519,7 +542,7 @@ class TestEngine:
             # The frequency corresponds to an integer number of cycles per
             # spectrum, so the phase will be consistent across spectra.
             # The accuracy is limited by the quantisation.
-            expected_phase = wrap_angle(tones[pol].phase + gain_phase[tone_channels[pol], pol] + extra_phase)
+            expected_phase = wrap_angle(tone_phases[pol] + gain_phase[tone_channels[pol], pol])
             np.testing.assert_equal(np.angle(tone_data), pytest.approx(expected_phase, abs=0.01))
             # Suppress the tone and check that everything is now zero (the
             # spectral leakage should be below the quantisation threshold).
@@ -599,6 +622,8 @@ class TestEngine:
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         output: Output,
+        extra_delay_samples: float,
+        extra_phase: float,
         dig_sample_bits: int,
     ) -> None:
         """Test that delay rate and phase rate setting works."""
@@ -608,9 +633,12 @@ class TestEngine:
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
-        tones = [CW(frac_channel=frac_channel(output, channel), magnitude=110) for channel in tone_channels]
+        tones = [
+            CW(frac_channel=frac_channel(output, channel), magnitude=110, delay=extra_delay_samples, phase=extra_phase)
+            for channel in tone_channels
+        ]
         src_layout = engine_server.src_layout
-        n_samples = 10 * src_layout.chunk_samples
+        n_samples = 32 * src_layout.chunk_samples
         dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
         dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
 
@@ -622,9 +650,9 @@ class TestEngine:
         coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
         await engine_client.request("delays", "test_stream", SYNC_EPOCH, *coeffs)
 
-        first_timestamp = 100 * src_layout.chunk_samples
+        first_timestamp = roundup(100 * src_layout.chunk_samples, output.spectra_samples * SPECTRA_PER_HEAP)
         end_delay = round(min(delay_rate) * n_samples)
-        expected_spectra = (n_samples + end_delay) // (2 * CHANNELS) - (TAPS - 1)
+        expected_spectra = (n_samples + end_delay - output.window) // output.spectra_samples
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -634,7 +662,7 @@ class TestEngine:
             first_timestamp=first_timestamp,
             # The first output heap would require data from before first_timestamp, so
             # is omitted.
-            expected_first_timestamp=first_timestamp + 2 * CHANNELS * SPECTRA_PER_HEAP,
+            expected_first_timestamp=first_timestamp + output.spectra_samples * SPECTRA_PER_HEAP,
             dst_present=expected_spectra // SPECTRA_PER_HEAP - 1,
         )
         # Add a polarisation dimension to timestamps to simplify some
@@ -646,7 +674,12 @@ class TestEngine:
         )
 
         # Adjust expected phase from the centre frequency to the other channel
-        expected_phase -= np.pi * (tone_channels[1] - tone_channels[0]) / CHANNELS * delay_rate * timestamps
+        channel_bw = ADC_SAMPLE_RATE / 2 / CHANNELS
+        if isinstance(output, NarrowbandOutput):
+            channel_bw /= output.decimation
+        expected_phase -= (
+            2 * np.pi * (tone_channels[1] - tone_channels[0]) * channel_bw * delay_rate * (timestamps / ADC_SAMPLE_RATE)
+        )
         np.testing.assert_equal(
             wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
         )
@@ -968,7 +1001,7 @@ class TestEngine:
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?delays``."""
         n_samples = max(8 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
-        dig_data = self._make_tone(n_samples, CW(frac_channel=0.5, magnitude=100), 0)
+        dig_data = self._make_tone(n_samples, CW(frac_channel=frac_channel(output, CHANNELS // 2), magnitude=100), 0)
 
         timestamp_list = self._patch_fill_in(
             monkeypatch, engine_client, "delays", "test_stream", SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
