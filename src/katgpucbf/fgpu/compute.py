@@ -277,8 +277,6 @@ class Compute(accel.OperationSequence):
     ) -> None:
         """Run the PFB-FIR on the received samples, for a wideband pipeline.
 
-        Coarse delay also seems to be involved.
-
         Parameters
         ----------
         samples
@@ -310,8 +308,6 @@ class Compute(accel.OperationSequence):
         spectra: int,
     ) -> None:
         """Run the PFB-FIR on the received samples, for a narrowband pipeline.
-
-        Coarse delay also seems to be involved.
 
         Parameters
         ----------
