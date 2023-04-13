@@ -707,6 +707,8 @@ class TestEngine:
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
+        extra_delay_samples: float,
+        extra_phase: float,
         output: Output,
     ) -> None:
         """Test loading several future delay models."""
@@ -716,7 +718,9 @@ class TestEngine:
 
         # To keep things simple, we'll just use phase, not delay.
         tone_channel = CHANNELS // 2
-        tone = CW(frac_channel=0.5, magnitude=110)
+        tone = CW(
+            frac_channel=frac_channel(output, tone_channel), magnitude=110, delay=extra_delay_samples, phase=extra_phase
+        )
         src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
         dig_data = self._make_tone(n_samples, tone, 0)
