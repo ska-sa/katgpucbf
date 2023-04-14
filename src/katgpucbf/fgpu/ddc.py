@@ -24,6 +24,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS, DIG_SAMPLE_BITS
+from . import INPUT_CHUNK_PADDING
 
 
 class _TuningDict(TypedDict):
@@ -71,6 +72,7 @@ class DDCTemplate:
         self._segment_samples = tuning["segment_samples"]
         self.taps = taps
         self.subsampling = subsampling
+        self.input_sample_bits = DIG_SAMPLE_BITS
 
         self._group_out_size = self.wgs // self._sg_size * self._coarsen
         self._group_in_size = self._group_out_size * subsampling
@@ -150,6 +152,10 @@ class DDC(accel.Operation):
         Baseband filter coefficients. If the filter is asymmetric, the
         coefficients must be reversed: the first element gets
         multiplied by the oldest sample.
+    **total_power** : uint64
+        Sum of squares of input samples.
+
+        .. todo:: This is not implemented yet (it exists but is not touched).
 
     Raises
     ------
@@ -175,17 +181,16 @@ class DDC(accel.Operation):
         self.template = template
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.subsampling)
+        # The actual padding requirement is just 4-byte alignment, but using
+        # INPUT_CHUNK_PADDING gives consistent padding to wideband pipelines.
+        in_bytes = samples * DIG_SAMPLE_BITS // BYTE_BITS
         self.slots["in"] = accel.IOSlot(
-            (
-                accel.Dimension(
-                    samples * DIG_SAMPLE_BITS // BYTE_BITS,
-                    alignment=4,
-                ),
-            ),
+            (accel.Dimension(in_bytes, min_padded_size=in_bytes + INPUT_CHUNK_PADDING),),
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
+        self.slots["total_power"] = accel.IOSlot((), np.uint64)
         self._mix_lookup = accel.DeviceArray(
             template.context, (template._segments, template._segment_samples), np.complex64
         )

@@ -126,7 +126,9 @@ pyyaml==6.0
 redis==4.5.4
     # via katsdptelstate
 scipy==1.9.2
-    # via katsdpsigproc
+    # via
+    #   katgpucbf (setup.cfg)
+    #   katsdpsigproc
 six==1.16.0
     # via
     #   katsdptelstate

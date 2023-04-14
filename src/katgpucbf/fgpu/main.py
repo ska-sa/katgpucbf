@@ -56,6 +56,7 @@ _T = TypeVar("_T")
 _OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
+DEFAULT_DDC_TAPS = 256
 DEFAULT_W_CUTOFF = 1.0
 
 
@@ -128,6 +129,10 @@ class NarrowbandOutputDict(OutputDict, total=False):
 
     centre_frequency: float
     decimation: int
+    ddc_taps: int
+    w_pass: float
+    w_stop: float
+    weight_pass: float
 
 
 def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
@@ -197,13 +202,19 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
     - centre_frequency
     - decimation
     - dst
+
+    If decimation is not 8 or 16, the following are also required:
+
+    - w_pass
+    - w_stop
+    - weight_pass
     """
 
     def field_callback(kws: NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
-            case "centre_frequency":
+            case "centre_frequency" | "w_pass" | "w_stop" | "weight_pass":
                 kws[key] = float(data)
-            case "decimation":
+            case "decimation" | "ddc_taps":
                 kws[key] = int(data)
             case _:
                 raise ValueError(f"unknown key {key}")
@@ -211,7 +222,15 @@ def parse_narrowband(value: str) -> NarrowbandOutputDict:
     try:
         kws: NarrowbandOutputDict = {}
         _parse_stream(value, kws, field_callback)
-        for key in ["centre_frequency", "decimation"]:
+        # These defaults are specified by MeerKAT requirements. Note that
+        # using **kws at the end means these are only defaults which can be
+        # overridden by the user.
+        # The ignores are to work around https://github.com/python/mypy/issues/9408
+        if kws.get("decimation") == 8:
+            kws = {"w_pass": 0.348 / 16, "w_stop": 0.574 / 16, "weight_pass": 0.015, **kws}  # type: ignore
+        elif kws.get("decimation") == 16:
+            kws = {"w_pass": 0.215 / 32, "w_stop": 0.629 / 32, "weight_pass": 0.033, **kws}  # type: ignore
+        for key in ["centre_frequency", "decimation", "w_pass", "w_stop", "weight_pass"]:
             if key not in kws:
                 raise ValueError(f"{key} is missing")
     except ValueError as exc:
@@ -239,7 +258,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Add a narrowband output (may be repeated). "
             "The required keys are: name, centre_frequency, decimation, channels, dst. "
-            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}]"
+            f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS}], "
+            f"w_cutoff [{DEFAULT_W_CUTOFF}], w_pass, w_stop, weight_pass. "
+            "If decimation is not 8 or 16, then w_pass, w_stop, weight_pass are required."
         ),
     )
     parser.add_argument(
@@ -426,13 +447,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             if len(output["dst"]) % len(args.dst_interface) != 0:
                 parser.error(f"{name}: number of destinations must be divisible by number of destination interfaces")
             used_names.add(name)
-            if "taps" not in output:
-                output["taps"] = DEFAULT_TAPS
-            if "w_cutoff" not in output:
-                output["w_cutoff"] = DEFAULT_W_CUTOFF
+            # Set defaults (listing **output allows defaults to be overridden)
+            output = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, **output}
             if output_group is args.wideband:
                 args.outputs.append(WidebandOutput(**output))
             else:
+                output = {"ddc_taps": DEFAULT_DDC_TAPS, **output}
                 args.outputs.append(NarrowbandOutput(**output))
     if not args.outputs:
         parser.error("At least one --wideband or --narrowband argument is required")

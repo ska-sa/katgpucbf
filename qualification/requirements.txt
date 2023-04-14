@@ -306,6 +306,7 @@ scipy==1.9.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
+    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
 six==1.16.0
     # via

@@ -66,12 +66,16 @@ class TestParseNarrowband:
             "centre_frequency": 400e6,
             "decimation": 8,
             "dst": [Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
+            "w_pass": 0.02175,
+            "w_stop": 0.035875,
+            "weight_pass": 0.015,
         }
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
         assert parse_narrowband(
-            "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,w_cutoff=0.5,dst=239.1.2.3+1:7148"
+            "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,"
+            "w_cutoff=0.5,dst=239.1.2.3+1:7148,ddc_taps=128,w_pass=0.1,w_stop=0.2,weight_pass=0.3"
         ) == {
             "name": "foo",
             "channels": 1024,
@@ -80,6 +84,10 @@ class TestParseNarrowband:
             "taps": 8,
             "w_cutoff": 0.5,
             "dst": [Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
+            "ddc_taps": 128,
+            "w_pass": 0.1,
+            "w_stop": 0.2,
+            "weight_pass": 0.3,
         }
 
     @pytest.mark.parametrize(
@@ -116,7 +124,8 @@ class TestParseArgs:
             "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9",
             (
                 "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,"
-                "centre_frequency=400e6,decimation=8,taps=4,w_cutoff=0.8"
+                "centre_frequency=400e6,decimation=8,taps=4,w_cutoff=0.8,"
+                "ddc_taps=128,w_pass=0.1,w_stop=0.2,weight_pass=0.3"
             ),
             "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,centre_frequency=300e6,decimation=16",
             "239.0.1.0+7:7148",
@@ -139,6 +148,10 @@ class TestParseArgs:
                 decimation=8,
                 taps=4,
                 w_cutoff=0.8,
+                ddc_taps=128,
+                w_pass=0.1,
+                w_stop=0.2,
+                weight_pass=0.3,
             ),
             NarrowbandOutput(
                 name="nb1",
@@ -148,5 +161,9 @@ class TestParseArgs:
                 decimation=16,
                 taps=16,
                 w_cutoff=1.0,
+                ddc_taps=256,
+                w_pass=0.00671875,
+                w_stop=0.01965625,
+                weight_pass=0.033,
             ),
         ]

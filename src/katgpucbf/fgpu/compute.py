@@ -20,13 +20,27 @@ Allocations of memory for input, intermediate and output are also handled here.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from fractions import Fraction
 
 import numpy as np
 from katsdpsigproc import accel, fft
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS
-from . import pfb, postproc
+from . import ddc, pfb, postproc
+
+
+@dataclass
+class NarrowbandConfig:
+    """Configuration for a narrowband stream."""
+
+    #: Factor by which bandwidth is reduced
+    decimation: int
+    #: Taps in low-pass filter
+    taps: int
+    #: Mixer frequency, in cycles per ADC sample
+    mix_frequency: float
 
 
 class ComputeTemplate:
@@ -47,15 +61,32 @@ class ComputeTemplate:
         Number of channels into which the input data will be decomposed.
     dig_sample_bits
         Number of bits per digitiser sample.
+    narrowband
+        Configuration for narrowband operation. If ``None``, wideband is assumed.
     """
 
-    def __init__(self, context: AbstractContext, taps: int, channels: int, dig_sample_bits: int) -> None:
+    def __init__(
+        self,
+        context: AbstractContext,
+        taps: int,
+        channels: int,
+        dig_sample_bits: int,
+        narrowband: NarrowbandConfig | None,
+    ) -> None:
         self.context = context
         self.taps = taps
         self.channels = channels
+        self.narrowband = narrowband
         self.unzip_factor = 4 if channels >= 8 else 1
-        self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, self.unzip_factor)
-        self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor)
+        self.postproc = postproc.PostprocTemplate(
+            context, channels, self.unzip_factor, complex_pfb=narrowband is not None
+        )
+        if narrowband is None:
+            self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, self.unzip_factor)
+            self.ddc: ddc.DDCTemplate | None = None
+        else:
+            self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, 32, self.unzip_factor, complex_input=True)
+            self.ddc = ddc.DDCTemplate(context, narrowband.taps, narrowband.decimation * 2)
 
     def instantiate(
         self,
@@ -116,14 +147,27 @@ class Compute(accel.OperationSequence):
         spectra: int,
         spectra_per_heap: int,
     ) -> None:
-        self.dig_sample_bits = template.pfb_fir.input_sample_bits
         self.template = template
         self.samples = samples
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
 
-        # PFB-FIR and FFT each happen for each polarisation.
-        self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for pol in range(N_POLS)]
+        operations: list[tuple[str, accel.Operation]] = []
+        # DDC, PFB-FIR and FFT each happen for each polarisation.
+        if template.ddc is None:
+            # Wideband
+            self.ddc: list[ddc.DDC] | None = None
+        else:
+            # Narrowband
+            assert template.narrowband is not None
+            if samples % template.ddc.subsampling != 0:
+                raise ValueError(f"samples ({samples}) must be a multiple of subsampling ({template.ddc.subsampling})")
+            self.ddc = [template.ddc.instantiate(command_queue, samples) for _ in range(N_POLS)]
+            for pol in range(N_POLS):
+                self.ddc[pol].mix_frequency = template.narrowband.mix_frequency
+                operations.append((f"ddc{pol}", self.ddc[pol]))
+            samples = self.ddc[0].out_samples  # Number of samples available to remainder of pipeline
+        self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for _ in range(N_POLS)]
         fft_shape = (spectra, template.unzip_factor, template.channels // template.unzip_factor)
         fft_template = fft.FftTemplate(
             template.context,
@@ -134,13 +178,12 @@ class Compute(accel.OperationSequence):
             fft_shape,
             fft_shape,
         )
-        self.fft = [fft_template.instantiate(command_queue, fft.FftMode.FORWARD) for pol in range(N_POLS)]
+        self.fft = [fft_template.instantiate(command_queue, fft.FftMode.FORWARD) for _ in range(N_POLS)]
 
         # Postproc is single though because it involves the corner turn which
         # combines the two pols.
         self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap)
 
-        operations: list[tuple[str, accel.Operation]] = []
         for pol in range(N_POLS):
             operations.append((f"pfb_fir{pol}", self.pfb_fir[pol]))
         for pol in range(N_POLS):
@@ -162,17 +205,69 @@ class Compute(accel.OperationSequence):
             "gains": ["postproc:gains"],
         }
         aliases = {}
+        if template.ddc is not None:
+            compounds["ddc_weights"] = [f"ddc{pol}:weights" for pol in range(N_POLS)]
         for pol in range(N_POLS):
-            compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
-            # pfb_firN:out is an array of real values while fftN:src
-            # reinterprets it as an array of complex values. We thus have to
-            # make them aliases to view the memory as different types.
+            if template.ddc is None:
+                compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
+                compounds[f"dig_total_power{pol}"] = [f"pfb_fir{pol}:total_power"]
+            else:
+                compounds[f"in{pol}"] = [f"ddc{pol}:in"]
+                compounds[f"subsampled{pol}"] = [f"ddc{pol}:out", f"pfb_fir{pol}:in"]
+                compounds[f"dig_total_power{pol}"] = [f"ddc{pol}:total_power"]
+            # pfb_firN:out is an array of real values (in wideband) while
+            # fftN:src reinterprets it as an array of complex values. We thus
+            # have to make them aliases to view the memory as different
+            # types.
             aliases[f"fft_in{pol}"] = [f"pfb_fir{pol}:out", f"fft{pol}:src"]
             compounds[f"fft_out{pol}"] = [f"fft{pol}:dest", f"postproc:in{pol}"]
-            compounds[f"dig_total_power{pol}"] = [f"pfb_fir{pol}:total_power"]
         super().__init__(command_queue, operations, compounds, aliases)
 
-    def run_frontend(
+    def run_ddc(self, samples: Sequence[accel.DeviceArray], first_sample: int) -> None:
+        """Run the narrowband DDC kernel on the received samples.
+
+        Parameters
+        ----------
+        samples
+            A pair of device arrays containing the samples, one for each pol.
+        first_sample
+            Timestamp (in samples) of the initial sample. This is used to
+            correctly phase the mixer.
+        """
+        assert self.ddc is not None
+        for pol in range(N_POLS):
+            self.bind(**{f"in{pol}": samples[pol]})
+        # TODO: only bind relevant slots for frontend
+        self.ensure_all_bound()
+        for pol in range(N_POLS):
+            # TODO: could run these in parallel, but that would require two
+            # command queues.
+            # Compute the fractional part of first_sample * mix_frequency.
+            # Using Fraction avoids the serious rounding errors that would
+            # occur using floating point.
+            phase = Fraction(self.ddc[pol].mix_frequency) * first_sample
+            phase -= round(phase)
+            self.ddc[pol].mix_phase = float(phase)
+            self.ddc[pol]()
+
+    def _run_frontend_common(
+        self,
+        in_offsets: Sequence[int],
+        out_offset: int,
+        spectra: int,
+    ) -> None:
+        """Do common parts of :meth:`run_wideband_frontend` and :meth:`run_narrowband_frontend`."""
+        # TODO: only bind relevant slots for frontend
+        self.ensure_all_bound()
+        for pol in range(N_POLS):
+            # TODO: could run these in parallel, but that would require two
+            # command queues.
+            self.pfb_fir[pol].in_offset = in_offsets[pol]
+            self.pfb_fir[pol].out_offset = out_offset
+            self.pfb_fir[pol].spectra = spectra
+            self.pfb_fir[pol]()
+
+    def run_wideband_frontend(
         self,
         samples: Sequence[accel.DeviceArray],
         dig_total_power: Sequence[accel.DeviceArray],
@@ -180,9 +275,7 @@ class Compute(accel.OperationSequence):
         out_offset: int,
         spectra: int,
     ) -> None:
-        """Run the PFB-FIR on the received samples.
-
-        Coarse delay also seems to be involved.
+        """Run the PFB-FIR on the received samples, for a wideband pipeline.
 
         Parameters
         ----------
@@ -194,10 +287,11 @@ class Compute(accel.OperationSequence):
         in_offsets
             Index of first sample in input array to process (one for each pol).
         out_offset
-            TODO: Figure out what this is. Need to refer to the actual pfb_fir kernel.
+            Index of first sample in output array to write.
         spectra
             How many spectra worth of samples to push through the PFB-FIR.
         """
+        assert self.ddc is None
         if len(samples) != N_POLS:
             raise ValueError(f"samples must contain {N_POLS} elements")
         if len(in_offsets) != N_POLS:
@@ -205,15 +299,27 @@ class Compute(accel.OperationSequence):
         for pol in range(N_POLS):
             self.bind(**{f"in{pol}": samples[pol]})
             self.bind(**{f"dig_total_power{pol}": dig_total_power[pol]})
-        # TODO: only bind relevant slots for frontend
-        self.ensure_all_bound()
-        for pol in range(N_POLS):
-            # TODO: could run these in parallel, but that would require two
-            # command queues.
-            self.pfb_fir[pol].in_offset = in_offsets[pol]
-            self.pfb_fir[pol].out_offset = out_offset
-            self.pfb_fir[pol].spectra = spectra
-            self.pfb_fir[pol]()
+        self._run_frontend_common(in_offsets, out_offset, spectra)
+
+    def run_narrowband_frontend(
+        self,
+        in_offsets: Sequence[int],
+        out_offset: int,
+        spectra: int,
+    ) -> None:
+        """Run the PFB-FIR on the received samples, for a narrowband pipeline.
+
+        Parameters
+        ----------
+        in_offsets
+            Index of first sample in input array to process (one for each pol).
+        out_offset
+            Index of first sample in output array to write.
+        spectra
+            How many spectra worth of samples to push through the PFB-FIR.
+        """
+        assert self.ddc is not None
+        self._run_frontend_common(in_offsets, out_offset, spectra)
 
     def run_backend(self, out: accel.DeviceArray, saturated: accel.DeviceArray) -> None:
         """Run the FFT and postproc on the data which has been PFB-FIRed.

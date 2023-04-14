@@ -27,3 +27,8 @@ DIG_POWER_DBFS_HIGH: Final = -22.0
 
 #: Valid values for the ``--dig-sample-bits`` command-line option
 DIG_SAMPLE_BITS_VALID = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16]
+
+#: Padding to add to GPU allocations of input chunks
+# 8 is more than necessary but ensures that we have a simple consistent amount
+# of padding between wideband and narrowband.
+INPUT_CHUNK_PADDING = 8
