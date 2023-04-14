@@ -18,6 +18,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from katsdptelstate.endpoint import Endpoint
 
@@ -60,6 +61,16 @@ class Output(ABC):
         """Number of digitiser samples that contribute to each output spectrum."""
         raise NotImplementedError  # pragma: nocover
 
+    if TYPE_CHECKING:
+        # Actually defining it at runtime confuses the dataclass decorator,
+        # because on NarrowbandOutput it is a data member rather than a
+        # property.
+        @property
+        @abstractmethod
+        def decimation(self) -> int:
+            """Factor by which bandwidth is reduced."""
+            raise NotImplementedError  # pragma: nocover
+
 
 @dataclass
 class WidebandOutput(Output):
@@ -72,6 +83,10 @@ class WidebandOutput(Output):
     @property
     def spectra_samples(self) -> int:  # noqa: D102
         return 2 * self.channels
+
+    @property
+    def decimation(self) -> int:  # noqa: D102
+        return 1
 
     @property
     def subsampling(self) -> int:  # noqa: D102
