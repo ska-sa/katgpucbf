@@ -17,10 +17,6 @@
 \usepackage{ifthen}
 \usepackage{float}
 \usepackage{enumitem}
-\usepackage{mathtools}
-\usepackage{tablefootnote}
-\usepackage{color}
-\usepackage{colortbl}
 
 % For plotting to work nicely.
 \usepackage{pgfplots}
@@ -126,7 +122,7 @@
   \end{titlepage}
 }
 
-\newcommand{\makeInfoPage}{%
+\newcommand{\makeinfopage}{%
   \begin{center}
     % lots of padding for signatures
     \renewcommand{\arraystretch}{1.5}
@@ -231,7 +227,7 @@
   \pagestyle{empty}
   \maketitle
   \pagestyle{normal}
-  \makeInfoPage%
+  \makeinfopage%
 
   \newpage{}
   \setcounter{page}{1} % reset page numbering for the actual content
