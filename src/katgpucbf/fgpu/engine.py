@@ -788,10 +788,14 @@ class Pipeline:
                     self._out_item.fine_delay[out_slice] = fine_delays.T / self.output.decimation
                     # The phase is referenced to the centre frequency, but
                     # coarse delay in wideband affects the phase of the centre
-                    # frequency (each sample shifts it by pi/2) and this
-                    # needs to be corrected for. In narrowband the centre
-                    # frequency is shifted to DC by the mixer and no correction
-                    # is needed.
+                    # frequency. The centre frequency is 4 samples per cycle, so
+                    # each sample shifts it by pi/2, and this needs to be
+                    # corrected for. The 4-sample period also allows us to reduce
+                    # the coarse delay mod 4, which bounds the magnitude of the
+                    # correction and hence improves floating-point accuracy.
+                    #
+                    # In narrowband the centre frequency is shifted to DC by
+                    # the mixer and no correction is needed.
                     phase = phase.T
                     if isinstance(self.output, WidebandOutput):
                         phase += 0.5 * np.pi * (np.array(start_coarse_delays) % 4)
