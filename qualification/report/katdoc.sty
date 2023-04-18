@@ -14,16 +14,7 @@
 \usepackage{tabularx}
 \usepackage{longtable}
 \usepackage{multirow}
-\usepackage{ifthen}
-\usepackage{float}
 \usepackage{enumitem}
-
-% For plotting to work nicely.
-\usepackage{pgfplots}
-\DeclareUnicodeCharacter{2212}{−}
-\usepgfplotslibrary{groupplots,dateplot}
-\usetikzlibrary{patterns,shapes.arrows}
-\pgfplotsset{compat=newest}
 
 \geometry{nomarginpar,verbose,a4paper,tmargin=32mm,bmargin=27mm,lmargin=21mm,rmargin=19mm,headheight=10mm,headsep=12mm,footskip=12mm}
 \setlength{\parskip}{\medskipamount}
@@ -245,18 +236,15 @@
   \pagestyle{preamble}
   \makeinfopage%
 
-  \newpage{}
-  \setcounter{page}{1} % reset page numbering for the actual content
-  \pagenumbering{arabic}
-  \pagestyle{normal}
-
   \tableofcontents{}
   \newpage{}
 
   \listoffigures
-
   \listoftables
-
   \listofabbreviations
   \newpage{}
+
+  \setcounter{page}{1} % reset page numbering for the actual content
+  \pagenumbering{arabic}
+  \pagestyle{normal}
 }

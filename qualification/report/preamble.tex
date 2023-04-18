@@ -11,6 +11,13 @@
 % Make degree sign in listings (e.g. from a backtrace) work.
 \lstset{inputencoding=utf8,literate={°}{{\textdegree}}1}
 
+% For plotting to work nicely.
+\usepackage{pgfplots}
+\DeclareUnicodeCharacter{2212}{−}
+\usepgfplotslibrary{groupplots,dateplot}
+\usetikzlibrary{patterns,shapes.arrows}
+\pgfplotsset{compat=newest}
+
 \newcommand{\docClient}{NRF (National Research Foundation)}
 \newcommand{\docFacility}{SARAO (South African Radio Astronomy Observatory)}
 \newcommand{\docProject}{MeerKAT Extension}
