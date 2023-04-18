@@ -23,6 +23,10 @@
 \setcounter{secnumdepth}{5}
 \setcounter{tocdepth}{5}
 
+% We only support pdf(la)tex for this particular style file
+\usepackage{iftex}
+\RequirePDFTeX
+
 % Front Cover
 \newcommand{\addcontributor}[5]{%
   #1 & #2 & #3 & #4 & #5 & \\
