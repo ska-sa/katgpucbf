@@ -562,7 +562,7 @@ class TestEngine:
         """Test leakage from tones that are not in the frequency centre."""
         # Rather than parametrize the test (which would be slow), send in
         # lots of different tones at different times. Each tone is maintained
-        # for at least full window, and we just discard the outputs
+        # for at a least full window, and we just discard the outputs
         # corresponding to times that mix the tones. The tones are all placed
         # in the centre channel, but linearly spaced over the frequencies in
         # that channel's frequency bin.
@@ -774,8 +774,8 @@ class TestEngine:
     @pytest.mark.parametrize("channels", [64, 2048, 8192])
     # Use small spectra-per-heap to get finer-grained testing of which spectra
     # were ditched. Fewer would be better, but there are internal alignment
-    # requirements. --src-chunk-samples needs to be increased to ensure
-    # narrowband windows fit.
+    # requirements. --src-chunk-samples needs to be increased (from
+    # CHUNK_SAMPLES) to ensure narrowband windows fit.
     @pytest.mark.cmdline_args("--spectra-per-heap=32", "--src-chunk-samples=4194304")
     async def test_missing_heaps(
         self,
