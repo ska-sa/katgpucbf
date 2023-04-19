@@ -61,6 +61,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--band", default="l", choices=["l", "u"], help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
+    parser.add_argument("--narrowband", action="store_true", help="Enable a narrowband output [no]")
+    parser.add_argument(
+        "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
+    )
+    parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
+    parser.add_argument(
+        "--narrowband-centre-frequency", type=float, help="Narrow baseband centre frequency [centre of wideband]"
+    )
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
     parser.add_argument(
@@ -77,6 +85,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.adc_sample_rate = BANDS[args.band].adc_sample_rate
     if args.centre_frequency is None:
         args.centre_frequency = BANDS[args.band].centre_frequency
+    if args.narrowband_centre_frequency is None:
+        args.narrowband_centre_frequency = args.adc_sample_rate / 4
     if args.digitisers is None:
         args.digitisers = args.antennas
     return args
@@ -140,6 +150,15 @@ def generate_config(args: argparse.Namespace) -> dict:
         "input_labels": [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]],
         "n_chans": args.channels,
     }
+    if args.narrowband:
+        config["outputs"]["narrow0-antenna-channelised-voltage"] = {
+            **config["outputs"]["antenna-channelised-voltage"],  # Copy from wideband
+            "n_chans": args.narrowband_channels,
+            "narrowband": {
+                "decimation_factor": args.narrowband_decimation,
+                "centre_frequency": args.narrowband_centre_frequency,
+            },
+        }
     if args.last_stage == "f":
         return config
 
@@ -148,6 +167,11 @@ def generate_config(args: argparse.Namespace) -> dict:
         "src_streams": ["antenna-channelised-voltage"],
         "int_time": args.int_time,
     }
+    if args.narrowband:
+        config["outputs"]["narrow0-baseline-correlation-products"] = {
+            **config["outputs"]["baseline-correlation-products"],  # Copy from wideband
+            "src_streams": ["narrow0-antenna-channelised-voltage"],
+        }
     if args.last_stage == "x":
         return config
 
@@ -159,6 +183,11 @@ def generate_config(args: argparse.Namespace) -> dict:
         "archive": False,
         "continuum_factor": 1,
     }
+    if args.narrowband:
+        config["outputs"]["sdp_l0_narrow0"] = {
+            **config["outputs"]["sdp_l0"],  # Copy from wideband
+            "src_streams": ["narrow0-baseline-correlation-products"],
+        }
 
     return config
 
