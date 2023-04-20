@@ -78,8 +78,8 @@ class CW:
     Parameters
     ----------
     frac_channel
-        Frequency, as a channel number divided by the number of
-        channels (e.g., 0.5 means the centre frequency)
+        Frequency, as a fraction of the overall digitised bandwidth
+        (e.g., 0.5 means the wideband centre frequency)
     magnitude
         Voltage magnitude
     phase
