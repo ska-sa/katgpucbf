@@ -562,7 +562,7 @@ class TestEngine:
         """Test leakage from tones that are not in the frequency centre."""
         # Rather than parametrize the test (which would be slow), send in
         # lots of different tones at different times. Each tone is maintained
-        # for at a least full window, and we just discard the outputs
+        # for at least a full window, and we just discard the outputs
         # corresponding to times that mix the tones. The tones are all placed
         # in the centre channel, but linearly spaced over the frequencies in
         # that channel's frequency bin.
