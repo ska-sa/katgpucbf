@@ -17,7 +17,6 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
-import itertools
 import logging
 import math
 import numbers
@@ -32,6 +31,7 @@ import scipy.signal
 import spead2.recv
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
+from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     BYTE_BITS,
@@ -414,15 +414,13 @@ def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> n
 class Pipeline:
     """Processing pipeline for a single output stream."""
 
-    def __init__(self, output: Output, engine: "Engine", context: AbstractContext, substreams: Sequence[int]) -> None:
+    def __init__(self, output: Output, engine: "Engine", context: AbstractContext) -> None:
         # Tuning knobs not exposed via arguments
         n_send = 4
         n_out = n_send if engine.use_peerdirect else 2
 
         self.engine = engine
         self.output = output
-        self.substreams = substreams
-        assert len(substreams) == len(output.dst)
         self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue(f"{output.name}.in_queue", engine.n_in)
         self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue(f"{output.name}.out_queue", n_out)
         self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue(f"{output.name}.out_free_queue", n_out)
@@ -458,7 +456,7 @@ class Pipeline:
             )
 
         # Initialize sending
-        self.send_chunks = self._init_send(substreams, engine.use_peerdirect)
+        self._init_send(engine.use_peerdirect)
         self._out_item = self._out_free_queue.get_nowait()
         self._out_item.reset_all(compute_queue)
 
@@ -469,7 +467,7 @@ class Pipeline:
         self._init_delay_gain()
 
         self.descriptor_heap = send.make_descriptor_heap(
-            channels_per_substream=output.channels // len(substreams),
+            channels_per_substream=output.channels // len(output.dst),
             spectra_per_heap=engine.spectra_per_heap,
         )
 
@@ -531,7 +529,7 @@ class Pipeline:
         for pol in range(N_POLS):
             self.set_gains(pol, np.full(self.output.channels, self.engine.default_gain, dtype=np.complex64))
 
-    def _init_send(self, substreams: Sequence[int], use_peerdirect: bool) -> list[send.Chunk]:
+    def _init_send(self, use_peerdirect: bool) -> None:
         """Initialise the send side of the pipeline."""
         send_chunks: list[send.Chunk] = []
         for _ in range(self._out_free_queue.maxsize):
@@ -545,7 +543,7 @@ class Pipeline:
                 chunk = send.Chunk(
                     buf,
                     saturated=item.saturated.empty_like(),
-                    substreams=substreams,
+                    n_substreams=len(self.output.dst),
                     feng_id=self.engine.feng_id,
                     spectra_samples=self.output.spectra_samples,
                 )
@@ -563,13 +561,14 @@ class Pipeline:
                     send.Chunk(
                         accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
                         accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
-                        substreams=substreams,
+                        n_substreams=len(self.output.dst),
                         feng_id=self.engine.feng_id,
                         spectra_samples=self.output.spectra_samples,
                     )
                 )
                 self._send_free_queue.put_nowait(send_chunks[-1])
-        return send_chunks
+        n_data_heaps = len(send_chunks) * self.spectra // self.engine.spectra_per_heap * len(self.output.dst)
+        self._send_streams = self.engine.make_send_streams(self.output.dst, n_data_heaps, send_chunks)
 
     @property
     def spectra(self) -> int:  # noqa: D401
@@ -599,11 +598,6 @@ class Pipeline:
         an overlapping window with more samples than this.
         """
         return self.output.spectra_samples
-
-    @property
-    def n_data_heaps(self) -> int:
-        """Maximum number of data heaps that can be in flight."""
-        return len(self.send_chunks) * self.spectra // self.engine.spectra_per_heap * len(self.output.dst)
 
     def add_in_item(self, item: InItem) -> None:
         """Append a newly-received :class:`~.InItem`."""
@@ -884,7 +878,7 @@ class Pipeline:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
 
-    async def run_transmit(self, streams: list["spead2.send.asyncio.AsyncStream"]) -> None:
+    async def run_transmit(self) -> None:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without PeerDirect. In the
@@ -898,11 +892,6 @@ class Pipeline:
         In the PeerDirect case, the item and the chunk are bound together and
         share memory. In this case `_send_free_queue` is unused. The item is
         only returned to `_out_free_queue` once it has been fully transmitted.
-
-        Parameters
-        ----------
-        streams
-            The streams transmitting data.
         """
         task: asyncio.Future | None = None
         last_end_timestamp: int | None = None
@@ -957,7 +946,7 @@ class Pipeline:
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
                 skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.spectra_samples)
-                send.skipped_heaps_counter.labels(self.output.name).inc(skipped_frames * len(self.substreams))
+                send.skipped_heaps_counter.labels(self.output.name).inc(skipped_frames * len(self.output.dst))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:
@@ -965,7 +954,7 @@ class Pipeline:
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(
-                self._chunk_send_and_cleanup(streams, n_frames, chunk),
+                self._chunk_send_and_cleanup(self._send_streams, n_frames, chunk),
                 name="Chunk Send and Cleanup Task",
             )
             self.engine.add_service_task(task)
@@ -977,8 +966,8 @@ class Pipeline:
                 pass  # It's already logged by _chunk_send_and_cleanup
         stop_heap = spead2.send.Heap(send.FLAVOUR)
         stop_heap.add_end()
-        for substream_index in self.substreams:
-            await streams[0].async_send_heap(stop_heap, substream_index=substream_index)
+        for substream_index in range(len(self.output.dst)):
+            await self._send_streams[0].async_send_heap(stop_heap, substream_index=substream_index)
         logger.debug("run_transmit completed")
 
     def delay_update_timestamp(self) -> int:
@@ -1174,6 +1163,12 @@ class Engine(aiokatcp.DeviceServer):
         self._src_buffer = src_buffer
         self._src_ibv = src_ibv
         self.src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
+        self._dst_interface = dst_interface
+        self._dst_ttl = dst_ttl
+        self._dst_ibv = dst_ibv
+        self._dst_packet_payload = dst_packet_payload
+        self._dst_comp_vector = dst_comp_vector
+        self._send_rate_factor = send_rate_factor
         self.adc_sample_rate = adc_sample_rate
         self.feng_id = feng_id
         self.n_ants = num_ants
@@ -1200,33 +1195,10 @@ class Engine(aiokatcp.DeviceServer):
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
-        first_substream = 0
         self._pipelines = []
+        self._send_thread_pool = spead2.ThreadPool(1, [] if dst_affinity < 0 else [dst_affinity])
         for output in outputs:
-            last_substream = first_substream + len(output.dst)
-            substreams = range(first_substream, last_substream)
-            self._pipelines.append(Pipeline(output, self, context, substreams))
-            first_substream = last_substream
-
-        all_endpoints = list(itertools.chain.from_iterable(output.dst for output in outputs))
-        rate_scale = sum(output.send_rate_factor for output in outputs)
-        n_data_heaps = sum(pipeline.n_data_heaps for pipeline in self._pipelines)
-        send_chunks = list(itertools.chain.from_iterable(pipeline.send_chunks for pipeline in self._pipelines))
-        self._send_streams = send.make_streams(
-            endpoints=all_endpoints,
-            interfaces=dst_interface,
-            ttl=dst_ttl,
-            ibv=dst_ibv,
-            packet_payload=dst_packet_payload,
-            affinity=dst_affinity,
-            comp_vector=dst_comp_vector,
-            adc_sample_rate=adc_sample_rate,
-            send_rate_factor=send_rate_factor * rate_scale,
-            feng_id=feng_id,
-            num_ants=num_ants,
-            n_data_heaps=n_data_heaps,
-            chunks=send_chunks,
-        )
+            self._pipelines.append(Pipeline(output, self, context))
 
     def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
@@ -1312,6 +1284,29 @@ class Engine(aiokatcp.DeviceServer):
         time_sync_task = add_time_sync_sensors(sensors)
         self.add_service_task(time_sync_task)
         self._cancel_tasks.append(time_sync_task)
+
+    def make_send_streams(
+        self, endpoints: list[Endpoint], n_data_heaps: int, chunks: Sequence[send.Chunk]
+    ) -> list["spead2.send.asyncio.AsyncStream"]:
+        """Create send streams for a pipeline.
+
+        This method should only be called by :class:`Pipeline`.
+        """
+        return send.make_streams(
+            thread_pool=self._send_thread_pool,
+            endpoints=endpoints,
+            interfaces=self._dst_interface,
+            ttl=self._dst_ttl,
+            ibv=self._dst_ibv,
+            packet_payload=self._dst_packet_payload,
+            comp_vector=self._dst_comp_vector,
+            adc_sample_rate=self.adc_sample_rate,
+            send_rate_factor=self._send_rate_factor,
+            feng_id=self.feng_id,
+            num_ants=self.n_ants,
+            n_data_heaps=n_data_heaps,
+            chunks=chunks,
+        )
 
     def _update_steady_state_timestamp(self, timestamp: int) -> None:
         """Update the ``steady-state-timestamp`` sensor to at least a given value."""
@@ -1627,11 +1622,11 @@ class Engine(aiokatcp.DeviceServer):
         # before any data makes its way through the pipeline.
         for pipeline in self._pipelines:
             descriptor_sender = DescriptorSender(
-                self._send_streams[0],
+                pipeline._send_streams[0],
                 pipeline.descriptor_heap,
                 self.n_ants * descriptor_interval_s,
                 (self.feng_id + 1) * descriptor_interval_s,
-                substreams=pipeline.substreams,
+                substreams=range(len(pipeline.output.dst)),
             )
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
@@ -1663,7 +1658,7 @@ class Engine(aiokatcp.DeviceServer):
             self.add_service_task(proc_task)
 
             send_task = asyncio.create_task(
-                pipeline.run_transmit(self._send_streams),
+                pipeline.run_transmit(),
                 name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
             )
             self.add_service_task(send_task)
