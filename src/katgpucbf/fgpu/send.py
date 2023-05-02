@@ -66,32 +66,32 @@ class Frame:
         Saturation data for the frame, of shape (N_POLS,)
     feng_id
         Value to put in ``feng_id`` SPEAD item
-    substreams
-        Substream indices into which the channels are divided
+    n_substreams
+        Number of substreams into which the channels are divided
     """
 
     def __init__(
-        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, substreams: Sequence[int], feng_id: int
+        self, timestamp: np.ndarray, data: np.ndarray, saturated: np.ndarray, *, n_substreams: int, feng_id: int
     ) -> None:
-        channels = data.shape[0]
-        assert channels % len(substreams) == 0
-        channels_per_substream = channels // len(substreams)
+        n_channels = data.shape[0]
+        assert n_channels % n_substreams == 0
+        n_channels_per_substream = n_channels // n_substreams
         self.heaps = []
         self.data = data
         self.saturated = saturated
-        for i, substream_index in enumerate(substreams):
-            start_channel = i * channels_per_substream
+        for i in range(n_substreams):
+            start_channel = i * n_channels_per_substream
             heap = spead2.send.Heap(FLAVOUR)
             heap.repeat_pointers = True
             heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
             heap.add_item(make_immediate(FENG_ID_ID, feng_id))
             heap.add_item(make_immediate(FREQUENCY_ID, start_channel))
-            heap_data = data[start_channel : start_channel + channels_per_substream]
+            heap_data = data[start_channel : start_channel + n_channels_per_substream]
             assert heap_data.flags.c_contiguous, "Heap data must be contiguous"
             heap.add_item(
                 spead2.Item(FENG_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data)
             )
-            self.heaps.append(spead2.send.HeapReference(heap, substream_index=substream_index))
+            self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
 
 
 def _multi_send(
@@ -124,15 +124,15 @@ class Chunk:
         data: np.ndarray,
         saturated: np.ndarray,
         *,
-        substreams: Sequence[int],
+        n_substreams: int,
         feng_id: int,
         spectra_samples: int,
     ) -> None:
         n_frames = data.shape[0]
-        channels = data.shape[1]
-        spectra_per_heap = data.shape[2]
-        if channels % len(substreams) != 0:
-            raise ValueError("substreams must divide into channels")
+        n_channels = data.shape[1]
+        n_spectra_per_heap = data.shape[2]
+        if n_channels % n_substreams != 0:
+            raise ValueError("n_substreams must divide into n_channels")
         self.data = data
         self.saturated = saturated
         #: Whether each frame has valid data
@@ -141,13 +141,13 @@ class Chunk:
         self._timestamp = 0
         #: Callback to return the chunk to the appropriate queue
         self.cleanup: Callable[[], None] | None = None
-        self._timestamp_step = spectra_per_heap * spectra_samples
+        self._timestamp_step = n_spectra_per_heap * spectra_samples
         #: Storage for timestamps in the SPEAD heaps.
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
         # The ... in indexing causes numpy to give a 0d array view, rather than
         # a scalar.
         self._frames = [
-            Frame(self._timestamps[i, ...], data[i], saturated[i], feng_id=feng_id, substreams=substreams)
+            Frame(self._timestamps[i, ...], data[i], saturated[i], feng_id=feng_id, n_substreams=n_substreams)
             for i in range(n_frames)
         ]
 
@@ -212,12 +212,12 @@ class Chunk:
 
 def make_streams(
     *,
+    thread_pool: spead2.ThreadPool,
     endpoints: list[Endpoint],
     interfaces: list[str],
     ttl: int,
     ibv: bool,
     packet_payload: int,
-    affinity: int,
     comp_vector: int,
     adc_sample_rate: float,
     send_rate_factor: float,
@@ -233,7 +233,6 @@ def make_streams(
     Thus, they can be used interchangeably for load-balancing purposes.
     """
     dtype = chunks[0].data.dtype
-    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
     memory_regions: list[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
     rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor / len(interfaces)
