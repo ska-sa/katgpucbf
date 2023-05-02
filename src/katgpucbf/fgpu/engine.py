@@ -31,7 +31,6 @@ import scipy.signal
 import spead2.recv
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
-from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     BYTE_BITS,
@@ -568,7 +567,7 @@ class Pipeline:
                 )
                 self._send_free_queue.put_nowait(send_chunks[-1])
         n_data_heaps = len(send_chunks) * self.spectra // self.engine.spectra_per_heap * len(self.output.dst)
-        self._send_streams = self.engine.make_send_streams(self.output.dst, n_data_heaps, send_chunks)
+        self._send_streams = self.engine.make_send_streams(self.output, n_data_heaps, send_chunks)
 
     @property
     def spectra(self) -> int:  # noqa: D401
@@ -1286,7 +1285,7 @@ class Engine(aiokatcp.DeviceServer):
         self._cancel_tasks.append(time_sync_task)
 
     def make_send_streams(
-        self, endpoints: list[Endpoint], n_data_heaps: int, chunks: Sequence[send.Chunk]
+        self, output: Output, n_data_heaps: int, chunks: Sequence[send.Chunk]
     ) -> list["spead2.send.asyncio.AsyncStream"]:
         """Create send streams for a pipeline.
 
@@ -1294,14 +1293,14 @@ class Engine(aiokatcp.DeviceServer):
         """
         return send.make_streams(
             thread_pool=self._send_thread_pool,
-            endpoints=endpoints,
+            endpoints=output.dst,
             interfaces=self._dst_interface,
             ttl=self._dst_ttl,
             ibv=self._dst_ibv,
             packet_payload=self._dst_packet_payload,
             comp_vector=self._dst_comp_vector,
             adc_sample_rate=self.adc_sample_rate,
-            send_rate_factor=self._send_rate_factor,
+            send_rate_factor=self._send_rate_factor * output.send_rate_factor,
             feng_id=self.feng_id,
             num_ants=self.n_ants,
             n_data_heaps=n_data_heaps,
