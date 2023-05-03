@@ -51,7 +51,7 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DIG_POWER_DBFS_HIGH, DIG_POWER_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
+from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 from .output import NarrowbandOutput, Output, WidebandOutput
@@ -374,9 +374,9 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
-def dig_pwr_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
-    """Compute status for dig-pwr-dbfs sensor."""
-    if DIG_POWER_DBFS_LOW <= value <= DIG_POWER_DBFS_HIGH:
+def dig_rms_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
+    """Compute status for dig-rms-dbfs sensor."""
+    if DIG_RMS_DBFS_LOW <= value <= DIG_RMS_DBFS_HIGH:
         return aiokatcp.Sensor.Status.NOMINAL
     else:
         return aiokatcp.Sensor.Status.WARN
@@ -497,10 +497,10 @@ class Pipeline:
             sensors.add(
                 aiokatcp.Sensor(
                     float,
-                    f"{self.output.name}.input{pol}.dig-pwr-dbfs",
+                    f"{self.output.name}.input{pol}.dig-rms-dbfs",
                     "Digitiser ADC average power",
                     units="dBFS",
-                    status_func=dig_pwr_dbfs_status,
+                    status_func=dig_rms_dbfs_status,
                     auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
@@ -935,7 +935,7 @@ class Pipeline:
                 # want 1.0 to correspond to a sine wave rather than a square wave.
                 avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                self.engine.sensors[f"{self.output.name}.input{pol}.dig-pwr-dbfs"].set_value(
+                self.engine.sensors[f"{self.output.name}.input{pol}.dig-rms-dbfs"].set_value(
                     avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                 )
 
