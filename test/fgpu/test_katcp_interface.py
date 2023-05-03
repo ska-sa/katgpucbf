@@ -55,18 +55,20 @@ def assert_valid_complex_list(value: str) -> None:
 class TestKatcpRequests:
     """Unit tests for the Engine's KATCP requests."""
 
-    engine_arglist = [
-        "--katcp-host=127.0.0.1",
-        "--katcp-port=0",
-        "--src-interface=lo",
-        "--dst-interface=lo",
-        f"--sync-epoch={SYNC_EPOCH}",
-        f"--gain={GAIN}",
-        "--adc-sample-rate=1.712e9",
-        f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS}",
-        "239.10.10.0+7:7149",  # src1
-        "239.10.10.8+7:7149",  # src2
-    ]
+    @pytest.fixture
+    def engine_arglist(self) -> list[str]:
+        return [
+            "--katcp-host=127.0.0.1",
+            "--katcp-port=0",
+            "--src-interface=lo",
+            "--dst-interface=lo",
+            f"--sync-epoch={SYNC_EPOCH}",
+            f"--gain={GAIN}",
+            "--adc-sample-rate=1.712e9",
+            f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS}",
+            "239.10.10.0+7:7149",  # src1
+            "239.10.10.8+7:7149",  # src2
+        ]
 
     @pytest.mark.parametrize("pol", range(N_POLS))
     async def test_initial_gain(self, engine_client: aiokatcp.Client, pol: int) -> None:

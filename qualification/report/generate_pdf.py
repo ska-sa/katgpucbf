@@ -509,9 +509,7 @@ def extract_requirements_verified(results: Iterable[Result]) -> dict[str, list[s
     requirements_verified = defaultdict(list)
     for result in results:
         for requirement in result.requirements:
-            # TODO: This will need to be adapted once NGC-656 is merged.
-            test_name = fix_test_name(result.name).split("[")[0]  # Remove the param list at the back.
-            requirements_verified[requirement].append(test_name)
+            requirements_verified[requirement].append(result.text_name)
     # Remove duplicates from the lists.
     for key in requirements_verified.keys():
         requirements_verified[key] = sorted(set(requirements_verified[key]))
