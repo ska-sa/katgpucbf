@@ -1194,6 +1194,10 @@ class Engine(aiokatcp.DeviceServer):
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
+        # Prevent multiple chunks from being in flight in pipelines at the same
+        # time. This keeps the pipelines synchronised to avoid running out of
+        # InItems.
+        self._active_in_sem = asyncio.BoundedSemaphore(1)
         self._pipelines = []
         self._send_thread_pool = spead2.ThreadPool(1, [] if dst_affinity < 0 else [dst_affinity])
         for output in outputs:
@@ -1316,6 +1320,7 @@ class Engine(aiokatcp.DeviceServer):
         """Return an InItem to the free queue if its refcount hits zero."""
         item.refcount -= 1
         if item.refcount == 0:
+            self._active_in_sem.release()
             if self.use_vkgdr:
                 chunks = []
                 for pol_data in item.pol_data:
@@ -1340,7 +1345,7 @@ class Engine(aiokatcp.DeviceServer):
         for chunk in chunks:
             chunk.recycle()
 
-    def _add_in_item(self, item: InItem) -> None:
+    async def _add_in_item(self, item: InItem) -> None:
         """Push an :class:`InItem` to all the pipelines.
 
         This also takes care of computing `present_cumsum` and initialising
@@ -1350,6 +1355,7 @@ class Engine(aiokatcp.DeviceServer):
         # position 1.
         for pol_data in item.pol_data:
             np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
+        await self._active_in_sem.acquire()
         item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
             pipeline.add_in_item(item)
@@ -1459,7 +1465,7 @@ class Engine(aiokatcp.DeviceServer):
 
             if prev_item is not None:
                 self._copy_tail(prev_item, in_item)
-                self._add_in_item(prev_item)
+                await self._add_in_item(prev_item)
             prev_item = in_item
 
             if not self.use_vkgdr:
@@ -1477,7 +1483,7 @@ class Engine(aiokatcp.DeviceServer):
         if prev_item is not None:
             # Flush the final chunk to the pipelines
             self._copy_tail(prev_item, None)  # Mark tail as absent
-            self._add_in_item(prev_item)
+            await self._add_in_item(prev_item)
 
         logger.debug("run_receive completed")
         for pipeline in self._pipelines:
