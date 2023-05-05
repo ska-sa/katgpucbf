@@ -58,7 +58,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="ADDRESS",
         help="Starting IP address for external digitisers",
     )
-    parser.add_argument("--band", default="l", choices=["l", "u"], help="Band ID [%(default)s]")
+    parser.add_argument("--band", default="l", choices=BANDS.keys(), help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
     parser.add_argument("--narrowband", action="store_true", help="Enable a narrowband output [no]")
