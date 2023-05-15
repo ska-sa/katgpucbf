@@ -61,6 +61,7 @@ from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
+from .output import Output, XengineOutput
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
@@ -194,6 +195,9 @@ class XBEngine(DeviceServer):
         The index of the first channel in the subset of channels processed by
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
         spectrum reassembly by the downstream receiver.
+    outputs
+        Output streams to generate. Currently this must be a single
+        XengineOutput.
     src
         Endpoint for the incoming data.
     src_interface
@@ -250,16 +254,13 @@ class XBEngine(DeviceServer):
         katcp_host: str,
         katcp_port: int,
         adc_sample_rate_hz: float,
-        send_rate_factor: float,
-        n_ants: int,
-        n_channels_total: int,
-        n_channels_per_stream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
         heap_accumulation_threshold: int,
         sync_epoch: float,
         channel_offset_value: int,
+        outputs: list[Output],
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
         src_interface: str,
         src_ibv: bool,
@@ -282,23 +283,22 @@ class XBEngine(DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
+        # B-engine doesn't work yet
+        assert len(outputs) == 1
+        assert isinstance(outputs[0], XengineOutput)
+
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
-        if channel_offset_value % n_channels_per_stream != 0:
-            raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+        if channel_offset_value % outputs[0].channels_per_substream != 0:
+            raise ValueError("channel_offset must be an integer multiple of channels_per_substream")
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
-        self.send_rate_factor = send_rate_factor
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
-        self.n_ants = n_ants
-        self.n_channels_total = n_channels_total
-        self.n_channels_per_stream = n_channels_per_stream
-        self.n_spectra_per_heap = n_spectra_per_heap
+        self.n_ants = outputs[0].antennas  # Still needed in sender_loop
         self.sample_bits = sample_bits
-        self.n_samples_between_spectra = n_samples_between_spectra
         self.channel_offset_value = channel_offset_value
 
         self._src = src
@@ -328,7 +328,7 @@ class XBEngine(DeviceServer):
         # configure the receiver, we pass it as a seperate argument to the
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
-        self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
+        self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
             self.sensors,
@@ -339,6 +339,7 @@ class XBEngine(DeviceServer):
                 * self.rx_heap_timestamp_step
                 / adc_sample_rate_hz,
             ),
+            (channel_offset_value, channel_offset_value + outputs[0].channels_per_substream),
         )
 
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
@@ -357,9 +358,9 @@ class XBEngine(DeviceServer):
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
         self._src_layout = recv.Layout(
-            n_ants=self.n_ants,
-            n_channels_per_stream=self.n_channels_per_stream,
-            n_spectra_per_heap=self.n_spectra_per_heap,
+            n_ants=outputs[0].antennas,
+            n_channels_per_stream=outputs[0].channels_per_substream,
+            n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
@@ -383,9 +384,9 @@ class XBEngine(DeviceServer):
 
         correlation_template = CorrelationTemplate(
             self.context,
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap=self.n_spectra_per_heap,
+            n_ants=outputs[0].antennas,
+            n_channels=outputs[0].channels_per_substream,
+            n_spectra_per_heap=n_spectra_per_heap,
         )
         self.correlation = correlation_template.instantiate(
             self._proc_command_queue, n_batches=heaps_per_fengine_per_chunk
@@ -408,20 +409,20 @@ class XBEngine(DeviceServer):
         allocator = accel.DeviceAllocator(self.context)
         for _ in range(n_rx_items):
             buffer_device = self.correlation.slots["in_samples"].allocate(allocator, bind=False)
-            present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
+            present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, outputs[0].antennas), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
-            present_ants = np.zeros(shape=(n_ants,), dtype=bool)
+            present_ants = np.zeros(shape=(outputs[0].antennas,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
             buf = self.correlation.slots["in_samples"].allocate_host(self.context)
-            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
+            present = np.zeros(outputs[0].antennas * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
@@ -433,11 +434,11 @@ class XBEngine(DeviceServer):
         self.dump_interval_s: float = self.timestamp_increment_per_accumulation / adc_sample_rate_hz
 
         self.send_stream = XSend(
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_total,
-            n_channels_per_stream=self.n_channels_per_stream,
+            n_ants=outputs[0].antennas,
+            n_channels=outputs[0].channels,
+            n_channels_per_stream=outputs[0].channels_per_substream,
             dump_interval_s=self.dump_interval_s,
-            send_rate_factor=self.send_rate_factor,
+            send_rate_factor=outputs[0].send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             packet_payload=dst_packet_payload,
@@ -455,15 +456,29 @@ class XBEngine(DeviceServer):
             tx_enabled=self._init_tx_enabled,
         )
 
-    def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
-        """Define the sensors for an XBEngine."""
+    def populate_sensors(
+        self,
+        sensors: aiokatcp.SensorSet,
+        rx_sensor_timeout: float,
+        chan_range: tuple[int, int],
+    ) -> None:
+        """Define the sensors for an XBEngine.
+
+        Parameters
+        ----------
+        rx_sensor_timeout
+            See :meth:`.recv.make_sensors` for more information.
+        chan_range
+            Tuple of integers showing the two values of the chan-range sensor
+            - (channel_offset, channel_offset + channels_per_substream)
+        """
         # Static sensors
         sensors.add(
             aiokatcp.Sensor(
                 str,
                 "chan-range",
                 "The range of channels processed by this XB-engine, inclusive",
-                default=f"({self.channel_offset_value},{self.channel_offset_value + self.n_channels_per_stream - 1})",
+                default=f"({chan_range[0]},{chan_range[1] - 1})",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )

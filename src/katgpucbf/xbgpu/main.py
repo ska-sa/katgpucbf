@@ -33,13 +33,14 @@ import argparse
 import asyncio
 import logging
 from collections.abc import Sequence
+from typing import TypedDict
 
 import katsdpsigproc.accel
 import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import endpoint_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
@@ -48,13 +49,86 @@ from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
+from .output import BengineOutput, XengineOutput
 
 logger = logging.getLogger(__name__)
+
+
+class BengineOutputDict(TypedDict, total=False):
+    """Configuration options for a beamformer output.
+
+    Unlike :class:`BengineOutput`, all the fields are optional, so that it can
+    be built up incrementally. They must all be filled in before using it to
+    construct a :class:`BengineOutput`.
+    """
+
+    beams: int
+    dst: list[Endpoint]
+    channels_per_substream: int
+    spectra_per_heap: int
+    send_rate_factor: float
+
+
+def parse_bengine(value: str) -> BengineOutputDict:
+    """Parse a string with B-engine configuration data.
+
+    The string has a comma-separated list of key=value pairs. See
+    :class:`BengineOutput` for the valid keys and types. The following
+    keys are required:
+
+    - beams
+    - channels_per_substream
+    - dst
+    - send_rate_factor
+    - spectra_per_heap
+    """
+    kws: BengineOutputDict = {}
+    for part in value.split(","):
+        match part.split("=", 1):
+            case [key, data]:
+                match key:
+                    case _ if key in kws:
+                        raise ValueError(f"{key} specified twice")
+                    case "beams" | "channels_per_substream" | "spectra_per_heap":
+                        kws[key] = int(data)
+                    case "send_rate_factor":
+                        kws[key] = float(data)
+                    case "dst":
+                        kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
+                    case _:
+                        raise ValueError(f"--beamformer: unknown key {key}")
+            case _:
+                raise ValueError(f"missing '=' in {part}")
+    for key in ["beams", "dst"]:
+        # These are the bare minimum needed for a B-engine,
+        # the rest can be taken from X-engine cmd-line args.
+        if key not in kws:
+            raise ValueError(f"{key} is missing")
+
+    # Check if we have enough dest addresses for each beam
+    if len(kws["dst"]) != kws["beams"]:
+        raise ValueError(
+            "Mismatch in number of beams and \
+            output multicast address range."
+        )
+    return kws
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse all command line parameters for the XB-Engine and ensure that they are valid."""
     parser = argparse.ArgumentParser(description="Launch an XB-Engine for a single multicast stream.")
+    parser.add_argument(
+        "--beamformer",
+        type=parse_bengine,
+        default=[],
+        action="append",
+        metavar="KEY=VALUE[,KEY=VALUE...]",
+        help="Add a beamformer output (may be repeated). The required keys are: beams, dst.",
+    )
+    parser.add_argument(
+        "--ipython",
+        action="store_true",
+    )
     parser.add_argument(
         "--katcp-host",
         type=str,
@@ -217,6 +291,16 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
 
+    # Convert from *BengineOutputDict to *BengineOutput
+    for output in args.beamformer:
+        if "channels_per_substream" not in output:
+            output["channels_per_substream"] = args.channels_per_substream
+        if "spectra_per_heap" not in output:
+            output["spectra_per_heap"] = args.spectra_per_heap
+        if "send_rate_factor" not in output:
+            output["send_rate_factor"] = args.send_rate_factor
+
+    args.beamformer = [BengineOutput(**output) for output in args.beamformer]
     return args
 
 
@@ -237,28 +321,32 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         monitor = NullMonitor()
 
     logger.info("Initialising XB-Engine on %s", context.device.name)
+    xengine = XengineOutput(
+        antennas=args.array_size,
+        channels=args.channels,
+        channels_per_substream=args.channels_per_substream,
+        dst=args.dst,
+        send_rate_factor=args.send_rate_factor,
+    )
     xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
-        send_rate_factor=args.send_rate_factor,
-        n_ants=args.array_size,
-        n_channels_total=args.channels,
-        n_channels_per_stream=args.channels_per_substream,
-        n_spectra_per_heap=args.spectra_per_heap,
         n_samples_between_spectra=args.samples_between_spectra,
+        n_spectra_per_heap=args.spectra_per_heap,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,
+        outputs=[xengine] + args.beamformer,
         src=args.src,
         src_interface=args.src_interface,
         src_ibv=args.src_ibv,
         src_affinity=args.src_affinity,
         src_comp_vector=args.src_comp_vector,
         src_buffer=args.src_buffer,
-        dst=args.dst,
         dst_interface=args.dst_interface,
+        dst=args.dst,
         dst_ttl=args.dst_ttl,
         dst_ibv=args.dst_ibv,
         dst_packet_payload=args.dst_packet_payload,
