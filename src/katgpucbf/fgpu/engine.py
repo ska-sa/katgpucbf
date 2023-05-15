@@ -327,6 +327,8 @@ class OutItem(QueueItem):
     phase: MappedArray
     #: Per-channel gains
     gains: MappedArray
+    #: Gain version number matching `gains` (for comparison to Pipeline.gains_version)
+    gains_version: int
     #: Bit-mask indicating which spectra contain valid data and should be transmitted.
     present: np.ndarray
     #: Number of spectra contained in :attr:`spectra`.
@@ -347,6 +349,7 @@ class OutItem(QueueItem):
         self.fine_delay = MappedArray.from_slot(vkgdr_handle, context, compute.slots["fine_delay"])
         self.phase = MappedArray.from_slot(vkgdr_handle, context, compute.slots["phase"])
         self.gains = MappedArray.from_slot(vkgdr_handle, context, compute.slots["gains"])
+        self.gains_version = -1
         self.present = np.zeros(self.fine_delay.host.shape[0], dtype=bool)
         self.spectra_samples = spectra_samples
         super().__init__(timestamp)
@@ -501,6 +504,8 @@ class Pipeline:
         # Initialize delays and gains
         self.delay_models: list[AlignedDelayModel[MultiDelayModel]] = []
         self.gains = np.zeros((output.channels, self.pols), np.complex64)
+        # A version number that is incremented every time the gains change
+        self.gains_version = 0
         self._populate_sensors()
         self._init_delay_gain()
 
@@ -705,10 +710,10 @@ class Pipeline:
         accs = self._out_item.n_spectra // self.engine.spectra_per_heap
         self._out_item.n_spectra = accs * self.engine.spectra_per_heap
         if self._out_item.n_spectra > 0:
-            # Take a copy of the gains synchronously. This avoids race conditions
-            # with gains being updated at the same time as they're in the
-            # middle of being transferred.
-            self._out_item.gains.host[:] = self.gains
+            # Copy the gains to the device if they are out of date.
+            if self._out_item.gains_version != self.gains_version:
+                self._out_item.gains.host[:] = self.gains
+                self._out_item.gains_version = self.gains_version
             # TODO: can limit postprocessing to the relevant range (the FFT
             # size is baked into the plan, so is harder to modify on the
             # fly). Without this, saturation counts can be wrong.
@@ -1044,6 +1049,7 @@ class Pipeline:
         The `gains` must contain one entry per channel; the shortcut of
         supplying a single value is handled by :meth:`request_gain`.
         """
+        self.gains_version += 1
         self.gains[:, input] = gains
         # This timestamp is conservative: self._out_item.timestamp is almost
         # always valid, except while _flush_out is waiting to update
