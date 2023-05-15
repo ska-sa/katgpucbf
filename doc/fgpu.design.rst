@@ -391,6 +391,14 @@ Fine delays and the twiddle factor for the Cooley-Tukey transformation are
 computed using the ``sincospi`` function, which saves both a multiplication by
 :math:`\pi` and a range reduction.
 
+The gains, fine delays and phases need to be made available to the kernel. We
+found that transferring them through the usual CUDA copy mechanism leads to
+sub-optimal scheduling, because these (small) transfers could end up queued
+behind the much larger transfers of digitiser samples. Instead, we use `vkgdr`_
+to allow the CPU to write directly to the GPU buffers. The buffers are
+replicated per output item, so that it is possible for the CPU to be updating
+the values for one output item while the GPU is computing on another.
+
 Coarse delays
 ^^^^^^^^^^^^^
 One of the more challenging aspects of the processing design was the handling
