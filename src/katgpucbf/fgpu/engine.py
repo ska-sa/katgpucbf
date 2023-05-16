@@ -1227,7 +1227,7 @@ class Engine(aiokatcp.DeviceServer):
         self.use_peerdirect = use_peerdirect
 
         # Tuning knobs not exposed via arguments
-        self.n_in = 4
+        self.n_in = 3
 
         self._upload_queue = context.create_command_queue()
         # For copying head of each chunk to the tail of the previous chunk
