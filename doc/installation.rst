@@ -19,8 +19,8 @@ with access to the GPU.
 Installation with pip
 ---------------------
 It is also possible to install katgpucbf with pip. In this case, you will need
-to have CUDA already installed. Change to the root directory of the repository
-and run
+to have CUDA already installed, as well as Vulkan drivers [#]_. Change to the
+root directory of the repository and run
 
 .. code:: sh
 
@@ -28,3 +28,6 @@ and run
 
 Note that if you are planning to do development on katgpucbf, you should refer
 to the :doc:`Developers' guide <dev-guide>`.
+
+.. [#] Standard driver installation should include Vulkan support, although you
+   may need to install a package such as libvulkan1.
