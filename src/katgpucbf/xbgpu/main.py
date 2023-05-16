@@ -88,7 +88,7 @@ def parse_bengine(value: str) -> BengineOutputDict:
             case [key, data]:
                 match key:
                     case _ if key in kws:
-                        raise ValueError(f"{key} specified twice")
+                        raise ValueError(f"--beamformer: {key} specified twice")
                     case "beams" | "channels_per_substream" | "spectra_per_heap":
                         kws[key] = int(data)
                     case "send_rate_factor":
@@ -98,19 +98,16 @@ def parse_bengine(value: str) -> BengineOutputDict:
                     case _:
                         raise ValueError(f"--beamformer: unknown key {key}")
             case _:
-                raise ValueError(f"missing '=' in {part}")
+                raise ValueError(f"--beamformer: missing '=' in {part}")
     for key in ["beams", "dst"]:
         # These are the bare minimum needed for a B-engine,
         # the rest can be taken from X-engine cmd-line args.
         if key not in kws:
-            raise ValueError(f"{key} is missing")
+            raise ValueError(f"--beamformer: {key} is missing")
 
     # Check if we have enough dest addresses for each beam
     if len(kws["dst"]) != kws["beams"]:
-        raise ValueError(
-            "Mismatch in number of beams and \
-            output multicast address range."
-        )
+        raise ValueError("--beamformer: Mismatch in number of beams and dest multicast address range.")
     return kws
 
 
