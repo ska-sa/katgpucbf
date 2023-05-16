@@ -29,6 +29,7 @@ import katsdpsigproc.accel as accel
 import numpy as np
 import scipy.signal
 import spead2.recv
+import vkgdr.pycuda
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
 
@@ -239,6 +240,46 @@ class InItem(QueueItem):
         return self.timestamp + self.n_samples
 
 
+@dataclass
+class MappedArray:
+    """An array visible in the address space of both the host and the device.
+
+    The host view can be updated using normal numpy code, and the changes will
+    be visible to subsequently enqueued kernels on the device.
+    """
+
+    host: np.ndarray
+    device: accel.DeviceArray
+
+    @classmethod
+    def from_slot(cls, vkgdr_handle: vkgdr.Vkgdr, context: AbstractContext, slot: accel.IOSlotBase) -> "MappedArray":
+        """Allocate a :class:`MappedArray` to match a slot.
+
+        Parameters
+        ----------
+        vkgdr_handle
+            Handle for allocating memory from vkgdr. It must be created from the same device
+            as `context`.
+        context
+            CUDA context in which the device view will be used.
+        slot
+            Slot from which the dtype, shape and padded shape will be
+            extracted. The parameter is annotated as
+            :class:`~katsdpsigproc.accel.IOSlotBase` for convenience, but it
+            must actually be an instance of :class:`~katsdpsigproc.accel.IOSlot`.
+        """
+        assert isinstance(slot, accel.IOSlot)
+        padded_shape = slot.required_padded_shape()
+        n_bytes = int(np.product(padded_shape)) * slot.dtype.itemsize
+        with context:
+            handle = vkgdr.pycuda.Memory(vkgdr_handle, n_bytes)
+        # Slice out the shape from the padded shape
+        index = tuple(slice(0, x) for x in slot.shape)
+        host = np.asarray(handle).view(slot.dtype).reshape(padded_shape)[index]
+        device = accel.DeviceArray(context, slot.shape, slot.dtype, padded_shape, raw=handle)
+        return cls(host=host, device=device)
+
+
 class OutItem(QueueItem):
     """Item for use in output queues.
 
@@ -280,15 +321,14 @@ class OutItem(QueueItem):
     saturation: accel.DeviceArray
     #: Output sum of squared samples, per pol
     dig_total_power: list[accel.DeviceArray]
-    #: Provides a scratch space for collecting per-spectrum fine delays while
-    #: the `OutItem` is being prepared. When the `OutItem` is placed onto the
-    #: queue it is copied to the `Compute`.
-    fine_delay: accel.HostArray
-    #: A similar scratch space for collecting per-spectrum phase offsets while
-    #: the :class:`OutItem` is being prepared.
-    phase: accel.HostArray
+    #: Per-spectrum fine delays
+    fine_delay: MappedArray
+    #: Per-spectrum phase offsets
+    phase: MappedArray
     #: Per-channel gains
-    gains: accel.HostArray
+    gains: MappedArray
+    #: Gain version number matching `gains` (for comparison to Pipeline.gains_version)
+    gains_version: int
     #: Bit-mask indicating which spectra contain valid data and should be transmitted.
     present: np.ndarray
     #: Number of spectra contained in :attr:`spectra`.
@@ -298,17 +338,19 @@ class OutItem(QueueItem):
     #: Corresponding chunk for transmission (only used in PeerDirect mode).
     chunk: send.Chunk | None = None
 
-    def __init__(self, compute: Compute, spectra_samples: int, timestamp: int = 0) -> None:
+    def __init__(self, vkgdr_handle: vkgdr.Vkgdr, compute: Compute, spectra_samples: int, timestamp: int = 0) -> None:
         allocator = accel.DeviceAllocator(compute.template.context)
         self.spectra = compute.slots["out"].allocate(allocator, bind=False)
         self.saturated = compute.slots["saturated"].allocate(allocator, bind=False)
         self.dig_total_power = [
             compute.slots[f"dig_total_power{pol}"].allocate(allocator, bind=False) for pol in range(N_POLS)
         ]
-        self.fine_delay = compute.slots["fine_delay"].allocate_host(compute.template.context)
-        self.phase = compute.slots["phase"].allocate_host(compute.template.context)
-        self.gains = compute.slots["gains"].allocate_host(compute.template.context)
-        self.present = np.zeros(self.fine_delay.shape[0], dtype=bool)
+        context = compute.template.context
+        self.fine_delay = MappedArray.from_slot(vkgdr_handle, context, compute.slots["fine_delay"])
+        self.phase = MappedArray.from_slot(vkgdr_handle, context, compute.slots["phase"])
+        self.gains = MappedArray.from_slot(vkgdr_handle, context, compute.slots["gains"])
+        self.gains_version = -1
+        self.present = np.zeros(self.fine_delay.host.shape[0], dtype=bool)
         self.spectra_samples = spectra_samples
         super().__init__(timestamp)
 
@@ -462,6 +504,8 @@ class Pipeline:
         # Initialize delays and gains
         self.delay_models: list[AlignedDelayModel[MultiDelayModel]] = []
         self.gains = np.zeros((output.channels, self.pols), np.complex64)
+        # A version number that is incremented every time the gains change
+        self.gains_version = 0
         self._populate_sensors()
         self._init_delay_gain()
 
@@ -532,7 +576,7 @@ class Pipeline:
         """Initialise the send side of the pipeline."""
         send_chunks: list[send.Chunk] = []
         for _ in range(self._out_free_queue.maxsize):
-            item = OutItem(self._compute, self.output.spectra_samples)
+            item = OutItem(self.engine.vkgdr_handle, self._compute, self.output.spectra_samples)
             if use_peerdirect:
                 dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
                 # buf is structurally a numpy array, but the pointer in it is a CUDA
@@ -642,8 +686,9 @@ class Pipeline:
         with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait out_free_queue"):
             item = await self._out_free_queue.get()
 
-        # Just make double-sure that all events associated with the item are past.
-        item.enqueue_wait_for_events(self._compute.command_queue)
+        # Just make double-sure that all events associated with the item are past
+        # and have already been waited for.
+        assert not item.events
         item.reset_all(self._compute.command_queue, new_timestamp)
         return item
 
@@ -665,17 +710,18 @@ class Pipeline:
         accs = self._out_item.n_spectra // self.engine.spectra_per_heap
         self._out_item.n_spectra = accs * self.engine.spectra_per_heap
         if self._out_item.n_spectra > 0:
-            # Take a copy of the gains synchronously. This avoids race conditions
-            # with gains being updated at the same time as they're in the
-            # middle of being transferred.
-            self._out_item.gains[:] = self.gains
-            # TODO: only need to copy the relevant region, and can limit
-            # postprocessing to the relevant range (the FFT size is baked into
-            # the plan, so is harder to modify on the fly).
-            # Without this, saturation counts can be wrong.
-            self._compute.buffer("fine_delay").set_async(self._compute.command_queue, self._out_item.fine_delay)
-            self._compute.buffer("phase").set_async(self._compute.command_queue, self._out_item.phase)
-            self._compute.buffer("gains").set_async(self._compute.command_queue, self._out_item.gains)
+            # Copy the gains to the device if they are out of date.
+            if self._out_item.gains_version != self.gains_version:
+                self._out_item.gains.host[:] = self.gains
+                self._out_item.gains_version = self.gains_version
+            # TODO: can limit postprocessing to the relevant range (the FFT
+            # size is baked into the plan, so is harder to modify on the
+            # fly). Without this, saturation counts can be wrong.
+            self._compute.bind(
+                fine_delay=self._out_item.fine_delay.device,
+                phase=self._out_item.phase.device,
+                gains=self._out_item.gains.device,
+            )
             self._compute.run_backend(self._out_item.spectra, self._out_item.saturated)
             # Note: we also need to wait for any frontend calls because they
             # write directly to self._out_item.dig_total_power, but this
@@ -778,7 +824,7 @@ class Pipeline:
                     # Convert units of fine delay from digitiser samples to phase slope
                     # across the band. Narrowband has `decimation` times less bandwidth,
                     # so the phase change across the band is that much less.
-                    self._out_item.fine_delay[out_slice] = fine_delays.T / self.output.decimation
+                    self._out_item.fine_delay.host[out_slice] = fine_delays.T / self.output.decimation
                     # The phase is referenced to the centre frequency, but
                     # coarse delay in wideband affects the phase of the centre
                     # frequency. The centre frequency is 4 samples per cycle, so
@@ -795,7 +841,7 @@ class Pipeline:
                         phase = wrap_angle(phase)
                     # Divide by pi because the arguments of sincospif() used in the
                     # kernel are in radians/PI.
-                    self._out_item.phase[out_slice] = phase / np.pi
+                    self._out_item.phase.host[out_slice] = phase / np.pi
                     samples = []
                     for pol_data in in_item.pol_data:
                         assert pol_data.samples is not None
@@ -1003,6 +1049,7 @@ class Pipeline:
         The `gains` must contain one entry per channel; the shortcut of
         supplying a single value is handled by :meth:`request_gain`.
         """
+        self.gains_version += 1
         self.gains[:, input] = gains
         # This timestamp is conservative: self._out_item.timestamp is almost
         # always valid, except while _flush_out is waiting to update
@@ -1191,6 +1238,12 @@ class Engine(aiokatcp.DeviceServer):
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.n_samples = self.src_layout.chunk_samples + extra_samples
 
+        with context:
+            # We could quite easily make do with non-coherent mappings and
+            # explicit flushing, but since NVIDIA currently only provides
+            # host-coherent memory, this is a simpler option.
+            self.vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
+
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
@@ -1212,15 +1265,6 @@ class Engine(aiokatcp.DeviceServer):
         for _ in range(self._in_free_queue.maxsize):
             self._in_free_queue.put_nowait(InItem(context, self.src_layout, self.n_samples, use_vkgdr=self.use_vkgdr))
 
-        if self.use_vkgdr:
-            import vkgdr.pycuda
-
-            with context:
-                # We could quite easily make do with non-coherent mappings and
-                # explicit flushing, but since NVIDIA currently only provides
-                # host-coherent memory, this is a simpler option.
-                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
-
         data_ringbuffer = ChunkRingbuffer(
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
@@ -1233,7 +1277,7 @@ class Engine(aiokatcp.DeviceServer):
                     array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
                     device_bytes = array_bytes + INPUT_CHUNK_PADDING
                     with context:
-                        mem = vkgdr.pycuda.Memory(vkgdr_handle, device_bytes)
+                        mem = vkgdr.pycuda.Memory(self.vkgdr_handle, device_bytes)
                     buf = np.array(mem, copy=False).view(np.uint8)
                     # The device buffer contains extra space for copying the head
                     # of the following chunk, but we don't need that in the host

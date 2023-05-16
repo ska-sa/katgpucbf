@@ -422,7 +422,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
     )
     parser.add_argument(
-        "--use-vkgdr", action="store_true", help="Assemble chunks directly in GPU memory (requires Vulkan)"
+        "--use-vkgdr",
+        action="store_true",
+        help="Assemble chunks directly in GPU memory (requires sufficient GPU BAR space)",
     )
     parser.add_argument(
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
