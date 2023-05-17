@@ -611,7 +611,7 @@ is always a compile-time constant (after loop unrolling), which means the
 necessary registers and shift amounts are also known at compile-time.
 
 To cheaply achieve sign extension, the value is first shifted to the top 10
-bits of a 32-bit (signed integer), then shifted right. In standard C/C++ this
+bits of a 32-bit signed integer, then shifted right. In standard C/C++ this
 is undefined behaviour, but CUDA implements the common behaviour of performing
 sign extension.
 
@@ -648,14 +648,14 @@ The work items are partitioned into :dfn:`subgroups` each containing
 :c:macro:`COARSEN` consecutive output samples.
 
 The position of each work item within its subgroup is stored in
-:c:var:`sg_rank`). Each work item is responsible only for samples whose index
+:c:var:`sg_rank`. Each work item is responsible only for samples whose index
 modulo :c:macro:`SG_SIZE` equals :c:var:`sg_rank`. It's not entirely clear why
 having this division of labour improves performance, although it does reduce
 the ratio of (input and output) samples to threads and hence allows for
 greater occupancy.
 
 Samples are loaded in an order that processes all input samples with the
-same index modulo :c:macro:`DECIMATION` together, keeping a sliding window of
+same index modulo :c:macro:`SUBSAMPLING` together, keeping a sliding window of
 :c:macro:`COARSEN` such samples. This allows each subgroup to load each input
 sample from local memory just once, even though each contributes to multiple
 output samples. Note that other subgroups will still retrieve some of the
@@ -681,7 +681,7 @@ every tile, etc.
 The tile size should generally be as large as possible (so that the fraction
 of data held in memory is as small as possible), and in the simplest
 case, tiles correspond exactly to segments. However, the tile
-size must divide into the decimation factor, so when the decimation factor is
+size must divide into the subsampling factor, so when the subsampling factor is
 smaller than (or not a multiple of) the segment size, tiles must be smaller
 than segments.
 

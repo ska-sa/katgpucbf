@@ -219,7 +219,6 @@ class DDC(accel.Operation):
         out_buffer = self.buffer("out")
         weights_buffer = self.buffer("weights")
         groups = accel.divup(out_buffer.shape[0], self.template._group_out_size)
-        # TODO: set up the offsets
 
         self.command_queue.enqueue_kernel(
             self.template.kernel,
@@ -227,8 +226,6 @@ class DDC(accel.Operation):
                 out_buffer.buffer,
                 in_buffer.buffer,
                 weights_buffer.buffer,
-                np.int32(0),  # out_offset
-                np.int32(0),  # in_offset_words
                 np.int32(out_buffer.shape[0]),  # out_size
                 np.int32(accel.divup(in_buffer.shape[0], 4)),  # in_size_words
                 np.float64(self.mix_frequency),  # mix_scale
