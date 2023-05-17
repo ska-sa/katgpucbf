@@ -342,9 +342,12 @@ class OutItem(QueueItem):
         allocator = accel.DeviceAllocator(compute.template.context)
         self.spectra = compute.slots["out"].allocate(allocator, bind=False)
         self.saturated = compute.slots["saturated"].allocate(allocator, bind=False)
-        self.dig_total_power = [
-            compute.slots[f"dig_total_power{pol}"].allocate(allocator, bind=False) for pol in range(N_POLS)
-        ]
+        if "dig_total_power0" in compute.slots:
+            self.dig_total_power = [
+                compute.slots[f"dig_total_power{pol}"].allocate(allocator, bind=False) for pol in range(N_POLS)
+            ]
+        else:
+            self.dig_total_power = []
         context = compute.template.context
         self.fine_delay = MappedArray.from_slot(vkgdr_handle, context, compute.slots["fine_delay"])
         self.phase = MappedArray.from_slot(vkgdr_handle, context, compute.slots["phase"])
@@ -453,15 +456,30 @@ def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> n
 
 
 class Pipeline:
-    """Processing pipeline for a single output stream."""
+    """Processing pipeline for a single output stream.
 
-    def __init__(self, output: Output, engine: "Engine", context: AbstractContext) -> None:
+    Parameters
+    ----------
+    output
+        The output stream to produce
+    engine
+        The owning engine
+    context
+        CUDA context for device work
+    dig_stats
+        If true, this pipeline is responsible for producing the digitiser statistics
+        such as dig-rms-dbfs.
+    """
+
+    def __init__(self, output: Output, engine: "Engine", context: AbstractContext, dig_stats: bool) -> None:
+        assert isinstance(output, WidebandOutput) or not dig_stats, "wideband output required for digitiser stats"
         # Tuning knobs not exposed via arguments
         n_send = 4
         n_out = n_send if engine.use_peerdirect else 2
 
         self.engine = engine
         self.output = output
+        self.dig_stats = dig_stats
         self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue(f"{output.name}.in_queue", engine.n_in)
         self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue(f"{output.name}.out_queue", n_out)
         self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue(f"{output.name}.out_free_queue", n_out)
@@ -534,19 +552,6 @@ class Pipeline:
                     "count when model was loaded>, delay <in seconds>, "
                     "delay-rate <unit-less or, seconds-per-second>, "
                     "phase <radians>, phase-rate <radians per second>).",
-                )
-            )
-            # TODO[nb]: it may be better to make this a single sensor and
-            # have only one of the pipelines update it.
-            sensors.add(
-                aiokatcp.Sensor(
-                    float,
-                    f"{self.output.name}.input{pol}.dig-rms-dbfs",
-                    "Digitiser ADC average power",
-                    units="dBFS",
-                    status_func=dig_rms_dbfs_status,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -943,7 +948,12 @@ class Pipeline:
         context = self._compute.template.context
         func_name = f"{self.output.name}.run_transmit"
         # Scratch space for transferring digitiser power
-        dig_total_power = [self._compute.slots[f"dig_total_power{pol}"].allocate_host(context) for pol in range(N_POLS)]
+        if self.dig_stats:
+            dig_total_power = [
+                self._compute.slots[f"dig_total_power{pol}"].allocate_host(context) for pol in range(N_POLS)
+            ]
+        else:
+            dig_total_power = []
         while True:
             with self.engine.monitor.with_state(func_name, "wait out_queue"):
                 out_item = await self._out_queue.get()
@@ -964,8 +974,8 @@ class Pipeline:
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
             out_item.saturated.get_async(self._download_queue, chunk.saturated)
-            for pol in range(N_POLS):
-                out_item.dig_total_power[pol].get_async(self._download_queue, dig_total_power[pol])
+            for pol, trg in enumerate(dig_total_power):
+                out_item.dig_total_power[pol].get_async(self._download_queue, trg)
             events.append(self._download_queue.enqueue_marker())
 
             chunk.timestamp = out_item.timestamp
@@ -974,14 +984,14 @@ class Pipeline:
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events(events)
 
-            for pol in range(N_POLS):
-                total_power = float(dig_total_power[pol])
+            for pol, trg in enumerate(dig_total_power):
+                total_power = float(trg)
                 avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
                 # Normalise relative to full scale. The factor of 2 is because we
                 # want 1.0 to correspond to a sine wave rather than a square wave.
                 avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
                 avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                self.engine.sensors[f"{self.output.name}.input{pol}.dig-rms-dbfs"].set_value(
+                self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
                     avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                 )
 
@@ -1253,8 +1263,11 @@ class Engine(aiokatcp.DeviceServer):
         self._active_in_sem = asyncio.BoundedSemaphore(1)
         self._pipelines = []
         self._send_thread_pool = spead2.ThreadPool(1, [] if dst_affinity < 0 else [dst_affinity])
-        for output in outputs:
-            self._pipelines.append(Pipeline(output, self, context))
+        for i, output in enumerate(outputs):
+            # Wideband outputs are always placed first, but we need to consider
+            # the case of there being no wideband output at all.
+            dig_stats = i == 0 and isinstance(output, WidebandOutput)
+            self._pipelines.append(Pipeline(output, self, context, dig_stats))
 
     def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
@@ -1308,6 +1321,17 @@ class Engine(aiokatcp.DeviceServer):
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    float,
+                    f"input{pol}.dig-rms-dbfs",
+                    "Digitiser ADC average power",
+                    units="dBFS",
+                    status_func=dig_rms_dbfs_status,
                     auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
