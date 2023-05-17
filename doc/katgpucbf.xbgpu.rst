@@ -10,6 +10,7 @@ Submodules
    katgpucbf.xbgpu.correlation
    katgpucbf.xbgpu.engine
    katgpucbf.xbgpu.main
+   katgpucbf.xbgpu.output
    katgpucbf.xbgpu.recv
    katgpucbf.xbgpu.xsend
 
