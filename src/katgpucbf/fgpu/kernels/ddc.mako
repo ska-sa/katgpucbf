@@ -242,8 +242,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     GLOBAL float2 * RESTRICT out,
     const GLOBAL unsigned int * RESTRICT in,
     const GLOBAL float * RESTRICT weights,
-    int out_offset,
-    int in_offset_words,
     int out_size,
     int in_size_words,
     double mix_scale,  // Mixer frequency in cycles per sample
@@ -263,15 +261,14 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     unsigned int sg_group = lid / SG_SIZE;  // Subgroup number
 
     unsigned int in_offset_group = group * (GROUP_IN_SIZE * SEGMENT_WORDS / SEGMENT_SAMPLES);
-    in_offset_words += in_offset_group;
-    in += in_offset_words;
+    in += in_offset_group;
     in_size_words -= in_offset_group;
     /* Note: could also limit in_size_words to LOAD_WORDS to avoid loading
      * unwanted data. But that data will be needed by another workgroup and
      * it seems beneficial to load it into L2 cache.
      */
 
-    out += out_offset + group * GROUP_OUT_SIZE;
+    out += group * GROUP_OUT_SIZE;
     out_size -= group * GROUP_OUT_SIZE;
 
     // Complex mixer value at first sample mixed by this work item
