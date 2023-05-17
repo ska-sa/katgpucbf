@@ -105,21 +105,13 @@ The general operation of the DSP engines is illustrated in the diagram below:
      \begin{scope}[continue chain=chain/stream\s]
      \node[proc, on chain] (download\s) {Copy from GPU};
      \node[proc, on chain] (transmit\s) {Transmit};
-     \node[pproc, draw=none, anchor=west,
-           start chain=tx\s-0 going below, on chain=tx\s-0] (transmit\s-0) at (transmit\s.west) {};
-     \node[pproc, draw=none, anchor=east,
-           start chain=tx\s-1 going below, on chain=tx\s-1] (transmit\s-1) at (transmit\s.east) {};
-     \foreach \i in {0, 1} {
-       \node[pproc-base, on chain=tx\s-\i] (outstream\s-\i) {};
-       \draw[flow] (transmit\s-\i) -- (outstream\s-\i);
-     }
+     \node[proc, on chain] (outstream\s) {Stream};
      \draw[queue] (align) -- (process\s);
      \draw[queue] (process\s) -- (download\s);
      \draw[queue] (download\s) -- (transmit\s);
+     \draw[flow] (transmit\s) -- (outstream\s);
      \end{scope}
    }
-   \node[proc, fit=(outstream0-0) (outstream1-1), inner sep=0pt, outer sep=0pt] (outstream) {};
-   \node at (outstream.center) {Stream};
    \foreach \i in {0, 1} {
      \node[pproc, on chain=rx\i] (receive\i) {Receive};
      \node[pproc, on chain=rx\i] (stream\i) {Stream};
@@ -133,10 +125,9 @@ in the XB-engine there is only one.
 
 There might not always be multiple processing pipelines. When they exist, they
 are to support multiple outputs generated from the same input, such as wide-
-and narrow-band F-engines, or multiple beams. A single stream is used so that
-all the outputs go through a single thread (and hence only one core is needed
-for sending) and a single rate-limiter (preventing micro-bursts if each
-pipeline sends data at the same time).
+and narrow-band F-engines, or multiple beams. Separate outputs use separate
+output streams so that they can interleave their outputs while transmitting at
+different rates. They share a thread to reduce the number of cores required.
 
 Chunking
 ^^^^^^^^

@@ -1,6 +1,10 @@
 F-Engine Design
 ===============
 
+We start by describing the design for wideband output. Narrowband outputs
+use most of the same components, but have extra complications, which are
+described in a :ref:`separate section <fgpu.narrow>`.
+
 Network receive
 ---------------
 Each polarisation is handled as a separate SPEAD stream, with a separate thread.
@@ -26,18 +30,6 @@ GPU Processing
 The actual GPU kernels are reasonably straight-forward, because they're
 generally memory-bound rather than compute-bound. The main challenges are in
 data movement through the system.
-
-Narrowband
-^^^^^^^^^^
-In narrow-band modes, the first step is a down-conversion filter that produces
-a new sample stream with a lower bandwidth and sampling rate. The kernel
-implementing this is particularly complex, and is discussed separately in
-`fgpu.ddc`_.
-
-.. note::
-
-   At the time of writing, the kernel has been written but the full narrowband
-   operation is not yet implemented.
 
 Decode
 ^^^^^^
@@ -537,13 +529,13 @@ From there a number of transformations occur:
 4. When an output chunk is ready to be sent, the per-spectrum flags are
    reduced to per-frame flags.
 
-.. _fgpu.ddc:
+.. _fgpu.narrow:
 
-Narrowband down-conversion kernel
----------------------------------
-
-To provide efficient operation on a narrowband region, several logical steps are
-performed:
+Narrowband
+----------
+Narrowband outputs are those in which only a portion of the digitised
+bandwidth is channelised and output. Typically they have narrower channel
+widths. The overall approach is as follows:
 
 1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
    :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
@@ -555,9 +547,9 @@ performed:
 3. The signal is subsampled (every Nth sample is retained), reducing the data
    rate. The low-pass filter above limits aliasing.
 
-For efficiency, all three operations are implemented in the same kernel. In
-particular, the filtered samples that would be removed by subsampling are never
-actually computed.
+4. The rest of the pipeline proceeds largely as before. However, the input is
+   now complex rather than real, so the Fourier transform is a
+   complex-to-complex rather than real-to-complex transform.
 
 .. note::
    To avoid confusion, the "subsampling factor" is the ratio of original to
@@ -565,6 +557,26 @@ actually computed.
    the factor by which the bandwidth is reduced. Because the mixing turns a
    real signal into a complex signal, the subsampling factor is twice the
    decimation factor.
+
+The first three steps are implemented by a new "digital down-conversion"
+("DDC") kernel. This is applied to each input chunk, after copying the head of
+the following chunk to the tail of the chunk. This does lead to redundant
+down-conversion in the overlap region, and could potentially be optimised.
+
+The PFB FIR kernel has alternations because it needs to consume
+single-precision complex inputs rather than packed integers. However, the real
+and imaginary components are independent, and so the input is treated
+internally as if it contained just real values, with an adjustment to correctly
+index the weights. The postprocessing kernel also has minor adjustments, as the
+corrections for a real-to-complex Fourier transform are no longer required, and
+some indexing adjustments are needed to place the DC output of the Fourier
+transform in the centre of the output.
+
+Down-conversion kernel
+^^^^^^^^^^^^^^^^^^^^^^
+For efficiency, the first three operations above are implemented in the same
+kernel. In particular, the filtered samples that would be removed by
+subsampling are never actually computed.
 
 The kernel is one of the more complex in katgpucbf. Simpler implementations
 tend to have low performance because the target GPUs (NVIDIA Ampere
@@ -574,7 +586,7 @@ using OpenCL :ref:`gpu-terminology`), and attempts to allievate this can also
 easily consume a lot of local memory and thus reduce occupancy.
 
 Work groups
-^^^^^^^^^^^
+~~~~~~~~~~~
 Each work group is responsible for producing a contiguous set of output
 samples (given by the constant :c:macro:`GROUP_OUT_SIZE`). To do so, it needs
 to load data from :c:macro:`LOAD_SIZE` input samples, which includes the extra
@@ -590,7 +602,7 @@ mappings of work items to work, and communicate through local memory.
 .. _ddc-load:
 
 Loading and unpacking
-^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~
 Initially (prior to the outer loop mentioned above), each work item loads the
 packed 10-bit samples for some number of input samples into registers (between
 them they load all :c:macro:`LOAD_SIZE` samples). To save space, these are
@@ -621,7 +633,7 @@ words to be combined into a 64-bit word and shifted, retaining just the high
 32 bits of the result; this is ideal for our use case.
 
 Mixer signal
-^^^^^^^^^^^^
+~~~~~~~~~~~~
 Care needs to be taken with the precision of the argument to the mixer signal.
 Simply evaluating the sine and cosine of :math:`2\pi f t` when
 :math:`t` is large can lead to a catastrophic loss of precision, as the
@@ -641,7 +653,7 @@ the nearest integer (to increase the number of fractional mantissa bits
 available) and then proceed in single precision.
 
 FIR filter
-^^^^^^^^^^
+~~~~~~~~~~
 For the FIR filter, a different mapping of work items to samples is used.
 The work items are partitioned into :dfn:`subgroups` each containing
 :c:macro:`SG_SIZE` work items. Each subgroup collaborates to produce
@@ -670,7 +682,7 @@ it increases: the overhead relative to the per-work item accumulation scales
 as :math:`O(n\log n)`.
 
 Tiles
-^^^^^
+~~~~~
 Each segment is further subdivided into :dfn:`tiles`. For each tile,
 :c:macro:`SG_SIZE` decoded and mixed samples are kept in local memory at a
 time; this limitation helps reduce local memory usage. These are written in
@@ -686,7 +698,7 @@ smaller than (or not a multiple of) the segment size, tiles must be smaller
 than segments.
 
 Uncoalesced access
-^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 Both the global reads and writes use uncoalesced accesses, meaning that
 adjacent work items do not read from/write to adjacent addresses. This can
 harm performance, and usually it is beneficial to stage copies through local
@@ -696,11 +708,45 @@ instruction-level parallelism to hide the latency, and the extra work on the
 load-store pipeline when using local memory just slows things down.
 
 Performance tuning
-^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 The work group size, subgroup size and coarsening factor can all affect
 performance significantly, and not always in obvious ways. It will likely be
 necessary to implement autotuning to get optimal results across a range of
 problem parameters and hardware devices, but this has not yet been done.
+
+Delays
+^^^^^^
+Coarse delay is (as for wideband) implemented using an input offset to the PFB
+FIR kernel. This means that the resolution of coarse delay is coarser than for
+wideband (by the subsampling factor). This choice is driven by the access
+patterns in the various kernels: the DDC kernel depends on knowing at compile
+time where each packed sample starts within a word, and hence is no amenable
+to single-sample input offsets.
+
+Multiple outputs
+^^^^^^^^^^^^^^^^
+A standard use case for MeerKAT is to produce wideband and narrowband outputs
+from a single input stream. To make this efficient, a single engine can
+support multiple output streams, and the input is only transferred to the GPU
+once.
+
+The code is split into an Engine class that handles common input tasks, and a
+Pipeline class that handles per-output processing and transmission. Copying
+the head of each chunk to the tail of the previous chunk is handled by the
+Engine, after which the previous chunk is pushed to the input queue of each
+Pipeline. The chunks have reference counts to help determine when all
+pipelines are done with them.
+
+Input statistics
+^^^^^^^^^^^^^^^^
+The wideband PFB FIR kernel also computes statistics on the input digitiser
+stream (just RMS power, at the time of writing). Since all the outputs are
+produced from the same input, we do not attempt to duplicate this calculation
+for narrowband.
+
+An engine with only narrowband outputs will thus be lacking these statistics.
+Calculating the statistics in that case would be challenging, as it would
+need to be done in the DDC kernel, which is already extremely complex.
 
 .. rubric:: Footnotes
 
