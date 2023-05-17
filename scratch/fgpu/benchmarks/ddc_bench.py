@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -26,7 +26,7 @@ from katgpucbf.fgpu.ddc import DDCTemplate
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--taps", type=int, default=256)
-    parser.add_argument("--decimation", type=int, default=16)
+    parser.add_argument("--subsampling", type=int, default=16)
     parser.add_argument("--samples", type=int, default=16 * 1024 * 1024)
     parser.add_argument("--passes", type=int, default=10)
     args = parser.parse_args()
@@ -34,7 +34,7 @@ def main():
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
         command_queue = context.create_tuning_command_queue()
-        template = DDCTemplate(context, taps=args.taps, decimation=args.decimation)
+        template = DDCTemplate(context, taps=args.taps, subsampling=args.subsampling)
         fn = template.instantiate(command_queue, samples=args.samples)
         fn.ensure_all_bound()
         fn.buffer("in").zero(command_queue)

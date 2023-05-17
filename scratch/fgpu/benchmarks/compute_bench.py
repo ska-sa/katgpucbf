@@ -23,7 +23,7 @@ from katsdpsigproc import accel
 
 from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu.compute import ComputeTemplate
-from katgpucbf.fgpu.engine import generate_weights
+from katgpucbf.fgpu.engine import generate_pfb_weights
 
 
 def main():
@@ -51,7 +51,7 @@ def main():
     rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
-        template = ComputeTemplate(context, args.taps, args.channels, args.dig_sample_bits)
+        template = ComputeTemplate(context, args.taps, args.channels, args.dig_sample_bits, narrowband=None)
         command_queue = context.create_tuning_command_queue()
         extra_samples = (args.taps - 1) * args.channels * 2
         spectra = args.samples // (args.channels * 2)
@@ -64,7 +64,7 @@ def main():
         fn.ensure_all_bound()
 
         h_weights = fn.buffer("weights").empty_like()
-        h_weights[:] = generate_weights(args.channels, args.taps, 1.0)
+        h_weights[:] = generate_pfb_weights(2 * args.channels, args.taps, 1.0)
         fn.buffer("weights").set(command_queue, h_weights)
 
         h_gains = fn.buffer("gains").empty_like()
@@ -94,7 +94,7 @@ def main():
             fn.postproc()
 
         def run_all():
-            fn.run_frontend(
+            fn.run_wideband_frontend(
                 [fn.buffer("in0"), fn.buffer("in1")],
                 [fn.buffer("dig_total_power0"), fn.buffer("dig_total_power1")],
                 [0, 0],
