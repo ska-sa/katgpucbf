@@ -212,6 +212,7 @@ class Chunk:
 
 def make_streams(
     *,
+    output_name: str,
     thread_pool: spead2.ThreadPool,
     endpoints: list[Endpoint],
     interfaces: list[str],
@@ -268,6 +269,14 @@ def make_streams(
         # interfaces. IDs may get reused after 2^40/num_ants heaps, which should
         # be much larger than a receiver's window.
         stream.set_cnt_sequence((i << 40) + feng_id, num_ants)
+    # Referencing the labels causes them to be created, in advance of data
+    # actually being transmitted.
+    output_heaps_counter.labels(output_name)
+    output_bytes_counter.labels(output_name)
+    output_samples_counter.labels(output_name)
+    skipped_heaps_counter.labels(output_name)
+    for pol in range(N_POLS):
+        output_clip_counter.labels(output_name, pol)
     return streams
 
 

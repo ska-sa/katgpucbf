@@ -1340,6 +1340,7 @@ class Engine(aiokatcp.DeviceServer):
         This method should only be called by :class:`Pipeline`.
         """
         return send.make_streams(
+            output_name=output.name,
             thread_pool=self._send_thread_pool,
             endpoints=output.dst,
             interfaces=self._dst_interface,

@@ -47,7 +47,7 @@ class PromDiff:
         self,
         *,
         registry: prometheus_client.CollectorRegistry = prometheus_client.REGISTRY,
-        namespace: str | None = None
+        namespace: str | None = None,
     ) -> None:
         self._registry = registry
         self._before: list[prometheus_client.samples.Sample] = []
@@ -82,7 +82,7 @@ class PromDiff:
         """Return the increase in the metric during the context manager protocol.
 
         If it is not found, returns ``None``. If it was not found on entry,
-        returns the value on exit.
+        raises an exception.
         """
         if labels is None:
             labels = {}
@@ -90,6 +90,8 @@ class PromDiff:
         after = self._get_value(self._after, name, labels)
         if before is not None and after is not None:
             return after - before
+        elif after is not None:
+            raise ValueError(f"Metric {name}{labels} did not exist at start")
         else:
             return after
 
