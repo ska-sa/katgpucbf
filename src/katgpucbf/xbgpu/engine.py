@@ -42,7 +42,6 @@ import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
 from katsdpsigproc import accel
-from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     DESCRIPTOR_TASK_NAME,
@@ -61,7 +60,7 @@ from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
-from .output import Output, XengineOutput
+from .output import Output, XOutput
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
@@ -197,7 +196,7 @@ class XBEngine(DeviceServer):
         spectrum reassembly by the downstream receiver.
     outputs
         Output streams to generate. Currently this must be a single
-        XengineOutput.
+        XOutput.
     src
         Endpoint for the incoming data.
     src_interface
@@ -267,7 +266,6 @@ class XBEngine(DeviceServer):
         src_affinity: int,
         src_comp_vector: int,
         src_buffer: int,
-        dst: Endpoint,
         dst_interface: str,
         dst_ttl: int,
         dst_ibv: bool,
@@ -285,7 +283,7 @@ class XBEngine(DeviceServer):
 
         # B-engine doesn't work yet
         assert len(outputs) == 1
-        assert isinstance(outputs[0], XengineOutput)
+        assert isinstance(outputs[0], XOutput)
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -443,8 +441,8 @@ class XBEngine(DeviceServer):
             context=self.context,
             packet_payload=dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_stream(
-                dest_ip=dst.host,
-                dest_port=dst.port,
+                dest_ip=outputs[0].dst[0].host,
+                dest_port=outputs[0].dst[0].port,
                 interface_ip=dst_interface,
                 ttl=dst_ttl,
                 use_ibv=dst_ibv,

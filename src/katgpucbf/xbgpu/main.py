@@ -49,17 +49,17 @@ from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
-from .output import BengineOutput, XengineOutput
+from .output import BOutput, XOutput
 
 logger = logging.getLogger(__name__)
 
 
-class BengineOutputDict(TypedDict, total=False):
+class BOutputDict(TypedDict, total=False):
     """Configuration options for a beamformer output.
 
-    Unlike :class:`BengineOutput`, all the fields are optional, so that it can
+    Unlike :class:`BOutput`, all the fields are optional, so that it can
     be built up incrementally. They must all be filled in before using it to
-    construct a :class:`BengineOutput`.
+    construct a :class:`BOutput`.
     """
 
     beams: int
@@ -69,7 +69,7 @@ class BengineOutputDict(TypedDict, total=False):
     send_rate_factor: float
 
 
-def parse_bengine(value: str) -> BengineOutputDict:
+def parse_bengine(value: str) -> BOutputDict:
     """Parse a string with B-engine configuration data.
 
     The string has a comma-separated list of key=value pairs. See
@@ -82,7 +82,7 @@ def parse_bengine(value: str) -> BengineOutputDict:
     - send_rate_factor
     - spectra_per_heap
     """
-    kws: BengineOutputDict = {}
+    kws: BOutputDict = {}
     for part in value.split(","):
         match part.split("=", 1):
             case [key, data]:
@@ -121,10 +121,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help="Add a beamformer output (may be repeated). The required keys are: beams, dst.",
-    )
-    parser.add_argument(
-        "--ipython",
-        action="store_true",
     )
     parser.add_argument(
         "--katcp-host",
@@ -288,7 +284,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
 
-    # Convert from *BengineOutputDict to *BengineOutput
+    # Convert from *BOutputDict to *BOutput
     for output in args.beamformer:
         if "channels_per_substream" not in output:
             output["channels_per_substream"] = args.channels_per_substream
@@ -297,7 +293,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         if "send_rate_factor" not in output:
             output["send_rate_factor"] = args.send_rate_factor
 
-    args.beamformer = [BengineOutput(**output) for output in args.beamformer]
+    args.beamformer = [BOutput(**output) for output in args.beamformer]
     return args
 
 
@@ -318,7 +314,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         monitor = NullMonitor()
 
     logger.info("Initialising XB-Engine on %s", context.device.name)
-    xengine = XengineOutput(
+    xengine = XOutput(
         antennas=args.array_size,
         channels=args.channels,
         channels_per_substream=args.channels_per_substream,
@@ -343,7 +339,6 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         src_comp_vector=args.src_comp_vector,
         src_buffer=args.src_buffer,
         dst_interface=args.dst_interface,
-        dst=args.dst,
         dst_ttl=args.dst_ttl,
         dst_ibv=args.dst_ibv,
         dst_packet_payload=args.dst_packet_payload,

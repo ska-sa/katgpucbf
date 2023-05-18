@@ -32,7 +32,7 @@ class Output(ABC):
 
 
 @dataclass
-class XengineOutput(Output):
+class XOutput(Output):
     """Static configuration for an X-engine output stream."""
 
     antennas: int
@@ -45,7 +45,7 @@ class XengineOutput(Output):
 
 
 @dataclass
-class BengineOutput(Output):
+class BOutput(Output):
     """Static configuration for a Beamformer stream."""
 
     beams: int
