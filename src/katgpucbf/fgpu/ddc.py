@@ -152,10 +152,6 @@ class DDC(accel.Operation):
         Baseband filter coefficients. If the filter is asymmetric, the
         coefficients must be reversed: the first element gets
         multiplied by the oldest sample.
-    **total_power** : uint64
-        Sum of squares of input samples.
-
-        .. todo:: This is not implemented yet (it exists but is not touched).
 
     Raises
     ------
@@ -190,7 +186,6 @@ class DDC(accel.Operation):
         )
         self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
         self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
-        self.slots["total_power"] = accel.IOSlot((), np.uint64)
         self._mix_lookup = accel.DeviceArray(
             template.context, (template._segments, template._segment_samples), np.complex64
         )
