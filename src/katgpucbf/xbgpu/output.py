@@ -26,14 +26,14 @@ from katsdptelstate.endpoint import Endpoint
 class Output(ABC):
     """Static configuration for an output stream."""
 
+    name: str
     channels_per_substream: int
     dst: list[Endpoint]
-    send_rate_factor: float
 
 
 @dataclass
 class XOutput(Output):
-    """Static configuration for an X-engine output stream."""
+    """Static configuration for an output X-engine stream."""
 
     antennas: int
     channels: int
@@ -46,7 +46,6 @@ class XOutput(Output):
 
 @dataclass
 class BOutput(Output):
-    """Static configuration for a Beamformer stream."""
+    """Static configuration for an output Beam stream."""
 
-    beams: int
     spectra_per_heap: int

@@ -217,8 +217,6 @@ class XBEngine(DeviceServer):
     rx_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
-    dst
-        Destination endpoint for the outgoing data.
     dst_interface
         IP address of the network device to use for output.
     dst_ttl
@@ -253,6 +251,7 @@ class XBEngine(DeviceServer):
         katcp_host: str,
         katcp_port: int,
         adc_sample_rate_hz: float,
+        send_rate_factor: float,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
@@ -288,8 +287,9 @@ class XBEngine(DeviceServer):
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
-        if channel_offset_value % outputs[0].channels_per_substream != 0:
-            raise ValueError("channel_offset must be an integer multiple of channels_per_substream")
+        for output in outputs:
+            if channel_offset_value % output.channels_per_substream != 0:
+                raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
@@ -436,7 +436,7 @@ class XBEngine(DeviceServer):
             n_channels=outputs[0].channels,
             n_channels_per_stream=outputs[0].channels_per_substream,
             dump_interval_s=self.dump_interval_s,
-            send_rate_factor=outputs[0].send_rate_factor,
+            send_rate_factor=send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             packet_payload=dst_packet_payload,

@@ -40,7 +40,7 @@ import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
@@ -55,32 +55,28 @@ logger = logging.getLogger(__name__)
 
 
 class BOutputDict(TypedDict, total=False):
-    """Configuration options for a beamformer output.
+    """Configuration options for a beam output.
 
     Unlike :class:`BOutput`, all the fields are optional, so that it can
     be built up incrementally. They must all be filled in before using it to
     construct a :class:`BOutput`.
     """
 
-    beams: int
-    dst: list[Endpoint]
+    name: str
+    dst: Endpoint
     channels_per_substream: int
     spectra_per_heap: int
-    send_rate_factor: float
 
 
-def parse_bengine(value: str) -> BOutputDict:
-    """Parse a string with B-engine configuration data.
+def parse_beam(value: str) -> BOutputDict:
+    """Parse a string with beam configuration data.
 
     The string has a comma-separated list of key=value pairs. See
     :class:`BengineOutput` for the valid keys and types. The following
     keys are required:
 
-    - beams
-    - channels_per_substream
+    - name
     - dst
-    - send_rate_factor
-    - spectra_per_heap
     """
     kws: BOutputDict = {}
     for part in value.split(","):
@@ -88,26 +84,23 @@ def parse_bengine(value: str) -> BOutputDict:
             case [key, data]:
                 match key:
                     case _ if key in kws:
-                        raise ValueError(f"--beamformer: {key} specified twice")
-                    case "beams" | "channels_per_substream" | "spectra_per_heap":
+                        raise ValueError(f"--beam: {key} specified twice")
+                    case "name":
+                        kws[key] = data
+                    case "channels_per_substream" | "spectra_per_heap":
                         kws[key] = int(data)
-                    case "send_rate_factor":
-                        kws[key] = float(data)
                     case "dst":
-                        kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
+                        kws[key] = endpoint_parser(DEFAULT_PORT)(data)
                     case _:
-                        raise ValueError(f"--beamformer: unknown key {key}")
+                        raise ValueError(f"--beam: unknown key {key}")
             case _:
-                raise ValueError(f"--beamformer: missing '=' in {part}")
-    for key in ["beams", "dst"]:
-        # These are the bare minimum needed for a B-engine,
+                raise ValueError(f"--beam: missing '=' in {part}")
+    for key in ["name", "dst"]:
+        # These are the bare minimum needed for a beam,
         # the rest can be taken from X-engine cmd-line args.
         if key not in kws:
-            raise ValueError(f"--beamformer: {key} is missing")
+            raise ValueError(f"--beam: {key} is missing")
 
-    # Check if we have enough dest addresses for each beam
-    if len(kws["dst"]) != kws["beams"]:
-        raise ValueError("--beamformer: Mismatch in number of beams and dest multicast address range.")
     return kws
 
 
@@ -115,12 +108,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse all command line parameters for the XB-Engine and ensure that they are valid."""
     parser = argparse.ArgumentParser(description="Launch an XB-Engine for a single multicast stream.")
     parser.add_argument(
-        "--beamformer",
-        type=parse_bengine,
+        "--beam",
+        type=parse_beam,
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a beamformer output (may be repeated). The required keys are: beams, dst.",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst.",
     )
     parser.add_argument(
         "--katcp-host",
@@ -285,15 +278,18 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("Only 8-bit values are currently supported.")
 
     # Convert from *BOutputDict to *BOutput
-    for output in args.beamformer:
+    used_names = {"xengine"}
+    for output in args.beam:
+        name = output["name"]
+        if name in used_names:
+            parser.error(f"output name {name} already used.")
+        used_names.add(name)
         if "channels_per_substream" not in output:
             output["channels_per_substream"] = args.channels_per_substream
         if "spectra_per_heap" not in output:
             output["spectra_per_heap"] = args.spectra_per_heap
-        if "send_rate_factor" not in output:
-            output["send_rate_factor"] = args.send_rate_factor
 
-    args.beamformer = [BOutput(**output) for output in args.beamformer]
+    args.beam = [BOutput(**output) for output in args.beam]
     return args
 
 
@@ -315,23 +311,24 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
 
     logger.info("Initialising XB-Engine on %s", context.device.name)
     xengine = XOutput(
+        name="xengine",
         antennas=args.array_size,
         channels=args.channels,
         channels_per_substream=args.channels_per_substream,
         dst=args.dst,
-        send_rate_factor=args.send_rate_factor,
     )
     xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
+        send_rate_factor=args.send_rate_factor,
         n_samples_between_spectra=args.samples_between_spectra,
         n_spectra_per_heap=args.spectra_per_heap,
         sample_bits=args.sample_bits,
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,
-        outputs=[xengine] + args.beamformer,
+        outputs=[xengine] + args.beam,
         src=args.src,
         src_interface=args.src_interface,
         src_ibv=args.src_ibv,

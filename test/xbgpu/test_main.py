@@ -19,46 +19,41 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
-from katgpucbf.xbgpu.main import parse_bengine
+from katgpucbf.xbgpu.main import parse_beam
 
 
-class TestParseBengine:
-    """Test :func:`.parse_bengine`."""
+class TestParseBeam:
+    """Test :func:`.parse_beam`."""
 
-    def test_maximal(self) -> None:
-        """Test with the required arguments."""
-        assert parse_bengine(
-            "beams=2,channels_per_substream=512,send_rate_factor=1.0,spectra_per_heap=256,dst=239.1.2.3+1:7148"
-        ) == {
-            "beams": 2,
-            "channels_per_substream": 512,
-            "dst": [Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
-            "send_rate_factor": 1.0,
-            "spectra_per_heap": 256,
+    def test_required_only(self) -> None:
+        """Test with just required arguments."""
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148") == {
+            "name": "beam1",
+            "dst": Endpoint("239.1.2.3", 7148),
         }
 
-    def test_beamcount_mismatch(self) -> None:
-        """Test where number of beams does not match dst addresses."""
-        with pytest.raises(
-            ValueError, match="--beamformer: Mismatch in number of beams and dest multicast address range."
-        ):
-            parse_bengine(
-                "beams=2,channels_per_substream=512,send_rate_factor=1.0,spectra_per_heap=256,dst=239.1.2.3+7:7148"
-            )
+    def test_maximal(self) -> None:
+        """Test with all valid arguments."""
+        assert parse_beam("name=beam1,channels_per_substream=512,spectra_per_heap=256,dst=239.1.2.3:7148") == {
+            "name": "beam1",
+            "channels_per_substream": 512,
+            "dst": Endpoint("239.1.2.3", 7148),
+            "spectra_per_heap": 256,
+        }
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("dst", "beams=8,channels_per_substream=512,send_rate_factor=1.0,spectra_per_heap=256"),
-            ("beams", "channels_per_substream=512,spectra_per_heap=256,dst=239.1.2.3+7:7148"),
+            ("dst", "name=foo,channels_per_substream=512,spectra_per_heap=256"),
+            ("name", "channels_per_substream=512,spectra_per_heap=256,dst=239.1.2.3:7148"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
         """Test without one of the required keys."""
-        with pytest.raises(ValueError, match=f"--beamformer: {missing} is missing"):
-            parse_bengine(value)
+        with pytest.raises(ValueError, match=f"--beam: {missing} is missing"):
+            parse_beam(value)
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--beamformer: channels_per_substream specified twice"):
-            parse_bengine("beams=8,channels_per_substream=8,channels_per_substream=9,dst=239.1.2.3+7:7148")
+        with pytest.raises(ValueError, match="--beam: channels_per_substream specified twice"):
+            parse_beam("name=food,channels_per_substream=8,channels_per_substream=9,dst=239.1.2.3:7148")
