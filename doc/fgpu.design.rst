@@ -568,9 +568,19 @@ single-precision complex inputs rather than packed integers. However, the real
 and imaginary components are independent, and so the input is treated
 internally as if it contained just real values, with an adjustment to correctly
 index the weights. The postprocessing kernel also has minor adjustments, as the
-corrections for a real-to-complex Fourier transform are no longer required, and
-some indexing adjustments are needed to place the DC output of the Fourier
-transform in the centre of the output.
+corrections for a real-to-complex Fourier transform are no longer required.
+
+An incidental difference between the wideband and narrowband modes is that in
+wideband, the DC frequency of the Fourier transform corresponds to the lowest
+on-sky frequency, while for wideband it corresponds to the centre on-sky
+frequency. This difference is also handled in the postprocessing kernel.
+Internally, channels are numbered according to the Fourier transform (0 being
+the DC channel), but different calculations are used in wideband versus
+narrowband mode to swap the two halves of the band when
+
+- indexing the gains array;
+- indexing the output array;
+- computing the phase from the fine delay and channel.
 
 Down-conversion kernel
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -720,7 +730,7 @@ Coarse delay is (as for wideband) implemented using an input offset to the PFB
 FIR kernel. This means that the resolution of coarse delay is coarser than for
 wideband (by the subsampling factor). This choice is driven by the access
 patterns in the various kernels: the DDC kernel depends on knowing at compile
-time where each packed sample starts within a word, and hence is no amenable
+time where each packed sample starts within a word, and hence is not amenable
 to single-sample input offsets.
 
 Multiple outputs
