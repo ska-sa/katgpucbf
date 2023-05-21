@@ -558,7 +558,7 @@ widths. The overall approach is as follows:
    real signal into a complex signal, the subsampling factor is twice the
    decimation factor.
 
-The first three steps are implemented by a new "digital down-conversion"
+The first three steps are implemented by a "digital down-conversion"
 ("DDC") kernel. This is applied to each input chunk, after copying the head of
 the following chunk to the tail of the chunk. This does lead to redundant
 down-conversion in the overlap region, and could potentially be optimised.
