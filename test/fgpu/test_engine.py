@@ -849,7 +849,7 @@ class TestEngine:
                 # multiple of the mixer wavelength, but there can still be
                 # numerical rounding differences. For the fixed seed chosen
                 # above, we get exact equality, but this test may need to be
-                # related slightly in future.
+                # relaxed slightly in future.
                 np.testing.assert_equal(x, y)
 
         for pol in range(N_POLS):
