@@ -56,8 +56,9 @@ _T = TypeVar("_T")
 _OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
-DEFAULT_DDC_TAPS = 256
 DEFAULT_W_CUTOFF = 1.0
+DEFAULT_DDC_TAPS = 128
+DEFAULT_WEIGHT_PASS = 0.005
 
 
 def comma_split(
@@ -130,8 +131,6 @@ class NarrowbandOutputDict(OutputDict, total=False):
     centre_frequency: float
     decimation: int
     ddc_taps: int
-    w_pass: float
-    w_stop: float
     weight_pass: float
 
 
@@ -203,17 +202,11 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
     - centre_frequency
     - decimation
     - dst
-
-    If decimation is not 8 or 16, the following are also required:
-
-    - w_pass
-    - w_stop
-    - weight_pass
     """
 
     def field_callback(kws: NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
-            case "centre_frequency" | "w_pass" | "w_stop" | "weight_pass":
+            case "centre_frequency" | "weight_pass":
                 kws[key] = float(data)
             case "decimation" | "ddc_taps":
                 kws[key] = int(data)
@@ -223,16 +216,17 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
     try:
         kws: NarrowbandOutputDict = {}
         _parse_stream(value, kws, field_callback)
-        # These defaults are specified by MeerKAT requirements. Note that
-        # using **kws at the end means these are only defaults which can be
-        # overridden by the user.
-        # The ignores are to work around https://github.com/python/mypy/issues/9408
-        if kws.get("decimation") == 8:
-            kws = {"w_pass": 0.348 / 16, "w_stop": 0.574 / 16, "weight_pass": 0.015, **kws}  # type: ignore
-        elif kws.get("decimation") == 16:
-            kws = {"w_pass": 0.215 / 32, "w_stop": 0.629 / 32, "weight_pass": 0.033, **kws}  # type: ignore
-        kws = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, "ddc_taps": DEFAULT_DDC_TAPS, **kws}  # type: ignore
-        for key in ["centre_frequency", "decimation", "w_pass", "w_stop", "weight_pass"]:
+        # Note that using **kws at the end means these are only defaults which
+        # can be overridden by the user.
+        # The ignore is to work around https://github.com/python/mypy/issues/9408
+        kws = {
+            "taps": DEFAULT_TAPS,
+            "w_cutoff": DEFAULT_W_CUTOFF,
+            "weight_pass": DEFAULT_WEIGHT_PASS,
+            "ddc_taps": DEFAULT_DDC_TAPS,
+            **kws,  # type: ignore[misc]
+        }
+        for key in ["centre_frequency", "decimation"]:
             if key not in kws:
                 raise ValueError(f"{key} is missing")
     except ValueError as exc:
@@ -261,8 +255,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             "Add a narrowband output (may be repeated). "
             "The required keys are: name, centre_frequency, decimation, channels, dst. "
             f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS}], "
-            f"w_cutoff [{DEFAULT_W_CUTOFF}], w_pass, w_stop, weight_pass. "
-            "If decimation is not 8 or 16, then w_pass, w_stop, weight_pass are required."
+            f"w_cutoff [{DEFAULT_W_CUTOFF}], weight_pass."
         ),
     )
     parser.add_argument(

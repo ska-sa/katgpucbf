@@ -148,7 +148,9 @@ class TestEngine:
         pfb = generate_pfb_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff)
         gain = np.repeat(np.sum(pfb), output.channels)
         if isinstance(output, NarrowbandOutput):
-            ddc = generate_ddc_weights(output.ddc_taps, output.w_pass, output.w_stop, output.weight_pass)
+            ddc = generate_ddc_weights(
+                output.ddc_taps, 0.25 / output.subsampling, 0.75 / output.subsampling, output.weight_pass
+            )
             response = np.fft.fftshift(scipy.signal.freqz(ddc, worN=output.spectra_samples, whole=True)[1])
             # Discard higher frequencies
             response = response[
@@ -230,7 +232,7 @@ class TestEngine:
         assert engine_server._port == 0
         assert engine_server._src_interface == ["127.0.0.1"] * N_POLS
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
-        assert engine_server._pipelines[0].channels == CHANNELS
+        assert engine_server._pipelines[0].output.channels == CHANNELS
         assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
         assert engine_server._srcs == [
             [
