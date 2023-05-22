@@ -35,21 +35,25 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     ddc_taps = 256
     pfb_taps = 4
     spectra_per_heap = 256
-    subsampling = 2 * decimation
+    subsampling = decimation
     nb_spectra = 256
 
     if mode == "wide":
         narrowband: compute.NarrowbandConfig | None = None
         spectra = 1280
+        internal_channels = channels
     else:
         narrowband = compute.NarrowbandConfig(decimation=decimation, taps=ddc_taps, mix_frequency=0.2)
         spectra = nb_spectra
+        internal_channels = 2 * channels
     template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, narrowband)
     # The sample count is the minimum that will produce the required number of
     # output spectra for narrowband mode. For wideband there is more headroom.
     fn = template.instantiate(
         command_queue,
-        nb_spectra * channels * subsampling + ddc_taps + ((pfb_taps - 1) * channels - 1) * subsampling,
+        nb_spectra * internal_channels * subsampling
+        + ddc_taps
+        + ((pfb_taps - 1) * internal_channels - 1) * subsampling,
         spectra,
         spectra_per_heap,
     )

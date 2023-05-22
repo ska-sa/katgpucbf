@@ -493,14 +493,14 @@ class Pipeline:
         self._download_queue = context.create_command_queue()
         if isinstance(output, NarrowbandOutput):
             narrowband_config = NarrowbandConfig(
-                decimation=output.internal_decimation,
+                decimation=output.decimation,
                 taps=output.ddc_taps,
                 mix_frequency=-output.centre_frequency / engine.adc_sample_rate,
             )
         else:
             narrowband_config = None
         template = ComputeTemplate(
-            context, output.taps, output.internal_channels, engine.src_layout.sample_bits, narrowband=narrowband_config
+            context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=narrowband_config
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
         device_pfb_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
@@ -591,9 +591,6 @@ class Pipeline:
                 # pointer and so actually trying to use it as such will cause a
                 # segfault.
                 buf = np.frombuffer(dev_buffer, dtype=item.spectra.dtype).reshape(item.spectra.shape)
-                # Slice out just the channels we're interested in transmitting
-                pad = (self.output.internal_channels - self.output.channels) // 2
-                buf = buf[:, pad : self.output.internal_channels - pad, ...]
                 chunk = send.Chunk(
                     buf,
                     saturated=item.saturated.empty_like(),
@@ -699,8 +696,7 @@ class Pipeline:
         if self._out_item.n_spectra > 0:
             # Copy the gains to the device if they are out of date.
             if self._out_item.gains_version != self.gains_version:
-                padding = (self.output.internal_channels - self.output.channels) // 2
-                self._out_item.gains.host[:] = np.pad(self.gains, ((padding,), (0,)))
+                self._out_item.gains.host[:] = self.gains
                 self._out_item.gains_version = self.gains_version
             # TODO: can limit postprocessing to the relevant range (the FFT
             # size is baked into the plan, so is harder to modify on the
@@ -954,16 +950,8 @@ class Pipeline:
                 chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
                 self._download_queue.enqueue_wait_for_events(out_item.events)
                 assert isinstance(chunk.data, accel.HostArray)
-                # TODO: could also limit first axis to data that is actually present
-                pad = (self.output.internal_channels - self.output.channels) // 2
-                out_item.spectra.get_region(
-                    self._download_queue,
-                    chunk.data,
-                    np.s_[:, pad : self.output.internal_channels - pad, :, :, :],
-                    np.s_[:, :, :, :, :],
-                    blocking=False,
-                )
-            # TODO: this will also include saturation of discarded channels
+                # TODO: use get_region since it might be partial
+                out_item.spectra.get_async(self._download_queue, chunk.data)
             out_item.saturated.get_async(self._download_queue, chunk.saturated)
             for pol, trg in enumerate(dig_total_power):
                 out_item.dig_total_power[pol].get_async(self._download_queue, trg)
