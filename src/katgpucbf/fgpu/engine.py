@@ -101,8 +101,12 @@ def generate_pfb_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
     return weights.astype(np.float32)
 
 
-def generate_ddc_weights(taps: int, w_pass: float, w_stop: float, weight_pass: float) -> np.ndarray:
+def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.ndarray:
     """Generate equiripple filter weights for the narrowband low-pass filter.
+
+    The filter is designed with the assumption that only the inner 50% of the
+    band will be retained. The response in the outer 50% (and aliases
+    thereof) are thus irrelevant.
 
     The resulting weights are normalised such that the sum of squares is 1.
 
@@ -110,17 +114,22 @@ def generate_ddc_weights(taps: int, w_pass: float, w_stop: float, weight_pass: f
     ----------
     taps
         Number of taps in the filter
-    w_pass
-        Passband width
-    w_stop
-        Passband width plus transition width
+    subsampling
+        Subsampling factor for subsampling applied after filtering
     weight_pass
         Weight given to the passband in the filter design (relative to stopband
         weight of 1.0).
     """
-    weights = scipy.signal.remez(taps, [0, w_pass, w_stop, 0.5], [1.0, 0.0], [weight_pass, 1.0], maxiter=1000)
-    weights /= np.sqrt(np.sum(np.square(weights)))
-    return weights.astype(np.float32)
+    edges = [0, 0.25]
+    desired = [1.0]
+    weights = [weight_pass]
+    for x in np.arange(0.75, 0.5 * subsampling):
+        edges += [x, min(x + 0.5, 0.5 * subsampling)]
+        desired.append(0.0)
+        weights.append(1.0)
+    coeff = scipy.signal.remez(taps, edges, desired, weights, fs=subsampling, maxiter=1000)
+    coeff /= np.sqrt(np.sum(np.square(coeff)))
+    return coeff.astype(np.float32)
 
 
 @dataclass
@@ -512,9 +521,7 @@ class Pipeline:
             device_ddc_weights = self._compute.slots["ddc_weights"].allocate(accel.DeviceAllocator(context))
             device_ddc_weights.set(
                 compute_queue,
-                generate_ddc_weights(
-                    output.ddc_taps, 0.25 / output.subsampling, 0.75 / output.subsampling, output.weight_pass
-                ),
+                generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
             )
 
         # Initialize sending

@@ -749,6 +749,11 @@ filter that is as close as possible to 1 in the passband and 0 in the
 stopband. A weighting factor (which the user can override) balances the
 priority of the passband (ripple) and stopband (alias suppression).
 
+The filter performance is slightly improved by noting that the discarded
+channels have multiple aliases, and the filter response in those aliases is
+also irrelevant. We thus use :func:`scipy.signal.remez` to only optimise the
+response to those channels that alias into the output.
+
 Delays
 ^^^^^^
 Coarse delay is (as for wideband) implemented using an input offset to the PFB
