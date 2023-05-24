@@ -241,7 +241,6 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 async def _correlator_config_and_description(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
 ) -> tuple[dict, dict]:
-
     config: dict = {
         "version": "3.4",
         "config": {},

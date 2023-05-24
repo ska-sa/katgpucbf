@@ -14,7 +14,7 @@ repos:
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
   - repo: https://github.com/psf/black
-    rev: 22.12.0
+    rev: 23.3.0
     hooks:
       - id: black
   - repo: https://github.com/pycqa/isort
@@ -36,7 +36,7 @@ repos:
       - id: pydocstyle
         exclude: 'setup.py|scratch/'  # Because complaining about docstrings here is annoying.
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.1.1'
+    rev: 'v1.3.0'
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things. See
@@ -49,29 +49,27 @@ repos:
         types: []
         types_or: [python, pyi]
         additional_dependencies: [
-            'aiokatcp==1.6.0',
-            'dask==2022.10.0',
+            'aiokatcp==1.7.0',
+            'dask==2023.5.0',
             'katsdpsigproc==1.6.1',
             'katsdptelstate==0.13',
             'numpy==1.23.4',
             'pyparsing==3.0.9',
-            'pytest==7.1.3',
+            'pytest==7.3.1',
             'spead2==3.11.1',
             'types-decorator==5.1.1',
-            'types-docutils==0.17.1',
-            'types-redis==4.5.4',
-            'types-setuptools==57.0.0',
+            'types-docutils==0.18.1',
+            'types-redis==4.5.5',
             'types-six==1.16.0',
         ]
   - repo: https://github.com/jazzband/pip-tools
-    rev: 6.12.1
+    rev: 6.13.0
     hooks:
       - id: pip-compile
         name: pip-compile requirements.txt
         args:
           - --output-file=requirements.txt
           - --extra=gpu
-          - --extra=vkgdr
           # Avoid putting extras in the output, so that it can be used for constraints
           - --strip-extras
           - setup.cfg

@@ -141,13 +141,13 @@ def test_correlator(
 
     # Calculate expected values
     calculated_visibilities_host = np.zeros(buf_visibilities_host.shape, buf_visibilities_host.dtype)
-    for (first_batch, last_batch) in batch_ranges:
+    for first_batch, last_batch in batch_ranges:
         calculated_visibilities_host += correlate_host(buf_samples_host[first_batch:last_batch])
 
     # Calculate using the kernel
     buf_samples_device.set(command_queue, buf_samples_host)
     correlation.zero_visibilities()
-    for (first_batch, last_batch) in batch_ranges:
+    for first_batch, last_batch in batch_ranges:
         correlation.first_batch = first_batch
         correlation.last_batch = last_batch
         correlation()
