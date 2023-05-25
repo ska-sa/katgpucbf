@@ -97,7 +97,7 @@ class DDCTemplate:
            Actually do autotuning instead of using fixed logic.
         """
         wgs = 32
-        unroll = 8
+        unroll = 7
         while unroll * subsampling * DIG_SAMPLE_BITS % 32:
             unroll *= 2
         return {"wgs": wgs, "unroll": unroll}
