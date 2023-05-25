@@ -25,8 +25,8 @@ from katgpucbf.fgpu.ddc import DDCTemplate
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--taps", type=int, default=256)
-    parser.add_argument("--subsampling", type=int, default=16)
+    parser.add_argument("--taps", type=int, default=128)
+    parser.add_argument("--subsampling", type=int, default=8)
     parser.add_argument("--samples", type=int, default=16 * 1024 * 1024)
     parser.add_argument("--passes", type=int, default=10)
     args = parser.parse_args()
