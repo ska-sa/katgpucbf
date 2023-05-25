@@ -118,9 +118,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
-    unsigned int group_first_in_idx = get_group_id(0) * (WGS * C * SUBSAMPLING);
-    // TODO: risk of integer overflow:
-    unsigned int group_first_in_word = group_first_in_idx * SAMPLE_BITS / SAMPLE_WORD_BITS;
+    unsigned int group_first_in_word = get_group_id(0) * (WGS * C * SUBSAMPLING * SAMPLE_BITS / SAMPLE_WORD_BITS);
     for (int i = lid; i < group_in_words; i += WGS)
     {
         unsigned int idx = group_first_in_word + i;
@@ -162,7 +160,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         }
     }
 
-    mix_bias += (group_first_in_idx + first_in_idx) * mix_scale;
+    mix_bias += get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
     mix_bias -= rint(mix_bias);
     float2 mix_base;
     sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);
