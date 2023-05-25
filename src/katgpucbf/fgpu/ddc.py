@@ -29,9 +29,7 @@ from . import INPUT_CHUNK_PADDING
 
 class _TuningDict(TypedDict):
     wgs: int
-    sg_size: int
-    coarsen: int
-    segment_samples: int
+    unroll: int
 
 
 class DDCTemplate:
@@ -67,27 +65,13 @@ class DDCTemplate:
             tuning = self.autotune(context, taps, subsampling)
         self.context = context
         self.wgs = tuning["wgs"]
-        self._sg_size = tuning["sg_size"]
-        self._coarsen = tuning["coarsen"]
-        self._segment_samples = tuning["segment_samples"]
+        self.unroll = tuning["unroll"]
         self.taps = taps
         self.subsampling = subsampling
         self.input_sample_bits = DIG_SAMPLE_BITS
 
-        self._group_out_size = self.wgs // self._sg_size * self._coarsen
-        self._group_in_size = self._group_out_size * subsampling
-        self._load_size = self._group_in_size + taps - subsampling
-        self._segments = (self._load_size - 1) // (self._segment_samples * self.wgs) + 1
-
         # Sanity check the tuning parameters
-        if self.wgs % self._sg_size:
-            raise ValueError("wgs must be a multiple of sg_size")
-        if self.subsampling % self._sg_size:
-            raise ValueError("subsampling must be a multiple of sg_size")
-        if self._group_in_size % self._segment_samples:
-            raise ValueError("group_in_size must be a multiple of segment_samples (fix sg_size)")
-        if self._segment_samples * DIG_SAMPLE_BITS % 32:
-            raise ValueError("segment_samples * DIG_SAMPLE_BITS must be a multiple of 32")
+        # TODO: re-do for NGC-980
 
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
@@ -95,12 +79,10 @@ class DDCTemplate:
                 "kernels/ddc.mako",
                 {
                     "wgs": self.wgs,
+                    "unroll": self.unroll,
                     "taps": taps,
                     "subsampling": subsampling,
-                    "coarsen": self._coarsen,
-                    "sg_size": self._sg_size,
                     "sample_bits": DIG_SAMPLE_BITS,
-                    "segment_samples": self._segment_samples,
                 },
                 extra_dirs=[str(resource_dir)],
             )
@@ -113,13 +95,9 @@ class DDCTemplate:
 
            Actually do autotuning instead of using fixed logic.
         """
-        wgs = 32
-        coarsen = 9
-        sg_size = 2
-        segment_samples = 16
-        while sg_size > 1 and subsampling % sg_size != 0:
-            sg_size //= 2
-        return {"wgs": wgs, "coarsen": coarsen, "sg_size": sg_size, "segment_samples": segment_samples}
+        wgs = 256
+        unroll = 8
+        return {"wgs": wgs, "unroll": unroll}
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""
@@ -181,11 +159,9 @@ class DDC(accel.Operation):
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
-        self._weights = accel.DeviceArray(template.context, (template.taps,), np.float32)
+        self._weights = accel.DeviceArray(template.context, (template.taps,), np.complex64)
         self._weights_host = self._weights.empty_like()
-        self._mix_lookup = accel.DeviceArray(
-            template.context, (template._segments, template._segment_samples), np.complex64
-        )
+        self._mix_lookup = accel.DeviceArray(template.context, (template.unroll,), np.complex64)
         self._mix_lookup_host = self._mix_lookup.empty_like()
         self._mix_frequency = 0.0  # Specify in cycles per sample
         self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
@@ -194,14 +170,12 @@ class DDC(accel.Operation):
         """Set the mixer frequency and filter weights."""
         assert weights.shape == self._weights_host.shape
         self._mix_frequency = mix_frequency
-        self._weights_host[:] = weights
+        self._weights_host[:] = weights * np.exp(2j * np.pi * mix_frequency * np.arange(len(weights)))
         self._weights.set(self.command_queue, self._weights_host)
 
-        major = self.template.wgs * self.template._segment_samples
-        sample_indices = (np.arange(self._mix_lookup_host.shape[0]) * major)[:, np.newaxis] + (
-            np.arange(self.template._segment_samples)[np.newaxis, :]
+        self._mix_lookup_host[:] = np.exp(
+            2j * np.pi * mix_frequency * self.template.subsampling * np.arange(self.template.unroll)
         )
-        self._mix_lookup_host[:] = np.exp(2j * np.pi * mix_frequency * sample_indices)
         self._mix_lookup.set(self.command_queue, self._mix_lookup_host)
 
     @property
@@ -212,7 +186,7 @@ class DDC(accel.Operation):
     def _run(self) -> None:
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
-        groups = accel.divup(out_buffer.shape[0], self.template._group_out_size)
+        groups = accel.divup(self.out_samples, self.template.wgs * self.template.unroll)
 
         self.command_queue.enqueue_kernel(
             self.template.kernel,

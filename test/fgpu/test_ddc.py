@@ -51,7 +51,7 @@ def ddc_host(samples: np.ndarray, weights: np.ndarray, subsampling: int, mix_fre
         (256, 64, 1234568, None),
         (32, 32, 1234568, None),
         (55, 5, 123464, None),
-        (256, 16, 256 * 1024, {"wgs": 96, "coarsen": 3, "sg_size": 8, "segment_samples": 32}),
+        (256, 16, 256 * 1024, {"wgs": 96, "unroll": 4}),
     ],
 )
 def test_ddc(
