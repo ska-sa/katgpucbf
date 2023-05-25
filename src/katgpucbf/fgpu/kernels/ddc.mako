@@ -150,11 +150,6 @@ void ddc(
                 accum[k].y += samples[j + k] * w.y;
             }
         }
-
-        /* This is not necessary for correctness, but prevents the compiler
-         * going nuts on register allocation and improves performance.
-         */
-        __syncwarp();
     }
 
     mix_bias += get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
