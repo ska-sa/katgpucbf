@@ -19,6 +19,7 @@ import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf.fgpu import compute
+from katgpucbf.fgpu.engine import generate_ddc_weights
 
 pytestmark = [pytest.mark.cuda_only]
 
@@ -32,7 +33,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     channels = 32768
     dig_sample_bits = 10
     decimation = 8
-    ddc_taps = 256
+    ddc_taps = 128
     pfb_taps = 4
     spectra_per_heap = 256
     subsampling = decimation
@@ -43,7 +44,12 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
         spectra = 1280
         internal_channels = channels
     else:
-        narrowband = compute.NarrowbandConfig(decimation=decimation, taps=ddc_taps, mix_frequency=0.2)
+        narrowband = compute.NarrowbandConfig(
+            decimation=decimation,
+            taps=ddc_taps,
+            mix_frequency=0.2,
+            weights=generate_ddc_weights(ddc_taps, decimation, 0.1),
+        )
         spectra = nb_spectra
         internal_channels = 2 * channels
     template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, narrowband)

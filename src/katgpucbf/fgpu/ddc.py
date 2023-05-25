@@ -148,10 +148,6 @@ class DDC(accel.Operation):
         Input digitiser samples in a big chunk.
     **out** : out_samples, complex64
         Filtered and subsampled output data
-    **weights** : taps, float32
-        Baseband filter coefficients. If the filter is asymmetric, the
-        coefficients must be reversed: the first element gets
-        multiplied by the oldest sample.
 
     Raises
     ------
@@ -185,34 +181,37 @@ class DDC(accel.Operation):
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
-        self.slots["weights"] = accel.IOSlot((template.taps,), np.float32)
+        self._weights = accel.DeviceArray(template.context, (template.taps,), np.float32)
+        self._weights_host = self._weights.empty_like()
         self._mix_lookup = accel.DeviceArray(
             template.context, (template._segments, template._segment_samples), np.complex64
         )
         self._mix_lookup_host = self._mix_lookup.empty_like()
-        self.mix_frequency = 0.0  # Specify in cycles per sample
+        self._mix_frequency = 0.0  # Specify in cycles per sample
         self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
+
+    def configure(self, mix_frequency: float, weights: np.ndarray) -> None:
+        """Set the mixer frequency and filter weights."""
+        assert weights.shape == self._weights_host.shape
+        self._mix_frequency = mix_frequency
+        self._weights_host[:] = weights
+        self._weights.set(self.command_queue, self._weights_host)
+
+        major = self.template.wgs * self.template._segment_samples
+        sample_indices = (np.arange(self._mix_lookup_host.shape[0]) * major)[:, np.newaxis] + (
+            np.arange(self.template._segment_samples)[np.newaxis, :]
+        )
+        self._mix_lookup_host[:] = np.exp(2j * np.pi * mix_frequency * sample_indices)
+        self._mix_lookup.set(self.command_queue, self._mix_lookup_host)
 
     @property
     def mix_frequency(self) -> float:
         """Mixer frequency in cycles per ADC sample."""
         return self._mix_frequency
 
-    @mix_frequency.setter
-    def mix_frequency(self, frequency: float) -> None:
-        self._mix_frequency = frequency
-        major = self.template.wgs * self.template._segment_samples
-        sample_indices = (np.arange(self._mix_lookup_host.shape[0]) * major)[:, np.newaxis] + (
-            np.arange(self.template._segment_samples)[np.newaxis, :]
-        )
-        angles = 2 * np.pi * frequency * sample_indices
-        self._mix_lookup_host[:] = np.cos(angles) + 1j * np.sin(angles)
-        self._mix_lookup.set(self.command_queue, self._mix_lookup_host)
-
     def _run(self) -> None:
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
-        weights_buffer = self.buffer("weights")
         groups = accel.divup(out_buffer.shape[0], self.template._group_out_size)
 
         self.command_queue.enqueue_kernel(
@@ -220,7 +219,7 @@ class DDC(accel.Operation):
             [
                 out_buffer.buffer,
                 in_buffer.buffer,
-                weights_buffer.buffer,
+                self._weights.buffer,
                 np.int32(out_buffer.shape[0]),  # out_size
                 np.int32(accel.divup(in_buffer.shape[0], 4)),  # in_size_words
                 np.float64(self.mix_frequency),  # mix_scale

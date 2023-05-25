@@ -41,6 +41,8 @@ class NarrowbandConfig:
     taps: int
     #: Mixer frequency, in cycles per ADC sample
     mix_frequency: float
+    #: Downconversion filter weights (float)
+    weights: np.ndarray
 
 
 class ComputeTemplate:
@@ -171,7 +173,7 @@ class Compute(accel.OperationSequence):
                 raise ValueError(f"samples ({samples}) must be a multiple of subsampling ({template.ddc.subsampling})")
             self.ddc = [template.ddc.instantiate(command_queue, samples) for _ in range(N_POLS)]
             for pol in range(N_POLS):
-                self.ddc[pol].mix_frequency = template.narrowband.mix_frequency
+                self.ddc[pol].configure(template.narrowband.mix_frequency, template.narrowband.weights)
                 operations.append((f"ddc{pol}", self.ddc[pol]))
             samples = self.ddc[0].out_samples  # Number of samples available to remainder of pipeline
         self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for _ in range(N_POLS)]

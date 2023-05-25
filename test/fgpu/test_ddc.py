@@ -71,10 +71,9 @@ def test_ddc(
 
     template = DDCTemplate(context, taps=taps, subsampling=subsampling, tuning=tuning)
     fn = template.instantiate(command_queue, samples)
-    fn.mix_frequency = mix_frequency
+    fn.configure(mix_frequency, weights)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
-    fn.buffer("weights").set(command_queue, weights)
     fn()
     h_out = fn.buffer("out").get(command_queue)
     # atol has to be quite large because the calculation is fundamentally
