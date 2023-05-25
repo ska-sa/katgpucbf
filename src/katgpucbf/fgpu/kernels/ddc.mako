@@ -100,7 +100,7 @@ void ddc(
             float2 weights[TAPS];
             float2 mix_lookup[C];
         };
-        float out[2][C * WGS];
+        float out[2][C * WGS];  // Logically float2, but split to reduce bank conflicts
     } local;
 
     unsigned int lid = get_local_id(0);
