@@ -185,8 +185,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 
     BARRIER();
 
-    // TODO: transpose writeback through local mem?
-
     unsigned int first_out_idx = get_group_id(0) * (WGS * C);
     for (int i = 0; i < C; i++)
     {
