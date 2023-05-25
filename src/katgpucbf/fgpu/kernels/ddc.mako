@@ -91,6 +91,7 @@ void ddc(
 {
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
     const int group_in_words = (group_in_size * SAMPLE_BITS + SAMPLE_WORD_BITS - 1) / SAMPLE_WORD_BITS;
+    const int load_rounds = (group_in_words + WGS - 1) / WGS;
     LOCAL_DECL union
     {
         struct
@@ -105,10 +106,14 @@ void ddc(
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
     unsigned int group_first_in_word = get_group_id(0) * (WGS * C * SUBSAMPLING * SAMPLE_BITS / SAMPLE_WORD_BITS);
-    for (int i = lid; i < group_in_words; i += WGS)
+#pragma unroll
+    for (int i = 0; i < load_rounds; i++)
     {
-        unsigned int idx = group_first_in_word + i;
-        local.in[i] = (idx < in_size_words) ? in[idx] : 0;
+        unsigned int l_idx = i * WGS + lid;
+        unsigned int idx = group_first_in_word + l_idx;
+        int v = (idx < in_size_words) ? in[idx] : 0;
+        if (l_idx < group_in_words)
+            local.in[l_idx] = v;
     }
 
     /* Copy weights and mix_lookup to local memory (TODO: bank conflicts?) */
