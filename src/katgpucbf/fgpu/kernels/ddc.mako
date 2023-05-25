@@ -105,9 +105,16 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 {
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
     const int group_in_words = (group_in_size * SAMPLE_BITS + SAMPLE_WORD_BITS - 1) / SAMPLE_WORD_BITS;
-    LOCAL_DECL sample_word l_in[group_in_words];
-    LOCAL_DECL float2 l_weights[TAPS];
-    LOCAL_DECL float2 l_mix_lookup[C];
+    LOCAL_DECL union
+    {
+        struct
+        {
+            sample_word l_in[group_in_words];
+            float2 l_weights[TAPS];
+            float2 l_mix_lookup[C];
+        };
+        float l_out[2][C * WGS];
+    } local;
 
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
@@ -117,14 +124,14 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     for (int i = lid; i < group_in_words; i += WGS)
     {
         unsigned int idx = group_first_in_word + i;
-        l_in[i] = (idx < in_size_words) ? in[group_first_in_word + i] : 0;
+        local.l_in[i] = (idx < in_size_words) ? in[group_first_in_word + i] : 0;
     }
 
     /* Copy weights and mix_lookup to local memory (TODO: bank conflicts?) */
     for (int i = lid; i < TAPS; i += WGS)
-        l_weights[i] = weights[i];
+        local.l_weights[i] = weights[i];
     for (int i = lid; i < C; i += WGS)
-        l_mix_lookup[i] = mix_lookup[i];
+        local.l_mix_lookup[i] = mix_lookup[i];
 
     BARRIER();
 
@@ -134,7 +141,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
 
     unsigned int first_in_idx = lid * (C * SUBSAMPLING);
     for (int i = 0; i < C + W - 1; i++)
-        decoder_init(&decoders[i], l_in, first_in_idx + i * SUBSAMPLING);
+        decoder_init(&decoders[i], local.l_in, first_in_idx + i * SUBSAMPLING);
     for (int i = 0; i < C; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
@@ -146,7 +153,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         }
         for (int j = 0; j < W; j++)
         {
-            float2 w = l_weights[j * SUBSAMPLING + i];
+            float2 w = local.l_weights[j * SUBSAMPLING + i];
             for (int k = 0; k < C; k++)
             {
                 accum[k].x += samples[j + k] * w.x;
@@ -164,15 +171,30 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     {
         accum[i] = cmul(accum[i], mix_base);
         if (i > 0)
-            accum[i] = cmul(accum[i], l_mix_lookup[i]);
+            accum[i] = cmul(accum[i], local.l_mix_lookup[i]);
     }
 
-    // TODO: transpose writeback through local mem?
-    unsigned int first_out_idx = get_global_id(0) * C;
+    BARRIER();
+
     for (int i = 0; i < C; i++)
     {
-        unsigned int idx = first_out_idx + i;
+        unsigned int idx = lid * C + i;
+        local.l_out[0][idx] = accum[i].x;
+        local.l_out[1][idx] = accum[i].y;
+    }
+
+    BARRIER();
+
+    // TODO: transpose writeback through local mem?
+
+    unsigned int first_out_idx = get_group_id(0) * (WGS * C);
+    for (int i = 0; i < C; i++)
+    {
+        unsigned int l_idx = lid + i * WGS;
+        unsigned int idx = first_out_idx + l_idx;
         if (idx < out_size)
-            out[idx] = accum[i];
+        {
+            out[idx] = make_float2(local.l_out[0][l_idx], local.l_out[1][l_idx]);
+        }
     }
 }
