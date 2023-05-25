@@ -78,6 +78,7 @@ def test_ddc(
     h_out = fn.buffer("out").get(command_queue)
     # atol has to be quite large because the calculation is fundamentally
     # numerically unstable.
+    print(np.nonzero(np.abs(h_out - expected) > 2e-2))
     np.testing.assert_allclose(h_out, expected, atol=2e-2)
     # RMS error should be an order of magnitude lower
     err = h_out - expected

@@ -14,6 +14,11 @@
  * limitations under the License.
  ******************************************************************************/
 
+/* Alignment requirements:
+ * - WGS must be multiple of SAMPLE_WORD_BITS
+ * - TAPS must be a multiple of SUBSAMPLING
+ */
+
 <%include file="/port.mako"/>
 
 #define WGS ${wgs}
@@ -98,18 +103,32 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     const GLOBAL float2 * RESTRICT mix_lookup  // Mixer phase rotations
 )
 {
-    unsigned int gid = get_global_id(0);
-    unsigned int first_in_idx = gid * (C * SUBSAMPLING);
+    const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
+    const int group_in_words = (group_in_size * SAMPLE_BITS + SAMPLE_WORD_BITS - 1) / SAMPLE_WORD_BITS;
+    LOCAL_DECL sample_word l_in[group_in_words];
 
-    // TODO: copy input to shared memory
+    unsigned int lid = get_local_id(0);
+    /* Copy workgroup's sample data to local memory */
+    unsigned int group_first_in_idx = get_group_id(0) * (WGS * C * SUBSAMPLING);
+    // TODO: risk of integer overflow:
+    unsigned int group_first_in_word = group_first_in_idx * SAMPLE_BITS / SAMPLE_WORD_BITS;
+    for (int i = lid; i < group_in_words; i += WGS)
+    {
+        unsigned int idx = group_first_in_word + i;
+        l_in[i] = (idx < in_size_words) ? in[group_first_in_word + i] : 0;
+    }
+
+    BARRIER();
+
     // TODO: copy weights to shared memory
 
     float2 accum[C];
     decoder decoders[C + W - 1];
     float samples[C + W - 1];
 
+    unsigned int first_in_idx = lid * (C * SUBSAMPLING);
     for (int i = 0; i < C + W - 1; i++)
-        decoder_init(&decoders[i], in, first_in_idx + i * SUBSAMPLING);
+        decoder_init(&decoders[i], l_in, first_in_idx + i * SUBSAMPLING);
     for (int i = 0; i < C; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
@@ -130,7 +149,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         }
     }
 
-    mix_bias += first_in_idx * mix_scale;
+    mix_bias += (group_first_in_idx + first_in_idx) * mix_scale;
     mix_bias -= rint(mix_bias);
     float2 mix_base;
     sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);
@@ -144,7 +163,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     }
 
     // TODO: transpose writeback through local mem?
-    unsigned int first_out_idx = gid * C;
+    unsigned int first_out_idx = get_global_id(0) * C;
     for (int i = 0; i < C; i++)
     {
         unsigned int idx = first_out_idx + i;

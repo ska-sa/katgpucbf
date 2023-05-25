@@ -95,8 +95,8 @@ class DDCTemplate:
 
            Actually do autotuning instead of using fixed logic.
         """
-        wgs = 256
-        unroll = 8
+        wgs = 128
+        unroll = 4
         return {"wgs": wgs, "unroll": unroll}
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
