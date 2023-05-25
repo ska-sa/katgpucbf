@@ -15,8 +15,8 @@
  ******************************************************************************/
 
 /* Alignment requirements:
- * - WGS must be multiple of SAMPLE_WORD_BITS
  * - TAPS must be a multiple of SUBSAMPLING
+ * - C * SUBSAMPLING * SAMPLE_BITS must be a multiple of SAMPLE_WORD_BITS
  */
 
 <%include file="/port.mako"/>
@@ -34,53 +34,38 @@ typedef unsigned int sample_word;
 typedef int ssample_word;
 #define SAMPLE_WORD_BITS 32
 
-/**
- *  Read a contiguous sequence of packed samples
- *
- * The implementation is optimised to work with loop unrolling, such that
- * buffer_bits should always be a compile-time constant and branches should
- * vanish.
- */
-struct decoder
-{
-    const LOCAL sample_word *next_raw;
-    sample_word buffer;
-    int buffer_bits;
-};
-
 DEVICE_FN static unsigned int reverse_endian(unsigned int v)
 {
     return __byte_perm(v, v, 0x0123);
 }
 
-/// Initialise a decoder.
-DEVICE_FN static void decoder_init(decoder *dec, const LOCAL sample_word *base, unsigned int offset)
+DEVICE_FN static int decode(const LOCAL sample_word * RESTRICT in, sample_word *buffer, unsigned int idx, bool start)
 {
-    // Compute how much to skip
-    unsigned int bits = offset * SAMPLE_BITS;
-    unsigned int full_words = bits / SAMPLE_WORD_BITS;
-    dec->buffer = reverse_endian(base[full_words]);
-    dec->buffer_bits = SAMPLE_WORD_BITS - bits % SAMPLE_WORD_BITS;
-    dec->next_raw = base + (full_words + 1);
-}
+    // Optimised for the case that idx is known at compile time
+    unsigned int bit_idx = idx * SAMPLE_BITS;
+    unsigned int word = bit_idx / SAMPLE_WORD_BITS;
+    unsigned int bit = bit_idx % SAMPLE_WORD_BITS;
+    sample_word shifted;  // has desired value in the top SAMPLE_BITS bits
 
-DEVICE_FN static int decoder_next(decoder *dec)
-{
-    // Desired value in the top SAMPLE_BITS bits
-    sample_word shifted;
-    if (dec->buffer_bits >= SAMPLE_BITS)
+    if (bit == 0 || start)
     {
-        shifted = dec->buffer << (SAMPLE_WORD_BITS - dec->buffer_bits);
-        dec->buffer_bits -= SAMPLE_BITS;
+        // The buffer isn't initialised yet, or still contains the
+        // previous word
+        // CUDA is little-endian, but the packing uses big endian
+        *buffer = reverse_endian(in[word]);
+    }
+
+    if (bit + SAMPLE_BITS <= SAMPLE_WORD_BITS)
+    {
+        // It's already in the buffer
+        shifted = *buffer << bit;
     }
     else
     {
-        sample_word next = *dec->next_raw++;
-        // CUDA is little-endian, but the packing uses big endian
-        next = reverse_endian(next);
-        shifted = __funnelshift_lc(next, dec->buffer, SAMPLE_WORD_BITS - dec->buffer_bits);
-        dec->buffer = next;
-        dec->buffer_bits += SAMPLE_WORD_BITS - SAMPLE_BITS;
+        // It's split across the buffer and the next word
+        sample_word next = reverse_endian(in[word + 1]);
+        shifted = __funnelshift_l(next, *buffer, bit);
+        *buffer = next;
     }
     // Rely on nvcc to do sign extension when right-shifting a negative
     // value (it's undefined behaviour in C).
@@ -92,7 +77,8 @@ DEVICE_FN static float2 cmul(float2 a, float2 b)
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
+KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1)
+void ddc(
     GLOBAL float2 * RESTRICT out,
     const GLOBAL sample_word * RESTRICT in,
     const GLOBAL float2 * RESTRICT weights,
@@ -122,7 +108,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     for (int i = lid; i < group_in_words; i += WGS)
     {
         unsigned int idx = group_first_in_word + i;
-        local.in[i] = (idx < in_size_words) ? in[group_first_in_word + i] : 0;
+        local.in[i] = (idx < in_size_words) ? in[idx] : 0;
     }
 
     /* Copy weights and mix_lookup to local memory (TODO: bank conflicts?) */
@@ -134,21 +120,22 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     BARRIER();
 
     float2 accum[C];
-    decoder decoders[C + W - 1];
+    sample_word buffer[C + W - 1];
     float samples[C + W - 1];
 
-    unsigned int first_in_idx = lid * (C * SUBSAMPLING);
-    for (int i = 0; i < C + W - 1; i++)
-        decoder_init(&decoders[i], local.in, first_in_idx + i * SUBSAMPLING);
     for (int i = 0; i < C; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
+    unsigned int first_in_word = lid * (C * SUBSAMPLING * SAMPLE_BITS / SAMPLE_WORD_BITS);
+#pragma unroll
     for (int i = 0; i < SUBSAMPLING; i++)
     {
+#pragma unroll
         for (int j = 0; j < C + W - 1; j++)
         {
-            samples[j] = (float) decoder_next(&decoders[j]);
+            samples[j] = (float) decode(local.in + first_in_word, &buffer[j], j * SUBSAMPLING + i, i == 0);
         }
+#pragma unroll
         for (int j = 0; j < W; j++)
         {
             float2 w = local.weights[j * SUBSAMPLING + i];
@@ -158,6 +145,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
                 accum[k].y += samples[j + k] * w.y;
             }
         }
+
+        /* This is not necessary for correctness, but prevents the compiler
+         * going nuts on register allocation and improves performance.
+         */
+        __syncwarp();
     }
 
     mix_bias += get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
@@ -165,6 +157,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     float2 mix_base;
     sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);
 
+#pragma unroll
     for (int i = 0; i < C; i++)
     {
         accum[i] = cmul(accum[i], mix_base);
@@ -172,8 +165,9 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
             accum[i] = cmul(accum[i], local.mix_lookup[i]);
     }
 
-    BARRIER();
+    BARRIER(); // Only needed because local.out is in a union
 
+#pragma unroll
     for (int i = 0; i < C; i++)
     {
         unsigned int idx = lid * C + i;
@@ -184,6 +178,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     BARRIER();
 
     unsigned int first_out_idx = get_group_id(0) * (WGS * C);
+#pragma unroll
     for (int i = 0; i < C; i++)
     {
         unsigned int l_idx = lid + i * WGS;

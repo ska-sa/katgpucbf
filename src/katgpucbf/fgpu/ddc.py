@@ -72,6 +72,7 @@ class DDCTemplate:
 
         # Sanity check the tuning parameters
         # TODO: re-do for NGC-980
+        assert self.subsampling * self.unroll * self.input_sample_bits % 32 == 0
 
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
@@ -95,8 +96,10 @@ class DDCTemplate:
 
            Actually do autotuning instead of using fixed logic.
         """
-        wgs = 128
-        unroll = 4
+        wgs = 32
+        unroll = 8
+        while unroll * subsampling * DIG_SAMPLE_BITS % 32:
+            unroll *= 2
         return {"wgs": wgs, "unroll": unroll}
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
