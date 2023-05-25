@@ -106,6 +106,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
     const int group_in_words = (group_in_size * SAMPLE_BITS + SAMPLE_WORD_BITS - 1) / SAMPLE_WORD_BITS;
     LOCAL_DECL sample_word l_in[group_in_words];
+    LOCAL_DECL float2 l_weights[TAPS];
 
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
@@ -118,9 +119,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         l_in[i] = (idx < in_size_words) ? in[group_first_in_word + i] : 0;
     }
 
-    BARRIER();
+    /* Copy weights to local memory */
+    for (int i = lid; i < TAPS; i += WGS)
+        l_weights[i] = weights[i];
 
-    // TODO: copy weights to shared memory
+    BARRIER();
 
     float2 accum[C];
     decoder decoders[C + W - 1];
@@ -140,7 +143,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void ddc(
         }
         for (int j = 0; j < W; j++)
         {
-            float2 w = weights[j * SUBSAMPLING + i];
+            float2 w = l_weights[j * SUBSAMPLING + i];
             for (int k = 0; k < C; k++)
             {
                 accum[k].x += samples[j + k] * w.x;
