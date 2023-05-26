@@ -116,7 +116,7 @@ class DDCTemplate:
             return tune.make_measure(queue, fn)
 
         ua = cls.unroll_align(subsampling)
-        return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64, 96, 128], unroll=range(ua, 17, ua)))
+        return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(max(8, ua), 17, ua)))
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""
