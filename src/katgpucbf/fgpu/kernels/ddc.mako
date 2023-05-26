@@ -51,8 +51,7 @@ DEVICE_FN static int decode(const LOCAL sample_word * RESTRICT in, sample_word *
     {
         // The buffer isn't initialised yet, or still contains the
         // previous word
-        // CUDA is little-endian, but the packing uses big endian
-        *buffer = reverse_endian(in[word]);
+        *buffer = in[word];
     }
 
     if (bit + SAMPLE_BITS <= SAMPLE_WORD_BITS)
@@ -63,7 +62,7 @@ DEVICE_FN static int decode(const LOCAL sample_word * RESTRICT in, sample_word *
     else
     {
         // It's split across the buffer and the next word
-        sample_word next = reverse_endian(in[word + 1]);
+        sample_word next = in[word + 1];
         shifted = __funnelshift_l(next, *buffer, bit);
         *buffer = next;
     }
@@ -143,7 +142,10 @@ void ddc(
         unsigned int idx = group_first_in_word + l_idx;
         int v = (idx < in_size_words) ? in[idx] : 0;
         if (l_idx < group_in_words)
-            local.in[l_idx] = v;
+        {
+            // CUDA is little-endian, but the packing uses big endian
+            local.in[l_idx] = reverse_endian(v);
+        }
     }
 
     /* Copy weights and mix_lookup to local memory */
