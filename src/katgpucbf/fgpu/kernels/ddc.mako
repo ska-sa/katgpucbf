@@ -77,7 +77,7 @@ DEVICE_FN static float2 cmul(float2 a, float2 b)
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-DEVICE_FN static void copy_to_local_f32(LOCAL float *out, const GLOBAL float * RESTRICT in, unsigned int n)
+DEVICE_FN static void copy_to_local_float(LOCAL float *out, const GLOBAL float * RESTRICT in, unsigned int n)
 {
     // This implementation is optimised for 'items' being a compile-time constant,
     // and also for when it is a multiple of WGS.
@@ -96,7 +96,7 @@ DEVICE_FN static void copy_to_local_f32(LOCAL float *out, const GLOBAL float * R
     }
 }
 
-DEVICE_FN static void copy_to_local(LOCAL float2 *out, const GLOBAL float2 * RESTRICT in, unsigned int n)
+DEVICE_FN static void copy_to_local_float2(LOCAL float2 *out, const GLOBAL float2 * RESTRICT in, unsigned int n)
 {
     /* This relies on some behaviour that's not totally defined (aliasing
      * float2 as float[2] but which nvcc seems to handle sanely.
@@ -104,7 +104,7 @@ DEVICE_FN static void copy_to_local(LOCAL float2 *out, const GLOBAL float2 * RES
      * This approach does perform marginally better than copying a float2
      * at a time, presumably due to bank conflicts.
      */
-    copy_to_local_f32((LOCAL float *) out, (const GLOBAL float *) in, n * 2);
+    copy_to_local_float((LOCAL float *) out, (const GLOBAL float *) in, n * 2);
 }
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1)
@@ -147,8 +147,8 @@ void ddc(
     }
 
     /* Copy weights and mix_lookup to local memory */
-    copy_to_local(local.weights, weights, TAPS);
-    copy_to_local(local.mix_lookup, mix_lookup, C);
+    copy_to_local_float2(local.weights, weights, TAPS);
+    copy_to_local_float2(local.mix_lookup, mix_lookup, C);
 
     BARRIER();
 
