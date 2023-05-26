@@ -99,8 +99,19 @@ def test_bad_template_parameters(context: AbstractContext, taps: int, subsamplin
         DDCTemplate(context, taps=taps, subsampling=subsampling)
 
 
+def test_bad_tuning(context: AbstractContext) -> None:
+    with pytest.raises(ValueError, match="unroll must be a multiple of 16"):
+        DDCTemplate(context, taps=255, subsampling=5, tuning={"wgs": 32, "unroll": 5})
+
+
 def test_too_few_samples(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
     """Test that :class:`DDC` raises ValueError when `samples` is too small."""
     template = DDCTemplate(context, taps=256, subsampling=16)
     with pytest.raises(ValueError):
         template.instantiate(command_queue, 255)
+
+
+@pytest.mark.force_autotune
+def test_autotune(context: AbstractContext) -> None:
+    """Test that autotuner runs successfully."""
+    DDCTemplate(context, taps=128, subsampling=8)

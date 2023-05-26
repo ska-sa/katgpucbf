@@ -16,6 +16,7 @@
 
 """Digital down-conversion."""
 
+import math
 from importlib import resources
 from typing import Callable, TypedDict, cast
 
@@ -71,8 +72,9 @@ class DDCTemplate:
         self.input_sample_bits = DIG_SAMPLE_BITS
 
         # Sanity check the tuning parameters
-        # TODO: re-do for NGC-980
-        assert self.subsampling * self.unroll * self.input_sample_bits % 32 == 0
+        ua = self.unroll_align(subsampling)
+        if self.unroll % ua != 0:
+            raise ValueError(f"unroll must be a multiple of {ua}")
 
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
@@ -88,6 +90,11 @@ class DDCTemplate:
                 extra_dirs=[str(resource_dir)],
             )
         self.kernel = program.get_kernel("ddc")
+
+    @staticmethod
+    def unroll_align(subsampling: int) -> int:
+        """Determine the factor that must divide into `unroll`."""
+        return 32 // math.gcd(32, subsampling * DIG_SAMPLE_BITS)
 
     @classmethod
     @tune.autotuner(test={"wgs": 32, "unroll": 16})
@@ -108,13 +115,8 @@ class DDCTemplate:
             fn.bind(**{"in": in_data, "out": out_data})
             return tune.make_measure(queue, fn)
 
-        # Find minimum power of two necessary to make unroll factor valid
-        unroll_align = 1
-        while unroll_align * subsampling * DIG_SAMPLE_BITS % 32:
-            unroll_align *= 2
-        return cast(
-            _TuningDict, tune.autotune(generate, wgs=[32, 64, 96, 128], unroll=range(unroll_align, 17, unroll_align))
-        )
+        ua = cls.unroll_align(subsampling)
+        return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64, 96, 128], unroll=range(ua, 17, ua)))
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""
