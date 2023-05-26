@@ -46,8 +46,8 @@ def ddc_host(samples: np.ndarray, weights: np.ndarray, subsampling: int, mix_fre
         (256, 16, 1024 * 1024, None),
         (256, 16, 1234568, None),
         (256, 8, 1234568, None),
-        (256, 4, 1234568, None),
-        (256, 32, 1234568, None),
+        (255, 4, 1234568, None),
+        (257, 32, 1234568, None),
         (256, 64, 1234568, None),
         (32, 32, 1234568, None),
         (55, 5, 123464, None),
@@ -88,7 +88,6 @@ def test_ddc(
 @pytest.mark.parametrize(
     "taps,subsampling",
     [
-        (123, 12),  # Not a multiple
         (0, 64),  # <= 0
         (8, -1),  # <= 0
     ],

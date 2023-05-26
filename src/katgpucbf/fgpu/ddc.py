@@ -46,11 +46,6 @@ class DDCTemplate:
         Number of taps in the FIR filter
     subsampling
         Fraction of samples to retain after filtering
-
-    Raises
-    ------
-    ValueError
-        If `taps` is not a multiple of `subsampling`
     """
 
     def __init__(
@@ -60,8 +55,6 @@ class DDCTemplate:
             raise ValueError("taps must be positive")
         if subsampling <= 0:
             raise ValueError("subsampling must be positive")
-        if taps % subsampling != 0:
-            raise ValueError("taps must be a multiple of subsampling")
         if tuning is None:
             tuning = self.autotune(context, taps, subsampling)
         self.context = context

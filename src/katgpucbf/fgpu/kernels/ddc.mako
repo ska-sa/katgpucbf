@@ -15,7 +15,6 @@
  ******************************************************************************/
 
 /* Alignment requirements:
- * - TAPS must be a multiple of SUBSAMPLING
  * - C * SUBSAMPLING * SAMPLE_BITS must be a multiple of SAMPLE_WORD_BITS
  */
 
@@ -26,7 +25,7 @@
 #define SUBSAMPLING ${subsampling}
 #define SAMPLE_BITS ${sample_bits}
 #define C ${unroll}
-#define W ${taps // subsampling}
+#define W ${(taps + subsampling - 1) // subsampling}
 
 /// Raw storage type for sample data
 typedef unsigned int sample_word;
@@ -183,13 +182,14 @@ void ddc(
 #pragma unroll
     for (int i = 0; i < SUBSAMPLING; i++)
     {
+        const int w = (W - 1) * SUBSAMPLING + i < TAPS ? W : W - 1;
 #pragma unroll
-        for (int j = 0; j < C + W - 1; j++)
+        for (int j = 0; j < C + w - 1; j++)
         {
             samples[j] = (float) decode(local.in + first_in_word, &buffer[j], j * SUBSAMPLING + i, i == 0);
         }
 #pragma unroll
-        for (int j = 0; j < W; j++)
+        for (int j = 0; j < w; j++)
         {
             float2 w = local.weights[j * SUBSAMPLING + i];
             for (int k = 0; k < C; k++)
