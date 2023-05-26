@@ -17,10 +17,10 @@
 """Digital down-conversion."""
 
 from importlib import resources
-from typing import TypedDict
+from typing import Callable, TypedDict, cast
 
 import numpy as np
-from katsdpsigproc import accel
+from katsdpsigproc import accel, tune
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS, DIG_SAMPLE_BITS
@@ -89,18 +89,32 @@ class DDCTemplate:
             )
         self.kernel = program.get_kernel("ddc")
 
-    def autotune(self, context: AbstractContext, taps: int, subsampling: int) -> _TuningDict:
-        """Determine tuning parameters.
+    @classmethod
+    @tune.autotuner(test={"wgs": 32, "unroll": 16})
+    def autotune(cls, context: AbstractContext, taps: int, subsampling: int) -> _TuningDict:
+        """Determine tuning parameters."""
+        queue = context.create_tuning_command_queue()
+        in_samples = 16 * 1024 * 1024
+        out_samples = accel.divup(in_samples - taps + 1, subsampling)
+        in_bytes = in_samples * DIG_SAMPLE_BITS // 8
+        in_data = accel.DeviceArray(
+            context, (in_bytes,), padded_shape=(in_bytes + INPUT_CHUNK_PADDING,), dtype=np.uint8
+        )
+        out_data = accel.DeviceArray(context, (out_samples,), np.complex64)
+        in_data.zero(queue)
 
-        .. todo::
+        def generate(wgs: int, unroll: int) -> Callable[[int], float] | None:
+            fn = cls(context, taps, subsampling, tuning={"wgs": wgs, "unroll": unroll}).instantiate(queue, in_samples)
+            fn.bind(**{"in": in_data, "out": out_data})
+            return tune.make_measure(queue, fn)
 
-           Actually do autotuning instead of using fixed logic.
-        """
-        wgs = 32
-        unroll = 7
-        while unroll * subsampling * DIG_SAMPLE_BITS % 32:
-            unroll *= 2
-        return {"wgs": wgs, "unroll": unroll}
+        # Find minimum power of two necessary to make unroll factor valid
+        unroll_align = 1
+        while unroll_align * subsampling * DIG_SAMPLE_BITS % 32:
+            unroll_align *= 2
+        return cast(
+            _TuningDict, tune.autotune(generate, wgs=[32, 64, 96, 128], unroll=range(unroll_align, 17, unroll_align))
+        )
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""
