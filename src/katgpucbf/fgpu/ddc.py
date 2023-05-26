@@ -134,10 +134,9 @@ class DDC(accel.Operation):
     Element j of the output contains the dot product of **weights** with
     elements :math:`dj, d(j+1), \ldots, d(j+taps-1)` of the mixed signal. The
     mixed signal is the product of sample :math:`j` of the input with
-    :math:`e^{2\pi i (aj + b)}`, where :math:`a` and :math:`b` are set with
-    the :attr:`mix_frequency` and :attr:`mix_phase` properties. Note that
-    setting :attr:`mix_frequency` is somewhat expensive as it has to update an
-    array on the device.
+    :math:`e^{2\pi i (aj + b)}`, where :math:`a` is the `mix_frequency`
+    argument to :meth:`configure` and :math:`b` is the (settable)
+    :attr:`mix_phase` property.
 
     .. rubric:: Slots
 
@@ -186,7 +185,12 @@ class DDC(accel.Operation):
         self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
 
     def configure(self, mix_frequency: float, weights: np.ndarray) -> None:
-        """Set the mixer frequency and filter weights."""
+        """Set the mixer frequency and filter weights.
+
+        This is a somewhat expensive operation, as it computes lookup tables
+        and transfers them to the device synchronously. It is only intended
+        to be used at startup rather than continuously.
+        """
         assert weights.shape == self._weights_host.shape
         self._mix_frequency = mix_frequency
         self._weights_host[:] = weights * np.exp(2j * np.pi * mix_frequency * np.arange(len(weights)))

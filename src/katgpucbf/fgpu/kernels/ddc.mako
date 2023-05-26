@@ -39,7 +39,23 @@ DEVICE_FN static unsigned int reverse_endian(unsigned int v)
     return __byte_perm(v, v, 0x0123);
 }
 
-DEVICE_FN static int decode(const LOCAL sample_word * RESTRICT in, sample_word *buffer, unsigned int idx, bool start)
+/**
+ * Load the next sample value.
+ *
+ * This is intended to be called with a sequence of contiguous sample indices,
+ * passing the same @a buffer each time. On the first call with a particular
+ * buffer (or after a discontiguous change in @a idx), set @a start to false.
+ *
+ * @param in      Array with all the raw (but native-endian) sample words for the workgroup
+ * @param buffer  Sample word that help the LSBs of the previous sample if any (updated on return)
+ * @param idx     Index of the sample to retrieve, relative to @a in
+ * @param start   If true, @a buffer is ignored
+ */
+DEVICE_FN static int decode(
+    const LOCAL sample_word * RESTRICT in,
+    sample_word *buffer,
+    unsigned int idx,
+    bool start)
 {
     // Optimised for the case that idx is known at compile time
     unsigned int bit_idx = idx * SAMPLE_BITS;
@@ -76,6 +92,7 @@ DEVICE_FN static float2 cmul(float2 a, float2 b)
     return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
+// Cooperatively copy n elements from in to out
 DEVICE_FN static void copy_to_local_float(LOCAL float *out, const GLOBAL float * RESTRICT in, unsigned int n)
 {
     // This implementation is optimised for 'items' being a compile-time constant,
@@ -95,6 +112,7 @@ DEVICE_FN static void copy_to_local_float(LOCAL float *out, const GLOBAL float *
     }
 }
 
+// Cooperatively copy n elements from in to out
 DEVICE_FN static void copy_to_local_float2(LOCAL float2 *out, const GLOBAL float2 * RESTRICT in, unsigned int n)
 {
     /* This relies on some behaviour that's not totally defined (aliasing
@@ -182,6 +200,7 @@ void ddc(
         }
     }
 
+    // Compute the mixer for the first sample output by this workitem
     mix_bias += get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
     mix_bias -= rint(mix_bias);
     float2 mix_base;
@@ -198,6 +217,10 @@ void ddc(
     BARRIER(); // Only needed because local.out is in a union
 
 #pragma unroll
+    /* Copy the results to local memory to transpose it.
+     * TODO: this can cause some bank conflicts if C is a multiple of a large
+     * power of 2 - see if some padding could help.
+     */
     for (int i = 0; i < C; i++)
     {
         unsigned int idx = lid * C + i;
@@ -207,6 +230,7 @@ void ddc(
 
     BARRIER();
 
+    // Copy the results from local memory to global memory
     unsigned int first_out_idx = get_group_id(0) * (WGS * C);
 #pragma unroll
     for (int i = 0; i < C; i++)
