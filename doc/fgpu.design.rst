@@ -59,7 +59,7 @@ always be contained in a single byte, and a simplified code path is used in
 these cases.
 
 The narrowband digital down conversion also decodes the packed samples, but
-this is discussed :ref:`separately <ddc-load>`.
+this is discussed :ref:`separately <ddc>`.
 
 Polyphase Filter Bank
 ^^^^^^^^^^^^^^^^^^^^^
@@ -538,7 +538,7 @@ bandwidth is channelised and output. Typically they have narrower channel
 widths. The overall approach is as follows:
 
 1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
-   :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
+   :math:`e^{2\pi j\omega t}`, to effect a shift in the frequency of the
    signal. The centre of the desired band is placed at the DC frequency.
 
 2. The signal is convolved with a low-pass filter. This suppresses most
@@ -597,147 +597,96 @@ channels) when
 - indexing the output array;
 - computing the phase from the fine delay and channel.
 
+.. _ddc:
+
 Down-conversion kernel
 ^^^^^^^^^^^^^^^^^^^^^^
 For efficiency, the first three operations above are implemented in the same
 kernel. In particular, the filtered samples that would be removed by
-subsampling are never actually computed.
+subsampling are never actually computed.  Unlike the memory-bound PFB kernel,
+this kernel is at the boundary between being memory-bound and compute-bound
+(depending on the number of taps). The design thus needs a more efficient
+approach to decoding the packed samples.
 
-The kernel is one of the more complex in katgpucbf. Simpler implementations
-tend to have low performance because the target GPUs (NVIDIA Ampere
-architecture, particularly those based on GA-102) have far more throughput for
-flops than for the load-store pipeline or local memory (recall that we're
-using OpenCL :ref:`gpu-terminology`), and attempts to allievate this can also
-easily consume a lot of local memory and thus reduce occupancy.
+Each work-item is responsible for completely computing :math:`C` consecutive
+output values (:math:`C` is a tuning parameter), which it does
+concurrently. We can describe the operation with the equation
 
-Work groups
-~~~~~~~~~~~
-Each work group is responsible for producing a contiguous set of output
-samples (given by the constant :c:macro:`GROUP_OUT_SIZE`). To do so, it needs
-to load data from :c:macro:`LOAD_SIZE` input samples, which includes the extra
-samples needed to cater for the footprint of the low-pass filter.
+.. math::
 
-To maximise the arithmetic intensity and minimise the number of load/store
-operations, it's necessary for the kernel to hold a lot of data in registers.
-To avoid needing all the data at the same time, it has an outer loop that
-alternates between firstly, loading, decoding and mixing some data, and
-secondly, applying the low-pass filter. These two stages use different
-mappings of work items to work, and communicate through local memory.
+   y_{b+i} = \sum_{k=0}^{T-1} x_{S(b+i)+k} w_k e^{2\pi j\omega [S(b+i)+k]}
 
-.. _ddc-load:
+where
 
-Loading and unpacking
-~~~~~~~~~~~~~~~~~~~~~
-Initially (prior to the outer loop mentioned above), each work item loads the
-packed 10-bit samples for some number of input samples into registers (between
-them they load all :c:macro:`LOAD_SIZE` samples). To save space, these are
-unpacked only as needed. At present, this kernel only supports 10-bit samples,
-and not the other sample sizes supported by the wide-band PFB kernel.
+- :math:`x` is the input
+- :math:`y` is the output
+- :math:`w` contains the weights,
+- :math:`S` is the subsampling factor
+- :math:`T` is the number of taps
+- :math:`b` is the first of the :math:`C` outputs to produce; and
+- :math:`0 \le i < C` is the index into the :math:`C` outputs to produce.
+- :math:`\omega` is the angular frequency of the mixer signal.
 
-To simplify alignment, the input samples are divided
-into :dfn:`segments` of 16 consecutive samples, which consumes 20 bytes or
-five 32-bit words. The segments are distributed amongst the work items in
-round-robin fashion, so that work item :math:`i` holds segments :math:`i + jW`
-where :math:`W` is the work group size (:c:macro:`WGS` in the code). There
-won't be an equal number of segments for each work item, so some work items
-will be holding useless data.
+The first simplification we make is to pre-compute the weights with the mixer
+(on the CPU). Let :math:`z_k = w_k e^{2\pi j\omega k}`. Then the equation
+becomes
 
-When a sample is required, it is unpacked, given the segment and position
-within the segment. The kernel is designed so that the position in the segment
-is always a compile-time constant (after loop unrolling), which means the
-necessary registers and shift amounts are also known at compile-time.
+.. math::
 
-To cheaply achieve sign extension, the value is first shifted to the top 10
-bits of a 32-bit signed integer, then shifted right. In standard C/C++ this
-is undefined behaviour, but CUDA implements the common behaviour of performing
-sign extension.
+   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{k=0}^{T-1} x_{S(b+i)+k} z_k.
 
-In some cases the desired sample is split across a word boundary. CUDA
-provides a (hardware-accelerated) :dfn:`funnel-shift` intrinsic, which allows two
-words to be combined into a 64-bit word and shifted, retaining just the high
-32 bits of the result; this is ideal for our use case.
+For now we'll focus on just the summation, and deal with the exponential later.
+For simplicity, assume :math:`T` is a multiple of :math:`S` (although the
+implementation does not require it) and let :math:`W = \frac{T}{S}`. Then we
+can write :math:`j` as :math:`pS + q` and rewrite this equation as
+
+.. math::
+
+   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{p=0}^{W - 1} \sum_{q=0}^{S-1} x_{S(b+i+p) + q} z_{pS + q}.
+
+The kernel iterates first over :math:`q`, then :math:`p`, then :math:`i`. A
+separate accumulator variable is kept for each value of :math:`i`.
+For a given :math:`q`, we only need :math:`C + W - 1` different values
+of :math:`x` (since that's the range of :math:`i+p`). We decode them all into
+an array before iterating over :math:`q` and :math:`i` to update the
+accumulators.
+
+When :math:`q` is advanced, we need to decode a new set of :math:`C + W - 1`
+samples. These immediately follow the previous set. We take advantage of this:
+in many cases, the new sample occupies (at least partially) the same 32-bit
+word from which we obtained the previous sample. By keeping those
+:math:`C + W - 1` words around, we get a head-start on decoding the new
+sample.
+
+Choosing :math:`C` is a trade-off. Larger values of :math:`C` clearly increase
+register pressure. However they reduce the number of loads required: each work
+item decodes :math:`(C + W - 1)S` samples to produce :math:`C` outputs, which
+is an average of :math:`S + \frac{(W - 1)S}{C}`.
+To further reduce the global memory traffic, all the samples and weights are
+copied to local memory at the start of the kernel. The results are also first
+transposed in local memory before being written back to global memory, to
+improve the global memory access pattern.
+
+The implementation relies heavily on loop unrolling. Provided that :math:`CS`
+samples occupy a whole number of 32-bit words (so that different work-items are
+loading samples from the same bit positions within a word), all the conditional
+logic involved in decoding the samples can be evaluated at compile-time.
 
 Mixer signal
 ~~~~~~~~~~~~
 Care needs to be taken with the precision of the argument to the mixer signal.
-Simply evaluating the sine and cosine of :math:`2\pi f t` when
+Simply evaluating the sine and cosine of :math:`2\pi \omega t` when
 :math:`t` is large can lead to a catastrophic loss of precision, as the
-product :math:`f t` will have a large integer part and leave few bits for
-the fractional part. Even passing :math:`f` in single precision can lead
+product :math:`\omega t` will have a large integer part and leave few bits for
+the fractional part. Even passing :math:`\omega` in single precision can lead
 to large errors.
 
-To overcome this, a hybrid approach is used. Let the first sample handled by a
-work item be :math:`t_0`, and the kth sample of the ith segment be :math:`t_0
-+ t_{i,k}`. Note that :math:`t_{i,k}` is the same for all work items.
-We can write the mixer value as
-:math:`e^{2\pi j f t_0}e^{2\pi j f t_{i,k}}`. The second factor can be
-pre-computed for all :math:`i` and :math:`k` and stored in a small lookup
-table. The former still needs expensive handling, but needs to be performed
-far fewer times. We compute :math:`f t_0` in double precision, subtract
-the nearest integer (to increase the number of fractional mantissa bits
-available) and then proceed in single precision.
-
-FIR filter
-~~~~~~~~~~
-For the FIR filter, a different mapping of work items to samples is used.
-The work items are partitioned into :dfn:`subgroups` each containing
-:c:macro:`SG_SIZE` work items. Each subgroup collaborates to produce
-:c:macro:`COARSEN` consecutive output samples.
-
-The position of each work item within its subgroup is stored in
-:c:var:`sg_rank`. Each work item is responsible only for samples whose index
-modulo :c:macro:`SG_SIZE` equals :c:var:`sg_rank`. It's not entirely clear why
-having this division of labour improves performance, although it does reduce
-the ratio of (input and output) samples to threads and hence allows for
-greater occupancy.
-
-Samples are loaded in an order that processes all input samples with the
-same index modulo :c:macro:`SUBSAMPLING` together, keeping a sliding window of
-:c:macro:`COARSEN` such samples. This allows each subgroup to load each input
-sample from local memory just once, even though each contributes to multiple
-output samples. Note that other subgroups will still retrieve some of the
-same samples (from local memory), but the coarsening mitigates the cost of
-this.
-
-At the end of the kernel, the work items in a subgroup need to sum their
-individual results. This is done using a facility of :mod:`katsdpsigproc`,
-which in practice utilises warp shuffle instructions. While reasonably
-efficient for small values of :c:var:`SG_SIZE`, this rapidly becomes costly as
-it increases: the overhead relative to the per-work item accumulation scales
-as :math:`O(n\log n)`.
-
-Tiles
-~~~~~
-Each segment is further subdivided into :dfn:`tiles`. For each tile,
-:c:macro:`SG_SIZE` decoded and mixed samples are kept in local memory at a
-time; this limitation helps reduce local memory usage. These are written in
-the first phase (decoding and mixing), and read in the second phase (FIR
-filter), and then the next set of :c:macro:`SG_SIZE` samples are written for
-every tile, etc.
-
-The tile size should generally be as large as possible (so that the fraction
-of data held in memory is as small as possible), and in the simplest
-case, tiles correspond exactly to segments. However, the tile
-size must divide into the subsampling factor, so when the subsampling factor is
-smaller than (or not a multiple of) the segment size, tiles must be smaller
-than segments.
-
-Uncoalesced access
-~~~~~~~~~~~~~~~~~~
-Both the global reads and writes use uncoalesced accesses, meaning that
-adjacent work items do not read from/write to adjacent addresses. This can
-harm performance, and usually it is beneficial to stage copies through local
-memory using coalesced accesses. However, attempts to do so have only reduced
-performance. It's not clear why, but it may be that there is sufficient
-instruction-level parallelism to hide the latency, and the extra work on the
-load-store pipeline when using local memory just slows things down.
-
-Performance tuning
-~~~~~~~~~~~~~~~~~~
-The work group size, subgroup size and coarsening factor can all affect
-performance significantly, and not always in obvious ways. It will likely be
-necessary to implement autotuning to get optimal results across a range of
-problem parameters and hardware devices, but this has not yet been done.
+To overcome this, a hybrid approach is used. The factor :math:`e^{2\pi j\omega S(b+i)}`
+is further decomposed as :math:`e^{2\pi j\omega (Sb)} e^{2\pi j\omega (Si)}`. We
+compute :math:`Sb` in double precision and subtract out the integer part before
+dropping to single precision to compute the complex exponential. This only
+needs to be done once per work-item. The second factor is stored in a
+single-precision lookup table, indexed by :math:`i`.
 
 Filter design
 ^^^^^^^^^^^^^
