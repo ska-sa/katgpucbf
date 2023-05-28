@@ -734,8 +734,8 @@ produced from the same input, we do not attempt to duplicate this calculation
 for narrowband.
 
 An engine with only narrowband outputs will thus be lacking these statistics.
-Calculating the statistics in that case would be challenging, as it would
-need to be done in the DDC kernel, which is already extremely complex.
+Calculating the statistics in that case would require extending the DDC kernel
+to compute the same statistics.
 
 .. rubric:: Footnotes
 
