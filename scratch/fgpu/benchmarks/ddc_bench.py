@@ -20,6 +20,7 @@ import argparse
 
 from katsdpsigproc import accel
 
+from katgpucbf import DIG_SAMPLE_BITS
 from katgpucbf.fgpu.ddc import DDCTemplate
 
 
@@ -28,13 +29,16 @@ def main():
     parser.add_argument("--taps", type=int, default=128)
     parser.add_argument("--subsampling", type=int, default=8)
     parser.add_argument("--samples", type=int, default=16 * 1024 * 1024)
+    parser.add_argument("--input-sample-bits", type=int, default=DIG_SAMPLE_BITS)
     parser.add_argument("--passes", type=int, default=10)
     args = parser.parse_args()
 
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
         command_queue = context.create_tuning_command_queue()
-        template = DDCTemplate(context, taps=args.taps, subsampling=args.subsampling)
+        template = DDCTemplate(
+            context, taps=args.taps, subsampling=args.subsampling, input_sample_bits=args.input_sample_bits
+        )
         fn = template.instantiate(command_queue, samples=args.samples)
         fn.ensure_all_bound()
         fn.buffer("in").zero(command_queue)
