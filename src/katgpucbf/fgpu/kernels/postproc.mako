@@ -18,6 +18,8 @@
 <%namespace name="transpose" file="/transpose_base.mako"/>
 
 #define CHANNELS ${channels}
+#define OUT_LOW ${out_low}
+#define OUT_CHANNELS ${out_high - out_low}
 #define n ${unzip_factor}
 #define m ${channels // unzip_factor}
 
@@ -243,9 +245,19 @@ DEVICE_FN float2 apply_delay_gain(float2 gain, float phase, float2 X)
 DEVICE_FN int wrap_index(int k)
 {
 % if complex_pfb:
-    return (k + CHANNELS / 2) & (CHANNELS - 1);
+    return ((k + CHANNELS / 2) & (CHANNELS - 1)) - OUT_LOW;
 % else:
-    return k;
+    return k - OUT_LOW;
+% endif
+}
+
+/* Check whether output array index (returned by wrap_index) is a real output channel */
+DEVICE_FN bool valid_channel(int ch)
+{
+% if out_low > 0 or out_high < channels:
+    return ch >= 0 && ch < OUT_CHANNELS;
+% else:
+    return true;
 % endif
 }
 
@@ -329,19 +341,24 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
         {
             for (int p = coords.ly; p < n; p += ${block})
             {
-                int k = p * m + s;
+                int k[2];
+                k[0] = p * m + s;
+                // & to avoid overflow in edge cases.
+                k[1] = (CHANNELS - k[0]) & (CHANNELS - 1);
                 for (int i = 0; i < 2; i++)
                 {
                     float2 g[2];
-                    // & to avoid overflow in edge cases. When complex_pfb, shift
-                    // by CHANNELS / 2 since negative frequency gains are
-                    // stored at lower addresses.
-% if complex_pfb:
-                    int ch = (i ? CHANNELS / 2 - k : CHANNELS / 2 + k) & (CHANNELS - 1);
-% else:
-                    int ch = (i ? -k : k) & (CHANNELS - 1);
-% endif
-                    float4_to_float2_array(gains[ch], g);
+                    int ch = wrap_index(k[i]);
+                    if (valid_channel(ch))
+                    {
+                        float4_to_float2_array(gains[ch], g);
+                    }
+                    else
+                    {
+                        g[0] = make_float2(0.0f, 0.0f);
+                        g[1] = g[0];
+                    }
+                    // TODO: avoid taking up space for unused gains
                     for (int pol = 0; pol < 2; pol++)
                         l_gains[p][pol][i][coords.lx] = g[pol];
                 }
@@ -385,6 +402,9 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                      */
                     if (i == 1 && (s == 0 || s * 2 == m))
                         continue;
+                    // Skip processing channels that are not in the output
+                    if (!valid_channel(wrap_index(k[i])))
+                        continue;
                     const float delay_scale = -1.0f / CHANNELS;
                     float channel_scale = delay_scale * delay_channel(k[i]);
                     float2 out[2];
@@ -418,9 +438,15 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
             for (int p = 0; p < n; p++)
             {
                 int k = p * m + s;
-                base[wrap_index(k) * out_stride] = scratch[p][0].arr[${lr}][${lc}];
+                int ch = wrap_index(k);
+                if (valid_channel(ch))
+                    base[ch * out_stride] = scratch[p][0].arr[${lr}][${lc}];
                 if (s != 0 && s * 2 != m)  // Skip the duplicates (calculation was skipped)
-                    base[wrap_index(CHANNELS - k) * out_stride] = scratch[p][1].arr[${lr}][${lc}];
+                {
+                    ch = wrap_index(CHANNELS - k);
+                    if (valid_channel(ch))
+                        base[ch * out_stride] = scratch[p][1].arr[${lr}][${lc}];
+                }
             }
         }
     }

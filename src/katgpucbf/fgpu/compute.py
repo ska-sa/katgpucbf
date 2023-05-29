@@ -58,7 +58,7 @@ class ComputeTemplate:
     taps
         The number of taps that you want the resulting PFB-FIRs to have.
     channels
-        Number of channels into which the input data will be decomposed.
+        Number of output channels into which the input data will be decomposed.
     dig_sample_bits
         Number of bits per digitiser sample.
     narrowband
@@ -78,15 +78,24 @@ class ComputeTemplate:
         self.channels = channels
         self.narrowband = narrowband
         self.unzip_factor = 4 if channels >= 8 else 1
-        self.postproc = postproc.PostprocTemplate(
-            context, channels, self.unzip_factor, complex_pfb=narrowband is not None
-        )
         if narrowband is None:
+            self.internal_channels = channels
+            self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor, complex_pfb=False)
             self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, dig_sample_bits, self.unzip_factor)
             self.ddc: ddc.DDCTemplate | None = None
         else:
-            self.pfb_fir = pfb.PFBFIRTemplate(context, taps, channels, 32, self.unzip_factor, complex_input=True)
-            self.ddc = ddc.DDCTemplate(context, narrowband.taps, narrowband.decimation * 2)
+            self.internal_channels = 2 * channels
+            self.postproc = postproc.PostprocTemplate(
+                context,
+                self.internal_channels,
+                self.unzip_factor,
+                complex_pfb=True,
+                out_channels=(channels // 2, 3 * channels // 2),
+            )
+            self.pfb_fir = pfb.PFBFIRTemplate(
+                context, taps, self.internal_channels, 32, self.unzip_factor, complex_input=True
+            )
+            self.ddc = ddc.DDCTemplate(context, narrowband.taps, narrowband.decimation)
 
     def instantiate(
         self,
@@ -166,7 +175,7 @@ class Compute(accel.OperationSequence):
                 operations.append((f"ddc{pol}", self.ddc[pol]))
             samples = self.ddc[0].out_samples  # Number of samples available to remainder of pipeline
         self.pfb_fir = [template.pfb_fir.instantiate(command_queue, samples, spectra) for _ in range(N_POLS)]
-        fft_shape = (spectra, template.unzip_factor, template.channels // template.unzip_factor)
+        fft_shape = (spectra, template.unzip_factor, template.internal_channels // template.unzip_factor)
         fft_template = fft.FftTemplate(
             template.context,
             1,

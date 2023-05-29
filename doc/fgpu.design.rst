@@ -541,22 +541,35 @@ widths. The overall approach is as follows:
    :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
    signal. The centre of the desired band is placed at the DC frequency.
 
-2. The signal is convolved with a low-pass filter. This eliminates the
-   unwanted parts of the band, to the extent possible with a FIR filter.
+2. The signal is convolved with a low-pass filter. This suppresses most
+   of the unwanted parts of the band, to the extent possible with a FIR
+   filter.
 
 3. The signal is subsampled (every Nth sample is retained), reducing the data
-   rate. The low-pass filter above limits aliasing.
+   rate. The low-pass filter above limits aliasing. At this stage, twice as
+   much bandwidth as desired is retained.
 
-4. The rest of the pipeline proceeds largely as before. However, the input is
-   now complex rather than real, so the Fourier transform is a
-   complex-to-complex rather than real-to-complex transform.
+4. The rest of the pipeline proceeds largely as before, but using double the
+   final channel count (since the bandwidth is also doubled, the channel width
+   is as desired). The input is now complex rather than real, so the Fourier
+   transform is a complex-to-complex rather than real-to-complex transform.
+
+5. Half the channels (the outer half) are discarded.
 
 .. note::
    To avoid confusion, the "subsampling factor" is the ratio of original to
    retained samples in the subsampling step, while the "decimation factor" is
    the factor by which the bandwidth is reduced. Because the mixing turns a
    real signal into a complex signal, the subsampling factor is twice the
-   decimation factor.
+   decimation factor in step 3 (but equal to the overall decimation
+   factor).
+
+The decimation is thus achieved by a combination of time-domain (steps 2 and
+3) and frequency domain (step 5) techniques. This has better computational
+efficiency than a purely frequency-domain approach (which would require the
+PFB to be run on the full bandwidth), while mitigating many of the filter
+design problems inherent in a purely time-domain approach (the roll-off of the
+FIR filter can be hidden in the discarded outer channels).
 
 The first three steps are implemented by a "digital down-conversion"
 ("DDC") kernel. This is applied to each input chunk, after copying the head of
@@ -567,8 +580,9 @@ The PFB FIR kernel has alternations because it needs to consume
 single-precision complex inputs rather than packed integers. However, the real
 and imaginary components are independent, and so the input is treated
 internally as if it contained just real values, with an adjustment to correctly
-index the weights. The postprocessing kernel also has minor adjustments, as the
-corrections for a real-to-complex Fourier transform are no longer required.
+index the weights. The postprocessing kernel also has adjustments, as the
+corrections for a real-to-complex Fourier transform are no longer required, and
+the outer channels must be discarded.
 
 An incidental difference between the wideband and narrowband modes is that in
 wideband, the DC frequency of the Fourier transform corresponds to the lowest
@@ -576,7 +590,8 @@ on-sky frequency, while for wideband it corresponds to the centre on-sky
 frequency. This difference is also handled in the postprocessing kernel.
 Internally, channels are numbered according to the Fourier transform (0 being
 the DC channel), but different calculations are used in wideband versus
-narrowband mode to swap the two halves of the band when
+narrowband mode to swap the two halves of the band (and to discard half the
+channels) when
 
 - indexing the gains array;
 - indexing the output array;
@@ -723,6 +738,21 @@ The work group size, subgroup size and coarsening factor can all affect
 performance significantly, and not always in obvious ways. It will likely be
 necessary to implement autotuning to get optimal results across a range of
 problem parameters and hardware devices, but this has not yet been done.
+
+Filter design
+^^^^^^^^^^^^^
+Discarding half the channels after channelisation allows for a lot of freedom
+in the design of the DDC FIR filter: the discarded channels, as well as their
+aliases, can have an arbitrary response. This allows for a gradual transition
+from passband to stopband. We use :func:`scipy.signal.remez` to produce a
+filter that is as close as possible to 1 in the passband and 0 in the
+stopband. A weighting factor (which the user can override) balances the
+priority of the passband (ripple) and stopband (alias suppression).
+
+The filter performance is slightly improved by noting that the discarded
+channels have multiple aliases, and the filter response in those aliases is
+also irrelevant. We thus use :func:`scipy.signal.remez` to only optimise the
+response to those channels that alias into the output.
 
 Delays
 ^^^^^^

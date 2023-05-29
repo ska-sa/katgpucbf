@@ -35,6 +35,12 @@ class Output(ABC):
 
     @property
     @abstractmethod
+    def internal_channels(self) -> int:
+        """Number of channels in the PFB."""
+        raise NotImplementedError  # pragma: nocover
+
+    @property
+    @abstractmethod
     def send_rate_factor(self) -> float:
         """Output stream rate, relative to a wideband stream."""
         raise NotImplementedError  # pragma: nocover
@@ -68,13 +74,23 @@ class Output(ABC):
         @property
         @abstractmethod
         def decimation(self) -> int:
-            """Factor by which bandwidth is reduced."""
+            """Factor by which bandwidth is reduced at the output."""
             raise NotImplementedError  # pragma: nocover
+
+    @property
+    @abstractmethod
+    def internal_decimation(self) -> int:
+        """Factor by which bandwidth is reduced by the DDC kernel."""
+        raise NotImplementedError  # pragma: nocover
 
 
 @dataclass
 class WidebandOutput(Output):
     """Static configuration for a wideband output stream."""
+
+    @property
+    def internal_channels(self) -> int:  # noqa: D102
+        return self.channels
 
     @property
     def send_rate_factor(self) -> float:  # noqa: D102
@@ -86,6 +102,10 @@ class WidebandOutput(Output):
 
     @property
     def decimation(self) -> int:  # noqa: D102
+        return 1
+
+    @property
+    def internal_decimation(self) -> int:  # noqa: D102
         return 1
 
     @property
@@ -104,9 +124,15 @@ class NarrowbandOutput(Output):
     centre_frequency: float
     decimation: int
     ddc_taps: int
-    w_pass: float
-    w_stop: float
     weight_pass: float
+
+    def __post_init__(self) -> None:
+        if self.decimation % 2 != 0:
+            raise ValueError("decimation factor must be even")
+
+    @property
+    def internal_channels(self) -> int:  # noqa: D102
+        return 2 * self.channels
 
     @property
     def send_rate_factor(self) -> float:  # noqa: D102
@@ -117,8 +143,12 @@ class NarrowbandOutput(Output):
         return 2 * self.channels * self.decimation
 
     @property
+    def internal_decimation(self) -> int:  # noqa: D102
+        return self.decimation // 2
+
+    @property
     def subsampling(self) -> int:  # noqa: D102
-        return 2 * self.decimation
+        return self.decimation
 
     @property
     def window(self) -> int:  # noqa: D102

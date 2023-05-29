@@ -38,7 +38,7 @@ class PostprocTemplate:
     context
         The GPU context that we'll operate in.
     channels
-        Number of channels in each spectrum.
+        Number of input channels in each spectrum.
     unzip_factor
         Radix of the final Cooley-Tukey FFT step performed by the kernel.
     complex_pfb
@@ -47,9 +47,19 @@ class PostprocTemplate:
         considered to be the centre of the band i.e. it is written to the
         middle of the output rather than the start (and similarly, gains for
         it are loaded from the middle of the gain array etc).
+    out_channels
+        Range of channels to write to the output (defaults to all).
     """
 
-    def __init__(self, context: AbstractContext, channels: int, unzip_factor: int = 1, *, complex_pfb: bool) -> None:
+    def __init__(
+        self,
+        context: AbstractContext,
+        channels: int,
+        unzip_factor: int = 1,
+        *,
+        complex_pfb: bool,
+        out_channels: tuple[int, int] | None = None,
+    ) -> None:
         self.block = 32
         self.vtx = 1
         self.vty = 1
@@ -61,6 +71,12 @@ class PostprocTemplate:
             raise ValueError("channels must be a multiple of unzip_factor")
         if unzip_factor not in {1, 2, 4}:
             raise ValueError("unzip_factor must be 1, 2 or 4")
+        if out_channels is None:
+            self.out_channels = (0, channels)
+        else:
+            if not 0 <= out_channels[0] < out_channels[1] <= channels:
+                raise ValueError("out_channels must be a subrange of [0, channels)")
+            self.out_channels = out_channels
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
                 context,
@@ -70,6 +86,8 @@ class PostprocTemplate:
                     "vtx": self.vtx,
                     "vty": self.vty,
                     "channels": channels,
+                    "out_low": self.out_channels[0],
+                    "out_high": self.out_channels[1],
                     "unzip_factor": unzip_factor,
                     "complex_pfb": complex_pfb,
                 },
@@ -96,7 +114,7 @@ class Postproc(accel.Operation):
         Input channelised data for the two polarisations. These are formed by
         taking the complex-to-complex Fourier transform of the input
         reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
-    **out** : spectra // spectra_per_heap × channels × spectra_per_heap × N_POLS × COMPLEX, int8
+    **out** : spectra // spectra_per_heap × out_channels × spectra_per_heap × N_POLS × COMPLEX, int8
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network.
     **saturated** : heaps × N_POLS, uint32
@@ -105,7 +123,7 @@ class Postproc(accel.Operation):
         Fine delay in samples (one value per pol).
     **phase** : spectra × 2, float32
         Fixed phase adjustment in radians (one value per pol).
-    **gains** : channels × 2, complex64
+    **gains** : out_channels × 2, complex64
         Per-channel gain (one value per pol).
 
     Parameters
@@ -146,13 +164,14 @@ class Postproc(accel.Operation):
             accel.Dimension(template.unzip_factor, exact=True),
             accel.Dimension(template.channels // template.unzip_factor, exact=True),
         )
+        n_out_channels = template.out_channels[1] - template.out_channels[0]
         self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["out"] = accel.IOSlot((heaps, template.channels, spectra_per_heap, pols, cplx), np.int8)
+        self.slots["out"] = accel.IOSlot((heaps, n_out_channels, spectra_per_heap, pols, cplx), np.int8)
         self.slots["saturated"] = accel.IOSlot((heaps, pols), np.uint32)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
-        self.slots["gains"] = accel.IOSlot((template.channels, pols), np.complex64)
+        self.slots["gains"] = accel.IOSlot((n_out_channels, pols), np.complex64)
 
     def _run(self) -> None:
         block_x = self.template.block * self.template.vtx

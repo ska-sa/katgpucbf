@@ -101,8 +101,12 @@ def generate_pfb_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
     return weights.astype(np.float32)
 
 
-def generate_ddc_weights(taps: int, w_pass: float, w_stop: float, weight_pass: float) -> np.ndarray:
+def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.ndarray:
     """Generate equiripple filter weights for the narrowband low-pass filter.
+
+    The filter is designed with the assumption that only the inner 50% of the
+    band will be retained. The response in the outer 50% (and aliases
+    thereof) are thus irrelevant.
 
     The resulting weights are normalised such that the sum of squares is 1.
 
@@ -110,17 +114,22 @@ def generate_ddc_weights(taps: int, w_pass: float, w_stop: float, weight_pass: f
     ----------
     taps
         Number of taps in the filter
-    w_pass
-        Passband width
-    w_stop
-        Passband width plus transition width
+    subsampling
+        Subsampling factor for subsampling applied after filtering
     weight_pass
         Weight given to the passband in the filter design (relative to stopband
         weight of 1.0).
     """
-    weights = scipy.signal.remez(taps, [0, w_pass, w_stop, 0.5], [1.0, 0.0], [weight_pass, 1.0], maxiter=1000)
-    weights /= np.sqrt(np.sum(np.square(weights)))
-    return weights.astype(np.float32)
+    edges = [0, 0.25]
+    desired = [1.0]
+    weights = [weight_pass]
+    for x in np.arange(0.75, 0.5 * subsampling):
+        edges += [x, min(x + 0.5, 0.5 * subsampling)]
+        desired.append(0.0)
+        weights.append(1.0)
+    coeff = scipy.signal.remez(taps, edges, desired, weights, fs=subsampling, maxiter=1000)
+    coeff /= np.sqrt(np.sum(np.square(coeff)))
+    return coeff.astype(np.float32)
 
 
 @dataclass
@@ -391,7 +400,7 @@ class OutItem(QueueItem):
 
     @property
     def channels(self) -> int:  # noqa: D401
-        """Number of channels."""
+        """Number of channels stored in the item."""
         return self.spectra.shape[1]
 
     @property
@@ -511,7 +520,8 @@ class Pipeline:
         if isinstance(output, NarrowbandOutput):
             device_ddc_weights = self._compute.slots["ddc_weights"].allocate(accel.DeviceAllocator(context))
             device_ddc_weights.set(
-                compute_queue, generate_ddc_weights(output.ddc_taps, output.w_pass, output.w_stop, output.weight_pass)
+                compute_queue,
+                generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
             )
 
         # Initialize sending
@@ -521,7 +531,7 @@ class Pipeline:
 
         # Initialize delays and gains
         self.delay_models: list[AlignedDelayModel[MultiDelayModel]] = []
-        self.gains = np.zeros((output.channels, self.pols), np.complex64)
+        self.gains = np.zeros((output.channels, N_POLS), np.complex64)
         # A version number that is incremented every time the gains change
         self.gains_version = 0
         self._populate_sensors()
@@ -603,7 +613,7 @@ class Pipeline:
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
             heaps = spectra // self.engine.spectra_per_heap
-            send_shape = (heaps, self.channels, self.engine.spectra_per_heap, N_POLS, COMPLEX)
+            send_shape = (heaps, self.output.channels, self.engine.spectra_per_heap, N_POLS, COMPLEX)
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
@@ -622,30 +632,6 @@ class Pipeline:
     def spectra(self) -> int:  # noqa: D401
         """Number of spectra per output chunk."""
         return self.engine.chunk_jones // self.output.channels
-
-    @property
-    def pols(self) -> int:  # noqa: D401
-        """Number of polarisations."""
-        return N_POLS
-
-    @property
-    def channels(self) -> int:  # noqa: D401
-        """Number of channels into which the incoming signal is decomposed."""
-        return self._compute.template.channels
-
-    @property
-    def taps(self) -> int:  # noqa: D401
-        """Number of taps in the PFB-FIR filter."""
-        return self._compute.template.taps
-
-    @property
-    def spectra_samples(self) -> int:  # noqa: D401
-        """Number of incoming digitiser samples needed per spectrum.
-
-        Note that this is the spacing between spectra. Each spectrum uses
-        an overlapping window with more samples than this.
-        """
-        return self.output.spectra_samples
 
     def add_in_item(self, item: InItem) -> None:
         """Append a newly-received :class:`~.InItem`."""
@@ -748,7 +734,7 @@ class Pipeline:
         """
         # This is guaranteed by the way subsampling is defined; this assertion
         # is really as a reminder to the reader.
-        assert self.spectra_samples % self.output.subsampling == 0
+        assert self.output.spectra_samples % self.output.subsampling == 0
         while (in_item := await self._fill_in()) is not None:
             # TODO[nb]: add earlier checks to ensure this will be the case
             assert in_item.timestamp % self.output.subsampling == 0
@@ -758,7 +744,7 @@ class Pipeline:
             start_timestamp = self._out_item.end_timestamp
             orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
             if min(orig_start_timestamps) < in_item.timestamp:
-                align = self.engine.spectra_per_heap * self.spectra_samples
+                align = self.engine.spectra_per_heap * self.output.spectra_samples
                 # This loop is needed because MultiDelayModel is not necessarily
                 # monotonic, and so simply taking the larger of the two skip
                 # results does not guarantee a suitable timestamp.
@@ -790,12 +776,12 @@ class Pipeline:
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
             max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.output.window + 1
-            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.spectra_samples
+            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.output.spectra_samples
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
-            timestamps = np.arange(start_timestamp, max_end, self.spectra_samples)
+            timestamps = np.arange(start_timestamp, max_end, self.output.spectra_samples)
             orig_timestamps, fine_delays, phase = _sample_models(
-                self.delay_models, start_timestamp, max_end, self.spectra_samples
+                self.delay_models, start_timestamp, max_end, self.output.spectra_samples
             )
             # timestamps can be empty if we fast-forwarded the output right over the
             # end of the current input item, and it causes problems if we don't check
@@ -829,7 +815,7 @@ class Pipeline:
                     # Convert units of fine delay from digitiser samples to phase slope
                     # across the band. Narrowband has `decimation` times less bandwidth,
                     # so the phase change across the band is that much less.
-                    self._out_item.fine_delay.host[out_slice] = fine_delays.T / self.output.decimation
+                    self._out_item.fine_delay.host[out_slice] = fine_delays.T / self.output.internal_decimation
                     # The phase is referenced to the centre frequency, but
                     # coarse delay in wideband affects the phase of the centre
                     # frequency. The centre frequency is 4 samples per cycle, so
@@ -871,8 +857,8 @@ class Pipeline:
                         # Offset in the chunk of the first sample for each spectrum
                         first_offset = np.arange(
                             offsets[pol],
-                            offsets[pol] + batch_spectra * self.spectra_samples,
-                            self.spectra_samples,
+                            offsets[pol] + batch_spectra * self.output.spectra_samples,
+                            self.output.spectra_samples,
                         )
                         # Offset of the last sample (inclusive, rather than past-the-end)
                         last_offset = first_offset + self.output.window - 1
@@ -986,7 +972,7 @@ class Pipeline:
 
             for pol, trg in enumerate(dig_total_power):
                 total_power = float(trg)
-                avg_power = total_power / (out_item.n_spectra * self.spectra_samples)
+                avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
                 # Normalise relative to full scale. The factor of 2 is because we
                 # want 1.0 to correspond to a sine wave rather than a square wave.
                 avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
@@ -1000,7 +986,7 @@ class Pipeline:
                 # Account for heaps skipped between the end of the previous out_item and the
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
-                skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.spectra_samples)
+                skipped_frames = skipped_samples // (self.engine.spectra_per_heap * self.output.spectra_samples)
                 send.skipped_heaps_counter.labels(self.output.name).inc(skipped_frames * len(self.output.dst))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data

@@ -30,9 +30,20 @@ pytestmark = [pytest.mark.cuda_only]
 
 
 def postproc_host_pol(
-    data, spectra, spectra_per_heap_out, channels, unzip_factor, complex_pfb, fine_delay, fringe_phase, gains
+    data,
+    spectra,
+    spectra_per_heap_out,
+    channels,
+    unzip_factor,
+    complex_pfb,
+    out_channels,
+    fine_delay,
+    fringe_phase,
+    gains,
 ):
     """Calculate postproc steps on the host CPU for a single polarisation."""
+    out_s = np.s_[out_channels[0] : out_channels[1]]
+    n_out_channels = out_channels[1] - out_channels[0]
     # Fix up unzipped complex-to-complex transform into a full-size
     # real-to-complex or complex-to-complex transform. Rather than doing this
     # directly, go back to the time domain and do a fresh transform, to ensure
@@ -46,15 +57,16 @@ def postproc_host_pol(
         data_rfft = np.fft.rfft(data_time.view(np.float64), axis=-1)
         # Throw out last channel (Nyquist frequency)
         data = data_rfft.astype(np.complex64)[:, :channels]
+    data = data[:, out_s]
     # Compute delay phases
-    channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, :] - channels / 2
+    channel_idx = np.arange(channels, dtype=np.float32)[np.newaxis, out_s] - channels / 2
     m2jpi = np.complex64(-2j * np.pi)
     phase = np.exp(m2jpi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
     assert phase.dtype == np.complex64
     # Apply delay, phase and gain
     corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)
     # Split complex into real, imaginary
-    corrected = corrected.view(np.float32).reshape(spectra, channels, 2)
+    corrected = corrected.view(np.float32).reshape(spectra, n_out_channels, 2)
     # Count saturation per heap
     saturated = np.sum(np.any(np.abs(corrected) > 127.0, axis=2), axis=1, dtype=np.uint32)
     saturated = np.sum(saturated.reshape(-1, spectra_per_heap_out), axis=1)
@@ -64,12 +76,22 @@ def postproc_host_pol(
     corrected = np.minimum(np.maximum(corrected, -127), 127)
     corrected = corrected.astype(np.int8)
     # Partial transpose
-    reshaped = corrected.reshape(-1, spectra_per_heap_out, channels, 2)
+    reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels, 2)
     return reshaped.transpose(0, 2, 1, 3), saturated
 
 
 def postproc_host(
-    in0, in1, channels, unzip_factor, complex_pfb, spectra_per_heap_out, spectra, fine_delay, fringe_phase, gains
+    in0,
+    in1,
+    channels,
+    unzip_factor,
+    complex_pfb,
+    out_channels,
+    spectra_per_heap_out,
+    spectra,
+    fine_delay,
+    fringe_phase,
+    gains,
 ):
     """Aggregate both polarisation's postproc on the host CPU."""
     out = []
@@ -81,6 +103,7 @@ def postproc_host(
             channels,
             unzip_factor,
             complex_pfb,
+            out_channels,
             spectra_per_heap_out,
             spectra,
             fine_delay[:, pol],
@@ -106,8 +129,13 @@ def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex6
 
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 @pytest.mark.parametrize("complex_pfb", [False, True])
+@pytest.mark.parametrize("out_channels", [(0, 4096), (1024, 3072), (123, 3456)])
 def test_postproc(
-    context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int, complex_pfb: bool
+    context: AbstractContext,
+    command_queue: AbstractCommandQueue,
+    unzip_factor: int,
+    complex_pfb: bool,
+    out_channels: tuple[int, int],
 ) -> None:
     """Test GPU Postproc for numerical correctness."""
     channels = 4096
@@ -119,13 +147,25 @@ def test_postproc(
     h_in1 = _make_complex(lambda: rng.uniform(-512, 512, in_shape))
     h_fine_delay = rng.uniform(0.0, 2.0, (spectra, N_POLS)).astype(np.float32)
     h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
-    h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (channels, N_POLS)))
+    h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (out_channels[1] - out_channels[0], N_POLS)))
 
     expected, expected_saturated = postproc_host(
-        h_in0, h_in1, spectra, spectra_per_heap_out, channels, unzip_factor, complex_pfb, h_fine_delay, h_phase, h_gains
+        h_in0,
+        h_in1,
+        spectra,
+        spectra_per_heap_out,
+        channels,
+        unzip_factor,
+        complex_pfb,
+        out_channels,
+        h_fine_delay,
+        h_phase,
+        h_gains,
     )
 
-    template = postproc.PostprocTemplate(context, channels, unzip_factor, complex_pfb=complex_pfb)
+    template = postproc.PostprocTemplate(
+        context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels
+    )
     fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
     fn.ensure_all_bound()
     fn.buffer("in0").set(command_queue, h_in0)
@@ -139,5 +179,7 @@ def test_postproc(
     h_saturated = fn.buffer("saturated").get(command_queue)
 
     np.testing.assert_allclose(h_out, expected, atol=1)
-    np.testing.assert_equal(h_saturated, expected_saturated)
+    # Rounding differences can occasionally cause a value to be saturated in
+    # one path and not the other, but it should be rare.
+    np.testing.assert_allclose(h_saturated, expected_saturated, atol=5)
     assert np.min(h_out) == -127  # Ensure -128 gets clamped to -127
