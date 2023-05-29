@@ -89,7 +89,7 @@ class DDCTemplate:
                     "unroll": self.unroll,
                     "taps": taps,
                     "subsampling": subsampling,
-                    "sample_bits": input_sample_bits,
+                    "input_sample_bits": input_sample_bits,
                 },
                 extra_dirs=[str(resource_dir)],
             )

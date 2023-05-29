@@ -15,7 +15,7 @@
  ******************************************************************************/
 
 /* Alignment requirements:
- * - C * SUBSAMPLING * SAMPLE_BITS must be a multiple of SAMPLE_WORD_BITS
+ * - C * SUBSAMPLING * INPUT_SAMPLE_BITS must be a multiple of SAMPLE_WORD_BITS
  */
 
 <%include file="/port.mako"/>
@@ -23,7 +23,7 @@
 #define WGS ${wgs}
 #define TAPS ${taps}
 #define SUBSAMPLING ${subsampling}
-#define SAMPLE_BITS ${sample_bits}
+#define INPUT_SAMPLE_BITS ${input_sample_bits}
 #define C ${unroll}
 #define W ${(taps + subsampling - 1) // subsampling}
 
@@ -57,10 +57,10 @@ DEVICE_FN static int decode(
     bool start)
 {
     // Optimised for the case that idx is known at compile time
-    unsigned int bit_idx = idx * SAMPLE_BITS;
+    unsigned int bit_idx = idx * INPUT_SAMPLE_BITS;
     unsigned int word = bit_idx / SAMPLE_WORD_BITS;
     unsigned int bit = bit_idx % SAMPLE_WORD_BITS;
-    sample_word shifted;  // has desired value in the top SAMPLE_BITS bits
+    sample_word shifted;  // has desired value in the top INPUT_SAMPLE_BITS bits
 
     if (bit == 0 || start)
     {
@@ -69,7 +69,7 @@ DEVICE_FN static int decode(
         *buffer = in[word];
     }
 
-    if (bit + SAMPLE_BITS <= SAMPLE_WORD_BITS)
+    if (bit + INPUT_SAMPLE_BITS <= SAMPLE_WORD_BITS)
     {
         // It's already in the buffer
         shifted = *buffer << bit;
@@ -83,7 +83,7 @@ DEVICE_FN static int decode(
     }
     // Rely on nvcc to do sign extension when right-shifting a negative
     // value (it's undefined behaviour in C).
-    return ((ssample_word) shifted) >> (SAMPLE_WORD_BITS - SAMPLE_BITS);
+    return ((ssample_word) shifted) >> (SAMPLE_WORD_BITS - INPUT_SAMPLE_BITS);
 }
 
 DEVICE_FN static float2 cmul(float2 a, float2 b)
@@ -136,7 +136,8 @@ void ddc(
 )
 {
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
-    const int group_in_words = (group_in_size * SAMPLE_BITS + SAMPLE_WORD_BITS - 1) / SAMPLE_WORD_BITS;
+    const int group_in_words =
+        (group_in_size * INPUT_SAMPLE_BITS + SAMPLE_WORD_BITS - 1) / SAMPLE_WORD_BITS;
     const int load_rounds = (group_in_words + WGS - 1) / WGS;
     LOCAL_DECL union
     {
@@ -151,7 +152,8 @@ void ddc(
 
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
-    unsigned int group_first_in_word = get_group_id(0) * (WGS * C * SUBSAMPLING * SAMPLE_BITS / SAMPLE_WORD_BITS);
+    unsigned int group_first_in_word =
+        get_group_id(0) * (WGS * C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
 #pragma unroll
     for (int i = 0; i < load_rounds; i++)
     {
@@ -178,7 +180,7 @@ void ddc(
     for (int i = 0; i < C; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
-    unsigned int first_in_word = lid * (C * SUBSAMPLING * SAMPLE_BITS / SAMPLE_WORD_BITS);
+    unsigned int first_in_word = lid * (C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
 #pragma unroll
     for (int i = 0; i < SUBSAMPLING; i++)
     {
