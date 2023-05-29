@@ -29,6 +29,7 @@
 
 % else:
 
+<%include file="sample.mako"/>
 <%include file="unpack.mako"/>
 <%namespace name="wg_reduce" file="/wg_reduce.mako"/>
 ${wg_reduce.define_scratch('unsigned long long', wgs, 'scratch_t', allow_shuffle=True)}

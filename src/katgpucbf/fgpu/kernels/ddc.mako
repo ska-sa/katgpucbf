@@ -27,16 +27,7 @@
 #define C ${unroll}
 #define W ${(taps + subsampling - 1) // subsampling}
 
-/// Raw storage type for sample data
-typedef unsigned int sample_word;
-/// Signed version of sample_word
-typedef int ssample_word;
-#define SAMPLE_WORD_BITS 32
-
-DEVICE_FN static unsigned int reverse_endian(unsigned int v)
-{
-    return __byte_perm(v, v, 0x0123);
-}
+<%include file="sample.mako"/>
 
 /**
  * Load the next sample value.
@@ -81,9 +72,7 @@ DEVICE_FN static int decode(
         shifted = __funnelshift_l(next, *buffer, bit);
         *buffer = next;
     }
-    // Rely on nvcc to do sign extension when right-shifting a negative
-    // value (it's undefined behaviour in C).
-    return ((ssample_word) shifted) >> (SAMPLE_WORD_BITS - INPUT_SAMPLE_BITS);
+    return extract_sample(shifted);
 }
 
 DEVICE_FN static float2 cmul(float2 a, float2 b)
@@ -153,7 +142,7 @@ void ddc(
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
     unsigned int group_first_in_word =
-        get_group_id(0) * (WGS * C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
+        get_group_id(0) * samples_to_words(WGS * C * SUBSAMPLING);
 #pragma unroll
     for (int i = 0; i < load_rounds; i++)
     {
@@ -163,7 +152,7 @@ void ddc(
         if (l_idx < group_in_words)
         {
             // CUDA is little-endian, but the packing uses big endian
-            local.in[l_idx] = reverse_endian(v);
+            local.in[l_idx] = betoh(v);
         }
     }
 
@@ -180,7 +169,7 @@ void ddc(
     for (int i = 0; i < C; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
-    unsigned int first_in_word = lid * (C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
+    unsigned int first_in_word = lid * samples_to_words(C * SUBSAMPLING);
 #pragma unroll
     for (int i = 0; i < SUBSAMPLING; i++)
     {
