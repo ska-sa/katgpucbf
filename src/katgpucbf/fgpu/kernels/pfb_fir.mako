@@ -68,7 +68,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     const GLOBAL float * RESTRICT in,     // Input data (down-converted samples)
 % else:
     GLOBAL unsigned long long * RESTRICT out_total_power,  // Sum of squares of samples (incremented)
-    const GLOBAL unsigned char * RESTRICT in,     // Input data (digitiser samples)
+    const GLOBAL sample_word * RESTRICT in,     // Input data (digitiser samples)
 % endif
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
     int n,                                // Size of the `out` array, to avoid going out-of-bounds.
@@ -150,7 +150,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
          * total power.
          */
 % if not complex_input:
+#if INPUT_SAMPLE_BITS > 16
+        total_power += (long long) sample * sample;  // Have to prevent overflow in the multiply
+#else
         total_power += sample * sample;
+#endif
 % endif
         samples[TAPS - 1] = (float) sample;
 

@@ -15,104 +15,83 @@
  ******************************************************************************/
 
 /* Before including, define INPUT_SAMPLE_BITS to the number of bits per digitiser
- * sample. Samples must fit within two contiguous bytes. Thus, supported values
- * are 2-10, 12 and 16. The supported values larger than 8 are guaranteed not
- * to be split across 3 bytes only because the first sample is byte-aligned, so
- * for example 10-bit samples are guaranteed to be 2-bit aligned.
+ * sample. At most 32-bit samples are supported.
  */
+
+typedef unsigned int sample_word;  // Type used for accessing input global memory
+typedef int ssample_word;  // Signed version of sample_word
+#define SAMPLE_WORD_BITS 32
 
 typedef int sample_t;  // Type returned by unpack_read
 
-/* Return the byte index in the chunk where the start of a sample will
- * be. The sample may be spread over two successive bytes but we just need to
+/* Return the word index in the chunk where the start of a sample will
+ * be. The sample may be spread over two successive words but we just need to
  * know where the first one is.
  */
-DEVICE_FN unsigned int samples_to_bytes(unsigned int samples)
+DEVICE_FN static unsigned int samples_to_words(unsigned int samples)
 {
-    /* We want to compute samples * INPUT_SAMPLE_BITS / 8, but need to avoid
-     * overflow in the intermediate value, so we split INPUT_SAMPLE_BITS into
-     * whole bytes and fractions of a byte. We also want to make it as
-     * efficient as possible, which is why we have special cases
-     * (INPUT_SAMPLE_BITS should be a constant expression, so the compiler will
-     * make the switch statement vanish).
+    /* We want to compute samples * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS, but
+     * need to avoid overflow in the intermediate value, so we split
+     * `samples` into a portion that's a multiple of SAMPLE_WORD_BITS and a
+     * remainder.
      */
-    unsigned int addr = samples * (INPUT_SAMPLE_BITS / 8);
-    switch (INPUT_SAMPLE_BITS % 8)
-    {
-    case 1:
-        addr += samples >> 3;
-        break;
-    case 2:
-        addr += samples >> 2;
-        break;
-    case 4:
-        addr += samples >> 1;
-        break;
-    default:
-        /* The Python code checks that the buffer has at most 2^29 samples,
-         * to ensure that this will not overflow.
-         */
-        addr += samples * (INPUT_SAMPLE_BITS % 8) / 8;
-        break;
-    }
-    return addr;
+    return (samples / SAMPLE_WORD_BITS) * INPUT_SAMPLE_BITS
+        + (samples % SAMPLE_WORD_BITS) * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS;
 }
 
-/* Extract INPUT_SAMPLE_BITS-wide bitfield from an integer, with sign extension.
- * The `shift` MSBs and `32 - INPUT_SAMPLE_BITS - shift` MSBs are removed.
- *
- * This relies on the shift-right operation doing sign extension if the input
- * is negative. That's not defined by C but is the behaviour of CUDA.
- */
-DEVICE_FN sample_t extract_bits(int value, int shift)
-{
-    return (value << shift) >> (32 - INPUT_SAMPLE_BITS);
-}
-
-/* An "address" for a sample. It contains a pointer to the first byte
+/* An "address" for a sample. It contains a pointer to the first word
  * of the sample and a shift value to pass to extract_bits.
  */
 struct unpack_t
 {
-    const GLOBAL unsigned char *ptr;
+    const GLOBAL sample_word *ptr;
     int shift;
 };
 
 /* Initialise an unpack_t, given the pointer to the base of the array and
  * the sample index.
  */
-DEVICE_FN void unpack_init(unpack_t *unpack, const GLOBAL unsigned char *in, unsigned int idx)
+DEVICE_FN static void unpack_init(unpack_t *unpack, const GLOBAL sample_word *in, unsigned int idx)
 {
-    int shift = (INPUT_SAMPLE_BITS % 8) * idx % 8;
-    if (INPUT_SAMPLE_BITS == 2 || INPUT_SAMPLE_BITS == 4)
-        shift += 24;  // To shift an 8-bit value to the top of a 32-bit value
-    else
-        shift += 16;  // To shift a 16-bit value to the top of a 32-bit value
+    int shift = (INPUT_SAMPLE_BITS * idx) % SAMPLE_WORD_BITS;
     unpack->shift = shift;
-    unpack->ptr = in + samples_to_bytes(idx);
+    unpack->ptr = in + samples_to_words(idx);
+}
+
+DEVICE_FN static unsigned int reverse_endian(unsigned int v)
+{
+    return __byte_perm(v, v, 0x0123);
 }
 
 // Dereference an unpack_t to get the sample value
-DEVICE_FN sample_t unpack_read(const unpack_t *unpack)
+DEVICE_FN static sample_t unpack_read(const unpack_t *unpack)
 {
-    if (INPUT_SAMPLE_BITS == 8)
-        return *(const GLOBAL char *) unpack->ptr;
+    sample_word hi;  // Contains desired bits in the MSBs
+    if (SAMPLE_WORD_BITS % INPUT_SAMPLE_BITS == 0)
+    {
+        // It's always contained entirely in one word. No funnels shifts needed.
+        hi = reverse_endian(unpack->ptr[0]) << unpack->shift;
+    }
     else
     {
-        int raw;
-        if (INPUT_SAMPLE_BITS == 2 || INPUT_SAMPLE_BITS == 4)
-            raw = unpack->ptr[0];
-        else
-            raw = (unpack->ptr[0] << 8) + unpack->ptr[1];
-        return extract_bits(raw, unpack->shift);
+        // It's potentially split across words
+        // Place the desired bits in the MSBs of hi
+        hi = __funnelshift_l(
+            reverse_endian(unpack->ptr[1]), reverse_endian(unpack->ptr[0]), unpack->shift
+        );
     }
+
+    /* This relies on the shift-right operation doing sign extension if the input
+     * is negative. That's not defined by C but is the behaviour of CUDA.
+     */
+    return ((ssample_word) hi) >> (SAMPLE_WORD_BITS - INPUT_SAMPLE_BITS);
 }
 
 /* Increment an unpack_t by a given number of samples. The number of
- * samples must be a whole number of bytes (which in practice means
- * it should be a multiple of 8).
+ * samples must be a whole number of words (which in practice means
+ * it should be a multiple of 32).
  */
-DEVICE_FN void unpack_advance(unpack_t *unpack, unsigned int dist)
+DEVICE_FN static void unpack_advance(unpack_t *unpack, unsigned int dist)
 {
-    unpack->ptr += samples_to_bytes(dist);
+    unpack->ptr += samples_to_words(dist);
 }

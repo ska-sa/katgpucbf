@@ -100,14 +100,15 @@ class PFBFIRTemplate:
             if input_sample_bits != 32:
                 raise ValueError("input_sample_bits must be 32 when complex_input is true")
         else:
+            # If the assertion fails, the error message below needs to be updated.
+            assert DIG_SAMPLE_BITS_VALID == range(2, 17)
             if input_sample_bits not in DIG_SAMPLE_BITS_VALID:
-                raise ValueError("input_sample_bits must be 2-10, 12 or 16 when complex_input is false")
-        if (2 * channels) % self.wgs != 0:
-            raise ValueError(f"2*channels must be a multiple of {self.wgs}")
-        if channels <= 1 or channels & (channels - 1):
-            raise ValueError("channels must be an even power of 2")
-        if channels % unzip_factor != 0:
-            raise ValueError("channels must be a multiple of unzip_factor")
+                raise ValueError("input_sample_bits must be 2-16 when complex_input is false")
+        # step (== 2 * channels) must be a multiple of SAMPLE_WORD_BITS, which is
+        # why 16 is a minimum.
+        min_channels = max(16, self.wgs // 2, unzip_factor)
+        if channels < min_channels or channels & (channels - 1):
+            raise ValueError(f"channels must be an even power of 2 and at least {min_channels}")
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
                 context,
@@ -182,7 +183,7 @@ class PFBFIR(accel.Operation):
     ValueError
         If ``samples`` is not a multiple of 8 and ``complex_input`` is false
     ValueError
-        If ``samples`` is too large (more than 2**29)
+        If ``samples`` is too large (at least 2**32)
 
     Parameters
     ----------
@@ -208,9 +209,8 @@ class PFBFIR(accel.Operation):
         super().__init__(command_queue)
         if not template.complex_input and samples % BYTE_BITS != 0:
             raise ValueError(f"samples must be a multiple of {BYTE_BITS}")
-        if samples > 2**29:
-            # This ensures no overflow in samples_to_bytes in the kernel
-            raise ValueError("at most 2**29 samples are supported")
+        if samples >= 2**32:
+            raise ValueError("at most 2**32-1 samples are supported")
         self.template = template
         self.samples = samples
         self.spectra = spectra  # Can be changed (TODO: documentation)
@@ -222,7 +222,7 @@ class PFBFIR(accel.Operation):
             step = 2 * template.channels
             # Some load operations can run past the end. Not all input_sample_bits
             # need padding, but it's simplest just to provide it unconditionally.
-            # The actual padding needed is only 1 byte, but we use
+            # The actual padding needed is at most 4 bytes, but we use
             # INPUT_CHUNK_PADDING so that the Compute operation ends up with the
             # desired padded size.
             in_padding = INPUT_CHUNK_PADDING
