@@ -568,7 +568,7 @@ The decimation is thus achieved by a combination of time-domain (steps 2 and
 3) and frequency domain (step 5) techniques. This has better computational
 efficiency than a purely frequency-domain approach (which would require the
 PFB to be run on the full bandwidth), while mitigating many of the filter
-design problems inherent in a purely time-domain approach (the rolloff of the
+design problems inherent in a purely time-domain approach (the roll-off of the
 FIR filter can be hidden in the discarded outer channels).
 
 The first three steps are implemented by a "digital down-conversion"
