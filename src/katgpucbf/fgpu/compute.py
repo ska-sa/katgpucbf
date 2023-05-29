@@ -97,7 +97,7 @@ class ComputeTemplate:
             self.pfb_fir = pfb.PFBFIRTemplate(
                 context, taps, self.internal_channels, 32, self.unzip_factor, complex_input=True
             )
-            self.ddc = ddc.DDCTemplate(context, narrowband.taps, narrowband.decimation)
+            self.ddc = ddc.DDCTemplate(context, narrowband.taps, narrowband.decimation, dig_sample_bits)
 
     def instantiate(
         self,

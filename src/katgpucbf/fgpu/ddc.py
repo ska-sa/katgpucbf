@@ -24,7 +24,7 @@ import numpy as np
 from katsdpsigproc import accel, tune
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import BYTE_BITS, DIG_SAMPLE_BITS
+from .. import BYTE_BITS
 from . import INPUT_CHUNK_PADDING
 
 
@@ -46,26 +46,37 @@ class DDCTemplate:
         Number of taps in the FIR filter
     subsampling
         Fraction of samples to retain after filtering
+    input_sample_bits
+        Bits per input sample
     """
 
+    autotune_version = 1
+
     def __init__(
-        self, context: AbstractContext, taps: int, subsampling: int, tuning: _TuningDict | None = None
+        self,
+        context: AbstractContext,
+        taps: int,
+        subsampling: int,
+        input_sample_bits: int,
+        tuning: _TuningDict | None = None,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be positive")
         if subsampling <= 0:
             raise ValueError("subsampling must be positive")
+        if not 1 <= input_sample_bits <= 32:
+            raise ValueError("input_sample_bits must be in the range [1, 32]")
         if tuning is None:
-            tuning = self.autotune(context, taps, subsampling)
+            tuning = self.autotune(context, taps, subsampling, input_sample_bits)
         self.context = context
         self.wgs = tuning["wgs"]
         self.unroll = tuning["unroll"]
         self.taps = taps
         self.subsampling = subsampling
-        self.input_sample_bits = DIG_SAMPLE_BITS
+        self.input_sample_bits = input_sample_bits
 
         # Sanity check the tuning parameters
-        ua = self.unroll_align(subsampling)
+        ua = self.unroll_align(subsampling, input_sample_bits)
         if self.unroll % ua != 0:
             raise ValueError(f"unroll must be a multiple of {ua}")
 
@@ -78,25 +89,25 @@ class DDCTemplate:
                     "unroll": self.unroll,
                     "taps": taps,
                     "subsampling": subsampling,
-                    "sample_bits": DIG_SAMPLE_BITS,
+                    "sample_bits": input_sample_bits,
                 },
                 extra_dirs=[str(resource_dir)],
             )
         self.kernel = program.get_kernel("ddc")
 
     @staticmethod
-    def unroll_align(subsampling: int) -> int:
+    def unroll_align(subsampling: int, input_sample_bits: int) -> int:
         """Determine the factor that must divide into `unroll`."""
-        return 32 // math.gcd(32, subsampling * DIG_SAMPLE_BITS)
+        return 32 // math.gcd(32, subsampling * input_sample_bits)
 
     @classmethod
     @tune.autotuner(test={"wgs": 32, "unroll": 16})
-    def autotune(cls, context: AbstractContext, taps: int, subsampling: int) -> _TuningDict:
+    def autotune(cls, context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int) -> _TuningDict:
         """Determine tuning parameters."""
         queue = context.create_tuning_command_queue()
         in_samples = 16 * 1024 * 1024
         out_samples = accel.divup(in_samples - taps + 1, subsampling)
-        in_bytes = in_samples * DIG_SAMPLE_BITS // 8
+        in_bytes = in_samples * input_sample_bits // 8
         in_data = accel.DeviceArray(
             context, (in_bytes,), padded_shape=(in_bytes + INPUT_CHUNK_PADDING,), dtype=np.uint8
         )
@@ -104,11 +115,13 @@ class DDCTemplate:
         in_data.zero(queue)
 
         def generate(wgs: int, unroll: int) -> Callable[[int], float] | None:
-            fn = cls(context, taps, subsampling, tuning={"wgs": wgs, "unroll": unroll}).instantiate(queue, in_samples)
+            fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": wgs, "unroll": unroll}).instantiate(
+                queue, in_samples
+            )
             fn.bind(**{"in": in_data, "out": out_data})
             return tune.make_measure(queue, fn)
 
-        ua = cls.unroll_align(subsampling)
+        ua = cls.unroll_align(subsampling, input_sample_bits)
         return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(max(8, ua), 17, ua)))
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
@@ -133,7 +146,7 @@ class DDC(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : samples * DIG_SAMPLE_BITS // BYTE_BITS, uint8
+    **in** : samples * input_sample_bits // BYTE_BITS, uint8
         Input digitiser samples in a big chunk.
     **out** : out_samples, complex64
         Filtered and subsampled output data
@@ -164,7 +177,7 @@ class DDC(accel.Operation):
         self.out_samples = accel.divup(samples - template.taps + 1, template.subsampling)
         # The actual padding requirement is just 4-byte alignment, but using
         # INPUT_CHUNK_PADDING gives consistent padding to wideband pipelines.
-        in_bytes = samples * DIG_SAMPLE_BITS // BYTE_BITS
+        in_bytes = samples * template.input_sample_bits // BYTE_BITS
         self.slots["in"] = accel.IOSlot(
             (accel.Dimension(in_bytes, min_padded_size=in_bytes + INPUT_CHUNK_PADDING),),
             np.uint8,

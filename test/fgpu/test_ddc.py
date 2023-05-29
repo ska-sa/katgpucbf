@@ -20,16 +20,18 @@ import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
+from katgpucbf import BYTE_BITS
 from katgpucbf.fgpu.ddc import DDCTemplate, _TuningDict
 
 from .. import unpackbits
 
 
-def ddc_host(samples: np.ndarray, weights: np.ndarray, subsampling: int, mix_frequency: float) -> np.ndarray:
+def ddc_host(
+    samples: np.ndarray, weights: np.ndarray, subsampling: int, input_sample_bits: int, mix_frequency: float
+) -> np.ndarray:
     """Implement the DDC calculation simply in numpy."""
     # Calculation is done in double precision for better accuracy
-    samples = unpackbits(samples).astype(np.complex128)
+    samples = unpackbits(samples, input_sample_bits).astype(np.complex128)
     mix_angle = 2 * np.pi * mix_frequency * np.arange(0, len(samples), dtype=np.float64)
     mix = np.cos(mix_angle) + 1j * np.sin(mix_angle)
     samples *= mix
@@ -40,18 +42,18 @@ def ddc_host(samples: np.ndarray, weights: np.ndarray, subsampling: int, mix_fre
 
 
 @pytest.mark.parametrize(
-    "taps,subsampling,samples,tuning",
+    "taps,subsampling,samples,input_sample_bits,tuning",
     [
-        (256, 16, 256, None),
-        (256, 16, 1024 * 1024, None),
-        (256, 16, 1234568, None),
-        (256, 8, 1234568, None),
-        (255, 4, 1234568, None),
-        (257, 32, 1234568, None),
-        (256, 64, 1234568, None),
-        (32, 32, 1234568, None),
-        (55, 5, 123464, None),
-        (256, 16, 256 * 1024, {"wgs": 96, "unroll": 4}),
+        (256, 16, 256, 10, None),
+        (256, 16, 1024 * 1024, 12, None),
+        (256, 16, 1234568, 13, None),
+        (256, 8, 1234568, 16, None),
+        (255, 4, 1234568, 32, None),
+        (257, 32, 1234568, 8, None),
+        (256, 64, 1234568, 5, None),
+        (32, 32, 1234568, 7, None),
+        (55, 5, 123464, 10, None),
+        (256, 16, 256 * 1024, 10, {"wgs": 96, "unroll": 4}),
     ],
 )
 def test_ddc(
@@ -60,16 +62,19 @@ def test_ddc(
     taps: int,
     subsampling: int,
     samples: int,
+    input_sample_bits: int,
     tuning: _TuningDict | None,
 ) -> None:
     """Test DDC kernel."""
     rng = np.random.default_rng(seed=1)
-    h_in = rng.integers(0, 256, samples * DIG_SAMPLE_BITS // BYTE_BITS, np.uint8)
+    h_in = rng.integers(0, 256, samples * input_sample_bits // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
     mix_frequency = 0.21
-    expected = ddc_host(h_in, weights, subsampling, mix_frequency)
+    expected = ddc_host(h_in, weights, subsampling, input_sample_bits, mix_frequency)
 
-    template = DDCTemplate(context, taps=taps, subsampling=subsampling, tuning=tuning)
+    template = DDCTemplate(
+        context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, tuning=tuning
+    )
     fn = template.instantiate(command_queue, samples)
     fn.configure(mix_frequency, weights)
     fn.ensure_all_bound()
@@ -78,39 +83,49 @@ def test_ddc(
     h_out = fn.buffer("out").get(command_queue)
     # atol has to be quite large because the calculation is fundamentally
     # numerically unstable.
-    np.testing.assert_allclose(h_out, expected, atol=2e-2)
+    np.testing.assert_allclose(h_out, expected, atol=2e-5 * 2**input_sample_bits)
     # RMS error should be an order of magnitude lower
     err = h_out - expected
     rms = np.sqrt(np.vdot(err, err) / err.size)
-    assert rms < 2e-3
+    assert rms < 2e-6 * 2**input_sample_bits
 
 
 @pytest.mark.parametrize(
-    "taps,subsampling",
+    "taps,subsampling,input_sample_bits",
     [
-        (0, 64),  # <= 0
-        (8, -1),  # <= 0
+        (0, 64, 10),  # <= 0
+        (8, -1, 12),  # <= 0
+        (64, 8, 33),  # Too large sample_bits
     ],
 )
-def test_bad_template_parameters(context: AbstractContext, taps: int, subsampling: int) -> None:
+def test_bad_template_parameters(context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int) -> None:
     """Test that :class:`DDCTemplate` raises ValueError when given invalid parameters."""
     with pytest.raises(ValueError):
-        DDCTemplate(context, taps=taps, subsampling=subsampling)
+        DDCTemplate(context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits)
 
 
 def test_bad_tuning(context: AbstractContext) -> None:
     with pytest.raises(ValueError, match="unroll must be a multiple of 16"):
-        DDCTemplate(context, taps=255, subsampling=5, tuning={"wgs": 32, "unroll": 5})
+        DDCTemplate(context, taps=255, subsampling=5, input_sample_bits=10, tuning={"wgs": 32, "unroll": 5})
 
 
 def test_too_few_samples(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
     """Test that :class:`DDC` raises ValueError when `samples` is too small."""
-    template = DDCTemplate(context, taps=256, subsampling=16)
+    template = DDCTemplate(context, taps=256, input_sample_bits=10, subsampling=16)
     with pytest.raises(ValueError):
         template.instantiate(command_queue, 255)
 
 
+@pytest.mark.parametrize(
+    "taps,subsampling,input_sample_bits",
+    [
+        (256, 16, 10),
+        (96, 8, 10),
+        (256, 5, 32),
+        (96, 16, 5),
+    ],
+)
 @pytest.mark.force_autotune
-def test_autotune(context: AbstractContext) -> None:
+def test_autotune(context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int) -> None:
     """Test that autotuner runs successfully."""
-    DDCTemplate(context, taps=128, subsampling=8)
+    DDCTemplate(context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits)
