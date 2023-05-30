@@ -58,7 +58,6 @@ def main():  # noqa: C901
         if args.narrowband:
             narrowband_config = NarrowbandConfig(
                 decimation=args.narrowband_decimation,
-                taps=args.ddc_taps,
                 mix_frequency=0.25,
                 weights=generate_ddc_weights(args.ddc_taps, args.narrowband_decimation, 0.005),
             )

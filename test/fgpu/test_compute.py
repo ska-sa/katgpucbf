@@ -46,7 +46,6 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     else:
         narrowband = compute.NarrowbandConfig(
             decimation=decimation,
-            taps=ddc_taps,
             mix_frequency=0.2,
             weights=generate_ddc_weights(ddc_taps, decimation, 0.1),
         )

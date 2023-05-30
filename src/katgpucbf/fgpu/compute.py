@@ -37,8 +37,6 @@ class NarrowbandConfig:
 
     #: Factor by which bandwidth is reduced
     decimation: int
-    #: Taps in low-pass filter
-    taps: int
     #: Mixer frequency, in cycles per ADC sample
     mix_frequency: float
     #: Downconversion filter weights (float)
@@ -97,7 +95,7 @@ class ComputeTemplate:
             self.pfb_fir = pfb.PFBFIRTemplate(
                 context, taps, self.internal_channels, 32, self.unzip_factor, complex_input=True
             )
-            self.ddc = ddc.DDCTemplate(context, narrowband.taps, narrowband.decimation, dig_sample_bits)
+            self.ddc = ddc.DDCTemplate(context, len(narrowband.weights), narrowband.decimation, dig_sample_bits)
 
     def instantiate(
         self,

@@ -503,7 +503,6 @@ class Pipeline:
         if isinstance(output, NarrowbandOutput):
             narrowband_config = NarrowbandConfig(
                 decimation=output.decimation,
-                taps=output.ddc_taps,
                 mix_frequency=-output.centre_frequency / engine.adc_sample_rate,
                 weights=generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
             )
