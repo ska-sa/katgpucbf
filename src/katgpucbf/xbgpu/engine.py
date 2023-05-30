@@ -468,16 +468,7 @@ class XBEngine(DeviceServer):
         sensors: aiokatcp.SensorSet,
         rx_sensor_timeout: float,
     ) -> None:
-        """Define the sensors for an XBEngine.
-
-        Parameters
-        ----------
-        rx_sensor_timeout
-            See :meth:`.recv.make_sensors` for more information.
-        chan_range
-            Tuple of integers showing the two values of the chan-range sensor
-            - (channel_offset, channel_offset + channels_per_substream)
-        """
+        """Define the sensors for an XBEngine."""
         # Static sensors
         sensors.add(
             aiokatcp.Sensor(
