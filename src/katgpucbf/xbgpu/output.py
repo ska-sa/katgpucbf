@@ -27,25 +27,19 @@ class Output(ABC):
     """Static configuration for an output stream."""
 
     name: str
+    dst: Endpoint
     channels_per_substream: int
-    dst: list[Endpoint]
 
 
 @dataclass
 class XOutput(Output):
     """Static configuration for an output X-engine stream."""
 
-    antennas: int
-    channels: int
-
-    @property
-    def baselines(self) -> int:
-        """Number of baselines for this array configuration."""
-        return (self.antennas + 1) * (self.antennas) * 2
+    pass
 
 
 @dataclass
 class BOutput(Output):
     """Static configuration for an output Beam stream."""
 
-    spectra_per_heap: int
+    pass

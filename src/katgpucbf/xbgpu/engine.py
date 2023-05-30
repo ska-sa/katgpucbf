@@ -252,6 +252,9 @@ class XBEngine(DeviceServer):
         katcp_port: int,
         adc_sample_rate_hz: float,
         send_rate_factor: float,
+        n_ants: int,
+        n_channels_total: int,
+        n_channels_per_stream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
@@ -290,12 +293,18 @@ class XBEngine(DeviceServer):
         for output in outputs:
             if channel_offset_value % output.channels_per_substream != 0:
                 raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
+            if output.channels_per_substream != n_channels_per_stream:
+                raise ValueError(
+                    f"{output.name} has {output.channels_per_substream} channels-per-substream, \
+                                 which is not compatible with the global value ({n_channels_per_stream})"
+                )
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
-        self.n_ants = outputs[0].antennas  # Still needed in sender_loop
+        self.n_ants = n_ants
+
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value
 
@@ -337,7 +346,7 @@ class XBEngine(DeviceServer):
                 * self.rx_heap_timestamp_step
                 / adc_sample_rate_hz,
             ),
-            (channel_offset_value, channel_offset_value + outputs[0].channels_per_substream),
+            (channel_offset_value, channel_offset_value + n_channels_per_stream),
         )
 
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
@@ -356,8 +365,8 @@ class XBEngine(DeviceServer):
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
         self._src_layout = recv.Layout(
-            n_ants=outputs[0].antennas,
-            n_channels_per_stream=outputs[0].channels_per_substream,
+            n_ants=n_ants,
+            n_channels_per_stream=n_channels_per_stream,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
@@ -382,8 +391,8 @@ class XBEngine(DeviceServer):
 
         correlation_template = CorrelationTemplate(
             self.context,
-            n_ants=outputs[0].antennas,
-            n_channels=outputs[0].channels_per_substream,
+            n_ants=n_ants,
+            n_channels=n_channels_per_stream,
             n_spectra_per_heap=n_spectra_per_heap,
         )
         self.correlation = correlation_template.instantiate(
@@ -407,20 +416,20 @@ class XBEngine(DeviceServer):
         allocator = accel.DeviceAllocator(self.context)
         for _ in range(n_rx_items):
             buffer_device = self.correlation.slots["in_samples"].allocate(allocator, bind=False)
-            present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, outputs[0].antennas), dtype=np.uint8)
+            present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
 
         for _ in range(n_tx_items):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
-            present_ants = np.zeros(shape=(outputs[0].antennas,), dtype=bool)
+            present_ants = np.zeros(shape=(n_ants,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         for _ in range(n_free_chunks):
             buf = self.correlation.slots["in_samples"].allocate_host(self.context)
-            present = np.zeros(outputs[0].antennas * self.heaps_per_fengine_per_chunk, np.uint8)
+            present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
@@ -432,17 +441,17 @@ class XBEngine(DeviceServer):
         self.dump_interval_s: float = self.timestamp_increment_per_accumulation / adc_sample_rate_hz
 
         self.send_stream = XSend(
-            n_ants=outputs[0].antennas,
-            n_channels=outputs[0].channels,
-            n_channels_per_stream=outputs[0].channels_per_substream,
+            n_ants=n_ants,
+            n_channels=n_channels_total,
+            n_channels_per_stream=n_channels_per_stream,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             packet_payload=dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_stream(
-                dest_ip=outputs[0].dst[0].host,
-                dest_port=outputs[0].dst[0].port,
+                dest_ip=outputs[0].dst.host,
+                dest_port=outputs[0].dst.port,
                 interface_ip=dst_interface,
                 ttl=dst_ttl,
                 use_ibv=dst_ibv,
