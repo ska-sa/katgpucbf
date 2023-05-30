@@ -34,18 +34,17 @@ class TestParseBeam:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_beam("name=beam1,channels_per_substream=512,spectra_per_heap=256,dst=239.1.2.3:7148") == {
+        assert parse_beam("name=beam1,channels_per_substream=512,dst=239.1.2.3:7148") == {
             "name": "beam1",
             "channels_per_substream": 512,
             "dst": Endpoint("239.1.2.3", 7148),
-            "spectra_per_heap": 256,
         }
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("dst", "name=foo,channels_per_substream=512,spectra_per_heap=256"),
-            ("name", "channels_per_substream=512,spectra_per_heap=256,dst=239.1.2.3:7148"),
+            ("dst", "name=foo,channels_per_substream=512"),
+            ("name", "channels_per_substream=512,dst=239.1.2.3:7148"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:

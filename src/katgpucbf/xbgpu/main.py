@@ -65,7 +65,6 @@ class BOutputDict(TypedDict, total=False):
     name: str
     dst: Endpoint
     channels_per_substream: int
-    spectra_per_heap: int
 
 
 def parse_beam(value: str) -> BOutputDict:
@@ -284,6 +283,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         if name in used_names:
             parser.error(f"output name {name} already used.")
         used_names.add(name)
+        if "channels_per_substream" not in output:
+            output["channels_per_substream"] = args.channels_per_substream
 
     args.beam = [BOutput(**output) for output in args.beam]
     return args
