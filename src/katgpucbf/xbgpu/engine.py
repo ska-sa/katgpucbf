@@ -298,13 +298,13 @@ class XBEngine(DeviceServer):
                     f"{output.name} has {output.channels_per_substream} channels-per-substream, \
                                  which is not compatible with the global value ({n_channels_per_stream})"
                 )
+            # TODO: Do we need to ensure all output.dst addresses do not overlap?
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
-
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value
 
