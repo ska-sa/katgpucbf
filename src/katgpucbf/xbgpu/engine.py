@@ -305,6 +305,7 @@ class XBEngine(DeviceServer):
         self.heap_accumulation_threshold = heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
+        self.n_channels_per_stream = n_channels_per_stream
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value
 
@@ -346,7 +347,6 @@ class XBEngine(DeviceServer):
                 * self.rx_heap_timestamp_step
                 / adc_sample_rate_hz,
             ),
-            (channel_offset_value, channel_offset_value + n_channels_per_stream),
         )
 
         self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
@@ -467,7 +467,6 @@ class XBEngine(DeviceServer):
         self,
         sensors: aiokatcp.SensorSet,
         rx_sensor_timeout: float,
-        chan_range: tuple[int, int],
     ) -> None:
         """Define the sensors for an XBEngine.
 
@@ -485,7 +484,7 @@ class XBEngine(DeviceServer):
                 str,
                 "chan-range",
                 "The range of channels processed by this XB-engine, inclusive",
-                default=f"({chan_range[0]},{chan_range[1] - 1})",
+                default=f"({self.channel_offset_value},{self.channel_offset_value + self.n_channels_per_stream - 1})",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
