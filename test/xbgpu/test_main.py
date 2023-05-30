@@ -57,3 +57,8 @@ class TestParseBeam:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--beam: channels_per_substream specified twice"):
             parse_beam("name=food,channels_per_substream=8,channels_per_substream=9,dst=239.1.2.3:7148")
+
+    def test_invalid_key(self) -> None:
+        """Test with an unknown key/value pair."""
+        with pytest.raises(ValueError, match="--beam: unknown key fizz"):
+            parse_beam("fizz=buzz,name=food,channels_per_substream=8,channels_per_substream=9,dst=239.1.2.3:7148")
