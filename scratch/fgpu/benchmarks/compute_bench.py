@@ -57,7 +57,10 @@ def main():  # noqa: C901
     with context:
         if args.narrowband:
             narrowband_config = NarrowbandConfig(
-                decimation=args.narrowband_decimation, taps=args.ddc_taps, mix_frequency=0.25
+                decimation=args.narrowband_decimation,
+                taps=args.ddc_taps,
+                mix_frequency=0.25,
+                weights=generate_ddc_weights(args.ddc_taps, args.narrowband_decimation, 0.005),
             )
             spectra_samples = 2 * args.channels * args.narrowband_decimation
             window = args.taps * spectra_samples + args.ddc_taps - args.narrowband_decimation
@@ -83,11 +86,6 @@ def main():  # noqa: C901
         h_weights = fn.buffer("weights").empty_like()
         h_weights[:] = generate_pfb_weights(2 * args.channels, args.taps, 1.0)
         fn.buffer("weights").set(command_queue, h_weights)
-
-        if args.narrowband:
-            h_ddc_weights = fn.buffer("ddc_weights").empty_like()
-            h_ddc_weights[:] = generate_ddc_weights(args.ddc_taps, args.narrowband_decimation, 0.005)
-            fn.buffer("ddc_weights").set(command_queue, h_ddc_weights)
 
         h_gains = fn.buffer("gains").empty_like()
         h_gains[:] = 1
