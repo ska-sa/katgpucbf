@@ -614,13 +614,13 @@ concurrently. We can describe the operation with the equation
 
 .. math::
 
-   y_{b+i} = \sum_{k=0}^{T-1} x_{S(b+i)+k} w_k e^{2\pi j\omega [S(b+i)+k]}
+   y_{b+i} = \sum_{k=0}^{T-1} x_{S(b+i)+k} \cdot h_k \cdot e^{2\pi j\omega [S(b+i)+k]}
 
 where
 
 - :math:`x` is the input
 - :math:`y` is the output
-- :math:`w` contains the weights,
+- :math:`h` contains the weights,
 - :math:`S` is the subsampling factor
 - :math:`T` is the number of taps
 - :math:`b` is the first of the :math:`C` outputs to produce; and
@@ -628,21 +628,21 @@ where
 - :math:`\omega` is the angular frequency of the mixer signal.
 
 The first simplification we make is to pre-compute the weights with the mixer
-(on the CPU). Let :math:`z_k = w_k e^{2\pi j\omega k}`. Then the equation
+(on the CPU). Let :math:`z_k = h_k e^{2\pi j\omega k}`. Then the equation
 becomes
 
 .. math::
 
-   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{k=0}^{T-1} x_{S(b+i)+k} z_k.
+   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{k=0}^{T-1} x_{S(b+i)+k}\cdot z_k.
 
 For now we'll focus on just the summation, and deal with the exponential later.
 For simplicity, assume :math:`T` is a multiple of :math:`S` (although the
 implementation does not require it) and let :math:`W = \frac{T}{S}`. Then we
-can write :math:`j` as :math:`pS + q` and rewrite this equation as
+can write :math:`k` as :math:`pS + q` and rewrite this equation as
 
 .. math::
 
-   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{p=0}^{W - 1} \sum_{q=0}^{S-1} x_{S(b+i+p) + q} z_{pS + q}.
+   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{p=0}^{W - 1} \sum_{q=0}^{S-1} x_{S(b+i+p) + q} \cdot z_{pS + q}.
 
 The kernel iterates first over :math:`q`, then :math:`p`, then :math:`i`. A
 separate accumulator variable is kept for each value of :math:`i`.
@@ -682,7 +682,7 @@ the fractional part. Even passing :math:`\omega` in single precision can lead
 to large errors.
 
 To overcome this, a hybrid approach is used. The factor :math:`e^{2\pi j\omega S(b+i)}`
-is further decomposed as :math:`e^{2\pi j\omega (Sb)} e^{2\pi j\omega (Si)}`. We
+is further decomposed as :math:`e^{2\pi j\omega (Sb)} \cdot e^{2\pi j\omega (Si)}`. We
 compute :math:`Sb` in double precision and subtract out the integer part before
 dropping to single precision to compute the complex exponential. This only
 needs to be done once per work-item. The second factor is stored in a

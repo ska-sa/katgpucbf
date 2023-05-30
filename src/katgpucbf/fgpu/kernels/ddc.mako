@@ -46,7 +46,7 @@ DEVICE_FN static unsigned int reverse_endian(unsigned int v)
  * buffer (or after a discontiguous change in @a idx), set @a start to false.
  *
  * @param in      Array with all the raw (but native-endian) sample words for the workgroup
- * @param buffer  Sample word that help the LSBs of the previous sample if any (updated on return)
+ * @param buffer  Sample word that holds the LSBs of the previous sample if any (updated on return)
  * @param idx     Index of the sample to retrieve, relative to @a in
  * @param start   If true, @a buffer is ignored
  */
