@@ -166,7 +166,14 @@ def rst2latex(text: str) -> str:
     """Turn a section of ReStructured Text (like a docstring) into LaTeX."""
     writer = docutils.writers.latex2e.Writer()
     writer.translator_class = Translator
-    return publish_parts(source=text, writer=writer)["body"]
+    # If these are not specifically set, docutils issues deprecation warnings
+    # indicating that the defaults will change. These settings are the values
+    # that will become the default in future.
+    overrides = {
+        "use_latex_citations": True,
+        "legacy_column_widths": False,
+    }
+    return publish_parts(source=text, writer=writer, settings_overrides=overrides)["body"]
 
 
 @dataclass
