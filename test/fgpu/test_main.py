@@ -20,7 +20,7 @@ import pytest
 from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf.fgpu.main import (
-    DEFAULT_DDC_TAPS,
+    DEFAULT_DDC_TAPS_RATIO,
     DEFAULT_TAPS,
     DEFAULT_W_CUTOFF,
     DEFAULT_WEIGHT_PASS,
@@ -78,7 +78,7 @@ class TestParseNarrowband:
             dst=[Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
             weight_pass=DEFAULT_WEIGHT_PASS,
             taps=DEFAULT_TAPS,
-            ddc_taps=DEFAULT_DDC_TAPS,
+            ddc_taps=DEFAULT_DDC_TAPS_RATIO * 8,
             w_cutoff=DEFAULT_W_CUTOFF,
         )
 
@@ -168,7 +168,7 @@ class TestParseArgs:
                 decimation=16,
                 taps=DEFAULT_TAPS,
                 w_cutoff=DEFAULT_W_CUTOFF,
-                ddc_taps=DEFAULT_DDC_TAPS,
+                ddc_taps=DEFAULT_DDC_TAPS_RATIO * 16,
                 weight_pass=DEFAULT_WEIGHT_PASS,
             ),
         ]

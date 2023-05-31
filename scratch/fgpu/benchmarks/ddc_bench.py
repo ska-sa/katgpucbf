@@ -18,20 +18,24 @@
 
 import argparse
 
+import numpy as np
 from katsdpsigproc import accel
 
 from katgpucbf import DIG_SAMPLE_BITS
 from katgpucbf.fgpu.ddc import DDCTemplate
+from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--taps", type=int, default=128)
+    parser.add_argument("--taps", type=int)  # Default is computed
     parser.add_argument("--subsampling", type=int, default=8)
-    parser.add_argument("--samples", type=int, default=16 * 1024 * 1024)
+    parser.add_argument("--samples", type=int, default=32 * 1024 * 1024)
     parser.add_argument("--input-sample-bits", type=int, default=DIG_SAMPLE_BITS)
-    parser.add_argument("--passes", type=int, default=10)
+    parser.add_argument("--passes", type=int, default=1000)
     args = parser.parse_args()
+    if args.taps is None:
+        args.taps = args.subsampling * DEFAULT_DDC_TAPS_RATIO
 
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
@@ -42,6 +46,7 @@ def main():
         fn = template.instantiate(command_queue, samples=args.samples)
         fn.ensure_all_bound()
         fn.buffer("in").zero(command_queue)
+        fn.configure(0.25, np.ones(args.taps, np.float32))
         fn()  # Do a warmup pass
         start = command_queue.enqueue_marker()
         for _ in range(args.passes):

@@ -57,7 +57,8 @@ _OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
 DEFAULT_W_CUTOFF = 1.0
-DEFAULT_DDC_TAPS = 128
+#: Ratio of decimation factor to tap count
+DEFAULT_DDC_TAPS_RATIO = 12
 DEFAULT_WEIGHT_PASS = 0.005
 
 
@@ -216,6 +217,9 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
     try:
         kws: NarrowbandOutputDict = {}
         _parse_stream(value, kws, field_callback)
+        for key in ["centre_frequency", "decimation"]:
+            if key not in kws:
+                raise ValueError(f"{key} is missing")
         # Note that using **kws at the end means these are only defaults which
         # can be overridden by the user.
         # The ignore is to work around https://github.com/python/mypy/issues/9408
@@ -223,12 +227,9 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
             "weight_pass": DEFAULT_WEIGHT_PASS,
-            "ddc_taps": DEFAULT_DDC_TAPS,
+            "ddc_taps": DEFAULT_DDC_TAPS_RATIO * kws["decimation"],
             **kws,  # type: ignore[misc]
         }
-        for key in ["centre_frequency", "decimation"]:
-            if key not in kws:
-                raise ValueError(f"{key} is missing")
     except ValueError as exc:
         raise ValueError(f"--narrowband: {exc}") from exc
     return NarrowbandOutput(**kws)
@@ -254,7 +255,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Add a narrowband output (may be repeated). "
             "The required keys are: name, centre_frequency, decimation, channels, dst. "
-            f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS}], "
+            f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS_RATIO}*decimation], "
             f"w_cutoff [{DEFAULT_W_CUTOFF}], weight_pass."
         ),
     )
