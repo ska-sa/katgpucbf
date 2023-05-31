@@ -503,8 +503,8 @@ class Pipeline:
         if isinstance(output, NarrowbandOutput):
             narrowband_config = NarrowbandConfig(
                 decimation=output.decimation,
-                taps=output.ddc_taps,
                 mix_frequency=-output.centre_frequency / engine.adc_sample_rate,
+                weights=generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
             )
         else:
             narrowband_config = None
@@ -517,12 +517,6 @@ class Pipeline:
             compute_queue,
             generate_pfb_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff),
         )
-        if isinstance(output, NarrowbandOutput):
-            device_ddc_weights = self._compute.slots["ddc_weights"].allocate(accel.DeviceAllocator(context))
-            device_ddc_weights.set(
-                compute_queue,
-                generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
-            )
 
         # Initialize sending
         self._init_send(engine.use_peerdirect)
