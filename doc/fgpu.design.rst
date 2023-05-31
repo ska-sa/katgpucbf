@@ -538,7 +538,7 @@ bandwidth is channelised and output. Typically they have narrower channel
 widths. The overall approach is as follows:
 
 1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
-   :math:`e^{2\pi j\omega t}`, to effect a shift in the frequency of the
+   :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
    signal. The centre of the desired band is placed at the DC frequency.
 
 2. The signal is convolved with a low-pass filter. This suppresses most
@@ -568,7 +568,7 @@ The decimation is thus achieved by a combination of time-domain (steps 2 and
 3) and frequency domain (step 5) techniques. This has better computational
 efficiency than a purely frequency-domain approach (which would require the
 PFB to be run on the full bandwidth), while mitigating many of the filter
-design problems inherent in a purely time-domain approach (the rolloff of the
+design problems inherent in a purely time-domain approach (the roll-off of the
 FIR filter can be hidden in the discarded outer channels).
 
 The first three steps are implemented by a "digital down-conversion"
@@ -614,35 +614,35 @@ concurrently. We can describe the operation with the equation
 
 .. math::
 
-   y_{b+i} = \sum_{k=0}^{T-1} x_{S(b+i)+k} w_k e^{2\pi j\omega [S(b+i)+k]}
+   y_{b+i} = \sum_{k=0}^{T-1} x_{S(b+i)+k} \cdot h_k \cdot e^{2\pi jf[S(b+i)+k]}
 
 where
 
 - :math:`x` is the input
 - :math:`y` is the output
-- :math:`w` contains the weights,
+- :math:`h` contains the weights
 - :math:`S` is the subsampling factor
 - :math:`T` is the number of taps
-- :math:`b` is the first of the :math:`C` outputs to produce; and
-- :math:`0 \le i < C` is the index into the :math:`C` outputs to produce.
-- :math:`\omega` is the angular frequency of the mixer signal.
+- :math:`b` is the first of the :math:`C` outputs to produce
+- :math:`0 \le i < C` is the index into the :math:`C` outputs to produce; and
+- :math:`f` is the frequency of the mixer signal, in cycles per digitiser sample.
 
 The first simplification we make is to pre-compute the weights with the mixer
-(on the CPU). Let :math:`z_k = w_k e^{2\pi j\omega k}`. Then the equation
+(on the CPU). Let :math:`z_k = h_k e^{2\pi jfk}`. Then the equation
 becomes
 
 .. math::
 
-   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{k=0}^{T-1} x_{S(b+i)+k} z_k.
+   y_{b+i} = e^{2\pi jfS(b+i)} \sum_{k=0}^{T-1} x_{S(b+i)+k}\cdot z_k.
 
 For now we'll focus on just the summation, and deal with the exponential later.
 For simplicity, assume :math:`T` is a multiple of :math:`S` (although the
 implementation does not require it) and let :math:`W = \frac{T}{S}`. Then we
-can write :math:`j` as :math:`pS + q` and rewrite this equation as
+can write :math:`k` as :math:`pS + q` and rewrite this equation as
 
 .. math::
 
-   y_{b+i} = e^{2\pi j\omega S(b+i)} \sum_{p=0}^{W - 1} \sum_{q=0}^{S-1} x_{S(b+i+p) + q} z_{pS + q}.
+   y_{b+i} = e^{2\pi jfS(b+i)} \sum_{p=0}^{W - 1} \sum_{q=0}^{S-1} x_{S(b+i+p) + q} \cdot z_{pS + q}.
 
 The kernel iterates first over :math:`q`, then :math:`p`, then :math:`i`. A
 separate accumulator variable is kept for each value of :math:`i`.
@@ -675,14 +675,14 @@ logic involved in decoding the samples can be evaluated at compile-time.
 Mixer signal
 ~~~~~~~~~~~~
 Care needs to be taken with the precision of the argument to the mixer signal.
-Simply evaluating the sine and cosine of :math:`2\pi \omega t` when
+Simply evaluating the sine and cosine of :math:`2\pi ft` when
 :math:`t` is large can lead to a catastrophic loss of precision, as the
-product :math:`\omega t` will have a large integer part and leave few bits for
-the fractional part. Even passing :math:`\omega` in single precision can lead
+product :math:`ft` will have a large integer part and leave few bits for
+the fractional part. Even passing :math:`f` in single precision can lead
 to large errors.
 
-To overcome this, a hybrid approach is used. The factor :math:`e^{2\pi j\omega S(b+i)}`
-is further decomposed as :math:`e^{2\pi j\omega (Sb)} e^{2\pi j\omega (Si)}`. We
+To overcome this, a hybrid approach is used. The factor :math:`e^{2\pi jfS(b+i)}`
+is further decomposed as :math:`e^{2\pi jf(Sb)} \cdot e^{2\pi jf(Si)}`. We
 compute :math:`Sb` in double precision and subtract out the integer part before
 dropping to single precision to compute the complex exponential. This only
 needs to be done once per work-item. The second factor is stored in a

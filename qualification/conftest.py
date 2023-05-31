@@ -193,8 +193,8 @@ def pdf_report(request, monkeypatch) -> Reporter:
         data[0]["test_name"] = name_marker.args[0]
     request.node.user_properties.append(("pdf_report_data", data))
     reporter = Reporter(data, raw_data=request.config.getini("raw_data"))
-    orig_log_failure = pytest_check.check_methods.log_failure
-    orig_get_full_context = pytest_check.check_methods.get_full_context
+    orig_log_failure = pytest_check.check_log.log_failure
+    orig_get_full_context = pytest_check.pseudo_traceback.get_full_context
 
     def get_full_context(level):
         # The real log_failure function constructs a backtrace, and inserting
@@ -202,14 +202,21 @@ def pdf_report(request, monkeypatch) -> Reporter:
         # skip an extra level for each wrapper we're injecting.
         return orig_get_full_context(level + 2)
 
-    def log_failure(msg):
-        reporter.failure(f"Failed assertion: {msg}")
-        return orig_log_failure(msg)
+    def log_failure(msg="", check_str=""):
+        __tracebackhide__ = True
+        if check_str:
+            reporter.failure(f"Failed assertion: {msg}: {check_str}")
+        else:
+            reporter.failure(f"Failed assertion: {msg}")
+        return orig_log_failure(msg, check_str)
 
     # Patch the central point where pytest-check logs failures so that we can
     # insert them into the test procedure.
-    monkeypatch.setattr(pytest_check.check_methods, "log_failure", log_failure)
-    monkeypatch.setattr(pytest_check.check_methods, "get_full_context", get_full_context)
+    monkeypatch.setattr(pytest_check.check_log, "log_failure", log_failure)
+    # context_manager uses `from .check_log import log_failure` so we have to
+    # patch it under that name.
+    monkeypatch.setattr(pytest_check.context_manager, "log_failure", log_failure)
+    monkeypatch.setattr(pytest_check.pseudo_traceback, "get_full_context", get_full_context)
     return reporter
 
 
@@ -241,7 +248,6 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 async def _correlator_config_and_description(
     pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
 ) -> tuple[dict, dict]:
-
     config: dict = {
         "version": "3.4",
         "config": {},
