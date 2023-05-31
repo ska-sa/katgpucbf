@@ -512,6 +512,15 @@ class Pipeline:
             context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=narrowband_config
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
+        # Pre-allocate the memory for some buffers that we know we won't be
+        # explicitly binding.
+        self._compute.ensure_bound("fft_work")
+        for pol in range(N_POLS):
+            if narrowband_config:
+                self._compute.ensure_bound(f"subsampled{pol}")
+            self._compute.ensure_bound(f"fft_in{pol}")
+            self._compute.ensure_bound(f"fft_out{pol}")
+
         device_pfb_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_pfb_weights.set(
             compute_queue,
