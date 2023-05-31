@@ -675,7 +675,7 @@ logic involved in decoding the samples can be evaluated at compile-time.
 Mixer signal
 ~~~~~~~~~~~~
 Care needs to be taken with the precision of the argument to the mixer signal.
-Simply evaluating the sine and cosine of :math:`2\pift` when
+Simply evaluating the sine and cosine of :math:`2\pi ft` when
 :math:`t` is large can lead to a catastrophic loss of precision, as the
 product :math:`ft` will have a large integer part and leave few bits for
 the fractional part. Even passing :math:`f` in single precision can lead
