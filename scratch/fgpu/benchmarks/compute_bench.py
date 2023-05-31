@@ -24,6 +24,7 @@ from katsdpsigproc import accel
 from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu.compute import ComputeTemplate, NarrowbandConfig
 from katgpucbf.fgpu.engine import generate_ddc_weights, generate_pfb_weights
+from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
 
 
 def main():  # noqa: C901
@@ -35,7 +36,7 @@ def main():  # noqa: C901
     parser.add_argument("--spectra-per-heap", type=int, default=256)
     parser.add_argument("--dig-sample-bits", type=int, default=DIG_SAMPLE_BITS)
     parser.add_argument("--passes", type=int, default=1000)
-    parser.add_argument("--ddc-taps", type=int, default=128)
+    parser.add_argument("--ddc-taps", type=int)  # Default is computed from decimation
     parser.add_argument("--narrowband", action="store_true")
     parser.add_argument("--narrowband-decimation", type=int, default=8)
     parser.add_argument("--kernel", choices=["all", "ddc", "pfb_fir", "fft", "postproc"], default="all")
@@ -46,6 +47,8 @@ def main():  # noqa: C901
         help="Measure after every N iterations to estimate SEM (standard error in the mean)",
     )
     args = parser.parse_args()
+    if args.ddc_taps is None:
+        args.ddc_taps = DEFAULT_DDC_TAPS_RATIO * args.narrowband_decimation
     if args.sem is not None:
         if args.sem <= 0:
             parser.error("--sem must be positive")
