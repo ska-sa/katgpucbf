@@ -343,7 +343,7 @@ class XBEngine(DeviceServer):
             ),
         )
 
-        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
+        self.timestamp_increment_per_accumulation = outputs[0].timestamp_increment_per_accumulation
 
         # Sets the number of batches of heaps to store per chunk
         self.heaps_per_fengine_per_chunk = heaps_per_fengine_per_chunk

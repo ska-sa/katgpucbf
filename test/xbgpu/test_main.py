@@ -19,7 +19,7 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
-from katgpucbf.xbgpu.main import parse_beam, parse_corrprod
+from katgpucbf.xbgpu.main import DEFAULT_HEAP_ACCUMULATION_THRESHOLD, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
 
@@ -59,18 +59,38 @@ class TestParseBeam:
 class TestParseCorrprod:
     """Test :func:`.parse_corrprod`."""
 
+    def test_minimal(self) -> None:
+        """Test with the minimum required arguments."""
+        assert parse_corrprod(
+            "name=foo,samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148"
+        ) == XOutput(
+            name="foo",
+            dst=Endpoint("239.2.3.4", 7148),
+            heap_accumulation_threshold=DEFAULT_HEAP_ACCUMULATION_THRESHOLD,
+            samples_between_spectra=2048,
+            spectra_per_heap=256,
+        )
+
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_corrprod("name=bcp1,dst=239.2.3.4:7148") == XOutput(
-            name="bcp1",
+        assert parse_corrprod(
+            "name=foo,heap_accumulation_threshold=99,samples_between_spectra=2048,"
+            "spectra_per_heap=256,dst=239.2.3.4:7148"
+        ) == XOutput(
+            name="foo",
             dst=Endpoint("239.2.3.4", 7148),
+            heap_accumulation_threshold=99,
+            samples_between_spectra=2048,
+            spectra_per_heap=256,
         )
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("dst", "name=foo"),
-            ("name", "dst=239.1.2.3:7148"),
+            ("name", "samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148"),
+            ("samples_between_spectra", "name=bcp1,spectra_per_heap=256,dst=239.2.3.4:7148"),
+            ("spectra_per_heap", "name=bcp1,samples_between_spectra=2048,dst=239.2.3.4:7148"),
+            ("dst", "name=foo,samples_between_spectra=2048,spectra_per_heap=256"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
@@ -81,9 +101,9 @@ class TestParseCorrprod:
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--corrprod: name specified twice"):
-            parse_corrprod("name=foo,name=bar,dst=239.1.2.3:7148")
+            parse_corrprod("name=foo,name=bar,samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
         with pytest.raises(ValueError, match="--corrprod: unknown key fizz"):
-            parse_corrprod("fizz=buzz,name=foo,dst=239.1.2.3:7148")
+            parse_corrprod("fizz=buzz,name=foo,samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148")

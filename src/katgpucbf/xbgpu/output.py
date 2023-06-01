@@ -34,8 +34,14 @@ class Output(ABC):
 class XOutput(Output):
     """Static configuration for an output baseline-correlation-products stream."""
 
-    # TODO: Make timestamp_increment_per_accumulation a property here
-    pass
+    heap_accumulation_threshold: int
+    samples_between_spectra: int
+    spectra_per_heap: int
+
+    @property
+    def timestamp_increment_per_accumulation(self) -> int:  # noqa: D102
+        """Timestamp increment (in samples) per accumulation interval."""
+        return self.heap_accumulation_threshold * self.samples_between_spectra * self.spectra_per_heap
 
 
 @dataclass

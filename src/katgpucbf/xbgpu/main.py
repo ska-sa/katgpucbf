@@ -53,6 +53,7 @@ from .output import BOutput, XOutput
 
 _OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
+DEFAULT_HEAP_ACCUMULATION_THRESHOLD = 52
 
 
 class OutputDict(TypedDict, total=False):
@@ -82,7 +83,9 @@ class XOutputDict(OutputDict, total=False):
     See :class:`OutputDict` for further information.
     """
 
-    pass
+    heap_accumulation_threshold: int
+    samples_between_spectra: int
+    spectra_per_heap: int
 
 
 def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
@@ -144,14 +147,27 @@ def parse_corrprod(value: str) -> XOutput:
 
     - name
     - dst
+    - heap_accumulation_threshold
+    - samples_between_spectra
+    - spectra_per_heap
     """
 
     def _field_callback(kws: XOutputDict, key: str, data: str) -> None:
-        raise ValueError(f"unknown key {key}")
+        match key:
+            case "heap_accumulation_threshold" | "samples_between_spectra" | "spectra_per_heap":
+                kws[key] = int(data)
+            case _:
+                raise ValueError(f"unknown key {key}")
 
     try:
         kws: XOutputDict = {}
         _parse_stream(value, kws, _field_callback)
+        # TODO: Perhaps do something clever/neat and only pass XOutput the complete
+        #       timestamp_increment_per_accumulation (and not each component)
+        kws = {"heap_accumulation_threshold": DEFAULT_HEAP_ACCUMULATION_THRESHOLD, **kws}  # type: ignore
+        for key in ["samples_between_spectra", "spectra_per_heap"]:
+            if key not in kws:
+                raise ValueError(f"{key} is missing")
         return XOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--corrprod: {exc}") from exc
@@ -268,7 +284,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--heap-accumulation-threshold",
         type=int,
-        default=52,
+        default=DEFAULT_HEAP_ACCUMULATION_THRESHOLD,
         help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
     )
     parser.add_argument(
