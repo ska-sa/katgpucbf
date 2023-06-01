@@ -84,8 +84,6 @@ class XOutputDict(OutputDict, total=False):
     """
 
     heap_accumulation_threshold: int
-    samples_between_spectra: int
-    spectra_per_heap: int
 
 
 def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
@@ -148,13 +146,11 @@ def parse_corrprod(value: str) -> XOutput:
     - name
     - dst
     - heap_accumulation_threshold
-    - samples_between_spectra
-    - spectra_per_heap
     """
 
     def _field_callback(kws: XOutputDict, key: str, data: str) -> None:
         match key:
-            case "heap_accumulation_threshold" | "samples_between_spectra" | "spectra_per_heap":
+            case "heap_accumulation_threshold":
                 kws[key] = int(data)
             case _:
                 raise ValueError(f"unknown key {key}")
@@ -165,9 +161,6 @@ def parse_corrprod(value: str) -> XOutput:
         # TODO: Perhaps do something clever/neat and only pass XOutput the complete
         #       timestamp_increment_per_accumulation (and not each component)
         kws = {"heap_accumulation_threshold": DEFAULT_HEAP_ACCUMULATION_THRESHOLD, **kws}  # type: ignore
-        for key in ["samples_between_spectra", "spectra_per_heap"]:
-            if key not in kws:
-                raise ValueError(f"{key} is missing")
         return XOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--corrprod: {exc}") from exc
@@ -282,12 +275,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "and still be accepted. [%(default)s]",
     )
     parser.add_argument(
-        "--heap-accumulation-threshold",
-        type=int,
-        default=DEFAULT_HEAP_ACCUMULATION_THRESHOLD,
-        help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
-    )
-    parser.add_argument(
         "--sync-epoch",
         type=float,
         required=True,
@@ -395,7 +382,6 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         n_samples_between_spectra=args.samples_between_spectra,
         n_spectra_per_heap=args.spectra_per_heap,
         sample_bits=args.sample_bits,
-        heap_accumulation_threshold=args.heap_accumulation_threshold,
         sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,
         outputs=args.outputs,

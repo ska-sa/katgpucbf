@@ -185,9 +185,6 @@ class XBEngine(DeviceServer):
         The number of time samples received per frequency channel.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
-    heap_accumulation_threshold
-        The number of consecutive heaps to accumulate. This value is used to
-        determine the dump rate.
     sync_epoch
         UNIX time corresponding to timestamp zero
     channel_offset_value
@@ -258,7 +255,6 @@ class XBEngine(DeviceServer):
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
-        heap_accumulation_threshold: int,
         sync_epoch: float,
         channel_offset_value: int,
         outputs: list[Output],
@@ -296,7 +292,7 @@ class XBEngine(DeviceServer):
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
-        self.heap_accumulation_threshold = heap_accumulation_threshold
+        self.heap_accumulation_threshold = outputs[0].heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_per_stream = n_channels_per_stream
@@ -343,7 +339,7 @@ class XBEngine(DeviceServer):
             ),
         )
 
-        self.timestamp_increment_per_accumulation = outputs[0].timestamp_increment_per_accumulation
+        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # Sets the number of batches of heaps to store per chunk
         self.heaps_per_fengine_per_chunk = heaps_per_fengine_per_chunk

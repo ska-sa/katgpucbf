@@ -61,36 +61,25 @@ class TestParseCorrprod:
 
     def test_minimal(self) -> None:
         """Test with the minimum required arguments."""
-        assert parse_corrprod(
-            "name=foo,samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148"
-        ) == XOutput(
+        assert parse_corrprod("name=foo,dst=239.2.3.4:7148") == XOutput(
             name="foo",
-            dst=Endpoint("239.2.3.4", 7148),
             heap_accumulation_threshold=DEFAULT_HEAP_ACCUMULATION_THRESHOLD,
-            samples_between_spectra=2048,
-            spectra_per_heap=256,
+            dst=Endpoint("239.2.3.4", 7148),
         )
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_corrprod(
-            "name=foo,heap_accumulation_threshold=99,samples_between_spectra=2048,"
-            "spectra_per_heap=256,dst=239.2.3.4:7148"
-        ) == XOutput(
+        assert parse_corrprod("name=foo,heap_accumulation_threshold=99,dst=239.2.3.4:7148") == XOutput(
             name="foo",
-            dst=Endpoint("239.2.3.4", 7148),
             heap_accumulation_threshold=99,
-            samples_between_spectra=2048,
-            spectra_per_heap=256,
+            dst=Endpoint("239.2.3.4", 7148),
         )
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("name", "samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148"),
-            ("samples_between_spectra", "name=bcp1,spectra_per_heap=256,dst=239.2.3.4:7148"),
-            ("spectra_per_heap", "name=bcp1,samples_between_spectra=2048,dst=239.2.3.4:7148"),
-            ("dst", "name=foo,samples_between_spectra=2048,spectra_per_heap=256"),
+            ("name", "dst=239.2.3.4:7148"),
+            ("dst", "name=foo"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
@@ -101,9 +90,9 @@ class TestParseCorrprod:
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--corrprod: name specified twice"):
-            parse_corrprod("name=foo,name=bar,samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148")
+            parse_corrprod("name=foo,name=bar,dst=239.2.3.4:7148")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
         with pytest.raises(ValueError, match="--corrprod: unknown key fizz"):
-            parse_corrprod("fizz=buzz,name=foo,samples_between_spectra=2048,spectra_per_heap=256,dst=239.2.3.4:7148")
+            parse_corrprod("fizz=buzz,name=foo,dst=239.2.3.4:7148")
