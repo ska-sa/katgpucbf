@@ -212,8 +212,6 @@ class Compute(accel.OperationSequence):
             "gains": ["postproc:gains"],
         }
         aliases = {}
-        if template.ddc is not None:
-            compounds["ddc_weights"] = [f"ddc{pol}:weights" for pol in range(N_POLS)]
         for pol in range(N_POLS):
             if template.ddc is None:
                 compounds[f"in{pol}"] = [f"pfb_fir{pol}:in"]
@@ -243,8 +241,7 @@ class Compute(accel.OperationSequence):
         assert self.ddc is not None
         for pol in range(N_POLS):
             self.bind(**{f"in{pol}": samples[pol]})
-        # TODO: only bind relevant slots for frontend
-        self.ensure_all_bound()
+            self.ensure_bound(f"subsampled{pol}")
         for pol in range(N_POLS):
             # TODO: could run these in parallel, but that would require two
             # command queues.
@@ -263,9 +260,9 @@ class Compute(accel.OperationSequence):
         spectra: int,
     ) -> None:
         """Do common parts of :meth:`run_wideband_frontend` and :meth:`run_narrowband_frontend`."""
-        # TODO: only bind relevant slots for frontend
-        self.ensure_all_bound()
+        self.ensure_bound("weights")
         for pol in range(N_POLS):
+            self.ensure_bound(f"fft_in{pol}")
             # TODO: could run these in parallel, but that would require two
             # command queues.
             self.pfb_fir[pol].in_offset = in_offsets[pol]
@@ -325,6 +322,8 @@ class Compute(accel.OperationSequence):
             How many spectra worth of samples to push through the PFB-FIR.
         """
         assert self.ddc is not None
+        for pol in range(N_POLS):
+            self.ensure_bound(f"subsampled{pol}")
         self._run_frontend_common(in_offsets, out_offset, spectra)
 
     def run_backend(self, out: accel.DeviceArray, saturated: accel.DeviceArray) -> None:
@@ -338,7 +337,10 @@ class Compute(accel.OperationSequence):
             Destination for the processed data.
         """
         self.bind(out=out, saturated=saturated)
-        # TODO: only bind relevant slots for backend
+        # Note: we only actually need to bind the slots specific to the
+        # backend, but there are quite a few to keep track of, and by the
+        # time the backend is run the frontend slots should all be bound
+        # anyway.
         self.ensure_all_bound()
         for fft_op in self.fft:
             fft_op()

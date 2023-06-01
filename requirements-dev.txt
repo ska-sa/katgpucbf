@@ -136,7 +136,7 @@ katsdpservices==1.2
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
-katsdpsigproc==1.6.1
+katsdpsigproc==1.7.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
