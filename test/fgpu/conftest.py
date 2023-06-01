@@ -17,6 +17,7 @@
 """Fixtures for use in fgpu unit tests."""
 
 from collections.abc import AsyncGenerator
+from ipaddress import IPv4Address, IPv4Network
 
 import aiokatcp
 import async_timeout
@@ -39,19 +40,35 @@ def n_src_streams() -> int:  # noqa: D401
 
 
 @pytest.fixture
-def mock_send_stream(mocker) -> list[spead2.InprocQueue]:
+def mock_send_stream_network() -> IPv4Network:
+    """Network mask to filter the queues returned by :func:`mock_send_stream`.
+
+    Test classes can override this to select only a subset.
+    """
+    return IPv4Network("0.0.0.0/0")
+
+
+@pytest.fixture
+def mock_send_stream(mocker, mock_send_stream_network: IPv4Network) -> list[spead2.InprocQueue]:
     """Mock out creation of the send stream.
 
     Each time a :class:`spead2.send.asyncio.UdpStream` is created, it instead
     creates an in-process stream and appends an equivalent number of inproc
     queues to the list returned by the fixture.
+
+    The queues returned can be filtered by IP address by overriding the
+    :func:`mock_send_stream_network` fixture.
     """
     queues: list[spead2.InprocQueue] = []
 
     def constructor(thread_pool, endpoints, config, *args, **kwargs):
         stream_queues = [spead2.InprocQueue() for _ in endpoints]
-        queues.extend(stream_queues)
-        return spead2.send.asyncio.InprocStream(thread_pool, queues, config)
+        queues.extend(
+            queue
+            for queue, endpoint in zip(stream_queues, endpoints)
+            if IPv4Address(endpoint[0]) in mock_send_stream_network
+        )
+        return spead2.send.asyncio.InprocStream(thread_pool, stream_queues, config)
 
     mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
     return queues
