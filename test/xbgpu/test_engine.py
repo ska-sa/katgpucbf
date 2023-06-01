@@ -387,6 +387,9 @@ class TestEngine:
         arglist = [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
+            "--corrprod=name=bcp1,"
+            f"heap_accumulation_threshold={heap_accumulation_threshold},"
+            "dst=239.21.11.4:7149",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
@@ -395,13 +398,11 @@ class TestEngine:
             f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
-            f"--heap-accumulation-threshold={heap_accumulation_threshold}",
             "--sync-epoch=1234567890",
             "--src-interface=lo",
             "--dst-interface=lo",
             "--tx-enabled",
             "239.10.11.4:7149",  # src
-            "239.21.11.4:7149",  # dst
         ]
         args = parse_args(arglist)
         xbengine, _ = make_engine(context, args)
