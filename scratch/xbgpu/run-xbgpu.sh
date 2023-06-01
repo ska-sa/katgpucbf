@@ -46,6 +46,7 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --src-interface $iface \
     --dst-interface $iface \
     --src-ibv --dst-ibv \
+    --corrprod=name=bcp1,dst=$dst_mcast \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --array-size ${array_size:-64} \
     --spectra-per-heap ${spectra_per_heap:-256} \
@@ -57,4 +58,4 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --sync-epoch 0 \
     --katcp-port $port \
     --tx-enabled \
-    $src_mcast $dst_mcast
+    $src_mcast

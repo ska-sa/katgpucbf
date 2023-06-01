@@ -28,18 +28,18 @@ class Output(ABC):
 
     name: str
     dst: Endpoint
-    channels_per_substream: int
 
 
 @dataclass
 class XOutput(Output):
-    """Static configuration for an output X-engine stream."""
+    """Static configuration for an output baseline-correlation-products stream."""
 
+    # TODO: Make timestamp_increment_per_accumulation a property here
     pass
 
 
 @dataclass
 class BOutput(Output):
-    """Static configuration for an output Beam stream."""
+    """Static configuration for an output beam stream."""
 
     pass

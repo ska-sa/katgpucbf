@@ -19,32 +19,25 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
-from katgpucbf.xbgpu.main import parse_beam
+from katgpucbf.xbgpu.main import parse_beam, parse_corrprod
+from katgpucbf.xbgpu.output import BOutput, XOutput
 
 
 class TestParseBeam:
     """Test :func:`.parse_beam`."""
 
-    def test_required_only(self) -> None:
-        """Test with just required arguments."""
-        assert parse_beam("name=beam1,dst=239.1.2.3:7148") == {
-            "name": "beam1",
-            "dst": Endpoint("239.1.2.3", 7148),
-        }
-
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_beam("name=beam1,channels_per_substream=512,dst=239.1.2.3:7148") == {
-            "name": "beam1",
-            "channels_per_substream": 512,
-            "dst": Endpoint("239.1.2.3", 7148),
-        }
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148") == BOutput(
+            name="beam1",
+            dst=Endpoint("239.1.2.3", 7148),
+        )
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("dst", "name=foo,channels_per_substream=512"),
-            ("name", "channels_per_substream=512,dst=239.1.2.3:7148"),
+            ("dst", "name=foo"),
+            ("name", "dst=239.1.2.3:7148"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
@@ -54,10 +47,43 @@ class TestParseBeam:
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--beam: channels_per_substream specified twice"):
-            parse_beam("name=food,channels_per_substream=8,channels_per_substream=9,dst=239.1.2.3:7148")
+        with pytest.raises(ValueError, match="--beam: name specified twice"):
+            parse_beam("name=foo,name=bar,dst=239.1.2.3:7148")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
         with pytest.raises(ValueError, match="--beam: unknown key fizz"):
-            parse_beam("fizz=buzz,name=food,channels_per_substream=8,channels_per_substream=9,dst=239.1.2.3:7148")
+            parse_beam("fizz=buzz,name=foo,dst=239.1.2.3:7148")
+
+
+class TestParseCorrprod:
+    """Test :func:`.parse_corrprod`."""
+
+    def test_maximal(self) -> None:
+        """Test with all valid arguments."""
+        assert parse_corrprod("name=bcp1,dst=239.2.3.4:7148") == XOutput(
+            name="bcp1",
+            dst=Endpoint("239.2.3.4", 7148),
+        )
+
+    @pytest.mark.parametrize(
+        "missing,value",
+        [
+            ("dst", "name=foo"),
+            ("name", "dst=239.1.2.3:7148"),
+        ],
+    )
+    def test_missing_key(self, missing: str, value: str) -> None:
+        """Test without one of the required keys."""
+        with pytest.raises(ValueError, match=f"--corrprod: {missing} is missing"):
+            parse_corrprod(value)
+
+    def test_duplicate_key(self) -> None:
+        """Test with a key specified twice."""
+        with pytest.raises(ValueError, match="--corrprod: name specified twice"):
+            parse_corrprod("name=foo,name=bar,dst=239.1.2.3:7148")
+
+    def test_invalid_key(self) -> None:
+        """Test with an unknown key/value pair."""
+        with pytest.raises(ValueError, match="--corrprod: unknown key fizz"):
+            parse_corrprod("fizz=buzz,name=foo,dst=239.1.2.3:7148")

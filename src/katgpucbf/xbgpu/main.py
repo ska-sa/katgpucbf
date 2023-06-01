@@ -32,8 +32,8 @@ everything required to run the XB-Engine.
 import argparse
 import asyncio
 import logging
-from collections.abc import Sequence
-from typing import TypedDict
+from collections.abc import Callable, Sequence
+from typing import TypedDict, TypeVar
 
 import katsdpsigproc.accel
 import prometheus_async
@@ -51,56 +51,110 @@ from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
+_OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
 
 
-class BOutputDict(TypedDict, total=False):
-    """Configuration options for a beam output.
+class OutputDict(TypedDict, total=False):
+    """Configuration options for an output stream.
 
-    Unlike :class:`BOutput`, all the fields are optional, so that it can
-    be built up incrementally. They must all be filled in before using it to
-    construct a :class:`BOutput`.
+    Unlike :class:`BOutput` or :class:`XOutput`, all the fields are optional,
+    so that it can be built up incrementally. They must all be filled in
+    before using it to construct an :class:`Output`.
     """
 
     name: str
     dst: Endpoint
-    channels_per_substream: int
 
 
-def parse_beam(value: str) -> BOutputDict:
-    """Parse a string with beam configuration data.
+class BOutputDict(OutputDict, total=False):
+    """Configuration options for a beam output.
 
-    The string has a comma-separated list of key=value pairs. See
-    :class:`BengineOutput` for the valid keys and types. The following
-    keys are required:
-
-    - name
-    - dst
+    See :class:`OutputDict` for further information.
     """
-    kws: BOutputDict = {}
+
+    pass
+
+
+class XOutputDict(OutputDict, total=False):
+    """Configuration options for a baseline-correlation output.
+
+    See :class:`OutputDict` for further information.
+    """
+
+    pass
+
+
+def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
+    """Parse a correlation-product or beam stream description.
+
+    This populates `kws` (which should initially be empty) from key=value pairs
+    in `value`. It handles the common fields directly, and type-specific fields
+    are handled by a provided field callback. The callback is invoked with
+    `kws`, the key and the value. If it does not recognise the key, it should
+    raise ValueError.
+    """
     for part in value.split(","):
         match part.split("=", 1):
             case [key, data]:
                 match key:
                     case _ if key in kws:
-                        raise ValueError(f"--beam: {key} specified twice")
+                        raise ValueError(f"{key} specified twice")
                     case "name":
                         kws[key] = data
-                    case "channels_per_substream":
-                        kws[key] = int(data)
                     case "dst":
                         kws[key] = endpoint_parser(DEFAULT_PORT)(data)
                     case _:
-                        raise ValueError(f"--beam: unknown key {key}")
+                        field_callback(kws, key, data)
             case _:
-                raise ValueError(f"--beam: missing '=' in {part}")
+                raise ValueError(f"missing '=' in {part}")
     for key in ["name", "dst"]:
-        # These are the bare minimum needed for a beam,
-        # the rest can be taken from X-engine cmd-line args.
         if key not in kws:
-            raise ValueError(f"--beam: {key} is missing")
+            raise ValueError(f"{key} is missing")
 
-    return kws
+
+def parse_beam(value: str) -> BOutput:
+    """Parse a string with beam configuration data.
+
+    The string has a comma-separated list of key=value pairs. See
+    :class:`BOutput` for the valid keys and types. The following
+    keys are required:
+
+    - name
+    - dst
+    """
+
+    def _field_callback(kws: BOutputDict, key: str, data: str) -> None:
+        raise ValueError(f"unknown key {key}")
+
+    try:
+        kws: BOutputDict = {}
+        _parse_stream(value, kws, _field_callback)
+        return BOutput(**kws)
+    except ValueError as exc:
+        raise ValueError(f"--beam: {exc}") from exc
+
+
+def parse_corrprod(value: str) -> XOutput:
+    """Parse a string with correlation product configuration data.
+
+    The string has comma-separated list of key=value pairs. See
+    :class:`XOutput` for the valid keys and types. The following keys
+    are required:
+
+    - name
+    - dst
+    """
+
+    def _field_callback(kws: XOutputDict, key: str, data: str) -> None:
+        raise ValueError(f"unknown key {key}")
+
+    try:
+        kws: XOutputDict = {}
+        _parse_stream(value, kws, _field_callback)
+        return XOutput(**kws)
+    except ValueError as exc:
+        raise ValueError(f"--corrprod: {exc}") from exc
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -113,6 +167,14 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help="Add a half-beam output (may be repeated). The required keys are: name, dst.",
+    )
+    parser.add_argument(
+        "--corrprod",
+        type=parse_corrprod,
+        default=[],
+        action="append",
+        metavar="KEY=VALUE[,KEY=VALUE...]",
+        help="Add a baseline-correlation-product output (may be repeated). The required keys are: name, dst.",
     )
     parser.add_argument(
         "--katcp-host",
@@ -269,22 +331,21 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
-    parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), help="Multicast address data is sent on.")
 
     args = parser.parse_args(arglist)
 
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
 
-    # Convert from *BOutputDict to *BOutput
-    used_names = {"xengine"}
-    for output in args.beam:
-        name = output["name"]
-        if name in used_names:
-            parser.error(f"output name {name} already used.")
-        used_names.add(name)
-        if "channels_per_substream" not in output:
-            output["channels_per_substream"] = args.channels_per_substream
+    used_names = set()
+    args.outputs = []
+    for output_group in [args.corrprod, args.beam]:
+        for output in output_group:
+            name = output.name
+            if name in used_names:
+                parser.error(f"output name {name} already used.")
+            used_names.add(name)
+            args.outputs.append(output)
 
     args.beam = [BOutput(**output) for output in args.beam]
     return args
@@ -307,11 +368,6 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         monitor = NullMonitor()
 
     logger.info("Initialising XB-Engine on %s", context.device.name)
-    xengine = XOutput(
-        name="xengine",
-        dst=args.dst,
-        channels_per_substream=args.channels_per_substream,
-    )
     xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -326,7 +382,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         heap_accumulation_threshold=args.heap_accumulation_threshold,
         sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,
-        outputs=[xengine] + args.beam,
+        outputs=args.outputs,
         src=args.src,
         src_interface=args.src_interface,
         src_ibv=args.src_ibv,
