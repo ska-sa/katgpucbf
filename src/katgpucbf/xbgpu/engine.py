@@ -291,14 +291,8 @@ class XBEngine(DeviceServer):
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         for output in outputs:
-            if channel_offset_value % output.channels_per_substream != 0:
+            if channel_offset_value % n_channels_per_stream != 0:
                 raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
-            if output.channels_per_substream != n_channels_per_stream:
-                raise ValueError(
-                    f"{output.name} has {output.channels_per_substream} channels-per-substream, \
-                                 which is not compatible with the global value ({n_channels_per_stream})"
-                )
-            # TODO: Do we need to ensure all output.dst addresses do not overlap?
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
@@ -463,11 +457,7 @@ class XBEngine(DeviceServer):
             tx_enabled=self._init_tx_enabled,
         )
 
-    def populate_sensors(
-        self,
-        sensors: aiokatcp.SensorSet,
-        rx_sensor_timeout: float,
-    ) -> None:
+    def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Static sensors
         sensors.add(
