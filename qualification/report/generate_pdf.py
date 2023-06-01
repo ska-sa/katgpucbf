@@ -113,6 +113,18 @@ def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
     return config_mode
 
 
+def correlator_sort_key(config: dict) -> tuple:
+    """Generate a sort key to sort correlators."""
+    # It seems at least some of these get stringified, so ensure they are numeric
+    return (
+        float(config["bandwidth"]),
+        int(config["channels"]),
+        int(config["antennas"]),
+        float(config["integration_time"]),
+        int(config["dsims"]),
+    )
+
+
 class LstListing(Environment):
     """A class to wrap LaTeX's lstlisting environment."""
 
@@ -497,7 +509,27 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
             # Strip out ANSI color escape sequences
             failure_message = re.sub("\x1b\\[.*?m", "", report.longreprtext)
             result.failure_messages.append(failure_message)
+
     return test_configuration, results
+
+
+def sort_results(test_configuration: TestConfiguration, results: list[Result]) -> None:
+    """Sort correlators and results (in-place)."""
+    test_configuration.correlators.sort(key=lambda correlator: correlator_sort_key(correlator.mode_config))
+    correlator_uuids = [correlator.uuid for correlator in test_configuration.correlators]
+
+    def result_key(result: Result) -> tuple:
+        try:
+            correlator_idx = correlator_uuids.index(UUID(result.config["correlator"]))
+        except KeyError:
+            correlator_idx = -1
+        test_dir = result.nodeid.split("/")[0]
+        # This is not a unique key, but pytest generally runs tests from the same file
+        # in definition order, which is a good choice (and Python's sort is
+        # stable).
+        return test_dir, correlator_idx
+
+    results.sort(key=result_key)
 
 
 def extract_requirements_verified(results: Iterable[Result]) -> dict[str, list[str]]:
@@ -790,6 +822,7 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
         A PyLatex document
     """
     test_configuration, results = parse(result_list)
+    sort_results(test_configuration, results)
     requirements_verified = extract_requirements_verified(results)
 
     doc = Document(
