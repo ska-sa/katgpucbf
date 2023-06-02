@@ -123,10 +123,10 @@ def compute_tone_gain(
     # well (2e9 is comfortably less than 2^31).
     # The PFB is scaled for fixed incoherent gain, but we need to be concerned
     # about coherent gain to avoid overflowing the F-engine output. Coherent gain
-    # scales approximately with np.sqrt(correlator.n_chans / 2).
+    # scales approximately with sqrt(bw / chan_bw / 2).
     target_voltage = min(target_voltage, np.sqrt(2e9 / receiver.n_spectra_per_acc))
     dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    return target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans / 2))
+    return target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans * receiver.decimation_factor / 2))
 
 
 async def sample_tone_response(
