@@ -99,7 +99,7 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
             case [key, data]:
                 match key:
                     case _ if key in kws:
-                        raise ValueError(f"{key} specified twice")
+                        raise ValueError(f"{key} already specified")
                     case "name":
                         kws[key] = data
                     case "dst":
@@ -349,7 +349,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             used_names.add(name)
             args.outputs.append(output)
 
-    args.beam = [BOutput(**output) for output in args.beam]
     return args
 
 

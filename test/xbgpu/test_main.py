@@ -47,7 +47,7 @@ class TestParseBeam:
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--beam: name specified twice"):
+        with pytest.raises(ValueError, match="--beam: name already specified"):
             parse_beam("name=foo,name=bar,dst=239.1.2.3:7148")
 
     def test_invalid_key(self) -> None:
@@ -82,7 +82,7 @@ class TestParseCorrprod:
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--corrprod: name specified twice"):
+        with pytest.raises(ValueError, match="--corrprod: name already specified"):
             parse_corrprod("name=foo,name=bar,heap_accumulation_threshold=52,dst=239.2.3.4:7148")
 
     def test_invalid_key(self) -> None:
