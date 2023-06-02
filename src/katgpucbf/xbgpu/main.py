@@ -53,7 +53,6 @@ from .output import BOutput, XOutput
 
 _OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
-DEFAULT_HEAP_ACCUMULATION_THRESHOLD = 52
 
 
 class OutputDict(TypedDict, total=False):
@@ -158,9 +157,8 @@ def parse_corrprod(value: str) -> XOutput:
     try:
         kws: XOutputDict = {}
         _parse_stream(value, kws, _field_callback)
-        # TODO: Perhaps do something clever/neat and only pass XOutput the complete
-        #       timestamp_increment_per_accumulation (and not each component)
-        kws = {"heap_accumulation_threshold": DEFAULT_HEAP_ACCUMULATION_THRESHOLD, **kws}  # type: ignore
+        if "heap_accumulation_threshold" not in kws:
+            raise ValueError("heap_accumulation_threshold is missing")
         return XOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--corrprod: {exc}") from exc
@@ -183,7 +181,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a baseline-correlation-product output (may be repeated). The required keys are: name, dst.",
+        help="Add a baseline-correlation-products output (may be repeated). The required keys are: name, dst.",
     )
     parser.add_argument(
         "--katcp-host",

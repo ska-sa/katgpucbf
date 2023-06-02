@@ -19,7 +19,7 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
-from katgpucbf.xbgpu.main import DEFAULT_HEAP_ACCUMULATION_THRESHOLD, parse_beam, parse_corrprod
+from katgpucbf.xbgpu.main import parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
 
@@ -59,27 +59,20 @@ class TestParseBeam:
 class TestParseCorrprod:
     """Test :func:`.parse_corrprod`."""
 
-    def test_minimal(self) -> None:
-        """Test with the minimum required arguments."""
-        assert parse_corrprod("name=foo,dst=239.2.3.4:7148") == XOutput(
-            name="foo",
-            heap_accumulation_threshold=DEFAULT_HEAP_ACCUMULATION_THRESHOLD,
-            dst=Endpoint("239.2.3.4", 7148),
-        )
-
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_corrprod("name=foo,heap_accumulation_threshold=99,dst=239.2.3.4:7148") == XOutput(
+        assert parse_corrprod("name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148") == XOutput(
             name="foo",
-            heap_accumulation_threshold=99,
+            heap_accumulation_threshold=52,
             dst=Endpoint("239.2.3.4", 7148),
         )
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("name", "dst=239.2.3.4:7148"),
-            ("dst", "name=foo"),
+            ("name", "heap_accumulation_threshold=52,dst=239.2.3.4:7148"),
+            ("heap_accumulation_threshold", "name=foo,dst=239.2.3.4:7148"),
+            ("dst", "name=foo,heap_accumulation_threshold=52"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
@@ -90,9 +83,9 @@ class TestParseCorrprod:
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--corrprod: name specified twice"):
-            parse_corrprod("name=foo,name=bar,dst=239.2.3.4:7148")
+            parse_corrprod("name=foo,name=bar,heap_accumulation_threshold=52,dst=239.2.3.4:7148")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
         with pytest.raises(ValueError, match="--corrprod: unknown key fizz"):
-            parse_corrprod("fizz=buzz,name=foo,dst=239.2.3.4:7148")
+            parse_corrprod("fizz=buzz,name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148")

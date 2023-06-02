@@ -54,7 +54,6 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --channels-per-substream $channels_per_substream \
     --samples-between-spectra ${samples_between_spectra:-$((channels*2))} \
     --channel-offset-value $channel_offset \
-    --heap-accumulation-threshold ${heap_accumulation_threshold:-52} \
     --sync-epoch 0 \
     --katcp-port $port \
     --tx-enabled \
