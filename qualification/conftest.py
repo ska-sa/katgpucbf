@@ -322,7 +322,7 @@ async def _correlator_config_and_description(
     }
     if narrowband_decimation > 1:
         config["outputs"]["antenna-channelised-voltage"]["narrowband"] = {
-            "decimation": narrowband_decimation,
+            "decimation_factor": narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
         }
     config["outputs"]["baseline-correlation-products"] = {
