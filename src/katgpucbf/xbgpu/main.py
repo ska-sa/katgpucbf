@@ -181,7 +181,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a baseline-correlation-products output (may be repeated). The required keys are: name, dst.",
+        help="Add a baseline-correlation-products output (may be repeated). The required keys are: "
+        "name, dst, heap_accumulation_threshold.",
     )
     parser.add_argument(
         "--katcp-host",
