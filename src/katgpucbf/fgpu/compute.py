@@ -21,7 +21,6 @@ Allocations of memory for input, intermediate and output are also handled here.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from fractions import Fraction
 
 import numpy as np
 from katsdpsigproc import accel, fft
@@ -243,14 +242,8 @@ class Compute(accel.OperationSequence):
             self.bind(**{f"in{pol}": samples[pol]})
             self.ensure_bound(f"subsampled{pol}")
         for pol in range(N_POLS):
-            # TODO: could run these in parallel, but that would require two
-            # command queues.
-            # Compute the fractional part of first_sample * mix_frequency.
-            # Using Fraction avoids the serious rounding errors that would
-            # occur using floating point.
-            phase = Fraction(self.ddc[pol].mix_frequency) * first_sample
-            phase -= round(phase)
-            self.ddc[pol].mix_phase = float(phase)
+            # TODO: eliminate this property entirely
+            self.ddc[pol].mix_phase = 0.0
             self.ddc[pol]()
 
     def _run_frontend_common(

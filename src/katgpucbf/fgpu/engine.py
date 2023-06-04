@@ -828,11 +828,22 @@ class Pipeline:
                     # correction and hence improves floating-point accuracy.
                     #
                     # In narrowband the centre frequency is shifted to DC by
-                    # the mixer and no correction is needed.
+                    # the mixer, and we need to remove the phase that
+                    # introduces.
                     phase = phase.T
                     if isinstance(self.output, WidebandOutput):
                         phase += 0.5 * np.pi * (np.array(start_coarse_delays) % 4)
                         phase = wrap_angle(phase)
+                    else:
+                        assert self._compute.template.narrowband is not None  # keep mypy happy
+                        mix_frequency = self._compute.template.narrowband.mix_frequency
+                        # Note: we use timestamps rather than orig_timestamps here, which
+                        # makes the adjustment independent of the delay.
+                        rel_timestamps = timestamps - in_item.timestamp
+                        mix_phase = rel_timestamps * mix_frequency  # In cycles, not radians
+                        mix_phase -= np.round(mix_phase)
+                        phase = wrap_angle(phase - mix_phase[:, np.newaxis] * 2 * np.pi)
+
                     # Divide by pi because the arguments of sincospif() used in the
                     # kernel are in radians/PI.
                     self._out_item.phase.host[out_slice] = phase / np.pi
