@@ -383,6 +383,9 @@ async def _test_delay_phase_fixed(
         input2 = receiver.input_labels[-1]
         bl_idx = receiver.bls_ordering.index((input1, input2))
         expected = delay_phase(receiver, residual) + phase
+        # The delay in the dsim will affect the phase of the centre frequency,
+        # which the delay compensation won't correct.
+        expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
         check_phases(pdf_report, actual[:, bl_idx], expected, caption)
 
 
