@@ -46,6 +46,7 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --src-interface $iface \
     --dst-interface $iface \
     --src-ibv --dst-ibv \
+    --corrprod=name=bcp1,heap_accumulation_threshold=${heap_accumulation_threshold:-52},dst=$dst_mcast \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --array-size ${array_size:-64} \
     --spectra-per-heap ${spectra_per_heap:-256} \
@@ -53,8 +54,7 @@ exec spead2_net_raw numactl -C $other_affinity xbgpu \
     --channels-per-substream $channels_per_substream \
     --samples-between-spectra ${samples_between_spectra:-$((channels*2))} \
     --channel-offset-value $channel_offset \
-    --heap-accumulation-threshold ${heap_accumulation_threshold:-52} \
     --sync-epoch 0 \
     --katcp-port $port \
     --tx-enabled \
-    $src_mcast $dst_mcast
+    $src_mcast

@@ -32,14 +32,15 @@ everything required to run the XB-Engine.
 import argparse
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import TypedDict, TypeVar
 
 import katsdpsigproc.accel
 import prometheus_async
 from katsdpservices import get_interface_address, setup_logging
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import endpoint_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
@@ -48,13 +49,141 @@ from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
 from ..utils import add_signal_handlers, parse_source
 from .correlation import device_filter
+from .output import BOutput, XOutput
 
+_OD = TypeVar("_OD", bound="OutputDict")
 logger = logging.getLogger(__name__)
+
+
+class OutputDict(TypedDict, total=False):
+    """Configuration options for an output stream.
+
+    Unlike :class:`BOutput` or :class:`XOutput`, all the fields are optional,
+    so that it can be built up incrementally. They must all be filled in
+    before using it to construct an :class:`Output`.
+    """
+
+    name: str
+    dst: Endpoint
+
+
+class BOutputDict(OutputDict, total=False):
+    """Configuration options for a beam output.
+
+    See :class:`OutputDict` for further information.
+    """
+
+    pass
+
+
+class XOutputDict(OutputDict, total=False):
+    """Configuration options for a baseline-correlation output.
+
+    See :class:`OutputDict` for further information.
+    """
+
+    heap_accumulation_threshold: int
+
+
+def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
+    """Parse a correlation-product or beam stream description.
+
+    This populates `kws` (which should initially be empty) from key=value pairs
+    in `value`. It handles the common fields directly, and type-specific fields
+    are handled by a provided field callback. The callback is invoked with
+    `kws`, the key and the value. If it does not recognise the key, it should
+    raise ValueError.
+    """
+    for part in value.split(","):
+        match part.split("=", 1):
+            case [key, data]:
+                match key:
+                    case _ if key in kws:
+                        raise ValueError(f"{key} already specified")
+                    case "name":
+                        kws[key] = data
+                    case "dst":
+                        kws[key] = endpoint_parser(DEFAULT_PORT)(data)
+                    case _:
+                        field_callback(kws, key, data)
+            case _:
+                raise ValueError(f"missing '=' in {part}")
+    for key in ["name", "dst"]:
+        if key not in kws:
+            raise ValueError(f"{key} is missing")
+
+
+def parse_beam(value: str) -> BOutput:
+    """Parse a string with beam configuration data.
+
+    The string has a comma-separated list of key=value pairs. See
+    :class:`BOutput` for the valid keys and types. The following
+    keys are required:
+
+    - name
+    - dst
+    """
+
+    def _field_callback(kws: BOutputDict, key: str, data: str) -> None:
+        raise ValueError(f"unknown key {key}")
+
+    try:
+        kws: BOutputDict = {}
+        _parse_stream(value, kws, _field_callback)
+        return BOutput(**kws)
+    except ValueError as exc:
+        raise ValueError(f"--beam: {exc}") from exc
+
+
+def parse_corrprod(value: str) -> XOutput:
+    """Parse a string with correlation product configuration data.
+
+    The string has comma-separated list of key=value pairs. See
+    :class:`XOutput` for the valid keys and types. The following keys
+    are required:
+
+    - name
+    - dst
+    - heap_accumulation_threshold
+    """
+
+    def _field_callback(kws: XOutputDict, key: str, data: str) -> None:
+        match key:
+            case "heap_accumulation_threshold":
+                kws[key] = int(data)
+            case _:
+                raise ValueError(f"unknown key {key}")
+
+    try:
+        kws: XOutputDict = {}
+        _parse_stream(value, kws, _field_callback)
+        if "heap_accumulation_threshold" not in kws:
+            raise ValueError("heap_accumulation_threshold is missing")
+        return XOutput(**kws)
+    except ValueError as exc:
+        raise ValueError(f"--corrprod: {exc}") from exc
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse all command line parameters for the XB-Engine and ensure that they are valid."""
     parser = argparse.ArgumentParser(description="Launch an XB-Engine for a single multicast stream.")
+    parser.add_argument(
+        "--beam",
+        type=parse_beam,
+        default=[],
+        action="append",
+        metavar="KEY=VALUE[,KEY=VALUE...]",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst.",
+    )
+    parser.add_argument(
+        "--corrprod",
+        type=parse_corrprod,
+        default=[],
+        action="append",
+        metavar="KEY=VALUE[,KEY=VALUE...]",
+        help="Add a baseline-correlation-products output (may be repeated). The required keys are: "
+        "name, dst, heap_accumulation_threshold.",
+    )
     parser.add_argument(
         "--katcp-host",
         type=str,
@@ -145,12 +274,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "and still be accepted. [%(default)s]",
     )
     parser.add_argument(
-        "--heap-accumulation-threshold",
-        type=int,
-        default=52,
-        help="Number of batches of heaps to accumulate in a single dump. [%(default)s]",
-    )
-    parser.add_argument(
         "--sync-epoch",
         type=float,
         required=True,
@@ -210,12 +333,21 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
-    parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), help="Multicast address data is sent on.")
 
     args = parser.parse_args(arglist)
 
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
+
+    used_names = set()
+    args.outputs = []
+    for output_group in [args.corrprod, args.beam]:
+        for output in output_group:
+            name = output.name
+            if name in used_names:
+                parser.error(f"output name {name} already used.")
+            used_names.add(name)
+            args.outputs.append(output)
 
     return args
 
@@ -245,19 +377,18 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         n_ants=args.array_size,
         n_channels_total=args.channels,
         n_channels_per_stream=args.channels_per_substream,
-        n_spectra_per_heap=args.spectra_per_heap,
         n_samples_between_spectra=args.samples_between_spectra,
+        n_spectra_per_heap=args.spectra_per_heap,
         sample_bits=args.sample_bits,
-        heap_accumulation_threshold=args.heap_accumulation_threshold,
         sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,
+        outputs=args.outputs,
         src=args.src,
         src_interface=args.src_interface,
         src_ibv=args.src_ibv,
         src_affinity=args.src_affinity,
         src_comp_vector=args.src_comp_vector,
         src_buffer=args.src_buffer,
-        dst=args.dst,
         dst_interface=args.dst_interface,
         dst_ttl=args.dst_ttl,
         dst_ibv=args.dst_ibv,

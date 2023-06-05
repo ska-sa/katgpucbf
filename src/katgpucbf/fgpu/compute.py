@@ -124,7 +124,7 @@ class Compute(accel.OperationSequence):
     - spectra_per_heap <= spectra - i.e. a chunk of data must be enough to send out at
       least one heap.
     - spectra % spectra_per_heap == 0
-    - samples >= output.window (see :class:`.Output`). An input chunk requires
+    - samples >= output.window (see :class:`.fgpu.output.Output`). An input chunk requires
       at least enough samples to output a single spectrum.
     - samples % 8 == 0
 

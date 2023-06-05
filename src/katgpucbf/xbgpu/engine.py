@@ -42,7 +42,6 @@ import numpy as np
 import spead2.recv
 from aiokatcp import DeviceServer
 from katsdpsigproc import accel
-from katsdptelstate.endpoint import Endpoint
 
 from .. import (
     DESCRIPTOR_TASK_NAME,
@@ -61,6 +60,7 @@ from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import recv
 from .correlation import Correlation, CorrelationTemplate
+from .output import Output, XOutput
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
@@ -185,15 +185,15 @@ class XBEngine(DeviceServer):
         The number of time samples received per frequency channel.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
-    heap_accumulation_threshold
-        The number of consecutive heaps to accumulate. This value is used to
-        determine the dump rate.
     sync_epoch
         UNIX time corresponding to timestamp zero
     channel_offset_value
         The index of the first channel in the subset of channels processed by
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
         spectrum reassembly by the downstream receiver.
+    outputs
+        Output streams to generate. Currently this must be a single
+        XOutput.
     src
         Endpoint for the incoming data.
     src_interface
@@ -214,8 +214,6 @@ class XBEngine(DeviceServer):
     rx_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
-    dst
-        Destination endpoint for the outgoing data.
     dst_interface
         IP address of the network device to use for output.
     dst_ttl
@@ -257,16 +255,15 @@ class XBEngine(DeviceServer):
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
-        heap_accumulation_threshold: int,
         sync_epoch: float,
         channel_offset_value: int,
+        outputs: list[Output],
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
         src_interface: str,
         src_ibv: bool,
         src_affinity: int,
         src_comp_vector: int,
         src_buffer: int,
-        dst: Endpoint,
         dst_interface: str,
         dst_ttl: int,
         dst_ibv: bool,
@@ -282,23 +279,24 @@ class XBEngine(DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
+        # B-engine doesn't work yet
+        assert len(outputs) == 1
+        assert isinstance(outputs[0], XOutput)
+
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
-        if channel_offset_value % n_channels_per_stream != 0:
-            raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+        for output in outputs:
+            if channel_offset_value % n_channels_per_stream != 0:
+                raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
-        self.send_rate_factor = send_rate_factor
-        self.heap_accumulation_threshold = heap_accumulation_threshold
+        self.heap_accumulation_threshold = outputs[0].heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
-        self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
-        self.n_spectra_per_heap = n_spectra_per_heap
         self.sample_bits = sample_bits
-        self.n_samples_between_spectra = n_samples_between_spectra
         self.channel_offset_value = channel_offset_value
 
         self._src = src
@@ -328,7 +326,7 @@ class XBEngine(DeviceServer):
         # configure the receiver, we pass it as a seperate argument to the
         # reciever for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
-        self.rx_heap_timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
+        self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
             self.sensors,
@@ -357,9 +355,9 @@ class XBEngine(DeviceServer):
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
         self._src_layout = recv.Layout(
-            n_ants=self.n_ants,
-            n_channels_per_stream=self.n_channels_per_stream,
-            n_spectra_per_heap=self.n_spectra_per_heap,
+            n_ants=n_ants,
+            n_channels_per_stream=n_channels_per_stream,
+            n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
@@ -383,9 +381,9 @@ class XBEngine(DeviceServer):
 
         correlation_template = CorrelationTemplate(
             self.context,
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_per_stream,
-            n_spectra_per_heap=self.n_spectra_per_heap,
+            n_ants=n_ants,
+            n_channels=n_channels_per_stream,
+            n_spectra_per_heap=n_spectra_per_heap,
         )
         self.correlation = correlation_template.instantiate(
             self._proc_command_queue, n_batches=heaps_per_fengine_per_chunk
@@ -433,17 +431,17 @@ class XBEngine(DeviceServer):
         self.dump_interval_s: float = self.timestamp_increment_per_accumulation / adc_sample_rate_hz
 
         self.send_stream = XSend(
-            n_ants=self.n_ants,
-            n_channels=self.n_channels_total,
-            n_channels_per_stream=self.n_channels_per_stream,
+            n_ants=n_ants,
+            n_channels=n_channels_total,
+            n_channels_per_stream=n_channels_per_stream,
             dump_interval_s=self.dump_interval_s,
-            send_rate_factor=self.send_rate_factor,
+            send_rate_factor=send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
             context=self.context,
             packet_payload=dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_stream(
-                dest_ip=dst.host,
-                dest_port=dst.port,
+                dest_ip=outputs[0].dst.host,
+                dest_port=outputs[0].dst.port,
                 interface_ip=dst_interface,
                 ttl=dst_ttl,
                 use_ibv=dst_ibv,
