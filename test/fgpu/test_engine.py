@@ -20,6 +20,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
+from ipaddress import IPv4Network
 
 import aiokatcp
 import numpy as np
@@ -47,17 +48,22 @@ pytestmark = [pytest.mark.cuda_only]
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
 SPECTRA_PER_HEAP = 256
-# Lower than the default to make tests quicker, and smaller than
-# CHUNK_JONES to check that this case works.
+# Lower than the default to make tests quicker
 # TODO: use a number that's not a multiple of the number of channels,
 # once _send_data can handle partial chunks.
 CHUNK_SAMPLES = 524288
-CHUNK_JONES = 1048576
+CHUNK_JONES = 131072
 MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 PACKET_SAMPLES = 4096
 TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
+
+WIDEBAND_ARGS = f"name=test_wideband,dst=239.10.11.0+15:7149,taps={TAPS}"
+# Centre frequency is a multiple of the channel width
+NARROWBAND_ARGS = (
+    f"name=test_narrowband,dst=239.10.12.0+15:7149,taps={TAPS},decimation=8,centre_frequency=339077148.4375"
+)
 
 
 @pytest.fixture
@@ -112,30 +118,31 @@ def frac_channel(output: Output, channel: float) -> float:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
-    @pytest.fixture(
-        params=[
-            pytest.param(
-                f"--wideband=name=test_stream,dst=239.10.11.0+15:7149,taps={TAPS}",
-                id="wideband",
-            ),
-            # Centre frequency is a multiple of the channel width
-            pytest.param(
-                f"--narrowband=name=test_stream,dst=239.10.11.0+15:7149,taps={TAPS},"
-                "decimation=8,centre_frequency=339077148.4375",
-                id="narrowband",
-            ),
-        ]
-    )
-    def output_arg(self, channels: int, request) -> str:
-        return f"{request.param},channels={channels}"
+    @pytest.fixture
+    def wideband_args(self, channels: int) -> str:
+        """Arguments to pass to the command-line parser for the wideband output."""
+        return f"{WIDEBAND_ARGS},channels={channels}"
 
     @pytest.fixture
-    def output(self, output_arg: str) -> Output:
-        arg_name, arg_value = output_arg.split("=", 1)
-        if arg_name == "--wideband":
-            return parse_wideband(arg_value)
+    def narrowband_args(self, channels: int) -> str:
+        """Arguments to pass to the command-line parser for the narrowband output."""
+        return f"{NARROWBAND_ARGS},channels={channels}"
+
+    @pytest.fixture(params=["wideband", "narrowband"])
+    def output(self, wideband_args: str, narrowband_args: str, request: pytest.FixtureRequest) -> Output:
+        """The output to run tests against."""
+        if request.param == "wideband":
+            return parse_wideband(wideband_args)
         else:
-            return parse_narrowband(arg_value)
+            return parse_narrowband(narrowband_args)
+
+    @pytest.fixture
+    def mock_send_stream_network(self, output: Output) -> IPv4Network:
+        """Filter the output queues to just those corresponding to `output`.
+
+        This overrides the default implementation in conftest.py.
+        """
+        return IPv4Network((output.dst[0].host, 24))
 
     @pytest.fixture
     def coherent_scale(self, output: Output) -> np.ndarray:
@@ -197,7 +204,7 @@ class TestEngine:
             return 0.0
 
     @pytest.fixture
-    def engine_arglist(self, output: Output, output_arg: str, default_gain: np.float32) -> list[str]:
+    def engine_arglist(self, wideband_args: str, narrowband_args: str, default_gain: np.float32) -> list[str]:
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
@@ -205,7 +212,7 @@ class TestEngine:
             "--dst-interface=lo",
             f"--sync-epoch={SYNC_EPOCH}",
             f"--src-chunk-samples={CHUNK_SAMPLES}",
-            f"--dst-chunk-jones={CHUNK_JONES // output.decimation}",
+            f"--dst-chunk-jones={CHUNK_JONES}",
             f"--max-delay-diff={MAX_DELAY_DIFF}",
             f"--spectra-per-heap={SPECTRA_PER_HEAP}",
             f"--src-packet-samples={PACKET_SAMPLES}",
@@ -213,7 +220,8 @@ class TestEngine:
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--gain={default_gain}",
             "--send-rate-factor=0",  # Infinitely fast
-            output_arg,
+            f"--wideband={wideband_args}",
+            f"--narrowband={narrowband_args}",
             "239.10.10.0+7:7149",  # src1
             "239.10.10.8+7:7149",  # src2
         ]
@@ -495,14 +503,14 @@ class TestEngine:
         phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
         phase_correction = -phase
         coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
-        await engine_client.request("delays", "test_stream", SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
 
         # Use constant-magnitude gains to avoid throwing off the magnitudes
         rng = np.random.default_rng(123)
         gain_phase = rng.uniform(0, 2 * np.pi, (CHANNELS, N_POLS))
         gains = default_gain * np.exp(1j * gain_phase).astype(np.complex64)
         for pol in range(N_POLS):
-            await engine_client.request("gain", "test_stream", pol, *(str(gain) for gain in gains[:, pol]))
+            await engine_client.request("gain", output.name, pol, *(str(gain) for gain in gains[:, pol]))
 
         src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
@@ -585,7 +593,7 @@ class TestEngine:
         # Crank up the gain so that leakage is measurable
         gain = 100 * default_gain
         for pol in range(N_POLS):
-            await engine_client.request("gain", "test_stream", pol, gain)
+            await engine_client.request("gain", output.name, pol, gain)
         # CBF-REQ-0126: The CBF shall perform channelisation such that the 53 dB
         # attenuation is ≤ 2x (twice) the pass band width.
         #
@@ -653,7 +661,7 @@ class TestEngine:
         phase_rate_per_sample = np.array([30, 32.5]) / n_samples
         phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
         coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
-        await engine_client.request("delays", "test_stream", SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
 
         first_timestamp = roundup(100 * src_layout.chunk_samples, output.spectra_samples * SPECTRA_PER_HEAP)
         end_delay = round(min(delay_rate) * n_samples)
@@ -718,7 +726,7 @@ class TestEngine:
     ) -> None:
         """Test loading several future delay models."""
         # Set up infrastructure for testing delay sensor updates
-        delay_sensors = [engine_server.sensors[f"test_stream.input{pol}.delay"] for pol in range(N_POLS)]
+        delay_sensors = [engine_server.sensors[f"{output.name}.input{pol}.delay"] for pol in range(N_POLS)]
         sensor_updates_dict = self._watch_sensors(delay_sensors)
 
         # To keep things simple, we'll just use phase, not delay.
@@ -735,7 +743,7 @@ class TestEngine:
         update_phases = [1.0, 0.2, -0.2, -2.0, 0.0]
         for time, phase in zip(update_times, update_phases):
             coeffs = f"0.0,0.0:{phase},0.0"
-            await engine_client.request("delays", "test_stream", SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
+            await engine_client.request("delays", output.name, SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
 
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
@@ -854,19 +862,18 @@ class TestEngine:
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
-        assert prom_diff.get_sample_diff("output_heaps_total", {"stream": "test_stream"}) == output_heaps
+        assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
         frame_samples = channels * spectra_per_heap * N_POLS
         frame_size = frame_samples * COMPLEX * np.dtype(np.int8).itemsize
         assert (
-            prom_diff.get_sample_diff("output_bytes_total", {"stream": "test_stream"})
-            == np.sum(dst_present) * frame_size
+            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name}) == np.sum(dst_present) * frame_size
         )
         assert (
-            prom_diff.get_sample_diff("output_samples_total", {"stream": "test_stream"})
+            prom_diff.get_sample_diff("output_samples_total", {"stream": output.name})
             == np.sum(dst_present) * frame_samples
         )
         assert (
-            prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": "test_stream"})
+            prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})
             == np.sum(~dst_present) * n_substreams
         )
 
@@ -917,7 +924,7 @@ class TestEngine:
         tone = CW(frac_channel=frac_channel(output, 271), magnitude=110.0)
         for pol in range(N_POLS):
             # Set gain high enough to make the tone saturate
-            await engine_client.request("gain", "test_stream", pol, default_gain * 2)
+            await engine_client.request("gain", output.name, pol, default_gain * 2)
 
         src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
@@ -932,12 +939,10 @@ class TestEngine:
             )
 
         assert prom_diff.get_sample_diff(
-            "output_clipped_samples_total", {"stream": "test_stream", "pol": f"{tone_pol}"}
+            "output_clipped_samples_total", {"stream": output.name, "pol": f"{tone_pol}"}
         ) == len(timestamps)
         assert (
-            prom_diff.get_sample_diff(
-                "output_clipped_samples_total", {"stream": "test_stream", "pol": f"{1 - tone_pol}"}
-            )
+            prom_diff.get_sample_diff("output_clipped_samples_total", {"stream": output.name, "pol": f"{1 - tone_pol}"})
             == 0
         )
 
@@ -945,14 +950,14 @@ class TestEngine:
         # output chunk, so we need to round up to output chunk size.
         last_timestamp = roundup(timestamps[-1] + 1, engine_server.chunk_jones * output.decimation * 2)
 
-        sensor = engine_server.sensors[f"test_stream.input{tone_pol}.feng-clip-cnt"]
+        sensor = engine_server.sensors[f"{output.name}.input{tone_pol}.feng-clip-cnt"]
         assert sensor.value == len(timestamps)
         assert sensor.timestamp == SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE
-        sensor = engine_server.sensors[f"test_stream.input{1 - tone_pol}.feng-clip-cnt"]
+        sensor = engine_server.sensors[f"{output.name}.input{1 - tone_pol}.feng-clip-cnt"]
         assert sensor.value == 0
         assert sensor.timestamp == SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE
 
-    def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, *request) -> list[int]:
+    def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, output: Output, *request) -> list[int]:
         """Patch Pipeline._fill_in` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
@@ -963,7 +968,7 @@ class TestEngine:
         timestamp = []
 
         async def fill_in(self) -> InItem | None:
-            if self._in_item is None:
+            if self._in_item is None and self.output.name == output.name:
                 nonlocal counter
                 counter += 1
                 if counter == 12:
@@ -990,7 +995,7 @@ class TestEngine:
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
-        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, "gain-all", "test_stream", 0)
+        timestamp_list = self._patch_fill_in(monkeypatch, engine_client, output, "gain-all", output.name, 0)
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -1025,7 +1030,7 @@ class TestEngine:
         dig_data = self._make_tone(n_samples, CW(frac_channel=frac_channel(output, CHANNELS // 2), magnitude=100), 0)
 
         timestamp_list = self._patch_fill_in(
-            monkeypatch, engine_client, "delays", "test_stream", SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
+            monkeypatch, engine_client, output, "delays", output.name, SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
         )
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
