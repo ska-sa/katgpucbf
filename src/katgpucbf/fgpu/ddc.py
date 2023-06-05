@@ -137,12 +137,11 @@ class DDC(accel.Operation):
     baseband filter and a mixer frequency for translating the signal from
     the desired band to baseband.
 
-    Element j of the output contains the dot product of **weights** with
-    elements :math:`dj, d(j+1), \ldots, d(j+taps-1)` of the mixed signal. The
-    mixed signal is the product of sample :math:`j` of the input with
-    :math:`e^{2\pi i (aj + b)}`, where :math:`a` is the `mix_frequency`
-    argument to :meth:`configure` and :math:`b` is the (settable)
-    :attr:`mix_phase` property.
+    Element i of the output contains the dot product of **weights** with
+    elements :math:`dj, d(i+1), \ldots, d(i+taps-1)` of the mixed signal. The
+    mixed signal is the product of sample :math:`i` of the input with
+    :math:`e^{2\pi j (ai)}`, where :math:`a` is the `mix_frequency`
+    argument to :meth:`configure`.
 
     .. rubric:: Slots
 
@@ -188,7 +187,6 @@ class DDC(accel.Operation):
         self._mix_lookup = accel.DeviceArray(template.context, (template.unroll,), np.complex64)
         self._mix_lookup_host = self._mix_lookup.empty_like()
         self._mix_frequency = 0.0  # Specify in cycles per sample
-        self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
 
     def configure(self, mix_frequency: float, weights: np.ndarray) -> None:
         """Set the mixer frequency and filter weights.
@@ -226,7 +224,6 @@ class DDC(accel.Operation):
                 np.int32(out_buffer.shape[0]),  # out_size
                 np.int32(accel.divup(in_buffer.shape[0], 4)),  # in_size_words
                 np.float64(self.mix_frequency),  # mix_scale
-                np.float64(self.mix_phase),  # mix_bias
                 self._mix_lookup.buffer,
             ],
             global_size=(groups * self.template.wgs, 1, 1),

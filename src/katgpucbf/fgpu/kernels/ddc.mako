@@ -131,7 +131,6 @@ void ddc(
     unsigned int out_size,
     unsigned int in_size_words,
     double mix_scale,  // Mixer frequency in cycles per sample
-    double mix_bias,   // Mixer phase in cycles at the first sample
     const GLOBAL float2 * RESTRICT mix_lookup  // Mixer phase rotations
 )
 {
@@ -203,7 +202,7 @@ void ddc(
     }
 
     // Compute the mixer for the first sample output by this workitem
-    mix_bias += get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
+    double mix_bias = get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
     mix_bias -= rint(mix_bias);
     float2 mix_base;
     sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);

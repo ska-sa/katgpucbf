@@ -242,8 +242,6 @@ class Compute(accel.OperationSequence):
             self.bind(**{f"in{pol}": samples[pol]})
             self.ensure_bound(f"subsampled{pol}")
         for pol in range(N_POLS):
-            # TODO: eliminate this property entirely
-            self.ddc[pol].mix_phase = 0.0
             self.ddc[pol]()
 
     def _run_frontend_common(
