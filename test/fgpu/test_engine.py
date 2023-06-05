@@ -778,6 +778,81 @@ class TestEngine:
                 # NOTE: Using the default relative tolerance of 1e-07
                 np.testing.assert_allclose(sensor_values[3], expected_phase)
 
+    @pytest.mark.parametrize("delay_samples", [0.0, 8192.0, 234.5, 42.8])
+    async def test_delay_slope(
+        self,
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        output: Output,
+        channels: int,
+        delay_samples: float,
+    ) -> None:
+        """Test the slope and intercept of the phase response to delay.
+
+        This serves mostly as a sanity check on the other tests of delay
+        tracking, which use complicated formulae to determine the expected
+        absolute phase of the response. Here we delay one polarisation
+        relative to the other, and check the difference in phase.
+        """
+        delay_s = delay_samples / ADC_SAMPLE_RATE
+        coeffs = ["0.0,0.0:0.0,0.0", f"{delay_s},0.0:0.0,0.0"]
+        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
+
+        src_layout = engine_server.src_layout
+        # Don't send the first chunk, to avoid complications with the step
+        # change in the delay at SYNC_EPOCH.
+        heap_samples = output.spectra_samples * SPECTRA_PER_HEAP
+        first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
+        n_samples = 20 * src_layout.chunk_samples
+        tone_timestamps = np.arange(n_samples) + first_timestamp
+
+        rng = np.random.default_rng(123)
+        n_tones = 10
+        tone_channels = rng.integers(0, channels, size=n_tones)
+        tone_channels[0] = channels // 2  # Ensure we test the intercept exactly
+        tone_phases = rng.uniform(0, 2 * np.pi, size=n_tones)
+        tones = [
+            CW(frac_channel=frac_channel(output, channel), magnitude=60, phase=phase)
+            for channel, phase in zip(tone_channels, tone_phases)
+        ]
+        dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
+        dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
+        # Ensure we haven't saturated
+        assert np.max(np.abs(dig_data)) < 2 ** (DIG_SAMPLE_BITS - 1) - 1
+
+        expected_first_timestamp = first_timestamp
+        # The data should have as many samples as the input, minus a reduction
+        # from windowing, rounded down to a full heap.
+        expected_spectra = (n_samples - output.window) // output.spectra_samples
+        if delay_samples > 0:
+            # The first output heap would require data from before the first
+            # timestamp, so it does not get produced
+            expected_first_timestamp += heap_samples
+            expected_spectra -= SPECTRA_PER_HEAP
+        out_data, _ = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            output,
+            dig_data,
+            first_timestamp=first_timestamp,
+            expected_first_timestamp=expected_first_timestamp,
+            dst_present=expected_spectra // SPECTRA_PER_HEAP,
+        )
+
+        # Ensure we haven't saturated
+        assert np.max(np.abs(out_data.real)) < 127
+        assert np.max(np.abs(out_data.imag)) < 127
+        orig_phase = np.angle(out_data[tone_channels, :, 0])
+        delayed_phase = np.angle(out_data[tone_channels, :, 1])
+        channel_bw = ADC_SAMPLE_RATE / 2 / output.decimation / channels
+        phase_ramp = -2 * np.pi * delay_s * channel_bw * (tone_channels - channels // 2)
+        phase_ramp = phase_ramp[:, np.newaxis]
+        # There is quite a lot of quantisation noise, so we need a large tolerance
+        assert_angles_allclose(orig_phase + phase_ramp, delayed_phase, atol=3e-2)
+
     # Test with spectra_samples less than, equal to and greater than src-packet-samples
     @pytest.mark.parametrize("channels", [64, 2048, 8192])
     # Use small spectra-per-heap to get finer-grained testing of which spectra
