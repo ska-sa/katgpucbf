@@ -108,7 +108,8 @@ def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.
     band will be retained. The response in the outer 50% (and aliases
     thereof) are thus irrelevant.
 
-    The resulting weights are normalised such that the sum of squares is 1.
+    The resulting weights are normalised such that the gain (after subsampling)
+    is 1.
 
     Parameters
     ----------
@@ -128,7 +129,7 @@ def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.
         desired.append(0.0)
         weights.append(1.0)
     coeff = scipy.signal.remez(taps, edges, desired, weights, fs=subsampling, maxiter=1000)
-    coeff /= np.sqrt(np.sum(np.square(coeff)))
+    coeff *= np.sqrt(subsampling)
     return coeff.astype(np.float32)
 
 
