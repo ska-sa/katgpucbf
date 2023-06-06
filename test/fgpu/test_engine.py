@@ -292,7 +292,7 @@ class TestEngine:
         Parameters
         ----------
         timestamps
-            Timestamps to generate
+            Timestamps for the samples to generate
         tone
             The cosine wave to synthesize
         pol
