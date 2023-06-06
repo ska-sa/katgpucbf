@@ -65,7 +65,9 @@ async def test_accum_length(
     # the input signals are the same for all antennas.
     assert isinstance(chunks[1][1].data, np.ndarray)
     total_power = np.sum(chunks[1][1].data[:, 0, 0], dtype=np.int64)
-    acc_len = round(receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans))
+    acc_len = round(
+        receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans * receiver.decimation_factor)
+    )
     expected_power = acc_len * receiver.n_chans * (level * level)
     pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}.")
     # Statistical analysis of total_power is quite tricky because there is
