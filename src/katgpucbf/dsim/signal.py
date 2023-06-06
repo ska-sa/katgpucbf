@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -237,7 +237,7 @@ class CW(Signal):
         waves = max(1, round(n * self.frequency / sample_rate))
         frequency = waves * sample_rate / n
         logger.info(f"Rounded tone frequency to {frequency} Hz")
-        scale = self.frequency / sample_rate * 2 * np.pi
+        scale = waves / n * 2 * np.pi
 
         # Index of the first element of each chunk
         offsets = da.arange(0, n, CHUNK_SIZE, chunks=1, dtype=np.int64)
