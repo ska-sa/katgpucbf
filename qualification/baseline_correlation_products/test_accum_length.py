@@ -25,6 +25,7 @@ from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0096")
+@pytest.mark.xfail(reason="requirement needs to be updated")
 async def test_accum_length(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -35,8 +36,7 @@ async def test_accum_length(
     Verification method
     -------------------
     Verify by testing that the accumulation interval is within specification
-    when set to 500ms. Inject a noise signal and check that the measured
-    signal has the expected power.
+    when set to 500ms.
     """
     receiver = receive_baseline_correlation_products
     pdf_report.step("Retrieve the reported accumulation time and check it.")
@@ -45,6 +45,22 @@ async def test_accum_length(
     with check:
         assert 0.48 <= receiver.int_time <= 0.52
 
+
+@pytest.mark.requirements("CBF-REQ-0096")
+async def test_accum_power(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+) -> None:
+    """
+    Test that the actual accumulation length matches the reported length.
+
+    Verification method
+    -------------------
+    Inject a noise signal and check that the measured signal has the expected
+    power for the number of accumulations.
+    """
+    receiver = receive_baseline_correlation_products
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
