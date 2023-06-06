@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -66,6 +66,9 @@ class TestCW:
         cw = CW(amplitude, frequency)
         out = cw.sample(n, adc_sample_rate)
         timestamps = np.arange(0, n)
+        # Round frequency to match the rounding in CW
+        waves = max(1, round(n * frequency / adc_sample_rate))
+        frequency = waves * adc_sample_rate / n
         expected = np.cos(timestamps * (frequency / adc_sample_rate * 2 * np.pi)) * amplitude
         np.testing.assert_allclose(out, expected, atol=1e-6 * amplitude)
 
