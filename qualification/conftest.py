@@ -321,9 +321,14 @@ async def _correlator_config_and_description(
         "n_chans": n_channels,
     }
     if narrowband_decimation > 1:
+        # Pick a centre frequency that is not going to be a multiple of the
+        # channel width (to test the most general case), but which is a
+        # multiple of the dsim frequency resolution (to avoid rounding the
+        # frequency of injected tones).
+        centre_frequency = adc_sample_rate * (23456789 / 2**27)
         config["outputs"]["antenna-channelised-voltage"]["narrowband"] = {
             "decimation_factor": narrowband_decimation,
-            "centre_frequency": adc_sample_rate / 4,
+            "centre_frequency": centre_frequency,
         }
     config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
