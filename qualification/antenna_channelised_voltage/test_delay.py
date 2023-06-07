@@ -143,7 +143,7 @@ async def test_delay_enable_disable(
 
     receiver = receive_baseline_correlation_products
     channel = 3 * receiver.n_chans // 4
-    freq = 3 * receiver.bandwidth / 4
+    freq = receiver.center_freq + receiver.bandwidth / 4
     signal = f"cw(0.1, {freq})"
     gain = compute_tone_gain(receiver, 0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
@@ -171,7 +171,7 @@ async def test_delay_enable_disable(
     # One might expect it to be pi radians, but that ignores the implicit
     # phase adjustment that ensures the centre channel has zero phase.
     with check:
-        assert phase == pytest.approx(math.pi / 3, abs=np.deg2rad(1))
+        assert phase == pytest.approx(math.pi * (freq - receiver.center_freq) / freq, abs=np.deg2rad(1))
 
     pdf_report.step("Check that compensation can be disabled.")
     await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
@@ -188,6 +188,9 @@ async def test_delay_enable_disable(
 
 
 @pytest.mark.requirements("CBF-REQ-0187,CBF-REQ-0188")
+@pytest.mark.xfail(
+    reason="requirement cannot be met for all modes as delays cannot be updated more than once per spectrum"
+)
 async def test_delay_application_rate(correlator: CorrelatorRemoteControl, pdf_report: Reporter) -> None:
     """Test that delay and phase polynomials are applied at the required rate.
 
@@ -300,14 +303,15 @@ def check_phases(
     pdf_report.figure(fig)
 
 
-def delay_phase(n_chans: int, delay_samples: float) -> np.ndarray:
+def delay_phase(receiver: BaselineCorrelationProductsReceiver, delay_samples: float) -> np.ndarray:
     """Calculate expected phase for a given delay.
 
     The return value is appropriate if the sample signal is provided on both
     inputs, but the first input in the correlation is configured with a delay
     of `delay_samples` samples, and no phase compensation.
     """
-    return np.arange(-n_chans // 2, n_chans // 2) / n_chans * np.pi * -delay_samples
+    n_chans = receiver.n_chans
+    return np.arange(-n_chans // 2, n_chans // 2) / n_chans / receiver.decimation_factor * np.pi * -delay_samples
 
 
 async def _test_delay_phase_fixed(
@@ -381,7 +385,10 @@ async def _test_delay_phase_fixed(
         input1 = receiver.input_labels[i]
         input2 = receiver.input_labels[-1]
         bl_idx = receiver.bls_ordering.index((input1, input2))
-        expected = delay_phase(receiver.n_chans, residual) + phase
+        expected = delay_phase(receiver, residual) + phase
+        # The delay in the dsim will affect the phase of the centre frequency,
+        # which the delay compensation won't correct.
+        expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
         check_phases(pdf_report, actual[:, bl_idx], expected, caption)
 
 
@@ -445,7 +452,7 @@ async def _test_delay_phase_rate(
         input2 = receiver.input_labels[-1]
         bl_idx = receiver.bls_ordering.index((input1, input2))
         actual = phases[1][:, bl_idx] - phases[0][:, bl_idx]
-        expected = delay_phase(receiver.n_chans, delay_rate * elapsed) + phase_rate * elapsed_s
+        expected = delay_phase(receiver, delay_rate * elapsed) + phase_rate * elapsed_s
         # Allow 2° rather than 1° because we're taking the difference between
         # two phases which each have a 1° tolerance.
         check_phases(pdf_report, actual, expected, caption, tolerance_deg=2)

@@ -192,10 +192,15 @@ class BaselineCorrelationProductsReceiver:
     ) -> None:
         # Some metadata we know already from the config.
         acv_name = correlator.config["outputs"][stream_name]["src_streams"][0]
-        self.n_inputs = len(correlator.config["outputs"][acv_name]["src_streams"])
+        acv_config = correlator.config["outputs"][acv_name]
+        self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
-        self.n_chans = correlator.config["outputs"][acv_name]["n_chans"]
-        self.input_labels = correlator.config["outputs"][acv_name]["input_labels"]
+        self.n_chans = acv_config["n_chans"]
+        self.input_labels = acv_config["input_labels"]
+        if "narrowband" in acv_config:
+            self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
+        else:
+            self.decimation_factor = 1
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
@@ -210,6 +215,7 @@ class BaselineCorrelationProductsReceiver:
         self.sync_time = correlator.sensors[f"{acv_name}.sync-time"].value
         self.scale_factor_timestamp = correlator.sensors[f"{acv_name}.scale-factor-timestamp"].value
         self.bandwidth = correlator.sensors[f"{acv_name}.bandwidth"].value
+        self.center_freq = correlator.sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints = [
             (endpoint.host, endpoint.port)
             for endpoint in endpoint_list_parser(DEFAULT_PORT)(

@@ -62,7 +62,24 @@ ini_options = [
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
-    IniOption(name="channels", help="Space-separated list of channel counts to test", type="args", default=["8192"]),
+    IniOption(
+        name="wideband_channels",
+        help="Space-separated list of channel counts to test in wideband",
+        type="args",
+        default=["8192"],
+    ),
+    IniOption(
+        name="narrowband_channels",
+        help="Space-separated list of channel counts to test in narrowband",
+        type="args",
+        default=["32768"],
+    ),
+    IniOption(
+        name="narrowband_decimation",
+        help="Space-separated list of narrowband decimation factors to test",
+        type="args",
+        default=["8"],
+    ),
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
     IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
 ]
@@ -130,11 +147,17 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("n_antennas", values, indirect=True)
     if "band" in metafunc.fixturenames:
         metafunc.parametrize("band", metafunc.config.getini("bands"), indirect=True)
-    if "n_channels" in metafunc.fixturenames:
+    if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
         # NB: don't try to convert the string-typed values to integers here.
         # It will generate new int objects each time, causing pytest to treat
         # them as different and hence it won't reuse the fixture between tests.
-        metafunc.parametrize("n_channels", metafunc.config.getini("channels"), indirect=True)
+        configs = [(n_channels, "1") for n_channels in metafunc.config.getini("wideband_channels")]
+        configs.extend(
+            (n_channels, decimation)
+            for decimation in metafunc.config.getini("narrowband_decimation")
+            for n_channels in metafunc.config.getini("narrowband_channels")
+        )
+        metafunc.parametrize("n_channels, narrowband_decimation", configs, indirect=True)
 
 
 # Need to redefine this from pytest-asyncio to have it at package scope
@@ -160,6 +183,12 @@ def n_dsims() -> int:  # noqa: D401
 @pytest.fixture(scope="package")
 def n_channels(request: pytest.FixtureRequest) -> int:  # noqa: D401
     """Number of channels for the channeliser."""
+    return int(request.param)
+
+
+@pytest.fixture(scope="package")
+def narrowband_decimation(request: pytest.FixtureRequest) -> int:  # noqa: D401
+    """Narrowband decimation factor, or 1 for wideband."""
     return int(request.param)
 
 
@@ -246,7 +275,13 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 
 @pytest.fixture(scope="package")
 async def _correlator_config_and_description(
-    pytestconfig, n_antennas: int, n_channels: int, n_dsims: int, band: str, int_time: float
+    pytestconfig,
+    n_antennas: int,
+    n_channels: int,
+    n_dsims: int,
+    band: str,
+    int_time: float,
+    narrowband_decimation: int,
 ) -> tuple[dict, dict]:
     config: dict = {
         "version": "3.4",
@@ -285,6 +320,16 @@ async def _correlator_config_and_description(
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
     }
+    if narrowband_decimation > 1:
+        # Pick a centre frequency that is not going to be a multiple of the
+        # channel width (to test the most general case), but which is a
+        # multiple of the dsim frequency resolution (to avoid rounding the
+        # frequency of injected tones).
+        centre_frequency = adc_sample_rate * (23456789 / 2**27)
+        config["outputs"]["antenna-channelised-voltage"]["narrowband"] = {
+            "decimation_factor": narrowband_decimation,
+            "centre_frequency": centre_frequency,
+        }
     config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
         "src_streams": ["antenna-channelised-voltage"],
@@ -292,15 +337,16 @@ async def _correlator_config_and_description(
     }
 
     # The first three key/values are used for the traditional MeerKAT
-    # correlator mode string, the second three are used for a more complete
+    # correlator mode string, while the rest are used for a more complete
     # correlator description in the final report.
     # TODO: Update the key to be the actual parameter/fixture name
     correlator_mode_config: dict[str, str] = {
         "antennas": str(n_antennas),
         "channels": str(n_channels),
-        "bandwidth": f"{int(adc_sample_rate//1e6//2)}",
+        "bandwidth": f"{round(adc_sample_rate / 1e6 / 2 / narrowband_decimation)}",
         "band": f"{BANDS[band].long_name}",
         "integration_time": str(int_time),
+        "narrowband_decimation": str(narrowband_decimation),
         "dsims": str(n_dsims),
     }
     long_description = (

@@ -123,10 +123,10 @@ def compute_tone_gain(
     # well (2e9 is comfortably less than 2^31).
     # The PFB is scaled for fixed incoherent gain, but we need to be concerned
     # about coherent gain to avoid overflowing the F-engine output. Coherent gain
-    # scales approximately with np.sqrt(correlator.n_chans / 2).
+    # scales approximately with sqrt(bw / chan_bw / 2).
     target_voltage = min(target_voltage, np.sqrt(2e9 / receiver.n_spectra_per_acc))
     dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    return target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans / 2))
+    return target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans * receiver.decimation_factor / 2))
 
 
 async def sample_tone_response(
@@ -157,7 +157,7 @@ async def sample_tone_response(
         corrs.append(receiver.bls_ordering.index((receiver.input_labels[i], receiver.input_labels[i + 1])))
 
     channel_width = receiver.bandwidth / receiver.n_chans
-    freqs = np.asarray(rel_freqs) * channel_width  # Baseband, which is what dsims work on
+    freqs = receiver.center_freq + (np.asarray(rel_freqs) - receiver.n_chans / 2) * channel_width
     amplitude = np.asarray(amplitude)
     out_shape = np.broadcast_shapes(freqs.shape, amplitude.shape) + (receiver.n_chans,)
     out = np.empty(out_shape, np.int32)

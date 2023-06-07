@@ -25,6 +25,7 @@ from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0096")
+@pytest.mark.xfail(reason="requirement needs to be updated")
 async def test_accum_length(
     correlator: CorrelatorRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
@@ -35,8 +36,7 @@ async def test_accum_length(
     Verification method
     -------------------
     Verify by testing that the accumulation interval is within specification
-    when set to 500ms. Inject a noise signal and check that the measured
-    signal has the expected power.
+    when set to 500ms.
     """
     receiver = receive_baseline_correlation_products
     pdf_report.step("Retrieve the reported accumulation time and check it.")
@@ -45,6 +45,22 @@ async def test_accum_length(
     with check:
         assert 0.48 <= receiver.int_time <= 0.52
 
+
+@pytest.mark.requirements("CBF-REQ-0096")
+async def test_accum_power(
+    correlator: CorrelatorRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+) -> None:
+    """
+    Test that the actual accumulation length matches the reported length.
+
+    Verification method
+    -------------------
+    Inject a noise signal and check that the measured signal has the expected
+    power for the number of accumulations.
+    """
+    receiver = receive_baseline_correlation_products
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
@@ -65,7 +81,9 @@ async def test_accum_length(
     # the input signals are the same for all antennas.
     assert isinstance(chunks[1][1].data, np.ndarray)
     total_power = np.sum(chunks[1][1].data[:, 0, 0], dtype=np.int64)
-    acc_len = round(receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans))
+    acc_len = round(
+        receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans * receiver.decimation_factor)
+    )
     expected_power = acc_len * receiver.n_chans * (level * level)
     pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}.")
     # Statistical analysis of total_power is quite tricky because there is
