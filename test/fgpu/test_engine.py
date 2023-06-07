@@ -60,9 +60,11 @@ FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
 
 WIDEBAND_ARGS = f"name=test_wideband,dst=239.10.11.0+15:7149,taps={TAPS}"
-# Centre frequency is a multiple of the channel width
+# Centre frequency is not a multiple of the channel width, but it does ensure
+# that the two copies of the same data in test_missing are separated by a
+# whole number of cycles.
 NARROWBAND_ARGS = (
-    f"name=test_narrowband,dst=239.10.12.0+15:7149,taps={TAPS},decimation=8,centre_frequency=339077148.4375"
+    f"name=test_narrowband,dst=239.10.12.0+15:7149,taps={TAPS},decimation=8,centre_frequency=408173015.5944824"
 )
 
 
@@ -113,6 +115,13 @@ def frac_channel(output: Output, channel: float) -> float:
         return (channel - output.channels // 2) / (output.channels * output.decimation) + offset
     else:
         return channel / output.channels
+
+
+def assert_angles_allclose(a, b, **kwargs) -> None:
+    """Assert that two angles (or arrays of angles) are equal to within a tolerance."""
+    a = np.asarray(a)
+    b = np.asarray(b)
+    np.testing.assert_allclose(wrap_angle(a - b), 0.0, **kwargs)
 
 
 class TestEngine:
@@ -272,7 +281,7 @@ class TestEngine:
         config = spead2.send.StreamConfig(max_packet_size=9000)  # Just needs to be bigger than the heaps
         return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
-    def _make_tone(self, n_samples: int, tone: CW, pol: int) -> np.ndarray:
+    def _make_tone(self, timestamps: np.ndarray, tone: CW, pol: int) -> np.ndarray:
         """Synthesize digitiser data containing a tone.
 
         Only one polarisation (`pol`) contains the tone; the other is all zeros.
@@ -282,16 +291,15 @@ class TestEngine:
 
         Parameters
         ----------
-        n_samples
-            Number of samples to generate per polarisation
+        timestamps
+            Timestamps for the samples to generate
         tone
             The cosine wave to synthesize
         pol
             The polarisation containing the tone
         """
         rng = np.random.default_rng(1)
-        t = np.arange(n_samples)
-        data = tone(t)
+        data = tone(timestamps)
         # Dither the signal to reduce quantisation artifacts, then quantise
         data += rng.random(size=data.shape)
         data = np.floor(data).astype(np.int16)
@@ -512,15 +520,16 @@ class TestEngine:
         for pol in range(N_POLS):
             await engine_client.request("gain", output.name, pol, *(str(gain) for gain in gains[:, pol]))
 
-        src_layout = engine_server.src_layout
-        n_samples = 20 * src_layout.chunk_samples
-        dig_data = self._make_tone(n_samples, tones[0], 0) + self._make_tone(n_samples, tones[1], 1)
-        dig_data[:, 1::2] *= -1  # Down-convert to baseband
-
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_EPOCH.
+        src_layout = engine_server.src_layout
         heap_samples = output.spectra_samples * SPECTRA_PER_HEAP
         first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
+        n_samples = 20 * src_layout.chunk_samples
+        tone_timestamps = np.arange(n_samples) + first_timestamp
+        dig_data = self._make_tone(tone_timestamps, tones[0], 0) + self._make_tone(tone_timestamps, tones[1], 1)
+        dig_data[:, 1::2] *= -1  # Down-convert to baseband
+
         expected_first_timestamp = first_timestamp
         # The data should have as many samples as the input, minus a reduction
         # from windowing, rounded down to a full heap.
@@ -547,11 +556,12 @@ class TestEngine:
             expected_mag = tones[pol].magnitude * coherent_scale[tone_channels[pol]] * default_gain
             assert 50 <= expected_mag < 127, "Magnitude is outside of good range for testing"
             np.testing.assert_equal(np.abs(tone_data), pytest.approx(expected_mag, abs=3))
-            # The frequency corresponds to an integer number of cycles per
-            # spectrum, so the phase will be consistent across spectra.
+            # The frequency (relative to the centre frequency) corresponds to
+            # an integer number of cycles per spectrum, so the phase will be
+            # consistent across spectra.
             # The accuracy is limited by the quantisation.
-            expected_phase = wrap_angle(tone_phases[pol] + gain_phase[tone_channels[pol], pol])
-            np.testing.assert_equal(np.angle(tone_data), pytest.approx(expected_phase, abs=0.01))
+            expected_phase = tone_phases[pol] + gain_phase[tone_channels[pol], pol]
+            assert_angles_allclose(np.angle(tone_data), expected_phase, atol=0.01)
             # Suppress the tone and check that everything is now zero (the
             # spectral leakage should be below the quantisation threshold).
             tone_data.fill(0)
@@ -581,7 +591,7 @@ class TestEngine:
             CW(frac_channel=frac_channel(output, CHANNELS // 2 - 0.5 + (i + 0.5) / n_tones), magnitude=500)
             for i in range(n_tones)
         ]
-        dig_data = np.concatenate([self._make_tone(step, tone, 0) for tone in tones], axis=1)
+        dig_data = np.concatenate([self._make_tone(np.arange(step), tone, 0) for tone in tones], axis=1)
         # Add some extra data to align to an input heap, and to fill out the
         # last output chunk.
         output_chunk_samples = engine_server.chunk_jones * 2 * output.decimation
@@ -652,8 +662,6 @@ class TestEngine:
         ]
         src_layout = engine_server.src_layout
         n_samples = 32 * src_layout.chunk_samples
-        dig_data = np.sum([self._make_tone(n_samples, tone, 0) for tone in tones], axis=0)
-        dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
 
         # Should be high enough to cause multiple coarse delay changes per chunk
         delay_rate = np.array([1e-5, 1.2e-5])
@@ -666,6 +674,9 @@ class TestEngine:
         first_timestamp = roundup(100 * src_layout.chunk_samples, output.spectra_samples * SPECTRA_PER_HEAP)
         end_delay = round(min(delay_rate) * n_samples)
         expected_spectra = (n_samples + end_delay - output.window) // output.spectra_samples
+        tone_timestamps = np.arange(n_samples) + first_timestamp
+        dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
+        dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
         out_data, timestamps = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -681,10 +692,8 @@ class TestEngine:
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
         timestamps = timestamps[:, np.newaxis]
-        expected_phase = wrap_angle(phase_rate_per_sample * timestamps)
-        np.testing.assert_equal(
-            wrap_angle(np.angle(out_data[tone_channels[0]]) - expected_phase), pytest.approx(0.0, abs=0.01)
-        )
+        expected_phase = phase_rate_per_sample * timestamps
+        assert_angles_allclose(np.angle(out_data[tone_channels[0]]), expected_phase, atol=0.01)
 
         # Adjust expected phase from the centre frequency to the other channel
         bw = ADC_SAMPLE_RATE / 2 / output.decimation
@@ -692,9 +701,7 @@ class TestEngine:
         expected_phase -= (
             2 * np.pi * (tone_channels[1] - tone_channels[0]) * channel_bw * delay_rate * (timestamps / ADC_SAMPLE_RATE)
         )
-        np.testing.assert_equal(
-            wrap_angle(np.angle(out_data[tone_channels[1]]) - expected_phase), pytest.approx(0.0, abs=0.01)
-        )
+        assert_angles_allclose(np.angle(out_data[tone_channels[1]]), expected_phase, atol=0.01)
 
     def _watch_sensors(self, sensors: Sequence[aiokatcp.Sensor]) -> dict[str, list]:
         """Set up observers on sensors that record updates.
@@ -736,7 +743,7 @@ class TestEngine:
         )
         src_layout = engine_server.src_layout
         n_samples = 10 * src_layout.chunk_samples
-        dig_data = self._make_tone(n_samples, tone, 0)
+        dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
         # Load some delay models for the future (the last one beyond the end of the data)
         update_times = [0, 123456, 400000, 1234567, 1234567890]  # in samples
@@ -759,7 +766,7 @@ class TestEngine:
             valid = (update_times[i] <= timestamps) & (timestamps < update_times[i + 1])
             assert np.any(valid)
             phases = np.angle(out_data[valid])
-            np.testing.assert_equal(wrap_angle(phases - update_phases[i]), pytest.approx(0, abs=0.01))
+            assert_angles_allclose(phases, update_phases[i], atol=0.01)
 
         for delay_sensor in delay_sensors:
             for expected_time, expected_phase, sensor_update in zip(
@@ -774,6 +781,81 @@ class TestEngine:
                 np.testing.assert_allclose(int(sensor_values[0]), expected_time, atol=200)
                 # NOTE: Using the default relative tolerance of 1e-07
                 np.testing.assert_allclose(sensor_values[3], expected_phase)
+
+    @pytest.mark.parametrize("delay_samples", [0.0, 8192.0, 234.5, 42.8])
+    async def test_delay_slope(
+        self,
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        output: Output,
+        channels: int,
+        delay_samples: float,
+    ) -> None:
+        """Test the slope and intercept of the phase response to delay.
+
+        This serves mostly as a sanity check on the other tests of delay
+        tracking, which use complicated formulae to determine the expected
+        absolute phase of the response. Here we delay one polarisation
+        relative to the other, and check the difference in phase.
+        """
+        delay_s = delay_samples / ADC_SAMPLE_RATE
+        coeffs = ["0.0,0.0:0.0,0.0", f"{delay_s},0.0:0.0,0.0"]
+        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
+
+        src_layout = engine_server.src_layout
+        # Don't send the first chunk, to avoid complications with the step
+        # change in the delay at SYNC_EPOCH.
+        heap_samples = output.spectra_samples * SPECTRA_PER_HEAP
+        first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
+        n_samples = 20 * src_layout.chunk_samples
+        tone_timestamps = np.arange(n_samples) + first_timestamp
+
+        rng = np.random.default_rng(123)
+        n_tones = 10
+        tone_channels = rng.integers(0, channels, size=n_tones)
+        tone_channels[0] = channels // 2  # Ensure we test the intercept exactly
+        tone_phases = rng.uniform(0, 2 * np.pi, size=n_tones)
+        tones = [
+            CW(frac_channel=frac_channel(output, channel), magnitude=60, phase=phase)
+            for channel, phase in zip(tone_channels, tone_phases)
+        ]
+        dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
+        dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
+        # Ensure we haven't saturated
+        assert np.max(np.abs(dig_data)) < 2 ** (DIG_SAMPLE_BITS - 1) - 1
+
+        expected_first_timestamp = first_timestamp
+        # The data should have as many samples as the input, minus a reduction
+        # from windowing, rounded down to a full heap.
+        expected_spectra = (n_samples - output.window) // output.spectra_samples
+        if delay_samples > 0:
+            # The first output heap would require data from before the first
+            # timestamp, so it does not get produced
+            expected_first_timestamp += heap_samples
+            expected_spectra -= SPECTRA_PER_HEAP
+        out_data, _ = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            engine_server,
+            output,
+            dig_data,
+            first_timestamp=first_timestamp,
+            expected_first_timestamp=expected_first_timestamp,
+            dst_present=expected_spectra // SPECTRA_PER_HEAP,
+        )
+
+        # Ensure we haven't saturated
+        assert np.max(np.abs(out_data.real)) < 127
+        assert np.max(np.abs(out_data.imag)) < 127
+        orig_phase = np.angle(out_data[tone_channels, :, 0])
+        delayed_phase = np.angle(out_data[tone_channels, :, 1])
+        channel_bw = ADC_SAMPLE_RATE / 2 / output.decimation / channels
+        phase_ramp = -2 * np.pi * delay_s * channel_bw * (tone_channels - channels // 2)
+        phase_ramp = phase_ramp[:, np.newaxis]
+        # There is quite a lot of quantisation noise, so we need a large tolerance
+        assert_angles_allclose(orig_phase + phase_ramp, delayed_phase, atol=3e-2)
 
     # Test with spectra_samples less than, equal to and greater than src-packet-samples
     @pytest.mark.parametrize("channels", [64, 2048, 8192])
@@ -924,7 +1006,7 @@ class TestEngine:
 
         src_layout = engine_server.src_layout
         n_samples = 20 * src_layout.chunk_samples
-        dig_data = self._make_tone(n_samples, tone, tone_pol)
+        dig_data = self._make_tone(np.arange(n_samples), tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             _, timestamps = await self._send_data(
                 mock_recv_streams,
@@ -1023,7 +1105,8 @@ class TestEngine:
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?delays``."""
         n_samples = max(16 * CHUNK_SAMPLES, output.spectra_samples * SPECTRA_PER_HEAP * 3)
-        dig_data = self._make_tone(n_samples, CW(frac_channel=frac_channel(output, CHANNELS // 2), magnitude=100), 0)
+        tone = CW(frac_channel=frac_channel(output, CHANNELS // 2), magnitude=100)
+        dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
         timestamp_list = self._patch_fill_in(
             monkeypatch, engine_client, output, "delays", output.name, SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
@@ -1042,7 +1125,7 @@ class TestEngine:
         assert timestamps[1] <= steady_state_timestamp <= timestamps[-2]
         # After the steady state timestamp, all the data have the phase applied.
         after = timestamps >= steady_state_timestamp
-        assert np.angle(out_data[CHANNELS // 2, after, 0]) == pytest.approx(3, abs=0.1)
+        assert_angles_allclose(np.angle(out_data[CHANNELS // 2, after, 0]), 3.0, atol=0.1)
         # The effect may take effect earlier than the indicated timestamp.
         # Check that it doesn't affect the first timestamp, which would suggest
         # we've messed up the test setup.
