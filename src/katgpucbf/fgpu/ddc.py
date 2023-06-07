@@ -185,9 +185,7 @@ class DDC(accel.Operation):
         self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
         self._weights = accel.DeviceArray(template.context, (template.taps,), np.complex64)
         self._weights_host = self._weights.empty_like()
-        self._mix_lookup = accel.DeviceArray(template.context, (template.unroll,), np.complex64)
-        self._mix_lookup_host = self._mix_lookup.empty_like()
-        self._mix_frequency = 0.0  # Specify in cycles per sample
+        self._mix_scale = 0  # Specify in cycles per output sample, times 2**32
         self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
 
     def configure(self, mix_frequency: float, weights: np.ndarray) -> None:
@@ -196,27 +194,32 @@ class DDC(accel.Operation):
         This is a somewhat expensive operation, as it computes lookup tables
         and transfers them to the device synchronously. It is only intended
         to be used at startup rather than continuously.
+
+        .. note::
+
+           The provided `mix_frequency` is quantised. The actual mixer
+           frequency can be retrieved from the :attr:`mix_frequency`
+           property.
         """
         assert weights.shape == self._weights_host.shape
-        self._mix_frequency = mix_frequency
-        self._weights_host[:] = weights * np.exp(2j * np.pi * mix_frequency * np.arange(len(weights)))
+        # Quantise the mixer frequency so that cycles per *output* sample are
+        # represented in fixed point with 32 fractional bits.
+        self._mix_scale = round(mix_frequency * self.template.subsampling * 2**32)
+        self._weights_host[:] = weights * np.exp(2j * np.pi * self.mix_frequency * np.arange(len(weights)))
         self._weights.set(self.command_queue, self._weights_host)
-
-        self._mix_lookup_host[:] = np.exp(
-            2j * np.pi * mix_frequency * self.template.subsampling * np.arange(self.template.unroll)
-        )
-        self._mix_lookup.set(self.command_queue, self._mix_lookup_host)
 
     @property
     def mix_frequency(self) -> float:
         """Mixer frequency in cycles per ADC sample."""
-        return self._mix_frequency
+        return self._mix_scale / self.template.subsampling / 2**32
 
     def _run(self) -> None:
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
         groups = accel.divup(self.out_samples, self.template.wgs * self.template.unroll)
 
+        mix_scale = self._mix_scale % 2**32
+        mix_bias = round(self.mix_phase * 2**32) % 2**32
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
@@ -225,9 +228,8 @@ class DDC(accel.Operation):
                 self._weights.buffer,
                 np.int32(out_buffer.shape[0]),  # out_size
                 np.int32(accel.divup(in_buffer.shape[0], 4)),  # in_size_words
-                np.float64(self.mix_frequency),  # mix_scale
-                np.float64(self.mix_phase),  # mix_bias
-                self._mix_lookup.buffer,
+                np.uint32(mix_scale),
+                np.uint32(mix_bias),
             ],
             global_size=(groups * self.template.wgs, 1, 1),
             local_size=(self.template.wgs, 1, 1),

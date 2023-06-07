@@ -70,7 +70,6 @@ def test_ddc(
     h_in = rng.integers(0, 256, samples * input_sample_bits // BYTE_BITS, np.uint8)
     weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
     mix_frequency = 0.21
-    expected = ddc_host(h_in, weights, subsampling, input_sample_bits, mix_frequency)
 
     template = DDCTemplate(
         context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, tuning=tuning
@@ -81,8 +80,13 @@ def test_ddc(
     fn.buffer("in").set(command_queue, h_in)
     fn()
     h_out = fn.buffer("out").get(command_queue)
+
+    # Check that quantisation doesn't affect frequency too much
+    assert fn.mix_frequency == pytest.approx(mix_frequency, abs=1 / 2**32 / subsampling)
+
     # atol has to be quite large because the calculation is fundamentally
     # numerically unstable.
+    expected = ddc_host(h_in, weights, subsampling, input_sample_bits, fn.mix_frequency)
     np.testing.assert_allclose(h_out, expected, atol=2e-5 * 2**input_sample_bits)
     # RMS error should be an order of magnitude lower
     err = h_out - expected
