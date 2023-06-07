@@ -681,12 +681,11 @@ product :math:`ft` will have a large integer part and leave few bits for
 the fractional part. Even passing :math:`f` in single precision can lead
 to large errors.
 
-To overcome this, a hybrid approach is used. The factor :math:`e^{2\pi jfS(b+i)}`
-is further decomposed as :math:`e^{2\pi jf(Sb)} \cdot e^{2\pi jf(Si)}`. We
-compute :math:`Sb` in double precision and subtract out the integer part before
-dropping to single precision to compute the complex exponential. This only
-needs to be done once per work-item. The second factor is stored in a
-single-precision lookup table, indexed by :math:`i`.
+To avoid these problems, fixed-point computations are used. Phase is
+represented as a fractional number of cycles, scaled by :math:`2^{32}` and
+stored in a 32-bit integer. When performing arithmetic on values encoded this
+way, the values may overflow and wrap. The high bits that are lost represent
+complete cycles, and so have no effect on phase.
 
 Filter design
 ^^^^^^^^^^^^^

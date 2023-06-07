@@ -130,9 +130,8 @@ void ddc(
     const GLOBAL float2 * RESTRICT weights,
     unsigned int out_size,
     unsigned int in_size_words,
-    double mix_scale,  // Mixer frequency in cycles per sample
-    double mix_bias,   // Mixer phase in cycles at the first sample
-    const GLOBAL float2 * RESTRICT mix_lookup  // Mixer phase rotations
+    unsigned int mix_scale,  // Mixer frequency in cycles per SUBSAMPLING samples, fixed point
+    unsigned int mix_bias    // Mixer phase in cycles at the first sample, fixed point
 )
 {
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
@@ -145,7 +144,6 @@ void ddc(
         {
             sample_word in[group_in_words];
             float2 weights[TAPS];
-            float2 mix_lookup[C];
         };
         float out[2][C * WGS];  // Logically float2, but split to reduce bank conflicts
     } local;
@@ -167,9 +165,8 @@ void ddc(
         }
     }
 
-    /* Copy weights and mix_lookup to local memory */
+    /* Copy weights to local memory */
     copy_to_local_float2(local.weights, weights, TAPS);
-    copy_to_local_float2(local.mix_lookup, mix_lookup, C);
 
     BARRIER();
 
@@ -202,18 +199,15 @@ void ddc(
         }
     }
 
-    // Compute the mixer for the first sample output by this workitem
-    mix_bias += get_global_id(0) * (C * SUBSAMPLING) * mix_scale;
-    mix_bias -= rint(mix_bias);
-    float2 mix_base;
-    sincospif(2 * (float) mix_bias, &mix_base.y, &mix_base.x);
-
+    unsigned int mix_cycles = get_global_id(0) * C * mix_scale + mix_bias;
 #pragma unroll
     for (int i = 0; i < C; i++)
     {
-        accum[i] = cmul(accum[i], mix_base);
-        if (i > 0)
-            accum[i] = cmul(accum[i], local.mix_lookup[i]);
+        float2 mix;
+        // Casting from unsigned int to int changes the range from [0, 2pi) to [-pi, pi).
+        __sincosf(2 * (float) M_PI / 4294967296.0f * (int) mix_cycles, &mix.y, &mix.x);
+        accum[i] = cmul(accum[i], mix);
+        mix_cycles += mix_scale;
     }
 
     BARRIER(); // Only needed because local.out is in a union
