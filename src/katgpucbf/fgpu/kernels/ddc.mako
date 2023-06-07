@@ -204,7 +204,9 @@ void ddc(
     for (int i = 0; i < C; i++)
     {
         float2 mix;
-        // Casting from unsigned int to int changes the range from [0, 2pi) to [-pi, pi).
+        // Casting from unsigned int to int changes the range from [0, 2pi) to
+        // [-pi, pi). The magic number is 2^32, used to convert fixed-point
+        // representation to real.
         __sincosf(2 * (float) M_PI / 4294967296.0f * (int) mix_cycles, &mix.y, &mix.x);
         accum[i] = cmul(accum[i], mix);
         mix_cycles += mix_scale;
