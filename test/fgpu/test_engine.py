@@ -849,12 +849,8 @@ class TestEngine:
             if p and i + middle < len(dst_present):
                 x = out_data[:, i * spectra_per_heap : (i + 1) * spectra_per_heap]
                 y = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
-                # For narrowband they're not guaranteed to be equal, as the mixer
-                # phase varies over time. For this test the time difference is a
-                # multiple of the mixer wavelength, but there can still be
-                # numerical rounding differences. For the fixed seed chosen
-                # above, we get exact equality, but this test may need to be
-                # relaxed slightly in future.
+                # For narrowband they're only guaranteed to be equal because
+                # the time difference is a multiple of the mixer wavelength.
                 np.testing.assert_equal(x, y)
 
         for pol in range(N_POLS):
