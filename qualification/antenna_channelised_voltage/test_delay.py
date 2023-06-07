@@ -189,7 +189,7 @@ async def test_delay_enable_disable(
 
 @pytest.mark.requirements("CBF-REQ-0187,CBF-REQ-0188")
 @pytest.mark.xfail(
-    reason="requirement cannot be met for all mdoes as delays cannot be updated more than once per spectrum"
+    reason="requirement cannot be met for all modes as delays cannot be updated more than once per spectrum"
 )
 async def test_delay_application_rate(correlator: CorrelatorRemoteControl, pdf_report: Reporter) -> None:
     """Test that delay and phase polynomials are applied at the required rate.
