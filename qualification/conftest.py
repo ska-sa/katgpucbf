@@ -353,6 +353,8 @@ async def _correlator_config_and_description(
         f"{n_antennas} antennas, {n_channels} channels, "
         f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
     )
+    if narrowband_decimation > 1:
+        long_description += f", 1/{narrowband_decimation} narrowband"
     logger.info("Config for correlator generation: %s.", long_description)
 
     return config, correlator_mode_config
