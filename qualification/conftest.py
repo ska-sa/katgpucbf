@@ -17,6 +17,7 @@
 """Fixtures and options for qualification testing of the correlator."""
 
 import asyncio
+import copy
 import inspect
 import json
 import logging
@@ -321,6 +322,17 @@ async def _correlator_config_and_description(
         "n_chans": n_channels,
     }
     if narrowband_decimation > 1:
+        # Create a wideband output so that testing is representative of normal
+        # usage, although it will not be consumed.
+        config["outputs"]["wideband-antenna-channelised-voltage"] = copy.deepcopy(
+            config["outputs"]["antenna-channelised-voltage"]
+        )
+        config["outputs"]["wideband-antenna-channelised-voltage"]["n_chans"] = 8192
+        config["outputs"]["wideband-baseline-correlation-products"] = {
+            "type": "gpucbf.baseline_correlation_products",
+            "src_streams": ["wideband-antenna-channelised-voltage"],
+            "int_time": int_time,
+        }
         # Pick a centre frequency that is not going to be a multiple of the
         # channel width (to test the most general case), but which is a
         # multiple of the dsim frequency resolution (to avoid rounding the
