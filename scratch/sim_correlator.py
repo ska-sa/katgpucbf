@@ -208,9 +208,11 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
         product_port = int(reply[2].decode())
         print(f"Product controller is at {product_host}:{product_port}")
 
-        print("Enabling baseline correlation products transmission...")
         product_client = await aiokatcp.Client.connect(product_host, product_port)
-        await product_client.request("capture-start", "baseline-correlation-products")
+        for output_name, output in config["outputs"].items():
+            if output["type"] == "gpucbf.baseline_correlation_products":
+                print(f"Enabling {output_name} transmission...")
+                await product_client.request("capture-start", output_name)
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
