@@ -98,13 +98,16 @@ def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
 
     if expand:
         # Long description required
-        config_mode = (
-            f'{config["antennas"]} antennas, '
-            f'{config["channels"]} channels, '
-            f'{config["band"]}-band, '
-            f'{config["integration_time"]}s integrations, '
-            f'{config["dsims"]} dsims.'
-        )
+        parts = [
+            f'{config["antennas"]} antennas',
+            f'{config["channels"]} channels',
+            f'{config["band"]}-band',
+            f'{config["integration_time"]}s integrations',
+            f'{config["dsims"]} dsims',
+        ]
+        if int(config["narrowband_decimation"]) > 1:
+            parts.append(f'1/{config["narrowband_decimation"]} narrowband')
+        config_mode = ", ".join(parts) + "."
     else:
         antpols = int(config["antennas"]) * 2
         chans = int(config["channels"]) // 1000
