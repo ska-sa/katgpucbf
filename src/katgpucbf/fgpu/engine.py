@@ -1585,16 +1585,16 @@ class Engine(aiokatcp.DeviceServer):
         if len(values) not in {0, 1, output.channels}:
             raise aiokatcp.FailReply(f"invalid number of values provided (must be 0, 1 or {output.channels})")
         if not values:
+            # Return the current values.
+            # If they're all the same, we can return just a single value.
             gains = pipeline.gains[:, input]
+            if np.all(gains == gains[0]):
+                gains = gains[:1]
+            return tuple(format_complex(gain) for gain in gains)
         else:
             gains = _parse_gains(*values, channels=output.channels, default_gain=None)
             pipeline.set_gains(input, gains)
-
-        # Return the current values.
-        # If they're all the same, we can return just a single value.
-        if np.all(gains == gains[0]):
-            gains = gains[:1]
-        return tuple(format_complex(gain) for gain in gains)
+            return ()
 
     async def request_gain_all(self, ctx, stream_name: str, *values: str) -> None:
         """Set the eq gains for all inputs.

@@ -83,10 +83,7 @@ class TestKatcpRequests:
         """Test that the eq gain is correctly set with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
         reply, _informs = await engine_client.request("gain", "wideband", pol, "0.2-3j")
-        assert len(reply) == 1
-        value = aiokatcp.decode(str, reply[0])
-        assert_valid_complex(value)
-        assert complex(value) == pytest.approx(0.2 - 3j)
+        assert reply == []
 
         sensor_value = await get_sensor(engine_client, f"wideband.input{pol}.eq")
         assert_valid_complex_list(sensor_value)
@@ -104,11 +101,7 @@ class TestKatcpRequests:
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
         reply, _informs = await engine_client.request("gain", "wideband", 0, *(str(gain) for gain in gains))
         np.testing.assert_equal(engine_server._pipelines[0].gains[:, 0], gains)
-        assert len(reply) == CHANNELS
-        for value in reply:
-            assert_valid_complex(aiokatcp.decode(str, value))
-        reply_array = np.array([complex(aiokatcp.decode(str, value)) for value in reply])
-        np.testing.assert_equal(reply_array, gains)
+        assert reply == []
 
         sensor_value = await get_sensor(engine_client, "wideband.input0.eq")
         assert_valid_complex_list(sensor_value)
