@@ -85,6 +85,13 @@ class TestKatcpRequests:
         reply, _informs = await engine_client.request("gain", "wideband", pol, "0.2-3j")
         assert reply == []
 
+        # Read back the value
+        reply, _informs = await engine_client.request("gain", "wideband", pol)
+        assert len(reply) == 1
+        value = aiokatcp.decode(str, reply[0])
+        assert_valid_complex(value)
+        assert complex(value) == pytest.approx(0.2 - 3j)
+
         sensor_value = await get_sensor(engine_client, f"wideband.input{pol}.eq")
         assert_valid_complex_list(sensor_value)
         assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
@@ -102,6 +109,14 @@ class TestKatcpRequests:
         reply, _informs = await engine_client.request("gain", "wideband", 0, *(str(gain) for gain in gains))
         np.testing.assert_equal(engine_server._pipelines[0].gains[:, 0], gains)
         assert reply == []
+
+        # Read back the values
+        reply, _informs = await engine_client.request("gain", "wideband", 0)
+        assert len(reply) == CHANNELS
+        for value in reply:
+            assert_valid_complex(aiokatcp.decode(str, value))
+        reply_array = np.array([complex(aiokatcp.decode(str, value)) for value in reply])
+        np.testing.assert_equal(reply_array, gains)
 
         sensor_value = await get_sensor(engine_client, "wideband.input0.eq")
         assert_valid_complex_list(sensor_value)
