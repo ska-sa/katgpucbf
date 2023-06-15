@@ -20,14 +20,15 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:12.0.1-runtime-ubuntu22.04 as base
+FROM nvidia/cuda:12.0.1-base-ubuntu22.04 as base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
 # image. Additionally, for the Vulkan drivers to work one needs
 # libvulkan1, libegl1 and libxext6.
 #
-# Some development packages are also installed that are needed for pycuda.
+# Some development packages are also installed that are needed for pycuda,
+# as well as libcufft, needed for fgpu.
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 COPY docker/10_nvidia.json /usr/share/glvnd/egl_vendor.d/10_nvidia.json
 # See also https://github.com/NVIDIA/nvidia-container-toolkit/issues/16
@@ -37,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cuda-nvcc-12-0 \
     cuda-profiler-api-12-0 \
     libcurand-dev-12-0 \
+    libcufft-12-0 \
     libvulkan1 \
     libegl1 \
     libxext6
@@ -181,7 +183,5 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
 COPY --from=build-cxx /tmp/tools/schedrr /usr/local/bin
-# Remove all the banner text that ends up in the logs
-RUN rm -- /opt/nvidia/entrypoint.d/*
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
 ENV PATH=/venv/bin:$PATH
