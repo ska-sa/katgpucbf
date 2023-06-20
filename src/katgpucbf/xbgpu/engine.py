@@ -44,8 +44,10 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
 from .. import (
+    COMPLEX,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
+    N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
@@ -80,6 +82,7 @@ class RxQueueItem(QueueItem):
     def __init__(self, buffer_device: accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
         self.buffer_device = buffer_device
         self.present = present
+        self.refcount = 0
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -187,6 +190,8 @@ class XPipeline:
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
+        self._populate_sensors()
+
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         # Static sensors
@@ -254,6 +259,10 @@ class XPipeline:
         self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
         self.correlation.zero_visibilities()
         return tx_item
+
+    def shutdown(self) -> None:
+        """Start a graceful shutdown after the final call to :meth:`add_rx_item`."""
+        self._rx_item_queue.put_nowait(None)
 
     async def gpu_proc_loop(self) -> None:
         """
@@ -658,8 +667,6 @@ class XBEngine(DeviceServer):
 
         self._init_tx_enabled = tx_enabled
 
-        self._pipelines = [XPipeline(output, self, context) for output in outputs]
-
         # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
         # these values too high results in too much GPU memory being consumed.
         # There needs to be enough of them that the different processing
@@ -723,6 +730,12 @@ class XBEngine(DeviceServer):
             max_active_chunks=self.max_active_chunks,
         )
 
+        # Prevent multiple chunks from being in flight in pipelines at the same
+        # time. This keeps the pipelines synchronised to avoid running out of
+        # RxQueueItems.
+        self._active_in_sem = asyncio.BoundedSemaphore(1)
+        self._pipelines = [XPipeline(output, self, context) for output in outputs]
+
         self.context = context
 
         # A command queue is the OpenCL name for a CUDA stream. An abstract
@@ -739,12 +752,20 @@ class XBEngine(DeviceServer):
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = self.monitor.make_queue("rx_item_queue", n_rx_items)
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
 
-        rx_data_shape = (heaps_per_fengine_per_chunk, n_ants, n_channels_total, n_spectra_per_heap)
+        rx_data_shape = (
+            heaps_per_fengine_per_chunk,
+            n_ants,
+            n_channels_per_stream,
+            n_spectra_per_heap,
+            N_POLS,
+            COMPLEX,
+        )
         for _ in range(n_rx_items):
+            # TODO: Abstract dtype, as per NGC-1000
             buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
+
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
@@ -762,6 +783,8 @@ class XBEngine(DeviceServer):
         # for packets to be transmitted too slowly.
         self.dump_interval_s: float = self.timestamp_increment_per_accumulation / adc_sample_rate_hz
 
+        # TODO: Make this part of the Pipeline
+        #       - Probably even start with an `_init_send` and make it switch on `output` type?
         self.send_stream = XSend(
             n_ants=n_ants,
             n_channels=n_channels_total,
@@ -799,13 +822,19 @@ class XBEngine(DeviceServer):
 
     def free_rx_item(self, item: RxQueueItem) -> None:
         """Return an :class:`RxQueueItem` to the free queue."""
-        self._rx_free_item_queue.put_nowait(item)
+        item.refcount -= 1
+        if item.refcount == 0:
+            # All Pipelines are done with this item
+            self._active_in_sem.release()
+            self._rx_free_item_queue.put_nowait(item)
 
-    def _add_rx_item(self, item: RxQueueItem | None) -> None:
+    async def _add_rx_item(self, item: RxQueueItem) -> None:
         """Push an :class:`RxQueueItem` to all the pipelines.
 
         Allow for None to be passed through to indicate shutdown procedure.
         """
+        await self._active_in_sem.acquire()
+        item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
             pipeline.add_rx_item(item)
 
@@ -843,11 +872,12 @@ class XBEngine(DeviceServer):
             item.add_marker(self._upload_command_queue)
 
             # Give the received item to the Pipeline's gpu_proc_loop.
-            self._add_rx_item(item)
+            await self._add_rx_item(item)
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")
-        self._add_rx_item(None)
+        for pipeline in self._pipelines:
+            pipeline.shutdown()
 
     async def request_capture_start(self, ctx) -> None:
         """Start transmission of this baseline-correlation-products stream."""
@@ -897,14 +927,17 @@ class XBEngine(DeviceServer):
         self.add_service_task(asyncio.create_task(self._receiver_loop(), name=RECV_TASK_NAME))
 
         for pipeline in self._pipelines:
-            self.add_service_task(
-                asyncio.create_task(pipeline.gpu_proc_loop(), name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}")
+            proc_task = asyncio.create_task(
+                pipeline.gpu_proc_loop(),
+                name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
             )
-            self.add_service_task(
-                asyncio.create_task(
-                    pipeline.sender_loop(self.send_stream), name=f"{pipeline.output.name}.{SEND_TASK_NAME}"
-                )
+            self.add_service_task(proc_task)
+
+            send_task = asyncio.create_task(
+                pipeline.sender_loop(self.send_stream),
+                name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
             )
+            self.add_service_task(send_task)
 
         await super().start()
 
