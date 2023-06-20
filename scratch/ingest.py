@@ -113,22 +113,22 @@ async def async_main(args: argparse.Namespace) -> None:
         multicast_endpoints = [
             tuple(endpoint)
             for endpoint in endpoint_list_parser(7148)(
-                await get_sensor_val(client, "baseline_correlation_products-destination")
+                await get_sensor_val(client, "baseline-correlation-products.destination")
             )
         ]
 
         # We need these parameters for various useful reasons.
-        n_bls = await get_sensor_val(client, "baseline_correlation_products-n-bls")
-        n_chans = await get_sensor_val(client, "baseline_correlation_products-n-chans")
-        n_chans_per_substream = await get_sensor_val(client, "baseline_correlation_products-n-chans-per-substream")
-        n_bits_per_sample = await get_sensor_val(client, "baseline_correlation_products-xeng-out-bits-per-sample")
-        n_spectra_per_acc = await get_sensor_val(client, "baseline_correlation_products-n-accs")
-        adc_sample_rate = await get_sensor_val(client, "antenna_channelised_voltage-adc-sample-rate")
-        int_time = await get_sensor_val(client, "baseline_correlation_products-int-time")
+        n_bls = await get_sensor_val(client, "baseline-correlation-products.n-bls")
+        n_chans = await get_sensor_val(client, "baseline-correlation-products.n-chans")
+        n_chans_per_substream = await get_sensor_val(client, "baseline-correlation-products.n-chans-per-substream")
+        n_bits_per_sample = await get_sensor_val(client, "baseline-correlation-products.xeng-out-bits-per-sample")
+        n_spectra_per_acc = await get_sensor_val(client, "baseline-correlation-products.n-accs")
+        adc_sample_rate = await get_sensor_val(client, "antenna-channelised-voltage.adc-sample-rate")
+        int_time = await get_sensor_val(client, "baseline-correlation-products.int-time")
 
         # The only reason for getting this info is to annotate the plot we make at the end.
         # I quite like this trick. It gives us a list of tuples.
-        bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline_correlation_products-bls-ordering"))
+        bls_ordering = ast.literal_eval(await get_sensor_val(client, "baseline-correlation-products.bls-ordering"))
 
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * CPLX * n_bits_per_sample // 8  # noqa: N806
@@ -182,9 +182,8 @@ async def async_main(args: argparse.Namespace) -> None:
         chunk = spead2.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, CPLX), dtype=getattr(np, f"int{n_bits_per_sample}")),
-            stream=stream,
         )
-        chunk.recycle()  # Make it available to the stream
+        stream.add_free_chunk(chunk)
 
     config = spead2.recv.UdpIbvConfig(
         endpoints=multicast_endpoints, interface_address=args.interface, buffer_size=int(16e6), comp_vector=-1
@@ -213,22 +212,22 @@ async def async_main(args: argparse.Namespace) -> None:
         plt.ion()
         plt.show()
     async for chunk in stream.data_ringbuffer:
-        with chunk:
-            received_heaps = int(np.sum(chunk.present))
-            if received_heaps == HEAPS_PER_CHUNK:
-                # We have a full chunk.
-                for i in range(n_bls):
-                    # We're just plotting the magnitude for now. Phase is easy enough,
-                    # and is left as an exercise to the reader.
-                    lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
-                    axs[i].relim()
-                    axs[i].autoscale_view()
-                plt.title(f"Chunk {chunk.chunk_id}")
-                if not args.interactive:
-                    plt.savefig(f"{chunk.chunk_id}.png")
-                    logger.info("Wrote chunk %d", chunk.chunk_id)
-            else:
-                logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
+        received_heaps = int(np.sum(chunk.present))
+        if received_heaps == HEAPS_PER_CHUNK:
+            # We have a full chunk.
+            for i in range(n_bls):
+                # We're just plotting the magnitude for now. Phase is easy enough,
+                # and is left as an exercise to the reader.
+                lines[i].set_ydata(np.abs(chunk.data[:, i, 0] + 1j * chunk.data[:, i, 0]))
+                axs[i].relim()
+                axs[i].autoscale_view()
+            plt.title(f"Chunk {chunk.chunk_id}")
+            if not args.interactive:
+                plt.savefig(f"{chunk.chunk_id}.png")
+                logger.info("Wrote chunk %d", chunk.chunk_id)
+        else:
+            logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
+        stream.add_free_chunk(chunk)
 
 
 if __name__ == "__main__":
