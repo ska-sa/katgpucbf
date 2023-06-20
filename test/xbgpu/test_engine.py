@@ -387,9 +387,7 @@ class TestEngine:
         arglist = [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
-            "--corrprod=name=bcp1,"
-            f"heap_accumulation_threshold={heap_accumulation_threshold},"
-            "dst=239.21.11.4:7149",
+            f"--corrprod=name=bcp1,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.11.4:7149",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
@@ -610,6 +608,7 @@ class TestEngine:
                 n_channels_per_stream=n_channels_per_stream,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
+
             await xbengine.stop()
 
         assert prom_diff.get_sample_diff("output_x_visibilities_total") == n_channels_per_stream * n_baselines
