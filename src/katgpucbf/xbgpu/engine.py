@@ -227,7 +227,7 @@ class XPipeline:
         sensors.add(
             aiokatcp.Sensor(
                 str,
-                "chan-range",
+                f"{self.output.name}.chan-range",
                 "The range of channels processed by this X-engine, inclusive",
                 default=f"({self.engine.channel_offset_value},"
                 f"{self.engine.channel_offset_value + self.engine.n_channels_per_stream - 1})",
@@ -238,7 +238,7 @@ class XPipeline:
         sensors.add(
             aiokatcp.Sensor(
                 bool,
-                "rx.synchronised",
+                f"{self.output.name}.rx.synchronised",
                 "For the latest accumulation, was data present from all F-Engines.",
                 default=False,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
@@ -248,7 +248,7 @@ class XPipeline:
         sensors.add(
             aiokatcp.Sensor(
                 int,
-                "xeng-clip-cnt",
+                f"{self.output.name}.xeng-clip-cnt",
                 "Number of visibilities that saturated",
                 default=0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -274,7 +274,7 @@ class XPipeline:
             tx_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
-        self.engine.sensors["rx.synchronised"].value = bool(tx_item.present_ants.all())
+        self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(tx_item.present_ants.all())
 
         self.correlation.reduce()
         tx_item.add_marker(self._proc_command_queue)
@@ -485,7 +485,7 @@ class XPipeline:
                 # heap.
                 end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
                 end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
-                clip_cnt_sensor = self.engine.sensors["xeng-clip-cnt"]
+                clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
                 clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
             self.send_stream.send_heap(heap)
 
