@@ -538,7 +538,7 @@ class TestEngine:
         assert prom_diff.get_sample_diff("output_x_heaps_total") == n_total_accumulations
         # Could manually calculate it here, but it's available inside the send_stream
         assert prom_diff.get_sample_diff("output_x_bytes_total") == (
-            xbengine.send_stream.heap_payload_size_bytes * n_total_accumulations
+            xbengine._pipelines[0].send_stream.heap_payload_size_bytes * n_total_accumulations
         )
         assert prom_diff.get_sample_diff("output_x_visibilities_total") == (
             n_channels_per_stream * n_baselines * n_total_accumulations

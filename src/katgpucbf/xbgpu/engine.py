@@ -83,12 +83,12 @@ class RxQueueItem(QueueItem):
         self.buffer_device = buffer_device
         self.present = present
         self.refcount = 0
+        self.chunk: recv.Chunk | None = None
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
         super().reset(timestamp=timestamp)
-        self.chunk: recv.Chunk | None = None
 
 
 class TxQueueItem(QueueItem):
@@ -126,7 +126,13 @@ class TxQueueItem(QueueItem):
 class XPipeline:
     """Processing pipeline for a single baseline-correlation-products stream."""
 
-    def __init__(self, output: Output, engine: "XBEngine", context: AbstractContext) -> None:
+    def __init__(
+        self,
+        output: Output,
+        engine: "XBEngine",
+        context: AbstractContext,
+        init_tx_enabled: bool,
+    ) -> None:
         assert isinstance(output, XOutput), "Only baseline-correlation-products are supported"
         self.engine = engine
         self.output = output
@@ -190,6 +196,29 @@ class XPipeline:
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
+        self.send_stream = XSend(
+            n_ants=engine.n_ants,
+            n_channels=engine.n_channels_total,
+            n_channels_per_stream=engine.n_channels_per_stream,
+            dump_interval_s=self.dump_interval_s,
+            send_rate_factor=engine.send_rate_factor,
+            channel_offset=engine.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
+            context=context,
+            packet_payload=engine.dst_packet_payload,
+            stream_factory=lambda stream_config, buffers: make_stream(
+                dest_ip=output.dst.host,
+                dest_port=output.dst.port,
+                interface_ip=engine.dst_interface,
+                ttl=engine.dst_ttl,
+                use_ibv=engine.dst_ibv,
+                affinity=engine.dst_affinity,
+                comp_vector=engine.dst_comp_vector,
+                stream_config=stream_config,
+                buffers=buffers,
+            ),
+            tx_enabled=init_tx_enabled,
+        )
+
         self._populate_sensors()
 
     def _populate_sensors(self) -> None:
@@ -226,7 +255,7 @@ class XPipeline:
             )
         )
 
-    def add_rx_item(self, item: RxQueueItem | None) -> None:
+    def add_rx_item(self, item: RxQueueItem) -> None:
         """Append a newly-received :class:`RxQueueItem`."""
         self._rx_item_queue.put_nowait(item)
 
@@ -265,8 +294,7 @@ class XPipeline:
         self._rx_item_queue.put_nowait(None)
 
     async def gpu_proc_loop(self) -> None:
-        """
-        Perform all GPU processing of received data in a continuous loop.
+        """Perform all GPU processing of received data in a continuous loop.
 
         This function performs the following steps:
         1. Retrieve an rx_item from the _rx_item_queue
@@ -315,8 +343,8 @@ class XPipeline:
             if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
+            # TODO: Get rid of this explicit reference to the Chunk
             assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
-            rx_item.chunk.recycle()
 
             current_timestamp = rx_item.timestamp
             if tx_item.timestamp < 0:
@@ -358,7 +386,6 @@ class XPipeline:
             if current_accum != tx_accum:
                 tx_item = await self._flush_accumulation(tx_item, current_accum)
 
-            rx_item.reset()
             rx_item.add_marker(self._proc_command_queue)
             self.engine.free_rx_item(rx_item)
         # When the stream is closed, if the sender loop is waiting for a tx item,
@@ -367,7 +394,7 @@ class XPipeline:
         logger.debug("gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def sender_loop(self, send_stream: XSend) -> None:
+    async def sender_loop(self) -> None:
         """
         Send heaps to the network in a continuous loop.
 
@@ -396,7 +423,7 @@ class XPipeline:
                 break
             await item.async_wait_for_events()
 
-            heap = await send_stream.get_free_heap()
+            heap = await self.send_stream.get_free_heap()
 
             # NOTE: We do not expect the time between dumps to be the same each
             # time as the time.time() function checks the wall time now, not
@@ -451,7 +478,7 @@ class XPipeline:
             # else: No F-Engines had a break in data for this accumulation
 
             heap.timestamp = item.timestamp
-            if send_stream.tx_enabled:
+            if self.send_stream.tx_enabled:
                 # Convert timestamp for the *end* of the heap (not the start)
                 # to a UNIX time for the sensor update. NB: this should be done
                 # *before* send_heap, because that gives away ownership of the
@@ -460,12 +487,12 @@ class XPipeline:
                 end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
                 clip_cnt_sensor = self.engine.sensors["xeng-clip-cnt"]
                 clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
-            send_stream.send_heap(heap)
+            self.send_stream.send_heap(heap)
 
             item.reset()
             await self._tx_free_item_queue.put(item)
 
-        await send_stream.send_stop_heap()
+        await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
 
@@ -631,9 +658,8 @@ class XBEngine(DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
-        # B-engine doesn't work yet
-        assert len(outputs) == 1
-        assert isinstance(outputs[0], XOutput)
+        # B-engine doesn't work yet, testing with multiple XOutputs
+        assert all(isinstance(output, XOutput) for output in outputs)
 
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
@@ -644,9 +670,10 @@ class XBEngine(DeviceServer):
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
-        self.heap_accumulation_threshold = outputs[0].heap_accumulation_threshold
+        self.heap_accumulation_threshold = outputs[0].heap_accumulation_threshold  # type: ignore
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
+        self.n_channels_total = n_channels_total
         self.n_channels_per_stream = n_channels_per_stream
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value
@@ -657,15 +684,15 @@ class XBEngine(DeviceServer):
         self._src_buffer = src_buffer
         self._src_comp_vector = src_comp_vector
 
-        self._dst_interface = dst_interface
-        self._dst_ttl = dst_ttl
-        self._dst_ibv = dst_ibv
-        self._dst_packet_payload = dst_packet_payload
-        self._dst_affinity = dst_affinity
-        self._dst_comp_vector = dst_comp_vector
-        self._send_rate_factor = send_rate_factor
+        self.dst_interface = dst_interface
+        self.dst_ttl = dst_ttl
+        self.dst_ibv = dst_ibv
+        self.dst_packet_payload = dst_packet_payload
+        self.dst_affinity = dst_affinity
+        self.dst_comp_vector = dst_comp_vector
+        self.send_rate_factor = send_rate_factor
 
-        self._init_tx_enabled = tx_enabled
+        self.monitor = monitor
 
         # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
         # these values too high results in too much GPU memory being consumed.
@@ -708,8 +735,6 @@ class XBEngine(DeviceServer):
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
 
-        self.monitor = monitor
-
         data_ringbuffer = ChunkRingbuffer(
             self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
@@ -734,14 +759,12 @@ class XBEngine(DeviceServer):
         # time. This keeps the pipelines synchronised to avoid running out of
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
-        self._pipelines = [XPipeline(output, self, context) for output in outputs]
-
-        self.context = context
+        self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in outputs]
 
         # A command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
         # a CUDA stream depending on the context.
-        self._upload_command_queue = self.context.create_command_queue()
+        self._upload_command_queue = context.create_command_queue()
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
@@ -752,7 +775,7 @@ class XBEngine(DeviceServer):
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
-        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = self.monitor.make_queue("rx_free_item_queue", n_rx_items)
+        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue("rx_free_item_queue", n_rx_items)
 
         rx_data_shape = (
             heaps_per_fengine_per_chunk,
@@ -765,7 +788,6 @@ class XBEngine(DeviceServer):
         for _ in range(n_rx_items):
             # TODO: Abstract dtype, as per NGC-1000
             buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
-
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
             self._rx_free_item_queue.put_nowait(rx_item)
@@ -775,38 +797,6 @@ class XBEngine(DeviceServer):
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
-
-        # NOTE: This value staggers the send so that packets within a heap are
-        # transmitted onto the network across the entire time between dumps.
-        # Care needs to be taken to ensure that this rate is not set too high.
-        # If it is too high, the entire pipeline will stall needlessly waiting
-        # for packets to be transmitted too slowly.
-        self.dump_interval_s: float = self.timestamp_increment_per_accumulation / adc_sample_rate_hz
-
-        # TODO: Make this part of the Pipeline
-        #       - Probably even start with an `_init_send` and make it switch on `output` type?
-        self.send_stream = XSend(
-            n_ants=n_ants,
-            n_channels=n_channels_total,
-            n_channels_per_stream=n_channels_per_stream,
-            dump_interval_s=self.dump_interval_s,
-            send_rate_factor=send_rate_factor,
-            channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
-            context=self.context,
-            packet_payload=dst_packet_payload,
-            stream_factory=lambda stream_config, buffers: make_stream(
-                dest_ip=outputs[0].dst.host,
-                dest_port=outputs[0].dst.port,
-                interface_ip=dst_interface,
-                ttl=dst_ttl,
-                use_ibv=dst_ibv,
-                affinity=dst_affinity,
-                comp_vector=dst_comp_vector,
-                stream_config=stream_config,
-                buffers=buffers,
-            ),
-            tx_enabled=self._init_tx_enabled,
-        )
 
     def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
@@ -821,12 +811,27 @@ class XBEngine(DeviceServer):
         self._cancel_tasks.append(time_sync_task)
 
     def free_rx_item(self, item: RxQueueItem) -> None:
-        """Return an :class:`RxQueueItem` to the free queue."""
+        """Return an RxQueueItem to the free queue if its refcount hits zero."""
         item.refcount -= 1
         if item.refcount == 0:
             # All Pipelines are done with this item
             self._active_in_sem.release()
+            # Need to wait for any outstanding events before recycling
+            self.add_service_task(
+                asyncio.create_task(
+                    self._push_recv_chunk(item),
+                    name="Receive Chunk Recycle Task",
+                )
+            )
+            item.reset()
             self._rx_free_item_queue.put_nowait(item)
+
+    @staticmethod
+    async def _push_recv_chunk(item: RxQueueItem) -> None:
+        """Return chunk to the stream once `events` have fired."""
+        await item.async_wait_for_events()
+        item.chunk.recycle()  # type: ignore
+        item.chunk = None
 
     async def _add_rx_item(self, item: RxQueueItem) -> None:
         """Push an :class:`RxQueueItem` to all the pipelines.
@@ -879,13 +884,13 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             pipeline.shutdown()
 
-    async def request_capture_start(self, ctx) -> None:
-        """Start transmission of this baseline-correlation-products stream."""
-        self.send_stream.tx_enabled = True
+    # async def request_capture_start(self, ctx) -> None:
+    #     """Start transmission of this baseline-correlation-products stream."""
+    #     self.send_stream.tx_enabled = True
 
-    async def request_capture_stop(self, ctx) -> None:
-        """Stop transmission of this baseline-correlation-products stream."""
-        self.send_stream.tx_enabled = False
+    # async def request_capture_stop(self, ctx) -> None:
+    #     """Stop transmission of this baseline-correlation-products stream."""
+    #     self.send_stream.tx_enabled = False
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
@@ -906,14 +911,17 @@ class XBEngine(DeviceServer):
         """
         # Create the descriptor task first to ensure descriptor will be sent
         # before any data makes its way through the pipeline.
-        descriptor_sender = DescriptorSender(
-            self.send_stream.source_stream,
-            self.send_stream.descriptor_heap,
-            descriptor_interval_s,
-        )
-        descriptor_task = asyncio.create_task(descriptor_sender.run(), name=DESCRIPTOR_TASK_NAME)
-        self.add_service_task(descriptor_task)
-        self._cancel_tasks.append(descriptor_task)
+        for pipeline in self._pipelines:
+            descriptor_sender = DescriptorSender(
+                pipeline.send_stream.source_stream,
+                pipeline.send_stream.descriptor_heap,
+                descriptor_interval_s,
+            )
+            descriptor_task = asyncio.create_task(
+                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
+            )
+            self.add_service_task(descriptor_task)
+            self._cancel_tasks.append(descriptor_task)
 
         base_recv.add_reader(
             self.receiver_stream,
@@ -934,7 +942,7 @@ class XBEngine(DeviceServer):
             self.add_service_task(proc_task)
 
             send_task = asyncio.create_task(
-                pipeline.sender_loop(self.send_stream),
+                pipeline.sender_loop(),
                 name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
             )
             self.add_service_task(send_task)
