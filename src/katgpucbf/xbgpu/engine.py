@@ -182,10 +182,14 @@ class XPipeline:
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue("rx_item_queue", n_rx_items)
-        self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = engine.monitor.make_queue("tx_item_queue", n_tx_items)
+        self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
+            f"{output.name}.rx_item_queue", n_rx_items
+        )
+        self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = engine.monitor.make_queue(
+            f"{output.name}.tx_item_queue", n_tx_items
+        )
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = engine.monitor.make_queue(
-            "tx_free_item_queue", n_tx_items
+            f"{output.name}.tx_free_item_queue", n_tx_items
         )
 
         allocator = accel.DeviceAllocator(context=context)
@@ -670,7 +674,6 @@ class XBEngine(DeviceServer):
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
-        self.heap_accumulation_threshold = outputs[0].heap_accumulation_threshold  # type: ignore
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
@@ -725,8 +728,6 @@ class XBEngine(DeviceServer):
                 / adc_sample_rate_hz,
             ),
         )
-
-        self.timestamp_increment_per_accumulation = self.heap_accumulation_threshold * self.rx_heap_timestamp_step
 
         # Sets the number of batches of heaps to store per chunk
         self.heaps_per_fengine_per_chunk = heaps_per_fengine_per_chunk
