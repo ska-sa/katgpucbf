@@ -23,7 +23,7 @@ loops within the object.
 
 .. todo::
 
-    - The B-Engine logic has not been implemented yet - this needs to be added
+    * The B-Engine logic has not been implemented yet - this needs to be added
       eventually. It is expected that this logic will need to go in the
       _gpu_proc_loop for the B-Engine processing and then a seperate sender
       loop would need to be created for sending B-Engine data.
@@ -33,6 +33,7 @@ import asyncio
 import logging
 import math
 import time
+from abc import abstractmethod
 
 import aiokatcp
 import katsdpsigproc
@@ -120,58 +121,29 @@ class TxQueueItem(QueueItem):
         self.batches = 0
 
 
-# TODO: Create a BasePipeline class, followed with {X, B}Pipelines
+class Pipeline:
+    """Base Pipeline class to build on."""
 
+    # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
+    # these values too high results in too much GPU memory being consumed.
+    # There needs to be enough of them that the different processing
+    # functions do not get starved waiting for items. The low single digits
+    # is suitable. n_free_chunks wraps buffer in system RAM. This can be
+    # set quite high as there is much more system RAM than GPU RAM. It
+    # should be higher than max_active_chunks.
+    # These values are not configurable as they have been acceptable for
+    # most tests cases up until now. If the pipeline starts bottlenecking,
+    # then maybe look at increasing these values.
+    # TODO: Declare these constants elsewhere
+    n_rx_items = 3  # Too high means too much GPU memory gets allocated
+    n_tx_items = 2  # TODO: Will likely need to be == n_rx_items for BPipeline
 
-class XPipeline:
-    """Processing pipeline for a single baseline-correlation-products stream."""
-
-    def __init__(
-        self,
-        output: Output,
-        engine: "XBEngine",
-        context: AbstractContext,
-        init_tx_enabled: bool,
-    ) -> None:
-        assert isinstance(output, XOutput), "Only baseline-correlation-products are supported"
+    def __init__(self, output: Output, engine: "XBEngine", context: AbstractContext, init_tx_enabled: bool) -> None:
         self.engine = engine
         self.output = output
 
-        self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
-
-        # NOTE: This value staggers the send so that packets within a heap are
-        # transmitted onto the network across the entire time between dumps.
-        # Care needs to be taken to ensure that this rate is not set too high.
-        # If it is too high, the entire pipeline will stall needlessly waiting
-        # for packets to be transmitted too slowly.
-        self.dump_interval_s = self.timestamp_increment_per_accumulation / engine.adc_sample_rate_hz
-
         self._proc_command_queue = context.create_command_queue()
         self._download_command_queue = context.create_command_queue()
-
-        correlation_template = CorrelationTemplate(
-            context=context,
-            n_ants=engine.n_ants,
-            n_channels=engine.n_channels_per_stream,
-            n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
-        )
-        self.correlation = correlation_template.instantiate(
-            self._proc_command_queue, n_batches=engine.src_layout.heaps_per_fengine_per_chunk
-        )
-
-        # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
-        # these values too high results in too much GPU memory being consumed.
-        # There needs to be enough of them that the different processing
-        # functions do not get starved waiting for items. The low single digits
-        # is suitable. n_free_chunks wraps buffer in system RAM. This can be
-        # set quite high as there is much more system RAM than GPU RAM. It
-        # should be higher than max_active_chunks.
-        # These values are not configurable as they have been acceptable for
-        # most tests cases up until now. If the pipeline starts bottlenecking,
-        # then maybe look at increasing these values.
-        # TODO: Declare these constants elsewhere
-        n_rx_items = 3  # Too high means too much GPU memory gets allocated
-        n_tx_items = 2  # TODO: Will likely need to be == n_rx_items for BPipeline
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
@@ -183,17 +155,102 @@ class XPipeline:
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
-            f"{output.name}.rx_item_queue", n_rx_items
+            f"{output.name}.rx_item_queue", self.n_rx_items
         )
         self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = engine.monitor.make_queue(
-            f"{output.name}.tx_item_queue", n_tx_items
+            f"{output.name}.tx_item_queue", self.n_tx_items
         )
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = engine.monitor.make_queue(
-            f"{output.name}.tx_free_item_queue", n_tx_items
+            f"{output.name}.tx_free_item_queue", self.n_tx_items
+        )
+
+    # TODO: Is it fair to impose this on the user?
+    @abstractmethod
+    def _populate_sensors(self) -> None:
+        """Define any Pipeline-specific sensors."""
+        raise NotImplementedError  # pragma: nocover
+
+    def add_rx_item(self, item: RxQueueItem) -> None:
+        """Append a newly-received :class:`RxQueueItem`."""
+        self._rx_item_queue.put_nowait(item)
+
+    def shutdown(self) -> None:
+        """Start a graceful shutdown after the final call to :meth:`add_rx_item`."""
+        self._rx_item_queue.put_nowait(None)
+
+    @abstractmethod
+    async def gpu_proc_loop(self) -> None:
+        """Perform all GPU processing of received data in a continuous loop.
+
+        This function should do the following:
+        * Get an RxQueueItem off the rx_item_queue
+        * Ensure it is not a NoneType value (indicating shutdown sequence)
+        * await any outstanding events associated with the RxQueueItem
+        * TODO: Figure out whether the `is not None` check on the Chunk is necessary
+        * Apply GPU processing to data in the RxQueueItem
+            * Bind input buffer(s) accordingly
+        * Obtain a free TxQueueItem of the tx_free_item_queue
+            * Add event marker to wait for the proc_command_queue
+            * Put the prepared TxQueueItem on the tx_item_queue
+
+        NOTE: An initial TxQueueItem needs to be obtained from the tx_free_item_queue
+        for the first round of processing:
+        * The gpu_proc_loop requires logic to decipher the timestamp of the
+          first heap output.
+        * It also provides an opportunity to bind buffers before processing is queued (?)
+        """
+        raise NotImplementedError  # pragma: nocover
+
+    @abstractmethod
+    async def sender_loop(self) -> None:
+        """Send heaps to the network in a continuous loop.
+
+        This function should do the following:
+        * Get a TxQueueItem from the tx_item_queue
+        * Ensure it is not a NoneType value (indicating shutdown sequence)
+        * Wait for events on the item to complete (likely GPU processing)
+        * Wait for an available heap buffer from the send_stream
+        * Asynchronously Transfer/Download GPU buffer data into the heap buffer in system RAM
+            * Wait for the transfer to complete, before
+        * Transmit heap buffer onto the network
+        * Place the TxQueueItem back on the tx_free_item_queue once complete
+        """
+        raise NotImplementedError  # pragma: nocover
+
+
+class XPipeline(Pipeline):
+    """Processing pipeline for a single baseline-correlation-products stream."""
+
+    def __init__(
+        self,
+        output: XOutput,
+        engine: "XBEngine",
+        context: AbstractContext,
+        init_tx_enabled: bool,
+    ) -> None:
+        assert isinstance(output, XOutput), "Only baseline-correlation-products are supported"
+        super().__init__(output, engine, context, init_tx_enabled)
+        self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
+
+        # NOTE: This value staggers the send so that packets within a heap are
+        # transmitted onto the network across the entire time between dumps.
+        # Care needs to be taken to ensure that this rate is not set too high.
+        # If it is too high, the entire pipeline will stall needlessly waiting
+        # for packets to be transmitted too slowly.
+        self.dump_interval_s = self.timestamp_increment_per_accumulation / engine.adc_sample_rate_hz
+
+        correlation_template = CorrelationTemplate(
+            context=context,
+            n_ants=engine.n_ants,
+            n_channels=engine.n_channels_per_stream,
+            n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+        )
+        self.correlation = correlation_template.instantiate(
+            self._proc_command_queue, n_batches=engine.src_layout.heaps_per_fengine_per_chunk
         )
 
         allocator = accel.DeviceAllocator(context=context)
-        for _ in range(n_tx_items):
+        for _ in range(self.n_tx_items):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
@@ -225,7 +282,7 @@ class XPipeline:
 
         self._populate_sensors()
 
-    def _populate_sensors(self) -> None:
+    def _populate_sensors(self) -> None:  # noqa: D102
         sensors = self.engine.sensors
         # Static sensors
         sensors.add(
@@ -259,10 +316,6 @@ class XPipeline:
             )
         )
 
-    def add_rx_item(self, item: RxQueueItem) -> None:
-        """Append a newly-received :class:`RxQueueItem`."""
-        self._rx_item_queue.put_nowait(item)
-
     async def _flush_accumulation(self, tx_item: TxQueueItem, next_accum: int) -> TxQueueItem:
         """Emit the current `tx_item` and prepare a new one."""
         if tx_item.batches == 0:
@@ -274,7 +327,7 @@ class XPipeline:
         # present_ants only takes into account batches that have
         # been seen. If some batches went missing entirely, the
         # whole accumulation is bad.
-        if tx_item.batches != self.output.heap_accumulation_threshold:
+        if tx_item.batches != self.output.heap_accumulation_threshold:  # type: ignore
             tx_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
@@ -293,11 +346,7 @@ class XPipeline:
         self.correlation.zero_visibilities()
         return tx_item
 
-    def shutdown(self) -> None:
-        """Start a graceful shutdown after the final call to :meth:`add_rx_item`."""
-        self._rx_item_queue.put_nowait(None)
-
-    async def gpu_proc_loop(self) -> None:
+    async def gpu_proc_loop(self) -> None:  # noqa: D102
         """Perform all GPU processing of received data in a continuous loop.
 
         This function performs the following steps:
@@ -310,13 +359,6 @@ class XPipeline:
 
         The ratio of rx_items to tx_items is not one to one. There are expected
         to be many more rx_items in for every tx_item out.
-
-        The above steps are performed in a loop until the running flag is set
-        to false.
-
-        .. todo::
-
-            Add B-Engine processing in this function.
         """
         rx_item: RxQueueItem | None
 
@@ -341,8 +383,8 @@ class XPipeline:
         self.correlation.zero_visibilities()
         while True:
             # Get item from the receiver function.
-            # - Wait for the HtoD transfers to complete, then
-            # - Give the chunk back to the receiver for reuse.
+            # * Wait for the HtoD transfers to complete, then
+            # * Give the chunk back to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
             if rx_item is None:
                 break
@@ -398,9 +440,8 @@ class XPipeline:
         logger.debug("gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def sender_loop(self) -> None:
-        """
-        Send heaps to the network in a continuous loop.
+    async def sender_loop(self) -> None:  # noqa: D102
+        """Send heaps to the network in a continuous loop.
 
         This function does the following:
         1. Get an item from the _tx_item_queue.
@@ -410,8 +451,6 @@ class XPipeline:
         5. Wait for the transfer to complete.
         6. Transmit data in heap buffer out into the network.
         7. Place the tx_item on _tx_item_free_queue so that it can be reused.
-
-        The above steps are performed in a loop until the running flag is set to false.
 
         NOTE: The transfer from the GPU to the heap buffer and the sending onto
         the network could be pipeline a bit better, but this is not really
@@ -760,7 +799,9 @@ class XBEngine(DeviceServer):
         # time. This keeps the pipelines synchronised to avoid running out of
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
-        self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in outputs]
+        self._pipelines = [
+            XPipeline(output, self, context, tx_enabled) for output in outputs if isinstance(output, XOutput)
+        ]
 
         # A command queue is the OpenCL name for a CUDA stream. An abstract
         # command queue can either be implemented as an OpenCL command queue or
