@@ -926,13 +926,37 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             pipeline.shutdown()
 
-    # async def request_capture_start(self, ctx) -> None:
-    #     """Start transmission of this baseline-correlation-products stream."""
-    #     self.send_stream.tx_enabled = True
+    def _request_pipeline(self, stream_name: str) -> Pipeline:
+        """Get the pipeline related to the katcp request.
 
-    # async def request_capture_stop(self, ctx) -> None:
-    #     """Stop transmission of this baseline-correlation-products stream."""
-    #     self.send_stream.tx_enabled = False
+        Return the first Pipeline that matches by name.
+
+        Raises
+        ------
+        FailReply
+            If the `stream_name` is not a known output.
+        """
+        for pipeline in self._pipelines:
+            if stream_name == pipeline.output.name:
+                return pipeline
+        raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
+
+    async def request_capture_start(self, ctx, stream_name: str) -> None:
+        """Start transmission of a stream.
+
+        The request requires a stream name to enable
+        """
+        pipeline = self._request_pipeline(stream_name)
+        # TODO: Introduce `make_send_stream` helper function for each pipeline
+        #       to address this 'has no attribute' mypy error
+        pipeline.send_stream.tx_enabled = True  # type: ignore
+
+    async def request_capture_stop(self, ctx, stream_name: str) -> None:
+        """Stop transmission of a stream."""
+        pipeline = self._request_pipeline(stream_name)
+        # TODO: Introduce `make_send_stream` helper function for each pipeline
+        #       to address this 'has no attribute' mypy error
+        pipeline.send_stream.tx_enabled = False  # type: ignore
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
