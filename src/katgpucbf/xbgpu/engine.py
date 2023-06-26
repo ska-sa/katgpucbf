@@ -420,7 +420,7 @@ class XBEngine(DeviceServer):
         for _ in range(n_free_chunks):
             buf = self.correlation.slots["in_samples"].allocate_host(self.context)
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
-            chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
+            chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
         # NOTE: This value staggers the send so that packets within a heap are

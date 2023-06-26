@@ -35,9 +35,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, MIN_SENSOR_UPDATE_PERIOD, N_POLS
-from ..recv import BaseLayout, Chunk, StatsCollector
-from ..recv import make_stream as make_base_stream
-from ..recv import user_data_type
+from ..recv import BaseLayout, Chunk, StatsCollector, make_stream_group, user_data_type
 from ..spead import DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
 from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
@@ -165,12 +163,12 @@ class Layout(BaseLayout):
         return chunk_place_impl
 
 
-def make_streams(
+def make_stream_groups(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffers: Sequence[spead2.recv.ChunkRingbuffer],
     src_affinity: Sequence[int],
-) -> list[spead2.recv.ChunkRingStream]:
+) -> list[spead2.recv.ChunkStreamRingGroup]:
     """Create SPEAD receiver streams.
 
     Small helper function with F-engine-specific logic in it. Returns a stream
@@ -193,24 +191,25 @@ def make_streams(
         for counter in _PER_POL_COUNTERS:
             counter.labels(pol)
 
-    streams = [
-        make_base_stream(
+    groups = [
+        make_stream_group(
             layout=layout,
             spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID, DIGITISER_STATUS_ID],
             max_active_chunks=MAX_CHUNKS,
             max_heap_extra=np.dtype(np.uint16).itemsize,
             data_ringbuffer=data_ringbuffer,
             free_ringbuffer=free_ringbuffers[pol],
-            affinity=src_affinity[pol],
+            affinity=[src_affinity[pol]],
             max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
             stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
             stream_id=pol,
         )
         for pol in range(N_POLS)
     ]
-    for pol, stream in enumerate(streams):
-        stats_collector.add_stream(stream, [str(pol)])
-    return streams
+    for pol, group in enumerate(groups):
+        for stream in group:
+            stats_collector.add_stream(stream, [str(pol)])
+    return groups
 
 
 def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
@@ -267,7 +266,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
 
 
 async def chunk_sets(
-    streams: list[spead2.recv.ChunkRingStream],
+    ring_pairs: list[spead2.recv.ChunkRingPair],
     layout: Layout,
     sensors: aiokatcp.SensorSet,
     time_converter: TimeConverter,
@@ -284,8 +283,8 @@ async def chunk_sets(
 
     Parameters
     ----------
-    streams
-        A list of stream objects - there should be only two of them, because
+    ring_pairs
+        A list of ringbuffer pairs - there should be only two of them, because
         each represents a polarisation.
     layout
         Structure of the streams
@@ -295,11 +294,11 @@ async def chunk_sets(
     time_converter
         Converter to turn data timestamps into sensor timestamps.
     """
-    n_pol = len(streams)
+    n_pol = len(ring_pairs)
     # Working buffer to match up pairs of chunks from both pols. There is
     # a deque for each pol, ordered by time
-    buf: list[deque[Chunk]] = [deque() for _ in streams]
-    ring = cast(spead2.recv.asyncio.ChunkRingbuffer, streams[0].data_ringbuffer)
+    buf: list[deque[Chunk]] = [deque() for _ in ring_pairs]
+    ring = cast(spead2.recv.asyncio.ChunkRingbuffer, ring_pairs[0].data_ringbuffer)
     lost = 0
 
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk

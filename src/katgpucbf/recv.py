@@ -63,13 +63,13 @@ class Chunk(spead2.recv.Chunk):
     # New fields
     device: object
     timestamp: int
-    stream: weakref.ref
+    sink: weakref.ref
 
-    def __init__(self, *args, stream: spead2.recv.ChunkRingStream, device: object = None, **kwargs):
+    def __init__(self, *args, sink: spead2.recv.ChunkRingPair, device: object = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.device = device
         self.timestamp = 0  # Actual value filled in when chunk received
-        self.stream = weakref.ref(stream)
+        self.sink = weakref.ref(sink)
 
     def __enter__(self) -> "Chunk":
         return self
@@ -78,12 +78,12 @@ class Chunk(spead2.recv.Chunk):
         self.recycle()
 
     def recycle(self) -> None:
-        """Return the chunk to the owning stream."""
-        stream = self.stream()
-        # If it is None, the stream has been garbage collected, and there is no
+        """Return the chunk to the owning stream/group."""
+        sink = self.sink()
+        # If it is None, the sink has been garbage collected, and there is no
         # need to return the chunk.
-        if stream is not None:
-            stream.add_free_chunk(self)
+        if sink is not None:
+            sink.add_free_chunk(self)
 
 
 class StatsCollector(Collector):
@@ -301,6 +301,65 @@ def make_stream(
         data_ringbuffer,
         free_ringbuffer,
     )
+
+
+def make_stream_group(
+    *,
+    layout: BaseLayout,
+    spead_items: list[int],
+    max_active_chunks: int,
+    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.ChunkRingbuffer,
+    affinity: Iterable[int],
+    stream_stats: list[str],
+    max_heap_extra: int = 0,
+    **kwargs: Any,
+) -> spead2.recv.ChunkStreamRingGroup:
+    """Create a group of SPEAD receiver streams.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters.
+    spead_items
+        List of SPEAD item IDs to be expected in the heap headers.
+    max_active_chunks
+        Maximum number of chunks under construction.
+    max_heap_extra
+        Maximum non-payload data written by the place callback
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent.
+    free_ringbuffer
+        Ringbuffer for holding chunks for recycling once they've been used.
+    affinity
+        CPU core affinities for the worker threads (negative to not set an affinity).
+        The length of this list determines the number of streams to create.
+    stream_stats
+        Stats to hook up to prometheus.
+    kwargs
+        Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`.
+    """
+    stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
+    stats_base = stream_config.next_stat_index()
+    for stat in stream_stats:
+        stream_config.add_stat(stat)
+
+    chunk_stream_config = spead2.recv.ChunkStreamConfig(
+        items=spead_items,
+        max_chunks=max_active_chunks,
+        max_heap_extra=max_heap_extra,
+        place=layout.chunk_place(stats_base),
+    )
+    group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_active_chunks)
+
+    group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
+    for core in affinity:
+        group.emplace_back(
+            spead2.ThreadPool(1, [] if core < 0 else [core]),
+            stream_config,
+            chunk_stream_config,
+        )
+    return group
 
 
 def add_reader(

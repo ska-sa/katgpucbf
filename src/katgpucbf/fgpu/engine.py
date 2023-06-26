@@ -1272,9 +1272,9 @@ class Engine(aiokatcp.DeviceServer):
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
         free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
-        self._src_streams = recv.make_streams(self.src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
+        self._src_groups = recv.make_stream_groups(self.src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
         chunk_bytes = self.src_layout.chunk_samples * self.src_layout.sample_bits // BYTE_BITS
-        for stream in self._src_streams:
+        for group in self._src_groups:
             for _ in range(src_chunks_per_stream):
                 if self.use_vkgdr:
                     array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
@@ -1297,7 +1297,7 @@ class Engine(aiokatcp.DeviceServer):
                     device=device_array,
                     present=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint8),
                     extra=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint16),
-                    stream=stream,
+                    sink=group,
                 )
                 chunk.recycle()  # Make available to the stream
 
@@ -1454,7 +1454,7 @@ class Engine(aiokatcp.DeviceServer):
             for pol_data in prev_item.pol_data:
                 pol_data.present[-copy_heaps:] = 0  # Mark tail as absent, for each pol
 
-    async def _run_receive(self, streams: list[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
+    async def _run_receive(self, groups: list[spead2.recv.ChunkStreamRingGroup], layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -
@@ -1472,14 +1472,14 @@ class Engine(aiokatcp.DeviceServer):
 
         Parameters
         ----------
-        streams
+        groups
             There should be only two of these because they each represent one of
             the digitiser's two polarisations.
         layout
             The structure of the streams.
         """
         prev_item = None
-        async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
+        async for chunks in recv.chunk_sets(groups, layout, self.sensors, self.time_converter):
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
             # Make sure all the item's events are complete before overwriting
@@ -1698,9 +1698,9 @@ class Engine(aiokatcp.DeviceServer):
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
 
-        for pol, stream in enumerate(self._src_streams):
+        for pol, group in enumerate(self._src_groups):
             base_recv.add_reader(
-                stream,
+                group[0],
                 src=self._srcs[pol],
                 interface=self._src_interface[pol] if self._src_interface is not None else None,
                 ibv=self._src_ibv,
@@ -1709,7 +1709,7 @@ class Engine(aiokatcp.DeviceServer):
             )
 
         recv_task = asyncio.create_task(
-            self._run_receive(self._src_streams, self.src_layout),
+            self._run_receive(self._src_groups, self.src_layout),
             name=RECV_TASK_NAME,
         )
         self.add_service_task(recv_task)
@@ -1738,8 +1738,8 @@ class Engine(aiokatcp.DeviceServer):
         """
         for task in self._cancel_tasks:
             task.cancel()
-        for stream in self._src_streams:
-            stream.stop()
+        for group in self._src_groups:
+            group.stop()
         # If any of the tasks are already done then we had an exception, and
         # waiting for the rest may hang as the shutdown path won't proceed
         # neatly.

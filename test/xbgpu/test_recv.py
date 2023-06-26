@@ -80,7 +80,7 @@ def stream(layout, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
         data = np.empty(layout.chunk_bytes, np.int8)
         # Use np.ones to make sure the bits get zeroed out
         present = np.ones(layout.chunk_heaps, np.uint8)
-        chunk = Chunk(data=data, present=present, stream=stream)
+        chunk = Chunk(data=data, present=present, sink=stream)
         chunk.recycle()
     stream.add_inproc_reader(queue)
 

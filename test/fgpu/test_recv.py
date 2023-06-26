@@ -90,29 +90,29 @@ def free_ringbuffers(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
 
 
 @pytest.fixture
-def streams(
+def stream_groups(
     layout, data_ringbuffer, free_ringbuffers, queues
 ) -> Generator[list[spead2.recv.ChunkRingStream], None, None]:
-    """Create a receive stream per polarization.
+    """Create a receive stream group per polarization.
 
     They are connected to the :func:`queues` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    streams = recv.make_streams(layout, data_ringbuffer, free_ringbuffers, [-1, -1])
-    for stream, queue, free_ringbuffer in zip(streams, queues, free_ringbuffers):
+    stream_groups = recv.make_stream_groups(layout, data_ringbuffer, free_ringbuffers, [-1, -1])
+    for group, queue, free_ringbuffer in zip(stream_groups, queues, free_ringbuffers):
         for _ in range(free_ringbuffer.maxsize):
             data = np.empty(layout.chunk_bytes, np.uint8)
             # Use np.ones to make sure the bits get zeroed out
             present = np.ones(layout.chunk_heaps, np.uint8)
             extra = np.zeros(layout.chunk_heaps, np.uint16)
-            chunk = Chunk(data=data, present=present, extra=extra, stream=stream)
+            chunk = Chunk(data=data, present=present, extra=extra, sink=group)
             chunk.recycle()
-        stream.add_inproc_reader(queue)
+        group[0].add_inproc_reader(queue)
 
-    yield streams
+    yield stream_groups
 
-    for stream in streams:
-        stream.stop()
+    for group in stream_groups:
+        group.stop()
 
 
 @pytest.fixture
@@ -178,7 +178,7 @@ class TestStream:
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
-        streams: list[spead2.recv.ChunkRingStream],
+        stream_groups: list[spead2.recv.ChunkStreamRingGroup],
         queues: list[spead2.InprocQueue],
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
@@ -250,14 +250,14 @@ class TestStream:
                 expected_chunk_id += 1
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
-        assert streams[POL].stats["katgpucbf.metadata_heaps"] == 1
-        assert streams[POL].stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
+        assert stream_groups[POL][0].stats["katgpucbf.metadata_heaps"] == 1
+        assert stream_groups[POL][0].stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
 
     async def test_missing_heaps(
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
-        streams: list[spead2.recv.ChunkRingStream],
+        stream_groups: list[spead2.recv.ChunkStreamRingGroup],
         queues: list[spead2.InprocQueue],
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     ) -> None:
@@ -328,9 +328,7 @@ class TestChunkSets:
             present[:missing] = 0  # Mark some leading heaps as missing
             extra = rng.integers(0, layout.heap_samples - 1, size=layout.chunk_heaps, dtype=np.uint16)
             expected_clip[chunk_id, pol] = int(np.sum(extra[missing:], dtype=np.int64))
-            chunk = Chunk(
-                data=data, present=present, extra=extra, chunk_id=chunk_id, stream_id=pol, stream=streams[pol]
-            )
+            chunk = Chunk(data=data, present=present, extra=extra, chunk_id=chunk_id, stream_id=pol, sink=streams[pol])
             ringbuffer.put_nowait(chunk)
 
         for i in range(10):

@@ -430,7 +430,7 @@ def create_baseline_correlation_product_receive_stream(
         chunk = katgpucbf.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, COMPLEX), dtype=getattr(np, f"int{n_bits_per_sample}")),
-            stream=stream,
+            sink=stream,
         )
         chunk.recycle()
 
