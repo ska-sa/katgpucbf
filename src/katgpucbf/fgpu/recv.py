@@ -184,13 +184,19 @@ def make_stream_groups(
         Ringbuffers for holding chunks for recycling once they've been used
         (one per pol).
     src_affinity
-        CPU core affinity for the worker threads ([-1, -1] for no affinity).
+        CPU core affinity for the worker threads (one per thread). This must be
+        a multiple of the number of polarisations. Use -1 to indicate no
+        affinity for a thread.
     """
+    if len(src_affinity) % N_POLS:
+        raise ValueError("len(src_affinity) must be a multiple of N_POLS")
+
     # Reference counters to make the labels exist before the first scrape
     for pol in range(N_POLS):
         for counter in _PER_POL_COUNTERS:
             counter.labels(pol)
 
+    threads_per_pol = len(src_affinity) // N_POLS
     groups = [
         make_stream_group(
             layout=layout,
@@ -199,7 +205,7 @@ def make_stream_groups(
             max_heap_extra=np.dtype(np.uint16).itemsize,
             data_ringbuffer=data_ringbuffer,
             free_ringbuffer=free_ringbuffers[pol],
-            affinity=[src_affinity[pol]],
+            affinity=src_affinity[pol * threads_per_pol : (pol + 1) * threads_per_pol],
             max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
             stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
             stream_id=pol,

@@ -296,8 +296,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
         "--src-affinity",
-        type=comma_split(int, N_POLS),
-        metavar="CORE,CORE",
+        type=comma_split(int),
+        metavar="CORE,CORE,...",
         default=[-1] * N_POLS,
         help="Cores for input-handling threads (comma-separated) [not bound]",
     )
@@ -433,6 +433,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     for src in args.src:
         if not isinstance(src, str) and args.src_interface is None:
             parser.error("Live source requires --src-interface")
+    if len(args.src_affinity) % N_POLS != 0:
+        parser.error(f"--src-affinity length must be a multiple of {N_POLS}")
 
     # Convert from *OutputDict to *Output
     used_names = set()
