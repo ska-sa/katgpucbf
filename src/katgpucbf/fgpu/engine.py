@@ -1698,15 +1698,19 @@ class Engine(aiokatcp.DeviceServer):
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
 
+        src_comp_vector_iter = iter(self._src_comp_vector)
         for pol, group in enumerate(self._src_groups):
-            base_recv.add_reader(
-                group[0],
-                src=self._srcs[pol],
-                interface=self._src_interface[pol] if self._src_interface is not None else None,
-                ibv=self._src_ibv,
-                comp_vector=self._src_comp_vector[pol],
-                buffer=self._src_buffer,
-            )
+            for i, stream in enumerate(group):
+                first_src = i * len(self._srcs[pol]) // len(group)
+                last_src = (i + 1) * len(self._srcs[pol]) // len(group)
+                base_recv.add_reader(
+                    stream,
+                    src=self._srcs[pol][first_src:last_src],
+                    interface=self._src_interface[pol] if self._src_interface is not None else None,
+                    ibv=self._src_ibv,
+                    comp_vector=next(src_comp_vector_iter),
+                    buffer=self._src_buffer // len(group),
+                )
 
         recv_task = asyncio.create_task(
             self._run_receive(self._src_groups, self.src_layout),

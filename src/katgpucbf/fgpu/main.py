@@ -303,8 +303,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--src-comp-vector",
-        type=comma_split(int, N_POLS),
-        metavar="VECTOR,VECTOR",
+        type=comma_split(int),
+        metavar="VECTOR,VECTOR,...",
         default=[0] * N_POLS,
         help="Completion vectors for source streams, or -1 for polling [0]",
     )
@@ -435,6 +435,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             parser.error("Live source requires --src-interface")
     if len(args.src_affinity) % N_POLS != 0:
         parser.error(f"--src-affinity length must be a multiple of {N_POLS}")
+    if args.src_ibv and len(args.src_affinity) != len(args.src_comp_vector):
+        parser.error("--src-comp-vector must have same length as --src-affinity")
 
     # Convert from *OutputDict to *Output
     used_names = set()
