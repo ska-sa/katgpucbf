@@ -143,6 +143,7 @@ class TestXSend:
 
         queue = spead2.InprocQueue()
         send_stream = XSend(
+            output_name="test",
             n_ants=num_ants,
             n_channels=num_channels,
             n_channels_per_stream=n_channels_per_stream,

@@ -258,6 +258,7 @@ class XPipeline(Pipeline):
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = XSend(
+            output_name=output.name,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_total,
             n_channels_per_stream=engine.n_channels_per_stream,
@@ -267,6 +268,7 @@ class XPipeline(Pipeline):
             context=context,
             packet_payload=engine.dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_stream(
+                output_name=output.name,
                 dest_ip=output.dst.host,
                 dest_port=output.dst.port,
                 interface_ip=engine.dst_interface,
@@ -508,7 +510,7 @@ class XPipeline(Pipeline):
                 # All Antennas have missed data at some point, mark the entire dump missing
                 logger.warning("All Antennas had a break in data during this accumulation")
                 heap.buffer[...] = MISSING
-                incomplete_accum_counter.inc(1)
+                incomplete_accum_counter.labels(self.output.name).inc(1)
             elif not item.present_ants.all():
                 affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.engine.n_ants)
                 for affected_baseline in affected_baselines:
@@ -517,7 +519,7 @@ class XPipeline(Pipeline):
                     affected_baseline_index = affected_baseline * 4
                     heap.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
 
-                incomplete_accum_counter.inc(1)
+                incomplete_accum_counter.labels(self.output.name).inc(1)
             # else: No F-Engines had a break in data for this accumulation
 
             heap.timestamp = item.timestamp

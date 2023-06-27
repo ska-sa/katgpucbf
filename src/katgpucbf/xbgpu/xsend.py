@@ -32,19 +32,25 @@ from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
 from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID, make_immediate
 from . import METRIC_NAMESPACE
 
-output_heaps_counter = Counter("output_x_heaps", "number of X-engine heaps transmitted", namespace=METRIC_NAMESPACE)
+output_heaps_counter = Counter(
+    "output_x_heaps", "number of X-engine heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE
+)
 output_bytes_counter = Counter(
-    "output_x_bytes", "number of X-engine payload bytes transmitted", namespace=METRIC_NAMESPACE
+    "output_x_bytes", "number of X-engine payload bytes transmitted", ["stream"], namespace=METRIC_NAMESPACE
 )
 output_visibilities_counter = Counter(
-    "output_x_visibilities", "number of scalar visibilities", namespace=METRIC_NAMESPACE
+    "output_x_visibilities", "number of scalar visibilities", ["stream"], namespace=METRIC_NAMESPACE
 )
 output_clipped_visibilities_counter = Counter(
-    "output_x_clipped_visibilities", "number of scalar visibilities that saturated", namespace=METRIC_NAMESPACE
+    "output_x_clipped_visibilities",
+    "number of scalar visibilities that saturated",
+    ["stream"],
+    namespace=METRIC_NAMESPACE,
 )
 incomplete_accum_counter = Counter(
     "output_x_incomplete_accs",
     "incomplete output accumulations because input data was incomplete",
+    ["stream"],
     namespace=METRIC_NAMESPACE,
 )
 SEND_DTYPE = np.dtype(np.int32)
@@ -91,6 +97,7 @@ class Heap:
 
 def make_stream(
     *,
+    output_name: str,
     dest_ip: str,
     dest_port: int,
     interface_ip: str,
@@ -103,8 +110,9 @@ def make_stream(
 ) -> "spead2.send.asyncio.AsyncStream":
     """Produce a UDP spead2 stream used for transmission."""
     thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
+    stream: spead2.send.asyncio.AsyncStream
     if use_ibv:
-        return spead2.send.asyncio.UdpIbvStream(
+        stream = spead2.send.asyncio.UdpIbvStream(
             thread_pool,
             stream_config,
             spead2.send.UdpIbvConfig(
@@ -117,13 +125,22 @@ def make_stream(
         )
 
     else:
-        return spead2.send.asyncio.UdpStream(
+        stream = spead2.send.asyncio.UdpStream(
             thread_pool,
             [(dest_ip, dest_port)],
             stream_config,
             interface_address=interface_ip,
             ttl=ttl,
         )
+
+    # Reference the labels causing them to be created in
+    # advance of any data being transmitted.
+    output_heaps_counter.labels(output_name)
+    output_bytes_counter.labels(output_name)
+    output_visibilities_counter.labels(output_name)
+    output_clipped_visibilities_counter.labels(output_name)
+    incomplete_accum_counter.labels(output_name)
+    return stream
 
 
 class XSend:
@@ -191,6 +208,7 @@ class XSend:
 
     def __init__(
         self,
+        output_name: str,
         n_ants: int,
         n_channels: int,
         n_channels_per_stream: int,
@@ -211,6 +229,7 @@ class XSend:
         if channel_offset % n_channels_per_stream != 0:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
 
+        self.output_name = output_name
         self.tx_enabled = tx_enabled
 
         # Array Configuration Parameters
@@ -299,10 +318,10 @@ class XSend:
             # this point; it's only been queued for sending. But it should be close
             # enough for monitoring data rates at the granularity that this is
             # typically done.
-            output_heaps_counter.inc(1)
-            output_bytes_counter.inc(heap.buffer.nbytes)
-            output_visibilities_counter.inc(heap.buffer.shape[0] * heap.buffer.shape[1])
-            output_clipped_visibilities_counter.inc(saturated)
+            output_heaps_counter.labels(self.output_name).inc(1)
+            output_bytes_counter.labels(self.output_name).inc(heap.buffer.nbytes)
+            output_visibilities_counter.labels(self.output_name).inc(heap.buffer.shape[0] * heap.buffer.shape[1])
+            output_clipped_visibilities_counter.labels(self.output_name).inc(saturated)
         else:
             # :meth:`get_free_heap` still needs to await some Future before
             # returning a buffer.
