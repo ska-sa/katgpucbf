@@ -272,7 +272,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
 
 
 async def chunk_sets(
-    ring_pairs: list[spead2.recv.ChunkRingPair],
+    ring_pairs: Sequence[spead2.recv.ChunkRingPair],
     layout: Layout,
     sensors: aiokatcp.SensorSet,
     time_converter: TimeConverter,

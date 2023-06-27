@@ -92,7 +92,7 @@ def free_ringbuffers(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
 @pytest.fixture
 def stream_groups(
     layout, data_ringbuffer, free_ringbuffers, queues
-) -> Generator[list[spead2.recv.ChunkRingStream], None, None]:
+) -> Generator[list[spead2.recv.ChunkStreamRingGroup], None, None]:
     """Create a receive stream group per polarization.
 
     They are connected to the :func:`queues` fixture for input and
