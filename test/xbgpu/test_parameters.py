@@ -26,3 +26,5 @@ num_spectra_per_heap = [256]
 
 # Number of FFT channels out of the F-Engine
 num_channels = [1024, 8192, 32768]
+
+heap_accumulation_threshold = [4]

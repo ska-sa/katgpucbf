@@ -17,6 +17,7 @@
 """Unit tests for XBEngine module."""
 
 from collections.abc import Iterable
+from ipaddress import IPv4Network
 from typing import AbstractSet, AsyncGenerator, Callable, Final
 
 import aiokatcp
@@ -177,6 +178,14 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
+    @pytest.fixture
+    def mock_send_stream_network(self) -> IPv4Network:
+        """Filter the output queues to just those corresponding to the --corrprods.
+
+        Hardcoded to override the default implementation in conftest.py.
+        """
+        return IPv4Network("239.21.11.0/24")
+
     @staticmethod
     def _create_heaps(
         timestamp: int,
@@ -254,7 +263,7 @@ class TestEngine:
     async def _send_data(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
-        recv_stream: spead2.recv.asyncio.Stream,
+        mock_send_stream: list[spead2.InprocQueue],
         *,
         heap_factory: Callable[[int], list[spead2.send.HeapReference]],
         heap_accumulation_threshold: int,
@@ -274,8 +283,8 @@ class TestEngine:
         ----------
         mock_recv_streams
             Fixture
-        recv_stream
-            InprocStream to receive data output by XBEngine.
+        mock_send_stream
+            Fixture
         heap_factory
             Callback that takes a batch index and returns the heaps for that index.
         heap_accumulation_threshold
@@ -307,44 +316,54 @@ class TestEngine:
         for q in mock_recv_streams:
             q.stop()
 
-        # It is expected that the first packet will be a descriptor.
-        ig_recv = spead2.ItemGroup()
-        heap = await recv_stream.get()
-        items = ig_recv.update(heap)
-        assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
-
         accumulation_indices = sorted(accumulation_indices_set)
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
-            shape=(len(accumulation_indices), n_channels_per_stream, n_baselines, COMPLEX), dtype=np.int32
+            shape=(len(mock_send_stream), len(accumulation_indices), n_channels_per_stream, n_baselines, COMPLEX),
+            dtype=np.int32,
         )
-        for i, accumulation_index in enumerate(accumulation_indices):
-            # Wait for heap to be ready and then update out item group
-            # with the new values.
-            heap = await recv_stream.get()
 
-            while (updated_items := set(ig_recv.update(heap))) == set():
-                # Test has gone on long enough that we've received another descriptor
-                heap = await recv_stream.get()
-            assert updated_items == {"frequency", "timestamp", "xeng_raw"}
-            # Ensure that the timestamp from the heap is what we expect.
-            assert (
-                ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
-            ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+        out_config = spead2.recv.StreamConfig(max_heaps=100)
+        out_tp = spead2.ThreadPool()
 
-            assert ig_recv["timestamp"].value == accumulation_index * timestamp_step * heap_accumulation_threshold, (
-                "Output timestamp is not correct. "
-                f"Expected: {hex(accumulation_index * timestamp_step * heap_accumulation_threshold)}, "
-                f"actual: {hex(ig_recv['timestamp'].value)}."
-            )
+        for i, queue in enumerate(mock_send_stream):
+            stream = spead2.recv.asyncio.Stream(out_tp, out_config)
+            stream.add_inproc_reader(queue)
+            # It is expected that the first packet will be a descriptor.
+            ig_recv = spead2.ItemGroup()
+            heap = await stream.get()
+            items = ig_recv.update(heap)
+            assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            assert ig_recv["frequency"].value == n_channels_per_stream * CHANNEL_OFFSET, (
-                "Output channel offset not correct. "
-                f"Expected: {n_channels_per_stream * CHANNEL_OFFSET}, "
-                f"actual: {ig_recv['frequency'].value}."
-            )
+            for j, accumulation_index in enumerate(accumulation_indices):
+                # Wait for heap to be ready and then update out item group
+                # with the new values.
+                heap = await stream.get()
 
-            device_results[i] = ig_recv["xeng_raw"].value
+                while (updated_items := set(ig_recv.update(heap))) == set():
+                    # Test has gone on long enough that we've received another descriptor
+                    heap = await stream.get()
+                assert updated_items == {"frequency", "timestamp", "xeng_raw"}
+                # Ensure that the timestamp from the heap is what we expect.
+                assert (
+                    ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
+                ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+
+                assert (
+                    ig_recv["timestamp"].value == accumulation_index * timestamp_step * heap_accumulation_threshold
+                ), (
+                    "Output timestamp is not correct. "
+                    f"Expected: {hex(accumulation_index * timestamp_step * heap_accumulation_threshold)}, "
+                    f"actual: {hex(ig_recv['timestamp'].value)}."
+                )
+
+                assert ig_recv["frequency"].value == n_channels_per_stream * CHANNEL_OFFSET, (
+                    "Output channel offset not correct. "
+                    f"Expected: {n_channels_per_stream * CHANNEL_OFFSET}, "
+                    f"actual: {ig_recv['frequency'].value}."
+                )
+
+                device_results[i][j] = ig_recv["xeng_raw"].value
 
         return device_results
 
@@ -365,29 +384,21 @@ class TestEngine:
         # Will need to be updated for narrowband
         return 2 * n_channels_total
 
-    @pytest.fixture
-    def recv_stream(self, mock_send_stream: spead2.InprocQueue) -> spead2.recv.asyncio.Stream:
-        """Stream on the receive end of the ``mock_send_stream`` fixture."""
-        stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig(max_heaps=100))
-        stream.add_inproc_reader(mock_send_stream)
-        return stream
-
-    @pytest.fixture
-    async def xbengine(
+    @pytest.fixture(params=["heap_accumulation_threshold", [test_parameters.heap_accumulation_threshold]])
+    def engine_arglist(
         self,
-        context: AbstractContext,
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         heap_accumulation_threshold: int,
-    ) -> AsyncGenerator[XBEngine, None]:
-        """Create and start an engine based on the fixture values."""
-        arglist = [
+    ) -> list[str]:
+        return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
-            f"--corrprod=name=bcp1,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.11.4:7149",
+            f"--corrprod=name=bcp1,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.11.0:7149",
+            f"--corrprod=name=bcp2,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.12.0:7149",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
@@ -402,6 +413,15 @@ class TestEngine:
             "--tx-enabled",
             "239.10.11.4:7149",  # src
         ]
+
+    @pytest.fixture
+    async def xbengine(
+        self,
+        context: AbstractContext,
+        engine_arglist: list[str],
+    ) -> AsyncGenerator[XBEngine, None]:
+        """Create and start an engine based on the fixture values."""
+        arglist = list(engine_arglist)  # Copy, to ensure we don't alter the original
         args = parse_args(arglist)
         xbengine, _ = make_engine(context, args)
         await xbengine.start()
@@ -418,12 +438,11 @@ class TestEngine:
         [None, 0, 3],
         filter=valid_end_to_end_combination,
     )
-    @pytest.mark.parametrize("heap_accumulation_threshold", [4])
+    @pytest.mark.parametrize("heap_accumulation_threshold", test_parameters.heap_accumulation_threshold)
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
-        mock_send_stream: spead2.InprocQueue,
-        recv_stream: spead2.recv.asyncio.Stream,
+        mock_send_stream: list[spead2.InprocQueue],
         xbengine: XBEngine,
         n_ants: int,
         n_spectra_per_heap: int,
@@ -492,7 +511,7 @@ class TestEngine:
             batch_end_index = (first_accumulation_index + 1 + n_full_accumulations) * heap_accumulation_threshold
             device_results = await self._send_data(
                 mock_recv_streams,
-                recv_stream,
+                mock_send_stream,
                 heap_accumulation_threshold=heap_accumulation_threshold,
                 batch_indices=range(batch_start_index, batch_end_index),
                 heap_factory=heap_factory,
@@ -504,46 +523,49 @@ class TestEngine:
 
         incomplete_accums_counter = 0
         base_batch_index = batch_start_index
-        for i in range(n_total_accumulations):
-            # The first heap is an incomplete accumulation containing a
-            # single batch, we need to make sure that this is taken into
-            # account by the verification function.
-            if i == 0:
-                # This is to handle the first accumulation processed. The value
-                # checked here is simply the first in the range.
-                # - Even though :meth:`generate_expected_output` returns a
-                #   zeroed array for an incomplete accumulation, we still need
-                #   to maintain programmatic sense in the values generated here.
-                num_batches_in_current_accumulation = HEAPS_PER_FENGINE_PER_CHUNK
-                incomplete_accums_counter += 1
-            else:
-                num_batches_in_current_accumulation = heap_accumulation_threshold
-                if missing_antenna is not None:
+        for i in range(len(mock_send_stream)):
+            for j in range(n_total_accumulations):
+                # The first heap is an incomplete accumulation containing a
+                # single batch, we need to make sure that this is taken into
+                # account by the verification function.
+                if j == 0:
+                    # This is to handle the first accumulation processed. The value
+                    # checked here is simply the first in the range.
+                    # - Even though :meth:`generate_expected_output` returns a
+                    #   zeroed array for an incomplete accumulation, we still need
+                    #   to maintain programmatic sense in the values generated here.
+                    num_batches_in_current_accumulation = HEAPS_PER_FENGINE_PER_CHUNK
                     incomplete_accums_counter += 1
+                else:
+                    num_batches_in_current_accumulation = heap_accumulation_threshold
+                    if missing_antenna is not None:
+                        incomplete_accums_counter += 1
 
-            expected_output = generate_expected_output(
-                base_batch_index,
-                num_batches_in_current_accumulation,
-                heap_accumulation_threshold,
-                n_channels_per_stream,
-                n_ants,
-                n_spectra_per_heap,
-                missing_antenna,
-            )
-            base_batch_index += num_batches_in_current_accumulation
+                expected_output = generate_expected_output(
+                    base_batch_index,
+                    num_batches_in_current_accumulation,
+                    heap_accumulation_threshold,
+                    n_channels_per_stream,
+                    n_ants,
+                    n_spectra_per_heap,
+                    missing_antenna,
+                )
+                base_batch_index += num_batches_in_current_accumulation
 
-            np.testing.assert_equal(expected_output, device_results[i])
+                np.testing.assert_equal(expected_output, device_results[i][j])
 
-        assert prom_diff.get_sample_diff("output_x_incomplete_accs_total") == incomplete_accums_counter
-        assert prom_diff.get_sample_diff("output_x_heaps_total") == n_total_accumulations
+        assert (
+            prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": "bcp1"}) == incomplete_accums_counter
+        )
+        assert prom_diff.get_sample_diff("output_x_heaps_total", {"stream": "bcp1"}) == n_total_accumulations
         # Could manually calculate it here, but it's available inside the send_stream
-        assert prom_diff.get_sample_diff("output_x_bytes_total") == (
+        assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": "bcp1"}) == (
             xbengine._pipelines[0].send_stream.heap_payload_size_bytes * n_total_accumulations
         )
-        assert prom_diff.get_sample_diff("output_x_visibilities_total") == (
+        assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"}) == (
             n_channels_per_stream * n_baselines * n_total_accumulations
         )
-        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total") == 0
+        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"}) == 0
 
         expected_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
         # As per the explanation in :func:`~send_data`, the first accumulation
@@ -568,8 +590,7 @@ class TestEngine:
         self,
         context: AbstractContext,
         mock_recv_streams: list[spead2.InprocQueue],
-        mock_send_stream: spead2.InprocQueue,
-        recv_stream: spead2.recv.asyncio.Stream,
+        mock_send_stream: list[spead2.InprocQueue],
         xbengine: XBEngine,
         n_ants: int,
         n_channels_total: int,
@@ -599,7 +620,7 @@ class TestEngine:
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             await self._send_data(
                 mock_recv_streams,
-                recv_stream,
+                mock_send_stream,
                 heap_accumulation_threshold=heap_accumulation_threshold,
                 batch_indices=range(0, heap_accumulation_threshold),
                 heap_factory=heap_factory,
@@ -611,5 +632,11 @@ class TestEngine:
 
             await xbengine.stop()
 
-        assert prom_diff.get_sample_diff("output_x_visibilities_total") == n_channels_per_stream * n_baselines
-        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total") == n_channels_per_stream * n_baselines
+        assert (
+            prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"})
+            == n_channels_per_stream * n_baselines
+        )
+        assert (
+            prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"})
+            == n_channels_per_stream * n_baselines
+        )
