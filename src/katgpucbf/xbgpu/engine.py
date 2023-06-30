@@ -180,15 +180,17 @@ class Pipeline:
         - Get an RxQueueItem off the rx_item_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
         - await any outstanding events associated with the RxQueueItem
-        - TODO: Figure out whether the `is not None` check on the Chunk is necessary
         - Apply GPU processing to data in the RxQueueItem
+
             - Bind input buffer(s) accordingly
+
         - Obtain a free TxQueueItem of the tx_free_item_queue
             - Add event marker to wait for the proc_command_queue
             - Put the prepared TxQueueItem on the tx_item_queue
 
         NOTE: An initial TxQueueItem needs to be obtained from the tx_free_item_queue
         for the first round of processing:
+
         - The gpu_proc_loop requires logic to decipher the timestamp of the
           first heap output.
         - It also provides an opportunity to bind buffers before processing is queued (?)
@@ -205,7 +207,9 @@ class Pipeline:
         - Wait for events on the item to complete (likely GPU processing)
         - Wait for an available heap buffer from the send_stream
         - Asynchronously Transfer/Download GPU buffer data into the heap buffer in system RAM
+
             - Wait for the transfer to complete, before
+
         - Transmit heap buffer onto the network
         - Place the TxQueueItem back on the tx_free_item_queue once complete
         """
@@ -346,12 +350,14 @@ class XPipeline(Pipeline):
         """Perform all GPU processing of received data in a continuous loop.
 
         This function performs the following steps:
-        1. Retrieve an rx_item from the _rx_item_queue
-        2.1 Apply the correlation kernel to small subsets of the data
-            until all the data has been processed.
-        2.2 If sufficient correlations have occured, transfer the correlated
-            data to a tx_item, pass the tx_item to the _tx_item_queue and get a
-            new item from the _tx_free_item_queue.
+
+        - Retrieve an rx_item from the _rx_item_queue
+            - Apply the correlation kernel to small subsets of the data
+              until all the data has been processed.
+
+        - If sufficient correlations have occured, transfer the correlated
+          data to a tx_item, pass the tx_item to the _tx_item_queue and get a
+          new item from the _tx_free_item_queue.
 
         The ratio of rx_items to tx_items is not one to one. There are expected
         to be many more rx_items in for every tx_item out.
@@ -548,11 +554,11 @@ class XBEngine(DeviceServer):
     Data is passed between these items using :class:`asyncio.Queue`\s. The three
     processing functions are as follows:
 
-      1. :func:`_receiver_loop` - Receive chunks from network and initiate
-         transfer to GPU.
-      2. :func:`_gpu_proc_loop` - Perform the correlation operation.
-      3. :func:`_sender_loop` - Transfer correlated data to system RAM and then
-         send it out on the network.
+    - :func:`_receiver_loop` - Receive chunks from network and initiate
+        transfer to GPU.
+    - :func:`_gpu_proc_loop` - Perform the correlation operation.
+    - :func:`_sender_loop` - Transfer correlated data to system RAM and then
+        send it out on the network.
 
     There is also a seperate function for sending descriptors onto the network.
 
@@ -886,11 +892,11 @@ class XBEngine(DeviceServer):
         Receive heaps off of the network in a continuous loop.
 
         This function does the following:
-        1. Wait for a chunk to be assembled on the receiver.
-        2. Get a free rx item off of the _rx_free_item_queue.
-        3. Initiate the transfer of the chunk from system memory to the buffer
-           in GPU RAM that belongs to the rx_item.
-        4. Place the rx_item on _rx_item_queue so that it can be processed downstream.
+        - Wait for a chunk to be assembled on the receiver.
+        - Get a free rx item off of the _rx_free_item_queue.
+        - Initiate the transfer of the chunk from system memory to the buffer
+          in GPU RAM that belongs to the rx_item.
+        - Place the rx_item on _rx_item_queue so that it can be processed downstream.
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
