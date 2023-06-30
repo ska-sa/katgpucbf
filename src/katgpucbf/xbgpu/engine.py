@@ -23,7 +23,7 @@ loops within the object.
 
 .. todo::
 
-    * The B-Engine logic has not been implemented yet - this needs to be added
+    - The B-Engine logic has not been implemented yet - this needs to be added
       eventually. It is expected that this logic will need to go in the
       _gpu_proc_loop for the B-Engine processing and then a seperate sender
       loop would need to be created for sending B-Engine data.
@@ -135,7 +135,7 @@ class Pipeline:
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     # TODO: Declare these constants elsewhere
-    n_rx_items = 3  # Too high means too much GPU memory gets allocated
+    n_rx_items = 3
     n_tx_items = 2  # TODO: Will likely need to be == n_rx_items for BPipeline
 
     def __init__(self, output: Output, engine: "XBEngine", context: AbstractContext, init_tx_enabled: bool) -> None:
@@ -147,9 +147,9 @@ class Pipeline:
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
-        # * The _rx_item_queue passes items from the _receiver_loop function to
+        # - The _rx_item_queue passes items from the _receiver_loop function to
         #   the _gpu_proc_loop function.
-        # * The _tx_item_queue passes items from the _gpu_proc_loop to the
+        # - The _tx_item_queue passes items from the _gpu_proc_loop to the
         #   _sender_loop function.
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
@@ -183,21 +183,21 @@ class Pipeline:
         """Perform all GPU processing of received data in a continuous loop.
 
         This function should do the following:
-        * Get an RxQueueItem off the rx_item_queue
-        * Ensure it is not a NoneType value (indicating shutdown sequence)
-        * await any outstanding events associated with the RxQueueItem
-        * TODO: Figure out whether the `is not None` check on the Chunk is necessary
-        * Apply GPU processing to data in the RxQueueItem
-            * Bind input buffer(s) accordingly
-        * Obtain a free TxQueueItem of the tx_free_item_queue
-            * Add event marker to wait for the proc_command_queue
-            * Put the prepared TxQueueItem on the tx_item_queue
+        - Get an RxQueueItem off the rx_item_queue
+        - Ensure it is not a NoneType value (indicating shutdown sequence)
+        - await any outstanding events associated with the RxQueueItem
+        - TODO: Figure out whether the `is not None` check on the Chunk is necessary
+        - Apply GPU processing to data in the RxQueueItem
+            - Bind input buffer(s) accordingly
+        - Obtain a free TxQueueItem of the tx_free_item_queue
+            - Add event marker to wait for the proc_command_queue
+            - Put the prepared TxQueueItem on the tx_item_queue
 
         NOTE: An initial TxQueueItem needs to be obtained from the tx_free_item_queue
         for the first round of processing:
-        * The gpu_proc_loop requires logic to decipher the timestamp of the
+        - The gpu_proc_loop requires logic to decipher the timestamp of the
           first heap output.
-        * It also provides an opportunity to bind buffers before processing is queued (?)
+        - It also provides an opportunity to bind buffers before processing is queued (?)
         """
         raise NotImplementedError  # pragma: nocover
 
@@ -206,14 +206,14 @@ class Pipeline:
         """Send heaps to the network in a continuous loop.
 
         This function should do the following:
-        * Get a TxQueueItem from the tx_item_queue
-        * Ensure it is not a NoneType value (indicating shutdown sequence)
-        * Wait for events on the item to complete (likely GPU processing)
-        * Wait for an available heap buffer from the send_stream
-        * Asynchronously Transfer/Download GPU buffer data into the heap buffer in system RAM
-            * Wait for the transfer to complete, before
-        * Transmit heap buffer onto the network
-        * Place the TxQueueItem back on the tx_free_item_queue once complete
+        - Get a TxQueueItem from the tx_item_queue
+        - Ensure it is not a NoneType value (indicating shutdown sequence)
+        - Wait for events on the item to complete (likely GPU processing)
+        - Wait for an available heap buffer from the send_stream
+        - Asynchronously Transfer/Download GPU buffer data into the heap buffer in system RAM
+            - Wait for the transfer to complete, before
+        - Transmit heap buffer onto the network
+        - Place the TxQueueItem back on the tx_free_item_queue once complete
         """
         raise NotImplementedError  # pragma: nocover
 
@@ -385,8 +385,8 @@ class XPipeline(Pipeline):
         self.correlation.zero_visibilities()
         while True:
             # Get item from the receiver function.
-            # * Wait for the HtoD transfers to complete, then
-            # * Give the chunk back to the receiver for reuse.
+            # - Wait for the HtoD transfers to complete, then
+            # - Give the chunk back to the receiver for reuse.
             rx_item = await self._rx_item_queue.get()
             if rx_item is None:
                 break
@@ -812,9 +812,9 @@ class XBEngine(DeviceServer):
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
-        # * The _rx_item_queue passes items from the _receiver_loop function to
+        # - The _rx_item_queue passes items from the _receiver_loop function to
         #   the _gpu_proc_loop function.
-        # * The _tx_item_queue passes items from the _gpu_proc_loop to the
+        # - The _tx_item_queue passes items from the _gpu_proc_loop to the
         #   _sender_loop function.
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
