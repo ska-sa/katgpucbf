@@ -164,12 +164,6 @@ class Pipeline:
             f"{output.name}.tx_free_item_queue", self.n_tx_items
         )
 
-    # TODO: Is it fair to impose this on the user?
-    @abstractmethod
-    def _populate_sensors(self) -> None:
-        """Define any Pipeline-specific sensors."""
-        raise NotImplementedError  # pragma: nocover
-
     def add_rx_item(self, item: RxQueueItem) -> None:
         """Append a newly-received :class:`RxQueueItem`."""
         self._rx_item_queue.put_nowait(item)
