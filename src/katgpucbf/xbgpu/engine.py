@@ -138,7 +138,7 @@ class Pipeline:
     n_rx_items = 3
     n_tx_items = 2  # TODO: Will likely need to be == n_rx_items for BPipeline
 
-    def __init__(self, output: Output, engine: "XBEngine", context: AbstractContext, init_tx_enabled: bool) -> None:
+    def __init__(self, output: Output, engine: "XBEngine", context: AbstractContext) -> None:
         self.engine = engine
         self.output = output
 
@@ -165,7 +165,7 @@ class Pipeline:
         )
 
     def add_rx_item(self, item: RxQueueItem) -> None:
-        """Append a newly-received :class:`RxQueueItem`."""
+        """Append a newly-received :class:`RxQueueItem` to the `rx_item_queue`."""
         self._rx_item_queue.put_nowait(item)
 
     def shutdown(self) -> None:
@@ -226,8 +226,7 @@ class XPipeline(Pipeline):
         context: AbstractContext,
         init_tx_enabled: bool,
     ) -> None:
-        assert isinstance(output, XOutput), "Only baseline-correlation-products are supported"
-        super().__init__(output, engine, context, init_tx_enabled)
+        super().__init__(output, engine, context)
         self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
 
         # NOTE: This value staggers the send so that packets within a heap are
@@ -262,7 +261,7 @@ class XPipeline(Pipeline):
             n_channels_per_stream=engine.n_channels_per_stream,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=engine.send_rate_factor,
-            channel_offset=engine.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
+            channel_offset=engine.channel_offset_value,
             context=context,
             packet_payload=engine.dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_stream(
@@ -282,7 +281,7 @@ class XPipeline(Pipeline):
 
         self._populate_sensors()
 
-    def _populate_sensors(self) -> None:  # noqa: D102
+    def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         # Static sensors
         sensors.add(
@@ -346,7 +345,7 @@ class XPipeline(Pipeline):
         self.correlation.zero_visibilities()
         return tx_item
 
-    async def gpu_proc_loop(self) -> None:  # noqa: D102
+    async def gpu_proc_loop(self) -> None:
         """Perform all GPU processing of received data in a continuous loop.
 
         This function performs the following steps:
@@ -355,7 +354,7 @@ class XPipeline(Pipeline):
             - Apply the correlation kernel to small subsets of the data
               until all the data has been processed.
 
-        - If sufficient correlations have occured, transfer the correlated
+        - If sufficient correlations have occurred, transfer the correlated
           data to a tx_item, pass the tx_item to the _tx_item_queue and get a
           new item from the _tx_free_item_queue.
 
@@ -391,8 +390,6 @@ class XPipeline(Pipeline):
             if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
-            # TODO: Get rid of this explicit reference to the Chunk
-            assert rx_item.chunk is not None  # mypy doesn't like the fact that the chunk is "optional".
 
             current_timestamp = rx_item.timestamp
             if tx_item.timestamp < 0:
@@ -442,7 +439,7 @@ class XPipeline(Pipeline):
         logger.debug("gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def sender_loop(self) -> None:  # noqa: D102
+    async def sender_loop(self) -> None:
         """Send heaps to the network in a continuous loop.
 
         This function does the following:
@@ -455,7 +452,7 @@ class XPipeline(Pipeline):
         7. Place the tx_item on _tx_item_free_queue so that it can be reused.
 
         NOTE: The transfer from the GPU to the heap buffer and the sending onto
-        the network could be pipeline a bit better, but this is not really
+        the network could be pipelined a bit better, but this is not really
         required in this loop as this whole process occurs at a much slower
         pace than the rest of the pipeline.
         """
@@ -703,7 +700,7 @@ class XBEngine(DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
-        # B-engine doesn't work yet, testing with multiple XOutputs
+        # B-engine doesn't work yet
         assert all(isinstance(output, XOutput) for output in outputs)
 
         if sample_bits != 8:
@@ -754,7 +751,7 @@ class XBEngine(DeviceServer):
         # spectrum due to symmetric properties of the Fourier Transform. While
         # we can workout the timestamp_step from other parameters that
         # configure the receiver, we pass it as a seperate argument to the
-        # reciever for cases where the n_channels_per_stream changes across
+        # receiver for cases where the n_channels_per_stream changes across
         # streams (likely for non-power-of-two array sizes).
         # NOTE: Should be the same for both X- and B-engines, right?
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
@@ -872,16 +869,13 @@ class XBEngine(DeviceServer):
 
     @staticmethod
     async def _push_recv_chunk(item: RxQueueItem) -> None:
-        """Return chunk to the stream once `events` have fired."""
+        """Return chunk to the stream once `item`'s events have fired."""
         await item.async_wait_for_events()
         item.chunk.recycle()  # type: ignore
         item.chunk = None
 
     async def _add_rx_item(self, item: RxQueueItem) -> None:
-        """Push an :class:`RxQueueItem` to all the pipelines.
-
-        Allow for None to be passed through to indicate shutdown procedure.
-        """
+        """Push an :class:`RxQueueItem` to all the pipelines."""
         await self._active_in_sem.acquire()
         item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
@@ -920,7 +914,7 @@ class XBEngine(DeviceServer):
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_marker(self._upload_command_queue)
 
-            # Give the received item to the Pipeline's gpu_proc_loop.
+            # Give the received item to the pipelines' gpu_proc_loop.
             await self._add_rx_item(item)
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
@@ -944,9 +938,12 @@ class XBEngine(DeviceServer):
         raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
 
     async def request_capture_start(self, ctx, stream_name: str) -> None:
-        """Start transmission of a stream.
+        """Start transmission of stream.
 
-        The request requires a stream name to enable
+        Parameters
+        ----------
+        stream_name
+            Output stream name.
         """
         pipeline = self._request_pipeline(stream_name)
         # TODO: Introduce `make_send_stream` helper function for each pipeline
@@ -954,7 +951,13 @@ class XBEngine(DeviceServer):
         pipeline.send_stream.tx_enabled = True  # type: ignore
 
     async def request_capture_stop(self, ctx, stream_name: str) -> None:
-        """Stop transmission of a stream."""
+        """Stop transmission of a stream.
+
+        Parameters
+        ----------
+        stream_name
+            Output stream name.
+        """
         pipeline = self._request_pipeline(stream_name)
         # TODO: Introduce `make_send_stream` helper function for each pipeline
         #       to address this 'has no attribute' mypy error
