@@ -345,22 +345,11 @@ class XPipeline(Pipeline):
         self.correlation.zero_visibilities()
         return tx_item
 
-    async def gpu_proc_loop(self) -> None:
-        """Perform all GPU processing of received data in a continuous loop.
-
-        This function performs the following steps:
-
-        - Retrieve an rx_item from the _rx_item_queue
-            - Apply the correlation kernel to small subsets of the data
-              until all the data has been processed.
-
-        - If sufficient correlations have occurred, transfer the correlated
-          data to a tx_item, pass the tx_item to the _tx_item_queue and get a
-          new item from the _tx_free_item_queue.
-
-        The ratio of rx_items to tx_items is not one to one. There are expected
-        to be many more rx_items in for every tx_item out.
-        """
+    async def gpu_proc_loop(self) -> None:  # noqa: D102
+        # NOTE: The ratio of rx_items to tx_items is not one-to-one; there are expected
+        # to be many more rx_items in for every tx_item out. For this reason, and in
+        # addition to the steps outlined in :meth:`.Pipeline.gpu_proc_loop`, data is
+        # only transferred to a `TxQueueItem` once sufficient correlations have occurred.
         rx_item: RxQueueItem | None
 
         def do_correlation() -> None:
@@ -439,23 +428,11 @@ class XPipeline(Pipeline):
         logger.debug("gpu_proc_loop completed")
         self._tx_item_queue.put_nowait(None)
 
-    async def sender_loop(self) -> None:
-        """Send heaps to the network in a continuous loop.
-
-        This function does the following:
-        1. Get an item from the _tx_item_queue.
-        2. Wait for all the events on this item to complete.
-        3. Wait for an available heap buffer from the send_stream.
-        4. Transfer the GPU buffer in the item to the heap buffer in system RAM.
-        5. Wait for the transfer to complete.
-        6. Transmit data in heap buffer out into the network.
-        7. Place the tx_item on _tx_item_free_queue so that it can be reused.
-
-        NOTE: The transfer from the GPU to the heap buffer and the sending onto
-        the network could be pipelined a bit better, but this is not really
-        required in this loop as this whole process occurs at a much slower
-        pace than the rest of the pipeline.
-        """
+    async def sender_loop(self) -> None:  # noqa: D102
+        # NOTE: The transfer from the GPU to the heap buffer and the sending onto
+        # the network could be pipelined a bit better, but this is not really
+        # required in this loop as this whole process occurs at a much slower
+        # pace than the rest of the pipeline.
         old_time_s = time.time()
         old_timestamp = 0
 
