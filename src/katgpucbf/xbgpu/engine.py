@@ -15,11 +15,12 @@
 ################################################################################
 
 """
-This module defines an XBEngine object that implements an entire GPU XB-Engine pipeline.
+This module defines the objects that implement an entire GPU XB-Engine pipeline.
 
-Additionally this module defines the QueueItem and RxQueueItem objects that are
-used in the XBEngine for passing information between different async processing
-loops within the object.
+The XBEngine comprises multiple Pipeline objects that facilitate output data
+products. Additionally, the RxQueueItem and TxQueueItem objects, used in the
+XBEngine for passing information between different async processing loops,
+are defined here.
 
 .. todo::
 
@@ -87,10 +88,6 @@ class RxQueueItem(QueueItem):
         self.chunk: recv.Chunk | None = None
         super().__init__(timestamp)
 
-    def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events and chunk."""
-        super().reset(timestamp=timestamp)
-
 
 class TxQueueItem(QueueItem):
     """
@@ -124,13 +121,10 @@ class TxQueueItem(QueueItem):
 class Pipeline:
     """Base Pipeline class to build on."""
 
-    # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
-    # these values too high results in too much GPU memory being consumed.
-    # There needs to be enough of them that the different processing
-    # functions do not get starved waiting for items. The low single digits
-    # is suitable. n_free_chunks wraps buffer in system RAM. This can be
-    # set quite high as there is much more system RAM than GPU RAM. It
-    # should be higher than max_active_chunks.
+    # NOTE: n_rx_items and n_tx_items dictate the number of GPU buffers.
+    # Setting these values too high results in too much GPU memory being
+    # consumed. The quantity of each needs to be sufficient so as not to starve
+    # the different processing loops. The low single digits is suitable.
     # These values are not configurable as they have been acceptable for
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
@@ -147,10 +141,10 @@ class Pipeline:
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
-        # - The _rx_item_queue passes items from the _receiver_loop function to
-        #   the _gpu_proc_loop function.
-        # - The _tx_item_queue passes items from the _gpu_proc_loop to the
-        #   _sender_loop function.
+        # - The _rx_item_queue receives items from :meth:`.XBEngine._receiver_loop`
+        #   to be used by :meth:`_gpu_proc_loop`.
+        # - The _tx_item_queue receives items from :meth:`gpu_proc_loop` to be
+        #   used by :meth:`sender_loop`.
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
@@ -728,25 +722,15 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
-        # NOTE: The n_rx_items and n_tx_items each wrap a GPU buffer. Setting
-        # these values too high results in too much GPU memory being consumed.
-        # There needs to be enough of them that the different processing
-        # functions do not get starved waiting for items. The low single digits
-        # is suitable. n_free_chunks wraps buffer in system RAM. This can be
-        # set quite high as there is much more system RAM than GPU RAM. It
-        # should be higher than max_active_chunks.
+        # NOTE: n_free_chunks dictates the number of buffers in system RAM.
+        # This can be set quite high as there is much more system RAM than GPU
+        # RAM. It should be higher than max_active_chunks.
         # These values are not configurable as they have been acceptable for
         # most tests cases up until now. If the pipeline starts bottlenecking,
         # then maybe look at increasing these values.
+        # TODO: This is the same value as in Pipeline above. Abstract into a single declaration.
         n_rx_items = 3  # Too high means too much GPU memory gets allocated
 
-        # Multiply this _step by 2 to account for dropping half of the
-        # spectrum due to symmetric properties of the Fourier Transform. While
-        # we can workout the timestamp_step from other parameters that
-        # configure the receiver, we pass it as a seperate argument to the
-        # receiver for cases where the n_channels_per_stream changes across
-        # streams (likely for non-power-of-two array sizes).
-        # NOTE: Should be the same for both X- and B-engines, right?
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
@@ -800,15 +784,13 @@ class XBEngine(DeviceServer):
         # a CUDA stream depending on the context.
         self._upload_command_queue = context.create_command_queue()
 
-        # These queues are extended in the monitor class, allowing for the
-        # monitor to track the number of items on each queue.
-        # - The _rx_item_queue passes items from the _receiver_loop function to
-        #   the _gpu_proc_loop function.
-        # - The _tx_item_queue passes items from the _gpu_proc_loop to the
-        #   _sender_loop function.
-        # Once the destination function is finished with an item, it will pass
-        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
-        # all allocated buffers are in continuous circulation.
+        # This queue is extended in the monitor class, allowing for the
+        # monitor to track the number of items on the queue.
+        # - The XBEngine passes items from the :meth:`_receiver_loop` to each
+        #   pipeline via :meth:`.Pipeline.add_rx_item`.
+        # - Once the each pipeline is finished with an :class:`RxQueueItem`,
+        #   it must pass it back to the _rx_free_item_queue to ensure that
+        #   all allocated buffers are in continuous circulation.
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue("rx_free_item_queue", n_rx_items)
 
         rx_data_shape = (
