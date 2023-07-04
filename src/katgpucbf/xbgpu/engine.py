@@ -215,6 +215,16 @@ class Pipeline:
         """
         raise NotImplementedError  # pragma: nocover
 
+    @abstractmethod
+    def capture_start(self) -> None:
+        """Enable the transmission of this data product's stream."""
+        raise NotImplementedError  # pragma: nocover
+
+    @abstractmethod
+    def capture_stop(self) -> None:
+        """Disable the transmission of this data product's stream."""
+        raise NotImplementedError  # pragma: nocover
+
 
 class XPipeline(Pipeline):
     """Processing pipeline for a single baseline-correlation-products stream."""
@@ -513,6 +523,12 @@ class XPipeline(Pipeline):
 
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
+
+    def capture_start(self) -> None:  # noqa: D102
+        self.send_stream.tx_enabled = True
+
+    def capture_stop(self) -> None:  # noqa: D102
+        self.send_stream.tx_enabled = False
 
 
 class XBEngine(DeviceServer):
@@ -923,9 +939,7 @@ class XBEngine(DeviceServer):
             Output stream name.
         """
         pipeline = self._request_pipeline(stream_name)
-        # TODO: Introduce `make_send_stream` helper function for each pipeline
-        #       to address this 'has no attribute' mypy error
-        pipeline.send_stream.tx_enabled = True  # type: ignore
+        pipeline.capture_start()
 
     async def request_capture_stop(self, ctx, stream_name: str) -> None:
         """Stop transmission of a stream.
@@ -936,9 +950,7 @@ class XBEngine(DeviceServer):
             Output stream name.
         """
         pipeline = self._request_pipeline(stream_name)
-        # TODO: Introduce `make_send_stream` helper function for each pipeline
-        #       to address this 'has no attribute' mypy error
-        pipeline.send_stream.tx_enabled = False  # type: ignore
+        pipeline.capture_stop()
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
