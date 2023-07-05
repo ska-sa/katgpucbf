@@ -73,12 +73,17 @@ MISSING = np.array([-(2**31), 1], dtype=np.int32)
 
 class RxQueueItem(QueueItem):
     """
-    Extension of the QueueItem to also store a chunk reference and heap presence.
+    Extension of the QueueItem for use in receive queues.
 
-    The RxQueueItem between the sender and the gpu proc loops need to also
-    store a reference to the chunk that data in the GPU buffer was copied from.
-    This allows the gpu proc loop to hand the chunk back to the receiver once
-    the copy is complete to reuse resources.
+    The RxQueueItem holds a reference to the received Chunk because its data is
+    copied into the GPU buffer asynchronously. Once the GPU processing loop is
+    done with the Chunk's data, it hands it back to the receiving loop to reuse
+    the resource. It is for this reason that the Chunk's heap presence is
+    stored separately.
+
+    The RxQueueItem also holds a reference count of the number of pipelines still
+    using this item. This is to ensure the item isn't freed before each data
+    product has had a chance to use the received data.
     """
 
     def __init__(self, buffer_device: accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
@@ -178,7 +183,7 @@ class Pipeline:
 
             - Bind input buffer(s) accordingly
 
-        - Obtain a free TxQueueItem of the tx_free_item_queue
+        - Obtain a free TxQueueItem from the tx_free_item_queue
             - Add event marker to wait for the proc_command_queue
             - Put the prepared TxQueueItem on the tx_item_queue
 
