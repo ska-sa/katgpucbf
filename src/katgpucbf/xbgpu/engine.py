@@ -90,8 +90,12 @@ class RxQueueItem(QueueItem):
         self.buffer_device = buffer_device
         self.present = present
         self.refcount = 0
-        self.chunk: recv.Chunk | None = None
         super().__init__(timestamp)
+
+    def reset(self, timestamp: int = 0) -> None:
+        """Reset the timestamp, events and chunk."""
+        super().reset(timestamp=timestamp)
+        self.chunk: recv.Chunk | None = None
 
 
 class TxQueueItem(QueueItem):
@@ -837,22 +841,11 @@ class XBEngine(DeviceServer):
         if item.refcount == 0:
             # All Pipelines are done with this item
             self._active_in_sem.release()
-            # Need to wait for any outstanding events before recycling
-            self.add_service_task(
-                asyncio.create_task(
-                    self._push_recv_chunk(item),
-                    name="Receive Chunk Recycle Task",
-                )
-            )
+            # TODO: Don't recycle the chunk in the reset of the Item itself
+            # Need to separate the concerns
+            item.chunk.recycle()  # type: ignore
             item.reset()
             self._rx_free_item_queue.put_nowait(item)
-
-    @staticmethod
-    async def _push_recv_chunk(item: RxQueueItem) -> None:
-        """Return chunk to the stream once `item`'s events have fired."""
-        await item.async_wait_for_events()
-        item.chunk.recycle()  # type: ignore
-        item.chunk = None
 
     async def _add_rx_item(self, item: RxQueueItem) -> None:
         """Push an :class:`RxQueueItem` to all the pipelines."""
