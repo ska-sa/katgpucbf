@@ -273,13 +273,10 @@ class TestEngine:
         ]
         # TODO: same problem for `dst` itself.
 
-    def _make_digitiser(self, queues: list[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
-        """Create send stream for a fake digitiser.
-
-        The resulting stream has one sub-stream per polarisation.
-        """
+    def _make_digitiser(self, queue: spead2.InprocQueue) -> "spead2.send.asyncio.AsyncStream":
+        """Create send stream for a fake digitiser."""
         config = spead2.send.StreamConfig(max_packet_size=9000)  # Just needs to be bigger than the heaps
-        return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
+        return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), [queue], config)
 
     def _make_tone(self, timestamps: np.ndarray, tone: CW, pol: int) -> np.ndarray:
         """Synthesize digitiser data containing a tone.
@@ -310,7 +307,7 @@ class TestEngine:
 
     async def _send_data(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine: Engine,
         output: Output,
@@ -329,7 +326,7 @@ class TestEngine:
 
         Parameters
         ----------
-        mock_recv_streams, mock_send_stream, engine, output
+        mock_recv_stream, mock_send_stream, engine, output
             Fixtures
         dig_data
             2xN array of samples (not yet packed), which must currently be a
@@ -373,7 +370,7 @@ class TestEngine:
         saturated = np.abs(dig_data) >= saturation_value
         saturated = np.sum(saturated.reshape(N_POLS, -1, src_layout.heap_samples), axis=-1, dtype=np.uint16)
         dig_data = packbits(dig_data, src_layout.sample_bits)
-        dig_stream = self._make_digitiser(mock_recv_streams)
+        dig_stream = self._make_digitiser(mock_recv_stream)
         heap_gen = gen_heaps(
             src_layout,
             dig_data,
@@ -384,8 +381,7 @@ class TestEngine:
 
         for dig_heap in heap_gen:
             await dig_stream.async_send_heap(dig_heap)
-        for queue in mock_recv_streams:
-            queue.stop()
+        mock_recv_stream.stop()
 
         n_out_streams = len(mock_send_stream)
         assert n_out_streams == 16, "Number of output streams does not match command line"
@@ -460,7 +456,7 @@ class TestEngine:
     )
     async def test_channel_centre_tones(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -535,7 +531,7 @@ class TestEngine:
             expected_first_timestamp += heap_samples
             expected_spectra -= SPECTRA_PER_HEAP
         out_data, _ = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -564,7 +560,7 @@ class TestEngine:
 
     async def test_spectral_leakage(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -607,7 +603,7 @@ class TestEngine:
         tol = 10 ** (-53 / 20) * (tones[0].magnitude * coherent_scale[CHANNELS // 2]) * gain
 
         out_data, _ = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -638,7 +634,7 @@ class TestEngine:
     )
     async def test_delay_phase_rate(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -673,7 +669,7 @@ class TestEngine:
         dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
         dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
         out_data, timestamps = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -718,7 +714,7 @@ class TestEngine:
 
     async def test_delay_changes(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -748,7 +744,7 @@ class TestEngine:
             await engine_client.request("delays", output.name, SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
 
         out_data, timestamps = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -780,7 +776,7 @@ class TestEngine:
     @pytest.mark.parametrize("delay_samples", [0.0, 8192.0, 234.5, 42.8])
     async def test_delay_slope(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -831,7 +827,7 @@ class TestEngine:
             expected_first_timestamp += heap_samples
             expected_spectra -= SPECTRA_PER_HEAP
         out_data, _ = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -861,7 +857,7 @@ class TestEngine:
     @pytest.mark.cmdline_args("--spectra-per-heap=32", "--src-chunk-samples=4194304")
     async def test_missing_heaps(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -909,7 +905,7 @@ class TestEngine:
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             out_data, timestamps = await self._send_data(
-                mock_recv_streams,
+                mock_recv_stream,
                 mock_send_stream,
                 engine_server,
                 output,
@@ -952,7 +948,7 @@ class TestEngine:
 
     async def test_dig_clip_cnt_sensors(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -967,7 +963,7 @@ class TestEngine:
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -985,7 +981,7 @@ class TestEngine:
     @pytest.mark.parametrize("tone_pol", [0, 1])
     async def test_output_clip_count(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -1004,7 +1000,7 @@ class TestEngine:
         dig_data = self._make_tone(np.arange(n_samples), tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             _, timestamps = await self._send_data(
-                mock_recv_streams,
+                mock_recv_stream,
                 mock_send_stream,
                 engine_server,
                 output,
@@ -1056,7 +1052,7 @@ class TestEngine:
 
     async def test_steady_state_gain(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -1070,7 +1066,7 @@ class TestEngine:
 
         timestamp_list = self._patch_fill_in(monkeypatch, engine_client, output, "gain-all", output.name, 0)
         out_data, timestamps = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,
@@ -1091,7 +1087,7 @@ class TestEngine:
 
     async def test_steady_state_delay(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
         engine_server: Engine,
         engine_client: aiokatcp.Client,
@@ -1107,7 +1103,7 @@ class TestEngine:
             monkeypatch, engine_client, output, "delays", output.name, SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
         )
         out_data, timestamps = await self._send_data(
-            mock_recv_streams,
+            mock_recv_stream,
             mock_send_stream,
             engine_server,
             output,

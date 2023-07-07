@@ -21,12 +21,6 @@ import spead2
 
 
 @pytest.fixture
-def n_src_streams() -> int:  # noqa: D401
-    """Number of source streams for an xbgpu instance."""
-    return 1
-
-
-@pytest.fixture
 def mock_send_stream(mocker) -> spead2.InprocQueue:
     """Mock out creation of the send stream.
 
