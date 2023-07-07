@@ -382,8 +382,8 @@ class TestEngine:
             saturated=saturated,
         )
 
-        for heap in heap_gen:
-            await dig_stream.async_send_heap(heap)
+        for dig_heap in heap_gen:
+            await dig_stream.async_send_heap(dig_heap)
         for queue in mock_recv_streams:
             queue.stop()
 

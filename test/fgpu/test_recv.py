@@ -82,7 +82,7 @@ def data_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
 
 
 @pytest.fixture
-def free_ringbuffer(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
+def free_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
     """Create asynchronous free chunk ringbuffer, to be used by the receive streams."""
     return spead2.recv.asyncio.ChunkRingbuffer(4)
 
@@ -90,7 +90,7 @@ def free_ringbuffer(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
 @pytest.fixture
 def stream_group(
     layout, data_ringbuffer, free_ringbuffer, queues, recv_lossless_eviction
-) -> Generator[list[spead2.recv.ChunkStreamRingGroup], None, None]:
+) -> Generator[spead2.recv.ChunkStreamRingGroup, None, None]:
     """Create a receive stream group.
 
     They are connected to the :func:`queues` fixture for input and
