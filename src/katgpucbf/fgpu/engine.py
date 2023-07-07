@@ -134,6 +134,16 @@ def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.
     return coeff.astype(np.float32)
 
 
+def _padded_input_size(size_bytes: int) -> int:
+    """Determine padded input dimension for input array."""
+    dim = accel.Dimension(
+        size_bytes,
+        min_padded_size=size_bytes + INPUT_CHUNK_PADDING,
+        align_dtype=np.uint8,
+    )
+    return dim.required_padded_size()
+
+
 class InItem(QueueItem):
     """Item for use in input queues.
 
@@ -203,18 +213,13 @@ class InItem(QueueItem):
             # initialising the item from the chunks.
             self.samples = None
         else:
-            dim = accel.Dimension(
-                data_size,
-                min_padded_size=data_size + INPUT_CHUNK_PADDING,
-                align_dtype=np.uint8,
-            )
             self.samples = accel.DeviceArray(
                 context,
                 (N_POLS, data_size),
                 np.uint8,
                 padded_shape=(
                     N_POLS,
-                    dim.required_padded_size(),
+                    _padded_input_size(data_size),
                 ),
             )
         self.present = np.zeros((N_POLS, present_size), dtype=bool)
@@ -1268,7 +1273,7 @@ class Engine(aiokatcp.DeviceServer):
             if self.use_vkgdr:
                 # These quantities are per-pol
                 array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
-                device_bytes = array_bytes + INPUT_CHUNK_PADDING
+                device_bytes = _padded_input_size(array_bytes)
                 with context:
                     mem = vkgdr.pycuda.Memory(self.vkgdr_handle, N_POLS * device_bytes)
                 buf = np.array(mem, copy=False).view(np.uint8).reshape(N_POLS, device_bytes)
@@ -1278,12 +1283,9 @@ class Engine(aiokatcp.DeviceServer):
                 buf = buf[:, :chunk_bytes]
                 device_array = accel.DeviceArray(
                     context,
-                    (
-                        N_POLS,
-                        array_bytes,
-                    ),
+                    (N_POLS, array_bytes),
                     np.uint8,
-                    padded_shape=(device_bytes,),
+                    padded_shape=(N_POLS, device_bytes),
                     raw=mem,
                 )
             else:
