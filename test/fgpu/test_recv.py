@@ -18,9 +18,7 @@
 
 import dataclasses
 import itertools
-import logging
-from collections.abc import Generator, Iterable, Sequence
-from typing import cast
+from collections.abc import Generator, Iterable
 from unittest.mock import Mock
 
 import aiokatcp
@@ -128,8 +126,8 @@ def gen_heaps(
     layout: Layout,
     data: ArrayLike,
     first_timestamp: int,
-    present: Sequence[bool] | None = None,
-    saturated: Sequence[int] | None = None,
+    present: np.ndarray | None = None,
+    saturated: np.ndarray | None = None,
 ) -> Generator[spead2.send.Heap, None, None]:
     """Generate heaps from an array of data.
 
@@ -292,8 +290,8 @@ class TestStream:
         np.testing.assert_equal(chunk.present, expected)
 
 
-class TestChunkSets:
-    """Test :func:`.chunk_sets`."""
+class TestIterChunks:
+    """Test :func:`.iter_chunks`."""
 
     @pytest.fixture
     async def sensors(self) -> aiokatcp.SensorSet:
@@ -302,7 +300,7 @@ class TestChunkSets:
         return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
 
     async def test(
-        self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter, caplog
+        self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter
     ) -> None:  # noqa: D102
         streams = [Mock() for _ in range(N_POLS)]
         # Fake up stream stats
@@ -316,6 +314,7 @@ class TestChunkSets:
             stream.stats[config.get_stat_index("too_old_heaps")] = 111 + 1000 * pol
             stream.stats[config.get_stat_index("katgpucbf.bad_timestamp_heaps")] = 123 + 1000 * pol
             stream.stats[config.get_stat_index("katgpucbf.metadata_heaps")] = 321 + 1000 * pol
+        group = Mock()
 
         ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(100)  # Big enough not to worry about
         for stream in streams:
@@ -323,100 +322,72 @@ class TestChunkSets:
         rng = np.random.default_rng(1)
         expected_clip: dict[tuple[int, int], int] = {}  # Maps (chunk_id, pol) to total clip count
 
-        def add_chunk(chunk_id: int, pol: int, missing: int = 0) -> None:
-            data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
-            present = np.ones(layout.chunk_heaps, np.uint8)
-            present[:missing] = 0  # Mark some leading heaps as missing
-            extra = rng.integers(0, layout.heap_samples - 1, size=layout.chunk_heaps, dtype=np.uint16)
-            expected_clip[chunk_id, pol] = int(np.sum(extra[missing:], dtype=np.int64))
-            chunk = Chunk(data=data, present=present, extra=extra, chunk_id=chunk_id, stream_id=pol, sink=streams[pol])
+        def add_chunk(chunk_id: int, missing: tuple[int, int] = (0, 0)) -> None:
+            data = rng.integers(0, 255, size=(N_POLS, layout.chunk_bytes), dtype=np.uint8)
+            present = np.ones((N_POLS, layout.chunk_heaps), np.uint8)
+            extra = rng.integers(0, layout.heap_samples - 1, size=(N_POLS, layout.chunk_heaps), dtype=np.uint16)
+            for pol, miss in enumerate(missing):
+                present[pol, :miss] = 0  # Mark some leading heaps as missing
+                expected_clip[chunk_id, pol] = int(np.sum(extra[pol, missing[pol] :], dtype=np.int64))
+            chunk = Chunk(data=data, present=present, extra=extra, chunk_id=chunk_id, sink=group)
             ringbuffer.put_nowait(chunk)
 
         for i in range(10):
             # Throw in some empty chunks, to match what spead2 does
-            for pol in range(N_POLS):
-                add_chunk(i, pol, missing=layout.chunk_heaps)
-        add_chunk(10, 0)
-        add_chunk(10, 1)
-        add_chunk(11, 1)
-        add_chunk(12, 1, 1)
-        add_chunk(20, 1)
-        add_chunk(12, 0, 2)
-        add_chunk(20, 0)
-        add_chunk(21, 0)
+            add_chunk(i, missing=(layout.chunk_heaps,) * N_POLS)
+        add_chunk(10, (0, 1))
+        add_chunk(11, (layout.chunk_heaps, 0))
+        add_chunk(12, (3, 5))
+        add_chunk(20, (0, 0))
+        add_chunk(21, (0, layout.chunk_heaps))
         ringbuffer.stop()
 
-        with caplog.at_level(logging.WARNING, logger="katgpucbf.fgpu.recv"), PromDiff(
-            namespace=METRIC_NAMESPACE
-        ) as prom_diff:
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # We're not using make_stream, so we have to register the stream with
             # the stats collector manually.
-            for pol, stream in enumerate(streams):
-                recv.stats_collector.add_stream(stream, labels=[str(pol)])
-            sets = [
-                chunk_set
-                async for chunk_set in recv.chunk_sets(
-                    cast(list[spead2.recv.ChunkRingStream], streams), layout, sensors, time_converter
-                )
-            ]
-        assert caplog.record_tuples == [
-            ("katgpucbf.fgpu.recv", logging.WARNING, "Chunk not matched: timestamp=0xb0000 pol=1")
-        ]
-        assert len(sets) == 3
-        # Check that all the pairs are consistent
-        for s in sets:
-            for pol in range(N_POLS):
-                assert s[pol].stream_id == pol
-                assert s[pol].chunk_id == s[0].chunk_id
-                assert s[pol].timestamp == s[0].chunk_id * layout.chunk_samples
-        expected_ids = [10, 12, 20]
-        assert [s[0].chunk_id for s in sets] == expected_ids
-        assert sets[0][0].chunk_id == 10
-        assert sets[1][0].chunk_id == 12
-        assert sets[2][0].chunk_id == 20
-        # Check that the mismatched / empty chunks were returned to the free ring
-        assert streams[0].add_free_chunk.call_count == 11
-        assert streams[0].add_free_chunk.call_args[0][0].chunk_id == 21
-        assert streams[1].add_free_chunk.call_count == 11
-        assert streams[1].add_free_chunk.call_args[0][0].chunk_id == 11
+            for stream in streams:
+                recv.stats_collector.add_stream(stream)
+            chunks = [chunk async for chunk in recv.iter_chunks(ringbuffer, layout, sensors, time_converter)]
+        assert len(chunks) == 5
+        expected_ids = [10, 11, 12, 20, 21]
+        assert [chunk.chunk_id for chunk in chunks] == expected_ids
+        # Check that the empty chunks were returned to the free ring
+        assert group.add_free_chunk.call_count == 10
+        assert group.add_free_chunk.call_args[0][0].chunk_id == 9
 
         # Check metrics
         def get_sample_diffs(name: str) -> list[float | None]:
             return [prom_diff.get_sample_diff(name, {"pol": str(pol)}) for pol in range(N_POLS)]
 
-        assert get_sample_diffs("input_heaps_total") == [46, 47]
-        assert get_sample_diffs("input_chunks_total") == [3, 3]
-        assert get_sample_diffs("input_samples_total") == [46 * 4096, 47 * 4096]
-        assert get_sample_diffs("input_bytes_total") == [46 * 5120, 47 * 5120]
-        assert get_sample_diffs("input_too_old_heaps_total") == [111, 1111]
-        assert get_sample_diffs("input_missing_heaps_total") == [11 * 16 - 46, 11 * 16 - 47]
-        assert get_sample_diffs("input_bad_timestamp_heaps_total") == [123, 1123]
-        assert get_sample_diffs("input_metadata_heaps_total") == [321, 1321]
+        assert get_sample_diffs("input_heaps_total") == [61, 58]
+        assert prom_diff.get_sample_diff("input_chunks_total") == 5
+        assert get_sample_diffs("input_samples_total") == [61 * 4096, 58 * 4096]
+        assert get_sample_diffs("input_bytes_total") == [61 * 5120, 58 * 5120]
+        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 1222
+        assert get_sample_diffs("input_missing_heaps_total") == [12 * 16 - 61, 12 * 16 - 58]
+        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == 1246
+        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1642
         expected_clip_total = [sum(expected_clip[chunk_id, pol] for chunk_id in expected_ids) for pol in range(N_POLS)]
         assert get_sample_diffs("input_clipped_samples_total") == expected_clip_total
 
         # Check sensors
-        sensor = sensors["input0.rx.timestamp"]
-        assert sensor.value == 21 * layout.chunk_samples
-        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
-        sensor = sensors["input1.rx.timestamp"]
-        assert sensor.value == 20 * layout.chunk_samples
-        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
-        sensor = sensors["input0.rx.unixtime"]
-        assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
-        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-        assert sensor.timestamp == sensor.value
-        sensor = sensors["input1.rx.unixtime"]
-        assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
-        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-        assert sensor.timestamp == sensor.value
         for pol in range(N_POLS):
-            sensor = sensors[f"input{pol}.rx.missing-unixtime"]
-            assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
-            assert sensor.status == aiokatcp.Sensor.Status.ERROR
+            sensor = sensors[f"input{pol}.rx.timestamp"]
+            assert sensor.value == 21 * layout.chunk_samples
+            assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
+            assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+            sensor = sensors[f"input{pol}.rx.unixtime"]
+            assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
+            assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
             assert sensor.timestamp == sensor.value
+        sensor = sensors["input0.rx.missing-unixtime"]
+        assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
+        assert sensor.status == aiokatcp.Sensor.Status.ERROR
+        assert sensor.timestamp == sensor.value
+        sensor = sensors["input1.rx.missing-unixtime"]
+        assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
+        assert sensor.status == aiokatcp.Sensor.Status.ERROR
+        assert sensor.timestamp == sensor.value
         ds_sensor = sensors["rx.device-status"]
         assert ds_sensor.value == DeviceStatus.DEGRADED
         assert ds_sensor.status == aiokatcp.Sensor.Status.WARN

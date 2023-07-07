@@ -1471,7 +1471,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         prev_item = None
         assert isinstance(group.data_ringbuffer, ChunkRingbuffer)
-        async for chunk in group.data_ringbuffer:
+        async for chunk in recv.iter_chunks(group.data_ringbuffer, layout, self.sensors, self.time_converter):
             assert isinstance(chunk, base_recv.Chunk)
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()

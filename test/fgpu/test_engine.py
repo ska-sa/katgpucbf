@@ -374,21 +374,16 @@ class TestEngine:
         saturated = np.sum(saturated.reshape(N_POLS, -1, src_layout.heap_samples), axis=-1, dtype=np.uint16)
         dig_data = packbits(dig_data, src_layout.sample_bits)
         dig_stream = self._make_digitiser(mock_recv_streams)
-        heap_gens = [
-            gen_heaps(
-                src_layout,
-                pol_data,
-                first_timestamp,
-                pol,
-                present=src_present[pol] if src_present is not None else None,
-                saturated=saturated[pol],
-            )
-            for pol, pol_data in enumerate(dig_data)
-        ]
+        heap_gen = gen_heaps(
+            src_layout,
+            dig_data,
+            first_timestamp,
+            present=src_present,
+            saturated=saturated,
+        )
 
-        for cur_heaps in zip(*heap_gens):
-            for pol in range(N_POLS):
-                await dig_stream.async_send_heap(cur_heaps[pol], substream_index=pol)
+        for heap in heap_gen:
+            await dig_stream.async_send_heap(heap)
         for queue in mock_recv_streams:
             queue.stop()
 

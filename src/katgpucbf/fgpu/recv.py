@@ -19,11 +19,9 @@
 import functools
 import logging
 import math
-from collections import deque
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import cast
 
 import aiokatcp
 import numba
@@ -186,9 +184,6 @@ def make_stream_group(
         CPU core affinity for the worker threads (one per thread).
         Use -1 to indicate no affinity for a thread.
     """
-    if len(src_affinity) % N_POLS:
-        raise ValueError("len(src_affinity) must be a multiple of N_POLS")
-
     # Reference counters to make the labels exist before the first scrape
     for pol in range(N_POLS):
         for counter in _PER_POL_COUNTERS:
@@ -263,127 +258,93 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
     return sensors
 
 
-async def chunk_sets(
-    ring_pairs: Sequence[spead2.recv.ChunkRingPair],
+async def iter_chunks(
+    ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     layout: Layout,
     sensors: aiokatcp.SensorSet,
     time_converter: TimeConverter,
-) -> AsyncGenerator[list[Chunk], None]:
-    """Asynchronous generator yielding timestamp-matched sets of chunks.
+) -> AsyncGenerator[Chunk, None]:
+    """Iterate over the chunks and update sensors.
 
-    This code receives chunks of data from the C++-domain Ringbuffer, matches
-    them by timestamp, and ``yield`` to the caller.
-
-    The input streams must all share the same ringbuffer, and their array
-    indices must match their ``pol`` attributes. Whenever the most recent chunk
-    from each of the streams all have the same timestamp, they are yielded.
-    Chunks that are not yielded are returned to their streams.
+    It also populates the chunk timestamp.
 
     Parameters
     ----------
-    ring_pairs
-        A list of ringbuffer pairs - there should be only two of them, because
-        each represents a polarisation.
+    ringbuffer
+        Source of chunks.
     layout
-        Structure of the streams
+        Structure of the streams.
     sensors
         Sensor set containing at least the sensors created by
         :func:`make_sensors`.
     time_converter
         Converter to turn data timestamps into sensor timestamps.
     """
-    n_pol = len(ring_pairs)
-    # Working buffer to match up pairs of chunks from both pols. There is
-    # a deque for each pol, ordered by time
-    buf: list[deque[Chunk]] = [deque() for _ in ring_pairs]
-    ring = cast(spead2.recv.asyncio.ChunkRingbuffer, ring_pairs[0].data_ringbuffer)
     lost = 0
-
     first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
     # These duplicate the Prometheus counters, because prometheus_client
     # doesn't provide an efficient way to get the current value
     # (REGISTRY.get_sample_value is documented as being intended only for unit
     # tests).
-    n_heaps = [0] * n_pol
-    n_missing_heaps = [0] * n_pol
+    n_heaps = [0] * N_POLS
+    n_missing_heaps = [0] * N_POLS
 
     # `try`/`finally` block acting as a quick-and-dirty context manager,
     # to ensure that we clean up nicely after ourselves if we are stopped.
     try:
-        async for chunk in ring:
+        async for chunk in ringbuffer:
             assert isinstance(chunk, Chunk)
             # Inspect the chunk we have just received.
             chunk.timestamp = chunk.chunk_id * layout.chunk_samples
-            pol = chunk.stream_id
             good = np.sum(chunk.present)
             if not good:
+                # Dummy chunk created by spead2
                 chunk.recycle()
                 continue
             if first_timestamp == -1:
                 # TODO: use chunk.present to determine the actual first timestamp
                 first_timestamp = chunk.timestamp
-            lost += layout.chunk_heaps - good
+            lost += chunk.present.size - good
             logger.debug(
-                "Received chunk: timestamp=%#x pol=%d (%d/%d, lost %d)",
+                "Received chunk: timestamp=%#x (%d/%d, lost %d)",
                 chunk.timestamp,
-                pol,
                 good,
-                layout.chunk_heaps,
+                chunk.present.size,
                 lost,
             )
             unix_time = time_converter.adc_to_unix(chunk.timestamp)
-            sensors[f"input{pol}.rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-            sensors[f"input{pol}.rx.unixtime"].set_value(aiokatcp.core.Timestamp(unix_time), timestamp=unix_time)
+            for pol in range(N_POLS):
+                sensors[f"input{pol}.rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+                sensors[f"input{pol}.rx.unixtime"].set_value(aiokatcp.core.Timestamp(unix_time), timestamp=unix_time)
 
-            buf[pol].append(chunk)
-
-            # Age out old chunks that will never match. This happens if the
-            # chunk is older than the newest chunk for every pol.
-            min_newest = min((b[-1].chunk_id if b else -1) for b in buf)
-            for pol, b in enumerate(buf):
-                while b and b[0].chunk_id < min_newest:
-                    logger.warning("Chunk not matched: timestamp=%#x pol=%d", b[0].chunk_id * layout.chunk_samples, pol)
-                    # Chunk was passed by without getting used. Return to the pool.
-                    b.popleft().recycle()
-
-            # If we have a matching pair of chunks, then we can yield.
-            if all(b and b[0].chunk_id == chunk.chunk_id for b in buf):
-                expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
-                out = []
-                for b in buf:
-                    c = b.popleft()
-                    out.append(c)
-                    pol = c.stream_id
-                    # The cast is to force numpy ints to Python ints.
-                    buf_good = int(np.sum(c.present))
-                    heaps_counter.labels(pol).inc(buf_good)
-                    chunks_counter.labels(pol).inc()
-                    samples_counter.labels(pol).inc(buf_good * layout.heap_samples)
-                    bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
-                    # Zero out saturation count for heaps that were never received
-                    # (otherwise the value is undefined memory).
-                    assert c.extra is not None
-                    c.extra[c.present == 0] = 0
-                    dig_clip_counter.labels(pol).inc(int(np.sum(c.extra, dtype=np.uint64)))
-                    # Determine how many heaps we expected to have seen by
-                    # now, and subtract from it the number actually seen to
-                    # determine the number missing. This accounts for both
-                    # heaps lost within chunks and lost chunks.
-                    n_heaps[c.stream_id] += buf_good
-                    new_missing = expected_heaps - n_heaps[pol]
-                    if new_missing > n_missing_heaps[pol]:
-                        missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
-                        n_missing_heaps[pol] = new_missing
-                        sensors[f"input{pol}.rx.missing-unixtime"].set_value(
-                            aiokatcp.core.Timestamp(unix_time), timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
-                        )
-
-                yield out
+            pol_expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
+            chunks_counter.inc()
+            # Zero out saturation count for heaps that were never received
+            # (otherwise the value is undefined memory).
+            assert chunk.extra is not None
+            chunk.extra[chunk.present == 0] = 0
+            for pol in range(N_POLS):
+                # The cast is to force numpy ints to Python ints.
+                buf_good = int(np.sum(chunk.present[pol]))
+                heaps_counter.labels(pol).inc(buf_good)
+                samples_counter.labels(pol).inc(buf_good * layout.heap_samples)
+                bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
+                dig_clip_counter.labels(pol).inc(int(np.sum(chunk.extra[pol], dtype=np.uint64)))
+                # Determine how many heaps we expected to have seen by
+                # now, and subtract from it the number actually seen to
+                # determine the number missing. This accounts for both
+                # heaps lost within chunks and lost chunks.
+                n_heaps[pol] += buf_good
+                new_missing = pol_expected_heaps - n_heaps[pol]
+                if new_missing > n_missing_heaps[pol]:
+                    missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
+                    n_missing_heaps[pol] = new_missing
+                    sensors[f"input{pol}.rx.missing-unixtime"].set_value(
+                        aiokatcp.core.Timestamp(unix_time), timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
+                    )
+            yield chunk
     finally:
         stats_collector.update()  # Ensure final stats updates are captured
-        for b in buf:
-            for c in b:
-                c.recycle()
 
 
-__all__ = ["Chunk", "Layout", "chunk_sets"]
+__all__ = ["Chunk", "Layout", "iter_chunks"]
