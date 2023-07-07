@@ -1483,9 +1483,6 @@ class Engine(aiokatcp.DeviceServer):
             if not self.use_vkgdr:
                 in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunk.timestamp)
-
-            # When using vkgdr, the chunk has extra padding
-            chunk_data = chunk.data[:, : layout.chunk_bytes]
             in_item.n_samples = layout.chunk_samples
 
             transfer_events = []
@@ -1508,7 +1505,7 @@ class Engine(aiokatcp.DeviceServer):
                 # Copy the chunk to the right place on the GPU.
                 assert in_item.samples is not None
                 in_item.samples.set_region(
-                    self._upload_queue, chunk_data, np.s_[:, : layout.chunk_bytes], np.s_[:], blocking=False
+                    self._upload_queue, chunk.data, np.s_[:, : layout.chunk_bytes], np.s_[:], blocking=False
                 )
                 transfer_events.append(self._upload_queue.enqueue_marker())
                 # Put events on the queue so that run_processing() knows when to
