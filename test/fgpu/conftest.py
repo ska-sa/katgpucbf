@@ -28,7 +28,6 @@ from katsdpsigproc.abc import AbstractContext
 
 import katgpucbf.fgpu.engine
 import katgpucbf.fgpu.recv
-from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
 from katgpucbf.fgpu.main import make_engine, parse_args
 
@@ -36,7 +35,7 @@ from katgpucbf.fgpu.main import make_engine, parse_args
 @pytest.fixture
 def n_src_streams() -> int:  # noqa: D401
     """Number of source streams for an fgpu instance."""
-    return N_POLS
+    return 1
 
 
 @pytest.fixture
@@ -81,6 +80,15 @@ def recv_max_chunks_one(monkeypatch) -> None:
     This simplifies the process of reliably injecting data.
     """
     monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
+
+
+@pytest.fixture
+def recv_lossless_eviction(monkeypatch) -> None:
+    """Change :data:`katgpucbf.recv.EVICTION_MODE` to lossless for the test.
+
+    This simplifies the process of reliably injecting data.
+    """
+    monkeypatch.setattr(katgpucbf.recv, "EVICTION_MODE", spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSLESS)
 
 
 def check_vkgdr(context: AbstractContext) -> None:

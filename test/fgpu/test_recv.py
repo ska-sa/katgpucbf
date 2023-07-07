@@ -84,35 +84,34 @@ def data_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
 
 
 @pytest.fixture
-def free_ringbuffers(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
-    """Create asynchronous free chunk ringbuffers, to be used by the receive streams."""
-    return [spead2.recv.asyncio.ChunkRingbuffer(4) for _ in range(N_POLS)]
+def free_ringbuffer(layout) -> list[spead2.recv.asyncio.ChunkRingbuffer]:
+    """Create asynchronous free chunk ringbuffer, to be used by the receive streams."""
+    return spead2.recv.asyncio.ChunkRingbuffer(4)
 
 
 @pytest.fixture
-def stream_groups(
-    layout, data_ringbuffer, free_ringbuffers, queues
+def stream_group(
+    layout, data_ringbuffer, free_ringbuffer, queues, recv_lossless_eviction
 ) -> Generator[list[spead2.recv.ChunkStreamRingGroup], None, None]:
-    """Create a receive stream group per polarization.
+    """Create a receive stream group.
 
     They are connected to the :func:`queues` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    stream_groups = recv.make_stream_groups(layout, data_ringbuffer, free_ringbuffers, [-1, -1])
-    for group, queue, free_ringbuffer in zip(stream_groups, queues, free_ringbuffers):
-        for _ in range(free_ringbuffer.maxsize):
-            data = np.empty(layout.chunk_bytes, np.uint8)
-            # Use np.ones to make sure the bits get zeroed out
-            present = np.ones(layout.chunk_heaps, np.uint8)
-            extra = np.zeros(layout.chunk_heaps, np.uint16)
-            chunk = Chunk(data=data, present=present, extra=extra, sink=group)
-            chunk.recycle()
-        group[0].add_inproc_reader(queue)
+    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, [-1] * len(queues))
+    for _ in range(free_ringbuffer.maxsize):
+        data = np.empty((N_POLS, layout.chunk_bytes), np.uint8)
+        # Use np.ones to make sure the bits get zeroed out
+        present = np.ones((N_POLS, layout.chunk_heaps), np.uint8)
+        extra = np.zeros((N_POLS, layout.chunk_heaps), np.uint16)
+        chunk = Chunk(data=data, present=present, extra=extra, sink=stream_group)
+        chunk.recycle()
+    for stream, queue in zip(stream_group, queues):
+        stream.add_inproc_reader(queue)
 
-    yield stream_groups
+    yield stream_group
 
-    for group in stream_groups:
-        group.stop()
+    stream_group.stop()
 
 
 @pytest.fixture
@@ -129,43 +128,47 @@ def gen_heaps(
     layout: Layout,
     data: ArrayLike,
     first_timestamp: int,
-    pol: int,
     present: Sequence[bool] | None = None,
     saturated: Sequence[int] | None = None,
 ) -> Generator[spead2.send.Heap, None, None]:
     """Generate heaps from an array of data.
 
-    The data must be a 1D array of bytes, evenly divisible by the heap size.
+    The data must be a 2D array of bytes. The first axis is polarisation,
+    and the second must be evenly divisible by the heap size.
     The heaps do not exactly match the real digitiser packet format, but
     contain all the relevant items to test the receiver code.
 
     If `present` is specified, it must contain one boolean per heap. If the
     boolean is false, the heap is skipped.
 
-    If `present` is specified, it contains the saturation count for each heap
+    If `saturated` is specified, it contains the saturation count for each heap
     (used to compute `digitiser_status`). If not specified, all samples are
     assumed to be unsaturated.
     """
     data_arr = np.require(data, dtype=np.uint8)
-    assert data_arr.ndim == 1
-    data_arr = data_arr.reshape(-1, layout.heap_bytes)  # One row per heap
-    assert present is None or len(present) == data_arr.shape[0]
+    assert data_arr.ndim == 2
+    assert data_arr.shape[0] == N_POLS
+    data_arr = data_arr.reshape(N_POLS, -1, layout.heap_bytes)  # One row per heap
+    assert present is None or present.shape == data_arr.shape[:2]
+    assert saturated is None or saturated.shape == data_arr.shape[:2]
     timestamp = first_timestamp
     imm_format = [("u", FLAVOUR.heap_address_bits)]
-    for i, row in enumerate(data_arr):
-        if present is None or present[i]:
-            if saturated is not None and saturated[i] > 0:
-                status = (saturated[i] << DIGITISER_STATUS_SATURATION_COUNT_SHIFT) | (
-                    1 << DIGITISER_STATUS_SATURATION_FLAG_BIT
-                )
-            else:
-                status = 0
-            heap = spead2.send.Heap(FLAVOUR)
-            heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
-            heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
-            heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=status))
-            heap.add_item(spead2.Item(ADC_SAMPLES_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
-            yield heap
+    for i in range(data_arr.shape[1]):
+        for pol in range(N_POLS):
+            row = data_arr[pol, i]
+            if present is None or present[pol, i]:
+                if saturated is not None and saturated[pol, i] > 0:
+                    status = (saturated[pol, i] << DIGITISER_STATUS_SATURATION_COUNT_SHIFT) | (
+                        1 << DIGITISER_STATUS_SATURATION_FLAG_BIT
+                    )
+                else:
+                    status = 0
+                heap = spead2.send.Heap(FLAVOUR)
+                heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
+                heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
+                heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=status))
+                heap.add_item(spead2.Item(ADC_SAMPLES_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
+                yield heap
         timestamp += layout.heap_samples
 
 
@@ -178,7 +181,7 @@ class TestStream:
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
-        stream_groups: list[spead2.recv.ChunkStreamRingGroup],
+        stream_group: spead2.recv.ChunkStreamRingGroup,
         queues: list[spead2.InprocQueue],
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
@@ -204,14 +207,13 @@ class TestStream:
             mask
                 Like "good" but all timestamps have some garbage in the low-order bits.
         """
-        POL = 1  # Only test one of the pols # noqa: N806
         rng = np.random.default_rng(seed=1)
-        data = rng.integers(0, 255, size=5 * layout.chunk_bytes, dtype=np.uint8)
+        data = rng.integers(0, 255, size=(N_POLS, 5 * layout.chunk_bytes), dtype=np.uint8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.chunk_samples
         if timestamps == "mask":
             first_timestamp += 1234  # Invalid bits that will be masked off
-        heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp, POL)
+        heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
         if reorder:
             heap_list = list(heaps)
             # In each group of 12 heaps, swap the first and the last. The
@@ -221,15 +223,15 @@ class TestStream:
                 heap_list[i - 11], heap_list[i] = heap_list[i], heap_list[i - 11]
             heaps = heap_list
         if timestamps == "bad":
-            bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567, POL)
+            bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
             # Interleave the sequences
             heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
 
         # Heap with no payload - representing any sort of metadata heap such as descriptors
         heap = spead2.send.Heap(FLAVOUR)
-        await send_stream.async_send_heap(heap, substream_index=POL)
+        await send_stream.async_send_heap(heap)
         for heap in heaps:
-            await send_stream.async_send_heap(heap, substream_index=POL)
+            await send_stream.async_send_heap(heap)
         for queue in queues:
             queue.stop()  # Flushes out the receive streams
         seen = 0
@@ -241,40 +243,38 @@ class TestStream:
                     # these due to the way it allocates chunks to keep the window
                     # full.
                     continue
-                assert chunk.stream_id == POL
                 assert chunk.chunk_id == expected_chunk_id
                 assert np.all(chunk.present)
-                np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
-                data = data[layout.chunk_bytes :]  # Throw away the samples we've checked
+                np.testing.assert_array_equal(chunk.data, data[:, : layout.chunk_bytes])
+                data = data[:, layout.chunk_bytes :]  # Throw away the samples we've checked
                 seen += 1
                 expected_chunk_id += 1
         assert seen == 5
-        expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
-        assert stream_groups[POL][0].stats["katgpucbf.metadata_heaps"] == 1
-        assert stream_groups[POL][0].stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
+        expected_bad_timestamps = N_POLS * seen * layout.chunk_heaps if timestamps == "bad" else 0
+        assert stream_group[0].stats["katgpucbf.metadata_heaps"] == 1
+        assert stream_group[0].stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
 
     async def test_missing_heaps(
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
-        stream_groups: list[spead2.recv.ChunkStreamRingGroup],
+        stream_group: spead2.recv.ChunkStreamRingGroup,
         queues: list[spead2.InprocQueue],
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
-        POL = 1  # Only test one of the pols # noqa: N806
         rng = np.random.default_rng(seed=1)
-        data = rng.integers(0, 255, size=layout.chunk_bytes, dtype=np.uint8)
+        data = rng.integers(0, 255, size=(N_POLS, layout.chunk_bytes), dtype=np.uint8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.chunk_samples
-        heaps = list(gen_heaps(layout, data, first_timestamp, POL))
+        heaps = list(gen_heaps(layout, data, first_timestamp))
         # Create some gaps in the heaps
-        missing = [0, 5, 7]
+        missing = [0, 10, 15]
         for idx in reversed(missing):  # Have to go backwards, otherwise indices shift up
             del heaps[idx]
 
         for heap in heaps:
-            await send_stream.async_send_heap(heap, substream_index=POL)
+            await send_stream.async_send_heap(heap)
         for queue in queues:
             queue.stop()  # Flushes out the receive streams
         # Get just the chunks that actually have some data. We needn't worry
@@ -285,9 +285,10 @@ class TestStream:
         chunk = chunks[0]
         assert isinstance(chunk, Chunk)
         assert chunk.chunk_id == expected_chunk_id
-        assert chunk.stream_id == POL
-        expected = np.ones_like(chunk.present)
+        expected = np.ones(chunk.present.size, np.uint8)
         expected[missing] = 0
+        # heap list interleaves the polarisations, so use it as the fastest-varying axis
+        expected = expected.reshape(chunk.present.shape, order="F")
         np.testing.assert_equal(chunk.present, expected)
 
 

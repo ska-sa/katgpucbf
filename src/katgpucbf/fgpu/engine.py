@@ -17,10 +17,11 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
+import itertools
 import logging
 import math
 import numbers
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial
 
@@ -1250,8 +1251,8 @@ class Engine(aiokatcp.DeviceServer):
 
     def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
-        src_chunks_per_stream = 4
-        ringbuffer_capacity = src_chunks_per_stream * N_POLS
+        src_chunks = 4
+        ringbuffer_capacity = src_chunks * N_POLS
 
         context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
@@ -1260,35 +1261,42 @@ class Engine(aiokatcp.DeviceServer):
         data_ringbuffer = ChunkRingbuffer(
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
-        free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
-        self._src_groups = recv.make_stream_groups(self.src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = self.src_layout.chunk_samples * self.src_layout.sample_bits // BYTE_BITS
-        for group in self._src_groups:
-            for _ in range(src_chunks_per_stream):
-                if self.use_vkgdr:
-                    array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
-                    device_bytes = array_bytes + INPUT_CHUNK_PADDING
-                    with context:
-                        mem = vkgdr.pycuda.Memory(self.vkgdr_handle, device_bytes)
-                    buf = np.array(mem, copy=False).view(np.uint8)
-                    # The device buffer contains extra space for copying the head
-                    # of the following chunk, but we don't need that in the host
-                    # mapping.
-                    buf = buf[:chunk_bytes]
-                    device_array = accel.DeviceArray(
-                        context, (array_bytes,), np.uint8, padded_shape=(device_bytes,), raw=mem
-                    )
-                else:
-                    buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
-                    device_array = None
-                chunk = recv.Chunk(
-                    data=buf,
-                    device=device_array,
-                    present=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint8),
-                    extra=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint16),
-                    sink=group,
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(src_chunks)
+        self._src_group = recv.make_stream_group(self.src_layout, data_ringbuffer, free_ringbuffer, src_affinity)
+        chunk_bytes = self.src_layout.chunk_bytes
+        for _ in range(src_chunks):
+            if self.use_vkgdr:
+                # These quantities are per-pol
+                array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
+                device_bytes = array_bytes + INPUT_CHUNK_PADDING
+                with context:
+                    mem = vkgdr.pycuda.Memory(self.vkgdr_handle, N_POLS * device_bytes)
+                buf = np.array(mem, copy=False).view(np.uint8).reshape(N_POLS, device_bytes)
+                # The device buffer contains extra space for copying the head
+                # of the following chunk, but we don't need that in the host
+                # mapping.
+                buf = buf[:, :chunk_bytes]
+                device_array = accel.DeviceArray(
+                    context,
+                    (
+                        N_POLS,
+                        array_bytes,
+                    ),
+                    np.uint8,
+                    padded_shape=(device_bytes,),
+                    raw=mem,
                 )
-                chunk.recycle()  # Make available to the stream
+            else:
+                buf = accel.HostArray((N_POLS, chunk_bytes), np.uint8, context=context)
+                device_array = None
+            chunk = recv.Chunk(
+                data=buf,
+                device=device_array,
+                present=np.zeros((N_POLS, self.src_layout.chunk_heaps), np.uint8),
+                extra=np.zeros((N_POLS, self.src_layout.chunk_heaps), np.uint16),
+                sink=self._src_group,
+            )
+            chunk.recycle()  # Make available to the stream
 
     def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
@@ -1438,7 +1446,7 @@ class Engine(aiokatcp.DeviceServer):
         else:
             prev_item.present[:, -copy_heaps:] = 0  # Mark tail as absent, for each pol
 
-    async def _run_receive(self, groups: list[spead2.recv.ChunkStreamRingGroup], layout: recv.Layout) -> None:
+    async def _run_receive(self, group: spead2.recv.ChunkStreamRingGroup, layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -
@@ -1456,14 +1464,15 @@ class Engine(aiokatcp.DeviceServer):
 
         Parameters
         ----------
-        groups
-            There should be only two of these because they each represent one of
-            the digitiser's two polarisations.
+        group
+            Receiving stream group.
         layout
             The structure of the streams.
         """
         prev_item = None
-        async for chunks in recv.chunk_sets(groups, layout, self.sensors, self.time_converter):
+        assert isinstance(group.data_ringbuffer, ChunkRingbuffer)
+        async for chunk in group.data_ringbuffer:
+            assert isinstance(chunk, base_recv.Chunk)
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
             # Make sure all the item's events are complete before overwriting
@@ -1471,38 +1480,34 @@ class Engine(aiokatcp.DeviceServer):
             # handled by _push_recv_chunks.
             if not self.use_vkgdr:
                 in_item.enqueue_wait_for_events(self._upload_queue)
-            in_item.reset(chunks[0].timestamp)
+            in_item.reset(chunk.timestamp)
 
             # In steady-state, chunks should be the same size, but during
             # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.src_layout.sample_bits
+            in_item.n_samples = chunk.data.shape[1] * BYTE_BITS // self.src_layout.sample_bits
 
             transfer_events = []
-            for pol, chunk in enumerate(chunks):
-                # Copy the present flags (synchronously).
-                in_item.present[pol, : len(chunk.present)] = chunk.present
-                # Update the digitiser saturation count (the "extra" field holds
-                # per-heap values).
-                assert chunk.extra is not None
+            # Copy the present flags (synchronously).
+            in_item.present[:, : chunk.present.shape[1]] = chunk.present
+            # Update the digitiser saturation count (the "extra" field holds
+            # per-heap values).
+            assert chunk.extra is not None
+            for pol in range(N_POLS):
                 sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
                 sensor.set_value(
-                    sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
+                    sensor.value + int(np.sum(chunk.extra[pol], dtype=np.uint64)),
                     timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
                 )
             if self.use_vkgdr:
-                # TODO: need to rewrite this once chunks are dual-pol
-                for pol_data, chunk in zip(in_item.pol_data, chunks):
-                    assert pol_data.samples is None
-                    pol_data.samples = chunk.device  # type: ignore
-                    pol_data.chunk = chunk
+                assert in_item.samples is None
+                in_item.samples = chunk.device  # type: ignore
             else:
-                # Copy each pol chunk to the right place on the GPU.
+                # Copy the chunk to the right place on the GPU.
                 assert in_item.samples is not None
-                for pol, chunk in enumerate(chunks):
-                    in_item.samples.set_region(
-                        self._upload_queue, chunk.data, np.s_[pol, : chunk.data.nbytes], np.s_[:], blocking=False
-                    )
-                    transfer_events.append(self._upload_queue.enqueue_marker())
+                in_item.samples.set_region(
+                    self._upload_queue, chunk.data, np.s_[:, : chunk.data.shape[1]], np.s_[:], blocking=False
+                )
+                transfer_events.append(self._upload_queue.enqueue_marker())
                 # Put events on the queue so that run_processing() knows when to
                 # start.
                 in_item.events.extend(transfer_events)
@@ -1519,10 +1524,9 @@ class Engine(aiokatcp.DeviceServer):
                 # something goes wrong we won't have waited for the event, and
                 # giving the chunk back to the stream while it's still in use
                 # by the device could cause incorrect data to be transmitted.
-                for pol in range(len(chunks)):
-                    with self.monitor.with_state("run_receive", "wait transfer"):
-                        await async_wait_for_events([transfer_events[pol]])
-                    chunks[pol].recycle()
+                with self.monitor.with_state("run_receive", "wait transfer"):
+                    await async_wait_for_events(transfer_events)
+                chunk.recycle()
 
         if prev_item is not None:
             # Flush the final chunk to the pipelines
@@ -1684,21 +1688,25 @@ class Engine(aiokatcp.DeviceServer):
             self._cancel_tasks.append(descriptor_task)
 
         src_comp_vector_iter = iter(self._src_comp_vector)
-        for pol, group in enumerate(self._src_groups):
-            for i, stream in enumerate(group):
-                first_src = i * len(self._srcs[pol]) // len(group)
-                last_src = (i + 1) * len(self._srcs[pol]) // len(group)
-                base_recv.add_reader(
-                    stream,
-                    src=self._srcs[pol][first_src:last_src],
-                    interface=self._src_interface[pol] if self._src_interface is not None else None,
-                    ibv=self._src_ibv,
-                    comp_vector=next(src_comp_vector_iter),
-                    buffer=self._src_buffer // len(group),
-                )
+        if self._src_interface is None:
+            src_interface_iter: Iterator[str | None] = itertools.repeat(None)
+        else:
+            src_interface_iter = itertools.cycle(self._src_interface)
+        all_srcs = self._srcs[0] + self._srcs[1]
+        for i, stream in enumerate(self._src_group):
+            first_src = i * len(all_srcs) // len(self._src_group)
+            last_src = (i + 1) * len(all_srcs) // len(self._src_group)
+            base_recv.add_reader(
+                stream,
+                src=all_srcs[first_src:last_src],
+                interface=next(src_interface_iter),
+                ibv=self._src_ibv,
+                comp_vector=next(src_comp_vector_iter),
+                buffer=self._src_buffer // len(self._src_group),
+            )
 
         recv_task = asyncio.create_task(
-            self._run_receive(self._src_groups, self.src_layout),
+            self._run_receive(self._src_group, self.src_layout),
             name=RECV_TASK_NAME,
         )
         self.add_service_task(recv_task)
@@ -1727,8 +1735,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         for task in self._cancel_tasks:
             task.cancel()
-        for group in self._src_groups:
-            group.stop()
+        self._src_group.stop()
         # If any of the tasks are already done then we had an exception, and
         # waiting for the rest may hang as the shutdown path won't proceed
         # neatly.

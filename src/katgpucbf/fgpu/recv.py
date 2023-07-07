@@ -35,8 +35,9 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, MIN_SENSOR_UPDATE_PERIOD, N_POLS
-from ..recv import BaseLayout, Chunk, StatsCollector, make_stream_group, user_data_type
-from ..spead import DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
+from .. import recv as base_recv
+from ..recv import BaseLayout, Chunk, StatsCollector, user_data_type
+from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
 from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
 
@@ -48,7 +49,7 @@ MAX_CHUNKS = 2
 logger = logging.getLogger(__name__)
 
 heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
-chunks_counter = Counter("input_chunks", "number of chunks received", ["pol"], namespace=METRIC_NAMESPACE)
+chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
 samples_counter = Counter("input_samples", "number of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE)
 bytes_counter = Counter(
     "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
@@ -61,7 +62,6 @@ dig_clip_counter = Counter(
 )
 _PER_POL_COUNTERS = [
     heaps_counter,
-    chunks_counter,
     samples_counter,
     bytes_counter,
     missing_heaps_counter,
@@ -77,7 +77,6 @@ stats_collector = StatsCollector(
             "timestamp not a multiple of samples per packet",
         ),
     },
-    labelnames=["pol"],
     namespace=METRIC_NAMESPACE,
 )
 
@@ -107,7 +106,7 @@ class Layout(BaseLayout):
 
     @property
     def chunk_heaps(self) -> int:  # noqa: D401
-        """Number of heaps per chunk."""
+        """Number of heaps per chunk, on time axis."""
         return self.chunk_samples // self.heap_samples
 
     @property
@@ -136,6 +135,7 @@ class Layout(BaseLayout):
             timestamp = items[0]
             payload_size = items[1]
             status = items[2]
+            pol = items[3] & 1  # Polarisation is LSB of digitiser ID field
             user_data = numba.carray(user_data_ptr, 1)
             batch_stats = numba.carray(
                 intp_to_voidptr(data[0].batch_stats),
@@ -152,7 +152,7 @@ class Layout(BaseLayout):
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
             data[0].chunk_id = timestamp // chunk_samples
-            data[0].heap_index = timestamp // heap_samples % chunk_heaps
+            data[0].heap_index = timestamp // heap_samples % chunk_heaps + pol * chunk_heaps
             data[0].heap_offset = data[0].heap_index * heap_bytes
 
             extra = numba.carray(intp_to_voidptr(data[0].extra), 1, dtype=np.uint16)
@@ -163,12 +163,12 @@ class Layout(BaseLayout):
         return chunk_place_impl
 
 
-def make_stream_groups(
+def make_stream_group(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
-    free_ringbuffers: Sequence[spead2.recv.ChunkRingbuffer],
+    free_ringbuffer: spead2.recv.ChunkRingbuffer,
     src_affinity: Sequence[int],
-) -> list[spead2.recv.ChunkStreamRingGroup]:
+) -> spead2.recv.ChunkStreamRingGroup:
     """Create SPEAD receiver streams.
 
     Small helper function with F-engine-specific logic in it. Returns a stream
@@ -180,13 +180,11 @@ def make_stream_groups(
         Heap size and chunking parameters.
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
-    free_ringbuffers
-        Ringbuffers for holding chunks for recycling once they've been used
-        (one per pol).
+    free_ringbuffer
+        Ringbuffer for holding chunks for recycling once they've been used.
     src_affinity
-        CPU core affinity for the worker threads (one per thread). This must be
-        a multiple of the number of polarisations. Use -1 to indicate no
-        affinity for a thread.
+        CPU core affinity for the worker threads (one per thread).
+        Use -1 to indicate no affinity for a thread.
     """
     if len(src_affinity) % N_POLS:
         raise ValueError("len(src_affinity) must be a multiple of N_POLS")
@@ -196,26 +194,20 @@ def make_stream_groups(
         for counter in _PER_POL_COUNTERS:
             counter.labels(pol)
 
-    threads_per_pol = len(src_affinity) // N_POLS
-    groups = [
-        make_stream_group(
-            layout=layout,
-            spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID, DIGITISER_STATUS_ID],
-            max_active_chunks=MAX_CHUNKS,
-            max_heap_extra=np.dtype(np.uint16).itemsize,
-            data_ringbuffer=data_ringbuffer,
-            free_ringbuffer=free_ringbuffers[pol],
-            affinity=src_affinity[pol * threads_per_pol : (pol + 1) * threads_per_pol],
-            max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
-            stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
-            stream_id=pol,
-        )
-        for pol in range(N_POLS)
-    ]
-    for pol, group in enumerate(groups):
-        for stream in group:
-            stats_collector.add_stream(stream, [str(pol)])
-    return groups
+    group = base_recv.make_stream_group(
+        layout=layout,
+        spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID, DIGITISER_STATUS_ID, DIGITISER_ID_ID],
+        max_active_chunks=MAX_CHUNKS,
+        max_heap_extra=np.dtype(np.uint16).itemsize,
+        data_ringbuffer=data_ringbuffer,
+        free_ringbuffer=free_ringbuffer,
+        affinity=src_affinity,
+        max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
+        stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
+    )
+    for stream in group:
+        stats_collector.add_stream(stream)
+    return group
 
 
 def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:

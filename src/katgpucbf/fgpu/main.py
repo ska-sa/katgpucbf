@@ -297,8 +297,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--src-affinity",
         type=comma_split(int),
-        metavar="CORE,CORE,...",
-        default=[-1] * N_POLS,
+        metavar="CORE,...",
+        default=[-1],
         help="Cores for input-handling threads (comma-separated) [not bound]",
     )
     parser.add_argument(
@@ -433,8 +433,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     for src in args.src:
         if not isinstance(src, str) and args.src_interface is None:
             parser.error("Live source requires --src-interface")
-    if len(args.src_affinity) % N_POLS != 0:
-        parser.error(f"--src-affinity length must be a multiple of {N_POLS}")
     if args.src_ibv and len(args.src_affinity) != len(args.src_comp_vector):
         parser.error("--src-comp-vector must have same length as --src-affinity")
 

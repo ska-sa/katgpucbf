@@ -44,6 +44,10 @@ user_data_type = types.Record.make_c_struct(
 RX_SENSOR_TIMEOUT_CHUNKS = 10
 #: Minimum rx sensor status timeout in seconds
 RX_SENSOR_TIMEOUT_MIN = 1.0
+#: Eviction mode to use when some streams fall behind
+EVICTION_MODE = spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY
+
+AnyStream = spead2.recv.ChunkRingStream | spead2.recv.ChunkStreamGroupMember
 
 
 class Chunk(spead2.recv.Chunk):
@@ -93,7 +97,7 @@ class StatsCollector(Collector):
     class _StreamInfo:
         """Information about a single registered stream."""
 
-        stream: weakref.ReferenceType[spead2.recv.ChunkRingStream]
+        stream: weakref.ReferenceType[AnyStream]
         indices: list[int]  # Indices of counters, in the order given by counter_map
         prev: list[int]  # Amounts already counted
 
@@ -111,7 +115,7 @@ class StatsCollector(Collector):
             self.created = time.time()
             self.streams = []
 
-        def add_stream(self, stream: spead2.recv.ChunkRingStream) -> None:
+        def add_stream(self, stream: AnyStream) -> None:
             """Register a new stream."""
             config = stream.config
             indices = [config.get_stat_index(name) for name in self.totals.keys()]
@@ -176,7 +180,7 @@ class StatsCollector(Collector):
         for label_set in self._label_sets.values():
             label_set.update()
 
-    def add_stream(self, stream: spead2.recv.ChunkRingStream, labels: Iterable[str] = ()) -> None:
+    def add_stream(self, stream: AnyStream, labels: Iterable[str] = ()) -> None:
         """Register a new stream.
 
         If the collector was constructed with a non-empty ``labelnames``, then
@@ -350,7 +354,7 @@ def make_stream_group(
         max_heap_extra=max_heap_extra,
         place=layout.chunk_place(stats_base),
     )
-    group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_active_chunks)
+    group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_active_chunks, eviction_mode=EVICTION_MODE)
 
     group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
     for core in affinity:
@@ -363,7 +367,7 @@ def make_stream_group(
 
 
 def add_reader(
-    stream: spead2.recv.ChunkRingStream,
+    stream: AnyStream,
     *,
     src: str | list[tuple[str, int]],
     interface: str | None,
