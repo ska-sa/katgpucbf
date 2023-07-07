@@ -34,7 +34,7 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, MIN_SENSOR_UPDATE_PERIOD, N_POLS
 from .. import recv as base_recv
-from ..recv import BaseLayout, Chunk, StatsCollector, user_data_type
+from ..recv import BaseLayout, Chunk, StatsCollector
 from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
 from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
 from . import METRIC_NAMESPACE
@@ -76,6 +76,13 @@ stats_collector = StatsCollector(
         ),
     },
     namespace=METRIC_NAMESPACE,
+)
+
+user_data_type = types.Record.make_c_struct(
+    [
+        ("stats_base", types.size_t),  # Index for first custom statistic
+        ("stride", types.size_t),  # Bytes between polarisations in payload array
+    ]
 )
 
 
@@ -150,8 +157,9 @@ class Layout(BaseLayout):
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
             data[0].chunk_id = timestamp // chunk_samples
-            data[0].heap_index = timestamp // heap_samples % chunk_heaps + pol * chunk_heaps
-            data[0].heap_offset = data[0].heap_index * heap_bytes
+            heap_index = timestamp // heap_samples % chunk_heaps
+            data[0].heap_index = heap_index + pol * chunk_heaps
+            data[0].heap_offset = heap_index * heap_bytes + pol * user_data.stride
 
             extra = numba.carray(intp_to_voidptr(data[0].extra), 1, dtype=np.uint16)
             data[0].extra_offset = data[0].heap_index * 2  # 2 is sizeof(uint16)
@@ -166,6 +174,7 @@ def make_stream_group(
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     src_affinity: Sequence[int],
+    stride: int,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create SPEAD receiver streams.
 
@@ -183,12 +192,16 @@ def make_stream_group(
     src_affinity
         CPU core affinity for the worker threads (one per thread).
         Use -1 to indicate no affinity for a thread.
+    stride
+        Bytes between polarisations in chunk payload array
     """
     # Reference counters to make the labels exist before the first scrape
     for pol in range(N_POLS):
         for counter in _PER_POL_COUNTERS:
             counter.labels(pol)
 
+    user_data = np.zeros(1, dtype=user_data_type.dtype)
+    user_data["stride"] = stride
     group = base_recv.make_stream_group(
         layout=layout,
         spead_items=[TIMESTAMP_ID, spead2.HEAP_LENGTH_ID, DIGITISER_STATUS_ID, DIGITISER_ID_ID],
@@ -199,6 +212,7 @@ def make_stream_group(
         affinity=src_affinity,
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
+        user_data=user_data,
     )
     for stream in group:
         stats_collector.add_stream(stream)

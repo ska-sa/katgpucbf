@@ -234,16 +234,14 @@ class BaseLayout(ABC):
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         ...
 
-    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
+    def chunk_place(self, user_data: np.ndarray) -> scipy.LowLevelCallable:
         """Generate low-level code for placing heaps in chunks.
 
         Parameters
         ----------
-        stats_base
-            Index of first custom statistic
+        user_data
+            Data to pass to the placement callback
         """
-        user_data = np.zeros(1, dtype=user_data_type.dtype)
-        user_data["stats_base"] = stats_base
         return scipy.LowLevelCallable(
             self._chunk_place.ctypes,
             user_data=user_data.ctypes.data_as(ctypes.c_void_p),
@@ -260,6 +258,7 @@ def make_stream(
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     affinity: int,
     stream_stats: list[str],
+    user_data: np.ndarray,
     max_heap_extra: int = 0,
     **kwargs: Any,
 ) -> spead2.recv.ChunkRingStream:
@@ -273,8 +272,6 @@ def make_stream(
         List of SPEAD item IDs to be expected in the heap headers.
     max_active_chunks
         Maximum number of chunks under construction.
-    max_heap_extra
-        Maximum non-payload data written by the place callback
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
@@ -283,11 +280,15 @@ def make_stream(
         CPU core affinity for the worker thread (negative to not set an affinity).
     stream_stats
         Stats to hook up to prometheus.
+    user_data
+        Data to pass to the chunk placement callback
+    max_heap_extra
+        Maximum non-payload data written by the place callback
     kwargs
         Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`.
     """
     stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
-    stats_base = stream_config.next_stat_index()
+    user_data["stats_base"] = stream_config.next_stat_index()
     for stat in stream_stats:
         stream_config.add_stat(stat)
 
@@ -295,7 +296,7 @@ def make_stream(
         items=spead_items,
         max_chunks=max_active_chunks,
         max_heap_extra=max_heap_extra,
-        place=layout.chunk_place(stats_base),
+        place=layout.chunk_place(user_data),
     )
 
     return spead2.recv.ChunkRingStream(
@@ -316,6 +317,7 @@ def make_stream_group(
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     affinity: Iterable[int],
     stream_stats: list[str],
+    user_data: np.ndarray,
     max_heap_extra: int = 0,
     **kwargs: Any,
 ) -> spead2.recv.ChunkStreamRingGroup:
@@ -329,8 +331,6 @@ def make_stream_group(
         List of SPEAD item IDs to be expected in the heap headers.
     max_active_chunks
         Maximum number of chunks under construction.
-    max_heap_extra
-        Maximum non-payload data written by the place callback
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
@@ -340,11 +340,17 @@ def make_stream_group(
         The length of this list determines the number of streams to create.
     stream_stats
         Stats to hook up to prometheus.
+    user_data
+        User data to pass to the chunk callback. It must have a field called
+        `stats_base`, which will be filled in appropriately (modifying the
+        argument).
+    max_heap_extra
+        Maximum non-payload data written by the place callback
     kwargs
         Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`.
     """
     stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
-    stats_base = stream_config.next_stat_index()
+    user_data["stats_base"] = stream_config.next_stat_index()
     for stat in stream_stats:
         stream_config.add_stat(stat)
 
@@ -352,7 +358,7 @@ def make_stream_group(
         items=spead_items,
         max_chunks=max_active_chunks,
         max_heap_extra=max_heap_extra,
-        place=layout.chunk_place(stats_base),
+        place=layout.chunk_place(user_data),
     )
     group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_active_chunks, eviction_mode=EVICTION_MODE)
 

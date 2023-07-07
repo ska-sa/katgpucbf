@@ -1267,29 +1267,29 @@ class Engine(aiokatcp.DeviceServer):
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(src_chunks)
-        self._src_group = recv.make_stream_group(self.src_layout, data_ringbuffer, free_ringbuffer, src_affinity)
-        chunk_bytes = self.src_layout.chunk_bytes
+        if self.use_vkgdr:
+            # These quantities are per-pol
+            array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
+            stride = _padded_input_size(array_bytes)
+        else:
+            stride = self.src_layout.chunk_bytes
+        self._src_group = recv.make_stream_group(
+            self.src_layout, data_ringbuffer, free_ringbuffer, src_affinity, stride
+        )
         for _ in range(src_chunks):
             if self.use_vkgdr:
-                # These quantities are per-pol
-                array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
-                device_bytes = _padded_input_size(array_bytes)
                 with context:
-                    mem = vkgdr.pycuda.Memory(self.vkgdr_handle, N_POLS * device_bytes)
-                buf = np.array(mem, copy=False).view(np.uint8).reshape(N_POLS, device_bytes)
-                # The device buffer contains extra space for copying the head
-                # of the following chunk, but we don't need that in the host
-                # mapping.
-                buf = buf[:, :chunk_bytes]
+                    mem = vkgdr.pycuda.Memory(self.vkgdr_handle, N_POLS * stride)
+                buf = np.array(mem, copy=False).view(np.uint8).reshape(N_POLS, stride)
                 device_array = accel.DeviceArray(
                     context,
                     (N_POLS, array_bytes),
                     np.uint8,
-                    padded_shape=(N_POLS, device_bytes),
+                    padded_shape=(N_POLS, stride),
                     raw=mem,
                 )
             else:
-                buf = accel.HostArray((N_POLS, chunk_bytes), np.uint8, context=context)
+                buf = accel.HostArray((N_POLS, stride), np.uint8, context=context)
                 device_array = None
             chunk = recv.Chunk(
                 data=buf,
@@ -1484,9 +1484,9 @@ class Engine(aiokatcp.DeviceServer):
                 in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunk.timestamp)
 
-            # In steady-state, chunks should be the same size, but during
-            # shutdown, the last chunk may be short.
-            in_item.n_samples = chunk.data.shape[1] * BYTE_BITS // self.src_layout.sample_bits
+            # When using vkgdr, the chunk has extra padding
+            chunk_data = chunk.data[:, : layout.chunk_bytes]
+            in_item.n_samples = layout.chunk_samples
 
             transfer_events = []
             # Copy the present flags (synchronously).
@@ -1503,11 +1503,12 @@ class Engine(aiokatcp.DeviceServer):
             if self.use_vkgdr:
                 assert in_item.samples is None
                 in_item.samples = chunk.device  # type: ignore
+                in_item.chunk = chunk
             else:
                 # Copy the chunk to the right place on the GPU.
                 assert in_item.samples is not None
                 in_item.samples.set_region(
-                    self._upload_queue, chunk.data, np.s_[:, : chunk.data.shape[1]], np.s_[:], blocking=False
+                    self._upload_queue, chunk_data, np.s_[:, : layout.chunk_bytes], np.s_[:], blocking=False
                 )
                 transfer_events.append(self._upload_queue.enqueue_marker())
                 # Put events on the queue so that run_processing() knows when to

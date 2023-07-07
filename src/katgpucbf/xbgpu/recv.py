@@ -190,6 +190,7 @@ def make_stream(
     max_active_chunks
         Maximum number of chunks under construction.
     """
+    user_data = np.zeros(1, dtype=user_data_type.dtype)
     stream = make_base_stream(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
@@ -200,6 +201,7 @@ def make_stream(
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
         stop_on_stop_item=False,  # By default, a heap containing a stream control stop item will terminate the stream
+        user_data=user_data,
     )
     stats_collector.add_stream(stream)
     return stream

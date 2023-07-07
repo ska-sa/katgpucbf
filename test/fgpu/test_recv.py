@@ -96,7 +96,9 @@ def stream_group(
     They are connected to the :func:`queues` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, [-1] * len(queues))
+    stream_group = recv.make_stream_group(
+        layout, data_ringbuffer, free_ringbuffer, [-1] * len(queues), layout.chunk_bytes
+    )
     for _ in range(free_ringbuffer.maxsize):
         data = np.empty((N_POLS, layout.chunk_bytes), np.uint8)
         # Use np.ones to make sure the bits get zeroed out
