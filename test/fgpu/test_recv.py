@@ -70,9 +70,9 @@ class TestLayout:
 
 
 @pytest.fixture
-def queues() -> list[spead2.InprocQueue]:
-    """Create a in-process queue per polarization."""
-    return [spead2.InprocQueue() for _ in range(N_POLS)]
+def queue() -> spead2.InprocQueue:
+    """Create an in-process queue."""
+    return spead2.InprocQueue()
 
 
 @pytest.fixture
@@ -89,16 +89,14 @@ def free_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
 
 @pytest.fixture
 def stream_group(
-    layout, data_ringbuffer, free_ringbuffer, queues, recv_lossless_eviction
+    layout, data_ringbuffer, free_ringbuffer, queue
 ) -> Generator[spead2.recv.ChunkStreamRingGroup, None, None]:
     """Create a receive stream group.
 
-    They are connected to the :func:`queues` fixture for input and
+    They are connected to the :func:`queue` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    stream_group = recv.make_stream_group(
-        layout, data_ringbuffer, free_ringbuffer, [-1] * len(queues), layout.chunk_bytes
-    )
+    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, [-1], layout.chunk_bytes)
     for _ in range(free_ringbuffer.maxsize):
         data = np.empty((N_POLS, layout.chunk_bytes), np.uint8)
         # Use np.ones to make sure the bits get zeroed out
@@ -106,8 +104,7 @@ def stream_group(
         extra = np.zeros((N_POLS, layout.chunk_heaps), np.uint16)
         chunk = Chunk(data=data, present=present, extra=extra, sink=stream_group)
         chunk.recycle()
-    for stream, queue in zip(stream_group, queues):
-        stream.add_inproc_reader(queue)
+    stream_group[0].add_inproc_reader(queue)
 
     yield stream_group
 
@@ -115,13 +112,10 @@ def stream_group(
 
 
 @pytest.fixture
-def send_stream(queues) -> "spead2.send.asyncio.AsyncStream":
-    """Create a stream that feeds into :func:`streams`.
-
-    It has one substream per polarisation.
-    """
+def send_stream(queue) -> "spead2.send.asyncio.AsyncStream":
+    """Create a stream that feeds into :func:`stream_group`."""
     config = spead2.send.StreamConfig(max_packet_size=9000)  # Just needs to be bigger than heaps
-    return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
+    return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), [queue], config)
 
 
 def gen_heaps(
@@ -182,7 +176,7 @@ class TestStream:
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream_group: spead2.recv.ChunkStreamRingGroup,
-        queues: list[spead2.InprocQueue],
+        queue: spead2.InprocQueue,
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         reorder: bool,
         timestamps: str,
@@ -232,8 +226,7 @@ class TestStream:
         await send_stream.async_send_heap(heap)
         for heap in heaps:
             await send_stream.async_send_heap(heap)
-        for queue in queues:
-            queue.stop()  # Flushes out the receive streams
+        queue.stop()  # Flushes out the receive stream
         seen = 0
         async for chunk in data_ringbuffer:
             assert isinstance(chunk, Chunk)
@@ -259,7 +252,7 @@ class TestStream:
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream_group: spead2.recv.ChunkStreamRingGroup,
-        queues: list[spead2.InprocQueue],
+        queue: spead2.InprocQueue,
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
@@ -275,8 +268,7 @@ class TestStream:
 
         for heap in heaps:
             await send_stream.async_send_heap(heap)
-        for queue in queues:
-            queue.stop()  # Flushes out the receive streams
+        queue.stop()  # Flushes out the receive stream
         # Get just the chunks that actually have some data. We needn't worry
         # about returning chunks to the free ring as we don't expect to deplete
         # it.

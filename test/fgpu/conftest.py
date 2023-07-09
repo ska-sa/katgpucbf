@@ -76,15 +76,6 @@ def recv_max_chunks_one(monkeypatch) -> None:
     monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
 
 
-@pytest.fixture
-def recv_lossless_eviction(monkeypatch) -> None:
-    """Change :data:`katgpucbf.recv.EVICTION_MODE` to lossless for the test.
-
-    This simplifies the process of reliably injecting data.
-    """
-    monkeypatch.setattr(katgpucbf.recv, "EVICTION_MODE", spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSLESS)
-
-
 def check_vkgdr(context: AbstractContext) -> None:
     """Check whether vkgdr works on `context`, and skip the test if not."""
     vkgdr = pytest.importorskip("vkgdr")
