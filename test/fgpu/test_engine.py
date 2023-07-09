@@ -231,8 +231,7 @@ class TestEngine:
             "--send-rate-factor=0",  # Infinitely fast
             f"--wideband={wideband_args}",
             f"--narrowband={narrowband_args}",
-            "239.10.10.0+7:7149",  # src1
-            "239.10.10.8+7:7149",  # src2
+            "239.10.10.0+15:7149",  # src
         ]
 
     def test_engine_required_arguments(self, engine_server: Engine) -> None:
@@ -245,32 +244,11 @@ class TestEngine:
           correctly populated.
         """
         assert engine_server._port == 0
-        assert engine_server._src_interface == ["127.0.0.1"] * N_POLS
+        assert engine_server._src_interface == ["127.0.0.1"]
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
         assert engine_server._pipelines[0].output.channels == CHANNELS
         assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
-        assert engine_server._srcs == [
-            [
-                ("239.10.10.0", 7149),
-                ("239.10.10.1", 7149),
-                ("239.10.10.2", 7149),
-                ("239.10.10.3", 7149),
-                ("239.10.10.4", 7149),
-                ("239.10.10.5", 7149),
-                ("239.10.10.6", 7149),
-                ("239.10.10.7", 7149),
-            ],
-            [
-                ("239.10.10.8", 7149),
-                ("239.10.10.9", 7149),
-                ("239.10.10.10", 7149),
-                ("239.10.10.11", 7149),
-                ("239.10.10.12", 7149),
-                ("239.10.10.13", 7149),
-                ("239.10.10.14", 7149),
-                ("239.10.10.15", 7149),
-            ],
-        ]
+        assert engine_server._srcs == [(f"239.10.10.{i}", 7149) for i in range(16)]
         # TODO: same problem for `dst` itself.
 
     def _make_digitiser(self, queue: spead2.InprocQueue) -> "spead2.send.asyncio.AsyncStream":

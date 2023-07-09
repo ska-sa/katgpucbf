@@ -17,6 +17,7 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
+import copy
 import itertools
 import logging
 import math
@@ -1079,7 +1080,7 @@ class Engine(aiokatcp.DeviceServer):
     context
         The accelerator (OpenCL or CUDA) context to use for running the Engine.
     srcs
-        A list of source endpoints for the incoming data.
+        A list of source endpoints for the incoming data, or a pcap filename.
     src_interface
         IP addresses of the network devices to use for input.
     src_ibv
@@ -1161,7 +1162,7 @@ class Engine(aiokatcp.DeviceServer):
         katcp_host: str,
         katcp_port: int,
         context: AbstractContext,
-        srcs: list[str | list[tuple[str, int]]],
+        srcs: str | list[tuple[str, int]],
         src_interface: list[str] | None,
         src_ibv: bool,
         src_affinity: list[int],
@@ -1198,7 +1199,7 @@ class Engine(aiokatcp.DeviceServer):
         )
 
         # Attributes copied or initialised from arguments
-        self._srcs = list(srcs)
+        self._srcs = copy.copy(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
@@ -1692,13 +1693,12 @@ class Engine(aiokatcp.DeviceServer):
             src_interface_iter: Iterator[str | None] = itertools.repeat(None)
         else:
             src_interface_iter = itertools.cycle(self._src_interface)
-        all_srcs = self._srcs[0] + self._srcs[1]
         for i, stream in enumerate(self._src_group):
-            first_src = i * len(all_srcs) // len(self._src_group)
-            last_src = (i + 1) * len(all_srcs) // len(self._src_group)
+            first_src = i * len(self._srcs) // len(self._src_group)
+            last_src = (i + 1) * len(self._srcs) // len(self._src_group)
             base_recv.add_reader(
                 stream,
-                src=all_srcs[first_src:last_src],
+                src=self._srcs[first_src:last_src],
                 interface=next(src_interface_iter),
                 ibv=self._src_ibv,
                 comp_vector=next(src_comp_vector_iter),
