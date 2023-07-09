@@ -1693,17 +1693,20 @@ class Engine(aiokatcp.DeviceServer):
             src_interface_iter: Iterator[str | None] = itertools.repeat(None)
         else:
             src_interface_iter = itertools.cycle(self._src_interface)
-        for i, stream in enumerate(self._src_group):
-            first_src = i * len(self._srcs) // len(self._src_group)
-            last_src = (i + 1) * len(self._srcs) // len(self._src_group)
-            base_recv.add_reader(
-                stream,
-                src=self._srcs[first_src:last_src],
-                interface=next(src_interface_iter),
-                ibv=self._src_ibv,
-                comp_vector=next(src_comp_vector_iter),
-                buffer=self._src_buffer // len(self._src_group),
-            )
+        if isinstance(self._srcs, str):
+            self._src_group[0].add_udp_pcap_file_reader(self._srcs)
+        else:
+            for i, stream in enumerate(self._src_group):
+                first_src = i * len(self._srcs) // len(self._src_group)
+                last_src = (i + 1) * len(self._srcs) // len(self._src_group)
+                base_recv.add_reader(
+                    stream,
+                    src=self._srcs[first_src:last_src],
+                    interface=next(src_interface_iter),
+                    ibv=self._src_ibv,
+                    comp_vector=next(src_comp_vector_iter),
+                    buffer=self._src_buffer // len(self._src_group),
+                )
 
         recv_task = asyncio.create_task(
             self._run_receive(self._src_group, self.src_layout),
