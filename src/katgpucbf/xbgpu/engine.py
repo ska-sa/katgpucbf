@@ -82,19 +82,19 @@ class RxQueueItem(QueueItem):
     stored separately.
 
     The RxQueueItem also holds a reference count of the number of pipelines still
-    using this item. This is to ensure the item isn't freed before each data
-    product has had a chance to use the received data.
+    using this item. This is to ensure the item isn't freed before each pipeline
+    has had a chance to use the received data.
     """
 
     def __init__(self, buffer_device: accel.DeviceArray, present: np.ndarray, timestamp: int = 0) -> None:
         self.buffer_device = buffer_device
         self.present = present
         self.refcount = 0
-        super().__init__(timestamp)
+        super().__init__(timestamp=timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the timestamp, events and chunk."""
-        super().reset(timestamp=timestamp)
+        super().reset(timestamp)
         self.chunk: recv.Chunk | None = None
 
 
@@ -168,7 +168,7 @@ class Pipeline:
         )
 
     def add_rx_item(self, item: RxQueueItem) -> None:
-        """Append a newly-received :class:`RxQueueItem` to the `rx_item_queue`."""
+        """Append a newly-received :class:`RxQueueItem` to the :attr:`_rx_item_queue`."""
         self._rx_item_queue.put_nowait(item)
 
     def shutdown(self) -> None:
@@ -188,6 +188,7 @@ class Pipeline:
             - Bind input buffer(s) accordingly
 
         - Obtain a free TxQueueItem from the tx_free_item_queue
+
             - Add event marker to wait for the proc_command_queue
             - Put the prepared TxQueueItem on the tx_item_queue
 
@@ -196,7 +197,7 @@ class Pipeline:
 
         - The gpu_proc_loop requires logic to decipher the timestamp of the
           first heap output.
-        - It also provides an opportunity to bind buffers before processing is queued (?)
+        - It also provides an opportunity to bind buffers before processing is queued.
         """
         raise NotImplementedError  # pragma: nocover
 
@@ -547,10 +548,10 @@ class XBEngine(DeviceServer):
     Data is passed between these items using :class:`asyncio.Queue`\s. The three
     processing functions are as follows:
 
-    - :func:`_receiver_loop` - Receive chunks from network and initiate
+    - :meth:`_receiver_loop` - Receive chunks from network and initiate
         transfer to GPU.
-    - :func:`_gpu_proc_loop` - Perform the correlation operation.
-    - :func:`_sender_loop` - Transfer correlated data to system RAM and then
+    - :meth:`.Pipeline.gpu_proc_loop` - Perform the correlation operation.
+    - :meth:`.Pipeline.sender_loop` - Transfer correlated data to system RAM and then
         send it out on the network.
 
     There is also a seperate function for sending descriptors onto the network.
@@ -843,7 +844,8 @@ class XBEngine(DeviceServer):
             self._active_in_sem.release()
             # TODO: Don't recycle the chunk in the reset of the Item itself
             # Need to separate the concerns
-            item.chunk.recycle()  # type: ignore
+            assert item.chunk is not None
+            item.chunk.recycle()
             item.reset()
             self._rx_free_item_queue.put_nowait(item)
 
@@ -859,11 +861,11 @@ class XBEngine(DeviceServer):
         Receive heaps off of the network in a continuous loop.
 
         This function does the following:
-        - Wait for a chunk to be assembled on the receiver.
-        - Get a free rx item off of the _rx_free_item_queue.
-        - Initiate the transfer of the chunk from system memory to the buffer
-          in GPU RAM that belongs to the rx_item.
-        - Place the rx_item on _rx_item_queue so that it can be processed downstream.
+        1. Wait for a chunk to be assembled on the receiver.
+        2. Get a free rx item off of the _rx_free_item_queue.
+        3. Initiate the transfer of the chunk from system memory to the buffer
+           in GPU RAM that belongs to the rx_item.
+        4. Place the rx_item on _rx_item_queue so that it can be processed downstream.
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
