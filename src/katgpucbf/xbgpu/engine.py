@@ -220,14 +220,9 @@ class Pipeline:
         raise NotImplementedError  # pragma: nocover
 
     @abstractmethod
-    def capture_start(self) -> None:
-        """Enable the transmission of this data product's stream."""
-        raise NotImplementedError  # pragma: nocover
-
-    @abstractmethod
-    def capture_stop(self) -> None:
-        """Disable the transmission of this data product's stream."""
-        raise NotImplementedError  # pragma: nocover
+    def capture_enable(self, enable: bool = True) -> None:
+        """Enable/Disable the transmission of this data product's stream."""
+        raise NotImplementedError
 
 
 class XPipeline(Pipeline):
@@ -528,11 +523,8 @@ class XPipeline(Pipeline):
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
-    def capture_start(self) -> None:  # noqa: D102
-        self.send_stream.tx_enabled = True
-
-    def capture_stop(self) -> None:  # noqa: D102
-        self.send_stream.tx_enabled = False
+    def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
+        self.send_stream.tx_enabled = enable
 
 
 class XBEngine(DeviceServer):
@@ -921,7 +913,7 @@ class XBEngine(DeviceServer):
             Output stream name.
         """
         pipeline = self._request_pipeline(stream_name)
-        pipeline.capture_start()
+        pipeline.capture_enable()
 
     async def request_capture_stop(self, ctx, stream_name: str) -> None:
         """Stop transmission of a stream.
@@ -932,7 +924,7 @@ class XBEngine(DeviceServer):
             Output stream name.
         """
         pipeline = self._request_pipeline(stream_name)
-        pipeline.capture_stop()
+        pipeline.capture_enable(enable=False)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
