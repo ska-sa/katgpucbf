@@ -19,3 +19,6 @@
 from typing import Final
 
 METRIC_NAMESPACE: Final = "xbgpu"
+
+XPIPELINE_DEFAULT_NAME: Final = "xpipeline"
+BPIPELINE_DEFAULT_NAME: Final = "bpipeline"

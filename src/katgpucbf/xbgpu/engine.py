@@ -62,7 +62,7 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import recv
+from . import XPIPELINE_DEFAULT_NAME, recv
 from .correlation import Correlation, CorrelationTemplate
 from .output import Output, XOutput
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -128,7 +128,17 @@ class TxQueueItem(QueueItem):
 
 
 class Pipeline:
-    """Base Pipeline class to build on."""
+    """Base Pipeline class to build on.
+
+    Parameters
+    ----------
+    name
+        Name of Pipeline.
+    engine
+        The owning engine.
+    context
+        CUDA context for device work.
+    """
 
     # NOTE: n_rx_items and n_tx_items dictate the number of GPU buffers.
     # Setting these values too high results in too much GPU memory being
@@ -141,9 +151,9 @@ class Pipeline:
     n_rx_items = 3
     n_tx_items = 2  # TODO: Will likely need to be == n_rx_items for BPipeline
 
-    def __init__(self, output: Output, engine: "XBEngine", context: AbstractContext) -> None:
+    def __init__(self, name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.engine = engine
-        self.output = output
+        self.name = name
 
         self._proc_command_queue = context.create_command_queue()
         self._download_command_queue = context.create_command_queue()
@@ -157,14 +167,15 @@ class Pipeline:
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
         # all allocated buffers are in continuous circulation.
+        # TODO: BPipeline may/may not adopt this 1:1 {rx, tx}_item queue approach
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
-            f"{output.name}.rx_item_queue", self.n_rx_items
+            f"{name}.rx_item_queue", self.n_rx_items
         )
         self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = engine.monitor.make_queue(
-            f"{output.name}.tx_item_queue", self.n_tx_items
+            f"{name}.tx_item_queue", self.n_tx_items
         )
         self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = engine.monitor.make_queue(
-            f"{output.name}.tx_free_item_queue", self.n_tx_items
+            f"{name}.tx_free_item_queue", self.n_tx_items
         )
 
     def add_rx_item(self, item: RxQueueItem) -> None:
@@ -234,8 +245,10 @@ class XPipeline(Pipeline):
         engine: "XBEngine",
         context: AbstractContext,
         init_tx_enabled: bool,
+        name: str = XPIPELINE_DEFAULT_NAME,
     ) -> None:
-        super().__init__(output, engine, context)
+        super().__init__(name, engine, context)
+        self.output = output
         self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
 
         # NOTE: This value staggers the send so that packets within a heap are
