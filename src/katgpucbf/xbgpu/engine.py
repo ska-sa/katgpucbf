@@ -62,7 +62,7 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import XPIPELINE_DEFAULT_NAME, recv
+from . import DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .correlation import Correlation, CorrelationTemplate
 from .output import Output, XOutput
 from .xsend import XSend, incomplete_accum_counter, make_stream
@@ -148,8 +148,8 @@ class Pipeline:
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     # TODO: Declare these constants elsewhere
-    n_rx_items = 3
-    n_tx_items = 2  # TODO: Will likely need to be == n_rx_items for BPipeline
+    n_rx_items = DEFAULT_N_RX_ITEMS
+    n_tx_items = DEFAULT_N_TX_ITEMS  # TODO: Will likely need to be == n_rx_items for BPipeline
 
     def __init__(self, name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.engine = engine
@@ -245,7 +245,7 @@ class XPipeline(Pipeline):
         engine: "XBEngine",
         context: AbstractContext,
         init_tx_enabled: bool,
-        name: str = XPIPELINE_DEFAULT_NAME,
+        name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
         super().__init__(name, engine, context)
         self.output = output
@@ -615,8 +615,7 @@ class XBEngine(DeviceServer):
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
         spectrum reassembly by the downstream receiver.
     outputs
-        Output streams to generate. Currently this must be a single
-        XOutput.
+        Output streams to generate. Currently only XOutputs supported.
     src
         Endpoint for the incoming data.
     src_interface
@@ -737,15 +736,6 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
-        # NOTE: n_free_chunks dictates the number of buffers in system RAM.
-        # This can be set quite high as there is much more system RAM than GPU
-        # RAM. It should be higher than max_active_chunks.
-        # These values are not configurable as they have been acceptable for
-        # most tests cases up until now. If the pipeline starts bottlenecking,
-        # then maybe look at increasing these values.
-        # TODO: This is the same value as in Pipeline above. Abstract into a single declaration.
-        n_rx_items = 3  # Too high means too much GPU memory gets allocated
-
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
@@ -761,6 +751,13 @@ class XBEngine(DeviceServer):
 
         # Sets the number of batches of heaps to store per chunk
         self.heaps_per_fengine_per_chunk = heaps_per_fengine_per_chunk
+
+        # NOTE: n_free_chunks dictates the number of buffers in system RAM.
+        # This can be set quite high as there is much more system RAM than GPU
+        # RAM. It should be higher than max_active_chunks.
+        # These values are not configurable as they have been acceptable for
+        # most tests cases up until now. If the pipeline starts bottlenecking,
+        # then maybe look at increasing these values.
         self.max_active_chunks: int = (
             math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
         )
@@ -806,7 +803,10 @@ class XBEngine(DeviceServer):
         # - Once the each pipeline is finished with an :class:`RxQueueItem`,
         #   it must pass it back to the _rx_free_item_queue to ensure that
         #   all allocated buffers are in continuous circulation.
-        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue("rx_free_item_queue", n_rx_items)
+        # NOTE: Too high means too much GPU memory gets allocate
+        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue(
+            "rx_free_item_queue", DEFAULT_N_RX_ITEMS
+        )
 
         rx_data_shape = (
             heaps_per_fengine_per_chunk,
@@ -816,7 +816,7 @@ class XBEngine(DeviceServer):
             N_POLS,
             COMPLEX,
         )
-        for _ in range(n_rx_items):
+        for _ in range(DEFAULT_N_RX_ITEMS):
             # TODO: Abstract dtype, as per NGC-1000
             buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
