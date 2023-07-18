@@ -70,7 +70,7 @@ Stream
 Stream Group
     A group of incoming streams whose data are combined in chunks (see
     :class:`spead2.recv.ChunkStreamRingGroup`). Stream groups can be logically
-    treated like a single stream, and are used to scale receiving across
+    treated like a single stream, but allow receiving to be scaled across
     multiple CPU cores (with one member :class:`stream
     <spead2.recv.ChunkStreamGroupMember>` per thread).
 
