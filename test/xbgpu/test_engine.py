@@ -182,7 +182,7 @@ class TestEngine:
         timestamp: int,
         batch_index: int,
         n_ants: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_spectra_per_heap: int,
         missing_antennas: AbstractSet[int] = frozenset(),
     ) -> list[spead2.send.HeapReference]:
@@ -208,7 +208,7 @@ class TestEngine:
         n_ants
             The number of antennas that data will be received from. A seperate heap
             will be generated per antenna.
-        n_channels_per_stream
+        n_channels_per_substream
             The number of frequency channels contained in a heap.
         n_spectra_per_heap
             The number of time samples per frequency channel.
@@ -222,7 +222,7 @@ class TestEngine:
             A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
         # Define heap shapes needed to generate simulated data.
-        heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
+        heap_shape = (n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX)
 
         # Generate all the heaps for the different antennas.
         heaps: list[spead2.send.HeapReference] = []
@@ -232,11 +232,11 @@ class TestEngine:
             sample_array = np.zeros(heap_shape, np.int8)
 
             # Generate the data for the heap iterating assigning a different value to each channel.
-            for chan_index in range(n_channels_per_stream):
+            for chan_index in range(n_channels_per_substream):
                 sample_array[chan_index] = feng_sample(batch_index, chan_index, ant_index)
 
             # Create the heap, add it to a list of HeapReferences.
-            heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
+            heap = gen_heap(timestamp, ant_index, n_channels_per_substream * CHANNEL_OFFSET, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
 
         return heaps
@@ -261,7 +261,7 @@ class TestEngine:
         batch_indices: Iterable[int],
         timestamp_step: int,
         n_ants: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_spectra_per_heap: int,
     ) -> np.ndarray:
         """Send a contiguous stream of data to the engine and retrieve the results.
@@ -285,14 +285,14 @@ class TestEngine:
             but need not be contiguous.
         timestamp_step
             Timestamp step between each received heap processed.
-        n_ants, n_channels_per_stream, n_spectra_per_heap
+        n_ants, n_channels_per_substream, n_spectra_per_heap
             See :meth:`_create_heaps` for more info.
 
         Returns
         -------
         device_results
             Array of all GPU-generated data of shape
-            - (n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
+            - (n_total_accumulations, n_channels_per_substream, n_baselines, COMPLEX)
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
@@ -316,7 +316,7 @@ class TestEngine:
         accumulation_indices = sorted(accumulation_indices_set)
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
-            shape=(len(accumulation_indices), n_channels_per_stream, n_baselines, COMPLEX), dtype=np.int32
+            shape=(len(accumulation_indices), n_channels_per_substream, n_baselines, COMPLEX), dtype=np.int32
         )
         for i, accumulation_index in enumerate(accumulation_indices):
             # Wait for heap to be ready and then update out item group
@@ -338,9 +338,9 @@ class TestEngine:
                 f"actual: {hex(ig_recv['timestamp'].value)}."
             )
 
-            assert ig_recv["frequency"].value == n_channels_per_stream * CHANNEL_OFFSET, (
+            assert ig_recv["frequency"].value == n_channels_per_substream * CHANNEL_OFFSET, (
                 "Output channel offset not correct. "
-                f"Expected: {n_channels_per_stream * CHANNEL_OFFSET}, "
+                f"Expected: {n_channels_per_substream * CHANNEL_OFFSET}, "
                 f"actual: {ig_recv['frequency'].value}."
             )
 
@@ -357,7 +357,7 @@ class TestEngine:
         return n_engines
 
     @pytest.fixture
-    def n_channels_per_stream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
+    def n_channels_per_substream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
         return n_channels_total // n_engines
 
     @pytest.fixture
@@ -378,7 +378,7 @@ class TestEngine:
         context: AbstractContext,
         n_ants: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         heap_accumulation_threshold: int,
@@ -393,9 +393,9 @@ class TestEngine:
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
-            f"--channels-per-substream={n_channels_per_stream}",
+            f"--channels-per-substream={n_channels_per_substream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
-            f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
+            f"--channel-offset-value={n_channels_per_substream * CHANNEL_OFFSET}",
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             "--sync-epoch=1234567890",
@@ -430,7 +430,7 @@ class TestEngine:
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_samples_between_spectra: int,
         heap_accumulation_threshold: int,
         missing_antenna: int | None,
@@ -459,8 +459,8 @@ class TestEngine:
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
-        range_start = n_channels_per_stream * CHANNEL_OFFSET
-        range_end = range_start + n_channels_per_stream - 1
+        range_start = n_channels_per_substream * CHANNEL_OFFSET
+        range_end = range_start + n_channels_per_substream - 1
         assert xbengine.sensors["chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
@@ -479,7 +479,7 @@ class TestEngine:
                 timestamp,
                 batch_index,
                 n_ants,
-                n_channels_per_stream,
+                n_channels_per_substream,
                 n_spectra_per_heap,
                 missing_antennas=missing_antennas,
             )
@@ -500,7 +500,7 @@ class TestEngine:
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
-                n_channels_per_stream=n_channels_per_stream,
+                n_channels_per_substream=n_channels_per_substream,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
@@ -527,7 +527,7 @@ class TestEngine:
                 base_batch_index,
                 num_batches_in_current_accumulation,
                 heap_accumulation_threshold,
-                n_channels_per_stream,
+                n_channels_per_substream,
                 n_ants,
                 n_spectra_per_heap,
                 missing_antenna,
@@ -543,7 +543,7 @@ class TestEngine:
             xbengine.send_stream.heap_payload_size_bytes * n_total_accumulations
         )
         assert prom_diff.get_sample_diff("output_x_visibilities_total") == (
-            n_channels_per_stream * n_baselines * n_total_accumulations
+            n_channels_per_substream * n_baselines * n_total_accumulations
         )
         assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total") == 0
 
@@ -575,7 +575,7 @@ class TestEngine:
         xbengine: XBEngine,
         n_ants: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         heap_accumulation_threshold: int,
@@ -592,9 +592,11 @@ class TestEngine:
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = timestamp_step * batch_index
-            data = np.full((n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
+            data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
             return [
-                spead2.send.HeapReference(gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, data))
+                spead2.send.HeapReference(
+                    gen_heap(timestamp, ant_index, n_channels_per_substream * CHANNEL_OFFSET, data)
+                )
                 for ant_index in range(n_ants)
             ]
 
@@ -607,10 +609,12 @@ class TestEngine:
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
-                n_channels_per_stream=n_channels_per_stream,
+                n_channels_per_substream=n_channels_per_substream,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
             await xbengine.stop()
 
-        assert prom_diff.get_sample_diff("output_x_visibilities_total") == n_channels_per_stream * n_baselines
-        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total") == n_channels_per_stream * n_baselines
+        assert prom_diff.get_sample_diff("output_x_visibilities_total") == n_channels_per_substream * n_baselines
+        assert (
+            prom_diff.get_sample_diff("output_x_clipped_visibilities_total") == n_channels_per_substream * n_baselines
+        )

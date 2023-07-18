@@ -66,7 +66,7 @@ class TestXSend:
     async def _recv_data(
         recv_stream: spead2.recv.asyncio.Stream,
         n_engines: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_baselines: int,
     ) -> None:
         """Receive data transmitted from :func:`_send_data`.
@@ -90,9 +90,9 @@ class TestXSend:
             assert items["timestamp"].id == TIMESTAMP_ID
             assert items["timestamp"].value == i * TIMESTAMP_SCALE
             assert items["frequency"].id == FREQUENCY_ID
-            assert items["frequency"].value == n_channels_per_stream * 4
+            assert items["frequency"].value == n_channels_per_substream * 4
             assert items["xeng_raw"].id == XENG_RAW_ID
-            assert items["xeng_raw"].value.shape == (n_channels_per_stream, n_baselines, COMPLEX)
+            assert items["xeng_raw"].value.shape == (n_channels_per_substream, n_baselines, COMPLEX)
             assert items["xeng_raw"].value.dtype == np.int32
             np.testing.assert_equal(items["xeng_raw"].value, i)
 
@@ -138,17 +138,17 @@ class TestXSend:
         n_engines = 1
         while n_engines < num_ants * 4:
             n_engines *= 2
-        n_channels_per_stream = num_channels // n_engines
+        n_channels_per_substream = num_channels // n_engines
         n_baselines = (num_ants + 1) * (num_ants) * 2
 
         queue = spead2.InprocQueue()
         send_stream = XSend(
             n_ants=num_ants,
             n_channels=num_channels,
-            n_channels_per_stream=n_channels_per_stream,
+            n_channels_per_substream=n_channels_per_substream,
             dump_interval_s=0.0,  # Just send as fast as possible to speed up the test
             send_rate_factor=0,
-            channel_offset=n_channels_per_stream * 4,  # Arbitrary for now
+            channel_offset=n_channels_per_substream * 4,  # Arbitrary for now
             context=context,
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(), [queue], stream_config
@@ -162,4 +162,4 @@ class TestXSend:
 
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig())
         recv_stream.add_inproc_reader(queue)
-        await self._recv_data(recv_stream, n_engines, n_channels_per_stream, n_baselines)
+        await self._recv_data(recv_stream, n_engines, n_channels_per_substream, n_baselines)
