@@ -40,7 +40,7 @@ def layout() -> Layout:
     """Return an example layout."""
     return Layout(
         n_ants=4,
-        n_channels_per_stream=1024 // 4,
+        n_channels_per_substream=1024 // 4,
         n_spectra_per_heap=32,
         timestamp_step=2 * 1024 * 32,
         sample_bits=8,

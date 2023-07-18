@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -57,9 +57,11 @@ class Heap:
     """
 
     def __init__(
-        self, context: AbstractContext, n_channels_per_stream: int, n_baselines: int, channel_offset: int
+        self, context: AbstractContext, n_channels_per_substream: int, n_baselines: int, channel_offset: int
     ) -> None:
-        self.buffer: Final = accel.HostArray((n_channels_per_stream, n_baselines, COMPLEX), SEND_DTYPE, context=context)
+        self.buffer: Final = accel.HostArray(
+            (n_channels_per_substream, n_baselines, COMPLEX), SEND_DTYPE, context=context
+        )
         self.saturated: Final = accel.HostArray((), np.uint32, context=context)
         self._timestamp: Final = np.zeros((), dtype=">u8")  # Big-endian to be used in-place by the heap
         self.future = asyncio.get_running_loop().create_future()
@@ -150,9 +152,9 @@ class XSend:
         The number of antennas that have been correlated.
     n_channels
         The total number of channels across all X-Engines. Must be a multiple
-        of `n_channels_per_stream`.
-    n_channels_per_stream
-        The number of frequency channels contained per stream.
+        of `n_channels_per_substream`.
+    n_channels_per_substream
+        The number of frequency channels contained per substream.
     dump_interval_s
         A new heap is transmitted every `dump_interval_s` seconds. Set to zero
         to send as fast as possible.
@@ -168,7 +170,7 @@ class XSend:
     channel_offset
         Fixed value to be included in the SPEAD heap indicating the lowest
         channel value transmitted by this heap.  Must be a multiple of
-        `n_channels_per_stream`.
+        `n_channels_per_substream`.
     context
         All buffers to be transmitted will be created from this context.
     stream_factory
@@ -193,7 +195,7 @@ class XSend:
         self,
         n_ants: int,
         n_channels: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         dump_interval_s: float,
         send_rate_factor: float,
         channel_offset: int,
@@ -206,26 +208,26 @@ class XSend:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
 
-        if n_channels % n_channels_per_stream != 0:
-            raise ValueError("n_channels must be an integer multiple of n_channels_per_stream")
-        if channel_offset % n_channels_per_stream != 0:
-            raise ValueError("channel_offset must be an integer multiple of n_channels_per_stream")
+        if n_channels % n_channels_per_substream != 0:
+            raise ValueError("n_channels must be an integer multiple of n_channels_per_substream")
+        if channel_offset % n_channels_per_substream != 0:
+            raise ValueError("channel_offset must be an integer multiple of n_channels_per_substream")
 
         self.tx_enabled = tx_enabled
 
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
-        self.n_channels_per_stream: Final[int] = n_channels_per_stream
+        self.n_channels_per_substream: Final[int] = n_channels_per_substream
         n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
 
         # Multicast Stream Parameters
-        self.heap_payload_size_bytes = self.n_channels_per_stream * n_baselines * COMPLEX * SEND_DTYPE.itemsize
+        self.heap_payload_size_bytes = self.n_channels_per_substream * n_baselines * COMPLEX * SEND_DTYPE.itemsize
 
         self._heaps_queue: asyncio.Queue[Heap] = asyncio.Queue()
         buffers: list[accel.HostArray] = []
 
         for _ in range(n_send_heaps_in_flight):
-            heap = Heap(context, n_channels_per_stream, n_baselines, channel_offset)
+            heap = Heap(context, n_channels_per_substream, n_baselines, channel_offset)
             self._heaps_queue.put_nowait(heap)
             buffers.append(heap.buffer)
 
@@ -251,8 +253,8 @@ class XSend:
         # Set heap count sequence to allow a receiver to ingest multiple
         # X-engine outputs, if they should so choose.
         self.source_stream.set_cnt_sequence(
-            channel_offset // n_channels_per_stream,
-            n_channels // n_channels_per_stream,
+            channel_offset // n_channels_per_substream,
+            n_channels // n_channels_per_substream,
         )
 
         item_group = spead2.send.ItemGroup(flavour=FLAVOUR)

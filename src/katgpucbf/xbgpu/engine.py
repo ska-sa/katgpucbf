@@ -177,8 +177,8 @@ class XBEngine(DeviceServer):
         The number of antennas to be correlated.
     n_channels_total
         The total number of frequency channels out of the F-Engine.
-    n_channels_per_stream
-        The number of frequency channels contained per stream.
+    n_channels_per_substream
+        The number of frequency channels contained per substream.
     n_samples_between_spectra
         The number of samples between frequency spectra received.
     n_spectra_per_heap
@@ -251,7 +251,7 @@ class XBEngine(DeviceServer):
         send_rate_factor: float,
         n_ants: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
@@ -287,7 +287,7 @@ class XBEngine(DeviceServer):
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         for output in outputs:
-            if channel_offset_value % n_channels_per_stream != 0:
+            if channel_offset_value % n_channels_per_substream != 0:
                 raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
 
         # Array configuration parameters
@@ -295,7 +295,7 @@ class XBEngine(DeviceServer):
         self.heap_accumulation_threshold = outputs[0].heap_accumulation_threshold
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
-        self.n_channels_per_stream = n_channels_per_stream
+        self.n_channels_per_substream = n_channels_per_substream
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value
 
@@ -324,7 +324,7 @@ class XBEngine(DeviceServer):
         # spectrum due to symmetric properties of the Fourier Transform. While
         # we can workout the timestamp_step from other parameters that
         # configure the receiver, we pass it as a seperate argument to the
-        # reciever for cases where the n_channels_per_stream changes across
+        # reciever for cases where the n_channels_per_substream changes across
         # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
@@ -356,7 +356,7 @@ class XBEngine(DeviceServer):
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
         self._src_layout = recv.Layout(
             n_ants=n_ants,
-            n_channels_per_stream=n_channels_per_stream,
+            n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
@@ -382,7 +382,7 @@ class XBEngine(DeviceServer):
         correlation_template = CorrelationTemplate(
             self.context,
             n_ants=n_ants,
-            n_channels=n_channels_per_stream,
+            n_channels=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
         )
         self.correlation = correlation_template.instantiate(
@@ -433,7 +433,7 @@ class XBEngine(DeviceServer):
         self.send_stream = XSend(
             n_ants=n_ants,
             n_channels=n_channels_total,
-            n_channels_per_stream=n_channels_per_stream,
+            n_channels_per_substream=n_channels_per_substream,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=send_rate_factor,
             channel_offset=self.channel_offset_value,  # Arbitrary for now - depends on F-Engine stream
@@ -461,7 +461,8 @@ class XBEngine(DeviceServer):
                 str,
                 "chan-range",
                 "The range of channels processed by this XB-engine, inclusive",
-                default=f"({self.channel_offset_value},{self.channel_offset_value + self.n_channels_per_stream - 1})",
+                default=f"({self.channel_offset_value},"
+                f"{self.channel_offset_value + self.n_channels_per_substream - 1})",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
