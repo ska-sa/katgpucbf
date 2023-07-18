@@ -1,5 +1,12 @@
 F-Engine Design
 ===============
+A somewhat higher-level view of the design can be found in [Merry2023]_.
+The paper is based on an earlier version of this code (which pre-dates the
+narrowband support, for example).
+
+.. [Merry2023] Bruce Merry, "Efficient channelization on a graphics processing
+   unit," J. Astron. Telesc. Instrum. Syst. 9(3) 038001 (12 July 2023).
+   https://doi.org/10.1117/1.JATIS.9.3.038001
 
 We start by describing the design for wideband output. Narrowband outputs
 use most of the same components, but have extra complications, which are
@@ -7,14 +14,12 @@ described in a :ref:`separate section <fgpu.narrow>`.
 
 Network receive
 ---------------
-Each polarisation is handled as a separate SPEAD stream, with a separate thread.
-Separate threads are necessary because a single core is not fast enough to load
-the data. This introduces some challenges in aligning the polarisations, because
-locking a shared structure on every packet would be prohibitively expensive.
-Instead, the polarisations are kept separate during chunking, and aligned
-afterwards (in Python). A chunk is buffered until the matching chunk is received
-on the other polarisation. Alternatively, if a later chunk is seen for the other
-polarisation, then the chunk can never match and is discarded.
+The data from both polarisations are received by a single stream group, and
+polarisation forms the major axis of each chunk. The stream group may comprise
+multiple streams to support receive bandwidths that cannot be handled by a
+single thread. The polarisation of each packet is identified by a flag in the
+SPEAD items of the packet, rather than by the network interface or multicast
+group it was directed to.
 
 To minimise the number of copies, chunks are initialised with CUDA pinned memory
 (host memory that can be efficiently copied to the GPU).  Alternatively, it is

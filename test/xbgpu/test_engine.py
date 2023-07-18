@@ -242,18 +242,18 @@ class TestEngine:
         return heaps
 
     def _make_feng(
-        self, queues: list[spead2.InprocQueue], max_packet_size: int, max_heaps: int
+        self, queue: spead2.InprocQueue, max_packet_size: int, max_heaps: int
     ) -> "spead2.send.asyncio.AsyncStream":
         """Create send stream for a fake F-Engine."""
         feng_stream_config = spead2.send.StreamConfig(
             max_packet_size=max_packet_size,
             max_heaps=max_heaps,
         )
-        return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, feng_stream_config)
+        return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), [queue], feng_stream_config)
 
     async def _send_data(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         recv_stream: spead2.recv.asyncio.Stream,
         *,
         heap_factory: Callable[[int], list[spead2.send.HeapReference]],
@@ -272,7 +272,7 @@ class TestEngine:
 
         Parameters
         ----------
-        mock_recv_streams
+        mock_recv_stream
             Fixture
         recv_stream
             InprocStream to receive data output by XBEngine.
@@ -296,7 +296,7 @@ class TestEngine:
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
-        feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
+        feng_stream = self._make_feng(mock_recv_stream, max_packet_size, max_heaps)
 
         accumulation_indices_set = set()
         for batch_index in batch_indices:
@@ -304,8 +304,7 @@ class TestEngine:
             accumulation_indices_set.add(batch_index // heap_accumulation_threshold)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
-        for q in mock_recv_streams:
-            q.stop()
+        mock_recv_stream.stop()
 
         # It is expected that the first packet will be a descriptor.
         ig_recv = spead2.ItemGroup()
@@ -423,7 +422,7 @@ class TestEngine:
     @pytest.mark.parametrize("heap_accumulation_threshold", [4])
     async def test_xengine_end_to_end(
         self,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: spead2.InprocQueue,
         recv_stream: spead2.recv.asyncio.Stream,
         xbengine: XBEngine,
@@ -493,7 +492,7 @@ class TestEngine:
             ) * heap_accumulation_threshold - HEAPS_PER_FENGINE_PER_CHUNK
             batch_end_index = (first_accumulation_index + 1 + n_full_accumulations) * heap_accumulation_threshold
             device_results = await self._send_data(
-                mock_recv_streams,
+                mock_recv_stream,
                 recv_stream,
                 heap_accumulation_threshold=heap_accumulation_threshold,
                 batch_indices=range(batch_start_index, batch_end_index),
@@ -569,7 +568,7 @@ class TestEngine:
     async def test_saturation(
         self,
         context: AbstractContext,
-        mock_recv_streams: list[spead2.InprocQueue],
+        mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: spead2.InprocQueue,
         recv_stream: spead2.recv.asyncio.Stream,
         xbengine: XBEngine,
@@ -602,7 +601,7 @@ class TestEngine:
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             await self._send_data(
-                mock_recv_streams,
+                mock_recv_stream,
                 recv_stream,
                 heap_accumulation_threshold=heap_accumulation_threshold,
                 batch_indices=range(0, heap_accumulation_threshold),

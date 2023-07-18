@@ -24,8 +24,10 @@ import numpy as np
 from katsdpsigproc import accel, tune
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import BYTE_BITS
+from .. import BYTE_BITS, N_POLS
 from . import INPUT_CHUNK_PADDING
+
+_SAMPLE_WORD_SIZE = 4
 
 
 class _TuningDict(TypedDict):
@@ -50,7 +52,7 @@ class DDCTemplate:
         Bits per input sample
     """
 
-    autotune_version = 1
+    autotune_version = 2
 
     def __init__(
         self,
@@ -106,17 +108,19 @@ class DDCTemplate:
         """Determine tuning parameters."""
         queue = context.create_tuning_command_queue()
         in_samples = 16 * 1024 * 1024
-        out_samples = accel.divup(in_samples - taps + 1, subsampling)
-        in_bytes = in_samples * input_sample_bits // 8
-        in_data = accel.DeviceArray(
-            context, (in_bytes,), padded_shape=(in_bytes + INPUT_CHUNK_PADDING,), dtype=np.uint8
+        # Create one just to generate the correct padding for the inputs
+        dummy_fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": 32, "unroll": 8}).instantiate(
+            queue, in_samples, N_POLS
         )
-        out_data = accel.DeviceArray(context, (out_samples,), np.complex64)
+        dummy_fn.ensure_all_bound()
+        in_data = dummy_fn.buffer("in")
+        out_data = dummy_fn.buffer("out")
         in_data.zero(queue)
 
         def generate(wgs: int, unroll: int) -> Callable[[int], float] | None:
+            nonlocal in_data, out_data
             fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": wgs, "unroll": unroll}).instantiate(
-                queue, in_samples
+                queue, in_samples, N_POLS
             )
             fn.bind(**{"in": in_data, "out": out_data})
             return tune.make_measure(queue, fn)
@@ -124,9 +128,9 @@ class DDCTemplate:
         ua = cls.unroll_align(subsampling, input_sample_bits)
         return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(max(8, ua), 17, ua)))
 
-    def instantiate(self, command_queue: AbstractCommandQueue, samples: int) -> "DDC":
+    def instantiate(self, command_queue: AbstractCommandQueue, samples: int, n_pols: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""
-        return DDC(self, command_queue, samples)
+        return DDC(self, command_queue, samples, n_pols)
 
 
 class DDC(accel.Operation):
@@ -163,10 +167,12 @@ class DDC(accel.Operation):
     command_queue
         The GPU command queue
     samples
-        Number of input samples to store
+        Number of input samples to store, per polarisation
+    n_pols
+        Number of polarisations
     """
 
-    def __init__(self, template: DDCTemplate, command_queue: AbstractCommandQueue, samples: int) -> None:
+    def __init__(self, template: DDCTemplate, command_queue: AbstractCommandQueue, samples: int, n_pols: int) -> None:
         super().__init__(command_queue)
         if samples % BYTE_BITS != 0:
             raise ValueError(f"samples must be a multiple of {BYTE_BITS}")
@@ -175,14 +181,22 @@ class DDC(accel.Operation):
         self.template = template
         self.samples = samples
         self.out_samples = accel.divup(samples - template.taps + 1, template.subsampling)
-        # The actual padding requirement is just 4-byte alignment, but using
-        # INPUT_CHUNK_PADDING gives consistent padding to wideband pipelines.
+        # The actual padding requirement is just sample_word alignment, but
+        # using INPUT_CHUNK_PADDING gives consistent padding to wideband
+        # pipelines.
         in_bytes = samples * template.input_sample_bits // BYTE_BITS
         self.slots["in"] = accel.IOSlot(
-            (accel.Dimension(in_bytes, min_padded_size=in_bytes + INPUT_CHUNK_PADDING),),
+            (
+                n_pols,
+                accel.Dimension(
+                    in_bytes,
+                    min_padded_size=in_bytes + INPUT_CHUNK_PADDING,
+                    alignment=_SAMPLE_WORD_SIZE,
+                ),
+            ),
             np.uint8,
         )
-        self.slots["out"] = accel.IOSlot((self.out_samples,), np.complex64)
+        self.slots["out"] = accel.IOSlot((n_pols, self.out_samples), np.complex64)
         self._weights = accel.DeviceArray(template.context, (template.taps,), np.complex64)
         self._weights_host = self._weights.empty_like()
         self._mix_scale = 0  # Specify in cycles per output sample, times 2**32
@@ -226,11 +240,13 @@ class DDC(accel.Operation):
                 out_buffer.buffer,
                 in_buffer.buffer,
                 self._weights.buffer,
-                np.int32(out_buffer.shape[0]),  # out_size
-                np.int32(accel.divup(in_buffer.shape[0], 4)),  # in_size_words
+                np.uint32(out_buffer.padded_shape[1]),  # out_stride
+                np.uint32(in_buffer.padded_shape[1] // _SAMPLE_WORD_SIZE),  # in_stride in sample_words
+                np.uint32(out_buffer.shape[1]),  # out_size
+                np.uint32(accel.divup(in_buffer.shape[1], _SAMPLE_WORD_SIZE)),  # in_size_words
                 np.uint32(mix_scale),
                 np.uint32(mix_bias),
             ],
-            global_size=(groups * self.template.wgs, 1, 1),
+            global_size=(groups * self.template.wgs, in_buffer.shape[0], 1),
             local_size=(self.template.wgs, 1, 1),
         )

@@ -66,8 +66,7 @@ class TestKatcpRequests:
             f"--gain={GAIN}",
             "--adc-sample-rate=1.712e9",
             f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS}",
-            "239.10.10.0+7:7149",  # src1
-            "239.10.10.8+7:7149",  # src2
+            "239.10.10.0+15:7149",  # src
         ]
 
     @pytest.mark.parametrize("pol", range(N_POLS))

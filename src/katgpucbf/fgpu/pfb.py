@@ -59,6 +59,9 @@ class PFBFIRTemplate:
         placed contiguously.
     complex_input
         Operation mode (see above).
+    n_pols
+        Number of polarisations to operate over. The polarisations are
+        stored contiguously in memory, but have independent offsets.
 
     Raises
     ------
@@ -87,6 +90,7 @@ class PFBFIRTemplate:
         unzip_factor: int = 1,
         *,
         complex_input: bool = False,
+        n_pols: int,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
@@ -96,6 +100,7 @@ class PFBFIRTemplate:
         self.input_sample_bits = input_sample_bits
         self.unzip_factor = unzip_factor
         self.complex_input = complex_input
+        self.n_pols = n_pols
         if complex_input:
             if input_sample_bits != 32:
                 raise ValueError("input_sample_bits must be 32 when complex_input is true")
@@ -119,6 +124,7 @@ class PFBFIRTemplate:
                     "input_sample_bits": input_sample_bits,
                     "unzip_factor": unzip_factor,
                     "complex_input": complex_input,
+                    "n_pols": n_pols,
                 },
                 extra_dirs=[str(resource_dir)],
             )
@@ -153,13 +159,13 @@ class PFBFIR(accel.Operation):
 
     The slots depend on ``template.complex_input``. If it is false, then they are
 
-    **in** : samples * input_sample_bits // BYTE_BITS, uint8
+    **in** : pols × (samples * input_sample_bits // BYTE_BITS), uint8
         Input samples in a big chunk.
-    **out** : spectra × 2*channels, float32
+    **out** : pols × spectra × 2*channels, float32
         FIR-filtered time data, ready to be processed by the FFT.
     **weights** : 2*channels*taps, float32
         The time-domain transfer function of the FIR filter to be applied.
-    **total_power** : uint64
+    **total_power** : pols, uint64
         Sum of squares of input samples. This will not include every input
         sample. Rather, it will contain a specific tap from each PFB window
         (currently, the last tap, but that is an implementation detail).
@@ -215,8 +221,17 @@ class PFBFIR(accel.Operation):
         self.samples = samples
         self.spectra = spectra  # Can be changed (TODO: documentation)
         if template.complex_input:
-            self.slots["in"] = accel.IOSlot((samples,), np.complex64)
-            self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(template.channels, exact=True)), np.complex64)
+            self.slots["in"] = accel.IOSlot((template.n_pols, samples), np.complex64)
+            # The output needs to be unpadded so that it will match what the next
+            # stage (FFT) expects.
+            self.slots["out"] = accel.IOSlot(
+                (
+                    template.n_pols,
+                    accel.Dimension(spectra, exact=True),
+                    accel.Dimension(template.channels, exact=True),
+                ),
+                np.complex64,
+            )
             self.slots["weights"] = accel.IOSlot((template.channels * template.taps,), np.float32)
         else:
             step = 2 * template.channels
@@ -228,12 +243,25 @@ class PFBFIR(accel.Operation):
             in_padding = INPUT_CHUNK_PADDING
             in_bytes = samples * template.input_sample_bits // BYTE_BITS
             self.slots["in"] = accel.IOSlot(
-                (accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),), np.uint8
+                (
+                    template.n_pols,
+                    accel.Dimension(in_bytes, min_padded_size=in_bytes + in_padding),
+                ),
+                np.uint8,
             )
-            self.slots["out"] = accel.IOSlot((spectra, accel.Dimension(step, exact=True)), np.float32)
+            # The output needs to be unpadded so that it will match what the next
+            # stage (FFT) expects.
+            self.slots["out"] = accel.IOSlot(
+                (
+                    template.n_pols,
+                    accel.Dimension(spectra, exact=True),
+                    accel.Dimension(step, exact=True),
+                ),
+                np.float32,
+            )
             self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
-            self.slots["total_power"] = accel.IOSlot((), np.uint64)
-        self.in_offset = 0  # Number of samples to skip from the start of *in
+            self.slots["total_power"] = accel.IOSlot((template.n_pols,), np.uint64)
+        self.in_offset = np.zeros(template.n_pols, int)  # Number of samples to skip from the start of *in
         self.out_offset = 0  # Number of "spectra" to skip from the start of *out.
 
     def _run(self) -> None:
@@ -244,11 +272,13 @@ class PFBFIR(accel.Operation):
         sample_step = real_step // rps  # step size in samples
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
-        in_buffer_bytes = in_buffer.shape[0] * in_buffer.dtype.itemsize
+        # in_buffer_bytes/in_buffer_samples are per polarisation
+        in_buffer_bytes = in_buffer.shape[1] * in_buffer.dtype.itemsize
         in_buffer_samples = in_buffer_bytes * BYTE_BITS // (self.template.input_sample_bits * rps)
-        if self.in_offset + sample_step * (self.spectra + self.template.taps - 1) > in_buffer_samples:
-            raise IndexError("Input buffer does not contain sufficient samples")
-        if self.out_offset + self.spectra > out_buffer.shape[0]:
+        for in_offset in self.in_offset:
+            if in_offset + sample_step * (self.spectra + self.template.taps - 1) > in_buffer_samples:
+                raise IndexError("Input buffer does not contain sufficient samples")
+        if self.out_offset + self.spectra > out_buffer.shape[1]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
         # Try to ensure that each workitem has enough work to do to amortise
@@ -257,29 +287,40 @@ class PFBFIR(accel.Operation):
         work_spectra = self.template.taps * 8
         # Number of workgroups along the time axis to match this
         groupsy = accel.divup(self.spectra, work_spectra)
-        # Keep a minimum of 128K workitems, to avoid starving the GPU for work.
-        groupsy = max(groupsy, accel.divup(128 * 1024, real_step))
+        # Keep a minimum of 128K workitems (across all pols), to avoid starving
+        # the GPU for work.
+        groupsy = max(groupsy, accel.divup(128 * 1024 // self.template.n_pols, real_step))
         # Re-compute work_spectra to balance the load
         work_spectra = accel.divup(self.spectra, groupsy)
         stepy = work_spectra * real_step
         # Rounding up may have left some workgroups with nothing to do, so recalculate
         # groupsy again.
         groupsy = accel.divup(self.spectra, work_spectra)
-        kernel_args = [
-            self.buffer("out").buffer,
-            self.buffer("in").buffer,
-            self.buffer("weights").buffer,
-            np.int32(real_step * self.spectra),
-            np.int32(stepy),
-            np.int32(self.in_offset * rps),
-            np.int32(self.out_offset * real_step),  # Must be a multiple of real_step to make sense.
-        ]
+
+        raw_in_offset = (self.in_offset * rps).astype(np.int32)
+        out_buffer = self.buffer("out")
+        in_buffer = self.buffer("in")
+        kernel_args = (
+            [
+                out_buffer.buffer,
+                in_buffer.buffer,
+                self.buffer("weights").buffer,
+                np.int32(out_buffer.padded_shape[1] * out_buffer.padded_shape[2] * rps),
+                np.int32(in_buffer.padded_shape[1] * rps),
+                np.int32(real_step * self.spectra),
+                np.int32(stepy),
+            ]
+            + list(raw_in_offset)
+            + [
+                np.int32(self.out_offset * real_step),
+            ]
+        )
         if not self.template.complex_input:
             kernel_args.insert(1, self.buffer("total_power").buffer)
 
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             kernel_args,
-            global_size=(real_step, groupsy),
-            local_size=(self.template.wgs, 1),
+            global_size=(real_step, groupsy, self.template.n_pols),
+            local_size=(self.template.wgs, 1, 1),
         )

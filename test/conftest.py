@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -132,17 +132,16 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 @pytest.fixture
-def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
-    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
+def mock_recv_stream(mocker) -> spead2.InprocQueue:
+    """Mock out :func:`katgpucbf.recv.add_reader` to use an in-process queue.
 
     Returns
     -------
-    queues
-        A list of in-process queue to use for sending data. The number of queues
-        in the list is determined by ``n_src_streams``.
+    queue
+        An in-process queue to use for sending data.``.
     """
-    queues = [spead2.InprocQueue() for _ in range(n_src_streams)]
-    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
+    queue = spead2.InprocQueue()
+    have_reader = False
 
     def add_reader(
         stream: spead2.recv.ChunkRingStream,
@@ -154,11 +153,12 @@ def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
         buffer: int,
     ) -> None:
         """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
-        queue = next(queue_iter)
+        nonlocal have_reader
+        assert not have_reader, "A reader has already been added for this queue"
         stream.add_inproc_reader(queue)
 
     mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
-    return queues
+    return queue
 
 
 @pytest.fixture

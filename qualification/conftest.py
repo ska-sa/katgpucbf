@@ -304,7 +304,7 @@ async def _correlator_config_and_description(
 
     for i in range(n_dsims):
         dsim_name = f"dsim{i:03}"
-        for pol in ["v", "h"]:
+        for pol in ["h", "v"]:
             name = f"{dsim_name}{pol}"
             dig_names.append(name)
             config["outputs"][name] = {

@@ -137,8 +137,7 @@ class TestParseArgs:
                 "ddc_taps=64,weight_pass=0.3"
             ),
             "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,centre_frequency=300e6,decimation=16",
-            "239.0.1.0+7:7148",
-            "239.0.2.0+7:7148",
+            "239.0.1.0+15:7148",
         ]
         args = parse_args(raw_args)
         assert args.outputs == [
