@@ -178,7 +178,7 @@ class XBEngine(DeviceServer):
     n_channels_total
         The total number of frequency channels out of the F-Engine.
     n_channels_per_substream
-        The number of frequency channels contained per stream.
+        The number of frequency channels contained per substream.
     n_samples_between_spectra
         The number of samples between frequency spectra received.
     n_spectra_per_heap

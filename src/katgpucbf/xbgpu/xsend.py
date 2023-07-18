@@ -154,7 +154,7 @@ class XSend:
         The total number of channels across all X-Engines. Must be a multiple
         of `n_channels_per_substream`.
     n_channels_per_substream
-        The number of frequency channels contained per stream.
+        The number of frequency channels contained per substream.
     dump_interval_s
         A new heap is transmitted every `dump_interval_s` seconds. Set to zero
         to send as fast as possible.
