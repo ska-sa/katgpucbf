@@ -34,7 +34,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import XBEngine
+from katgpucbf.xbgpu.engine import XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args
 
 from .. import PromDiff
@@ -363,7 +363,7 @@ class TestEngine:
                     f"actual: {ig_recv['frequency'].value}."
                 )
 
-                device_results[i][j] = ig_recv["xeng_raw"].value
+                device_results[i, j] = ig_recv["xeng_raw"].value
 
         return device_results
 
@@ -398,6 +398,7 @@ class TestEngine:
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
             f"--corrprod=name=bcp1,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.11.0:7149",
+            # TODO: Update the second corrprod to use a different heap_accumulation_threshold
             f"--corrprod=name=bcp2,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.12.0:7149",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
@@ -421,8 +422,7 @@ class TestEngine:
         engine_arglist: list[str],
     ) -> AsyncGenerator[XBEngine, None]:
         """Create and start an engine based on the fixture values."""
-        arglist = list(engine_arglist)  # Copy, to ensure we don't alter the original
-        args = parse_args(arglist)
+        args = parse_args(engine_arglist)
         xbengine, _ = make_engine(context, args)
         await xbengine.start()
 
@@ -521,9 +521,10 @@ class TestEngine:
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
-        incomplete_accums_counter = 0
-        base_batch_index = batch_start_index
         for i in range(len(mock_send_stream)):
+            # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
+            incomplete_accums_counter = 0
+            base_batch_index = batch_start_index
             for j in range(n_total_accumulations):
                 # The first heap is an incomplete accumulation containing a
                 # single batch, we need to make sure that this is taken into
@@ -552,20 +553,26 @@ class TestEngine:
                 )
                 base_batch_index += num_batches_in_current_accumulation
 
-                np.testing.assert_equal(expected_output, device_results[i][j])
+                np.testing.assert_equal(expected_output, device_results[i, j])
 
-        assert (
-            prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": "bcp1"}) == incomplete_accums_counter
-        )
-        assert prom_diff.get_sample_diff("output_x_heaps_total", {"stream": "bcp1"}) == n_total_accumulations
-        # Could manually calculate it here, but it's available inside the send_stream
-        assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": "bcp1"}) == (
-            xbengine._pipelines[0].send_stream.heap_payload_size_bytes * n_total_accumulations
-        )
-        assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"}) == (
-            n_channels_per_stream * n_baselines * n_total_accumulations
-        )
-        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"}) == 0
+        xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
+        for pipeline in xpipelines:
+            output_name = pipeline.output.name
+            assert (
+                prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": f"{output_name}"})
+                == incomplete_accums_counter
+            )
+            assert (
+                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": f"{output_name}"}) == n_total_accumulations
+            )
+            # Could manually calculate it here, but it's available inside the send_stream
+            assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": f"{output_name}"}) == (
+                pipeline.send_stream.heap_payload_size_bytes * n_total_accumulations
+            )
+            assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": f"{output_name}"}) == (
+                n_channels_per_stream * n_baselines * n_total_accumulations
+            )
+            assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": f"{output_name}"}) == 0
 
         expected_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
         # As per the explanation in :func:`~send_data`, the first accumulation
