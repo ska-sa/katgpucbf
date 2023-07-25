@@ -147,7 +147,6 @@ class Pipeline:
     # These values are not configurable as they have been acceptable for
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
-    # TODO: Declare these constants elsewhere
     n_rx_items = DEFAULT_N_RX_ITEMS
     n_tx_items = DEFAULT_N_TX_ITEMS  # TODO: Will likely need to be == n_rx_items for BPipeline
 
