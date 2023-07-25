@@ -34,8 +34,8 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import XBEngine, XPipeline
-from katgpucbf.xbgpu.main import make_engine, parse_args
+from katgpucbf.xbgpu.engine import XBEngine, XOutput, XPipeline
+from katgpucbf.xbgpu.main import make_engine, parse_args, parse_corrprod
 
 from .. import PromDiff
 from . import test_parameters
@@ -50,6 +50,9 @@ HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
+
+CORRPROD1_ARGS: Final[str] = "name=bcp1,dst=239.10.11.0:7148"
+CORRPROD2_ARGS: Final[str] = "name=bcp2,dst=239.10.11.1:7148"
 
 
 @njit
@@ -178,13 +181,28 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
+    @pytest.fixture(params=["heap_accumulation_threshold", [test_parameters.heap_accumulation_threshold]])
+    def corrprod_args(self, heap_accumulation_threshold: int) -> list[str]:
+        """Arguments to pass to the command-line parser for multiple --corrprods."""
+
+        # TODO: Just make one heap_accumulation_threshold twice the value of the other
+        return [
+            f"{CORRPROD1_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
+            f"{CORRPROD2_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
+        ]
+
     @pytest.fixture
-    def mock_send_stream_network(self) -> IPv4Network:
+    def corrprod_outputs(self, corrprod_args: list[str]) -> list[XOutput]:
+        """The outputs to run tests against."""
+        return [parse_corrprod(corrprod_arg) for corrprod_arg in corrprod_args]
+
+    @pytest.fixture
+    def mock_send_stream_network(self, corrprod_outputs: list[XOutput]) -> IPv4Network:
         """Filter the output queues to just those corresponding to the --corrprods.
 
         Hardcoded to override the default implementation in conftest.py.
         """
-        return IPv4Network("239.21.11.0/24")
+        return IPv4Network((corrprod_outputs[0].dst.host, 24))
 
     @staticmethod
     def _create_heaps(
@@ -384,7 +402,7 @@ class TestEngine:
         # Will need to be updated for narrowband
         return 2 * n_channels_total
 
-    @pytest.fixture(params=["heap_accumulation_threshold", [test_parameters.heap_accumulation_threshold]])
+    @pytest.fixture
     def engine_arglist(
         self,
         n_ants: int,
@@ -392,14 +410,13 @@ class TestEngine:
         n_channels_per_stream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
-        heap_accumulation_threshold: int,
+        corrprod_args: list[str],
     ) -> list[str]:
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
-            f"--corrprod=name=bcp1,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.11.0:7149",
-            # TODO: Update the second corrprod to use a different heap_accumulation_threshold
-            f"--corrprod=name=bcp2,heap_accumulation_threshold={heap_accumulation_threshold},dst=239.21.12.0:7149",
+            f"--corrprod={corrprod_args[0]}",
+            f"--corrprod={corrprod_args[1]}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
@@ -450,6 +467,7 @@ class TestEngine:
         n_channels_per_stream: int,
         n_samples_between_spectra: int,
         heap_accumulation_threshold: int,
+        corrprod_outputs: list[XOutput],
         missing_antenna: int | None,
     ):
         """
@@ -478,7 +496,7 @@ class TestEngine:
 
         range_start = n_channels_per_stream * CHANNEL_OFFSET
         range_end = range_start + n_channels_per_stream - 1
-        assert xbengine.sensors["bcp1.chan-range"].value == f"({range_start},{range_end})"
+        assert xbengine.sensors[f"{corrprod_outputs[0].name}.chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
@@ -488,7 +506,7 @@ class TestEngine:
             """Record sensor updates in a list for later comparison."""
             actual_sensor_updates.append((sensor_reading.value, sensor_reading.status))
 
-        xbengine.sensors["bcp1.rx.synchronised"].attach(sensor_observer)
+        xbengine.sensors[f"{corrprod_outputs[0].name}.rx.synchronised"].attach(sensor_observer)
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
