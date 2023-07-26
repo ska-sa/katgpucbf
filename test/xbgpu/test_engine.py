@@ -18,6 +18,7 @@
 
 from collections.abc import Iterable
 from ipaddress import IPv4Network
+from math import lcm
 from typing import AbstractSet, AsyncGenerator, Callable, Final
 
 import aiokatcp
@@ -282,15 +283,15 @@ class TestEngine:
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
+        corrprod_outputs: list[XOutput],
         *,
         heap_factory: Callable[[int], list[spead2.send.HeapReference]],
-        heap_accumulation_threshold: int,
         batch_indices: Iterable[int],
         timestamp_step: int,
         n_ants: int,
         n_channels_per_stream: int,
         n_spectra_per_heap: int,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, list[int]]:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
         Each full accumulation requires `heap_accumulation_threshold` batches of
@@ -320,40 +321,54 @@ class TestEngine:
         device_results
             Array of all GPU-generated data of shape
             - (n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
+        n_accumulations_completed
+            Number of completed accumulations for each corrprod_output
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        accumulation_indices_set = set()
+        accumulation_indices: list[set] = [set() for _ in corrprod_outputs]
+
         for batch_index in batch_indices:
             heaps = heap_factory(batch_index)
-            accumulation_indices_set.add(batch_index // heap_accumulation_threshold)
+            for i, corrprod_output in enumerate(corrprod_outputs):
+                accumulation_indices[i].add(batch_index // corrprod_output.heap_accumulation_threshold)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+
+        accumulation_indices_sorted = []
+        for accumulation_index_set in accumulation_indices:
+            accumulation_indices_sorted.append(sorted(accumulation_index_set))
 
         for q in mock_recv_streams:
             q.stop()
 
-        accumulation_indices = sorted(accumulation_indices_set)
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
-            shape=(len(mock_send_stream), len(accumulation_indices), n_channels_per_stream, n_baselines, COMPLEX),
+            shape=(
+                len(corrprod_outputs),
+                len(accumulation_indices_sorted[0]),
+                n_channels_per_stream,
+                n_baselines,
+                COMPLEX,
+            ),
             dtype=np.int32,
         )
 
         out_config = spead2.recv.StreamConfig(max_heaps=100)
         out_tp = spead2.ThreadPool()
 
-        for i, queue in enumerate(mock_send_stream):
+        n_accumulations_completed = []
+        for i, corrprod_output in enumerate(corrprod_outputs):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
-            stream.add_inproc_reader(queue)
+            stream.add_inproc_reader(mock_send_stream[i])
             # It is expected that the first packet will be a descriptor.
             ig_recv = spead2.ItemGroup()
             heap = await stream.get()
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, accumulation_index in enumerate(accumulation_indices):
+            for j, accumulation_index in enumerate(accumulation_indices_sorted[i]):
                 # Wait for heap to be ready and then update out item group
                 # with the new values.
                 heap = await stream.get()
@@ -364,14 +379,16 @@ class TestEngine:
                 assert updated_items == {"frequency", "timestamp", "xeng_raw"}
                 # Ensure that the timestamp from the heap is what we expect.
                 assert (
-                    ig_recv["timestamp"].value % (timestamp_step * heap_accumulation_threshold) == 0
+                    ig_recv["timestamp"].value % (timestamp_step * corrprod_output.heap_accumulation_threshold) == 0
                 ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
 
                 assert (
-                    ig_recv["timestamp"].value == accumulation_index * timestamp_step * heap_accumulation_threshold
+                    ig_recv["timestamp"].value
+                    == accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold
                 ), (
                     "Output timestamp is not correct. "
-                    f"Expected: {hex(accumulation_index * timestamp_step * heap_accumulation_threshold)}, "
+                    f"Expected: "
+                    f"{hex(accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold)}, "
                     f"actual: {hex(ig_recv['timestamp'].value)}."
                 )
 
@@ -382,8 +399,9 @@ class TestEngine:
                 )
 
                 device_results[i, j] = ig_recv["xeng_raw"].value
+            n_accumulations_completed.append(len(accumulation_indices_sorted[i]))
 
-        return device_results
+        return device_results, n_accumulations_completed
 
     @pytest.fixture
     def n_engines(self, n_ants: int) -> int:
@@ -489,8 +507,9 @@ class TestEngine:
         """
         n_baselines = n_ants * (n_ants + 1) * 2
         first_accumulation_index = 123
-        n_full_accumulations = 3
-        n_total_accumulations = n_full_accumulations + 1
+        min_full_accumulations = lcm(
+            *[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
+        )
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
@@ -519,18 +538,20 @@ class TestEngine:
                 missing_antennas=missing_antennas,
             )
 
+        max_heap_acc_threshold = max(
+            corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
+        )
+
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
             # received batch is from the middle of an accumulation.
-            batch_start_index = (
-                first_accumulation_index + 1
-            ) * heap_accumulation_threshold - HEAPS_PER_FENGINE_PER_CHUNK
-            batch_end_index = (first_accumulation_index + 1 + n_full_accumulations) * heap_accumulation_threshold
-            device_results = await self._send_data(
+            batch_start_index = (first_accumulation_index + 1) * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
+            batch_end_index = (first_accumulation_index + 1 + min_full_accumulations) * max_heap_acc_threshold
+            device_results, n_accumulations_completed = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
-                heap_accumulation_threshold=heap_accumulation_threshold,
+                corrprod_outputs=corrprod_outputs,
                 batch_indices=range(batch_start_index, batch_end_index),
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
@@ -539,11 +560,13 @@ class TestEngine:
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
-        for i in range(len(mock_send_stream)):
+        incomplete_accums_counters = []
+        for i, corrprod_output in enumerate(corrprod_outputs):
             # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
             incomplete_accums_counter = 0
             base_batch_index = batch_start_index
-            for j in range(n_total_accumulations):
+            # TODO: Need to update this for loop to run longer for the Output that succumbed to lcm
+            for j in range(n_accumulations_completed[i]):
                 # The first heap is an incomplete accumulation containing a
                 # single batch, we need to make sure that this is taken into
                 # account by the verification function.
@@ -556,39 +579,40 @@ class TestEngine:
                     num_batches_in_current_accumulation = HEAPS_PER_FENGINE_PER_CHUNK
                     incomplete_accums_counter += 1
                 else:
-                    num_batches_in_current_accumulation = heap_accumulation_threshold
+                    num_batches_in_current_accumulation = corrprod_output.heap_accumulation_threshold
                     if missing_antenna is not None:
                         incomplete_accums_counter += 1
 
                 expected_output = generate_expected_output(
                     base_batch_index,
                     num_batches_in_current_accumulation,
-                    heap_accumulation_threshold,
+                    corrprod_output.heap_accumulation_threshold,
                     n_channels_per_stream,
                     n_ants,
                     n_spectra_per_heap,
                     missing_antenna,
                 )
                 base_batch_index += num_batches_in_current_accumulation
-
                 np.testing.assert_equal(expected_output, device_results[i, j])
+            incomplete_accums_counters.append(incomplete_accums_counter)
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
-        for pipeline in xpipelines:
+        for i, pipeline in enumerate(xpipelines):
             output_name = pipeline.output.name
             assert (
                 prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": f"{output_name}"})
-                == incomplete_accums_counter
+                == incomplete_accums_counters[i]
             )
             assert (
-                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": f"{output_name}"}) == n_total_accumulations
+                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": f"{output_name}"})
+                == n_accumulations_completed[i]
             )
             # Could manually calculate it here, but it's available inside the send_stream
             assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": f"{output_name}"}) == (
-                pipeline.send_stream.heap_payload_size_bytes * n_total_accumulations
+                pipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed[i]
             )
             assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": f"{output_name}"}) == (
-                n_channels_per_stream * n_baselines * n_total_accumulations
+                n_channels_per_stream * n_baselines * n_accumulations_completed[i]
             )
             assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": f"{output_name}"}) == 0
 
@@ -599,9 +623,9 @@ class TestEngine:
         # Depending on the `missing_antenna` parameter, the full accumulations
         # will either be all complete or incomplete.
         if missing_antenna is not None:
-            expected_sensor_updates += [(False, aiokatcp.Sensor.Status.ERROR)] * n_full_accumulations
+            expected_sensor_updates += [(False, aiokatcp.Sensor.Status.ERROR)] * max(n_accumulations_completed)
         else:
-            expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * n_full_accumulations
+            expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * max(n_accumulations_completed)
 
         assert actual_sensor_updates == expected_sensor_updates
 
@@ -623,6 +647,7 @@ class TestEngine:
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         heap_accumulation_threshold: int,
+        corrprod_outputs: list[XOutput],
     ):
         """Test saturation statistics.
 
@@ -646,7 +671,7 @@ class TestEngine:
             await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
-                heap_accumulation_threshold=heap_accumulation_threshold,
+                corrprod_outputs,
                 batch_indices=range(0, heap_accumulation_threshold),
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
