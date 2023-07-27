@@ -182,14 +182,14 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
-    @pytest.fixture(params=["heap_accumulation_threshold", [test_parameters.heap_accumulation_threshold]])
-    def corrprod_args(self, heap_accumulation_threshold: int) -> list[str]:
+    @pytest.fixture(params=test_parameters.heap_accumulation_threshold)
+    def corrprod_args(self, request) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
 
         # TODO: Just make one heap_accumulation_threshold twice the value of the other
         return [
-            f"{CORRPROD1_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
-            f"{CORRPROD2_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
+            f"{CORRPROD1_ARGS},heap_accumulation_threshold={request.param}",
+            f"{CORRPROD2_ARGS},heap_accumulation_threshold={request.param + 2}",
         ]
 
     @pytest.fixture
@@ -336,18 +336,18 @@ class TestEngine:
                 accumulation_indices[i].add(batch_index // corrprod_output.heap_accumulation_threshold)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
+        for q in mock_recv_streams:
+            q.stop()
+
         accumulation_indices_sorted = []
         for accumulation_index_set in accumulation_indices:
             accumulation_indices_sorted.append(sorted(accumulation_index_set))
-
-        for q in mock_recv_streams:
-            q.stop()
 
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
             shape=(
                 len(corrprod_outputs),
-                len(accumulation_indices_sorted[0]),
+                max(len(sorted_indices) for sorted_indices in accumulation_indices_sorted),
                 n_channels_per_stream,
                 n_baselines,
                 COMPLEX,
@@ -473,7 +473,6 @@ class TestEngine:
         [None, 0, 3],
         filter=valid_end_to_end_combination,
     )
-    @pytest.mark.parametrize("heap_accumulation_threshold", test_parameters.heap_accumulation_threshold)
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
@@ -484,7 +483,6 @@ class TestEngine:
         n_channels_total: int,
         n_channels_per_stream: int,
         n_samples_between_spectra: int,
-        heap_accumulation_threshold: int,
         corrprod_outputs: list[XOutput],
         missing_antenna: int | None,
     ):
@@ -507,9 +505,14 @@ class TestEngine:
         """
         n_baselines = n_ants * (n_ants + 1) * 2
         first_accumulation_index = 123
-        min_full_accumulations = lcm(
-            *[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
+        max_heap_acc_threshold = max(
+            corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
         )
+        min_full_accumulations = (
+            lcm(*[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs])
+            // max_heap_acc_threshold
+        )
+
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
@@ -538,10 +541,6 @@ class TestEngine:
                 missing_antennas=missing_antennas,
             )
 
-        max_heap_acc_threshold = max(
-            corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
-        )
-
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
@@ -565,7 +564,6 @@ class TestEngine:
             # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
             incomplete_accums_counter = 0
             base_batch_index = batch_start_index
-            # TODO: Need to update this for loop to run longer for the Output that succumbed to lcm
             for j in range(n_accumulations_completed[i]):
                 # The first heap is an incomplete accumulation containing a
                 # single batch, we need to make sure that this is taken into
@@ -623,9 +621,9 @@ class TestEngine:
         # Depending on the `missing_antenna` parameter, the full accumulations
         # will either be all complete or incomplete.
         if missing_antenna is not None:
-            expected_sensor_updates += [(False, aiokatcp.Sensor.Status.ERROR)] * max(n_accumulations_completed)
+            expected_sensor_updates += [(False, aiokatcp.Sensor.Status.ERROR)] * (max(n_accumulations_completed) - 1)
         else:
-            expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * max(n_accumulations_completed)
+            expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * (max(n_accumulations_completed) - 1)
 
         assert actual_sensor_updates == expected_sensor_updates
 
