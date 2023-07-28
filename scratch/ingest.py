@@ -323,7 +323,12 @@ async def async_main(args: argparse.Namespace) -> None:
                 plt.savefig(f"{chunk.chunk_id}.png")
                 logger.info("Wrote chunk %d", chunk.chunk_id)
         else:
-            logger.warning("Chunk %d missing heaps! (This is expected for the first few.)", chunk.chunk_id)
+            logger.warning(
+                "Chunk %d missing %d/%d heaps! (This is expected for the first few.)",
+                chunk.chunk_id,
+                HEAPS_PER_CHUNK - received_heaps,
+                HEAPS_PER_CHUNK,
+            )
         stream.add_free_chunk(chunk)
 
 
