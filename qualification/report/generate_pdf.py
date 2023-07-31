@@ -308,6 +308,7 @@ class Task:
     host: str
     version: str  # Docker image
     git_version: str
+    interfaces: dict[str, str]
 
 
 @dataclass
@@ -447,7 +448,12 @@ def _parse_host(msg: dict) -> tuple[str, Host]:
 
 
 def _parse_task(msg: dict) -> Task:
-    return Task(host=msg["host"], version=msg["version"], git_version=msg["git_version"])
+    return Task(
+        host=msg["host"],
+        interfaces=msg.get("interfaces", {}),
+        version=msg["version"],
+        git_version=msg["git_version"],
+    )
 
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
@@ -692,7 +698,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
         ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
             subsec.append(make_correlator_mode_str(correlator.mode_config, expand=True))
-            with subsec.create(LongTable(r"|l|l|")) as table:
+            with subsec.create(LongTable(r"|l|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
                     tasks = []
@@ -707,6 +713,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
                         table.add_row(
                             name.format(i=idx),
                             Hyperref(Marker(task.host, prefix="host"), task.host),
+                            ", ".join(task.interfaces.values()),
                         )
                     if tasks:
                         table.add_hline()
