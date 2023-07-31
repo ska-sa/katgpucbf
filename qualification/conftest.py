@@ -21,11 +21,12 @@ import copy
 import inspect
 import json
 import logging
+import re
 import subprocess
 import time
 from collections import namedtuple
 from collections.abc import AsyncGenerator, Generator
-from typing import TypeVar
+from typing import TypedDict, TypeVar
 
 import aiokatcp
 import matplotlib.style
@@ -84,6 +85,15 @@ ini_options = [
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
     IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
 ]
+
+
+class TaskDict(TypedDict):
+    """Type annotation for dictionary describing tasks."""
+
+    host: str
+    interfaces: dict[str, str]
+    version: str
+    git_version: str
 
 
 def pytest_addoption(parser, pluginmanager):  # noqa: D103
@@ -405,15 +415,31 @@ async def _report_correlator_config(
     correlator: CorrelatorRemoteControl,
     master_controller_client: aiokatcp.Client,
 ) -> None:
-    async def get_task_details(suffix: str, type: type[_T]) -> dict[str, _T]:
-        """Get value of a task-specific sensor for all tasks."""
-        _, informs = await correlator.product_controller_client.request("sensor-value", rf"/.*\.{suffix}$/")
-        result: dict[str, _T] = {}
+    async def get_task_details_multi(suffix: str, type: type[_T]) -> dict[str, dict[tuple[str, ...], _T]]:
+        """Get values of a task-specific sensor for all tasks.
+
+        The `suffix` is a regular expression, and may contain anonymous capture
+        groups. The return value is a nested dictionary: the outer dictionary is
+        indexed by the task name, the inner one by the capture group values.
+        """
+        regex = rf"^(.*)\.{suffix}$"
+        r = re.compile(regex)
+        _, informs = await correlator.product_controller_client.request("sensor-value", f"/{regex}/")
+        result: dict[str, dict[tuple[str, ...], _T]] = {}
         for inform in informs:
             if inform.arguments[3] == b"nominal":
-                task = aiokatcp.decode(str, inform.arguments[2]).rsplit(".", 1)[0]  # Strip off suffix
-                result[task] = aiokatcp.decode(type, inform.arguments[4])
+                m = r.match(aiokatcp.decode(str, inform.arguments[2]))
+                if m is None:
+                    continue  # Should never happen, unless the product controller is buggy
+                task = m[1]
+                key = m.groups()[1:]  # All capture groups except the task name
+                result.setdefault(task, {})[key] = aiokatcp.decode(type, inform.arguments[4])
         return result
+
+    async def get_task_details(suffix: str, type: type[_T]) -> dict[str, _T]:
+        """Get value of a task-specific sensor for all tasks."""
+        raw = await get_task_details_multi(re.escape(suffix), type)
+        return {key: value[()] for key, value in raw.items()}
 
     ports = await get_task_details("port", aiokatcp.Address)
     git_version_futures = {}
@@ -423,15 +449,19 @@ async def _report_correlator_config(
 
     versions = await get_task_details("version", str)
     hosts = await get_task_details("host", str)
-    tasks = {}
+    interfaces = await get_task_details_multi(r"interfaces\.([^.]+)\.name", str)
+    tasks: dict[str, TaskDict] = {}
     for task_name, hostname in hosts.items():
+        task_interfaces = interfaces.get(task_name, {})
         tasks[task_name] = {
             "host": hostname,
+            "interfaces": {key[0]: value for key, value in task_interfaces.items()},  # Flatten 1-tuple key
             "version": versions[task_name],
             "git_version": await git_version_futures[task_name],
         }
     tasks["product_controller"] = {
         "host": await get_sensor_val(master_controller_client, f"{correlator.name}.host"),
+        "interfaces": {},
         "version": await get_sensor_val(master_controller_client, f"{correlator.name}.version"),
         "git_version": await _get_git_version_conn(correlator.product_controller_client),
     }
