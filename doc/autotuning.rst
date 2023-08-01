@@ -7,7 +7,7 @@ katsdpsigproc library.
 
 To avoid autotuning occurring at startup, a database of pre-tuned parameters
 is stored in the repository and inserted into the Docker image. If necessary,
-it can be updated using the script :filename:`docker/autotune.py`, run on a
+it can be updated using the script :file:`docker/autotune.py`, run on a
 machine with a suitable GPU. It does not need to exactly match the GPU used
 for deployment, but should ideally come from the same family to give the best
 results.
@@ -20,7 +20,7 @@ is just an example; adjust as necessary), and takes roughly 30 minutes::
     docker pull harbor.sdp.kat.ac.za/cbf/katgpucbf
     docker run -it --rm --gpus=all -v $PWD/docker:/output harbor.sdp.kat.ac.za/cbf/katgpucbf /output/autotune.py /output/tuning.db
 
-Note that this may cause the database (:filename:`docker/tuning.db`) to be
+Note that this may cause the database (:file:`docker/tuning.db`) to be
 owned by root and require fixing. Check that the database is non-empty, then
 commit it.
 
