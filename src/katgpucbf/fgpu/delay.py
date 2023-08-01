@@ -219,6 +219,7 @@ class MultiDelayModel(AbstractDelayModel):
                 f"Timestamp {start} is before start of first linear model "
                 f"at {self._models[0].start} - possibly due to non-monotonic queries",
                 NonMonotonicQueryWarning,
+                stacklevel=3,
             )
         while len(self._models) > 1 and start >= self._models[1].start:
             self._popleft()
