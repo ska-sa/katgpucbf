@@ -53,7 +53,7 @@ importlib-metadata==6.6.0
     # via dask
 katsdpservices==1.2
     # via katgpucbf (setup.cfg)
-katsdpsigproc==1.7.0
+katsdpsigproc==1.8.0
     # via katgpucbf (setup.cfg)
 katsdptelstate==0.13
     # via katgpucbf (setup.cfg)

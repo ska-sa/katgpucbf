@@ -51,7 +51,7 @@ repos:
         additional_dependencies: [
             'aiokatcp==1.7.0',
             'dask==2023.5.0',
-            'katsdpsigproc==1.7.0',
+            'katsdpsigproc==1.8.0',
             'katsdptelstate==0.13',
             'numpy==1.23.4',
             'pyparsing==3.0.9',
