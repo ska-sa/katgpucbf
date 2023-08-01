@@ -109,7 +109,8 @@ class DDCTemplate:
         queue = context.create_tuning_command_queue()
         in_samples = 16 * 1024 * 1024
         # Create one just to generate the correct padding for the inputs
-        dummy_fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": 32, "unroll": 8}).instantiate(
+        ua = cls.unroll_align(subsampling, input_sample_bits)
+        dummy_fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": 32, "unroll": ua}).instantiate(
             queue, in_samples, N_POLS
         )
         dummy_fn.ensure_all_bound()
@@ -118,14 +119,16 @@ class DDCTemplate:
         in_data.zero(queue)
 
         def generate(wgs: int, unroll: int) -> Callable[[int], float] | None:
-            nonlocal in_data, out_data
-            fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": wgs, "unroll": unroll}).instantiate(
-                queue, in_samples, N_POLS
-            )
-            fn.bind(**{"in": in_data, "out": out_data})
-            return tune.make_measure(queue, fn)
+            # Making the context current allows `fn._weights` and
+            # `fn._weights_host` to be garbage-collected correctly when `fn`
+            # goes out of scope.
+            with context:
+                fn = cls(
+                    context, taps, subsampling, input_sample_bits, tuning={"wgs": wgs, "unroll": unroll}
+                ).instantiate(queue, in_samples, N_POLS)
+                fn.bind(**{"in": in_data, "out": out_data})
+                return tune.make_measure(queue, fn)
 
-        ua = cls.unroll_align(subsampling, input_sample_bits)
         return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(max(8, ua), 17, ua)))
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int, n_pols: int) -> "DDC":

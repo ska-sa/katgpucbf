@@ -185,5 +185,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
 COPY --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+COPY docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
-ENV PATH=/venv/bin:$PATH
+ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
