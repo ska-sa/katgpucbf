@@ -200,7 +200,7 @@ class TestEngine:
     def mock_send_stream_network(self, corrprod_outputs: list[XOutput]) -> IPv4Network:
         """Filter the output queues to just those corresponding to the --corrprods.
 
-        Hardcoded to override the default implementation in conftest.py.
+        This overrides the default implementation in conftest.py.
         """
         return IPv4Network((corrprod_outputs[0].dst.host, 24))
 
@@ -293,9 +293,9 @@ class TestEngine:
     ) -> tuple[np.ndarray, list[int]]:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
-        Each full accumulation requires `heap_accumulation_threshold` batches of
-        heaps. However, `batch_indices` is not required to contain full
-        accumulations.
+        Each full accumulation (for each corrprod-output) requires
+        `heap_accumulation_threshold` batches of heaps. However, `batch_indices`
+        is not required to contain full accumulations.
 
         Parameters
         ----------
@@ -307,8 +307,6 @@ class TestEngine:
             Fixture
         heap_factory
             Callback that takes a batch index and returns the heaps for that index.
-        heap_accumulation_threshold
-            Number of consecutive heaps to process in a single accumulation.
         batch_indices
             Indices of the batches to send. These must be strictly increasing,
             but need not be contiguous.
@@ -321,7 +319,7 @@ class TestEngine:
         -------
         device_results
             Array of all GPU-generated data of shape
-            - (n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
+            - (len(corrprod_outputs), n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
         n_accumulations_completed
             Number of completed accumulations for each corrprod_output
         """
