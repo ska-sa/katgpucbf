@@ -182,14 +182,13 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
-    @pytest.fixture(params=test_parameters.heap_accumulation_threshold)
-    def corrprod_args(self, request) -> list[str]:
+    @pytest.fixture
+    def corrprod_args(self, heap_accumulation_threshold) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
 
-        # TODO: Just make one heap_accumulation_threshold twice the value of the other
         return [
-            f"{CORRPROD1_ARGS},heap_accumulation_threshold={request.param}",
-            f"{CORRPROD2_ARGS},heap_accumulation_threshold={request.param + 2}",
+            f"{CORRPROD1_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
+            f"{CORRPROD2_ARGS},heap_accumulation_threshold={heap_accumulation_threshold + 3}",
         ]
 
     @pytest.fixture
@@ -304,6 +303,8 @@ class TestEngine:
             Fixture
         mock_send_stream
             Fixture
+        corrprod_outputs
+            Fixture
         heap_factory
             Callback that takes a batch index and returns the heaps for that index.
         heap_accumulation_threshold
@@ -328,26 +329,38 @@ class TestEngine:
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        accumulation_indices: list[set] = [set() for _ in corrprod_outputs]
+        acc_index_counts: list[dict[int, int]] = []
+        for corrprod_output in corrprod_outputs:
+            acc_index_counts.append(
+                dict.fromkeys(
+                    [batch_index // corrprod_output.heap_accumulation_threshold for batch_index in batch_indices], 0
+                )
+            )
+
+        # NOTE: The data generation generates an extra heap or several for the XPipeline
+        # with the smallest heap-accumulation-threshold - resulting in an incomplete final
+        # accumulation. Incomplete accumulations are purposefully dictated by `batch_indices`
+        # constructed by the caller.
+        for i, corrprod_output in enumerate(corrprod_outputs):
+            for batch_index in batch_indices:
+                adjusted_index = batch_index // corrprod_output.heap_accumulation_threshold
+                acc_index_counts[i][adjusted_index] += 1
+            # `adjusted_index` should be the last accumulation index for this corrprod
+            if acc_index_counts[i][adjusted_index] != corrprod_output.heap_accumulation_threshold:
+                acc_index_counts[i].pop(adjusted_index)
 
         for batch_index in batch_indices:
             heaps = heap_factory(batch_index)
-            for i, corrprod_output in enumerate(corrprod_outputs):
-                accumulation_indices[i].add(batch_index // corrprod_output.heap_accumulation_threshold)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
         for q in mock_recv_streams:
             q.stop()
 
-        accumulation_indices_sorted = []
-        for accumulation_index_set in accumulation_indices:
-            accumulation_indices_sorted.append(sorted(accumulation_index_set))
-
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
             shape=(
                 len(corrprod_outputs),
-                max(len(sorted_indices) for sorted_indices in accumulation_indices_sorted),
+                max(len(acc_indices) for acc_indices in acc_index_counts),
                 n_channels_per_stream,
                 n_baselines,
                 COMPLEX,
@@ -368,7 +381,7 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, accumulation_index in enumerate(accumulation_indices_sorted[i]):
+            for j, accumulation_index in enumerate(acc_index_counts[i].keys()):
                 # Wait for heap to be ready and then update out item group
                 # with the new values.
                 heap = await stream.get()
@@ -399,7 +412,7 @@ class TestEngine:
                 )
 
                 device_results[i, j] = ig_recv["xeng_raw"].value
-            n_accumulations_completed.append(len(accumulation_indices_sorted[i]))
+            n_accumulations_completed.append(len(acc_index_counts[i]))
 
         return device_results, n_accumulations_completed
 
@@ -473,6 +486,7 @@ class TestEngine:
         [None, 0, 3],
         filter=valid_end_to_end_combination,
     )
+    @pytest.mark.parametrize("heap_accumulation_threshold", test_parameters.heap_accumulation_threshold)
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
@@ -483,6 +497,7 @@ class TestEngine:
         n_channels_total: int,
         n_channels_per_stream: int,
         n_samples_between_spectra: int,
+        heap_accumulation_threshold: int,
         corrprod_outputs: list[XOutput],
         missing_antenna: int | None,
     ):
@@ -658,7 +673,7 @@ class TestEngine:
         n_baselines = n_ants * (n_ants + 1) * 2
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
-            timestamp = timestamp_step * batch_index
+            timestamp = batch_index * timestamp_step
             data = np.full((n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
             return [
                 spead2.send.HeapReference(gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, data))
