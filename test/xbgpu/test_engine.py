@@ -50,7 +50,6 @@ ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
-CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
 
 CORRPROD1_ARGS: Final[str] = "name=bcp1,dst=239.10.11.0:7148"
 CORRPROD2_ARGS: Final[str] = "name=bcp2,dst=239.10.11.1:7148"
@@ -183,6 +182,16 @@ class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
     @pytest.fixture
+    def frequency(self, n_engines: int, n_channels_per_stream: int):
+        """Return the start frequency for the XBEngine.
+
+        We arbitrarily choose to pretend to be an engine in the middle of the
+        range for the given array size.
+        """
+        engine_number = n_engines // 2
+        return engine_number * n_channels_per_stream
+
+    @pytest.fixture
     def corrprod_args(self, heap_accumulation_threshold) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
 
@@ -210,6 +219,7 @@ class TestEngine:
         batch_index: int,
         n_ants: int,
         n_channels_per_stream: int,
+        frequency: int,
         n_spectra_per_heap: int,
         missing_antennas: AbstractSet[int] = frozenset(),
     ) -> list[spead2.send.HeapReference]:
@@ -237,6 +247,8 @@ class TestEngine:
             will be generated per antenna.
         n_channels_per_stream
             The number of frequency channels contained in a heap.
+        frequency
+            The first channel in the range handled by this XBEngine.
         n_spectra_per_heap
             The number of time samples per frequency channel.
         missing_antennas
@@ -263,7 +275,7 @@ class TestEngine:
                 sample_array[chan_index] = feng_sample(batch_index, chan_index, ant_index)
 
             # Create the heap, add it to a list of HeapReferences.
-            heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
+            heap = gen_heap(timestamp, ant_index, frequency, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
 
         return heaps
@@ -289,6 +301,7 @@ class TestEngine:
         timestamp_step: int,
         n_ants: int,
         n_channels_per_stream: int,
+        frequency: int,
         n_spectra_per_heap: int,
     ) -> tuple[np.ndarray, list[int]]:
         """Send a contiguous stream of data to the engine and retrieve the results.
@@ -312,7 +325,7 @@ class TestEngine:
             but need not be contiguous.
         timestamp_step
             Timestamp step between each received heap processed.
-        n_ants, n_channels_per_stream, n_spectra_per_heap
+        n_ants, n_channels_per_stream, n_spectra_per_heap, frequency
             See :meth:`_create_heaps` for more info.
 
         Returns
@@ -403,9 +416,9 @@ class TestEngine:
                     f"actual: {hex(ig_recv['timestamp'].value)}."
                 )
 
-                assert ig_recv["frequency"].value == n_channels_per_stream * CHANNEL_OFFSET, (
+                assert ig_recv["frequency"].value == frequency, (
                     "Output channel offset not correct. "
-                    f"Expected: {n_channels_per_stream * CHANNEL_OFFSET}, "
+                    f"Expected: {frequency}, "
                     f"actual: {ig_recv['frequency'].value}."
                 )
 
@@ -437,6 +450,7 @@ class TestEngine:
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
+        frequency: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         corrprod_args: list[str],
@@ -451,7 +465,7 @@ class TestEngine:
             f"--channels={n_channels_total}",
             f"--channels-per-substream={n_channels_per_stream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
-            f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
+            f"--channel-offset-value={frequency}",
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             "--sync-epoch=1234567890",
@@ -494,6 +508,7 @@ class TestEngine:
         n_spectra_per_heap: int,
         n_channels_total: int,
         n_channels_per_stream: int,
+        frequency: int,
         n_samples_between_spectra: int,
         heap_accumulation_threshold: int,
         corrprod_outputs: list[XOutput],
@@ -529,7 +544,7 @@ class TestEngine:
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
-        range_start = n_channels_per_stream * CHANNEL_OFFSET
+        range_start = frequency
         range_end = range_start + n_channels_per_stream - 1
         assert xbengine.sensors[f"{corrprod_outputs[0].name}.chan-range"].value == f"({range_start},{range_end})"
 
@@ -550,6 +565,7 @@ class TestEngine:
                 batch_index,
                 n_ants,
                 n_channels_per_stream,
+                frequency,
                 n_spectra_per_heap,
                 missing_antennas=missing_antennas,
             )
@@ -569,6 +585,7 @@ class TestEngine:
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
                 n_channels_per_stream=n_channels_per_stream,
+                frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
@@ -655,6 +672,7 @@ class TestEngine:
         n_ants: int,
         n_channels_total: int,
         n_channels_per_stream: int,
+        frequency: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         heap_accumulation_threshold: int,
@@ -674,7 +692,7 @@ class TestEngine:
             timestamp = batch_index * timestamp_step
             data = np.full((n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
             return [
-                spead2.send.HeapReference(gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, data))
+                spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
                 for ant_index in range(n_ants)
             ]
 
@@ -688,6 +706,7 @@ class TestEngine:
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
                 n_channels_per_stream=n_channels_per_stream,
+                frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
