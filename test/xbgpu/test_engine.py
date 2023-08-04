@@ -532,7 +532,20 @@ class TestEngine:
         packet's timestamp (to be non-zero).
         """
         n_baselines = n_ants * (n_ants + 1) * 2
-        first_accumulation_index = 123
+
+        # We don't want to start at 0, that's boring. So let's offset this a bit.
+        first_batch_index = 123
+
+        # The arbitrarily-selected number above might not be at a convenient
+        # place. We want to be just before a LCM of the heap accumulation
+        # indices of all the corrprods, so that we can get an incomplete
+        # accumulation as the output first.
+        lowest_common_multiple = lcm(
+            *[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
+        )
+        advance = lowest_common_multiple - (first_batch_index % lowest_common_multiple)
+        first_batch_index += advance
+
         max_heap_acc_threshold = max(
             corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
         )
@@ -574,8 +587,8 @@ class TestEngine:
             # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
             # received batch is from the middle of an accumulation.
-            batch_start_index = (first_accumulation_index + 1) * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
-            batch_end_index = (first_accumulation_index + 1 + min_full_accumulations) * max_heap_acc_threshold
+            batch_start_index = (first_batch_index) * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
+            batch_end_index = (first_batch_index + min_full_accumulations) * max_heap_acc_threshold
             device_results, n_accumulations_completed = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
