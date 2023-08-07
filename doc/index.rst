@@ -38,6 +38,7 @@ Welcome to katgpucbf's documentation!
    dsim
    fsim
    qualification
+   autotuning
    todo
 
 
