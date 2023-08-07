@@ -118,7 +118,6 @@ class DDCTemplate:
         in_data.zero(queue)
 
         def generate(wgs: int, unroll: int) -> Callable[[int], float] | None:
-            nonlocal in_data, out_data
             fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": wgs, "unroll": unroll}).instantiate(
                 queue, in_samples, N_POLS
             )
