@@ -11,10 +11,13 @@
 #include <semaphore.h>
 #include <pthread.h>
 #include <emmintrin.h>
+#include <immintrin.h>
 
 using namespace std;
 using namespace std::chrono;
 using namespace std::literals::string_literals;
+
+static constexpr std::size_t cache_line_size = 64;  // guesstimate
 
 enum class memory_type
 {
@@ -27,8 +30,10 @@ enum class memory_type
 enum class memory_function
 {
     MEMCPY,
+    MEMCPY_STREAM_SSE2,
+    MEMCPY_STREAM_AVX,
     MEMSET,
-    MEMSET_STREAM,
+    MEMSET_STREAM_SSE2,
     READ
 };
 
@@ -49,8 +54,10 @@ static string memory_function_name(memory_function func)
     switch (func)
     {
     case memory_function::MEMCPY: return "memcpy";
+    case memory_function::MEMCPY_STREAM_SSE2: return "memcpy_stream_sse2";
+    case memory_function::MEMCPY_STREAM_AVX: return "memcpy_stream_avx";
     case memory_function::MEMSET: return "memset";
-    case memory_function::MEMSET_STREAM: return "memset_stream";
+    case memory_function::MEMSET_STREAM_SSE2: return "memset_stream_sse2";
     case memory_function::READ:   return "read";
     default: abort();
     }
@@ -80,8 +87,101 @@ static char *allocate(std::size_t size, memory_type type)
     return (char *) addr;
 }
 
+// memcpy, with SSE2 streaming stores
+static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    char * __restrict__ dest_c = (char *) dest;
+    const char * __restrict__ src_c = (const char *) src;
+    // Align the destination to a cache-line boundary
+    std::uintptr_t dest_i = std::uintptr_t(dest_c);
+    constexpr std::uintptr_t cache_line_mask = cache_line_size - 1;
+    std::uintptr_t aligned = (dest_i + cache_line_mask) & ~cache_line_mask;
+    std::size_t head = aligned - dest_i;
+    if (head > 0)
+    {
+        if (head >= n)
+        {
+            std::memcpy(dest_c, src_c, n);
+            /* Not normally required, but if the destination is
+             * write-combining memory then this will flush the combining
+             * buffers. That may be necessary if the memory is actually on
+             * a GPU or other accelerator.
+             */
+            _mm_sfence();
+            return dest;
+        }
+        std::memcpy(dest_c, src_c, head);
+        dest_c += head;
+        src_c += head;
+        n -= head;
+    }
+    std::size_t offset;
+    for (offset = 0; offset + 64 <= n; offset += 64)
+    {
+        __m128i value0 = _mm_loadu_si128((__m128i const *) (src_c + offset + 0));
+        __m128i value1 = _mm_loadu_si128((__m128i const *) (src_c + offset + 16));
+        __m128i value2 = _mm_loadu_si128((__m128i const *) (src_c + offset + 32));
+        __m128i value3 = _mm_loadu_si128((__m128i const *) (src_c + offset + 48));
+        _mm_stream_si128((__m128i *) (dest_c + offset + 0), value0);
+        _mm_stream_si128((__m128i *) (dest_c + offset + 16), value1);
+        _mm_stream_si128((__m128i *) (dest_c + offset + 32), value2);
+        _mm_stream_si128((__m128i *) (dest_c + offset + 48), value3);
+    }
+    std::size_t tail = n - offset;
+    std::memcpy(dest_c + offset, src_c + offset, tail);
+    _mm_sfence();
+    return dest;
+}
+
+// memcpy, with AVX streaming loads and stores
+[[gnu::target("avx2")]]
+static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    char * __restrict__ dest_c = (char *) dest;
+    const char * __restrict__ src_c = (const char *) src;
+    // Align the destination to a cache-line boundary
+    std::uintptr_t dest_i = std::uintptr_t(dest_c);
+    constexpr std::uintptr_t cache_line_mask = cache_line_size - 1;
+    std::uintptr_t aligned = (dest_i + cache_line_mask) & ~cache_line_mask;
+    std::size_t head = aligned - dest_i;
+    if (head > 0)
+    {
+        if (head >= n)
+        {
+            std::memcpy(dest_c, src_c, n);
+            /* Not normally required, but if the destination is
+             * write-combining memory then this will flush the combining
+             * buffers. That may be necessary if the memory is actually on
+             * a GPU or other accelerator.
+             */
+            _mm_sfence();
+            return dest;
+        }
+        std::memcpy(dest_c, src_c, head);
+        dest_c += head;
+        src_c += head;
+        n -= head;
+    }
+    std::size_t offset;
+    for (offset = 0; offset + 128 <= n; offset += 128)
+    {
+        __m256i value0 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 0));
+        __m256i value1 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 32));
+        __m256i value2 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 64));
+        __m256i value3 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 96));
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 0), value0);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32), value1);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 64), value2);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 96), value3);
+    }
+    std::size_t tail = n - offset;
+    std::memcpy(dest_c + offset, src_c + offset, tail);
+    _mm_sfence();
+    return dest;
+}
+
 /* memset, but using SSE streaming stores */
-static void memset_stream(void *dst, int c, std::size_t bytes)
+static void memset_stream_sse2(void *dst, int c, std::size_t bytes) noexcept
 {
     // Simplifies some edge cases
     if (bytes <= 16)
@@ -118,7 +218,7 @@ static void memset_stream(void *dst, int c, std::size_t bytes)
 }
 
 /* Read all the data in [src, src + bytes) and do nothing with it. */
-static void memory_read(const void *src, std::size_t bytes)
+static void memory_read(const void *src, std::size_t bytes) noexcept
 {
     std::uint8_t result1 = 0;
     // Process prefix up to 16-byte alignment
@@ -198,13 +298,21 @@ static void worker(int core, std::size_t buffer_size, memory_type mem_type, memo
             for (int p = 0; p < passes; p++)
                 memcpy(dst, src, buffer_size);
             break;
+        case memory_function::MEMCPY_STREAM_SSE2:
+            for (int p = 0; p < passes; p++)
+                memcpy_stream_sse2(dst, src, buffer_size);
+            break;
+        case memory_function::MEMCPY_STREAM_AVX:
+            for (int p = 0; p < passes; p++)
+                memcpy_stream_avx(dst, src, buffer_size);
+            break;
         case memory_function::MEMSET:
             for (int p = 0; p < passes; p++)
                 memset(dst, 0, buffer_size);
             break;
-        case memory_function::MEMSET_STREAM:
+        case memory_function::MEMSET_STREAM_SSE2:
             for (int p = 0; p < passes; p++)
-                memset_stream(dst, 0, buffer_size);
+                memset_stream_sse2(dst, 0, buffer_size);
             break;
         case memory_function::READ:
             for (int p = 0; p < passes; p++)
@@ -245,15 +353,19 @@ int main(int argc, char *const argv[])
         case 'f':
             if (optarg == "memcpy"s)
                 mem_func = memory_function::MEMCPY;
+            else if (optarg == "memcpy_stream_sse2"s)
+                mem_func = memory_function::MEMCPY_STREAM_SSE2;
+            else if (optarg == "memcpy_stream_avx"s)
+                mem_func = memory_function::MEMCPY_STREAM_AVX;
             else if (optarg == "memset"s)
                 mem_func = memory_function::MEMSET;
-            else if (optarg == "memset_stream"s)
-                mem_func = memory_function::MEMSET_STREAM;
+            else if (optarg == "memset_stream_sse2"s)
+                mem_func = memory_function::MEMSET_STREAM_SSE2;
             else if (optarg == "read"s)
                 mem_func = memory_function::READ;
             else
             {
-                std::cerr << "Invalid memory function (must be memcpy, memset, memset_stream or read)\n";
+                std::cerr << "Invalid memory function (must be memcpy, memcpy_stream_sse2, memcpy_stream_avx, memset, memset_stream_sse2 or read)\n";
                 return 1;
             }
             break;
