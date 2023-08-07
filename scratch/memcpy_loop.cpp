@@ -5,6 +5,7 @@
 #include <cstring>
 #include <chrono>
 #include <future>
+#include <memory>
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -68,9 +69,12 @@ static char *allocate(std::size_t size, memory_type type)
     void *addr;
     if (type == memory_type::MALLOC)
     {
-        addr = malloc(size);
+        // Ensure at least cache line alignment
+        std::size_t space = size + cache_line_size;
+        addr = malloc(size + cache_line_size);
         if (addr == nullptr)
             throw std::bad_alloc();
+        std::align(cache_line_size, size, addr, space);
     }
     else
     {
@@ -133,7 +137,7 @@ static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restric
     return dest;
 }
 
-// memcpy, with AVX streaming loads and stores
+// memcpy, with AVX streaming stores
 [[gnu::target("avx2")]]
 static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
 {
@@ -162,17 +166,21 @@ static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict
         src_c += head;
         n -= head;
     }
-    std::size_t offset;
-    for (offset = 0; offset + 128 <= n; offset += 128)
+    std::size_t offset = 0;
+    for (offset = 0; offset + 256 <= n; offset += 256)
     {
-        __m256i value0 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 0));
-        __m256i value1 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 32));
-        __m256i value2 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 64));
-        __m256i value3 = _mm256_stream_load_si256((__m256i const *) (src_c + offset + 96));
+        __m256i values[8];
+        for (int i = 0; i < 8; i++)
+            values[i] = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * i));
+        for (int i = 0; i < 8; i++)
+            _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * i), values[i]);
+    }
+    for (; offset + 64 <= n; offset += 64)
+    {
+        __m256i value0 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 0));
+        __m256i value1 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32));
         _mm256_stream_si256((__m256i *) (dest_c + offset + 0), value0);
         _mm256_stream_si256((__m256i *) (dest_c + offset + 32), value1);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 64), value2);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 96), value3);
     }
     std::size_t tail = n - offset;
     std::memcpy(dest_c + offset, src_c + offset, tail);
@@ -276,7 +284,16 @@ struct thread_data
     }
 };
 
-static void worker(int core, std::size_t buffer_size, memory_type mem_type, memory_function mem_func, int passes, thread_data &data)
+static void worker(
+    int core,
+    std::size_t buffer_size,
+    memory_type mem_type,
+    memory_function mem_func,
+    int src_align,
+    int dst_align,
+    int passes,
+    thread_data &data
+)
 {
     if (core >= 0)
     {
@@ -286,8 +303,8 @@ static void worker(int core, std::size_t buffer_size, memory_type mem_type, memo
         int result = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
         assert(result == 0);
     }
-    char *src = allocate(buffer_size, mem_type);
-    char *dst = allocate(buffer_size, mem_type);
+    char *src = allocate(buffer_size + src_align, mem_type) + src_align;
+    char *dst = allocate(buffer_size + dst_align, mem_type) + dst_align;
     while (true)
     {
         int result = sem_wait(&data.start_sem);
@@ -328,10 +345,11 @@ int main(int argc, char *const argv[])
     memory_type mem_type = memory_type::MMAP;
     memory_function mem_func = memory_function::MEMCPY;
     std::size_t buffer_size = 128 * 1024 * 1024;
+    int src_align = 0, dst_align = 0;  // relative to cache line size
     std::vector<int> cores;
     int passes = 10;
     int opt;
-    while ((opt = getopt(argc, argv, "t:f:b:p:")) != -1)
+    while ((opt = getopt(argc, argv, "t:f:b:p:S:D:")) != -1)
     {
         switch (opt)
         {
@@ -375,6 +393,12 @@ int main(int argc, char *const argv[])
         case 'p':
             passes = atoi(optarg);
             break;
+        case 'S':
+            src_align = atoi(optarg);
+            break;
+        case 'D':
+            dst_align = atoi(optarg);
+            break;
         default:
             return 1;
         }
@@ -392,7 +416,10 @@ int main(int argc, char *const argv[])
     std::vector<thread_data> data(n);
     for (size_t i = 0; i < n; i++)
         data[i].future = std::async(
-            std::launch::async, worker, cores[i], buffer_size, mem_type, mem_func, passes, std::ref(data[i]));
+            std::launch::async, worker, cores[i],
+            buffer_size, mem_type, mem_func, src_align, dst_align,
+            passes, std::ref(data[i])
+        );
     auto start = high_resolution_clock::now();
     while (true)
     {
