@@ -91,7 +91,7 @@ class Monitor(ABC):
         self.event_qsize(name, 0, maxsize)
         return Queue(self, name, maxsize)
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027
         """Close the Monitor.
 
         In the base class this does nothing, but if derived classes implement
