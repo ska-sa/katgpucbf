@@ -9,8 +9,7 @@ To avoid autotuning occurring at startup, a database of pre-tuned parameters
 is stored in the repository and inserted into the Docker image. If necessary,
 it can be updated using the script :file:`docker/autotune.py`, run on a
 machine with a suitable GPU. It does not need to exactly match the GPU used
-for deployment, but should ideally come from the same family to give the best
-results.
+for deployment, but the more similar it is, the better the tuning will be.
 
 To ensure that the tuning is done with the same environment (particularly CUDA
 compiler version) that will be deployed, the autotuning should be run inside
