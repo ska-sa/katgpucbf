@@ -119,7 +119,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     dig_names = []
     for ant_index in range(args.digitisers):
         number = 800 + ant_index  # Avoid confusion with real antennas
-        for pol in ["v", "h"]:
+        for pol in ["h", "v"]:
             name = f"m{number}{pol}"
             dig_names.append(name)
             if args.digitiser_address is None:

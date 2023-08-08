@@ -5,12 +5,12 @@ set -e -u
 # Load variables for machine-specific config
 . ../config/$(hostname -s).sh
 
-src_affinity="0,4"
+src_affinity="0,1,4,5"
 src_comp=$src_affinity
 dst_affinity="8"
 dst_comp=$dst_affinity
 other_affinity="12"
-srcs="239.102.0.64+7:7148 239.102.0.72+7:7148"
+src="239.102.0.64+15:7148"
 dst="239.102.200.0+15:7148"
 nb_dst="239.102.216.0+15:7148"
 katcp_port="7140"
@@ -36,4 +36,4 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --feng-id "$feng_id" \
     --wideband "name=wideband,channels=${channels:-32768},dst=$dst" \
     --narrowband "name=narrow0,channels=${nb_channels:-32768},decimation=${nb_decimation:-8},centre_frequency=284e6,${nb_ddc_taps:+ddc_taps=$nb_ddc_taps,}dst=$nb_dst" \
-    $srcs "$@"
+    "$src" "$@"

@@ -173,18 +173,18 @@ DEVICE_FN void fix_r2c(float2 z, float2 zn, float2 rot, float2 out[2])
  *
  * @param      s_  First channel to compute. The channels have the form
  *                 +/-(pm + s) where 0 <= p < n.
- * @param      in  Pointers to raw input for this spectrum, indexed by
- *                 polarisation
+ * @param      in  Pointer to raw input for this spectrum
+ * @param      in_stride  Stride between polarisations in @a in
  * @param[out] Z   Result, indexed by pol, +/- s, p.
  */
-DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
+DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 * RESTRICT in, unsigned int in_stride, float2 Z[2][2][n])
 {
     // Compute the mirror channel (with & to wrap it)
     int s[2] = {s_, (-s_) & (m - 1)};
     float2 Zr[2][2][n];  // Raw data; axes are pol, +/- s, sub-spectrum
     for (int i = 0; i < 2; i++)
         for (int pol = 0; pol < 2; pol++)
-            load_data(in[pol], s[i], Zr[pol][i]);
+            load_data(in + pol * in_stride, s[i], Zr[pol][i]);
 
     twiddle(s[0], Zr);
 
@@ -200,14 +200,14 @@ DEVICE_FN void finish_c2c(int s_, const GLOBAL float2 *in[2], float2 Z[2][2][n])
  *
  * @param      s   First channel to compute. The channels have the form
  *                 pm + s and CHANNELS - (pm + s) where 0 <= p < n.
- * @param      in  Pointers to raw input for this spectrum, indexed by
- *                 polarisation
+ * @param      in  Pointers to raw input for this spectrum
+ * @param      in_stride  Stride between polarisations in @a in
  * @param[out] X   Result, indexed by pol, +/- s, p
  */
-DEVICE_FN void finish_fft(int s, const GLOBAL float2 *in[2], float2 X[2][2][n])
+DEVICE_FN void finish_fft(int s, const GLOBAL float2 * RESTRICT in, unsigned int in_stride, float2 X[2][2][n])
 {
     float2 Z[2][2][n];
-    finish_c2c(s, in, Z);
+    finish_c2c(s, in, in_stride, Z);
 
     // Clean up C2C transform to form an R2C transform.
     for (int p = 0; p < n; p++)
@@ -305,20 +305,19 @@ DEVICE_FN int delay_channel(int k)
  * it's contiguous then the strides will coincide with these dimensions, but
  * katsdpsigproc may have added some padding to satisfy alignment requirements.
  * At the moment, this isn't the case, but this code aims for robustness against
- * possible changes. The input array is guaranteed to be tightly packed and so no
- * in_stride is used.
+ * possible changes.
  */
 KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     GLOBAL char4 * RESTRICT out,              // Output memory
     GLOBAL unsigned int (* RESTRICT out_saturated)[2], // Output saturation count, per heap and pol
-    const GLOBAL float2 * RESTRICT in0,       // Complex input voltages (pol0)
-    const GLOBAL float2 * RESTRICT in1,       // Complex input voltages (pol1)
+    const GLOBAL float2 * RESTRICT in,       // Complex input voltages
     const GLOBAL float2 * RESTRICT fine_delay, // Fine delay, in fraction of a sample (per pol)
     const GLOBAL float2 * RESTRICT phase,     // Constant phase offset for fine delay (per pol) [radians]
     // Pre-quantisation scale factor per channel (.xy for pol0, .zw for pol1)
     const GLOBAL float4 * RESTRICT gains,
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
+    int in_stride,                            // Input stride between polarisations
     int spectra_per_heap)                     // Number of spectra per output heap
 {
     LOCAL_DECL scratch_t scratch[n][2];
@@ -372,12 +371,11 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
             // Which spectrum within the accumulation.
             int spectrum = z * spectra_per_heap + ${r};
             int base_addr = spectrum * CHANNELS;
-            const GLOBAL float2 *in[2] = {in0 + base_addr, in1 + base_addr};
             float2 X[2][2][n];   // Final Fourier transform
 % if complex_pfb:
-            finish_c2c(s, in, X);
+            finish_c2c(s, in + base_addr, in_stride, X);
 % else:
-            finish_fft(s, in, X);
+            finish_fft(s, in + base_addr, in_stride, X);
 % endif
 
             float delay[2], ph[2];

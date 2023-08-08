@@ -61,7 +61,7 @@ def check_vkgdr(context: AbstractContext) -> None:
 async def engine_server(
     request,
     engine_arglist: list[str],
-    mock_recv_streams,
+    mock_recv_stream,
     mock_send_stream,
     recv_max_chunks_one,
     context: AbstractContext,

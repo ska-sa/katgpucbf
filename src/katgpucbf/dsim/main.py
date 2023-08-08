@@ -58,6 +58,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
+    parser.add_argument("--first-id", type=int, default=0, help="Digitiser ID for first stream [%(default)s]")
     parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
     parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
     parser.add_argument("--affinity", type=int, default=-1, help="Core affinity for the sending thread [not bound]")
@@ -161,7 +162,12 @@ async def async_main() -> None:
 
     timestamps = np.zeros(args.max_period // args.heap_samples, dtype=">u8")
     heap_sets = [
-        send.HeapSet.create(timestamps, [len(pol_dest) for pol_dest in args.dest], heap_size, range(len(args.dest)))
+        send.HeapSet.create(
+            timestamps,
+            [len(pol_dest) for pol_dest in args.dest],
+            heap_size,
+            range(args.first_id, args.first_id + len(args.dest)),
+        )
         for _ in range(2)
     ]
 

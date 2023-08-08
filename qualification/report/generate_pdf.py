@@ -28,7 +28,7 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Literal, Union
 from uuid import UUID
 
@@ -308,6 +308,7 @@ class Task:
     host: str
     version: str  # Docker image
     git_version: str
+    interfaces: dict[str, str]
 
 
 @dataclass
@@ -447,7 +448,12 @@ def _parse_host(msg: dict) -> tuple[str, Host]:
 
 
 def _parse_task(msg: dict) -> Task:
-    return Task(host=msg["host"], version=msg["version"], git_version=msg["git_version"])
+    return Task(
+        host=msg["host"],
+        interfaces=msg.get("interfaces", {}),
+        version=msg["version"],
+        git_version=msg["git_version"],
+    )
 
 
 def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
@@ -682,8 +688,9 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
     patterns = [
         ("Product controller", re.compile("product_controller")),
         ("DSim {i}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
-        ("F-engine {i}", re.compile(r"f\.antenna-channelised-voltage\.(\d+)")),
+        ("F-engine {i}", re.compile(r"f\.(?:wideband-)?antenna-channelised-voltage\.(\d+)")),
         ("XB-engine {i}", re.compile(r"xb\.baseline-correlation-products\.(\d+)")),
+        ("WB XB-engine {i}", re.compile(r"xb\.wideband-baseline-correlation-products\.(\d+)")),
     ]
     for i, correlator in enumerate(correlators, start=1):
         with section.create(
@@ -691,7 +698,7 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
         ) as subsec:
             subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
             subsec.append(make_correlator_mode_str(correlator.mode_config, expand=True))
-            with subsec.create(LongTable(r"|l|l|")) as table:
+            with subsec.create(LongTable(r"|l|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
                     tasks = []
@@ -706,8 +713,10 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
                         table.add_row(
                             name.format(i=idx),
                             Hyperref(Marker(task.host, prefix="host"), task.host),
+                            ", ".join(task.interfaces.values()),
                         )
-                    table.add_hline()
+                    if tasks:
+                        table.add_hline()
 
 
 def _doc_requirements_verified(doc: Document, requirements_verified: dict[str, list]) -> None:
@@ -784,7 +793,9 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
         section.append(f"({result.xfail_reason})")
     section.append(Command("hspace", "1cm"))
     if result.start_time is not None:
-        section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time)).strftime('%T')}")
+        section.append(
+            f"Test start time: {datetime.fromtimestamp(float(result.start_time), timezone.utc).strftime('%T')}"
+        )
         section.append(Command("hspace", "1cm"))
     section.append(f"Duration: {readable_duration(result.duration)} seconds\n")
 

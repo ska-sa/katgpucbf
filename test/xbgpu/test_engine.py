@@ -16,10 +16,9 @@
 
 """Unit tests for XBEngine module."""
 
-from collections.abc import Iterable
 from ipaddress import IPv4Network
 from math import lcm
-from typing import AbstractSet, AsyncGenerator, Callable, Final
+from typing import AbstractSet, AsyncGenerator, Callable, Final, Iterable
 
 import aiokatcp
 import numpy as np
@@ -50,10 +49,6 @@ ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
-CHANNEL_OFFSET: Final[int] = 4  # Selected fairly arbitrarily, just to be something.
-
-CORRPROD1_ARGS: Final[str] = "name=bcp1,dst=239.10.11.0:7148"
-CORRPROD2_ARGS: Final[str] = "name=bcp2,dst=239.10.11.1:7148"
 
 
 @njit
@@ -183,12 +178,22 @@ class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
     @pytest.fixture
-    def corrprod_args(self, heap_accumulation_threshold) -> list[str]:
+    def frequency(self, n_engines: int, n_channels_per_substream: int):
+        """Return the start frequency for the XBEngine.
+
+        We arbitrarily choose to pretend to be an engine in the middle of the
+        range for the given array size.
+        """
+        engine_number = n_engines // 2
+        return engine_number * n_channels_per_substream
+
+    @pytest.fixture
+    def corrprod_args(self, heap_accumulation_threshold: tuple[int, int]) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
 
         return [
-            f"{CORRPROD1_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
-            f"{CORRPROD2_ARGS},heap_accumulation_threshold={heap_accumulation_threshold + 3}",
+            f"name=bcp1,dst=239.10.11.0:7148,heap_accumulation_threshold={heap_accumulation_threshold[0]}",
+            f"name=bcp2,dst=239.10.11.1:7148,heap_accumulation_threshold={heap_accumulation_threshold[1]}",
         ]
 
     @pytest.fixture
@@ -209,7 +214,8 @@ class TestEngine:
         timestamp: int,
         batch_index: int,
         n_ants: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
+        frequency: int,
         n_spectra_per_heap: int,
         missing_antennas: AbstractSet[int] = frozenset(),
     ) -> list[spead2.send.HeapReference]:
@@ -235,8 +241,10 @@ class TestEngine:
         n_ants
             The number of antennas that data will be received from. A seperate heap
             will be generated per antenna.
-        n_channels_per_stream
+        n_channels_per_substream
             The number of frequency channels contained in a heap.
+        frequency
+            The first channel in the range handled by this XBEngine.
         n_spectra_per_heap
             The number of time samples per frequency channel.
         missing_antennas
@@ -249,7 +257,7 @@ class TestEngine:
             A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
         # Define heap shapes needed to generate simulated data.
-        heap_shape = (n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX)
+        heap_shape = (n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX)
 
         # Generate all the heaps for the different antennas.
         heaps: list[spead2.send.HeapReference] = []
@@ -259,11 +267,11 @@ class TestEngine:
             sample_array = np.zeros(heap_shape, np.int8)
 
             # Generate the data for the heap iterating assigning a different value to each channel.
-            for chan_index in range(n_channels_per_stream):
+            for chan_index in range(n_channels_per_substream):
                 sample_array[chan_index] = feng_sample(batch_index, chan_index, ant_index)
 
             # Create the heap, add it to a list of HeapReferences.
-            heap = gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, sample_array)
+            heap = gen_heap(timestamp, ant_index, frequency, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
 
         return heaps
@@ -288,7 +296,8 @@ class TestEngine:
         batch_indices: Iterable[int],
         timestamp_step: int,
         n_ants: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
+        frequency: int,
         n_spectra_per_heap: int,
     ) -> tuple[np.ndarray, list[int]]:
         """Send a contiguous stream of data to the engine and retrieve the results.
@@ -299,7 +308,7 @@ class TestEngine:
 
         Parameters
         ----------
-        mock_recv_streams
+        mock_recv_stream
             Fixture
         mock_send_stream
             Fixture
@@ -312,14 +321,14 @@ class TestEngine:
             but need not be contiguous.
         timestamp_step
             Timestamp step between each received heap processed.
-        n_ants, n_channels_per_stream, n_spectra_per_heap
+        n_ants, n_channels_per_substream, n_spectra_per_heap, frequency
             See :meth:`_create_heaps` for more info.
 
         Returns
         -------
         device_results
             Array of all GPU-generated data of shape
-            - (len(corrprod_outputs), n_total_accumulations, n_channels_per_stream, n_baselines, COMPLEX)
+            - (len(corrprod_outputs), n_total_accumulations, n_channels_per_substream, n_baselines, COMPLEX)
         n_accumulations_completed
             Number of completed accumulations for each corrprod_output
         """
@@ -359,7 +368,7 @@ class TestEngine:
             shape=(
                 len(corrprod_outputs),
                 max(len(acc_indices) for acc_indices in acc_index_counts),
-                n_channels_per_stream,
+                n_channels_per_substream,
                 n_baselines,
                 COMPLEX,
             ),
@@ -403,9 +412,9 @@ class TestEngine:
                     f"actual: {hex(ig_recv['timestamp'].value)}."
                 )
 
-                assert ig_recv["frequency"].value == n_channels_per_stream * CHANNEL_OFFSET, (
+                assert ig_recv["frequency"].value == frequency, (
                     "Output channel offset not correct. "
-                    f"Expected: {n_channels_per_stream * CHANNEL_OFFSET}, "
+                    f"Expected: {frequency}, "
                     f"actual: {ig_recv['frequency'].value}."
                 )
 
@@ -423,7 +432,7 @@ class TestEngine:
         return n_engines
 
     @pytest.fixture
-    def n_channels_per_stream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
+    def n_channels_per_substream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
         return n_channels_total // n_engines
 
     @pytest.fixture
@@ -436,7 +445,8 @@ class TestEngine:
         self,
         n_ants: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
+        frequency: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         corrprod_args: list[str],
@@ -449,9 +459,9 @@ class TestEngine:
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
-            f"--channels-per-substream={n_channels_per_stream}",
+            f"--channels-per-substream={n_channels_per_substream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
-            f"--channel-offset-value={n_channels_per_stream * CHANNEL_OFFSET}",
+            f"--channel-offset-value={frequency}",
             f"--spectra-per-heap={n_spectra_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             "--sync-epoch=1234567890",
@@ -484,7 +494,7 @@ class TestEngine:
         [None, 0, 3],
         filter=valid_end_to_end_combination,
     )
-    @pytest.mark.parametrize("heap_accumulation_threshold", test_parameters.heap_accumulation_threshold)
+    @pytest.mark.parametrize("heap_accumulation_threshold", [(3, 7), (4, 8), (5, 9)])
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
@@ -493,9 +503,9 @@ class TestEngine:
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
+        frequency: int,
         n_samples_between_spectra: int,
-        heap_accumulation_threshold: int,
         corrprod_outputs: list[XOutput],
         missing_antenna: int | None,
     ):
@@ -517,7 +527,20 @@ class TestEngine:
         packet's timestamp (to be non-zero).
         """
         n_baselines = n_ants * (n_ants + 1) * 2
-        first_accumulation_index = 123
+
+        # We don't want to start at 0, that's boring. So let's offset this a bit.
+        first_batch_index = 123
+
+        # The arbitrarily-selected number above might not be at a convenient
+        # place. We want to be just before a LCM of the heap accumulation
+        # indices of all the corrprods, so that we can get an incomplete
+        # accumulation as the output first.
+        lowest_common_multiple = lcm(
+            *[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
+        )
+        advance = lowest_common_multiple - (first_batch_index % lowest_common_multiple)
+        first_batch_index += advance
+
         max_heap_acc_threshold = max(
             corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
         )
@@ -529,8 +552,8 @@ class TestEngine:
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
-        range_start = n_channels_per_stream * CHANNEL_OFFSET
-        range_end = range_start + n_channels_per_stream - 1
+        range_start = frequency
+        range_end = range_start + n_channels_per_substream - 1
         assert xbengine.sensors[f"{corrprod_outputs[0].name}.chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
@@ -549,7 +572,8 @@ class TestEngine:
                 timestamp,
                 batch_index,
                 n_ants,
-                n_channels_per_stream,
+                n_channels_per_substream,
+                frequency,
                 n_spectra_per_heap,
                 missing_antennas=missing_antennas,
             )
@@ -558,8 +582,8 @@ class TestEngine:
             # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
             # received batch is from the middle of an accumulation.
-            batch_start_index = (first_accumulation_index + 1) * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
-            batch_end_index = (first_accumulation_index + 1 + min_full_accumulations) * max_heap_acc_threshold
+            batch_start_index = (first_batch_index) * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
+            batch_end_index = (first_batch_index + min_full_accumulations) * max_heap_acc_threshold
             device_results, n_accumulations_completed = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
@@ -568,7 +592,8 @@ class TestEngine:
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
-                n_channels_per_stream=n_channels_per_stream,
+                n_channels_per_substream=n_channels_per_substream,
+                frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
@@ -598,7 +623,7 @@ class TestEngine:
                     base_batch_index,
                     num_batches_in_current_accumulation,
                     corrprod_output.heap_accumulation_threshold,
-                    n_channels_per_stream,
+                    n_channels_per_substream,
                     n_ants,
                     n_spectra_per_heap,
                     missing_antenna,
@@ -623,7 +648,7 @@ class TestEngine:
                 pipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed[i]
             )
             assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": f"{output_name}"}) == (
-                n_channels_per_stream * n_baselines * n_accumulations_completed[i]
+                n_channels_per_substream * n_baselines * n_accumulations_completed[i]
             )
             assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": f"{output_name}"}) == 0
 
@@ -645,7 +670,7 @@ class TestEngine:
     @pytest.mark.parametrize("n_ants", [4])
     @pytest.mark.parametrize("n_channels_total", [1024])
     @pytest.mark.parametrize("n_spectra_per_heap", [256])
-    @pytest.mark.parametrize("heap_accumulation_threshold", [300])
+    @pytest.mark.parametrize("heap_accumulation_threshold", [[300, 300]])
     async def test_saturation(
         self,
         context: AbstractContext,
@@ -654,10 +679,11 @@ class TestEngine:
         xbengine: XBEngine,
         n_ants: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
+        frequency: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
-        heap_accumulation_threshold: int,
+        heap_accumulation_threshold: list[int],
         corrprod_outputs: list[XOutput],
     ):
         """Test saturation statistics.
@@ -672,9 +698,9 @@ class TestEngine:
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
-            data = np.full((n_channels_per_stream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
+            data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
             return [
-                spead2.send.HeapReference(gen_heap(timestamp, ant_index, n_channels_per_stream * CHANNEL_OFFSET, data))
+                spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
                 for ant_index in range(n_ants)
             ]
 
@@ -683,11 +709,12 @@ class TestEngine:
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs,
-                batch_indices=range(0, heap_accumulation_threshold),
+                batch_indices=range(0, heap_accumulation_threshold[0]),
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
-                n_channels_per_stream=n_channels_per_stream,
+                n_channels_per_substream=n_channels_per_substream,
+                frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
@@ -695,9 +722,9 @@ class TestEngine:
 
         assert (
             prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"})
-            == n_channels_per_stream * n_baselines
+            == n_channels_per_substream * n_baselines
         )
         assert (
             prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"})
-            == n_channels_per_stream * n_baselines
+            == n_channels_per_substream * n_baselines
         )

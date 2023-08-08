@@ -260,7 +260,7 @@ class XPipeline(Pipeline):
         correlation_template = CorrelationTemplate(
             context=context,
             n_ants=engine.n_ants,
-            n_channels=engine.n_channels_per_stream,
+            n_channels=engine.n_channels_per_substream,
             n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
         )
         self.correlation = correlation_template.instantiate(
@@ -279,7 +279,7 @@ class XPipeline(Pipeline):
             output_name=output.name,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_total,
-            n_channels_per_stream=engine.n_channels_per_stream,
+            n_channels_per_substream=engine.n_channels_per_substream,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=engine.send_rate_factor,
             channel_offset=engine.channel_offset_value,
@@ -311,7 +311,7 @@ class XPipeline(Pipeline):
                 f"{self.output.name}.chan-range",
                 "The range of channels processed by this X-engine, inclusive",
                 default=f"({self.engine.channel_offset_value},"
-                f"{self.engine.channel_offset_value + self.engine.n_channels_per_stream - 1})",
+                f"{self.engine.channel_offset_value + self.engine.n_channels_per_substream - 1})",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
@@ -599,8 +599,8 @@ class XBEngine(DeviceServer):
         The number of antennas to be correlated.
     n_channels_total
         The total number of frequency channels out of the F-Engine.
-    n_channels_per_stream
-        The number of frequency channels contained per stream.
+    n_channels_per_substream
+        The number of frequency channels contained per substream.
     n_samples_between_spectra
         The number of samples between frequency spectra received.
     n_spectra_per_heap
@@ -672,7 +672,7 @@ class XBEngine(DeviceServer):
         send_rate_factor: float,
         n_ants: int,
         n_channels_total: int,
-        n_channels_per_stream: int,
+        n_channels_per_substream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
@@ -707,7 +707,7 @@ class XBEngine(DeviceServer):
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         for output in outputs:
-            if channel_offset_value % n_channels_per_stream != 0:
+            if channel_offset_value % n_channels_per_substream != 0:
                 raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
 
         # Array configuration parameters
@@ -715,7 +715,7 @@ class XBEngine(DeviceServer):
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
-        self.n_channels_per_stream = n_channels_per_stream
+        self.n_channels_per_substream = n_channels_per_substream
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value
 
@@ -735,6 +735,12 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
+        # Multiply this _step by 2 to account for dropping half of the
+        # spectrum due to symmetric properties of the Fourier Transform. While
+        # we can workout the timestamp_step from other parameters that
+        # configure the receiver, we pass it as a seperate argument to the
+        # reciever for cases where the n_channels_per_substream changes across
+        # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
@@ -768,7 +774,7 @@ class XBEngine(DeviceServer):
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
         self.src_layout = recv.Layout(
             n_ants=n_ants,
-            n_channels_per_stream=n_channels_per_stream,
+            n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
             timestamp_step=self.rx_heap_timestamp_step,
@@ -810,7 +816,7 @@ class XBEngine(DeviceServer):
         rx_data_shape = (
             heaps_per_fengine_per_chunk,
             n_ants,
-            n_channels_per_stream,
+            n_channels_per_substream,
             n_spectra_per_heap,
             N_POLS,
             COMPLEX,
@@ -825,7 +831,7 @@ class XBEngine(DeviceServer):
         for _ in range(n_free_chunks):
             buf = buffer_device.empty_like()
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
-            chunk = recv.Chunk(data=buf, present=present, stream=self.receiver_stream)
+            chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
     def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:

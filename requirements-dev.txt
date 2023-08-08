@@ -4,11 +4,11 @@
 #
 #    pip-compile --extra=doc --extra=test --output-file=requirements-dev.txt --strip-extras requirements-dev.in setup.cfg
 #
-aioconsole==0.6.1
+aioconsole==0.6.2
     # via
     #   -c requirements.txt
     #   aiomonitor
-aiohttp==3.8.4
+aiohttp==3.8.5
     # via
     #   -c requirements.txt
     #   prometheus-async
@@ -52,16 +52,16 @@ backcall==0.2.0
     # via ipython
 build==0.10.0
     # via pip-tools
-certifi==2023.5.7
+certifi==2023.7.22
     # via requests
 cfgv==3.3.1
     # via pre-commit
-charset-normalizer==3.1.0
+charset-normalizer==3.2.0
     # via
     #   -c requirements.txt
     #   aiohttp
     #   requests
-click==8.1.3
+click==8.1.6
     # via
     #   -c requirements.txt
     #   dask
@@ -70,9 +70,9 @@ cloudpickle==2.2.1
     # via
     #   -c requirements.txt
     #   dask
-coverage==7.2.6
+coverage==7.2.7
     # via pytest-cov
-dask==2023.5.0
+dask==2023.7.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -82,7 +82,7 @@ decorator==5.1.1
     #   aiokatcp
     #   ipython
     #   katsdpsigproc
-distlib==0.3.6
+distlib==0.3.7
     # via virtualenv
 docutils==0.18.1
     # via
@@ -90,20 +90,20 @@ docutils==0.18.1
     #   sphinx
     #   sphinx-rtd-theme
     #   sphinxcontrib-bibtex
-exceptiongroup==1.1.1
+exceptiongroup==1.1.2
     # via pytest
-execnet==1.9.0
+execnet==2.0.2
     # via pytest-xdist
 executing==1.2.0
     # via stack-data
-filelock==3.12.0
+filelock==3.12.2
     # via virtualenv
-frozenlist==1.3.3
+frozenlist==1.4.0
     # via
     #   -c requirements.txt
     #   aiohttp
     #   aiosignal
-fsspec==2023.5.0
+fsspec==2023.6.0
     # via
     #   -c requirements.txt
     #   dask
@@ -111,7 +111,7 @@ hiredis==2.2.3
     # via
     #   -c requirements.txt
     #   katsdptelstate
-identify==2.5.24
+identify==2.5.26
     # via pre-commit
 idna==3.4
     # via
@@ -120,15 +120,15 @@ idna==3.4
     #   yarl
 imagesize==1.4.1
     # via sphinx
-importlib-metadata==6.6.0
+importlib-metadata==6.8.0
     # via
     #   -c requirements.txt
     #   dask
 iniconfig==2.0.0
     # via pytest
-ipython==8.13.2
+ipython==8.14.0
     # via -r requirements-dev.in
-jedi==0.18.2
+jedi==0.19.0
     # via ipython
 jinja2==3.1.2
     # via sphinx
@@ -136,7 +136,7 @@ katsdpservices==1.2
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
-katsdpsigproc==1.7.0
+katsdpsigproc==1.8.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -159,7 +159,7 @@ mako==1.2.4
     #   -c requirements.txt
     #   katsdpsigproc
     #   pycuda
-markupsafe==2.1.2
+markupsafe==2.1.3
     # via
     #   -c requirements.txt
     #   jinja2
@@ -181,12 +181,12 @@ netifaces==0.11.0
     #   katsdpservices
 nodeenv==1.8.0
     # via pre-commit
-numba==0.56.3
+numba==0.56.4
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
     #   katsdpsigproc
-numpy==1.23.4
+numpy==1.23.5
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -205,7 +205,7 @@ packaging==23.1
     #   pytest
     #   sphinx
     #   xarray
-pandas==2.0.1
+pandas==2.0.3
     # via
     #   -c requirements.txt
     #   katsdpsigproc
@@ -220,27 +220,27 @@ pexpect==4.8.0
     # via ipython
 pickleshare==0.7.5
     # via ipython
-pip-tools==6.13.0
+pip-tools==7.1.0
     # via -r requirements-dev.in
-platformdirs==3.5.1
+platformdirs==3.10.0
     # via
     #   -c requirements.txt
     #   pytools
     #   virtualenv
-pluggy==1.0.0
+pluggy==1.2.0
     # via pytest
-pre-commit==3.3.2
+pre-commit==3.3.3
     # via -r requirements-dev.in
 prometheus-async==22.2.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
-prometheus-client==0.16.0
+prometheus-client==0.17.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
     #   prometheus-async
-prompt-toolkit==3.0.38
+prompt-toolkit==3.0.39
     # via ipython
 ptyprocess==0.7.0
     # via pexpect
@@ -270,7 +270,7 @@ pyparsing==3.0.9
     #   katgpucbf (setup.cfg)
 pyproject-hooks==1.0.0
     # via build
-pytest==7.3.1
+pytest==7.4.0
     # via
     #   katgpucbf (setup.cfg)
     #   pytest-asyncio
@@ -278,13 +278,13 @@ pytest==7.3.1
     #   pytest-custom-exit-code
     #   pytest-mock
     #   pytest-xdist
-pytest-asyncio==0.21.0
+pytest-asyncio==0.21.1
     # via katgpucbf (setup.cfg)
-pytest-cov==4.0.0
+pytest-cov==4.1.0
     # via -r requirements-dev.in
 pytest-custom-exit-code==0.3.0
     # via katgpucbf (setup.cfg)
-pytest-mock==3.10.0
+pytest-mock==3.11.1
     # via katgpucbf (setup.cfg)
 pytest-xdist==3.3.1
     # via -r requirements-dev.in
@@ -292,7 +292,7 @@ python-dateutil==2.8.2
     # via
     #   -c requirements.txt
     #   pandas
-pytools==2022.1.14
+pytools==2023.1.1
     # via
     #   -c requirements.txt
     #   pycuda
@@ -300,19 +300,19 @@ pytz==2023.3
     # via
     #   -c requirements.txt
     #   pandas
-pyyaml==6.0
+pyyaml==6.0.1
     # via
     #   -c requirements.txt
     #   dask
     #   pre-commit
     #   pybtex
-redis==4.5.5
+redis==4.6.0
     # via
     #   -c requirements.txt
     #   katsdptelstate
 requests==2.31.0
     # via sphinx
-scipy==1.10.1
+scipy==1.11.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -327,7 +327,7 @@ six==1.16.0
     #   python-dateutil
 snowballstemmer==2.2.0
     # via sphinx
-spead2==3.11.1
+spead2==3.12.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -341,7 +341,7 @@ sphinx==6.2.1
     #   sphinxcontrib-tikz
 sphinx-mathjax-offline==0.0.2
     # via katgpucbf (setup.cfg)
-sphinx-rtd-theme==1.2.1
+sphinx-rtd-theme==1.2.2
     # via katgpucbf (setup.cfg)
 sphinxcontrib-applehelp==1.0.4
     # via sphinx
@@ -371,6 +371,7 @@ tomli==2.0.1
     # via
     #   build
     #   coverage
+    #   pip-tools
     #   pyproject-hooks
     #   pytest
 toolz==0.12.0
@@ -382,7 +383,7 @@ traitlets==5.9.0
     # via
     #   ipython
     #   matplotlib-inline
-typing-extensions==4.6.1
+typing-extensions==4.7.1
     # via
     #   -c requirements.txt
     #   aiokatcp
@@ -392,19 +393,19 @@ tzdata==2023.3
     # via
     #   -c requirements.txt
     #   pandas
-urllib3==2.0.2
+urllib3==2.0.4
     # via requests
-virtualenv==20.23.0
+virtualenv==20.24.2
     # via pre-commit
 wcwidth==0.2.6
     # via prompt-toolkit
-wheel==0.40.0
+wheel==0.41.0
     # via pip-tools
 wrapt==1.15.0
     # via
     #   -c requirements.txt
     #   prometheus-async
-xarray==2023.5.0
+xarray==2023.7.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -412,7 +413,7 @@ yarl==1.9.2
     # via
     #   -c requirements.txt
     #   aiohttp
-zipp==3.15.0
+zipp==3.16.2
     # via
     #   -c requirements.txt
     #   importlib-metadata

@@ -81,8 +81,7 @@ def postproc_host_pol(
 
 
 def postproc_host(
-    in0,
-    in1,
+    in_,
     channels,
     unzip_factor,
     complex_pfb,
@@ -96,10 +95,9 @@ def postproc_host(
     """Aggregate both polarisation's postproc on the host CPU."""
     out = []
     saturated = []
-    in_array = [in0, in1]
     for pol in range(N_POLS):
         pol_out, pol_saturated = postproc_host_pol(
-            in_array[pol],
+            in_[pol],
             channels,
             unzip_factor,
             complex_pfb,
@@ -142,16 +140,14 @@ def test_postproc(
     spectra_per_heap_out = 256
     spectra = 512
     rng = np.random.default_rng(seed=1)
-    in_shape = (spectra, unzip_factor, channels // unzip_factor)
-    h_in0 = _make_complex(lambda: rng.uniform(-512, 512, in_shape))
-    h_in1 = _make_complex(lambda: rng.uniform(-512, 512, in_shape))
+    in_shape = (N_POLS, spectra, unzip_factor, channels // unzip_factor)
+    h_in = _make_complex(lambda: rng.uniform(-512, 512, in_shape))
     h_fine_delay = rng.uniform(0.0, 2.0, (spectra, N_POLS)).astype(np.float32)
     h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
     h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (out_channels[1] - out_channels[0], N_POLS)))
 
     expected, expected_saturated = postproc_host(
-        h_in0,
-        h_in1,
+        h_in,
         spectra,
         spectra_per_heap_out,
         channels,
@@ -168,8 +164,7 @@ def test_postproc(
     )
     fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
     fn.ensure_all_bound()
-    fn.buffer("in0").set(command_queue, h_in0)
-    fn.buffer("in1").set(command_queue, h_in1)
+    fn.buffer("in").set(command_queue, h_in)
     fn.buffer("fine_delay").set(command_queue, h_fine_delay)
     fn.buffer("phase").set(command_queue, h_phase / np.pi)
     fn.buffer("gains").set(command_queue, h_gains)

@@ -128,6 +128,8 @@ void ddc(
     GLOBAL float2 * RESTRICT out,
     const GLOBAL sample_word * RESTRICT in,
     const GLOBAL float2 * RESTRICT weights,
+    unsigned int out_stride, // stride between pols, unit: float2
+    unsigned int in_stride,  // stride between pols, unit: sample_word
     unsigned int out_size,
     unsigned int in_size_words,
     unsigned int mix_scale,  // Mixer frequency in cycles per SUBSAMPLING samples, fixed point
@@ -147,6 +149,10 @@ void ddc(
         };
         float out[2][C * WGS];  // Logically float2, but split to reduce bank conflicts
     } local;
+
+    int pol = get_group_id(1);
+    out += pol * out_stride;
+    in += pol * in_stride;
 
     unsigned int lid = get_local_id(0);
     /* Copy workgroup's sample data to local memory */
