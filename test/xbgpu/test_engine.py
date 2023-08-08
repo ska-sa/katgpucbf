@@ -16,10 +16,9 @@
 
 """Unit tests for XBEngine module."""
 
-from collections.abc import Iterable
 from ipaddress import IPv4Network
 from math import lcm
-from typing import AbstractSet, AsyncGenerator, Callable, Final
+from typing import AbstractSet, AsyncGenerator, Callable, Final, Iterable
 
 import aiokatcp
 import numpy as np
@@ -50,9 +49,6 @@ ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
-
-CORRPROD1_ARGS: Final[str] = "name=bcp1,dst=239.10.11.0:7148"
-CORRPROD2_ARGS: Final[str] = "name=bcp2,dst=239.10.11.1:7148"
 
 
 @njit
@@ -192,12 +188,12 @@ class TestEngine:
         return engine_number * n_channels_per_stream
 
     @pytest.fixture
-    def corrprod_args(self, heap_accumulation_threshold) -> list[str]:
+    def corrprod_args(self, heap_accumulation_threshold: list[int]) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
 
         return [
-            f"{CORRPROD1_ARGS},heap_accumulation_threshold={heap_accumulation_threshold}",
-            f"{CORRPROD2_ARGS},heap_accumulation_threshold={heap_accumulation_threshold + 3}",
+            f"name=bcp1,dst=239.10.11.0:7148,heap_accumulation_threshold={heap_accumulation_threshold[0]}",
+            f"name=bcp2,dst=239.10.11.1:7148,heap_accumulation_threshold={heap_accumulation_threshold[1]}",
         ]
 
     @pytest.fixture
@@ -498,7 +494,7 @@ class TestEngine:
         [None, 0, 3],
         filter=valid_end_to_end_combination,
     )
-    @pytest.mark.parametrize("heap_accumulation_threshold", test_parameters.heap_accumulation_threshold)
+    @pytest.mark.parametrize("heap_accumulation_threshold", [[3, 7]])
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
@@ -675,7 +671,7 @@ class TestEngine:
     @pytest.mark.parametrize("n_ants", [4])
     @pytest.mark.parametrize("n_channels_total", [1024])
     @pytest.mark.parametrize("n_spectra_per_heap", [256])
-    @pytest.mark.parametrize("heap_accumulation_threshold", [300])
+    @pytest.mark.parametrize("heap_accumulation_threshold", [[300, 300]])
     async def test_saturation(
         self,
         context: AbstractContext,
@@ -688,7 +684,7 @@ class TestEngine:
         frequency: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
-        heap_accumulation_threshold: int,
+        heap_accumulation_threshold: list[int],
         corrprod_outputs: list[XOutput],
     ):
         """Test saturation statistics.
@@ -714,7 +710,7 @@ class TestEngine:
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs,
-                batch_indices=range(0, heap_accumulation_threshold),
+                batch_indices=range(0, heap_accumulation_threshold[0]),
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
                 n_ants=n_ants,
