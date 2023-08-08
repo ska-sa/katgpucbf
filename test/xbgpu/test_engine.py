@@ -188,7 +188,7 @@ class TestEngine:
         return engine_number * n_channels_per_substream
 
     @pytest.fixture
-    def corrprod_args(self, heap_accumulation_threshold: list[int]) -> list[str]:
+    def corrprod_args(self, heap_accumulation_threshold: tuple[int, int]) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
 
         return [
@@ -494,7 +494,7 @@ class TestEngine:
         [None, 0, 3],
         filter=valid_end_to_end_combination,
     )
-    @pytest.mark.parametrize("heap_accumulation_threshold", [[3, 7]])
+    @pytest.mark.parametrize("heap_accumulation_threshold", [(3, 7), (4, 8), (5, 9)])
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
@@ -506,7 +506,6 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_samples_between_spectra: int,
-        heap_accumulation_threshold: int,
         corrprod_outputs: list[XOutput],
         missing_antenna: int | None,
     ):
