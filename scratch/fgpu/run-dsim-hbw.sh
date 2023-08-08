@@ -22,6 +22,7 @@ for i in 0 1; do
         --katcp-port $(($i + 7140)) \
         --prometheus-port $(($i + 7150)) \
         --sync-time "$sync_time" \
+        --first-id $i \
         "${addresses[$i]}" "$@" &
 done
 wait

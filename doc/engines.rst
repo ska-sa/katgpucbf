@@ -67,6 +67,13 @@ Stream
     This should not be confused with a CUDA stream, which corresponds to a
     Command Queue in OpenCL terminology.
 
+Stream Group
+    A group of incoming streams whose data are combined in chunks (see
+    :class:`spead2.recv.ChunkStreamRingGroup`). Stream groups can be logically
+    treated like a single stream, but allow receiving to be scaled across
+    multiple CPU cores (with one member :class:`stream
+    <spead2.recv.ChunkStreamGroupMember>` per thread).
+
 Timestamp
     Timestamps are expressed in units of ADC (analogue-to-digital converter)
     samples, measured from a configurable "sync epoch" (also known as the "sync
@@ -90,11 +97,12 @@ The general operation of the DSP engines is illustrated in the diagram below:
             queue/.style={flow, <->},
             fqueue/.style={queue, color=blue}}
    \begin{scope}[start chain=chain going below]
-   \node[proc, on chain] (align) {Align, copy to GPU};
+   \node[proc, on chain] (group) {Stream group};
+   \node[proc, on chain] (upload) {Copy to GPU};
    \node[pproc, draw=none, anchor=west,
-         start chain=rx0 going above, on chain=rx0] (align0) at (align.west) {};
+         start chain=rx0 going above, on chain=rx0] (group0) at (group.west) {};
    \node[pproc, draw=none, anchor=east,
-         start chain=rx1 going above, on chain=rx1] (align1) at (align.east) {};
+         start chain=rx1 going above, on chain=rx1] (group1) at (group.east) {};
    \begin{scope}[start branch=stream0 going below]
      \node[proc, on chain=going below left] (process0) {GPU processing};
    \end{scope}
@@ -106,18 +114,17 @@ The general operation of the DSP engines is illustrated in the diagram below:
      \node[proc, on chain] (download\s) {Copy from GPU};
      \node[proc, on chain] (transmit\s) {Transmit};
      \node[proc, on chain] (outstream\s) {Stream};
-     \draw[queue] (align) -- (process\s);
+     \draw[queue] (upload) -- (process\s);
      \draw[queue] (process\s) -- (download\s);
      \draw[queue] (download\s) -- (transmit\s);
      \draw[flow] (transmit\s) -- (outstream\s);
      \end{scope}
    }
    \foreach \i in {0, 1} {
-     \node[pproc, on chain=rx\i] (receive\i) {Receive};
      \node[pproc, on chain=rx\i] (stream\i) {Stream};
-     \draw[flow] (stream\i) -- (receive\i);
-     \draw[queue] (receive\i) -- (align\i);
+     \draw[flow] (stream\i) -- (group\i);
    }
+   \draw[queue] (group) -- (upload);
    \end{scope}
 
 The F-engine uses two input streams and aligns two incoming polarisations, but
@@ -125,9 +132,10 @@ in the XB-engine there is only one.
 
 There might not always be multiple processing pipelines. When they exist, they
 are to support multiple outputs generated from the same input, such as wide-
-and narrow-band F-engines, or multiple beams. Separate outputs use separate
-output streams so that they can interleave their outputs while transmitting at
-different rates. They share a thread to reduce the number of cores required.
+and narrow-band F-engines, or correlation products and beams. Separate outputs
+use separate output streams so that they can interleave their outputs while
+transmitting at different rates. They share a thread to reduce the number of
+cores required.
 
 Chunking
 ^^^^^^^^
@@ -142,13 +150,14 @@ of the F-engine, increase the overheads associated with overlapping PFB
 Chunking also helps reduce the impact of slow Python code. Digitiser output
 heaps consist of only a single packet, and while F-engine output heaps can span
 multiple packets, they are still rather small and involving Python on a per-heap
-basis would be far too slow. We use :class:`spead2.recv.ChunkRingStream` to
-group heaps into chunks, which means Python code is only run per-chunk.
+basis would be far too slow. We use :class:`spead2.recv.ChunkRingStream` or
+:class:`spead2.recv.ChunkStreamRingGroup` to group heaps into chunks, which
+means Python code is only run per-chunk.
 
 Queues
 ^^^^^^
 Both engines consist of several components which run independently of each
-other - either via threads (spead2's C++ code) or Python's asyncio framework. The
+other — either via threads (spead2's C++ code) or Python's asyncio framework. The
 general pattern is that adjacent components are connected by a pair of queues:
 one carrying full buffers of data forward, and one returning free buffers. This
 approach allows all memory to be allocated up front. Slow components thus

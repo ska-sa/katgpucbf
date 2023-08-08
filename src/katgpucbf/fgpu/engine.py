@@ -17,10 +17,12 @@
 """Engine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
+import copy
+import itertools
 import logging
 import math
 import numbers
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial
 
@@ -133,19 +135,14 @@ def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.
     return coeff.astype(np.float32)
 
 
-@dataclass
-class PolInItem:
-    """Polarisation-specific elements of :class:`InItem`."""
-
-    #: A device memory region for storing the raw samples.
-    samples: accel.DeviceArray | None
-    #: Bitmask indicating which packets were present in the chunk.
-    present: np.ndarray
-    #: Cumulative sum over :attr:`present`. It is up to the caller
-    #: to compute it at the appropriate time.
-    present_cumsum: np.ndarray
-    #: Chunk to return to recv after processing (used with vkgdr only).
-    chunk: recv.Chunk | None = None
+def _padded_input_size(size_bytes: int) -> int:
+    """Determine padded input dimension for input array."""
+    dim = accel.Dimension(
+        size_bytes,
+        min_padded_size=size_bytes + INPUT_CHUNK_PADDING,
+        align_dtype=np.uint8,
+    )
+    return dim.required_padded_size()
 
 
 class InItem(QueueItem):
@@ -160,7 +157,7 @@ class InItem(QueueItem):
     .. code-block:: python
 
         # In the receive function
-        my_in_item.pol_data[pol].samples.set_region(...)  # start copying sample data to the GPU,
+        my_in_item.samples.set_region(...)  # start copying sample data to the GPU,
         my_in_item.add_marker(command_queue)
         self._in_queue.put_nowait(my_in_item)
         ...
@@ -184,8 +181,15 @@ class InItem(QueueItem):
         host memory.
     """
 
-    #: Per-polarisation data
-    pol_data: list[PolInItem]
+    #: A device memory region for storing the raw samples.
+    samples: accel.DeviceArray | None
+    #: Bitmask indicating which packets were present in the chunk.
+    present: np.ndarray
+    #: Cumulative sum over :attr:`present` (separately per pol). It is up to
+    #: the caller to compute it at the appropriate time.
+    present_cumsum: np.ndarray
+    #: Chunk to return to recv after processing (used with vkgdr only).
+    chunk: recv.Chunk | None = None
     #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
     n_samples: int
     #: Bitwidth of the data in :attr:`PolInItem.samples`
@@ -203,25 +207,24 @@ class InItem(QueueItem):
         use_vkgdr: bool = False,
     ) -> None:
         self.dig_sample_bits = layout.sample_bits
-        self.pol_data = []
         present_size = accel.divup(n_samples, layout.heap_samples)
         data_size = n_samples * self.dig_sample_bits // BYTE_BITS
-        for _pol in range(N_POLS):
-            if use_vkgdr:
-                # Memory belongs to the chunks, and we set samples when
-                # initialising the item from the chunks.
-                sample_data = None
-            else:
-                sample_data = accel.DeviceArray(
-                    context, (data_size,), np.uint8, padded_shape=(data_size + INPUT_CHUNK_PADDING,)
-                )
-            self.pol_data.append(
-                PolInItem(
-                    samples=sample_data,
-                    present=np.zeros(present_size, dtype=bool),
-                    present_cumsum=np.zeros(present_size + 1, np.uint32),
-                )
+        if use_vkgdr:
+            # Memory belongs to the chunks, and we set samples when
+            # initialising the item from the chunks.
+            self.samples = None
+        else:
+            self.samples = accel.DeviceArray(
+                context,
+                (N_POLS, data_size),
+                np.uint8,
+                padded_shape=(
+                    N_POLS,
+                    _padded_input_size(data_size),
+                ),
             )
+        self.present = np.zeros((N_POLS, present_size), dtype=bool)
+        self.present_cumsum = np.zeros((N_POLS, present_size + 1), np.uint32)
         self.refcount = 0
         super().__init__(timestamp)
 
@@ -239,10 +242,10 @@ class InItem(QueueItem):
         """Memory capacity in samples.
 
         The amount of space allocated to each polarisation stored in
-        :attr:`PolInData.samples`.
+        :attr:`samples`.
         """
-        assert self.pol_data[0].samples is not None
-        return self.pol_data[0].samples.shape[0] * BYTE_BITS // self.dig_sample_bits
+        assert self.samples is not None
+        return self.samples.shape[1] * BYTE_BITS // self.dig_sample_bits
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -330,7 +333,7 @@ class OutItem(QueueItem):
     #: Output saturation count, per pol
     saturation: accel.DeviceArray
     #: Output sum of squared samples, per pol
-    dig_total_power: list[accel.DeviceArray]
+    dig_total_power: accel.DeviceArray | None
     #: Per-spectrum fine delays
     fine_delay: MappedArray
     #: Per-spectrum phase offsets
@@ -352,12 +355,10 @@ class OutItem(QueueItem):
         allocator = accel.DeviceAllocator(compute.template.context)
         self.spectra = compute.slots["out"].allocate(allocator, bind=False)
         self.saturated = compute.slots["saturated"].allocate(allocator, bind=False)
-        if "dig_total_power0" in compute.slots:
-            self.dig_total_power = [
-                compute.slots[f"dig_total_power{pol}"].allocate(allocator, bind=False) for pol in range(N_POLS)
-            ]
+        if "dig_total_power" in compute.slots:
+            self.dig_total_power = compute.slots["dig_total_power"].allocate(allocator, bind=False)
         else:
-            self.dig_total_power = []
+            self.dig_total_power = None
         context = compute.template.context
         self.fine_delay = MappedArray.from_slot(vkgdr_handle, context, compute.slots["fine_delay"])
         self.phase = MappedArray.from_slot(vkgdr_handle, context, compute.slots["phase"])
@@ -388,8 +389,8 @@ class OutItem(QueueItem):
         be used to subsequently operate on the accumulators.
         """
         self.reset(timestamp)
-        for buf in self.dig_total_power:
-            buf.zero(command_queue)
+        if self.dig_total_power is not None:
+            self.dig_total_power.zero(command_queue)
 
     @property
     def end_timestamp(self) -> int:  # noqa: D401
@@ -516,11 +517,10 @@ class Pipeline:
         # Pre-allocate the memory for some buffers that we know we won't be
         # explicitly binding.
         self._compute.ensure_bound("fft_work")
-        for pol in range(N_POLS):
-            if narrowband_config:
-                self._compute.ensure_bound(f"subsampled{pol}")
-            self._compute.ensure_bound(f"fft_in{pol}")
-            self._compute.ensure_bound(f"fft_out{pol}")
+        if narrowband_config:
+            self._compute.ensure_bound("subsampled")
+        self._compute.ensure_bound("fft_in")
+        self._compute.ensure_bound("fft_out")
 
         device_pfb_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_pfb_weights.set(
@@ -662,11 +662,8 @@ class Pipeline:
             else:
                 self._in_item.enqueue_wait_for_events(self._compute.command_queue)
                 if isinstance(self.output, NarrowbandOutput):
-                    samples = []
-                    for pol_data in self._in_item.pol_data:
-                        assert pol_data.samples is not None
-                        samples.append(pol_data.samples)
-                    self._compute.run_ddc(samples, self._in_item.timestamp)
+                    assert self._in_item.samples is not None
+                    self._compute.run_ddc(self._in_item.samples, self._in_item.timestamp)
                     self._in_item.add_marker(self._compute.command_queue)
         return self._in_item
 
@@ -837,15 +834,13 @@ class Pipeline:
                     # Divide by pi because the arguments of sincospif() used in the
                     # kernel are in radians/PI.
                     self._out_item.phase.host[out_slice] = phase / np.pi
-                    samples = []
-                    for pol_data in in_item.pol_data:
-                        assert pol_data.samples is not None
-                        samples.append(pol_data.samples)
+                    assert in_item.samples is not None
                     if isinstance(self.output, NarrowbandOutput):
                         self._compute.run_narrowband_frontend(pfb_offsets, self._out_item.n_spectra, batch_spectra)
                     else:
+                        assert self._out_item.dig_total_power is not None
                         self._compute.run_wideband_frontend(
-                            samples,
+                            in_item.samples,
                             self._out_item.dig_total_power,
                             pfb_offsets,
                             self._out_item.n_spectra,
@@ -857,7 +852,7 @@ class Pipeline:
                     self._out_item.n_spectra += batch_spectra
                     # Work out which output spectra contain missing data.
                     self._out_item.present[out_slice] = True
-                    for pol, pol_data in enumerate(in_item.pol_data):
+                    for pol in range(N_POLS):
                         # Offset in the chunk of the first sample for each spectrum
                         first_offset = np.arange(
                             offsets[pol],
@@ -869,7 +864,9 @@ class Pipeline:
                         first_packet = first_offset // self.engine.src_layout.heap_samples
                         # last_packet is exclusive
                         last_packet = last_offset // self.engine.src_layout.heap_samples + 1
-                        present_packets = pol_data.present_cumsum[last_packet] - pol_data.present_cumsum[first_packet]
+                        present_packets = (
+                            in_item.present_cumsum[pol, last_packet] - in_item.present_cumsum[pol, first_packet]
+                        )
                         self._out_item.present[out_slice] &= present_packets == last_packet - first_packet
 
             # The _flush_out method calls the "backend" which triggers the FFT
@@ -939,11 +936,9 @@ class Pipeline:
         func_name = f"{self.output.name}.run_transmit"
         # Scratch space for transferring digitiser power
         if self.dig_stats:
-            dig_total_power = [
-                self._compute.slots[f"dig_total_power{pol}"].allocate_host(context) for pol in range(N_POLS)
-            ]
+            dig_total_power = self._compute.slots["dig_total_power"].allocate_host(context)
         else:
-            dig_total_power = []
+            dig_total_power = None
         while True:
             with self.engine.monitor.with_state(func_name, "wait out_queue"):
                 out_item = await self._out_queue.get()
@@ -964,8 +959,8 @@ class Pipeline:
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
             out_item.saturated.get_async(self._download_queue, chunk.saturated)
-            for pol, trg in enumerate(dig_total_power):
-                out_item.dig_total_power[pol].get_async(self._download_queue, trg)
+            if out_item.dig_total_power is not None:
+                out_item.dig_total_power.get_async(self._download_queue, dig_total_power)
             events.append(self._download_queue.enqueue_marker())
 
             chunk.timestamp = out_item.timestamp
@@ -974,16 +969,17 @@ class Pipeline:
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events(events)
 
-            for pol, trg in enumerate(dig_total_power):
-                total_power = float(trg)
-                avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
-                # Normalise relative to full scale. The factor of 2 is because we
-                # want 1.0 to correspond to a sine wave rather than a square wave.
-                avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
-                avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
-                self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                    avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
-                )
+            if dig_total_power is not None:
+                for pol, trg in enumerate(dig_total_power):
+                    total_power = float(trg)
+                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
+                    # Normalise relative to full scale. The factor of 2 is because we
+                    # want 1.0 to correspond to a sine wave rather than a square wave.
+                    avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
+                    avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
+                    )
 
             n_frames = out_item.n_spectra // self.engine.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
@@ -1084,7 +1080,7 @@ class Engine(aiokatcp.DeviceServer):
     context
         The accelerator (OpenCL or CUDA) context to use for running the Engine.
     srcs
-        A list of source endpoints for the incoming data.
+        A list of source endpoints for the incoming data, or a pcap filename.
     src_interface
         IP addresses of the network devices to use for input.
     src_ibv
@@ -1166,7 +1162,7 @@ class Engine(aiokatcp.DeviceServer):
         katcp_host: str,
         katcp_port: int,
         context: AbstractContext,
-        srcs: list[str | list[tuple[str, int]]],
+        srcs: str | list[tuple[str, int]],
         src_interface: list[str] | None,
         src_ibv: bool,
         src_affinity: list[int],
@@ -1203,7 +1199,7 @@ class Engine(aiokatcp.DeviceServer):
         )
 
         # Attributes copied or initialised from arguments
-        self._srcs = list(srcs)
+        self._srcs = copy.copy(srcs)
         self._src_comp_vector = list(src_comp_vector)
         self._src_interface = src_interface
         self._src_buffer = src_buffer
@@ -1261,8 +1257,8 @@ class Engine(aiokatcp.DeviceServer):
 
     def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
-        src_chunks_per_stream = 4
-        ringbuffer_capacity = src_chunks_per_stream * N_POLS
+        src_chunks = 4
+        ringbuffer_capacity = src_chunks * N_POLS
 
         context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
@@ -1271,35 +1267,39 @@ class Engine(aiokatcp.DeviceServer):
         data_ringbuffer = ChunkRingbuffer(
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
-        free_ringbuffers = [spead2.recv.ChunkRingbuffer(src_chunks_per_stream) for _ in range(N_POLS)]
-        self._src_streams = recv.make_streams(self.src_layout, data_ringbuffer, free_ringbuffers, src_affinity)
-        chunk_bytes = self.src_layout.chunk_samples * self.src_layout.sample_bits // BYTE_BITS
-        for stream in self._src_streams:
-            for _ in range(src_chunks_per_stream):
-                if self.use_vkgdr:
-                    array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
-                    device_bytes = array_bytes + INPUT_CHUNK_PADDING
-                    with context:
-                        mem = vkgdr.pycuda.Memory(self.vkgdr_handle, device_bytes)
-                    buf = np.array(mem, copy=False).view(np.uint8)
-                    # The device buffer contains extra space for copying the head
-                    # of the following chunk, but we don't need that in the host
-                    # mapping.
-                    buf = buf[:chunk_bytes]
-                    device_array = accel.DeviceArray(
-                        context, (array_bytes,), np.uint8, padded_shape=(device_bytes,), raw=mem
-                    )
-                else:
-                    buf = accel.HostArray((chunk_bytes,), np.uint8, context=context)
-                    device_array = None
-                chunk = recv.Chunk(
-                    data=buf,
-                    device=device_array,
-                    present=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint8),
-                    extra=np.zeros(self.src_layout.chunk_samples // self.src_layout.heap_samples, np.uint16),
-                    stream=stream,
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(src_chunks)
+        if self.use_vkgdr:
+            # These quantities are per-pol
+            array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
+            stride = _padded_input_size(array_bytes)
+        else:
+            stride = self.src_layout.chunk_bytes
+        self._src_group = recv.make_stream_group(
+            self.src_layout, data_ringbuffer, free_ringbuffer, src_affinity, stride
+        )
+        for _ in range(src_chunks):
+            if self.use_vkgdr:
+                with context:
+                    mem = vkgdr.pycuda.Memory(self.vkgdr_handle, N_POLS * stride)
+                buf = np.array(mem, copy=False).view(np.uint8).reshape(N_POLS, stride)
+                device_array = accel.DeviceArray(
+                    context,
+                    (N_POLS, array_bytes),
+                    np.uint8,
+                    padded_shape=(N_POLS, stride),
+                    raw=mem,
                 )
-                chunk.recycle()  # Make available to the stream
+            else:
+                buf = accel.HostArray((N_POLS, stride), np.uint8, context=context)
+                device_array = None
+            chunk = recv.Chunk(
+                data=buf,
+                device=device_array,
+                present=np.zeros((N_POLS, self.src_layout.chunk_heaps), np.uint8),
+                extra=np.zeros((N_POLS, self.src_layout.chunk_heaps), np.uint16),
+                sink=self._src_group,
+            )
+            chunk.recycle()  # Make available to the stream
 
     def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
@@ -1381,14 +1381,12 @@ class Engine(aiokatcp.DeviceServer):
         if item.refcount == 0:
             self._active_in_sem.release()
             if self.use_vkgdr:
-                chunks = []
-                for pol_data in item.pol_data:
-                    pol_data.samples = None
-                    assert pol_data.chunk is not None
-                    chunks.append(pol_data.chunk)
-                    pol_data.chunk = None
+                item.samples = None
+                assert item.chunk is not None
+                chunk = item.chunk
+                item.chunk = None
                 task = asyncio.create_task(
-                    self._push_recv_chunks(chunks, item.events),
+                    self._push_recv_chunks([chunk], item.events),
                     name="Receive Chunk Recycle Task",
                 )
                 self.add_service_task(task)
@@ -1412,8 +1410,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         # np.cumsum doesn't provide an initial zero, so we output starting at
         # position 1.
-        for pol_data in item.pol_data:
-            np.cumsum(pol_data.present, dtype=pol_data.present_cumsum.dtype, out=pol_data.present_cumsum[1:])
+        np.cumsum(item.present, axis=1, dtype=item.present_cumsum.dtype, out=item.present_cumsum[:, 1:])
         await self._active_in_sem.acquire()
         item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
@@ -1430,7 +1427,7 @@ class Engine(aiokatcp.DeviceServer):
         This can happen if we lose a whole input chunk from the digitiser.
         """
         chunk_heaps = prev_item.n_samples // self.src_layout.heap_samples
-        copy_heaps = len(prev_item.pol_data[0].present) - chunk_heaps
+        copy_heaps = prev_item.present.shape[1] - chunk_heaps
         if in_item is not None and prev_item.end_timestamp == in_item.timestamp:
             sample_bits = self.src_layout.sample_bits
             copy_samples = prev_item.capacity - prev_item.n_samples
@@ -1438,23 +1435,21 @@ class Engine(aiokatcp.DeviceServer):
             copy_bytes = copy_samples * sample_bits // BYTE_BITS
             # Must wait for the upload to complete before the copy starts
             self._copy_queue.enqueue_wait_for_events(in_item.events)
-            for pol_data0, pol_data1 in zip(prev_item.pol_data, in_item.pol_data):
-                assert pol_data0.samples is not None
-                assert pol_data1.samples is not None
-                pol_data1.samples.copy_region(
-                    self._copy_queue,
-                    pol_data0.samples,
-                    np.s_[:copy_bytes],
-                    np.s_[-copy_bytes:],
-                )
-                pol_data0.present[-copy_heaps:] = pol_data1.present[:copy_heaps]
+            assert prev_item.samples is not None
+            assert in_item.samples is not None
+            in_item.samples.copy_region(
+                self._copy_queue,
+                prev_item.samples,
+                np.s_[:, :copy_bytes],
+                np.s_[:, -copy_bytes:],
+            )
+            prev_item.present[:, -copy_heaps:] = in_item.present[:, :copy_heaps]
             prev_item.n_samples += copy_samples
             prev_item.add_marker(self._copy_queue)
         else:
-            for pol_data in prev_item.pol_data:
-                pol_data.present[-copy_heaps:] = 0  # Mark tail as absent, for each pol
+            prev_item.present[:, -copy_heaps:] = 0  # Mark tail as absent, for each pol
 
-    async def _run_receive(self, streams: list[spead2.recv.ChunkRingStream], layout: recv.Layout) -> None:
+    async def _run_receive(self, group: spead2.recv.ChunkStreamRingGroup, layout: recv.Layout) -> None:
         """Receive data from the network, queue it up for processing.
 
         This function receives chunk sets, which are chunks in groups of two -
@@ -1472,14 +1467,15 @@ class Engine(aiokatcp.DeviceServer):
 
         Parameters
         ----------
-        streams
-            There should be only two of these because they each represent one of
-            the digitiser's two polarisations.
+        group
+            Receiving stream group.
         layout
             The structure of the streams.
         """
         prev_item = None
-        async for chunks in recv.chunk_sets(streams, layout, self.sensors, self.time_converter):
+        assert isinstance(group.data_ringbuffer, ChunkRingbuffer)
+        async for chunk in recv.iter_chunks(group.data_ringbuffer, layout, self.sensors, self.time_converter):
+            assert isinstance(chunk, base_recv.Chunk)
             with self.monitor.with_state("run_receive", "wait in_free_queue"):
                 in_item = await self._in_free_queue.get()
             # Make sure all the item's events are complete before overwriting
@@ -1487,37 +1483,32 @@ class Engine(aiokatcp.DeviceServer):
             # handled by _push_recv_chunks.
             if not self.use_vkgdr:
                 in_item.enqueue_wait_for_events(self._upload_queue)
-            in_item.reset(chunks[0].timestamp)
-
-            # In steady-state, chunks should be the same size, but during
-            # shutdown, the last chunk may be short.
-            in_item.n_samples = chunks[0].data.nbytes * BYTE_BITS // self.src_layout.sample_bits
+            in_item.reset(chunk.timestamp)
+            in_item.n_samples = layout.chunk_samples
 
             transfer_events = []
-            for pol, (pol_data, chunk) in enumerate(zip(in_item.pol_data, chunks)):
-                # Copy the present flags (synchronously).
-                pol_data.present[: len(chunk.present)] = chunk.present
-                # Update the digitiser saturation count (the "extra" field holds
-                # per-heap values).
-                assert chunk.extra is not None
+            # Copy the present flags (synchronously).
+            in_item.present[:, : chunk.present.shape[1]] = chunk.present
+            # Update the digitiser saturation count (the "extra" field holds
+            # per-heap values).
+            assert chunk.extra is not None
+            for pol in range(N_POLS):
                 sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
                 sensor.set_value(
-                    sensor.value + int(np.sum(chunk.extra, dtype=np.uint64)),
+                    sensor.value + int(np.sum(chunk.extra[pol], dtype=np.uint64)),
                     timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
                 )
             if self.use_vkgdr:
-                for pol_data, chunk in zip(in_item.pol_data, chunks):
-                    assert pol_data.samples is None
-                    pol_data.samples = chunk.device  # type: ignore
-                    pol_data.chunk = chunk
+                assert in_item.samples is None
+                in_item.samples = chunk.device  # type: ignore
+                in_item.chunk = chunk
             else:
-                # Copy each pol chunk to the right place on the GPU.
-                for pol_data, chunk in zip(in_item.pol_data, chunks):
-                    assert pol_data.samples is not None
-                    pol_data.samples.set_region(
-                        self._upload_queue, chunk.data, np.s_[: chunk.data.nbytes], np.s_[:], blocking=False
-                    )
-                    transfer_events.append(self._upload_queue.enqueue_marker())
+                # Copy the chunk to the right place on the GPU.
+                assert in_item.samples is not None
+                in_item.samples.set_region(
+                    self._upload_queue, chunk.data, np.s_[:, : layout.chunk_bytes], np.s_[:], blocking=False
+                )
+                transfer_events.append(self._upload_queue.enqueue_marker())
                 # Put events on the queue so that run_processing() knows when to
                 # start.
                 in_item.events.extend(transfer_events)
@@ -1534,10 +1525,9 @@ class Engine(aiokatcp.DeviceServer):
                 # something goes wrong we won't have waited for the event, and
                 # giving the chunk back to the stream while it's still in use
                 # by the device could cause incorrect data to be transmitted.
-                for pol in range(len(chunks)):
-                    with self.monitor.with_state("run_receive", "wait transfer"):
-                        await async_wait_for_events([transfer_events[pol]])
-                    chunks[pol].recycle()
+                with self.monitor.with_state("run_receive", "wait transfer"):
+                    await async_wait_for_events(transfer_events)
+                chunk.recycle()
 
         if prev_item is not None:
             # Flush the final chunk to the pipelines
@@ -1698,18 +1688,28 @@ class Engine(aiokatcp.DeviceServer):
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
 
-        for pol, stream in enumerate(self._src_streams):
-            base_recv.add_reader(
-                stream,
-                src=self._srcs[pol],
-                interface=self._src_interface[pol] if self._src_interface is not None else None,
-                ibv=self._src_ibv,
-                comp_vector=self._src_comp_vector[pol],
-                buffer=self._src_buffer,
-            )
+        src_comp_vector_iter = iter(self._src_comp_vector)
+        if self._src_interface is None:
+            src_interface_iter: Iterator[str | None] = itertools.repeat(None)
+        else:
+            src_interface_iter = itertools.cycle(self._src_interface)
+        if isinstance(self._srcs, str):
+            self._src_group[0].add_udp_pcap_file_reader(self._srcs)
+        else:
+            for i, stream in enumerate(self._src_group):
+                first_src = i * len(self._srcs) // len(self._src_group)
+                last_src = (i + 1) * len(self._srcs) // len(self._src_group)
+                base_recv.add_reader(
+                    stream,
+                    src=self._srcs[first_src:last_src],
+                    interface=next(src_interface_iter),
+                    ibv=self._src_ibv,
+                    comp_vector=next(src_comp_vector_iter),
+                    buffer=self._src_buffer // len(self._src_group),
+                )
 
         recv_task = asyncio.create_task(
-            self._run_receive(self._src_streams, self.src_layout),
+            self._run_receive(self._src_group, self.src_layout),
             name=RECV_TASK_NAME,
         )
         self.add_service_task(recv_task)
@@ -1738,8 +1738,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         for task in self._cancel_tasks:
             task.cancel()
-        for stream in self._src_streams:
-            stream.stop()
+        self._src_group.stop()
         # If any of the tasks are already done then we had an exception, and
         # waiting for the rest may hang as the shutdown path won't proceed
         # neatly.

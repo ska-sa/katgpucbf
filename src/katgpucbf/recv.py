@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -44,6 +44,10 @@ user_data_type = types.Record.make_c_struct(
 RX_SENSOR_TIMEOUT_CHUNKS = 10
 #: Minimum rx sensor status timeout in seconds
 RX_SENSOR_TIMEOUT_MIN = 1.0
+#: Eviction mode to use when some streams fall behind
+EVICTION_MODE = spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY
+
+AnyStream = spead2.recv.ChunkRingStream | spead2.recv.ChunkStreamGroupMember
 
 
 class Chunk(spead2.recv.Chunk):
@@ -63,13 +67,13 @@ class Chunk(spead2.recv.Chunk):
     # New fields
     device: object
     timestamp: int
-    stream: weakref.ref
+    sink: weakref.ref
 
-    def __init__(self, *args, stream: spead2.recv.ChunkRingStream, device: object = None, **kwargs):
+    def __init__(self, *args, sink: spead2.recv.ChunkRingPair, device: object = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.device = device
         self.timestamp = 0  # Actual value filled in when chunk received
-        self.stream = weakref.ref(stream)
+        self.sink = weakref.ref(sink)
 
     def __enter__(self) -> "Chunk":
         return self
@@ -78,12 +82,12 @@ class Chunk(spead2.recv.Chunk):
         self.recycle()
 
     def recycle(self) -> None:
-        """Return the chunk to the owning stream."""
-        stream = self.stream()
-        # If it is None, the stream has been garbage collected, and there is no
+        """Return the chunk to the owning stream/group."""
+        sink = self.sink()
+        # If it is None, the sink has been garbage collected, and there is no
         # need to return the chunk.
-        if stream is not None:
-            stream.add_free_chunk(self)
+        if sink is not None:
+            sink.add_free_chunk(self)
 
 
 class StatsCollector(Collector):
@@ -93,7 +97,7 @@ class StatsCollector(Collector):
     class _StreamInfo:
         """Information about a single registered stream."""
 
-        stream: weakref.ReferenceType[spead2.recv.ChunkRingStream]
+        stream: weakref.ReferenceType[AnyStream]
         indices: list[int]  # Indices of counters, in the order given by counter_map
         prev: list[int]  # Amounts already counted
 
@@ -111,7 +115,7 @@ class StatsCollector(Collector):
             self.created = time.time()
             self.streams = []
 
-        def add_stream(self, stream: spead2.recv.ChunkRingStream) -> None:
+        def add_stream(self, stream: AnyStream) -> None:
             """Register a new stream."""
             config = stream.config
             indices = [config.get_stat_index(name) for name in self.totals.keys()]
@@ -176,7 +180,7 @@ class StatsCollector(Collector):
         for label_set in self._label_sets.values():
             label_set.update()
 
-    def add_stream(self, stream: spead2.recv.ChunkRingStream, labels: Iterable[str] = ()) -> None:
+    def add_stream(self, stream: AnyStream, labels: Iterable[str] = ()) -> None:
         """Register a new stream.
 
         If the collector was constructed with a non-empty ``labelnames``, then
@@ -230,16 +234,14 @@ class BaseLayout(ABC):
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         ...
 
-    def chunk_place(self, stats_base: int) -> scipy.LowLevelCallable:
+    def chunk_place(self, user_data: np.ndarray) -> scipy.LowLevelCallable:
         """Generate low-level code for placing heaps in chunks.
 
         Parameters
         ----------
-        stats_base
-            Index of first custom statistic
+        user_data
+            Data to pass to the placement callback
         """
-        user_data = np.zeros(1, dtype=user_data_type.dtype)
-        user_data["stats_base"] = stats_base
         return scipy.LowLevelCallable(
             self._chunk_place.ctypes,
             user_data=user_data.ctypes.data_as(ctypes.c_void_p),
@@ -256,6 +258,7 @@ def make_stream(
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     affinity: int,
     stream_stats: list[str],
+    user_data: np.ndarray,
     max_heap_extra: int = 0,
     **kwargs: Any,
 ) -> spead2.recv.ChunkRingStream:
@@ -269,8 +272,6 @@ def make_stream(
         List of SPEAD item IDs to be expected in the heap headers.
     max_active_chunks
         Maximum number of chunks under construction.
-    max_heap_extra
-        Maximum non-payload data written by the place callback
     data_ringbuffer
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
@@ -279,11 +280,15 @@ def make_stream(
         CPU core affinity for the worker thread (negative to not set an affinity).
     stream_stats
         Stats to hook up to prometheus.
+    user_data
+        Data to pass to the chunk placement callback
+    max_heap_extra
+        Maximum non-payload data written by the place callback
     kwargs
         Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`.
     """
     stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
-    stats_base = stream_config.next_stat_index()
+    user_data["stats_base"] = stream_config.next_stat_index()
     for stat in stream_stats:
         stream_config.add_stat(stat)
 
@@ -291,7 +296,7 @@ def make_stream(
         items=spead_items,
         max_chunks=max_active_chunks,
         max_heap_extra=max_heap_extra,
-        place=layout.chunk_place(stats_base),
+        place=layout.chunk_place(user_data),
     )
 
     return spead2.recv.ChunkRingStream(
@@ -303,8 +308,72 @@ def make_stream(
     )
 
 
+def make_stream_group(
+    *,
+    layout: BaseLayout,
+    spead_items: list[int],
+    max_active_chunks: int,
+    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.ChunkRingbuffer,
+    affinity: Iterable[int],
+    stream_stats: list[str],
+    user_data: np.ndarray,
+    max_heap_extra: int = 0,
+    **kwargs: Any,
+) -> spead2.recv.ChunkStreamRingGroup:
+    """Create a group of SPEAD receiver streams.
+
+    Parameters
+    ----------
+    layout
+        Heap size and chunking parameters.
+    spead_items
+        List of SPEAD item IDs to be expected in the heap headers.
+    max_active_chunks
+        Maximum number of chunks under construction.
+    data_ringbuffer
+        Output ringbuffer to which chunks will be sent.
+    free_ringbuffer
+        Ringbuffer for holding chunks for recycling once they've been used.
+    affinity
+        CPU core affinities for the worker threads (negative to not set an affinity).
+        The length of this list determines the number of streams to create.
+    stream_stats
+        Stats to hook up to prometheus.
+    user_data
+        User data to pass to the chunk callback. It must have a field called
+        `stats_base`, which will be filled in appropriately (modifying the
+        argument).
+    max_heap_extra
+        Maximum non-payload data written by the place callback
+    kwargs
+        Other keyword arguments are passed to :class:`spead2.recv.StreamConfig`.
+    """
+    stream_config = spead2.recv.StreamConfig(memcpy=spead2.MEMCPY_NONTEMPORAL, **kwargs)
+    user_data["stats_base"] = stream_config.next_stat_index()
+    for stat in stream_stats:
+        stream_config.add_stat(stat)
+
+    chunk_stream_config = spead2.recv.ChunkStreamConfig(
+        items=spead_items,
+        max_chunks=max_active_chunks,
+        max_heap_extra=max_heap_extra,
+        place=layout.chunk_place(user_data),
+    )
+    group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_active_chunks, eviction_mode=EVICTION_MODE)
+
+    group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
+    for core in affinity:
+        group.emplace_back(
+            spead2.ThreadPool(1, [] if core < 0 else [core]),
+            stream_config,
+            chunk_stream_config,
+        )
+    return group
+
+
 def add_reader(
-    stream: spead2.recv.ChunkRingStream,
+    stream: AnyStream,
     *,
     src: str | list[tuple[str, int]],
     interface: str | None,

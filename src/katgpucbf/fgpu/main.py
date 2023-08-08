@@ -42,7 +42,6 @@ from .. import (
     DEFAULT_PACKET_PAYLOAD_BYTES,
     DEFAULT_TTL,
     DIG_SAMPLE_BITS,
-    N_POLS,
     __version__,
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
@@ -290,22 +289,22 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     add_aiomonitor_arguments(parser)
     parser.add_argument(
         "--src-interface",
-        type=comma_split(get_interface_address, N_POLS, allow_single=True),
-        help="Name(s) of input network device",
+        type=comma_split(get_interface_address),
+        help="Name(s) of input network device(s)",
     )
     parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
     parser.add_argument(
         "--src-affinity",
-        type=comma_split(int, N_POLS),
-        metavar="CORE,CORE",
-        default=[-1] * N_POLS,
+        type=comma_split(int),
+        metavar="CORE,...",
+        default=[-1],
         help="Cores for input-handling threads (comma-separated) [not bound]",
     )
     parser.add_argument(
         "--src-comp-vector",
-        type=comma_split(int, N_POLS),
-        metavar="VECTOR,VECTOR",
-        default=[0] * N_POLS,
+        type=comma_split(int),
+        metavar="VECTOR,...",
+        default=[0],
         help="Completion vectors for source streams, or -1 for polling [0]",
     )
     parser.add_argument(
@@ -316,7 +315,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=96 * 1024 * 1024,
         metavar="BYTES",
-        help="Size of network receive buffer (per pol) [96MiB]",
+        help="Size of network receive buffer [96MiB]",
     )
     parser.add_argument(
         "--dst-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
@@ -337,7 +336,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--dst-comp-vector",
         type=int,
         default=0,
-        metavar="VECTOR,...",
+        metavar="VECTOR",
         help="Completion vector for transmission, or -1 for polling [0]",
     )
     parser.add_argument(
@@ -425,14 +424,15 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("src", type=parse_source, nargs=N_POLS, help="Source endpoints (or pcap file)")
+    parser.add_argument("src", type=parse_source, help="Source endpoints (or pcap file)")
     args = parser.parse_args(arglist)
 
     if args.use_peerdirect and not args.dst_ibv:
         parser.error("--use-peerdirect requires --dst-ibv")
-    for src in args.src:
-        if not isinstance(src, str) and args.src_interface is None:
-            parser.error("Live source requires --src-interface")
+    if not isinstance(args.src, str) and args.src_interface is None:
+        parser.error("Live source requires --src-interface")
+    if args.src_ibv and len(args.src_affinity) != len(args.src_comp_vector):
+        parser.error("--src-comp-vector must have same length as --src-affinity")
 
     # Convert from *OutputDict to *Output
     used_names = set()

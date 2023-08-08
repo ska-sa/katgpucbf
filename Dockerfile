@@ -164,6 +164,7 @@ LABEL maintainer="MeerKAT CBF team <cbf@ska.ac.za>"
 # numactl allows CPU and memory affinity to be controlled.
 # libboost-program-options is for spead2's C++ command-line tools - not
 # strictly needed but useful for debugging.
+# netbase provides /etc/protocols, which libpcap depends on in some cases.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     python3 \
     python3-pip \
@@ -178,10 +179,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     ibverbs-providers \
     libpcap0.8 \
     libcap2 \
-    libcap2-bin
+    libcap2-bin \
+    netbase
 
 COPY --from=build-py /venv /venv
 COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
 COPY --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+COPY docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
-ENV PATH=/venv/bin:$PATH
+ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest

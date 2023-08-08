@@ -83,7 +83,7 @@ class Layout(BaseLayout):
     ----------
     n_ants
         The number of antennas that data will be received from
-    n_channels_per_stream
+    n_channels_per_substream
         The number of frequency channels contained in the stream.
     n_spectra_per_heap
         The number of time samples received per frequency channel.
@@ -103,7 +103,7 @@ class Layout(BaseLayout):
     """
 
     n_ants: int
-    n_channels_per_stream: int
+    n_channels_per_substream: int
     n_spectra_per_heap: int
     timestamp_step: int
     sample_bits: int
@@ -112,7 +112,9 @@ class Layout(BaseLayout):
     @property
     def heap_bytes(self):
         """Calculate number of bytes in a heap based on layout parameters."""
-        return self.n_channels_per_stream * self.n_spectra_per_heap * N_POLS * COMPLEX * self.sample_bits // BYTE_BITS
+        return (
+            self.n_channels_per_substream * self.n_spectra_per_heap * N_POLS * COMPLEX * self.sample_bits // BYTE_BITS
+        )
 
     @property
     def chunk_heaps(self) -> int:  # noqa: D401
@@ -190,6 +192,7 @@ def make_stream(
     max_active_chunks
         Maximum number of chunks under construction.
     """
+    user_data = np.zeros(1, dtype=user_data_type.dtype)
     stream = make_base_stream(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
@@ -200,6 +203,7 @@ def make_stream(
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
         stop_on_stop_item=False,  # By default, a heap containing a stream control stop item will terminate the stream
+        user_data=user_data,
     )
     stats_collector.add_stream(stream)
     return stream

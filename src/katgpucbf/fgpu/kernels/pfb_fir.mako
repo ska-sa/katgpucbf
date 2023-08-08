@@ -22,6 +22,7 @@
 #define UNZIP_FACTOR ${unzip_factor}
 #define INPUT_SAMPLE_BITS ${input_sample_bits}
 #define WEIGHT_INDEX_SHIFT ${1 if complex_input else 0}
+#define N_POLS ${n_pols}
 
 % if complex_input:
 
@@ -71,16 +72,34 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     const GLOBAL unsigned char * RESTRICT in,     // Input data (digitiser samples)
 % endif
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
+    int out_stride,                       // Offset to `out` between pols
+    int in_stride,                        // Offset to `in` between pols
     int n,                                // Size of the `out` array, to avoid going out-of-bounds.
     int stepy,                            // Size of data that will be worked on by a single thread-block.
-    int in_offset,                        // Number of samples to skip from the start of *in.
-    int out_offset           // Number of samples to skip from the start of *out. Must be a multiple of `step` to make sense.
+% for pol in range(n_pols):
+    int in_offset${pol},                  // Number of samples to skip from the start of *in
+% endfor
+    // Number of samples to skip from the start of *out.
+    // Must be a multiple of `step` to make sense.
+    int out_offset
 )
 {
     const unsigned int step = 2 * CHANNELS;
     // Figure out where our thread block has to work.
     int group_x = get_group_id(0);
     int group_y = get_group_id(1);
+    int pol = get_group_id(2);
+    int in_offset;
+    switch (pol)
+    {
+% for pol in range(n_pols):
+    case ${pol}:
+        in_offset = in_offset${pol};
+        break;
+% endfor
+    }
+    in += pol * in_stride;
+    out += pol * out_stride;
 
     // Figure out where this thread has to work.
     int lid = get_local_id(0);
@@ -167,6 +186,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     LOCAL_DECL scratch_t scratch;
     total_power = reduce(total_power, lid, &scratch);
     if (lid == 0)
-        atomicAdd(out_total_power, total_power);
+        atomicAdd(&out_total_power[pol], total_power);
 % endif
 }

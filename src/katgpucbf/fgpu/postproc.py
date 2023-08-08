@@ -110,7 +110,7 @@ class Postproc(accel.Operation):
 
     .. rubric:: Slots
 
-    **in0**, **in1** : spectra × unzip_factor × channels // unzip_factor, complex64
+    **in** : N_POLS × spectra × unzip_factor × channels // unzip_factor, complex64
         Input channelised data for the two polarisations. These are formed by
         taking the complex-to-complex Fourier transform of the input
         reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
@@ -119,11 +119,11 @@ class Postproc(accel.Operation):
         transmission on the network.
     **saturated** : heaps × N_POLS, uint32
         Number of saturated complex values in **out**.
-    **fine_delay** : spectra × 2, float32
+    **fine_delay** : spectra × N_POLS, float32
         Fine delay in samples (one value per pol).
-    **phase** : spectra × 2, float32
+    **phase** : spectra × N_POLS, float32
         Fixed phase adjustment in radians (one value per pol).
-    **gains** : out_channels × 2, complex64
+    **gains** : out_channels × N_POLS, complex64
         Per-channel gain (one value per pol).
 
     Parameters
@@ -160,13 +160,13 @@ class Postproc(accel.Operation):
         heaps = spectra // spectra_per_heap
 
         in_shape = (
+            accel.Dimension(N_POLS),
             accel.Dimension(spectra),
             accel.Dimension(template.unzip_factor, exact=True),
             accel.Dimension(template.channels // template.unzip_factor, exact=True),
         )
         n_out_channels = template.out_channels[1] - template.out_channels[0]
-        self.slots["in0"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["in1"] = accel.IOSlot(in_shape, np.complex64)
+        self.slots["in"] = accel.IOSlot(in_shape, np.complex64)
         self.slots["out"] = accel.IOSlot((heaps, n_out_channels, spectra_per_heap, pols, cplx), np.int8)
         self.slots["saturated"] = accel.IOSlot((heaps, pols), np.uint32)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
@@ -181,21 +181,20 @@ class Postproc(accel.Operation):
         groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
         saturated = self.buffer("saturated")
-        in0 = self.buffer("in0")
-        in1 = self.buffer("in1")
+        in_ = self.buffer("in")
         saturated.zero(self.command_queue)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
                 out.buffer,
                 saturated.buffer,
-                in0.buffer,
-                in1.buffer,
+                in_.buffer,
                 self.buffer("fine_delay").buffer,
                 self.buffer("phase").buffer,
                 self.buffer("gains").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
+                np.int32(np.product(in_.padded_shape[1:])),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
