@@ -169,11 +169,22 @@ static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict
     std::size_t offset = 0;
     for (offset = 0; offset + 256 <= n; offset += 256)
     {
-        __m256i values[8];
-        for (int i = 0; i < 8; i++)
-            values[i] = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * i));
-        for (int i = 0; i < 8; i++)
-            _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * i), values[i]);
+        __m256i value0 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 0));
+        __m256i value1 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 1));
+        __m256i value2 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 2));
+        __m256i value3 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 3));
+        __m256i value4 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 4));
+        __m256i value5 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 5));
+        __m256i value6 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 6));
+        __m256i value7 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 7));
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 0), value0);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 1), value1);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 2), value2);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 3), value3);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 4), value4);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 5), value5);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 6), value6);
+        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 7), value7);
     }
     for (; offset + 64 <= n; offset += 64)
     {
