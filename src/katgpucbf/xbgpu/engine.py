@@ -354,8 +354,8 @@ class XPipeline(Pipeline):
         self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(tx_item.present_ants.all())
 
         self.correlation.reduce()
-        tx_item.add_marker(self._proc_command_queue)
-        await self._tx_item_queue.put(tx_item)
+        self._proc_command_queue.finish()
+        self._tx_item_queue.put_nowait(tx_item)
 
         # Prepare for the next accumulation (which might not be
         # contiguous with the previous one).
@@ -461,7 +461,6 @@ class XPipeline(Pipeline):
             item = await self._tx_item_queue.get()
             if item is None:
                 break
-            await item.async_wait_for_events()
 
             heap = await self.send_stream.get_free_heap()
 
