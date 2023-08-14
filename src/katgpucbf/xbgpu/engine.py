@@ -354,14 +354,14 @@ class XPipeline(Pipeline):
         self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(tx_item.present_ants.all())
 
         self.correlation.reduce()
-        self._proc_command_queue.finish()
+        tx_item.add_marker(self._proc_command_queue)
         self._tx_item_queue.put_nowait(tx_item)
 
         # Prepare for the next accumulation (which might not be
         # contiguous with the previous one).
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
-        tx_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
+        tx_item.reset(next_accum * self.timestamp_increment_per_accumulation)
         self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
         self.correlation.zero_visibilities()
         return tx_item
@@ -461,6 +461,7 @@ class XPipeline(Pipeline):
             item = await self._tx_item_queue.get()
             if item is None:
                 break
+            await item.async_wait_for_events()
 
             heap = await self.send_stream.get_free_heap()
 
@@ -528,7 +529,6 @@ class XPipeline(Pipeline):
                 clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
             self.send_stream.send_heap(heap)
 
-            item.reset()
             await self._tx_free_item_queue.put(item)
 
         await self.send_stream.send_stop_heap()
@@ -855,7 +855,6 @@ class XBEngine(DeviceServer):
             # Need to separate the concerns
             assert item.chunk is not None
             item.chunk.recycle()
-            item.reset()
             self._rx_free_item_queue.put_nowait(item)
 
     async def _add_rx_item(self, item: RxQueueItem) -> None:
@@ -887,14 +886,17 @@ class XBEngine(DeviceServer):
             # Get a free rx_item that will contain the GPU buffer to which the
             # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
+            # First wait for asynchronous GPU work on the buffer.
+            item.enqueue_wait_for_events(self._upload_command_queue)
+            item.reset()
+
+            # Now populate the fresh item
             item.chunk = chunk
             # Need a separate attribute as the chunk gets reset
             item.timestamp = chunk.timestamp
             # Need to reshape chunk.present to get Heaps in one dimension
             item.present[:] = chunk.present.reshape(item.present.shape)
             # Initiate transfer from received chunk to rx_item buffer.
-            # First wait for asynchronous GPU work on the buffer.
-            item.enqueue_wait_for_events(self._upload_command_queue)
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_marker(self._upload_command_queue)
 
