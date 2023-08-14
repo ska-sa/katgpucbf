@@ -21,19 +21,13 @@ from collections.abc import AsyncGenerator
 import aiokatcp
 import async_timeout
 import pytest
+import spead2
 from katsdpsigproc.abc import AbstractContext
 
 import katgpucbf.fgpu.engine
 import katgpucbf.fgpu.recv
-from katgpucbf import N_POLS
 from katgpucbf.fgpu.engine import Engine
 from katgpucbf.fgpu.main import make_engine, parse_args
-
-
-@pytest.fixture
-def n_src_streams() -> int:  # noqa: D401
-    """Number of source streams for an fgpu instance."""
-    return N_POLS
 
 
 @pytest.fixture
@@ -43,6 +37,36 @@ def recv_max_chunks_one(monkeypatch) -> None:
     This simplifies the process of reliably injecting data.
     """
     monkeypatch.setattr(katgpucbf.fgpu.recv, "MAX_CHUNKS", 1)
+
+
+@pytest.fixture
+def mock_recv_stream(mocker) -> spead2.InprocQueue:
+    """Mock out :func:`katgpucbf.recv.add_reader` to use an in-process queue.
+
+    Returns
+    -------
+    queue
+        An in-process queue to use for sending data.``.
+    """
+    queue = spead2.InprocQueue()
+    have_reader = False
+
+    def add_reader(
+        stream: spead2.recv.ChunkRingStream,
+        *,
+        src: str | list[tuple[str, int]],
+        interface: str | None,
+        ibv: bool,
+        comp_vector: int,
+        buffer: int,
+    ) -> None:
+        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
+        nonlocal have_reader
+        assert not have_reader, "A reader has already been added for this queue"
+        stream.add_inproc_reader(queue)
+
+    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
+    return queue
 
 
 def check_vkgdr(context: AbstractContext) -> None:

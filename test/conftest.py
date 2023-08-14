@@ -133,36 +133,6 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 @pytest.fixture
-def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
-    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
-
-    Returns
-    -------
-    queues
-        A list of in-process queue to use for sending data. The number of queues
-        in the list is determined by ``n_src_streams``.
-    """
-    queues = [spead2.InprocQueue() for _ in range(n_src_streams)]
-    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
-
-    def add_reader(
-        stream: spead2.recv.ChunkRingStream,
-        *,
-        src: str | list[tuple[str, int]],
-        interface: str | None,
-        ibv: bool,
-        comp_vector: int,
-        buffer: int,
-    ) -> None:
-        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
-        queue = next(queue_iter)
-        stream.add_inproc_reader(queue)
-
-    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
-    return queues
-
-
-@pytest.fixture
 def mock_send_stream_network() -> IPv4Network:
     """Network mask to filter the queues returned by :func:`mock_send_stream`.
 
