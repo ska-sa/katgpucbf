@@ -355,4 +355,8 @@ class XSend:
         """Send a Stop Heap over the spead2 transport."""
         stop_heap = spead2.send.Heap(FLAVOUR)
         stop_heap.add_end()
+        # Flush just to ensure that we don't overflow the stream's queue.
+        # It's a heavy-handed approach, but we don't care about performance
+        # during shutdown.
+        await self.source_stream.async_flush()
         await self.source_stream.async_send_heap(stop_heap)
