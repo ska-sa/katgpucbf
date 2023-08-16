@@ -336,25 +336,36 @@ class TestEngine:
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        acc_index_counts: list[dict[int, int]] = []
+        # NOTE: The data generation creates an extra heap or several for the
+        # XPipeline with the smallest `heap_accumulation_threshold`. This results
+        # in an incomplete final accumulation for that XPipeline. Incomplete
+        # accumulations are purposefully dictated by `batch_indices` constructed
+        # by the caller.
+        # For these reasons, `acc_index_heap_counts` tracks the heap count for
+        # each accumulation index (for each corrprod output). If a heap count
+        # for a corrprod's final accumulation is not equal to its
+        # `heap_accumulation_threshold`, the accumulation index is discarded
+        # from the list (used later on). If this function attempted to receive
+        # data for an XPipeline's final, incomplete accumulation, it would
+        # result in a _spead2.Stopped error as that accumulation would never
+        # have been processed/transmitted by the XPipeline.
+        # - i.e. the test would attempt to get one more heap than the stream
+        #   contained.
+        acc_index_heap_counts: list[dict[int, int]] = []
         for corrprod_output in corrprod_outputs:
-            acc_index_counts.append(
+            acc_index_heap_counts.append(
                 dict.fromkeys(
                     [batch_index // corrprod_output.heap_accumulation_threshold for batch_index in batch_indices], 0
                 )
             )
 
-        # NOTE: The data generation generates an extra heap or several for the XPipeline
-        # with the smallest heap-accumulation-threshold - resulting in an incomplete final
-        # accumulation. Incomplete accumulations are purposefully dictated by `batch_indices`
-        # constructed by the caller.
         for i, corrprod_output in enumerate(corrprod_outputs):
             for batch_index in batch_indices:
-                adjusted_index = batch_index // corrprod_output.heap_accumulation_threshold
-                acc_index_counts[i][adjusted_index] += 1
-            # `adjusted_index` should be the last accumulation index for this corrprod
-            if acc_index_counts[i][adjusted_index] != corrprod_output.heap_accumulation_threshold:
-                acc_index_counts[i].pop(adjusted_index)
+                acc_index = batch_index // corrprod_output.heap_accumulation_threshold
+                acc_index_heap_counts[i][acc_index] += 1
+            # `acc_index` should now be the last accumulation index for this corrprod
+            if acc_index_heap_counts[i][acc_index] != corrprod_output.heap_accumulation_threshold:
+                acc_index_heap_counts[i].pop(acc_index)
 
         for batch_index in batch_indices:
             heaps = heap_factory(batch_index)
@@ -367,7 +378,7 @@ class TestEngine:
         device_results = np.zeros(
             shape=(
                 len(corrprod_outputs),
-                max(len(acc_indices) for acc_indices in acc_index_counts),
+                max(len(acc_indices) for acc_indices in acc_index_heap_counts),
                 n_channels_per_substream,
                 n_baselines,
                 COMPLEX,
@@ -388,7 +399,7 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, accumulation_index in enumerate(acc_index_counts[i].keys()):
+            for j, accumulation_index in enumerate(acc_index_heap_counts[i].keys()):
                 # Wait for heap to be ready and then update out item group
                 # with the new values.
                 heap = await stream.get()
@@ -419,7 +430,7 @@ class TestEngine:
                 )
 
                 device_results[i, j] = ig_recv["xeng_raw"].value
-            n_accumulations_completed.append(len(acc_index_counts[i]))
+            n_accumulations_completed.append(len(acc_index_heap_counts[i]))
 
         return device_results, n_accumulations_completed
 
