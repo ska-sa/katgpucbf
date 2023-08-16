@@ -371,8 +371,8 @@ class TestEngine:
             heaps = heap_factory(batch_index)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
-        for q in mock_recv_streams:
-            q.stop()
+        for queue in mock_recv_streams:
+            queue.stop()
 
         n_baselines = n_ants * (n_ants + 1) * 2
         device_results = np.zeros(
