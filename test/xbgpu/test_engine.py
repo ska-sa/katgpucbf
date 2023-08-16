@@ -636,21 +636,21 @@ class TestEngine:
         for i, pipeline in enumerate(xpipelines):
             output_name = pipeline.output.name
             assert (
-                prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": f"{output_name}"})
+                prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": output_name})
                 == incomplete_accums_counters[i]
             )
             assert (
-                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": f"{output_name}"})
+                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": output_name})
                 == n_accumulations_completed[i]
             )
             # Could manually calculate it here, but it's available inside the send_stream
-            assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": f"{output_name}"}) == (
+            assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": output_name}) == (
                 pipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed[i]
             )
-            assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": f"{output_name}"}) == (
+            assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": output_name}) == (
                 n_channels_per_substream * n_baselines * n_accumulations_completed[i]
             )
-            assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": f"{output_name}"}) == 0
+            assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": output_name}) == 0
 
         expected_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
         # As per the explanation in :func:`~send_data`, the first accumulation
