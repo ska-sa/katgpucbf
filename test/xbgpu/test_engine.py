@@ -565,17 +565,22 @@ class TestEngine:
 
         range_start = frequency
         range_end = range_start + n_channels_per_substream - 1
-        assert xbengine.sensors[f"{corrprod_outputs[0].name}.chan-range"].value == f"({range_start},{range_end})"
+        for corrprod_output in corrprod_outputs:
+            assert xbengine.sensors[f"{corrprod_output.name}.chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
-        actual_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
+        actual_sensor_updates: dict[str, list[tuple[bool, aiokatcp.Sensor.Status]]]
+        actual_sensor_updates = {
+            f"{corrprod_output.name}.rx.synchronised": list() for corrprod_output in corrprod_outputs
+        }
 
         def sensor_observer(sync_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading):
             """Record sensor updates in a list for later comparison."""
-            actual_sensor_updates.append((sensor_reading.value, sensor_reading.status))
+            actual_sensor_updates[sync_sensor.name].append((sensor_reading.value, sensor_reading.status))
 
-        xbengine.sensors[f"{corrprod_outputs[0].name}.rx.synchronised"].attach(sensor_observer)
+        for corrprod_output in corrprod_outputs:
+            xbengine.sensors[f"{corrprod_output.name}.rx.synchronised"].attach(sensor_observer)
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
@@ -663,16 +668,21 @@ class TestEngine:
             )
             assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": output_name}) == 0
 
-        expected_sensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
+        # NOTE: Much like initialising `actual_sensor_updates`, a similar
+        # approach must be taken when geenrating `expected_sensor_updates`.
+        expected_sensor_updates: dict[str, list[tuple[bool, aiokatcp.Sensor.Status]]]
+        expected_sensor_updates = {sensor_name: list() for sensor_name in actual_sensor_updates.keys()}
+
         # As per the explanation in :func:`~send_data`, the first accumulation
         # is expected to be incomplete.
-        expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))
-        # Depending on the `missing_antenna` parameter, the full accumulations
-        # will either be all complete or incomplete.
-        if missing_antenna is not None:
-            expected_sensor_updates += [(False, aiokatcp.Sensor.Status.ERROR)] * (max(n_accumulations_completed) - 1)
-        else:
-            expected_sensor_updates += [(True, aiokatcp.Sensor.Status.NOMINAL)] * (max(n_accumulations_completed) - 1)
+        for sensor_name, completed_accs in zip(actual_sensor_updates.keys(), n_accumulations_completed):
+            expected_sensor_updates[sensor_name].append((False, aiokatcp.Sensor.Status.ERROR))
+            # Depending on the `missing_antenna` parameter, the full accumulations
+            # will either be all complete or incomplete.
+            if missing_antenna is not None:
+                expected_sensor_updates[sensor_name] += [(False, aiokatcp.Sensor.Status.ERROR)] * (completed_accs - 1)
+            else:
+                expected_sensor_updates[sensor_name] += [(True, aiokatcp.Sensor.Status.NOMINAL)] * (completed_accs - 1)
 
         assert actual_sensor_updates == expected_sensor_updates
 
