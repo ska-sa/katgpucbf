@@ -299,7 +299,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-    ) -> tuple[np.ndarray, list[int]]:
+    ) -> list[np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
         Each full accumulation (for each corrprod-output) requires
@@ -327,10 +327,9 @@ class TestEngine:
         Returns
         -------
         device_results
-            Array of all GPU-generated data of shape
-            - (len(corrprod_outputs), n_total_accumulations, n_channels_per_substream, n_baselines, COMPLEX)
-        n_accumulations_completed
-            Number of completed accumulations for each corrprod_output
+            List of arrays of all GPU-generated data. One output array per
+            corrprod_output, each array has shape
+            - (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX)
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
@@ -375,21 +374,22 @@ class TestEngine:
             queue.stop()
 
         n_baselines = n_ants * (n_ants + 1) * 2
-        device_results = np.zeros(
-            shape=(
-                len(corrprod_outputs),
-                max(len(acc_indices) for acc_indices in acc_index_heap_counts),
-                n_channels_per_substream,
-                n_baselines,
-                COMPLEX,
-            ),
-            dtype=np.int32,
-        )
+        device_results = [
+            np.zeros(
+                shape=(
+                    len(acc_indices.keys()),  # n_accumulations for this XPipeline
+                    n_channels_per_substream,
+                    n_baselines,
+                    COMPLEX,
+                ),
+                dtype=np.int32,
+            )
+            for acc_indices in acc_index_heap_counts
+        ]
 
         out_config = spead2.recv.StreamConfig(max_heaps=100)
         out_tp = spead2.ThreadPool()
 
-        n_accumulations_completed = []
         for i, corrprod_output in enumerate(corrprod_outputs):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
             stream.add_inproc_reader(mock_send_stream[i])
@@ -399,7 +399,7 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, accumulation_index in enumerate(acc_index_heap_counts[i].keys()):
+            for j, accumulation_index in enumerate(acc_index_heap_counts[i].keys()):  # .keys() to be explicit
                 # Wait for heap to be ready and then update out item group
                 # with the new values.
                 heap = await stream.get()
@@ -429,10 +429,9 @@ class TestEngine:
                     f"actual: {ig_recv['frequency'].value}."
                 )
 
-                device_results[i, j] = ig_recv["xeng_raw"].value
-            n_accumulations_completed.append(len(acc_index_heap_counts[i]))
+                device_results[i][j] = ig_recv["xeng_raw"].value
 
-        return device_results, n_accumulations_completed
+        return device_results
 
     @pytest.fixture
     def n_engines(self, n_ants: int) -> int:
@@ -538,6 +537,7 @@ class TestEngine:
         packet's timestamp (to be non-zero).
         """
         n_baselines = n_ants * (n_ants + 1) * 2
+        heap_acc_thresholds = [corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
 
         # We don't want to start at 0, that's boring. So let's offset this a bit.
         first_batch_index = 123
@@ -546,19 +546,12 @@ class TestEngine:
         # place. We want to be just before a LCM of the heap accumulation
         # indices of all the corrprods, so that we can get an incomplete
         # accumulation as the output first.
-        lowest_common_multiple = lcm(
-            *[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
-        )
+        lowest_common_multiple = lcm(*heap_acc_thresholds)
         advance = lowest_common_multiple - (first_batch_index % lowest_common_multiple)
         first_batch_index += advance
 
-        max_heap_acc_threshold = max(
-            corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
-        )
-        min_full_accumulations = (
-            lcm(*[corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs])
-            // max_heap_acc_threshold
-        )
+        max_heap_acc_threshold = max(heap_acc_thresholds)
+        min_full_accumulations = lowest_common_multiple // max_heap_acc_threshold
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
@@ -574,6 +567,8 @@ class TestEngine:
         actual_sensor_updates = {
             f"{corrprod_output.name}.rx.synchronised": list() for corrprod_output in corrprod_outputs
         }
+        expected_sensor_updates: dict[str, list[tuple[bool, aiokatcp.Sensor.Status]]]
+        expected_sensor_updates = {sensor_name: list() for sensor_name in actual_sensor_updates.keys()}
 
         def sensor_observer(sync_sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading):
             """Record sensor updates in a list for later comparison."""
@@ -598,9 +593,9 @@ class TestEngine:
             # Generate one extra chunk to simulate an incomplete accumulation
             # to check that dumps are aligned correctly - even if the first
             # received batch is from the middle of an accumulation.
-            batch_start_index = (first_batch_index) * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
+            batch_start_index = first_batch_index * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
             batch_end_index = (first_batch_index + min_full_accumulations) * max_heap_acc_threshold
-            device_results, n_accumulations_completed = await self._send_data(
+            device_results = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs=corrprod_outputs,
@@ -618,7 +613,8 @@ class TestEngine:
             # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
             incomplete_accums_counter = 0
             base_batch_index = batch_start_index
-            for j in range(n_accumulations_completed[i]):
+            # for j in range(n_accumulations_completed[i]):
+            for j, device_result in enumerate(device_results[i]):
                 # The first heap is an incomplete accumulation containing a
                 # single batch, we need to make sure that this is taken into
                 # account by the verification function.
@@ -645,44 +641,46 @@ class TestEngine:
                     missing_antenna,
                 )
                 base_batch_index += num_batches_in_current_accumulation
-                np.testing.assert_equal(expected_output, device_results[i, j])
+                np.testing.assert_equal(expected_output, device_result)
             incomplete_accums_counters.append(incomplete_accums_counter)
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
-        for i, pipeline in enumerate(xpipelines):
+        for pipeline, device_result, incomplete_accums_counter in zip(
+            xpipelines, device_results, incomplete_accums_counters
+        ):
             output_name = pipeline.output.name
+            n_accumulations_completed = device_result.shape[0]
             assert (
                 prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": output_name})
-                == incomplete_accums_counters[i]
+                == incomplete_accums_counter
             )
             assert (
-                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": output_name})
-                == n_accumulations_completed[i]
+                prom_diff.get_sample_diff("output_x_heaps_total", {"stream": output_name}) == n_accumulations_completed
             )
             # Could manually calculate it here, but it's available inside the send_stream
             assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": output_name}) == (
-                pipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed[i]
+                pipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed
             )
             assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": output_name}) == (
-                n_channels_per_substream * n_baselines * n_accumulations_completed[i]
+                n_channels_per_substream * n_baselines * n_accumulations_completed
             )
             assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": output_name}) == 0
 
-        # NOTE: Much like initialising `actual_sensor_updates`, a similar
-        # approach must be taken when geenrating `expected_sensor_updates`.
-        expected_sensor_updates: dict[str, list[tuple[bool, aiokatcp.Sensor.Status]]]
-        expected_sensor_updates = {sensor_name: list() for sensor_name in actual_sensor_updates.keys()}
-
-        # As per the explanation in :func:`~send_data`, the first accumulation
-        # is expected to be incomplete.
-        for sensor_name, completed_accs in zip(actual_sensor_updates.keys(), n_accumulations_completed):
+            # Verify sensor updates while we're here
+            sensor_name = f"{pipeline.output.name}.rx.synchronised"
+            # As per the explanation in :func:`~send_data`, the first accumulation
+            # is expected to be incomplete.
             expected_sensor_updates[sensor_name].append((False, aiokatcp.Sensor.Status.ERROR))
             # Depending on the `missing_antenna` parameter, the full accumulations
             # will either be all complete or incomplete.
             if missing_antenna is not None:
-                expected_sensor_updates[sensor_name] += [(False, aiokatcp.Sensor.Status.ERROR)] * (completed_accs - 1)
+                expected_sensor_updates[sensor_name] += [(False, aiokatcp.Sensor.Status.ERROR)] * (
+                    incomplete_accums_counter - 1
+                )
             else:
-                expected_sensor_updates[sensor_name] += [(True, aiokatcp.Sensor.Status.NOMINAL)] * (completed_accs - 1)
+                expected_sensor_updates[sensor_name] += [(True, aiokatcp.Sensor.Status.NOMINAL)] * (
+                    n_accumulations_completed - 1
+                )
 
         assert actual_sensor_updates == expected_sensor_updates
 
