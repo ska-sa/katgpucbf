@@ -335,38 +335,11 @@ class TestEngine:
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        # NOTE: The data generation creates an extra heap or several for the
-        # XPipeline with the smallest `heap_accumulation_threshold`. This results
-        # in an incomplete final accumulation for that XPipeline. Incomplete
-        # accumulations are purposefully dictated by `batch_indices` constructed
-        # by the caller.
-        # For these reasons, `acc_index_heap_counts` tracks the heap count for
-        # each accumulation index (for each corrprod output). If a heap count
-        # for a corrprod's final accumulation is not equal to its
-        # `heap_accumulation_threshold`, the accumulation index is discarded
-        # from the list (used later on). If this function attempted to receive
-        # data for an XPipeline's final, incomplete accumulation, it would
-        # result in a _spead2.Stopped error as that accumulation would never
-        # have been processed/transmitted by the XPipeline.
-        # - i.e. the test would attempt to get one more heap than the stream
-        #   contained.
-        acc_index_heap_counts: list[dict[int, int]] = []
-        for corrprod_output in corrprod_outputs:
-            acc_index_heap_counts.append(
-                dict.fromkeys(
-                    [batch_index // corrprod_output.heap_accumulation_threshold for batch_index in batch_indices], 0
-                )
-            )
-
-        for i, corrprod_output in enumerate(corrprod_outputs):
-            for batch_index in batch_indices:
-                acc_index = batch_index // corrprod_output.heap_accumulation_threshold
-                acc_index_heap_counts[i][acc_index] += 1
-            # `acc_index` should now be the last accumulation index for this corrprod
-            if acc_index_heap_counts[i][acc_index] != corrprod_output.heap_accumulation_threshold:
-                acc_index_heap_counts[i].pop(acc_index)
-
+        acc_indices: list[set[int]] = [set() for _ in corrprod_outputs]
         for batch_index in batch_indices:
+            for i, corrprod_output in enumerate(corrprod_outputs):
+                acc_index = batch_index // corrprod_output.heap_accumulation_threshold
+                acc_indices[i].add(acc_index)
             heaps = heap_factory(batch_index)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
 
@@ -377,14 +350,14 @@ class TestEngine:
         device_results = [
             np.zeros(
                 shape=(
-                    len(acc_indices.keys()),  # n_accumulations for this XPipeline
+                    len(acc_index_set),  # n_accumulations for this XPipeline
                     n_channels_per_substream,
                     n_baselines,
                     COMPLEX,
                 ),
                 dtype=np.int32,
             )
-            for acc_indices in acc_index_heap_counts
+            for acc_index_set in acc_indices
         ]
 
         out_config = spead2.recv.StreamConfig(max_heaps=100)
@@ -399,7 +372,7 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, accumulation_index in enumerate(acc_index_heap_counts[i].keys()):  # .keys() to be explicit
+            for j, accumulation_index in enumerate(sorted(acc_indices[i])):
                 # Wait for heap to be ready and then update out item group
                 # with the new values.
                 heap = await stream.get()
@@ -613,7 +586,6 @@ class TestEngine:
             # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
             incomplete_accums_counter = 0
             base_batch_index = batch_start_index
-            # for j in range(n_accumulations_completed[i]):
             for j, device_result in enumerate(device_results[i]):
                 # The first heap is an incomplete accumulation containing a
                 # single batch, we need to make sure that this is taken into
