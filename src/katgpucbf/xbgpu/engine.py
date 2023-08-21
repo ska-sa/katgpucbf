@@ -189,7 +189,8 @@ class Pipeline:
     async def gpu_proc_loop(self) -> None:
         """Perform all GPU processing of received data in a continuous loop.
 
-        This function should do the following:
+        This method does the following:
+
         - Get an RxQueueItem off the rx_item_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
         - await any outstanding events associated with the RxQueueItem
@@ -215,7 +216,8 @@ class Pipeline:
     async def sender_loop(self) -> None:
         """Send heaps to the network in a continuous loop.
 
-        This function should do the following:
+        This method does the following:
+
         - Get a TxQueueItem from the tx_item_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
         - Wait for events on the item to complete (likely GPU processing)
@@ -232,7 +234,7 @@ class Pipeline:
     @abstractmethod
     def capture_enable(self, enable: bool = True) -> None:
         """Enable/Disable the transmission of this data product's stream."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: nocover
 
 
 class XPipeline(Pipeline):
@@ -552,10 +554,10 @@ class XBEngine(DeviceServer):
     processing functions are as follows:
 
     - :meth:`_receiver_loop` - Receive chunks from network and initiate
-        transfer to GPU.
+      transfer to GPU.
     - :meth:`.Pipeline.gpu_proc_loop` - Perform the correlation operation.
     - :meth:`.Pipeline.sender_loop` - Transfer correlated data to system RAM and then
-        send it out on the network.
+      send it out on the network.
 
     There is also a seperate function for sending descriptors onto the network.
 
