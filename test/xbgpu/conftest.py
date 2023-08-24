@@ -21,17 +21,36 @@ import spead2
 
 
 @pytest.fixture
-def mock_send_stream(mocker) -> spead2.InprocQueue:
-    """Mock out creation of the send stream.
+def n_src_streams() -> int:  # noqa: D401
+    """Number of source streams for an xbgpu instance."""
+    return 1
 
-    Calls to :class:`spead2.send.asyncio.UdpStream` are replaced by an
-    in-process stream. Returns an inproc queue to receive the output from that
-    stream.
+
+@pytest.fixture
+def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
+    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
+
+    Returns
+    -------
+    queues
+        A list of in-process queue to use for sending data. The number of queues
+        in the list is determined by ``n_src_streams``.
     """
-    queue = spead2.InprocQueue()
+    queues = [spead2.InprocQueue() for _ in range(n_src_streams)]
+    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
 
-    def constructor(thread_pool, endpoints, config, *args, **kwargs):
-        return spead2.send.asyncio.InprocStream(thread_pool, [queue], config)
+    def add_reader(
+        stream: spead2.recv.ChunkRingStream,
+        *,
+        src: str | list[tuple[str, int]],
+        interface: str | None,
+        ibv: bool,
+        comp_vector: int,
+        buffer: int,
+    ) -> None:
+        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
+        queue = next(queue_iter)
+        stream.add_inproc_reader(queue)
 
-    mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
-    return queue
+    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
+    return queues
