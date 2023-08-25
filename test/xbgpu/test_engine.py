@@ -420,8 +420,10 @@ class TestEngine:
 
     @pytest.fixture
     def n_samples_between_spectra(self, n_channels_total: int) -> int:  # noqa: D102
-        # Will need to be updated for narrowband
-        return 2 * n_channels_total
+        # NOTE: Multiply by 8 to account for a decimation factor in the
+        # Narrowband case. It is also included to ensure we don't rely on the
+        # assumption that `n_samples_between_spectra == 2 * n_channels_total`.
+        return 2 * n_channels_total * 8
 
     @pytest.fixture
     def engine_arglist(
