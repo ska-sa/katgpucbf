@@ -976,7 +976,9 @@ class Pipeline:
                     # Normalise relative to full scale. The factor of 2 is because we
                     # want 1.0 to correspond to a sine wave rather than a square wave.
                     avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
-                    avg_power_db = 10 * math.log10(avg_power) if avg_power else -math.inf
+                    # If for some reason there's zero power, avoid reporting
+                    # -inf dB by assigning the most negative representable value
+                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
                         avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                     )

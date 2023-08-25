@@ -956,6 +956,40 @@ class TestEngine:
         assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0] + [10000] * 7
         assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == expected_timestamps
 
+    # It's easier to use a constant voltage. Also need to check the case were
+    # the input power is zero.
+    @pytest.mark.parametrize("inout", [(0, np.finfo(np.float64).min), (64, -15.034518566376697)])
+    async def test_dig_rms_dbfs_sensors(
+        self,
+        mock_recv_stream: spead2.InprocQueue,
+        mock_send_stream: list[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        output: Output,
+        inout: tuple[int, float],
+    ) -> None:
+        """Test that the ``dig-rms-dbfs`` sensors are set correctly."""
+        sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
+        sensor_update_dict = self._watch_sensors(sensors)
+        n_samples = 10 * CHUNK_SAMPLES
+        input_voltage, output_power_dbfs = inout
+        dig_data = np.ones((2, n_samples), np.int16) * input_voltage
+
+        await self._send_data(
+            mock_recv_stream,
+            mock_send_stream,
+            engine_server,
+            output,
+            dig_data,
+        )
+        # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
+        # __eq__ and __repr__) so that it can be used in comparisons.
+        time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
+        expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
+        for pol in range(N_POLS):
+            assert [r.value for r in sensor_update_dict[sensors[pol].name]] == [output_power_dbfs] * 9
+            assert [r.timestamp for r in sensor_update_dict[sensors[pol].name]] == expected_timestamps
+
     @pytest.mark.parametrize("tone_pol", [0, 1])
     async def test_output_clip_count(
         self,
