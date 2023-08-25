@@ -973,7 +973,7 @@ class TestEngine:
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 10 * CHUNK_SAMPLES
         input_voltage, output_power_dbfs = inout
-        dig_data = np.ones((2, n_samples), np.int16) * input_voltage
+        dig_data = np.full((2, n_samples), input_voltage, np.int16)
 
         await self._send_data(
             mock_recv_stream,
