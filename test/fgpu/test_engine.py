@@ -958,7 +958,9 @@ class TestEngine:
 
     # It's easier to use a constant voltage. Also need to check the case were
     # the input power is zero.
-    @pytest.mark.parametrize("inout", [(0, np.finfo(np.float64).min), (64, -15.034518566376697)])
+    @pytest.mark.parametrize(
+        "input_voltage,output_power_dbfs", [(0, np.finfo(np.float64).min), (64, pytest.approx(-15.0345186))]
+    )
     async def test_dig_rms_dbfs_sensors(
         self,
         mock_recv_stream: spead2.InprocQueue,
@@ -966,13 +968,13 @@ class TestEngine:
         engine_server: Engine,
         engine_client: aiokatcp.Client,
         output: Output,
-        inout: tuple[int, float],
+        input_voltage: int,
+        output_power_dbfs: float,
     ) -> None:
         """Test that the ``dig-rms-dbfs`` sensors are set correctly."""
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 10 * CHUNK_SAMPLES
-        input_voltage, output_power_dbfs = inout
         dig_data = np.full((2, n_samples), input_voltage, np.int16)
 
         await self._send_data(
