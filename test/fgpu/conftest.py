@@ -46,7 +46,7 @@ def mock_recv_stream(mocker) -> spead2.InprocQueue:
     Returns
     -------
     queue
-        An in-process queue to use for sending data.``.
+        An in-process queue to use for sending data.
     """
     queue = spead2.InprocQueue()
     have_reader = False
@@ -64,6 +64,7 @@ def mock_recv_stream(mocker) -> spead2.InprocQueue:
         nonlocal have_reader
         assert not have_reader, "A reader has already been added for this queue"
         stream.add_inproc_reader(queue)
+        have_reader = True
 
     mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
     return queue
