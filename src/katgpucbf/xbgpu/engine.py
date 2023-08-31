@@ -797,9 +797,6 @@ class XBEngine(DeviceServer):
             XPipeline(output, self, context, tx_enabled) for output in outputs if isinstance(output, XOutput)
         ]
 
-        # A command queue is the OpenCL name for a CUDA stream. An abstract
-        # command queue can either be implemented as an OpenCL command queue or
-        # a CUDA stream depending on the context.
         self._upload_command_queue = context.create_command_queue()
 
         # This queue is extended in the monitor class, allowing for the
