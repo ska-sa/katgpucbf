@@ -678,9 +678,8 @@ class Pipeline:
         with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait out_free_queue"):
             item = await self._out_free_queue.get()
 
-        # Just make double-sure that all events associated with the item are past
-        # and have already been waited for.
-        assert not item.events
+        # This should be a no-op, but is done to be sure
+        await item.async_wait_for_events()
         item.reset_all(self._compute.command_queue, new_timestamp)
         return item
 
@@ -944,30 +943,28 @@ class Pipeline:
                 out_item = await self._out_queue.get()
             if not out_item:
                 break
-            events = []
+            out_item.enqueue_wait_for_events(self._download_queue)
             if out_item.chunk is not None:
                 # We're using PeerDirect
                 chunk = out_item.chunk
                 chunk.cleanup = partial(self._out_free_queue.put_nowait, out_item)
-                events.extend(out_item.events)
             else:
                 with self.engine.monitor.with_state(func_name, "wait send_free_queue"):
                     chunk = await self._send_free_queue.get()
                 chunk.cleanup = partial(self._send_free_queue.put_nowait, chunk)
-                self._download_queue.enqueue_wait_for_events(out_item.events)
                 assert isinstance(chunk.data, accel.HostArray)
                 # TODO: use get_region since it might be partial
                 out_item.spectra.get_async(self._download_queue, chunk.data)
             out_item.saturated.get_async(self._download_queue, chunk.saturated)
             if out_item.dig_total_power is not None:
                 out_item.dig_total_power.get_async(self._download_queue, dig_total_power)
-            events.append(self._download_queue.enqueue_marker())
 
             chunk.timestamp = out_item.timestamp
             # Each frame is valid if all spectra in it are valid
             out_item.present.reshape(-1, self.engine.spectra_per_heap).all(axis=-1, out=chunk.present)
+            download_marker = self._download_queue.enqueue_marker()
             with self.engine.monitor.with_state(func_name, "wait transfer"):
-                await async_wait_for_events(events)
+                await async_wait_for_events([download_marker])
 
             if dig_total_power is not None:
                 for pol, trg in enumerate(dig_total_power):
@@ -1388,7 +1385,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk = item.chunk
                 item.chunk = None
                 task = asyncio.create_task(
-                    self._push_recv_chunks([chunk], item.events),
+                    self._push_recv_chunks([chunk], list(item.events.values())),
                     name="Receive Chunk Recycle Task",
                 )
                 self.add_service_task(task)
@@ -1436,7 +1433,7 @@ class Engine(aiokatcp.DeviceServer):
             copy_samples = min(copy_samples, in_item.n_samples)
             copy_bytes = copy_samples * sample_bits // BYTE_BITS
             # Must wait for the upload to complete before the copy starts
-            self._copy_queue.enqueue_wait_for_events(in_item.events)
+            in_item.enqueue_wait_for_events(self._copy_queue)
             assert prev_item.samples is not None
             assert in_item.samples is not None
             in_item.samples.copy_region(
@@ -1510,10 +1507,9 @@ class Engine(aiokatcp.DeviceServer):
                 in_item.samples.set_region(
                     self._upload_queue, chunk.data, np.s_[:, : layout.chunk_bytes], np.s_[:], blocking=False
                 )
-                transfer_events.append(self._upload_queue.enqueue_marker())
                 # Put events on the queue so that run_processing() knows when to
                 # start.
-                in_item.events.extend(transfer_events)
+                transfer_events.append(in_item.add_marker(self._upload_queue))
 
             if prev_item is not None:
                 self._copy_tail(prev_item, in_item)
