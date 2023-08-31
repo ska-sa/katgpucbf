@@ -164,8 +164,13 @@ class Pipeline:
         # - The _tx_item_queue receives items from :meth:`gpu_proc_loop` to be
         #   used by :meth:`sender_loop`.
         # Once the destination function is finished with an item, it will pass
-        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
-        # all allocated buffers are in continuous circulation.
+        # it back to the corresponding free-item queue to ensure that all
+        # allocated buffers are in continuous circulation.
+        # NOTE: Pipelines must not place :class:`RxQueueItem`s directly back on
+        # the `_rx_free_item_queue` as multiple pipelines will hold
+        # references to a single :class:`RxQueueItem`. Instead, invoke
+        # :meth:`.XBEngine.free_rx_item` to indicate this Pipeline no longer
+        # holds a reference to the item.
         # TODO: BPipeline may/may not adopt this 1:1 {rx, tx}_item queue approach
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
             f"{name}.rx_item_queue", self.n_rx_items
@@ -804,8 +809,9 @@ class XBEngine(DeviceServer):
         # - The XBEngine passes items from the :meth:`_receiver_loop` to each
         #   pipeline via :meth:`.Pipeline.add_rx_item`.
         # - Once the each pipeline is finished with an :class:`RxQueueItem`,
-        #   it must pass it back to the _rx_free_item_queue to ensure that
-        #   all allocated buffers are in continuous circulation.
+        #   it must pass it back to the _rx_free_item_queue via
+        #   :meth:`free_rx_item` to ensure that all allocated buffers are in
+        #   continuous circulation.
         # NOTE: Too high means too much GPU memory gets allocate
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue(
             "rx_free_item_queue", DEFAULT_N_RX_ITEMS
