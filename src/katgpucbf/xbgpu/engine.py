@@ -850,8 +850,8 @@ class XBEngine(DeviceServer):
         if item.refcount == 0:
             # All Pipelines are done with this item
             self._active_in_sem.release()
-            # TODO: Don't recycle the chunk in the reset of the Item itself
-            # Need to separate the concerns
+            # NOTE: Recycle the chunk only as resetting of the item is done
+            # when it is taken off the queue.
             assert item.chunk is not None
             item.chunk.recycle()
             self._rx_free_item_queue.put_nowait(item)
