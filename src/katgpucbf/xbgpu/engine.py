@@ -741,12 +741,6 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
-        # Multiply this _step by 2 to account for dropping half of the
-        # spectrum due to symmetric properties of the Fourier Transform. While
-        # we can workout the timestamp_step from other parameters that
-        # configure the receiver, we pass it as a seperate argument to the
-        # reciever for cases where the n_channels_per_substream changes across
-        # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
