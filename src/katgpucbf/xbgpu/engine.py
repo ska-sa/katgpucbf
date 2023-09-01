@@ -354,7 +354,7 @@ class XPipeline(Pipeline):
         # present_ants only takes into account batches that have
         # been seen. If some batches went missing entirely, the
         # whole accumulation is bad.
-        if tx_item.batches != self.output.heap_accumulation_threshold:  # type: ignore
+        if tx_item.batches != self.output.heap_accumulation_threshold:
             tx_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
