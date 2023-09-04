@@ -148,7 +148,7 @@ class Pipeline:
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     n_rx_items = DEFAULT_N_RX_ITEMS
-    n_tx_items = DEFAULT_N_TX_ITEMS  # TODO: Will likely need to be == n_rx_items for BPipeline
+    n_tx_items = DEFAULT_N_TX_ITEMS
 
     def __init__(self, name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.engine = engine
@@ -171,7 +171,6 @@ class Pipeline:
         # references to a single :class:`RxQueueItem`. Instead, invoke
         # :meth:`.XBEngine.free_rx_item` to indicate this Pipeline no longer
         # holds a reference to the item.
-        # TODO: BPipeline may/may not adopt this 1:1 {rx, tx}_item queue approach
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
             f"{name}.rx_item_queue", self.n_rx_items
         )
