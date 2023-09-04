@@ -128,7 +128,25 @@ class TxQueueItem(QueueItem):
 
 
 class Pipeline:
-    """Base Pipeline class to build on.
+    r"""Base Pipeline class to build on.
+
+    SPEAD heaps utilised by this pipeline are first received at the
+    :class:`.XBEngine`-level and uploaded to the GPU for processing.
+
+    The pipeline then performs GPU-accelerated processing on the uploaded
+    data before packetising and sending the results back out onto the network.
+
+    Data processing occurs across three separate async methods. Data is passed
+    between these methods using :class:`asyncio.Queue`\s. See each method for
+    more details.
+
+    - :meth:`.XBEngine._receiver_loop`,
+    - :meth:`.gpu_proc_loop`,
+    - :meth:`.sender_loop`.
+
+    Items passed between queues may still have GPU operations in progress. Each
+    item stores a list of events that can be used to determine if a GPU
+    operation is complete.
 
     Parameters
     ----------
@@ -550,30 +568,15 @@ class XBEngine(DeviceServer):
     Currently the B-Engine functionality has not been added. This class currently
     only creates an X-Engine pipeline.
 
-    This pipeline encompasses receiving SPEAD heaps from F-Engines, sending them
-    to the GPU for processing and then sending them back out on the network.
+    The XB-Engine conducts the reception of SPEAD heaps from F-engines and makes
+    the data available to the constituent pipelines. In order to reduce the load
+    on the main thread, received data is collected into chunks. A chunk consists
+    of multiple batches of F-Engine heaps where a batch is a collection of heaps
+    from all F-Engine with the same timestamp.
 
-    The X-Engine processing is performed across three different async_methods.
-    Data is passed between these items using :class:`asyncio.Queue`\s. The three
-    processing functions are as follows:
+    There is a seperate function for sending descriptors onto the network.
 
-    - :meth:`_receiver_loop` - Receive chunks from network and initiate
-      transfer to GPU.
-    - :meth:`.Pipeline.gpu_proc_loop` - Perform the correlation operation.
-    - :meth:`.Pipeline.sender_loop` - Transfer correlated data to system RAM and then
-      send it out on the network.
-
-    There is also a seperate function for sending descriptors onto the network.
-
-    Items passed between queues may still have GPU operations in progress. Each
-    item stores a list of events that can be used to determine if a GPU
-    operation is complete.
-
-    In order to reduce the load on the main thread, received data is collected
-    into chunks. A chunk consists of multiple batches of F-Engine heaps where a
-    batch is a collection of heaps from all F-Engine with the same timestamp.
-
-    The initialiser allocates all memory buffers to be used during the lifetime
+    Class initialisers allocate all memory buffers to be used during the lifetime
     of the XBEngine object. These buffers are continuously reused to ensure
     memory use remains constrained.
 
