@@ -69,8 +69,14 @@ class QueueItem:
 
     async def async_wait_for_events(self) -> None:
         """Wait for all events in the list of events to be complete."""
-        await katsdpsigproc.resource.async_wait_for_events(self.events.values())
-        self.events.clear()  # They've all completed, so no need to wait for them in future
+        events = self.events.copy()
+        await katsdpsigproc.resource.async_wait_for_events(events.values())
+        # We can remove the events we waited for. We can't just clear the
+        # entire dict, because another task may have asynchronously added
+        # events in the meantime.
+        for queue, event in events.items():
+            if self.events.get(queue) is event:
+                del self.events[queue]
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the item's timestamp.
