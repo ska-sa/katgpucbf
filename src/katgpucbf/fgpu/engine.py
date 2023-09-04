@@ -1385,7 +1385,7 @@ class Engine(aiokatcp.DeviceServer):
                 chunk = item.chunk
                 item.chunk = None
                 task = asyncio.create_task(
-                    self._push_recv_chunks([chunk], list(item.events.values())),
+                    self._push_recv_chunks([chunk], item.events),
                     name="Receive Chunk Recycle Task",
                 )
                 self.add_service_task(task)

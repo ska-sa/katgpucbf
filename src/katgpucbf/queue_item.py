@@ -44,11 +44,11 @@ class QueueItem:
     timestamp: int
     #: The latest GPU event marker per
     #: :class:`~katsdpsigproc.abc.AbstractCommandQueue`.
-    events: dict[AbstractCommandQueue, AbstractEvent]
+    _events: dict[AbstractCommandQueue, AbstractEvent]
 
     def __init__(self, timestamp: int = 0) -> None:
         self.reset(timestamp)
-        self.events = {}
+        self._events = {}
 
     def add_marker(self, command_queue: AbstractCommandQueue) -> AbstractEvent:
         """Add an event to the list of events in the QueueItem.
@@ -56,7 +56,7 @@ class QueueItem:
         The event represents all previous work enqueued to `command_queue`.
         """
         marker = command_queue.enqueue_marker()
-        self.events[command_queue] = marker
+        self._events[command_queue] = marker
         return marker
 
     def enqueue_wait_for_events(self, command_queue: AbstractCommandQueue) -> None:
@@ -65,18 +65,18 @@ class QueueItem:
         Future work enqueued to `command_queue` will be sequenced after any
         work associated with the stored events.
         """
-        command_queue.enqueue_wait_for_events(list(self.events.values()))
+        command_queue.enqueue_wait_for_events(list(self._events.values()))
 
     async def async_wait_for_events(self) -> None:
         """Wait for all events in the list of events to be complete."""
-        events = self.events.copy()
+        events = self._events.copy()
         await katsdpsigproc.resource.async_wait_for_events(events.values())
         # We can remove the events we waited for. We can't just clear the
         # entire dict, because another task may have asynchronously added
         # events in the meantime.
         for queue, event in events.items():
-            if self.events.get(queue) is event:
-                del self.events[queue]
+            if self._events.get(queue) is event:
+                del self._events[queue]
 
     def reset(self, timestamp: int = 0) -> None:
         """Reset the item's timestamp.
@@ -85,3 +85,8 @@ class QueueItem:
         the constructor so it can also be used for initialisation.
         """
         self.timestamp = timestamp
+
+    @property
+    def events(self) -> tuple[AbstractEvent, ...]:
+        """Get a copy of the currently registered events."""
+        return tuple(self._events.values())
