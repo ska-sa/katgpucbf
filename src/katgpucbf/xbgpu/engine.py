@@ -145,9 +145,8 @@ class Pipeline:
     - :meth:`.sender_loop`.
 
     Items passed between queues may still have GPU operations in progress.
-    Each item stores the most recent event per
-    :class:`~katsdpsigproc.abc.AbstractCommandQueue` that can be used to
-    determine if a GPU operation is complete.
+    :class:`.QueueItem` provides mechanisms to wait for the in-progress work to
+    complete.
 
     Parameters
     ----------
