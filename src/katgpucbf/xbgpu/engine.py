@@ -93,7 +93,7 @@ class RxQueueItem(QueueItem):
         super().__init__(timestamp=timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events and chunk."""
+        """Reset the timestamp and chunk."""
         super().reset(timestamp)
         self.chunk: recv.Chunk | None = None
 
@@ -121,7 +121,7 @@ class TxQueueItem(QueueItem):
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
-        """Reset the timestamp, events and present antenna tracker."""
+        """Reset the timestamp and present antenna tracker."""
         super().reset(timestamp=timestamp)
         self.present_ants.fill(True)  # Assume they're fine until told otherwise
         self.batches = 0
