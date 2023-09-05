@@ -51,9 +51,13 @@ class QueueItem:
         self._events = {}
 
     def add_marker(self, command_queue: AbstractCommandQueue) -> AbstractEvent:
-        """Add an event to the list of events in the QueueItem.
+        """Indicate that previous work on `command_queue` uses this item.
 
-        The event represents all previous work enqueued to `command_queue`.
+        Future calls to :meth:`enqueue_wait_for_events` or
+        :meth:`async_wait_for_events` will wait for all work issued to
+        `command_queue` up to this point.
+
+        The associated event is returned.
         """
         marker = command_queue.enqueue_marker()
         self._events[command_queue] = marker
