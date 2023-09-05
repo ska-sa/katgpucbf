@@ -128,7 +128,25 @@ class TxQueueItem(QueueItem):
 
 
 class Pipeline:
-    """Base Pipeline class to build on.
+    r"""Base Pipeline class to build on.
+
+    SPEAD heaps utilised by this pipeline are first received at the
+    :class:`.XBEngine`-level and uploaded to the GPU for processing.
+
+    The pipeline then performs GPU-accelerated processing on the uploaded
+    data before packetising and sending the results back out onto the network.
+
+    Data processing occurs across three separate async methods. Data is passed
+    between these methods using :class:`asyncio.Queue`\s. See each method for
+    more details.
+
+    - :meth:`.XBEngine._receiver_loop`,
+    - :meth:`.gpu_proc_loop`,
+    - :meth:`.sender_loop`.
+
+    Items passed between queues may still have GPU operations in progress.
+    :class:`.QueueItem` provides mechanisms to wait for the in-progress work to
+    complete.
 
     Parameters
     ----------
@@ -148,7 +166,7 @@ class Pipeline:
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     n_rx_items = DEFAULT_N_RX_ITEMS
-    n_tx_items = DEFAULT_N_TX_ITEMS  # TODO: Will likely need to be == n_rx_items for BPipeline
+    n_tx_items = DEFAULT_N_TX_ITEMS
 
     def __init__(self, name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.engine = engine
@@ -164,9 +182,13 @@ class Pipeline:
         # - The _tx_item_queue receives items from :meth:`gpu_proc_loop` to be
         #   used by :meth:`sender_loop`.
         # Once the destination function is finished with an item, it will pass
-        # it back to the corresponding _(rx/tx)_free_item_queue to ensure that
-        # all allocated buffers are in continuous circulation.
-        # TODO: BPipeline may/may not adopt this 1:1 {rx, tx}_item queue approach
+        # it back to the corresponding free-item queue to ensure that all
+        # allocated buffers are in continuous circulation.
+        # NOTE: Pipelines must not place :class:`RxQueueItem`s directly back on
+        # the `_rx_free_item_queue` as multiple pipelines will hold
+        # references to a single :class:`RxQueueItem`. Instead, invoke
+        # :meth:`.XBEngine.free_rx_item` to indicate this Pipeline no longer
+        # holds a reference to the item.
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
             f"{name}.rx_item_queue", self.n_rx_items
         )
@@ -349,7 +371,7 @@ class XPipeline(Pipeline):
         # present_ants only takes into account batches that have
         # been seen. If some batches went missing entirely, the
         # whole accumulation is bad.
-        if tx_item.batches != self.output.heap_accumulation_threshold:  # type: ignore
+        if tx_item.batches != self.output.heap_accumulation_threshold:
             tx_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
@@ -546,30 +568,15 @@ class XBEngine(DeviceServer):
     Currently the B-Engine functionality has not been added. This class currently
     only creates an X-Engine pipeline.
 
-    This pipeline encompasses receiving SPEAD heaps from F-Engines, sending them
-    to the GPU for processing and then sending them back out on the network.
+    The XB-Engine conducts the reception of SPEAD heaps from F-engines and makes
+    the data available to the constituent pipelines. In order to reduce the load
+    on the main thread, received data is collected into chunks. A chunk consists
+    of multiple batches of F-Engine heaps where a batch is a collection of heaps
+    from all F-Engine with the same timestamp.
 
-    The X-Engine processing is performed across three different async_methods.
-    Data is passed between these items using :class:`asyncio.Queue`\s. The three
-    processing functions are as follows:
+    There is a seperate function for sending descriptors onto the network.
 
-    - :meth:`_receiver_loop` - Receive chunks from network and initiate
-      transfer to GPU.
-    - :meth:`.Pipeline.gpu_proc_loop` - Perform the correlation operation.
-    - :meth:`.Pipeline.sender_loop` - Transfer correlated data to system RAM and then
-      send it out on the network.
-
-    There is also a seperate function for sending descriptors onto the network.
-
-    Items passed between queues may still have GPU operations in progress. Each
-    item stores a list of events that can be used to determine if a GPU
-    operation is complete.
-
-    In order to reduce the load on the main thread, received data is collected
-    into chunks. A chunk consists of multiple batches of F-Engine heaps where a
-    batch is a collection of heaps from all F-Engine with the same timestamp.
-
-    The initialiser allocates all memory buffers to be used during the lifetime
+    Class initialisers allocate all memory buffers to be used during the lifetime
     of the XBEngine object. These buffers are continuously reused to ensure
     memory use remains constrained.
 
@@ -736,12 +743,6 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
-        # Multiply this _step by 2 to account for dropping half of the
-        # spectrum due to symmetric properties of the Fourier Transform. While
-        # we can workout the timestamp_step from other parameters that
-        # configure the receiver, we pass it as a seperate argument to the
-        # reciever for cases where the n_channels_per_substream changes across
-        # streams (likely for non-power-of-two array sizes).
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
@@ -797,9 +798,6 @@ class XBEngine(DeviceServer):
             XPipeline(output, self, context, tx_enabled) for output in outputs if isinstance(output, XOutput)
         ]
 
-        # A command queue is the OpenCL name for a CUDA stream. An abstract
-        # command queue can either be implemented as an OpenCL command queue or
-        # a CUDA stream depending on the context.
         self._upload_command_queue = context.create_command_queue()
 
         # This queue is extended in the monitor class, allowing for the
@@ -807,8 +805,9 @@ class XBEngine(DeviceServer):
         # - The XBEngine passes items from the :meth:`_receiver_loop` to each
         #   pipeline via :meth:`.Pipeline.add_rx_item`.
         # - Once the each pipeline is finished with an :class:`RxQueueItem`,
-        #   it must pass it back to the _rx_free_item_queue to ensure that
-        #   all allocated buffers are in continuous circulation.
+        #   it must pass it back to the _rx_free_item_queue via
+        #   :meth:`free_rx_item` to ensure that all allocated buffers are in
+        #   continuous circulation.
         # NOTE: Too high means too much GPU memory gets allocate
         self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue(
             "rx_free_item_queue", DEFAULT_N_RX_ITEMS
@@ -853,8 +852,8 @@ class XBEngine(DeviceServer):
         if item.refcount == 0:
             # All Pipelines are done with this item
             self._active_in_sem.release()
-            # TODO: Don't recycle the chunk in the reset of the Item itself
-            # Need to separate the concerns
+            # NOTE: Recycle the chunk only as resetting of the item is done
+            # when it is taken off the queue.
             assert item.chunk is not None
             item.chunk.recycle()
             self._rx_free_item_queue.put_nowait(item)
