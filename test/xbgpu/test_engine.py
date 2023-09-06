@@ -16,7 +16,6 @@
 
 """Unit tests for XBEngine module."""
 
-from ipaddress import IPv4Network
 from math import lcm
 from typing import AbstractSet, AsyncGenerator, Callable, Final, Iterable
 
@@ -200,14 +199,6 @@ class TestEngine:
     def corrprod_outputs(self, corrprod_args: list[str]) -> list[XOutput]:
         """The outputs to run tests against."""
         return [parse_corrprod(corrprod_arg) for corrprod_arg in corrprod_args]
-
-    @pytest.fixture
-    def mock_send_stream_network(self, corrprod_outputs: list[XOutput]) -> IPv4Network:
-        """Filter the output queues to just those corresponding to the --corrprods.
-
-        This overrides the default implementation in conftest.py.
-        """
-        return IPv4Network((corrprod_outputs[0].dst.host, 24))
 
     @staticmethod
     def _create_heaps(
