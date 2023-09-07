@@ -23,6 +23,7 @@ actual running of the processing.
 
 import argparse
 import asyncio
+import gc
 import logging
 import math
 from collections.abc import Callable, Sequence
@@ -313,9 +314,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--src-buffer",
         type=int,
-        default=192 * 1024 * 1024,
+        default=64 * 1024 * 1024,
         metavar="BYTES",
-        help="Size of network receive buffer [192MiB]",
+        help="Size of network receive buffer [64MiB]",
     )
     parser.add_argument(
         "--dst-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
@@ -520,7 +521,12 @@ async def async_main() -> None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
     with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
         await engine.start()
+        # Avoid garbage collections needing to iterate over all the objects
+        # allocated so far. That makes garbage collection much faster, and we
+        # don't expect to free up much of what's currently allocated.
+        gc.freeze()
         await engine.join()
+        gc.unfreeze()  # Allow objects to be tidied away during shutdown
         if prometheus_server:
             await prometheus_server.close()
 

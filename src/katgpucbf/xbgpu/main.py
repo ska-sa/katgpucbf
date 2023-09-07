@@ -31,6 +31,7 @@ everything required to run the XB-Engine.
 
 import argparse
 import asyncio
+import gc
 import logging
 from collections.abc import Callable, Sequence
 from typing import TypedDict, TypeVar
@@ -428,7 +429,12 @@ async def async_main(args: argparse.Namespace) -> None:
         add_signal_handlers(xbengine)
 
         await xbengine.start()
+        # Avoid garbage collections needing to iterate over all the objects
+        # allocated so far. That makes garbage collection much faster, and we
+        # don't expect to free up much of what's currently allocated.
+        gc.freeze()
         await xbengine.join()
+        gc.unfreeze()  # Allow objects to be tidied away during shutdown
 
         if prometheus_server:
             await prometheus_server.close()
