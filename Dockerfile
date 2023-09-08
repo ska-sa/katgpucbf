@@ -59,6 +59,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python-is-python3 \
     git \
     pkg-config \
+    meson \
     libboost-dev \
     libboost-program-options-dev \
     libboost-system-dev \
@@ -87,11 +88,10 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
     wget "https://github.com/ska-sa/spead2/releases/download/v$SPEAD2_VERSION/spead2-$SPEAD2_VERSION.tar.gz" && \
     tar -zxf "spead2-$SPEAD2_VERSION.tar.gz" && \
     cd "spead2-$SPEAD2_VERSION" && \
-    mkdir build && \
+    meson setup build && \
     cd build && \
-    ../configure && \
-    make -j && \
-    make install
+    meson compile && \
+    meson install
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
