@@ -76,7 +76,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson meson-python
+RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that when we want to update we only have to do it in one place.
