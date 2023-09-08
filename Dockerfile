@@ -59,9 +59,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python-is-python3 \
     git \
     pkg-config \
+    ninja-build \
     libboost-dev \
     libboost-program-options-dev \
-    libboost-system-dev \
     libibverbs-dev \
     librdmacm-dev \
     libpcap-dev \
@@ -76,7 +76,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson
+RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson meson-python
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that when we want to update we only have to do it in one place.
