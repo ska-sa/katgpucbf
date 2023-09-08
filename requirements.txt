@@ -87,7 +87,6 @@ numpy==1.23.5
     #   numba
     #   pandas
     #   scipy
-    #   spead2
     #   xarray
 packaging==23.1
     # via
@@ -135,7 +134,7 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==3.12.0
+spead2==4.0.0
     # via katgpucbf (setup.cfg)
 terminaltables==3.1.10
     # via aiomonitor
