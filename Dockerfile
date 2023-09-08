@@ -87,7 +87,7 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
     wget "https://github.com/ska-sa/spead2/releases/download/v$SPEAD2_VERSION/spead2-$SPEAD2_VERSION.tar.gz" && \
     tar -zxf "spead2-$SPEAD2_VERSION.tar.gz" && \
     cd "spead2-$SPEAD2_VERSION" && \
-    meson setup build && \
+    meson setup -Dtools=disabled -Dibv=enabled -Dmlx5dv=enabled build && \
     cd build && \
     meson compile && \
     meson install
