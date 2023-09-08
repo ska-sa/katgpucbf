@@ -59,7 +59,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python-is-python3 \
     git \
     pkg-config \
-    meson \
     libboost-dev \
     libboost-program-options-dev \
     libboost-system-dev \
@@ -77,7 +76,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4
+RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 meson==1.2.1
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that when we want to update we only have to do it in one place.
