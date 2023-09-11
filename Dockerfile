@@ -117,6 +117,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-latex-extra \
     texlive-latex-recommended \
     texlive-science
+# Workaround pending https://bugs.launchpad.net/ubuntu/+source/docker.io-app/+bug/2034052
+COPY --from=docker/buildx-bin /buildx /usr/libexec/docker/cli-plugins/docker-buildx
 
 #######################################################################
 
