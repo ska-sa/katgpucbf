@@ -195,6 +195,7 @@ numpy==1.23.5
     #   numba
     #   pandas
     #   scipy
+    #   spead2
     #   xarray
 packaging==23.1
     # via
@@ -326,7 +327,7 @@ six==1.16.0
     #   python-dateutil
 snowballstemmer==2.2.0
     # via sphinx
-spead2==4.0.0
+spead2==4.0.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
