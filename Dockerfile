@@ -76,7 +76,7 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-# jina2, pypackagin, pycparser and meson are installed in order to compile the
+# jinja2, packaging, pycparser and meson are installed in order to compile the
 # C++ bindings of spead2
 RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson
 
