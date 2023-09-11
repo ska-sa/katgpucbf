@@ -61,7 +61,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     pkg-config \
     ninja-build \
     libboost-dev \
-    libboost-program-options-dev \
     libibverbs-dev \
     librdmacm-dev \
     libpcap-dev \
@@ -145,6 +144,11 @@ RUN pip install --no-deps . && pip check
 # the build cache for the other.
 
 FROM build-base as build-cxx
+
+# Needed for building fsim, but not needed for anything else
+# so we needn't put it in the base image.
+RUN DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+     libboost-program-options-dev
 
 # Build utilities.
 # We use make clean to ensure that an existing build from the build context
