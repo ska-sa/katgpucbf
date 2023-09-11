@@ -59,9 +59,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python-is-python3 \
     git \
     pkg-config \
+    ninja-build \
     libboost-dev \
     libboost-program-options-dev \
-    libboost-system-dev \
     libibverbs-dev \
     librdmacm-dev \
     libpcap-dev \
@@ -76,7 +76,9 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4
+# jinja2, packaging, pycparser and meson are installed in order to compile the
+# C++ bindings of spead2
+RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson
 
 # Install spead2 C++ bindings. We use requirements.txt just to get the
 # version, so that when we want to update we only have to do it in one place.
@@ -87,11 +89,10 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
     wget "https://github.com/ska-sa/spead2/releases/download/v$SPEAD2_VERSION/spead2-$SPEAD2_VERSION.tar.gz" && \
     tar -zxf "spead2-$SPEAD2_VERSION.tar.gz" && \
     cd "spead2-$SPEAD2_VERSION" && \
-    mkdir build && \
+    meson setup -Dtools=disabled -Dibv=enabled -Dmlx5dv=enabled build && \
     cd build && \
-    ../configure && \
-    make -j && \
-    make install
+    meson compile && \
+    meson install
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
@@ -116,6 +117,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-latex-extra \
     texlive-latex-recommended \
     texlive-science
+# Workaround pending https://bugs.launchpad.net/ubuntu/+source/docker.io-app/+bug/2034052
+COPY --from=docker/buildx-bin /buildx /usr/libexec/docker/cli-plugins/docker-buildx
 
 #######################################################################
 
