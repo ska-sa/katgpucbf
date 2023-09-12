@@ -553,9 +553,11 @@ class TestEngine:
             #   the first data processed not being on an accumulation
             #   boundary.
             heap_acc_thresholds = [corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
-            first_batch_index = 12 * np.product(heap_acc_thresholds)
-            batch_start_index = first_batch_index - HEAPS_PER_FENGINE_PER_CHUNK
-            batch_end_index = first_batch_index + np.product(heap_acc_thresholds)
+            n_heaps = np.product(heap_acc_thresholds)
+            batch_start_index = 12 * n_heaps  # Somewhere arbitrary that isn't zero
+            batch_end_index = batch_start_index + n_heaps
+            # Add an extra batch before the first full accumulation
+            batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
 
             device_results = await self._send_data(
                 mock_recv_streams,
