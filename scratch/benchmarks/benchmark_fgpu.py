@@ -43,7 +43,7 @@ def dsim_factory(
         addresses = ["239.102.0.64+7:7148", "239.102.0.72+7:7148"][index]
     else:
         addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
-    return (
+    command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --net=host "
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
@@ -57,8 +57,11 @@ def dsim_factory(
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
         f"--first-id={index} "
-        f"{addresses}"
+        f"{addresses} "
     )
+    if args.dig_sample_bits is not None:
+        command += f"--sample-bits={args.dig_sample_bits} "
+    return command
 
 
 def fgpu_factory(
@@ -83,12 +86,12 @@ def fgpu_factory(
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = f"0,{ncpus_per_quadrant}"
+        src_affinity = f"0,1,{ncpus_per_quadrant},{ncpus_per_quadrant+1}"
         dst_affinity = f"{2 * ncpus_per_quadrant}"
         other_affinity = f"{3 * ncpus_per_quadrant}"
     else:
         interface = server.interfaces[index % len(server.interfaces)]
-        src_affinity = f"{cpu_base},{cpu_base + 1}"
+        src_affinity = f"{cpu_base}"
         dst_affinity = f"{cpu_base + hstep}"
         other_affinity = f"{cpu_base + hstep + 1}"
     katcp_port = 7140 + index
@@ -115,7 +118,7 @@ def fgpu_factory(
         # f"ddc_taps=96,centre_frequency=200e6,dst=239.102.{216 + index}.0+7:7148 "
         f"239.102.{index}.64+15:7148 "
     )
-    for arg in ["spectra_per_heap", "array_size"]:
+    for arg in ["spectra_per_heap", "array_size", "dig_sample_bits"]:
         value = getattr(args, arg)
         if value is not None:
             dashed = arg.replace("_", "-")
@@ -242,8 +245,7 @@ async def search(args: argparse.Namespace) -> float:
     async def compare(adc_sample_rate: float) -> bool:
         return not (await measure(adc_sample_rate)).good()
 
-    step = 10_000_000
-    rates = range(round(args.low), round(args.high) + 1, step)
+    rates = range(round(args.low), round(args.high) + 1, round(args.step))
     low_result = await measure(rates[0])
     if not low_result.good():
         raise RuntimeError(f"failed on low: {low_result.message()}")
@@ -274,17 +276,24 @@ async def main():
     parser.add_argument(
         "--array-size",
         type=int,
-        help="The number of antennas in the array. [%(default)s]",
+        help="The number of antennas in the array.",
     )
     parser.add_argument(
         "--spectra-per-heap",
         type=int,
         metavar="SPECTRA",
-        help="Spectra in each output heap [%(default)s]",
+        help="Spectra in each output heap",
+    )
+    parser.add_argument(
+        "--dig-sample-bits",
+        type=int,
+        metavar="BITS",
+        help="Number of bits per digitised sample",
     )
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
+    parser.add_argument("--step", type=float, default=10e6, help="Step size between sample rates to test [%(default)s]")
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
