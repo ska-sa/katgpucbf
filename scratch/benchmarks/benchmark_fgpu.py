@@ -118,6 +118,12 @@ def fgpu_factory(
         # f"ddc_taps=96,centre_frequency=200e6,dst=239.102.{216 + index}.0+7:7148 "
         f"239.102.{index}.64+15:7148 "
     )
+    if args.narrowband:
+        command += (
+            f"--narrowband=name=narrowband,channels={args.narrowband_channels},"
+            f"decimation={args.narrowband_decimation},centre_frequency={adc_sample_rate / 4},"
+            f"dst=239.102.{216 + index}.0+7:7148 "
+        )
     for arg in ["spectra_per_heap", "array_size", "dig_sample_bits"]:
         value = getattr(args, arg)
         if value is not None:
@@ -290,6 +296,12 @@ async def main():
         metavar="BITS",
         help="Number of bits per digitised sample",
     )
+    parser.add_argument("--narrowband", action="store_true", help="Enable a narrowband output [no]")
+    parser.add_argument(
+        "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
+    )
+    parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
+
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
