@@ -9,8 +9,10 @@ from dataclasses import dataclass
 
 import aiohttp.client
 import asyncssh
-from noisy_search import noisy_search
+import numpy as np
 from prometheus_client.parser import text_string_to_metric_families
+
+from noisy_search import noisy_search
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 from sighandler import add_sigint_handler
 
@@ -251,7 +253,9 @@ async def search(args: argparse.Namespace) -> float:
     async def compare(adc_sample_rate: float) -> bool:
         return not (await measure(adc_sample_rate)).good()
 
-    rates = range(round(args.low), round(args.high) + 1, round(args.step))
+    # The additional 0.01 * args.step is to ensure high is included rather
+    # than excluded if the range is a multiple of step.
+    rates = np.arange(args.low, args.high + 0.01 * args.step, args.step)
     low_result = await measure(rates[0])
     if not low_result.good():
         raise RuntimeError(f"failed on low: {low_result.message()}")
@@ -259,7 +263,23 @@ async def search(args: argparse.Namespace) -> float:
     if high_result.good():
         raise RuntimeError("succeeded on high")
 
-    result = await noisy_search(rates, NOISE, TOLERANCE, compare)
+    # Compute error estimate. This is a heuristic based on gut feel rather
+    # than measurement. Assume that results are 1-NOISE reliable when at least
+    # 0.5% away from the critical value, and vary logarithmically in between.
+    noise = np.zeros((len(rates), len(rates) + 1))
+    for i, rate in enumerate(rates):
+        for j in range(len(rates) + 1):
+            actual = args.low + args.step * (j - 0.5)
+            actual = np.clip(actual, args.low, args.high)
+            l_rate = np.log(rate)
+            l_actual = np.log(actual)
+            noise[i, j] = np.clip(
+                0.5 + (l_rate - l_actual) / np.log1p(0.003) * (0.5 - NOISE),
+                NOISE,
+                1 - NOISE,
+            )
+
+    result = await noisy_search(rates, noise, TOLERANCE, compare)
     if result.position == 0:
         raise RuntimeError("lower bound is too high")
     elif result.position == len(rates):
