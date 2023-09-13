@@ -17,7 +17,14 @@
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Sequence, TypeVar
 
+import numpy as np
+from numpy.typing import NDArray
+
 _T = TypeVar("_T", covariant=True)
+
+
+def _entropy(a: NDArray[float], axis: int | tuple[int, ...] | None = None) -> np.float_:
+    return np.sum(-a * np.log(a), axis=axis)
 
 
 @dataclass
@@ -28,7 +35,7 @@ class NoisySearchResult(Generic[_T]):
 
 
 async def noisy_search(
-    items: Sequence[_T], noise: float, tolerance: float, compare: Callable[[_T], Awaitable[bool]]
+    items: Sequence[_T], noise: float | NDArray[float], tolerance: float, compare: Callable[[_T], Awaitable[bool]]
 ) -> NoisySearchResult[_T]:
     """
     Perform a binary search with a noisy comparison function.
@@ -49,10 +56,15 @@ async def noisy_search(
     Parameters
     ----------
     items
-        Existing elements. It is particularly efficient to pass an instance
-        of :class:`range`.
+        Existing elements.
     noise
-        Probability that comparison will return the incorrect result
+        Probability that comparison will return the incorrect result.
+        Alternatively it may be a matrix with `n` rows and `n + 1` columns,
+        where `n` is the length of `items`. The entry in row `i`, column `j`
+        is the probability that passing element `i` to `compare` will return
+        true if the correct position is immediately before element `j`. It
+        should thus be greater than 0.5 when `i` >= `j` and less than 0.5
+        otherwise.
     tolerance
         Maximum probability that this function may return an incorrect result
         (with a uniform prior)
@@ -64,38 +76,34 @@ async def noisy_search(
     Returns
     -------
     """
-    assert 0 <= noise < 0.5
-    assert 0 < tolerance < 0.5
     n = len(items)
-    a = [1.0 / (n + 1)] * (n + 1)  # Uniform prior
+    if np.isscalar(noise):
+        assert 0 <= noise < 0.5
+        yes_scale = np.tri(n, n + 1) * (1 - 2 * noise) + noise
+    else:
+        yes_scale = noise
+    no_scale = 1 - yes_scale
+    assert 0 < tolerance < 0.5
+    a = np.full(n + 1, 1 / (n + 1))  # Uniform prior
+    entropy = np.empty(n)
     queries = 0
     while True:
-        for i, v in enumerate(a):
-            if v >= 1 - tolerance:
-                return NoisySearchResult(position=i, queries=queries, confidence=v)
+        maxi = np.argmax(a)
+        if a[maxi] >= 1 - tolerance:
+            return NoisySearchResult(position=maxi, queries=queries, confidence=float(a[maxi]))
 
-        t = 0.0
-        prev_t = 0.0
-        for i in range(n + 1):
-            prev_t = t
-            t += a[i]
-            if t > 0.5:
-                break
-        # The paper has an asymmetric condition, but we pick the closest
-        # partition point.
-        if i > 0 and 0.5 - prev_t < t - 0.5:
-            i -= 1
-            t = prev_t
+        # Determine query point that gives the lowest expected entropy afterwards
+        csum = np.cumsum(a)[:n]
+        yes = a[np.newaxis, :] * yes_scale
+        yes /= np.sum(yes, axis=1, keepdims=True)
+        no = a[np.newaxis, :] * no_scale
+        no /= np.sum(no, axis=1, keepdims=True)
+        entropy = _entropy(yes, axis=1) * csum + _entropy(no, axis=1) * (1 - csum)
+        i = np.argmin(entropy)
         queries += 1
         if await compare(items[i]):
-            norm = (1 - noise) * t + noise * (1 - t)
-            scale_left = (1 - noise) / norm
-            scale_right = noise / norm
+            a *= yes_scale[i]
         else:
-            norm = noise * t + (1 - noise) * (1 - t)
-            scale_left = noise / norm
-            scale_right = (1 - noise) / norm
-        for j in range(i + 1):
-            a[j] *= scale_left
-        for j in range(i + 1, n + 1):
-            a[j] *= scale_right
+            a *= no_scale[i]
+        # Normalise
+        a /= np.sum(a)
