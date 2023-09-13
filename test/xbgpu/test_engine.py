@@ -501,6 +501,17 @@ class TestEngine:
         boundary to more accurately test the setting of the first output
         packet's timestamp (to be non-zero).
         """
+        # NOTE: `HEAPS_PER_FENGINE_PER_CHUNK` and the `heap_accumulation_threshold`s
+        # are chosen carefully for this test. We simulate the first accumulation
+        # being incomplete by ensuring there is only one chunk of data present.
+        # In doing so, we must ensure `HEAPS_PER_FENGINE_PER_CHUNK` is smaller
+        # than either pipeline's `heap_accumulation_threshold`. The logic of the
+        # test has *not* been verified if that constraint isn't met, it merely
+        # `assert`'s.
+        heap_acc_thresholds = [corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
+        for heap_accumulation_threshold in heap_acc_thresholds:
+            assert heap_accumulation_threshold > HEAPS_PER_FENGINE_PER_CHUNK
+
         n_baselines = n_ants * (n_ants + 1) * 2
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
@@ -545,18 +556,17 @@ class TestEngine:
             # accumulations for *both* XPipelines. The first usage is
             # dual-purpose once more:
             # - In addition to the above, the arbitrary start position for data
-            #   in this test dictates the first received batch to be in the
+            #   in this test dictates the first received chunk to be in the
             #   middle of an accumulation.
             # - More accurately, it forces the first accumulation (to be
-            #   processed) to only contain one batch of data. This ensures
+            #   processed) to only contain one chunk of data. This ensures
             #   we test that output dumps are aligned correctly, despite
             #   the first data processed not being on an accumulation
             #   boundary.
-            heap_acc_thresholds = [corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
             n_heaps = np.product(heap_acc_thresholds)
             batch_start_index = 12 * n_heaps  # Somewhere arbitrary that isn't zero
             batch_end_index = batch_start_index + n_heaps
-            # Add an extra batch before the first full accumulation
+            # Add an extra chunk before the first full accumulation
             batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
 
             device_results = await self._send_data(
