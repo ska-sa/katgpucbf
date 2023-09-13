@@ -67,7 +67,9 @@ async def kill_process(process: asyncssh.SSHClientProcess) -> None:
     try:
         process.terminate()
         await process.wait(check=False, timeout=30)
-    except (OSError, asyncio.TimeoutError) as exc:
+    except asyncio.TimeoutError:
+        print("WARNING: kill timed out")
+    except OSError as exc:
         print(f"WARNING: kill failed: {exc}")
 
 
