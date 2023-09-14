@@ -243,6 +243,28 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     raise AssertionError("should be unreachable")
 
 
+async def calibrate(args: argparse.Namespace) -> None:
+    for adc_sample_rate in np.arange(args.low, args.high + 0.01 * args.step, args.step):
+        sync_time = int(time.time())
+        async with await run_dsims(adc_sample_rate, sync_time, args):
+            trials = 0
+            successes = 0
+            while trials < args.calibrate_repeat:
+                async with await run_fgpus(adc_sample_rate, sync_time, args):
+                    if args.verbose:
+                        print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
+                    result = await process(adc_sample_rate, args.n, args.runtime, args.fgpu_server)
+                    if args.verbose:
+                        print(result.message())
+                    if result.good():
+                        trials += 1
+                        successes += 1
+                    elif result.missing_heaps > 0:
+                        # If missing == 0, we need to rerun the experiment
+                        trials += 1
+            print(adc_sample_rate, successes / trials)
+
+
 async def search(args: argparse.Namespace) -> tuple[float, float]:
     async def measure(adc_sample_rate: float) -> Result:
         while True:
@@ -270,18 +292,11 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
     # Compute error estimate. This is a heuristic based on gut feel rather
     # than measurement. Assume that results are 1-NOISE reliable when at least
     # FUZZ away from the critical value, and vary logarithmically in between.
-    noise = np.zeros((len(rates), len(rates) + 1))
-    for i, rate in enumerate(rates):
-        for j in range(len(rates) + 1):
-            actual = args.low + args.step * (j - 0.5)
-            actual = np.clip(actual, args.low, args.high)
-            l_rate = np.log(rate)
-            l_actual = np.log(actual)
-            noise[i, j] = np.clip(
-                0.5 + (l_rate - l_actual) / np.log1p(FUZZ) * (0.5 - NOISE),
-                NOISE,
-                1 - NOISE,
-            )
+    mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
+    mid_rates = np.r_[args.low, mid_rates, args.high]
+    l_rates = np.log(rates)[:, np.newaxis]
+    l_mid_rates = np.log(mid_rates)[np.newaxis, :]
+    noise = np.clip(0.5 + (l_rates - l_mid_rates) / np.log1p(FUZZ) * (0.5 - NOISE), NOISE, 1 - NOISE)
 
     result = await noisy_search(
         list(rates),
@@ -343,14 +358,23 @@ async def main():
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
     parser.add_argument("--fgpu-server", type=str, default="fgpu", help="Server on which to run fgpu [%(default)s]")
     parser.add_argument("-v", "--verbose", action="store_true", help="Emit stdout/stderr [no]")
+    parser.add_argument(
+        "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
+    )
+    parser.add_argument(
+        "--calibrate-repeat", type=int, default=10, help="Number of times to run at each rate [%(default)s]"
+    )
     args = parser.parse_args()
 
     servers = servers_from_toml(args.servers)
     args.dsim_server = servers[args.dsim_server]
     args.fgpu_server = servers[args.fgpu_server]
 
-    low, high = await search(args)
-    print(f"\n{low / 1e6} MHz - {high / 1e6} MHz")
+    if args.calibrate:
+        await calibrate(args)
+    else:
+        low, high = await search(args)
+        print(f"\n{low / 1e6} MHz - {high / 1e6} MHz")
 
 
 if __name__ == "__main__":
