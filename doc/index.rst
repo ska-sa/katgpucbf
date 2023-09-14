@@ -39,6 +39,7 @@ Welcome to katgpucbf's documentation!
    fsim
    qualification
    autotuning
+   benchmarking
    todo
 
 
