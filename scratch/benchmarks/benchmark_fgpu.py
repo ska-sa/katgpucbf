@@ -57,7 +57,8 @@ def dsim_factory(
         "--ibv "
         f"--interface={interface} "
         f"--adc-sample-rate={adc_sample_rate} "
-        "--ttl 2 "
+        "--ttl=2 "
+        "--period=16777216 "  # Speeds things up
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
