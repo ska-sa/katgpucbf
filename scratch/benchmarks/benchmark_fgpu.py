@@ -362,7 +362,7 @@ async def main():
         "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
     )
     parser.add_argument(
-        "--calibrate-repeat", type=int, default=10, help="Number of times to run at each rate [%(default)s]"
+        "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
     )
     args = parser.parse_args()
 
