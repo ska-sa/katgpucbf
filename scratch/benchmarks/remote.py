@@ -14,6 +14,8 @@
 # limitations under the License.
 ################################################################################
 
+"""Launch and manage remote tasks over SSH."""
+
 import asyncio
 import sys
 from contextlib import AsyncExitStack
@@ -64,6 +66,7 @@ class ServerInfo:
 
 
 async def kill_process(process: asyncssh.SSHClientProcess) -> None:
+    """Kill a remote process and wait for it to die."""
     try:
         process.terminate()
         await process.wait(check=False, timeout=30)

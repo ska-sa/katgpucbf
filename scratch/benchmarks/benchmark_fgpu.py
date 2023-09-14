@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+"""Benchmark critical rate of fgpu.
+
+See :doc:`benchmarking`.
+"""
+
 import argparse
 import asyncio
 import functools
@@ -38,6 +43,7 @@ def dsim_factory(
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
+    """Generate command to run dsim."""
     ncpus_per_quadrant = server_info.ncpus // 4
     cpu_base = index * ncpus_per_quadrant
     interface = server.interfaces[index % len(server.interfaces)]
@@ -80,6 +86,7 @@ def fgpu_factory(
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
+    """Generate command to run fgpu."""
     n = args.n
     ncpus_per_quadrant = server_info.ncpus // 4
     hstep = ncpus_per_quadrant // 2
@@ -143,6 +150,11 @@ async def run_dsims(
     sync_time: int,
     args: argparse.Namespace,
 ) -> AsyncExitStack:
+    """Run all the dsims.
+
+    The result must be used as a context manager. Exiting the context manager
+    will shut down the tasks.
+    """
     single_pol = False
     n = args.n
     if n == 1:
@@ -163,6 +175,11 @@ async def run_fgpus(
     sync_time: int,
     args: argparse.Namespace,
 ) -> AsyncExitStack:
+    """Run all the fgpu instances.
+
+    The result must be used as a context manager. Exiting the context manager
+    will shut down the tasks.
+    """
     factory = functools.partial(
         fgpu_factory,
         adc_sample_rate=adc_sample_rate,
@@ -186,6 +203,7 @@ async def _heap_counts1(session: aiohttp.client.ClientSession, url: str) -> tupl
 
 
 async def heap_counts(session: aiohttp.client.ClientSession, server: Server, n: int) -> tuple[int, int]:
+    """Query the number of heaps received and missing, for all n fgpu instances."""
     tasks = [
         asyncio.create_task(_heap_counts1(session, f"http://{server.hostname}:{7150 + i}/metrics")) for i in range(n)
     ]
@@ -196,16 +214,26 @@ async def heap_counts(session: aiohttp.client.ClientSession, server: Server, n: 
 
 @dataclass
 class Result:
-    expected_heaps: float
-    heaps: int
-    missing_heaps: int
+    """Result of a single trial."""
+
+    expected_heaps: float  #: Number of heaps expected, based on runtime and data rate
+    heaps: int  #: Number of heaps received
+    missing_heaps: int  #: Number of heaps reported as missing (gaps in incoming data)
 
     def good(self) -> bool:
+        """Whether the trial was a success (kept up with the rate).
+
+        If this is false, it does not mean that heaps were lost. If
+        :attr:`missing_heaps` is 0, it could mean that data was not being sent
+        at the correct rate, or that latency prevented the queries from
+        being performed at the correct times.
+        """
         if self.missing_heaps > 0:
             return False
         return (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps
 
     def message(self) -> str:
+        """Human-readable description of the outcome."""
         if self.missing_heaps > 0:
             return f"Missing {self.missing_heaps} heaps"
         elif not self.good():
@@ -220,6 +248,7 @@ async def process(
     runtime: float,
     fgpu_server: Server,
 ) -> Result:
+    """Perform a single trial on running engines."""
     async with aiohttp.client.ClientSession() as session:
         await asyncio.sleep(1)  # Give a chance for startup losses
         sleeper = asyncio.create_task(asyncio.sleep(runtime))
@@ -236,6 +265,7 @@ async def process(
 
 
 async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
+    """Perform a single trial."""
     sync_time = int(time.time())
     async with await run_fgpus(adc_sample_rate, sync_time, args):
         async with await run_dsims(adc_sample_rate, sync_time, args):
@@ -244,6 +274,7 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
 
 
 async def calibrate(args: argparse.Namespace) -> None:
+    """Run multiple trials on all the possible rates."""
     for adc_sample_rate in np.arange(args.low, args.high + 0.01 * args.step, args.step):
         sync_time = int(time.time())
         async with await run_dsims(adc_sample_rate, sync_time, args):
@@ -266,6 +297,8 @@ async def calibrate(args: argparse.Namespace) -> None:
 
 
 async def search(args: argparse.Namespace) -> tuple[float, float]:
+    """Search for the critical rate."""
+
     async def measure(adc_sample_rate: float) -> Result:
         while True:
             print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
@@ -314,7 +347,7 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
         return rates[result.low], rates[result.high]
 
 
-async def main():
+async def main():  # noqa: D103
     add_sigint_handler()
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")

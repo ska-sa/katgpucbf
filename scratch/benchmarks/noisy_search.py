@@ -14,6 +14,8 @@
 # limitations under the License.
 ################################################################################
 
+"""Perform a noisy binary search."""
+
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Sequence, TypeVar
 
@@ -30,6 +32,8 @@ def _entropy(a: ArrayLike, axis: int | tuple[int, ...] | None = None) -> np.floa
 
 @dataclass
 class NoisySearchResult:
+    """Results from :func:`noisy_search`."""
+
     low: int  #: Lower bound for the new element (as an index into the original array)
     high: int  #: Upper bound for the new element (as an index into the original array)
     comparisons: int  #: Number of comparisons made
@@ -86,9 +90,6 @@ async def noisy_search(
         A limit on the number of comparisons. If this number of comparisons is
         reached, a confidence interval wider than `max_interval` may be
         returned.
-
-    Returns
-    -------
     """
     n = len(items)
     if np.isscalar(noise):

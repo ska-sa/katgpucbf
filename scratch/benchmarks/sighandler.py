@@ -14,6 +14,8 @@
 # limitations under the License.
 ################################################################################
 
+"""Manage asyncio shutdown when Ctrl-C is pressed."""
+
 import asyncio
 import signal
 import sys
