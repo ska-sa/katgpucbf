@@ -15,28 +15,36 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Generic, Sequence, TypeVar
+from typing import Awaitable, Callable, Sequence, TypeVar
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike
 
 _T = TypeVar("_T", covariant=True)
 
 
-def _entropy(a: NDArray[float], axis: int | tuple[int, ...] | None = None) -> np.float_:
-    return np.sum(-a * np.log(a), axis=axis)
+def _entropy(a: ArrayLike, axis: int | tuple[int, ...] | None = None) -> np.floating:
+    array = np.asarray(a)
+    return np.sum(-array * np.log(array), axis=axis)
 
 
 @dataclass
-class NoisySearchResult(Generic[_T]):
-    position: int  #: The position of the element before which the new element is to be inserted
-    queries: int  #: Number of queries made
-    confidence: float  #: Probability that the answer is correct
+class NoisySearchResult:
+    low: int  #: Lower bound for the new element (as an index into the original array)
+    high: int  #: Upper bound for the new element (as an index into the original array)
+    comparisons: int  #: Number of comparisons made
+    confidence: float  #: Probability that the interval [low, high) contains the new element
 
 
 async def noisy_search(
-    items: Sequence[_T], noise: float | NDArray[float], tolerance: float, compare: Callable[[_T], Awaitable[bool]]
-) -> NoisySearchResult[_T]:
+    items: Sequence[_T],
+    noise: ArrayLike,
+    tolerance: float,
+    compare: Callable[[_T], Awaitable[bool]],
+    *,
+    max_interval: int = 1,
+    max_comparisons: int | None = None
+) -> NoisySearchResult:
     """
     Perform a binary search with a noisy comparison function.
 
@@ -67,40 +75,53 @@ async def noisy_search(
         otherwise.
     tolerance
         Maximum probability that this function may return an incorrect result
-        (with a uniform prior)
+        (with a uniform prior).
     compare
         Comparison function. It is passed an existing element, and should
         mostly return true if the new element comes before it and false
         otherwise.
+    max_interval
+        Maximum width of the returned interval (in indices)
+    max_comparisons
+        A limit on the number of comparisons. If this number of comparisons is
+        reached, a confidence interval wider than `max_interval` may be
+        returned.
 
     Returns
     -------
     """
     n = len(items)
     if np.isscalar(noise):
-        assert 0 <= noise < 0.5
-        yes_scale = np.tri(n, n + 1) * (1 - 2 * noise) + noise
+        real_noise: float
+        # np.isscalar is annotated with TypeGuard and it loses all the
+        # original type information, so mypy
+        real_noise = float(noise)  # type: ignore
+        assert 0.0 <= real_noise < 0.5
+        yes_scale = np.tri(n, n + 1) * (1 - 2 * real_noise) + real_noise
     else:
-        yes_scale = noise
+        yes_scale = np.asarray(noise)
     no_scale = 1 - yes_scale
     assert 0 < tolerance < 0.5
     a = np.full(n + 1, 1 / (n + 1))  # Uniform prior
     entropy = np.empty(n)
-    queries = 0
+    comparisons = 0
     while True:
-        maxi = np.argmax(a)
-        if a[maxi] >= 1 - tolerance:
-            return NoisySearchResult(position=maxi, queries=queries, confidence=float(a[maxi]))
+        # Determine the current confidence interval
+        csum = np.cumsum(a)
+        low = int(np.searchsorted(csum, 0.5 * tolerance)) - 1
+        high = int(np.searchsorted(csum, 1 - 0.5 * tolerance))
+        if high - low <= max_interval or (max_comparisons is not None and comparisons >= max_comparisons):
+            confidence = a[high] - (a[low] if low >= 0 else 0.0)
+            return NoisySearchResult(low=low, high=high, comparisons=comparisons, confidence=float(confidence))
 
         # Determine query point that gives the lowest expected entropy afterwards
-        csum = np.cumsum(a)[:n]
         yes = a[np.newaxis, :] * yes_scale
         yes /= np.sum(yes, axis=1, keepdims=True)
         no = a[np.newaxis, :] * no_scale
         no /= np.sum(no, axis=1, keepdims=True)
-        entropy = _entropy(yes, axis=1) * csum + _entropy(no, axis=1) * (1 - csum)
-        i = np.argmin(entropy)
-        queries += 1
+        entropy = _entropy(yes, axis=1) * csum[:n] + _entropy(no, axis=1) * (1 - csum[:n])
+        i = int(np.argmin(entropy))
+        comparisons += 1
         if await compare(items[i]):
             a *= yes_scale[i]
         else:

@@ -21,7 +21,10 @@ SAMPLES_PER_HEAP = 4096
 N_POLS = 2
 DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/cbf/katgpucbf"
 NOISE = 0.02  #: Probability of an incorrect result from each trial
-TOLERANCE = 0.0001  #: Allowable tolerance in overall result
+#: Minimum relative difference for comparisons to be reliable i.e. for the
+#: failure probability to be :const:`NOISE`.
+FUZZ = 0.005
+TOLERANCE = 0.001  #: Complement of confidence interval probability
 
 
 def dsim_factory(
@@ -239,7 +242,7 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     raise AssertionError("should be unreachable")
 
 
-async def search(args: argparse.Namespace) -> float:
+async def search(args: argparse.Namespace) -> tuple[float, float]:
     async def measure(adc_sample_rate: float) -> Result:
         while True:
             print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
@@ -265,7 +268,7 @@ async def search(args: argparse.Namespace) -> float:
 
     # Compute error estimate. This is a heuristic based on gut feel rather
     # than measurement. Assume that results are 1-NOISE reliable when at least
-    # 0.5% away from the critical value, and vary logarithmically in between.
+    # FUZZ away from the critical value, and vary logarithmically in between.
     noise = np.zeros((len(rates), len(rates) + 1))
     for i, rate in enumerate(rates):
         for j in range(len(rates) + 1):
@@ -274,19 +277,25 @@ async def search(args: argparse.Namespace) -> float:
             l_rate = np.log(rate)
             l_actual = np.log(actual)
             noise[i, j] = np.clip(
-                0.5 + (l_rate - l_actual) / np.log1p(0.003) * (0.5 - NOISE),
+                0.5 + (l_rate - l_actual) / np.log1p(FUZZ) * (0.5 - NOISE),
                 NOISE,
                 1 - NOISE,
             )
 
-    result = await noisy_search(rates, noise, TOLERANCE, compare)
-    if result.position == 0:
+    result = await noisy_search(
+        list(rates),
+        noise,
+        TOLERANCE,
+        compare,
+        max_interval=round(args.interval / args.step),
+        max_comparisons=args.max_comparisons,
+    )
+    if result.low == -1:
         raise RuntimeError("lower bound is too high")
-    elif result.position == len(rates):
+    elif result.high == len(rates):
         raise RuntimeError("upper bound is too low")
     else:
-        # - 1 because we want the good rate before the cut
-        return rates[result.position - 1]
+        return rates[result.low], rates[result.high]
 
 
 async def main():
@@ -325,7 +334,9 @@ async def main():
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
-    parser.add_argument("--step", type=float, default=10e6, help="Step size between sample rates to test [%(default)s]")
+    parser.add_argument("--step", type=float, default=1e6, help="Step size between sample rates to test [%(default)s]")
+    parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
+    parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
@@ -337,8 +348,8 @@ async def main():
     args.dsim_server = servers[args.dsim_server]
     args.fgpu_server = servers[args.fgpu_server]
 
-    adc_sample_rate = await search(args)
-    print(f"\n{adc_sample_rate / 1e6} MHz")
+    low, high = await search(args)
+    print(f"\n{low / 1e6} MHz - {high / 1e6} MHz")
 
 
 if __name__ == "__main__":
