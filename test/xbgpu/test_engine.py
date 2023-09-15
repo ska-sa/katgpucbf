@@ -16,8 +16,6 @@
 
 """Unit tests for XBEngine module."""
 
-from ipaddress import IPv4Network
-from math import lcm
 from typing import AbstractSet, AsyncGenerator, Callable, Final, Iterable
 
 import aiokatcp
@@ -200,14 +198,6 @@ class TestEngine:
     def corrprod_outputs(self, corrprod_args: list[str]) -> list[XOutput]:
         """The outputs to run tests against."""
         return [parse_corrprod(corrprod_arg) for corrprod_arg in corrprod_args]
-
-    @pytest.fixture
-    def mock_send_stream_network(self, corrprod_outputs: list[XOutput]) -> IPv4Network:
-        """Filter the output queues to just those corresponding to the --corrprods.
-
-        This overrides the default implementation in conftest.py.
-        """
-        return IPv4Network((corrprod_outputs[0].dst.host, 24))
 
     @staticmethod
     def _create_heaps(
@@ -511,22 +501,19 @@ class TestEngine:
         boundary to more accurately test the setting of the first output
         packet's timestamp (to be non-zero).
         """
+        # NOTE: `HEAPS_PER_FENGINE_PER_CHUNK` and the `heap_accumulation_threshold`s
+        # are chosen carefully for this test. We simulate the first accumulation
+        # being incomplete by ensuring there is only one chunk of data present.
+        # In doing so, we must ensure `HEAPS_PER_FENGINE_PER_CHUNK` is smaller
+        # than either pipeline's `heap_accumulation_threshold`. The logic of the
+        # test has *not* been verified if that constraint isn't met, it merely
+        # `assert`'s.
+        heap_accumulation_thresholds = [
+            corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
+        ]
+        assert min(heap_accumulation_thresholds) > HEAPS_PER_FENGINE_PER_CHUNK
+
         n_baselines = n_ants * (n_ants + 1) * 2
-        heap_acc_thresholds = [corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
-
-        # We don't want to start at 0, that's boring. So let's offset this a bit.
-        first_batch_index = 123
-
-        # The arbitrarily-selected number above might not be at a convenient
-        # place. We want to be just before a LCM of the heap accumulation
-        # indices of all the corrprods, so that we can get an incomplete
-        # accumulation as the output first.
-        lowest_common_multiple = lcm(*heap_acc_thresholds)
-        advance = lowest_common_multiple - (first_batch_index % lowest_common_multiple)
-        first_batch_index += advance
-
-        max_heap_acc_threshold = max(heap_acc_thresholds)
-        min_full_accumulations = lowest_common_multiple // max_heap_acc_threshold
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         missing_antennas = set() if missing_antenna is None else {missing_antenna}
@@ -565,11 +552,24 @@ class TestEngine:
             )
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
-            # Generate one extra chunk to simulate an incomplete accumulation
-            # to check that dumps are aligned correctly - even if the first
-            # received batch is from the middle of an accumulation.
-            batch_start_index = first_batch_index * max_heap_acc_threshold - HEAPS_PER_FENGINE_PER_CHUNK
-            batch_end_index = (first_batch_index + min_full_accumulations) * max_heap_acc_threshold
+            # NOTE: The product of `heap_accumulation_thresholds` is used in
+            # two ways below. Both uses are to ensure there is a whole number
+            # of accumulations for *both* XPipelines. The first usage is
+            # dual-purpose once more:
+            # - In addition to the above, the arbitrary start position for data
+            #   in this test dictates the first received chunk to be in the
+            #   middle of an accumulation.
+            # - More accurately, it forces the first accumulation (to be
+            #   processed) to only contain one chunk of data. This ensures
+            #   we test that output dumps are aligned correctly, despite
+            #   the first data processed not being on an accumulation
+            #   boundary.
+            n_heaps = np.product(heap_accumulation_thresholds)
+            batch_start_index = 12 * n_heaps  # Somewhere arbitrary that isn't zero
+            batch_end_index = batch_start_index + n_heaps
+            # Add an extra chunk before the first full accumulation
+            batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
+
             device_results = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
