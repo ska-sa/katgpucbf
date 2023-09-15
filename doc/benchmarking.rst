@@ -51,7 +51,7 @@ servers called ``dsim`` and ``fgpu``. A typical file looks like this:
 
 .. _TOML: https://toml.io/
 
-The `interfaces` tables list the names of the ibverbs-capable network
+The `interfaces` arrays list the names of the ibverbs-capable network
 interfaces that can be used for sending or receiving the data.
 
 By default the servers are loaded from :file:`servers.toml` in the current
@@ -151,7 +151,7 @@ developer in writing or updating the model.
 
    Run the calibration mode instead of the usual search
 
-.. option:: --calibrate-repeat
+.. option:: --calibrate-repeat <N>
 
    Set the number of repetitions for each rate.
 
