@@ -508,9 +508,10 @@ class TestEngine:
         # than either pipeline's `heap_accumulation_threshold`. The logic of the
         # test has *not* been verified if that constraint isn't met, it merely
         # `assert`'s.
-        heap_acc_thresholds = [corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs]
-        for heap_accumulation_threshold in heap_acc_thresholds:
-            assert heap_accumulation_threshold > HEAPS_PER_FENGINE_PER_CHUNK
+        heap_accumulation_thresholds = [
+            corrprod_output.heap_accumulation_threshold for corrprod_output in corrprod_outputs
+        ]
+        assert min(heap_accumulation_thresholds) > HEAPS_PER_FENGINE_PER_CHUNK
 
         n_baselines = n_ants * (n_ants + 1) * 2
 
@@ -551,9 +552,9 @@ class TestEngine:
             )
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
-            # NOTE: The product of `heap_acc_thresholds` is used in two ways
-            # below. Both uses are to ensure there is a whole number of
-            # accumulations for *both* XPipelines. The first usage is
+            # NOTE: The product of `heap_accumulation_thresholds` is used in
+            # two ways below. Both uses are to ensure there is a whole number
+            # of accumulations for *both* XPipelines. The first usage is
             # dual-purpose once more:
             # - In addition to the above, the arbitrary start position for data
             #   in this test dictates the first received chunk to be in the
@@ -563,7 +564,7 @@ class TestEngine:
             #   we test that output dumps are aligned correctly, despite
             #   the first data processed not being on an accumulation
             #   boundary.
-            n_heaps = np.product(heap_acc_thresholds)
+            n_heaps = np.product(heap_accumulation_thresholds)
             batch_start_index = 12 * n_heaps  # Somewhere arbitrary that isn't zero
             batch_end_index = batch_start_index + n_heaps
             # Add an extra chunk before the first full accumulation
