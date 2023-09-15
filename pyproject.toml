@@ -28,6 +28,7 @@ exclude ='''
 [tool.isort]
 profile = "black"
 line_length = 120
+known_local_folder = ["noisy_search", "remote", "sighandler"]
 
 [tool.pytest.ini_options]
 testpaths = "test"

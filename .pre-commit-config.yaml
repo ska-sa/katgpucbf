@@ -34,7 +34,9 @@ repos:
     rev: 6.3.0
     hooks:
       - id: pydocstyle
-        exclude: 'setup.py|scratch/'  # Because complaining about docstrings here is annoying.
+        # Because complaining about docstrings here is annoying. We want to
+        # check the benchmarks/ directory because that code is more complex.
+        exclude: 'setup\.py|scratch/(?!benchmarks)'
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: 'v1.4.1'
     hooks:
@@ -50,6 +52,7 @@ repos:
         types_or: [python, pyi]
         additional_dependencies: [
             'aiokatcp==1.7.0',
+            'asyncssh==2.13.2',
             'dask==2023.7.1',
             'katsdpsigproc==1.8.0',
             'katsdptelstate==0.13',
@@ -93,4 +96,10 @@ repos:
           - --strip-extras
           - setup.cfg
           - qualification/requirements.in
+        files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'
+      - id: pip-compile
+        name: pip-compile scratch/benchmarks/requirements.txt
+        args:
+          - --output-file=scratch/benchmarks/requirements.txt
+          - scratch/benchmarks/requirements.in
         files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'

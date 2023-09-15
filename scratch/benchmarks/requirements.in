@@ -1,0 +1,12 @@
+# Ensure versions consistent with the rest
+
+-c ../../requirements.txt
+-c ../../requirements-dev.txt
+-c ../../qualification/requirements.txt
+
+asyncssh
+async-timeout
+aiohttp
+numpy
+prometheus-client
+tomli >= 1.1.0; python_version < "3.11"
