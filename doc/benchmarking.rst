@@ -27,10 +27,9 @@ optimised for AMD Epyc servers with at least 16 cores; for other servers or
 for lower core counts, the benchmark script may need to be tuned to provide
 sensible placement.
 
-The client machine will also need a few Python packages installed, including
-:mod:`aiohttp`, :mod:`asyncssh`, :mod:`numpy` and :mod:`prometheus_client`
-(it's easiest to just run the script then install whatever packages are
-missing).
+The client machine will also need a few Python packages installed; you can
+use :command:`pip install -r scratch/benchmarks/requirements.txt` to install
+them. You do not need to have katgpucbf installed.
 
 On the client machine, you will need to create a TOML_ file describing the
 servers you want to use. Each table in the TOML file describes one server. You

@@ -96,3 +96,9 @@ repos:
           - setup.cfg
           - qualification/requirements.in
         files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'
+      - id: pip-compile
+        name: pip-compile scratch/benchmarks/requirements.txt
+        args:
+          - --output-file=scratch/benchmarks/requirements.txt
+          - scratch/benchmarks/requirements.in
+        files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'
