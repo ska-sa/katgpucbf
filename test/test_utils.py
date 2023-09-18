@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -53,9 +53,7 @@ class TestDeviceStatusSensor:
     def test_initial(self, sensors: aiokatcp.SensorSet) -> None:
         """Test initial reading of the sensor."""
         ds = sensors["device-status"]
-        assert ds.value == DeviceStatus.OK
-        assert ds.status == aiokatcp.Sensor.Status.NOMINAL
-        assert ds.timestamp == 1234567890.0
+        assert ds.reading == aiokatcp.Reading(1234567890.0, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
 
     def test_early_out(self, sensors: aiokatcp.SensorSet, mock_time: mock.Mock) -> None:
         """Update a sensor without changing status, and check that there is no change."""
@@ -68,13 +66,9 @@ class TestDeviceStatusSensor:
         """Change the status of a sensor and check that device-status follows."""
         ds = sensors["device-status"]
         sensors["sensor1"].set_value(123, timestamp=2345678901.0, status=aiokatcp.Sensor.Status.WARN)
-        assert ds.value == DeviceStatus.DEGRADED
-        assert ds.status == aiokatcp.Sensor.Status.WARN
-        assert ds.timestamp == 2345678901.0
+        assert ds.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
         sensors["sensor1"].set_value(234, timestamp=3456789012.0, status=aiokatcp.Sensor.Status.NOMINAL)
-        assert ds.value == DeviceStatus.OK
-        assert ds.status == aiokatcp.Sensor.Status.NOMINAL
-        assert ds.timestamp == 3456789012.0
+        assert ds.reading == aiokatcp.Reading(3456789012.0, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
 
 
 class TestTimeoutSensorStatus:
@@ -109,9 +103,7 @@ class TestTimeoutSensorStatus:
         """Test the simple case where the sensor is never updated."""
         start_timestamp = sensor.timestamp
         await asyncio.sleep(3)
-        assert sensor.value == 123
-        assert sensor.status == aiokatcp.Sensor.Status.ERROR
-        assert sensor.timestamp == start_timestamp + 2.0
+        assert sensor.reading == aiokatcp.Reading(start_timestamp + 2.0, aiokatcp.Sensor.Status.ERROR, 123)
         # Make sure it doesn't get updated again after another 2 seconds
         await asyncio.sleep(2)
         assert sensor.timestamp == start_timestamp + 2.0
@@ -124,22 +116,17 @@ class TestTimeoutSensorStatus:
         await asyncio.sleep(1)
         sensor.set_value(125, timestamp=start_timestamp + 2)
         await asyncio.sleep(1.5)
-        assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-        assert sensor.timestamp == start_timestamp + 2
+        assert sensor.reading == aiokatcp.Reading(start_timestamp + 2, aiokatcp.Sensor.Status.NOMINAL, 125)
         await asyncio.sleep(1)
         # Should now have timed out
-        assert sensor.value == 125
-        assert sensor.status == aiokatcp.Sensor.Status.ERROR
-        assert sensor.timestamp == start_timestamp + 4
+        assert sensor.reading == aiokatcp.Reading(start_timestamp + 4, aiokatcp.Sensor.Status.ERROR, 125)
 
     async def test_no_change(self, sensor: aiokatcp.Sensor) -> None:
         """Test that no update is made if the status is already correct."""
         sensor.set_value(124, status=aiokatcp.Sensor.Status.ERROR)
         timestamp = sensor.timestamp
         await asyncio.sleep(5)
-        assert sensor.value == 124
-        assert sensor.timestamp == timestamp
-        assert sensor.status == aiokatcp.Sensor.Status.ERROR
+        assert sensor.reading == aiokatcp.Reading(timestamp, aiokatcp.Sensor.Status.ERROR, 124)
 
     async def test_cancel(self, sensor: aiokatcp.Sensor, observer: TimeoutSensorStatusObserver) -> None:
         """Test that cancelling the observer prevents further updates."""

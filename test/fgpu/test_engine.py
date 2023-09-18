@@ -947,14 +947,15 @@ class TestEngine:
             output,
             dig_data,
         )
-        # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
-        # __eq__ and __repr__) so that it can be used in comparisons.
         time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
         expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
-        assert [r.value for r in sensor_update_dict[sensors[0].name]] == [5000] * 9
-        assert [r.timestamp for r in sensor_update_dict[sensors[0].name]] == expected_timestamps
-        assert [r.value for r in sensor_update_dict[sensors[1].name]] == [0, 0] + [10000] * 7
-        assert [r.timestamp for r in sensor_update_dict[sensors[1].name]] == expected_timestamps
+        assert sensor_update_dict[sensors[0].name] == [
+            aiokatcp.Reading(t, aiokatcp.Sensor.Status.NOMINAL, 5000) for t in expected_timestamps
+        ]
+        assert sensor_update_dict[sensors[1].name] == [
+            aiokatcp.Reading(t, aiokatcp.Sensor.Status.NOMINAL, v)
+            for t, v in zip(expected_timestamps, [0, 0] + [10000] * 7)
+        ]
 
     # It's easier to use a constant voltage. Also need to check the case were
     # the input power is zero.
@@ -984,13 +985,12 @@ class TestEngine:
             output,
             dig_data,
         )
-        # TODO: turn aiokatcp.Reading into a dataclass (or at least implement
-        # __eq__ and __repr__) so that it can be used in comparisons.
         time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
         expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
         for pol in range(N_POLS):
-            assert [r.value for r in sensor_update_dict[sensors[pol].name]] == [output_power_dbfs] * 9
-            assert [r.timestamp for r in sensor_update_dict[sensors[pol].name]] == expected_timestamps
+            assert sensor_update_dict[sensors[pol].name] == [
+                aiokatcp.Reading(t, aiokatcp.Sensor.Status.WARN, output_power_dbfs) for t in expected_timestamps
+            ]
 
     @pytest.mark.parametrize("tone_pol", [0, 1])
     async def test_output_clip_count(
@@ -1034,11 +1034,13 @@ class TestEngine:
         last_timestamp = roundup(timestamps[-1] + 1, engine_server.chunk_jones * output.decimation * 2)
 
         sensor = engine_server.sensors[f"{output.name}.input{tone_pol}.feng-clip-cnt"]
-        assert sensor.value == len(timestamps)
-        assert sensor.timestamp == SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE
+        assert sensor.reading == aiokatcp.Reading(
+            SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, len(timestamps)
+        )
         sensor = engine_server.sensors[f"{output.name}.input{1 - tone_pol}.feng-clip-cnt"]
-        assert sensor.value == 0
-        assert sensor.timestamp == SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE
+        assert sensor.reading == aiokatcp.Reading(
+            SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, 0
+        )
 
     def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, output: Output, *request) -> list[int]:
         """Patch Pipeline._fill_in` to make a request partway through the stream.

@@ -19,7 +19,7 @@
 import dataclasses
 import itertools
 from collections.abc import Generator, Iterable
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import aiokatcp
 import numpy as np
@@ -366,22 +366,20 @@ class TestIterChunks:
 
         # Check sensors
         for pol in range(N_POLS):
+            expected_timestamp = time_converter.adc_to_unix(21 * layout.chunk_samples)
             sensor = sensors[f"input{pol}.rx.timestamp"]
-            assert sensor.value == 21 * layout.chunk_samples
-            assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-            assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+            assert sensor.reading == aiokatcp.Reading(
+                expected_timestamp, aiokatcp.Sensor.Status.NOMINAL, 21 * layout.chunk_samples
+            )
             sensor = sensors[f"input{pol}.rx.unixtime"]
-            assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
-            assert sensor.status == aiokatcp.Sensor.Status.NOMINAL
-            assert sensor.timestamp == sensor.value
+            assert sensor.reading == aiokatcp.Reading(
+                expected_timestamp, aiokatcp.Sensor.Status.NOMINAL, expected_timestamp
+            )
         sensor = sensors["input0.rx.missing-unixtime"]
-        assert sensor.value == time_converter.adc_to_unix(20 * layout.chunk_samples)
-        assert sensor.status == aiokatcp.Sensor.Status.ERROR
-        assert sensor.timestamp == sensor.value
+        expected_timestamp = time_converter.adc_to_unix(20 * layout.chunk_samples)
+        assert sensor.reading == aiokatcp.Reading(expected_timestamp, aiokatcp.Sensor.Status.ERROR, expected_timestamp)
         sensor = sensors["input1.rx.missing-unixtime"]
-        assert sensor.value == time_converter.adc_to_unix(21 * layout.chunk_samples)
-        assert sensor.status == aiokatcp.Sensor.Status.ERROR
-        assert sensor.timestamp == sensor.value
+        expected_timestamp = time_converter.adc_to_unix(21 * layout.chunk_samples)
+        assert sensor.reading == aiokatcp.Reading(expected_timestamp, aiokatcp.Sensor.Status.ERROR, expected_timestamp)
         ds_sensor = sensors["rx.device-status"]
-        assert ds_sensor.value == DeviceStatus.DEGRADED
-        assert ds_sensor.status == aiokatcp.Sensor.Status.WARN
+        assert ds_sensor.reading == aiokatcp.Reading(ANY, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)
