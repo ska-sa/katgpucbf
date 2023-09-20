@@ -12,7 +12,7 @@ aiohttp==3.8.5
     # via
     #   -c requirements.txt
     #   prometheus-async
-aiokatcp==1.7.0
+aiokatcp==1.8.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)

@@ -8,7 +8,7 @@ aioconsole==0.6.2
     # via aiomonitor
 aiohttp==3.8.5
     # via prometheus-async
-aiokatcp==1.7.0
+aiokatcp==1.8.0
     # via katgpucbf (setup.cfg)
 aiomonitor==0.4.5
     # via katsdpservices

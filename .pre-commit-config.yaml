@@ -51,7 +51,7 @@ repos:
         types: []
         types_or: [python, pyi]
         additional_dependencies: [
-            'aiokatcp==1.7.0',
+            'aiokatcp==1.8.0',
             'asyncssh==2.13.2',
             'dask==2023.7.1',
             'katsdpsigproc==1.8.0',

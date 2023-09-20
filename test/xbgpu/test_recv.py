@@ -20,11 +20,12 @@ import itertools
 import logging
 import random
 from collections.abc import Generator, Iterator
+from unittest.mock import ANY
 
 import numpy as np
 import pytest
 import spead2.recv.asyncio
-from aiokatcp import DeviceStatus, Sensor, SensorSet
+from aiokatcp import DeviceStatus, Reading, Sensor, SensorSet
 from numpy.typing import ArrayLike
 
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
@@ -348,22 +349,17 @@ class TestStream:
         sensor = sensors["rx.timestamp"]
         # sensor.value should be of the last chunk sent
         absolute_present_timestamp = expected_chunk_ids[-1] * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-        assert sensor.value == absolute_present_timestamp
-        assert sensor.status == Sensor.Status.NOMINAL
-        assert sensor.timestamp == time_converter.adc_to_unix(sensor.value)
+        expected_timestamp = time_converter.adc_to_unix(absolute_present_timestamp)
+        assert sensor.reading == Reading(expected_timestamp, Sensor.Status.NOMINAL, absolute_present_timestamp)
         sensor = sensors["rx.unixtime"]
         # Should be the same value as the previous sensor, but in UNIX time
-        assert sensor.value == time_converter.adc_to_unix(absolute_present_timestamp)
-        assert sensor.status == Sensor.Status.NOMINAL
-        assert sensor.timestamp == sensor.value
+        assert sensor.reading == Reading(expected_timestamp, Sensor.Status.NOMINAL, expected_timestamp)
         sensor = sensors["rx.missing-unixtime"]
         # sensor.value should be of the last chunk to go missing
         absolute_missing_timestamp = (
             absolute_missing_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         )
-        assert sensor.value == time_converter.adc_to_unix(absolute_missing_timestamp)
-        assert sensor.status == Sensor.Status.ERROR
-        assert sensor.timestamp == sensor.value
+        expected_timestamp = time_converter.adc_to_unix(absolute_missing_timestamp)
+        assert sensor.reading == Reading(expected_timestamp, Sensor.Status.ERROR, expected_timestamp)
         ds_sensor = sensors["rx.device-status"]
-        assert ds_sensor.value == DeviceStatus.DEGRADED
-        assert ds_sensor.status == Sensor.Status.WARN
+        assert ds_sensor.reading == Reading(ANY, Sensor.Status.WARN, DeviceStatus.DEGRADED)
