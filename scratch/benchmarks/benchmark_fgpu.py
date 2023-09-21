@@ -293,7 +293,7 @@ async def calibrate(args: argparse.Namespace) -> None:
                     elif result.missing_heaps > 0:
                         # If missing == 0, we need to rerun the experiment
                         trials += 1
-            print(adc_sample_rate, successes / trials)
+            print(adc_sample_rate, successes / trials, flush=True)
 
 
 async def search(args: argparse.Namespace) -> tuple[float, float]:
