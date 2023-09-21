@@ -77,6 +77,9 @@ def add_gc_stats() -> None:
         buckets=[0.0002, 0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100],
         labelnames=["generation"],
     )
+    # Make all the metrics exist, before any GC calls happen
+    for generation in range(3):
+        gc_time.labels(str(generation))
     start_time = 0.0
 
     def callback(phase: str, info: dict) -> None:
