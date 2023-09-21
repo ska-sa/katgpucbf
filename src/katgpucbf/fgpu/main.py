@@ -47,7 +47,7 @@ from .. import (
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import add_signal_handlers, parse_source
+from ..utils import add_gc_stats, add_signal_handlers, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 from .output import NarrowbandOutput, WidebandOutput
@@ -424,6 +424,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
+    parser.add_argument("--gc-stats", action="store_true", help="Report garbage collection timing through Prometheus")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Source endpoints (or pcap file)")
     args = parser.parse_args(arglist)
@@ -516,6 +517,8 @@ async def async_main() -> None:
     logger.info("Initialising F-engine on %s", ctx.device.name)
     engine, monitor = make_engine(ctx, args)
     add_signal_handlers(engine)
+    if args.gc_stats:
+        add_gc_stats()
     prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
