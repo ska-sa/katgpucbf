@@ -220,6 +220,7 @@ def make_streams(
     ibv: bool,
     packet_payload: int,
     comp_vector: int,
+    buffer: int,
     adc_sample_rate: float,
     send_rate_factor: float,
     feng_id: int,
@@ -252,14 +253,22 @@ def make_streams(
                 ttl=ttl,
                 comp_vector=comp_vector,
                 memory_regions=memory_regions,
+                buffer_size=buffer // len(interfaces),
             )
             for interface in interfaces
         ]
         streams = [spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config) for ibv_config in ibv_configs]
     else:
+        # TODO: the type: ignore is just until
+        # https://github.com/ska-sa/spead2/pull/282 is released.
         streams = [
-            spead2.send.asyncio.UdpStream(
-                thread_pool, [(ep.host, ep.port) for ep in endpoints], config, ttl=ttl, interface_address=interface
+            spead2.send.asyncio.UdpStream(  # type: ignore
+                thread_pool,
+                [(ep.host, ep.port) for ep in endpoints],
+                config,
+                ttl=ttl,
+                interface_address=interface,
+                buffer_size=buffer // len(interfaces),
             )
             for interface in interfaces
         ]
