@@ -113,7 +113,8 @@ def fgpu_factory(
     command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=all --net=host "
-        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
+        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
+        f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
         f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
         f"--src-buffer={256 * 1024 * 1024 // n} "
@@ -382,6 +383,7 @@ async def main():  # noqa: D103
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
     )
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
+    parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
 
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
