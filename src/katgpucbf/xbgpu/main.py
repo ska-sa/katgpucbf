@@ -48,7 +48,7 @@ from katgpucbf.xbgpu.engine import XBEngine
 from .. import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, __version__
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import add_signal_handlers, parse_source
+from ..utils import add_gc_stats, add_signal_handlers, parse_source
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
@@ -427,6 +427,7 @@ async def async_main(args: argparse.Namespace) -> None:
         logger.info("Starting main processing loop")
 
         add_signal_handlers(xbengine)
+        add_gc_stats()
 
         await xbengine.start()
         # Avoid garbage collections needing to iterate over all the objects

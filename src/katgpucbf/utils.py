@@ -17,14 +17,17 @@
 """A collection of utility functions for katgpucbf."""
 
 import asyncio
+import gc
 import ipaddress
 import logging
 import signal
+import time
 import weakref
 from collections import Counter
 from typing import TypeVar
 
 import aiokatcp
+import prometheus_client
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME
@@ -61,6 +64,34 @@ def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
     loop = asyncio.get_running_loop()
     for signum in signums:
         loop.add_signal_handler(signum, handler)
+
+
+def add_gc_stats() -> None:
+    """Add Prometheus metrics for garbage collection timing.
+
+    It is only safe to call this once.
+    """
+    gc_time = prometheus_client.Histogram(
+        "python_gc_time_seconds",
+        "Time spent in garbage collection",
+        buckets=[0.0002, 0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100],
+        labelnames=["generation"],
+    )
+    # Make all the metrics exist, before any GC calls happen
+    for generation in range(3):
+        gc_time.labels(str(generation))
+    start_time = 0.0
+
+    def callback(phase: str, info: dict) -> None:
+        nonlocal start_time
+        if phase == "start":
+            start_time = time.monotonic()
+        else:
+            started = start_time  # Copy as early as possible, before any more GC can happen
+            elapsed = time.monotonic() - started
+            gc_time.labels(str(info["generation"])).observe(elapsed)
+
+    gc.callbacks.append(callback)
 
 
 def parse_source(value: str) -> list[tuple[str, int]] | str:

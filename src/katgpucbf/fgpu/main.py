@@ -47,7 +47,7 @@ from .. import (
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import add_signal_handlers, parse_source
+from ..utils import add_gc_stats, add_signal_handlers, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 from .output import NarrowbandOutput, WidebandOutput
@@ -516,6 +516,7 @@ async def async_main() -> None:
     logger.info("Initialising F-engine on %s", ctx.device.name)
     engine, monitor = make_engine(ctx, args)
     add_signal_handlers(engine)
+    add_gc_stats()
     prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
     if args.prometheus_port is not None:
         prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
