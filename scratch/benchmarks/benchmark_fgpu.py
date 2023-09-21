@@ -249,12 +249,13 @@ class Result:
 async def process(
     adc_sample_rate: float,
     n: int,
+    startup_time: float,
     runtime: float,
     fgpu_server: Server,
 ) -> Result:
     """Perform a single trial on running engines."""
     async with aiohttp.client.ClientSession() as session:
-        await asyncio.sleep(1)  # Give a chance for startup losses
+        await asyncio.sleep(startup_time)  # Give a chance for startup losses
         sleeper = asyncio.create_task(asyncio.sleep(runtime))
         orig_heaps, orig_missing = await heap_counts(session, fgpu_server, n)
         await sleeper
@@ -273,7 +274,7 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     sync_time = int(time.time())
     async with await run_fgpus(adc_sample_rate, sync_time, args):
         async with await run_dsims(adc_sample_rate, sync_time, args):
-            return await process(adc_sample_rate, args.n, args.runtime, args.fgpu_server)
+            return await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
     raise AssertionError("should be unreachable")
 
 
@@ -288,7 +289,7 @@ async def calibrate(args: argparse.Namespace) -> None:
                 async with await run_fgpus(adc_sample_rate, sync_time, args):
                     if args.verbose:
                         print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
-                    result = await process(adc_sample_rate, args.n, args.runtime, args.fgpu_server)
+                    result = await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
                     if args.verbose:
                         print(result.message())
                     if result.good():
@@ -385,6 +386,7 @@ async def main():  # noqa: D103
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
     parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
 
+    parser.add_argument("--startup-time", type=float, default=1.0, help="Time to run before starting measurement [%(default)s]")
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
