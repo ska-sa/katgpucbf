@@ -142,6 +142,8 @@ def fgpu_factory(
         if value is not None:
             dashed = arg.replace("_", "-")
             command += f"--{dashed}={value} "
+    for extra in args.extra:
+        command += f"{extra} "
     return command
 
 
@@ -397,6 +399,7 @@ async def main():  # noqa: D103
     parser.add_argument(
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
     )
+    parser.add_argument("extra", nargs="*", help="Remaining arguments are passed to fgpu")
     args = parser.parse_args()
 
     servers = servers_from_toml(args.servers)
