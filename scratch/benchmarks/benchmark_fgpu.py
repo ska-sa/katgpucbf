@@ -116,6 +116,7 @@ def fgpu_factory(
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
         f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
+        f"--src-buffer={256 * 1024 * 1024 // n} "
         f"--src-interface={interface} --src-ibv "
         f"--dst-interface={interface} --dst-ibv "
         f"--src-affinity={src_affinity} --src-comp-vector={src_affinity} "
