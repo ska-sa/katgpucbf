@@ -259,10 +259,8 @@ def make_streams(
         ]
         streams = [spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config) for ibv_config in ibv_configs]
     else:
-        # TODO: the type: ignore is just until
-        # https://github.com/ska-sa/spead2/pull/282 is released.
         streams = [
-            spead2.send.asyncio.UdpStream(  # type: ignore
+            spead2.send.asyncio.UdpStream(
                 thread_pool,
                 [(ep.host, ep.port) for ep in endpoints],
                 config,
