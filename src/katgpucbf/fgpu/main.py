@@ -341,6 +341,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Completion vector for transmission, or -1 for polling [0]",
     )
     parser.add_argument(
+        "--dst-buffer",
+        type=int,
+        default=1024 * 1024,
+        metavar="BYTES",
+        help="Size of network send buffer [1MiB]",
+    )
+    parser.add_argument(
         "--adc-sample-rate",
         type=float,
         required=True,
@@ -488,6 +495,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         dst_packet_payload=args.dst_packet_payload,
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
+        dst_buffer=args.dst_buffer,
         outputs=args.outputs,
         adc_sample_rate=args.adc_sample_rate,
         send_rate_factor=args.send_rate_factor,

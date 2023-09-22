@@ -1093,7 +1093,7 @@ class Engine(aiokatcp.DeviceServer):
     src_packet_samples
         The number of samples per digitiser packet.
     src_buffer
-        The size of the network receive buffer (per polarisation).
+        The size of the network receive buffer.
     dst_interface
         IP addresses of the network devices to use for output.
     dst_ttl
@@ -1108,6 +1108,8 @@ class Engine(aiokatcp.DeviceServer):
     dst_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
+    dst_buffer
+        Size of the network send buffer.
     outputs
         Output streams to generate. At present this must be a single
         WidebandOutput.
@@ -1174,6 +1176,7 @@ class Engine(aiokatcp.DeviceServer):
         dst_packet_payload: int,
         dst_affinity: int,
         dst_comp_vector: int,
+        dst_buffer: int,
         outputs: list[Output],
         adc_sample_rate: float,
         send_rate_factor: float,
@@ -1209,6 +1212,7 @@ class Engine(aiokatcp.DeviceServer):
         self._dst_ibv = dst_ibv
         self._dst_packet_payload = dst_packet_payload
         self._dst_comp_vector = dst_comp_vector
+        self._dst_buffer = dst_buffer
         self._send_rate_factor = send_rate_factor
         self.adc_sample_rate = adc_sample_rate
         self.feng_id = feng_id
@@ -1361,6 +1365,7 @@ class Engine(aiokatcp.DeviceServer):
             ibv=self._dst_ibv,
             packet_payload=self._dst_packet_payload,
             comp_vector=self._dst_comp_vector,
+            buffer=self._dst_buffer,
             adc_sample_rate=self.adc_sample_rate,
             send_rate_factor=self._send_rate_factor * output.send_rate_factor,
             feng_id=self.feng_id,

@@ -220,6 +220,7 @@ def make_streams(
     ibv: bool,
     packet_payload: int,
     comp_vector: int,
+    buffer: int,
     adc_sample_rate: float,
     send_rate_factor: float,
     feng_id: int,
@@ -252,6 +253,7 @@ def make_streams(
                 ttl=ttl,
                 comp_vector=comp_vector,
                 memory_regions=memory_regions,
+                buffer_size=buffer // len(interfaces),
             )
             for interface in interfaces
         ]
@@ -259,7 +261,12 @@ def make_streams(
     else:
         streams = [
             spead2.send.asyncio.UdpStream(
-                thread_pool, [(ep.host, ep.port) for ep in endpoints], config, ttl=ttl, interface_address=interface
+                thread_pool,
+                [(ep.host, ep.port) for ep in endpoints],
+                config,
+                ttl=ttl,
+                interface_address=interface,
+                buffer_size=buffer // len(interfaces),
             )
             for interface in interfaces
         ]
