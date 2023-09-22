@@ -343,9 +343,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--dst-buffer",
         type=int,
-        default=512 * 1024,
+        default=1024 * 1024,
         metavar="BYTES",
-        help="Size of network send buffer [512KiB]",
+        help="Size of network send buffer [1MiB]",
     )
     parser.add_argument(
         "--adc-sample-rate",
