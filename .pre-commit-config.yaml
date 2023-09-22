@@ -59,7 +59,7 @@ repos:
             'numpy==1.24.4',
             'pyparsing==3.0.9',
             'pytest==7.4.0',
-            'spead2==4.0.1',
+            'spead2==4.0.2',
             'types-decorator==5.1.1',
             'types-docutils==0.18.1',
             'types-redis==4.6.0',
