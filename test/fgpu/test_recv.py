@@ -105,6 +105,7 @@ def stream_group(
         chunk = Chunk(data=data, present=present, extra=extra, sink=stream_group)
         chunk.recycle()
     stream_group[0].add_inproc_reader(queue)
+    stream_group[0].start()
 
     yield stream_group
 
