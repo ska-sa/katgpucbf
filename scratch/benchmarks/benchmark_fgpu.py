@@ -8,6 +8,7 @@ See :doc:`benchmarking`.
 import argparse
 import asyncio
 import functools
+import sys
 import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ NOISE = 0.02  #: Probability of an incorrect result from each trial
 #: failure probability to be :const:`NOISE`.
 FUZZ = 0.005
 TOLERANCE = 0.001  #: Complement of confidence interval probability
+#: Verbosity level at which individual test results are reported
+VERBOSE_RESULTS = 1
 
 
 def dsim_factory(
@@ -99,7 +102,9 @@ def fgpu_factory(
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = f"0,1,2,3,{ncpus_per_quadrant},{ncpus_per_quadrant+1},{ncpus_per_quadrant+2},{ncpus_per_quadrant+3}"
+        src_affinity = (
+            f"0,1,2,3,{ncpus_per_quadrant},{ncpus_per_quadrant+1},{ncpus_per_quadrant+2},{ncpus_per_quadrant+3}"
+        )
         dst_affinity = f"{2 * ncpus_per_quadrant}"
         other_affinity = f"{3 * ncpus_per_quadrant}"
     elif n == 2:
@@ -286,25 +291,31 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
 
 async def calibrate(args: argparse.Namespace) -> None:
     """Run multiple trials on all the possible rates."""
-    for adc_sample_rate in np.arange(args.low, args.high + 0.01 * args.step, args.step):
-        sync_time = int(time.time())
-        async with await run_dsims(adc_sample_rate, sync_time, args):
-            trials = 0
-            successes = 0
-            while trials < args.calibrate_repeat:
-                async with await run_fgpus(adc_sample_rate, sync_time, args):
-                    if args.verbose:
-                        print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
-                    result = await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
-                    if args.verbose:
-                        print(result.message())
-                    if result.good():
-                        trials += 1
-                        successes += 1
-                    elif result.missing_heaps > 0:
-                        # If missing == 0, we need to rerun the experiment
-                        trials += 1
-            print(adc_sample_rate, successes / trials, flush=True)
+    rates = np.arange(args.low, args.high + 0.01 * args.step, args.step)
+    successes = [0] * len(rates)
+    for _ in range(args.calibrate_repeat):
+        for j, adc_sample_rate in enumerate(rates):
+            sync_time = int(time.time())
+            while True:
+                async with await run_dsims(adc_sample_rate, sync_time, args):
+                    async with await run_fgpus(adc_sample_rate, sync_time, args):
+                        if args.verbose >= VERBOSE_RESULTS:
+                            print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+                        result = await process(
+                            adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server
+                        )
+                        if args.verbose >= VERBOSE_RESULTS:
+                            print(result.message(), file=sys.stderr)
+                        if result.good():
+                            good = True
+                            break
+                        elif result.missing_heaps > 0:
+                            # If missing == 0, we need to rerun the experiment
+                            good = False
+                            break
+            successes[j] += int(good)
+    for success, adc_sample_rate in zip(successes, rates):
+        print(adc_sample_rate, success / args.calibrate_repeat)
 
 
 async def search(args: argparse.Namespace) -> tuple[float, float]:
@@ -312,12 +323,15 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
 
     async def measure(adc_sample_rate: float) -> Result:
         while True:
-            print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
+            if args.verbose >= VERBOSE_RESULTS:
+                print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
             result = await trial(adc_sample_rate, args)
             if not result.good() and result.missing_heaps == 0:
-                print(f"{result.message()}, re-running")
+                if args.verbose >= VERBOSE_RESULTS:
+                    print(f"{result.message()}, re-running", file=sys.stderr)
             else:
-                print(result.message())
+                if args.verbose >= VERBOSE_RESULTS:
+                    print(result.message(), file=sys.stderr)
                 return result
 
     async def compare(adc_sample_rate: float) -> bool:
@@ -392,7 +406,9 @@ async def main():  # noqa: D103
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
     parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
 
-    parser.add_argument("--startup-time", type=float, default=1.0, help="Time to run before starting measurement [%(default)s]")
+    parser.add_argument(
+        "--startup-time", type=float, default=1.0, help="Time to run before starting measurement [%(default)s]"
+    )
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
@@ -403,7 +419,7 @@ async def main():  # noqa: D103
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
     parser.add_argument("--fgpu-server", type=str, default="fgpu", help="Server on which to run fgpu [%(default)s]")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Emit stdout/stderr [no]")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity [no]")
     parser.add_argument(
         "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
     )
