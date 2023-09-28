@@ -99,7 +99,7 @@ def fgpu_factory(
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = f"0,1,{ncpus_per_quadrant},{ncpus_per_quadrant+1}"
+        src_affinity = f"0,1,2,3,{ncpus_per_quadrant},{ncpus_per_quadrant+1},{ncpus_per_quadrant+2},{ncpus_per_quadrant+3}"
         dst_affinity = f"{2 * ncpus_per_quadrant}"
         other_affinity = f"{3 * ncpus_per_quadrant}"
     elif n == 2:
