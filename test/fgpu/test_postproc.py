@@ -25,6 +25,7 @@ from numpy.typing import DTypeLike
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import postproc
+from katgpucbf.utils import gaussian_dtype
 
 pytestmark = [pytest.mark.cuda_only]
 
@@ -75,9 +76,11 @@ def postproc_host_pol(
     # Cast to integer with saturation
     corrected = np.minimum(np.maximum(corrected, -127), 127)
     corrected = corrected.astype(np.int8)
+    # Recombine real and imaginary in a structured dtype
+    corrected = corrected.view(gaussian_dtype(8))[..., -1]
     # Partial transpose
-    reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels, 2)
-    return reshaped.transpose(0, 2, 1, 3), saturated
+    reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels)
+    return reshaped.transpose(0, 2, 1), saturated
 
 
 def postproc_host(
@@ -128,12 +131,14 @@ def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex6
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 @pytest.mark.parametrize("complex_pfb", [False, True])
 @pytest.mark.parametrize("out_channels", [(0, 4096), (1024, 3072), (123, 3456)])
+@pytest.mark.parametrize("out_bits", [8])
 def test_postproc(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
     unzip_factor: int,
     complex_pfb: bool,
     out_channels: tuple[int, int],
+    out_bits: int,
 ) -> None:
     """Test GPU Postproc for numerical correctness."""
     channels = 4096
@@ -160,7 +165,7 @@ def test_postproc(
     )
 
     template = postproc.PostprocTemplate(
-        context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels
+        context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels, out_bits=out_bits
     )
     fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
     fn.ensure_all_bound()
@@ -173,8 +178,10 @@ def test_postproc(
     h_out = fn.buffer("out").get(command_queue)
     h_saturated = fn.buffer("saturated").get(command_queue)
 
-    np.testing.assert_allclose(h_out, expected, atol=1)
+    np.testing.assert_allclose(h_out.view(np.int8), expected.view(np.int8), atol=1)
     # Rounding differences can occasionally cause a value to be saturated in
     # one path and not the other, but it should be rare.
     np.testing.assert_allclose(h_saturated, expected_saturated, atol=5)
-    assert np.min(h_out) == -127  # Ensure -128 gets clamped to -127
+    # Ensure -128 gets clamped to -127
+    assert np.min(h_out["real"]) == -127
+    assert np.min(h_out["imag"]) == -127

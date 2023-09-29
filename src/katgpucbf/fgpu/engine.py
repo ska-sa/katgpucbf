@@ -37,7 +37,6 @@ from katsdpsigproc.resource import async_wait_for_events
 
 from .. import (
     BYTE_BITS,
-    COMPLEX,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
     MIN_SENSOR_UPDATE_PERIOD,
@@ -53,7 +52,7 @@ from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
+from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, gaussian_dtype
 from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -511,7 +510,12 @@ class Pipeline:
         else:
             narrowband_config = None
         template = ComputeTemplate(
-            context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=narrowband_config
+            context,
+            output.taps,
+            output.channels,
+            engine.src_layout.sample_bits,
+            send.SEND_BITS,
+            narrowband=narrowband_config,
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
         # Pre-allocate the memory for some buffers that we know we won't be
@@ -617,11 +621,13 @@ class Pipeline:
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
             heaps = spectra // self.engine.spectra_per_heap
-            send_shape = (heaps, self.output.channels, self.engine.spectra_per_heap, N_POLS, COMPLEX)
+            send_shape = (heaps, self.output.channels, self.engine.spectra_per_heap, N_POLS)
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
-                        accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
+                        accel.HostArray(
+                            send_shape, gaussian_dtype(send.SEND_BITS), context=self._compute.template.context
+                        ),
                         accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
                         n_substreams=len(self.output.dst),
                         feng_id=self.engine.feng_id,

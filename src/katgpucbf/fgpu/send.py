@@ -36,6 +36,8 @@ from . import METRIC_NAMESPACE
 PREAMBLE_SIZE = 72
 #: Data type of the output payload
 SEND_DTYPE = np.dtype(np.int8)
+#: Number of bits per real component in SEND_DTYPE
+SEND_BITS = 8
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter(
     "output_bytes", "number of payload bytes transmitted", ["stream"], namespace=METRIC_NAMESPACE
@@ -172,7 +174,7 @@ class Chunk:
         if not future.cancelled() and future.exception() is None:
             output_heaps_counter.labels(output_name).inc(len(frame.heaps))
             output_bytes_counter.labels(output_name).inc(frame.data.nbytes)
-            output_samples_counter.labels(output_name).inc(frame.data.size // COMPLEX)
+            output_samples_counter.labels(output_name).inc(frame.data.size)
             for pol in range(N_POLS):
                 output_clip_counter.labels(output_name, pol).inc(frame.saturated[pol])
 

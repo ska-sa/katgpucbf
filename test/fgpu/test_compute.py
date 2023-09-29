@@ -32,6 +32,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     """
     channels = 32768
     dig_sample_bits = 10
+    out_bits = 8
     decimation = 8
     ddc_taps = 128
     pfb_taps = 4
@@ -51,7 +52,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
         )
         spectra = nb_spectra
         internal_channels = 2 * channels
-    template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, narrowband)
+    template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, out_bits, narrowband)
     # The sample count is the minimum that will produce the required number of
     # output spectra for narrowband mode. For wideband there is more headroom.
     fn = template.instantiate(
