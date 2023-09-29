@@ -293,27 +293,28 @@ async def calibrate(args: argparse.Namespace) -> None:
     """Run multiple trials on all the possible rates."""
     rates = np.arange(args.low, args.high + 0.01 * args.step, args.step)
     successes = [0] * len(rates)
-    for _ in range(args.calibrate_repeat):
+    for trial in range(args.calibrate_repeat):
         for j, adc_sample_rate in enumerate(rates):
             sync_time = int(time.time())
-            while True:
+            redo = True
+            while redo:
+                redo = False
+                if args.verbose >= VERBOSE_RESULTS:
+                    print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                 async with await run_dsims(adc_sample_rate, sync_time, args):
                     async with await run_fgpus(adc_sample_rate, sync_time, args):
-                        if args.verbose >= VERBOSE_RESULTS:
-                            print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                         result = await process(
                             adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server
                         )
-                        if args.verbose >= VERBOSE_RESULTS:
-                            print(result.message(), file=sys.stderr)
-                        if result.good():
-                            good = True
-                            break
-                        elif result.missing_heaps > 0:
-                            # If missing == 0, we need to rerun the experiment
-                            good = False
-                            break
-            successes[j] += int(good)
+                if result.good():
+                    successes[j] += 1
+                elif result.missing_heaps == 0:
+                    redo = True  # Unexpected number of heaps received
+                if args.verbose >= VERBOSE_RESULTS:
+                    if redo:
+                        print(f"{result.message()}, rerunning", flush=True, file=sys.stderr)
+                    else:
+                        print(f"{result.message()}, {successes[j]}/{trial + 1} passed", flush=True, file=sys.stderr)
     for success, adc_sample_rate in zip(successes, rates):
         print(adc_sample_rate, success / args.calibrate_repeat)
 
