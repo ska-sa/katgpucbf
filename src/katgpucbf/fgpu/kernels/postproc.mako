@@ -97,7 +97,7 @@ DEVICE_FN qjones quant_jones(const float2 value[2], unsigned int saturated[2])
         saturated[i] += quant(value[i].x, &q[i].x) | quant(value[i].y, &q[i].y);
     }
 #if OUT_BITS == 4
-    return make_char2(pack_4bit(q[0]), pack_4bit(q[1]));
+    return make_uchar2(pack_4bit(q[0]), pack_4bit(q[1]));
 #else
     return make_char4(q[0].x, q[0].y, q[1].x, q[1].y);
 #endif
