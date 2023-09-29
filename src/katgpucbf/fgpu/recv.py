@@ -213,6 +213,7 @@ def make_stream_group(
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
         user_data=user_data,
+        explicit_start=True,
     )
     for stream in group:
         stats_collector.add_stream(stream)
