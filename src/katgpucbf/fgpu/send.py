@@ -63,7 +63,7 @@ class Frame:
     timestamp
         Zero-dimensional array of dtype ``>u8`` holding the timestamp.
     data
-        Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS, COMPLEX).
+        Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS).
     saturated
         Saturation data for the frame, of shape (N_POLS,)
     feng_id
@@ -236,10 +236,11 @@ def make_streams(
     differ only in the network interface used (there is one per interface).
     Thus, they can be used interchangeably for load-balancing purposes.
     """
-    dtype = chunks[0].data.dtype
+    dtype = chunks[0].data.dtype  # Type for each complex value
+    bandwidth = adc_sample_rate * 0.5
     memory_regions: list[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
-    rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor / len(interfaces)
+    rate = N_POLS * bandwidth * dtype.itemsize * send_rate_factor / len(interfaces)
     config = spead2.send.StreamConfig(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
