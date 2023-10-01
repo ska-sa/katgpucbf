@@ -19,6 +19,7 @@
 import asyncio
 import functools
 from collections.abc import Callable, Sequence
+from typing import TypedDict
 
 import numpy as np
 import spead2.send
@@ -34,10 +35,6 @@ from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
 PREAMBLE_SIZE = 72
-#: Data type of the output payload
-SEND_DTYPE = np.dtype(np.int8)
-#: Number of bits per real component in SEND_DTYPE
-SEND_BITS = 8
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter(
     "output_bytes", "number of payload bytes transmitted", ["stream"], namespace=METRIC_NAMESPACE
@@ -289,10 +286,18 @@ def make_streams(
     return streams
 
 
+class _RawKwargs(TypedDict, total=False):
+    """Helper class for type annotations."""
+
+    dtype: np.dtype
+    format: list[tuple[str, int]]
+
+
 def make_descriptor_heap(
     *,
     channels_per_substream: int,
     spectra_per_heap: int,
+    bits: int,
 ) -> "spead2.send.Heap":
     """Create a descriptor heap for output F-Engine data."""
     heap_data_shape = (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
@@ -319,12 +324,19 @@ def make_descriptor_heap(
         shape=(),
         format=IMMEDIATE_FORMAT,
     )
+
+    raw_kwargs: _RawKwargs = {}
+    try:
+        raw_kwargs["dtype"] = np.dtype(f"int{bits}")
+    except TypeError:
+        # The number of bits doesn't neatly fit a numpy dtype
+        raw_kwargs["format"] = [("i", bits)]
     ig.add_item(
         FENG_RAW_ID,
         "feng_raw",
         "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
         shape=heap_data_shape,
-        dtype=SEND_DTYPE,
+        **raw_kwargs,
     )
 
     return ig.get_heap(descriptors="all", data="none")

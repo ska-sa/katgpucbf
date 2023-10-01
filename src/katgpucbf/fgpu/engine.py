@@ -514,7 +514,7 @@ class Pipeline:
             output.taps,
             output.channels,
             engine.src_layout.sample_bits,
-            send.SEND_BITS,
+            engine.dst_sample_bits,
             narrowband=narrowband_config,
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
@@ -548,6 +548,7 @@ class Pipeline:
         self.descriptor_heap = send.make_descriptor_heap(
             channels_per_substream=output.channels // len(output.dst),
             spectra_per_heap=engine.spectra_per_heap,
+            bits=engine.dst_sample_bits,
         )
 
     def _populate_sensors(self) -> None:
@@ -626,7 +627,9 @@ class Pipeline:
                 send_chunks.append(
                     send.Chunk(
                         accel.HostArray(
-                            send_shape, gaussian_dtype(send.SEND_BITS), context=self._compute.template.context
+                            send_shape,
+                            gaussian_dtype(self.engine.dst_sample_bits),
+                            context=self._compute.template.context,
                         ),
                         accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
                         n_substreams=len(self.output.dst),
@@ -1192,6 +1195,7 @@ class Engine(aiokatcp.DeviceServer):
         chunk_jones: int,
         spectra_per_heap: int,
         dig_sample_bits: int,
+        dst_sample_bits: int,
         max_delay_diff: int,
         gain: complex,
         sync_epoch: float,
@@ -1230,6 +1234,7 @@ class Engine(aiokatcp.DeviceServer):
         self.monitor = monitor
         self.use_vkgdr = use_vkgdr
         self.use_peerdirect = use_peerdirect
+        self.dst_sample_bits = dst_sample_bits
 
         # Tuning knobs not exposed via arguments
         self.n_in = 3

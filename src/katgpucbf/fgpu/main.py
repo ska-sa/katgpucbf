@@ -410,6 +410,14 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="BITS",
         help="Number of bits per digitised sample [%(default)s]",
     )
+    parser.add_argument(
+        "--dst-sample-bits",
+        type=int,
+        default=8,
+        choices=[4, 8],
+        metavar="BITS",
+        help="Number of bits per output sample real component [%(default)s]",
+    )
     parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
     parser.add_argument(
         "--sync-epoch",
@@ -505,6 +513,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         chunk_jones=chunk_jones,
         spectra_per_heap=args.spectra_per_heap,
         dig_sample_bits=args.dig_sample_bits,
+        dst_sample_bits=args.dst_sample_bits,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,
         sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
