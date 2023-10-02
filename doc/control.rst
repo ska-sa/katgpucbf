@@ -260,9 +260,8 @@ xbgpu
 ``?capture-start``, ``?capture-stop``
     Enable or disable transmission of output data. This does not affect
     transmission of descriptors, which cannot be disabled. In the initial
-    state transmission is enabled.
-
-    .. todo:: Update after NGC-721 is addressed
+    state transmission is disabled, unless the :option:`!--tx-enabled`
+    command-line option has been passed.
 
 Shutting down the correlator
 ----------------------------
