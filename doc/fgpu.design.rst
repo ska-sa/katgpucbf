@@ -375,8 +375,10 @@ The remaining steps are to
  3. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
     are stored contiguously for each channel (the Nyquist frequencies are also
     discarded at this point).
- 4. Convert to int8.
- 5. Interleave the polarisations.
+ 4. Convert to integer.
+ 5. Where the output bits per sample is not a whole number of bytes, do the
+    necessary bit-packing.
+ 6. Interleave the polarisations.
 
 These are all combined into a single kernel to minimise memory traffic. The
 katsdpsigproc package provides a template for transpositions, and the other
