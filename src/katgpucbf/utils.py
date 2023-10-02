@@ -27,6 +27,7 @@ from collections import Counter
 from typing import TypeVar
 
 import aiokatcp
+import numpy as np
 import prometheus_client
 from katsdptelstate.endpoint import endpoint_list_parser
 
@@ -322,3 +323,20 @@ class TimeConverter:
     def adc_to_unix(self, samples: float) -> float:
         """Convert an ADC sample count to a UNIX timstamp."""
         return samples / self.adc_sample_rate + self.sync_epoch
+
+
+def gaussian_dtype(bits: int) -> np.dtype:
+    """Get numpy dtype for a Gaussian (complex) integer.
+
+    Parameters
+    ----------
+    bits
+        Number of bits in each real component
+    """
+    assert bits in {4, 8, 16, 32}
+    if bits == 4:
+        # 1-byte, packed with real high, imaginary low. Using void rather
+        # than e.g. uint8 avoids accidentally doing arithmetic on it.
+        return np.dtype("V1")
+    else:
+        return np.dtype([("real", f"int{bits}"), ("imag", f"int{bits}")])

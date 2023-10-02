@@ -61,6 +61,8 @@ class ComputeTemplate:
         Number of output channels into which the input data will be decomposed.
     dig_sample_bits
         Number of bits per digitiser sample.
+    out_bits
+        Number of bits per output real component.
     narrowband
         Configuration for narrowband operation. If ``None``, wideband is assumed.
     """
@@ -71,6 +73,7 @@ class ComputeTemplate:
         taps: int,
         channels: int,
         dig_sample_bits: int,
+        out_bits: int,
         narrowband: NarrowbandConfig | None,
     ) -> None:
         self.context = context
@@ -80,7 +83,9 @@ class ComputeTemplate:
         self.unzip_factor = 4 if channels >= 8 else 1
         if narrowband is None:
             self.internal_channels = channels
-            self.postproc = postproc.PostprocTemplate(context, channels, self.unzip_factor, complex_pfb=False)
+            self.postproc = postproc.PostprocTemplate(
+                context, channels, self.unzip_factor, complex_pfb=False, out_bits=out_bits
+            )
             self.pfb_fir = pfb.PFBFIRTemplate(
                 context, taps, channels, dig_sample_bits, self.unzip_factor, n_pols=N_POLS
             )
@@ -92,6 +97,7 @@ class ComputeTemplate:
                 self.internal_channels,
                 self.unzip_factor,
                 complex_pfb=True,
+                out_bits=out_bits,
                 out_channels=(channels // 2, 3 * channels // 2),
             )
             self.pfb_fir = pfb.PFBFIRTemplate(

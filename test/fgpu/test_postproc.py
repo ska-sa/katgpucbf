@@ -30,16 +30,17 @@ pytestmark = [pytest.mark.cuda_only]
 
 
 def postproc_host_pol(
-    data,
-    spectra,
-    spectra_per_heap_out,
-    channels,
-    unzip_factor,
-    complex_pfb,
-    out_channels,
-    fine_delay,
-    fringe_phase,
-    gains,
+    data: np.ndarray,
+    spectra: int,
+    spectra_per_heap_out: int,
+    channels: int,
+    unzip_factor: int,
+    complex_pfb: bool,
+    out_channels: tuple[int, int],
+    out_bits: int,
+    fine_delay: np.ndarray,
+    fringe_phase: np.ndarray,
+    gains: np.ndarray,
 ):
     """Calculate postproc steps on the host CPU for a single polarisation."""
     out_s = np.s_[out_channels[0] : out_channels[1]]
@@ -64,33 +65,37 @@ def postproc_host_pol(
     phase = np.exp(m2jpi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
     assert phase.dtype == np.complex64
     # Apply delay, phase and gain
+    corrected: np.ndarray  # mypy seems to get confused about the dtype; this makes it Any
     corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)
     # Split complex into real, imaginary
     corrected = corrected.view(np.float32).reshape(spectra, n_out_channels, 2)
     # Count saturation per heap
-    saturated = np.sum(np.any(np.abs(corrected) > 127.0, axis=2), axis=1, dtype=np.uint32)
+    qmax = 2 ** (out_bits - 1) - 1
+    saturated = np.sum(np.any(np.abs(corrected) > qmax, axis=2), axis=1, dtype=np.uint32)
     saturated = np.sum(saturated.reshape(-1, spectra_per_heap_out), axis=1)
-    # Convert to integer
+    # Convert to integral and saturate (still a real dtype though)
     corrected = np.rint(corrected)
-    # Cast to integer with saturation
-    corrected = np.minimum(np.maximum(corrected, -127), 127)
-    corrected = corrected.astype(np.int8)
+    corrected = np.minimum(np.maximum(corrected, -qmax), qmax)
+    # Recombine real and imaginary
+    assert corrected.dtype == np.float32
+    corrected = corrected.view(np.complex64)[..., -1]
     # Partial transpose
-    reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels, 2)
-    return reshaped.transpose(0, 2, 1, 3), saturated
+    reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels)
+    return reshaped.transpose(0, 2, 1), saturated
 
 
 def postproc_host(
-    in_,
-    channels,
-    unzip_factor,
-    complex_pfb,
-    out_channels,
-    spectra_per_heap_out,
-    spectra,
-    fine_delay,
-    fringe_phase,
-    gains,
+    in_: np.ndarray,
+    spectra_per_heap_out: int,
+    spectra: int,
+    channels: int,
+    unzip_factor: int,
+    complex_pfb: bool,
+    out_channels: tuple[int, int],
+    out_bits: int,
+    fine_delay: np.ndarray,
+    fringe_phase: np.ndarray,
+    gains: np.ndarray,
 ):
     """Aggregate both polarisation's postproc on the host CPU."""
     out = []
@@ -98,12 +103,13 @@ def postproc_host(
     for pol in range(N_POLS):
         pol_out, pol_saturated = postproc_host_pol(
             in_[pol],
+            spectra_per_heap_out,
+            spectra,
             channels,
             unzip_factor,
             complex_pfb,
             out_channels,
-            spectra_per_heap_out,
-            spectra,
+            out_bits,
             fine_delay[:, pol],
             fringe_phase[:, pol],
             gains[:, pol],
@@ -111,6 +117,18 @@ def postproc_host(
         out.append(pol_out)
         saturated.append(pol_saturated)
     return np.stack(out, axis=3), np.stack(saturated, axis=1)
+
+
+def unpack_complex(data: np.ndarray) -> np.ndarray:
+    """Unpack array of Gaussian integers to complex dtype."""
+    if data.dtype.itemsize == 1:
+        # It's 4-bit packed. We assume that >> will sign extend on signed types
+        real = data.view(np.int8) >> 4
+        imag = data.view(np.int8) << 4 >> 4
+    else:
+        real = data["real"]
+        imag = data["imag"]
+    return real.astype(np.float32) + 1j * imag.astype(np.float32)
 
 
 def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex64) -> np.ndarray:
@@ -128,12 +146,14 @@ def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex6
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 @pytest.mark.parametrize("complex_pfb", [False, True])
 @pytest.mark.parametrize("out_channels", [(0, 4096), (1024, 3072), (123, 3456)])
+@pytest.mark.parametrize("out_bits", [4, 8])
 def test_postproc(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
     unzip_factor: int,
     complex_pfb: bool,
     out_channels: tuple[int, int],
+    out_bits: int,
 ) -> None:
     """Test GPU Postproc for numerical correctness."""
     channels = 4096
@@ -154,13 +174,14 @@ def test_postproc(
         unzip_factor,
         complex_pfb,
         out_channels,
+        out_bits,
         h_fine_delay,
         h_phase,
         h_gains,
     )
 
     template = postproc.PostprocTemplate(
-        context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels
+        context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels, out_bits=out_bits
     )
     fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
     fn.ensure_all_bound()
@@ -173,8 +194,13 @@ def test_postproc(
     h_out = fn.buffer("out").get(command_queue)
     h_saturated = fn.buffer("saturated").get(command_queue)
 
-    np.testing.assert_allclose(h_out, expected, atol=1)
+    h_out = unpack_complex(h_out)
+    # Tolerance of 1.5 allows for error of 1 in each of real and imaginary
+    np.testing.assert_allclose(h_out, expected, atol=1.5)
     # Rounding differences can occasionally cause a value to be saturated in
     # one path and not the other, but it should be rare.
     np.testing.assert_allclose(h_saturated, expected_saturated, atol=5)
-    assert np.min(h_out) == -127  # Ensure -128 gets clamped to -127
+    # Ensure most negative value gets clamped
+    qmax = 2 ** (out_bits - 1) - 1
+    assert np.min(h_out.real) == -qmax
+    assert np.min(h_out.imag) == -qmax
