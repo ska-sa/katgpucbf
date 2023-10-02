@@ -223,7 +223,7 @@ def make_streams(
     packet_payload: int,
     comp_vector: int,
     buffer: int,
-    adc_sample_rate: float,
+    bandwidth: float,
     send_rate_factor: float,
     feng_id: int,
     num_ants: int,
@@ -237,7 +237,6 @@ def make_streams(
     Thus, they can be used interchangeably for load-balancing purposes.
     """
     dtype = chunks[0].data.dtype  # Type for each complex value
-    bandwidth = adc_sample_rate * 0.5
     memory_regions: list[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
     rate = N_POLS * bandwidth * dtype.itemsize * send_rate_factor / len(interfaces)

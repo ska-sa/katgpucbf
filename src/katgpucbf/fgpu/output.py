@@ -41,12 +41,6 @@ class Output(ABC):
 
     @property
     @abstractmethod
-    def send_rate_factor(self) -> float:
-        """Output stream rate, relative to a wideband stream."""
-        raise NotImplementedError  # pragma: nocover
-
-    @property
-    @abstractmethod
     def spectra_samples(self) -> int:
         """Number of incoming digitiser samples needed per spectrum.
 
@@ -93,10 +87,6 @@ class WidebandOutput(Output):
         return self.channels
 
     @property
-    def send_rate_factor(self) -> float:  # noqa: D102
-        return 1.0
-
-    @property
     def spectra_samples(self) -> int:  # noqa: D102
         return 2 * self.channels
 
@@ -133,10 +123,6 @@ class NarrowbandOutput(Output):
     @property
     def internal_channels(self) -> int:  # noqa: D102
         return 2 * self.channels
-
-    @property
-    def send_rate_factor(self) -> float:  # noqa: D102
-        return 1.0 / self.decimation
 
     @property
     def spectra_samples(self) -> int:  # noqa: D102
