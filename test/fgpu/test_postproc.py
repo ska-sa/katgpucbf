@@ -65,7 +65,7 @@ def postproc_host_pol(
     phase = np.exp(m2jpi * fine_delay[:, np.newaxis] * channel_idx / (2 * channels) + 1j * fringe_phase[:, np.newaxis])
     assert phase.dtype == np.complex64
     # Apply delay, phase and gain
-    corrected: np.ndarray
+    corrected: np.ndarray  # mypy seems to get confused about the dtype; this makes it Any
     corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)
     # Split complex into real, imaginary
     corrected = corrected.view(np.float32).reshape(spectra, n_out_channels, 2)
