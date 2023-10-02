@@ -62,9 +62,11 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
+from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
+from .bsend import BSend, make_descriptor_heap
+from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
-from .output import Output, XOutput
+from .output import BOutput, Output, XOutput
 from .xsend import XSend, incomplete_accum_counter, make_stream
 
 logger = logging.getLogger(__name__)
@@ -257,6 +259,68 @@ class Pipeline:
     def capture_enable(self, enable: bool = True) -> None:
         """Enable/Disable the transmission of this data product's stream."""
         raise NotImplementedError  # pragma: nocover
+
+
+class BPipeline(Pipeline):
+    """Processing pipeline for a collection of :class:`Beam`s."""
+
+    def __init__(
+        self, outputs: list[BOutput], engine: "XBEngine", context: AbstractContext, name: str = DEFAULT_BPIPELINE_NAME
+    ) -> None:
+        super().__init__(name, engine, context)
+        # TODO: We don't need individual Beams
+        self.n_beams = len(outputs)
+        self.output = outputs[0]  # TODO: Update once working with just once Beam
+        # We can dictate non-contiguous multicast endpoints as substreams
+        # in the stream config!
+        # Still, need to collate all output.dst addresses into one list to give to BSend
+        # The order doesn't *matter*, it's more for peace of mind
+        substream_id_mapping: dict[int, str] = {}
+        for i, output in enumerate(outputs):
+            substream_id_mapping[i] = output.name
+        # To keep the output.name and output.dst in lock-step, probably best to
+        # pass `outputs` to BSend constructor?
+        self.send_stream = BSend(
+            outputs=outputs,
+            n_channels_per_substream=engine.n_channels_per_substream,
+            spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            send_rate_factor=engine.send_rate_factor,
+            channel_offset=engine.channel_offset_value,
+            context=context,
+            packet_payload=engine.dst_packet_payload,
+            stream_factory=lambda stream_config, buffers: make_bstream(
+                endpoints=[output.dst for output in outputs],
+                interface=engine.dst_interface,
+                ttl=engine.dst_ttl,
+                use_ibv=engine.dst_ibv,
+                affinity=engine.dst_affinity,
+                comp_vector=engine.dst_comp_vector,
+                stream_config=stream_config,
+                buffers=buffers,
+            ),
+        )
+
+        self.send_stream.descriptor_heap = make_descriptor_heap(
+            n_channels_per_substream=engine.n_channels_per_substream,
+            spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+        )
+
+    def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
+        # TODO: Maybe pass this off to BSend?
+        # If enable is True, ensure that this `beam_name` is present
+        # else: Remove the entry
+
+        pass
+
+    async def gpu_proc_loop(self) -> None:  # noqa: D102
+        pass
+
+    async def sender_loop(self) -> None:  # noqa: D102
+        # NOTE: This function passes the entire downloaded data to
+        # chunk.send, which then takes care of directing data to each beam's
+        # output destination.
+        # TODO: Probably something like
+        pass
 
 
 class XPipeline(Pipeline):
@@ -708,9 +772,6 @@ class XBEngine(DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
-        # B-engine doesn't work yet
-        assert all(isinstance(output, XOutput) for output in outputs)
-
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
@@ -794,9 +855,12 @@ class XBEngine(DeviceServer):
         # time. This keeps the pipelines synchronised to avoid running out of
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
-        self._pipelines = [
-            XPipeline(output, self, context, tx_enabled) for output in outputs if isinstance(output, XOutput)
-        ]
+
+        # TODO: Find a neater way to switch on the type of `outputs` given
+        if all(isinstance(output, BOutput) for output in outputs):
+            self._pipelines = [BPipeline(outputs, self, context)]  # type: ignore
+        elif all(isinstance(output, XOutput) for output in outputs):
+            self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in outputs]  # type: ignore
 
         self._upload_command_queue = context.create_command_queue()
 
@@ -919,6 +983,8 @@ class XBEngine(DeviceServer):
         FailReply
             If the `stream_name` is not a known output.
         """
+        # TODO: Need to update this logic to search for beams
+        # - Perhaps if 'tied-array' in stream_name, look deeper
         for pipeline in self._pipelines:
             if stream_name == pipeline.output.name:
                 return pipeline
@@ -966,13 +1032,16 @@ class XBEngine(DeviceServer):
         # Create the descriptor task first to ensure descriptor will be sent
         # before any data makes its way through the pipeline.
         for pipeline in self._pipelines:
+            # TODO: Make this parametrisable somehow for XPipeline vs BPipeline
+            # BPipeline needs to stagger the sending of descriptors
             descriptor_sender = DescriptorSender(
                 pipeline.send_stream.source_stream,
                 pipeline.send_stream.descriptor_heap,
                 descriptor_interval_s,
+                substreams=range(pipeline.n_beams),
             )
             descriptor_task = asyncio.create_task(
-                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
+                descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
             )
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
@@ -991,13 +1060,14 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             proc_task = asyncio.create_task(
                 pipeline.gpu_proc_loop(),
-                name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
+                # name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
+                name=f"{pipeline.name}.{GPU_PROC_TASK_NAME}",
             )
             self.add_service_task(proc_task)
 
             send_task = asyncio.create_task(
                 pipeline.sender_loop(),
-                name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
+                name=f"{pipeline.name}.{SEND_TASK_NAME}",
             )
             self.add_service_task(send_task)
 
