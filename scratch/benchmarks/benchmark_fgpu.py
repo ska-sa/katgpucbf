@@ -316,7 +316,7 @@ async def calibrate(args: argparse.Namespace) -> None:
                     else:
                         print(f"{result.message()}, {successes[j]}/{trial + 1} passed", flush=True, file=sys.stderr)
     for success, adc_sample_rate in zip(successes, rates):
-        print(adc_sample_rate, success / args.calibrate_repeat)
+        print(adc_sample_rate, success, args.calibrate_repeat)
 
 
 async def search(args: argparse.Namespace) -> tuple[float, float]:
