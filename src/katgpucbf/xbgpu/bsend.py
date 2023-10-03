@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -65,7 +65,7 @@ class BSend:
 
     def __init__(
         self,
-        outputs: list[BOutput],
+        output: BOutput,
         n_channels_per_substream: int,
         spectra_per_heap: int,
         send_rate_factor: float,
@@ -87,7 +87,7 @@ class BSend:
 
         # `n_heaps_to_send` is actually used to dictate the amount of buffers (in XSend)
         # So perhaps we need to change the number of buffers to be range(send_free_queue.maxsize)
-        n_heaps_to_send = len(buffers) // spectra_per_heap * len(outputs)
+        n_heaps_to_send = len(buffers) // spectra_per_heap
 
         for _ in range(n_heaps_to_send):
             heap = Heap(context, n_channels_per_substream, spectra_per_heap)
@@ -103,9 +103,9 @@ class BSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
-            max_heaps=10 + len(outputs),  # TODO: Update this to be proper
+            max_heaps=10,  # TODO: Update this to be proper
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=0,  # Send as fast as possible
+            rate=0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
         )
         self.source_stream = stream_factory(stream_config, buffers)
 
@@ -113,8 +113,8 @@ class BSend:
         """Take in a buffer and send it as a SPEAD heap."""
         pass
 
-    def disable_substream(self, stream_id: int) -> None:
-        """Disable a substream's data transmission.
+    def enable_substream(self, stream_id: int, enable: bool = True) -> None:
+        """Enable/Disable a substream's data transmission.
 
         :class:`.BSend` operates as a large single stream with multiple
         substreams. Each substream is its own data product and is required
@@ -125,6 +125,9 @@ class BSend:
         stream_id
             ID of the substream, corresponds to the <beam-id><pol>
             convention, e.g. stream_id 3 has a stream_name ending in <1x>.
+        enable
+            Boolean indicating whether the `stream_id` should be enabled or
+            disabled.
         """
         pass
 

@@ -67,7 +67,8 @@ from .bsend import BSend, make_descriptor_heap
 from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
 from .output import BOutput, Output, XOutput
-from .xsend import XSend, incomplete_accum_counter, make_stream
+from .xsend import XSend, incomplete_accum_counter
+from .xsend import make_stream as make_xstream
 
 logger = logging.getLogger(__name__)
 MISSING = np.array([-(2**31), 1], dtype=np.int32)
@@ -150,8 +151,15 @@ class Pipeline:
     :class:`.QueueItem` provides mechanisms to wait for the in-progress work to
     complete.
 
+    .. todo::
+        Update the `output` parameter to be a list of `Output`s once multiple
+        beams are supported. This will require some updates to the plumbing
+        that uses `output` to e.g. capture-{start, stop}.
+
     Parameters
     ----------
+    output
+        Output config for data product (BOutput or XOutput).
     name
         Name of Pipeline.
     engine
@@ -170,9 +178,10 @@ class Pipeline:
     n_rx_items = DEFAULT_N_RX_ITEMS
     n_tx_items = DEFAULT_N_TX_ITEMS
 
-    def __init__(self, name: str, engine: "XBEngine", context: AbstractContext) -> None:
-        self.engine = engine
+    def __init__(self, output: Output, name: str, engine: "XBEngine", context: AbstractContext) -> None:
+        self.output = output
         self.name = name
+        self.engine = engine
 
         self._proc_command_queue = context.create_command_queue()
         self._download_command_queue = context.create_command_queue()
@@ -264,24 +273,22 @@ class Pipeline:
 class BPipeline(Pipeline):
     """Processing pipeline for a collection of :class:`Beam`s."""
 
+    output: BOutput
+
     def __init__(
-        self, outputs: list[BOutput], engine: "XBEngine", context: AbstractContext, name: str = DEFAULT_BPIPELINE_NAME
+        self, output: BOutput, engine: "XBEngine", context: AbstractContext, name: str = DEFAULT_BPIPELINE_NAME
     ) -> None:
-        super().__init__(name, engine, context)
+        super().__init__(output, name, engine, context)
         # TODO: We don't need individual Beams
-        self.n_beams = len(outputs)
-        self.output = outputs[0]  # TODO: Update once working with just once Beam
+        self.n_beams = 1
         # We can dictate non-contiguous multicast endpoints as substreams
         # in the stream config!
         # Still, need to collate all output.dst addresses into one list to give to BSend
         # The order doesn't *matter*, it's more for peace of mind
-        substream_id_mapping: dict[int, str] = {}
-        for i, output in enumerate(outputs):
-            substream_id_mapping[i] = output.name
         # To keep the output.name and output.dst in lock-step, probably best to
         # pass `outputs` to BSend constructor?
         self.send_stream = BSend(
-            outputs=outputs,
+            output=output,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             send_rate_factor=engine.send_rate_factor,
@@ -289,7 +296,7 @@ class BPipeline(Pipeline):
             context=context,
             packet_payload=engine.dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_bstream(
-                endpoints=[output.dst for output in outputs],
+                endpoints=[output.dst],
                 interface=engine.dst_interface,
                 ttl=engine.dst_ttl,
                 use_ibv=engine.dst_ibv,
@@ -326,6 +333,8 @@ class BPipeline(Pipeline):
 class XPipeline(Pipeline):
     """Processing pipeline for a single baseline-correlation-products stream."""
 
+    output: XOutput
+
     def __init__(
         self,
         output: XOutput,
@@ -334,8 +343,7 @@ class XPipeline(Pipeline):
         init_tx_enabled: bool,
         name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
-        super().__init__(name, engine, context)
-        self.output = output
+        super().__init__(output, name, engine, context)
         self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
 
         # NOTE: This value staggers the send so that packets within a heap are
@@ -373,7 +381,7 @@ class XPipeline(Pipeline):
             channel_offset=engine.channel_offset_value,
             context=context,
             packet_payload=engine.dst_packet_payload,
-            stream_factory=lambda stream_config, buffers: make_stream(
+            stream_factory=lambda stream_config, buffers: make_xstream(
                 output_name=output.name,
                 dest_ip=output.dst.host,
                 dest_port=output.dst.port,
@@ -686,7 +694,8 @@ class XBEngine(DeviceServer):
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
         spectrum reassembly by the downstream receiver.
     outputs
-        Output streams to generate. Currently only XOutputs supported.
+        Output streams to generate. Currently XOutputs and a single BOutput is
+        supported.
     src
         Endpoint for the incoming data.
     src_interface
@@ -856,11 +865,13 @@ class XBEngine(DeviceServer):
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
 
-        # TODO: Find a neater way to switch on the type of `outputs` given
-        if all(isinstance(output, BOutput) for output in outputs):
-            self._pipelines = [BPipeline(outputs, self, context)]  # type: ignore
-        elif all(isinstance(output, XOutput) for output in outputs):
-            self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in outputs]  # type: ignore
+        self._pipelines: list[Pipeline]
+        x_outputs = [output for output in outputs if isinstance(output, XOutput)]
+        b_outputs = [output for output in outputs if isinstance(output, BOutput)]
+        self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in x_outputs]
+        if len(b_outputs) == 1:
+            # TODO: Update once more BOutput's are supported
+            self._pipelines.append(BPipeline(b_outputs[0], self, context))
 
         self._upload_command_queue = context.create_command_queue()
 
@@ -983,8 +994,11 @@ class XBEngine(DeviceServer):
         FailReply
             If the `stream_name` is not a known output.
         """
-        # TODO: Need to update this logic to search for beams
-        # - Perhaps if 'tied-array' in stream_name, look deeper
+        # TODO: Need to update this logic when working with multiple beams
+        # - e.g. Make `_pipelines` a property, and return according to
+        #   the types of Pipelines it's parsed.
+        #   - e.g. BPipeline.output could be a property containing all
+        #     BOutputs.
         for pipeline in self._pipelines:
             if stream_name == pipeline.output.name:
                 return pipeline
@@ -1035,13 +1049,12 @@ class XBEngine(DeviceServer):
             # TODO: Make this parametrisable somehow for XPipeline vs BPipeline
             # BPipeline needs to stagger the sending of descriptors
             descriptor_sender = DescriptorSender(
-                pipeline.send_stream.source_stream,
-                pipeline.send_stream.descriptor_heap,
+                pipeline.send_stream.source_stream,  # type: ignore
+                pipeline.send_stream.descriptor_heap,  # type: ignore
                 descriptor_interval_s,
-                substreams=range(pipeline.n_beams),
             )
             descriptor_task = asyncio.create_task(
-                descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
+                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
             )
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
@@ -1060,14 +1073,13 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             proc_task = asyncio.create_task(
                 pipeline.gpu_proc_loop(),
-                # name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
-                name=f"{pipeline.name}.{GPU_PROC_TASK_NAME}",
+                name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
             )
             self.add_service_task(proc_task)
 
             send_task = asyncio.create_task(
                 pipeline.sender_loop(),
-                name=f"{pipeline.name}.{SEND_TASK_NAME}",
+                name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
             )
             self.add_service_task(send_task)
 
