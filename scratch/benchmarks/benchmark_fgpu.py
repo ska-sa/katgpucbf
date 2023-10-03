@@ -17,6 +17,7 @@ import aiohttp.client
 import asyncssh
 import numpy as np
 from prometheus_client.parser import text_string_to_metric_families
+from scipy.special import expit
 
 from noisy_search import noisy_search
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
@@ -26,10 +27,7 @@ HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
 SAMPLES_PER_HEAP = 4096
 N_POLS = 2
 DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/cbf/katgpucbf"
-NOISE = 0.02  #: Probability of an incorrect result from each trial
-#: Minimum relative difference for comparisons to be reliable i.e. for the
-#: failure probability to be :const:`NOISE`.
-FUZZ = 0.005
+NOISE = 0.01  #: Minimum probability of an incorrect result from each trial
 TOLERANCE = 0.001  #: Complement of confidence interval probability
 #: Verbosity level at which individual test results are reported
 VERBOSE_RESULTS = 1
@@ -348,14 +346,22 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
     if high_result.good():
         raise RuntimeError("succeeded on high")
 
-    # Compute error estimate. This is a heuristic based on gut feel rather
-    # than measurement. Assume that results are 1-NOISE reliable when at least
-    # FUZZ away from the critical value, and vary logarithmically in between.
+    # Compute error estimate. The model is a logistic regression on the
+    # log of the sample rate (log is used mainly to make the slope invariant
+    # to the scale of the rates, rather than for the shape).
+    # The magic numbers are determined from fit.py.
+    slope = {
+        1: -342.212919,
+        4: -582.668296,
+    }[args.n]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
     mid_rates = np.r_[args.low, mid_rates, args.high]
     l_rates = np.log(rates)[:, np.newaxis]
     l_mid_rates = np.log(mid_rates)[np.newaxis, :]
-    noise = np.clip(0.5 + (l_rates - l_mid_rates) / np.log1p(FUZZ) * (0.5 - NOISE), NOISE, 1 - NOISE)
+    noise = expit((l_mid_rates - l_rates) * slope)
+    # Don't allow probabilities to get too close to 0/1, as there are may be some
+    # external factor that makes things go wrong even at very low/high rates.
+    noise = np.clip(noise, NOISE, 1 - NOISE)
 
     result = await noisy_search(
         list(rates),
