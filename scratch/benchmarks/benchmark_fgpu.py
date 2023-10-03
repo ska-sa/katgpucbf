@@ -381,7 +381,7 @@ async def main():  # noqa: D103
     add_sigint_handler()
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
-    parser.add_argument("--channels", type=int, default=32768, help="Wideband channel count [%(default)s]")
+    parser.add_argument("--channels", type=int, default=1024, help="Wideband channel count [%(default)s]")
     parser.add_argument(
         "--use-vkgdr",
         action="store_true",
