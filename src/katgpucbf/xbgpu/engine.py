@@ -63,7 +63,7 @@ from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
-from .bsend import BSend, make_descriptor_heap
+from .bsend import BSend
 from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
 from .output import BOutput, Output, XOutput
@@ -305,11 +305,6 @@ class BPipeline(Pipeline):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
-        )
-
-        self.send_stream.descriptor_heap = make_descriptor_heap(
-            n_channels_per_substream=engine.n_channels_per_substream,
-            spectra_per_heap=engine.src_layout.n_spectra_per_heap,
         )
 
     def capture_enable(self, enable: bool = True) -> None:  # noqa: D102

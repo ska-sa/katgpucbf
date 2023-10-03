@@ -109,6 +109,31 @@ class BSend:
         )
         self.source_stream = stream_factory(stream_config, buffers)
 
+        item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+        item_group.add_item(
+            FREQUENCY_ID,
+            "frequency",  # Misleading name, but it's what the ICD specifies
+            "Value of the first channel in collections stored here.",
+            shape=[],
+            format=IMMEDIATE_FORMAT,
+        )
+        item_group.add_item(
+            TIMESTAMP_ID,
+            "timestamp",
+            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+            shape=[],
+            format=IMMEDIATE_FORMAT,
+        )
+        item_group.add_item(
+            BF_RAW_ID,
+            "bf_raw",
+            "",  # TODO: What to even say here? ICD says "Channelised complex data"
+            shape=buffers[0].shape,
+            dtype=buffers[0].dtype,
+        )
+
+        self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
+
     async def send_heap(self, heap: Heap) -> None:
         """Take in a buffer and send it as a SPEAD heap."""
         pass
@@ -174,37 +199,3 @@ def make_stream(
         )
 
     return stream
-
-
-def make_descriptor_heap(
-    *,
-    n_channels_per_substream: int,
-    spectra_per_heap: int,
-) -> "spead2.send.Heap":
-    """Create a descriptor heap for output B-engine data."""
-    heap_data_shape = (n_channels_per_substream, spectra_per_heap, COMPLEX)
-
-    ig = spead2.send.ItemGroup(flavour=FLAVOUR)
-    ig.add_item(
-        FREQUENCY_ID,
-        "frequency",  # Misleading name, but it's what the ICD specifies
-        "Value of the first channel in collections stored here.",
-        shape=[],
-        format=IMMEDIATE_FORMAT,
-    )
-    ig.add_item(
-        TIMESTAMP_ID,
-        "timestamp",
-        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-        shape=[],
-        format=IMMEDIATE_FORMAT,
-    )
-    ig.add_item(
-        BF_RAW_ID,
-        "bf_raw",
-        "",  # TODO: What to even say here? ICD says "Channelised complex data"
-        shape=heap_data_shape,
-        dtype=SEND_DTYPE,
-    )
-
-    return ig.get_heap(descriptors="all", data="none")
