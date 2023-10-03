@@ -108,7 +108,7 @@ def fgpu_factory(
     elif n == 2:
         interface = server.interfaces[index % len(server.interfaces)]
         cpu_base *= 2
-        src_affinity = f"{cpu_base},{cpu_base + ncpus_per_quadrant}"
+        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + ncpus_per_quadrant},{cpu_base + ncpus_per_quadrant + 1}"
         dst_affinity = f"{cpu_base + hstep}"
         other_affinity = f"{cpu_base + ncpus_per_quadrant + hstep}"
     else:
