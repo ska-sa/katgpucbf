@@ -138,8 +138,6 @@ def fgpu_factory(
         f"--feng-id={index} "
         f"{'--use-vkgdr --max-delay-diff=65536' if args.use_vkgdr else ''} "
         f"--wideband=name=wideband,channels={args.channels},dst=239.102.{200 + index}.0+63:7148 "
-        # "--narrowband=name=narrowband,channels=32768,decimation=8,"
-        # f"ddc_taps=96,centre_frequency=200e6,dst=239.102.{216 + index}.0+7:7148 "
         f"239.102.{index}.64+15:7148 "
     )
     if args.narrowband:
