@@ -137,14 +137,14 @@ def fgpu_factory(
         f"--sync-epoch={sync_time} "
         f"--feng-id={index} "
         f"{'--use-vkgdr --max-delay-diff=65536' if args.use_vkgdr else ''} "
-        f"--wideband=name=wideband,channels={args.channels},dst=239.102.{200 + index}.0+63:7148 "
+        f"--wideband=name=wideband,channels={args.channels},dst=239.102.{200 + index}.0+{args.xb - 1}:7148 "
         f"239.102.{index}.64+15:7148 "
     )
     if args.narrowband:
         command += (
             f"--narrowband=name=narrowband,channels={args.narrowband_channels},"
             f"decimation={args.narrowband_decimation},centre_frequency={adc_sample_rate / 4},"
-            f"dst=239.102.{216 + index}.0+7:7148 "
+            f"dst=239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148 "
         )
     for arg in ["spectra_per_heap", "array_size", "dig_sample_bits"]:
         value = getattr(args, arg)
@@ -410,6 +410,7 @@ async def main():  # noqa: D103
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
     )
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
+    parser.add_argument("--xb", type=int, default=64, help="Number of XB-engines [%(default)s]")
     parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
 
     parser.add_argument(
