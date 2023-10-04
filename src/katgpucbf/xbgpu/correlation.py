@@ -242,7 +242,7 @@ class Correlation(accel.Operation):
                 mid_visibilities_buffer.buffer,
                 np.uint32(self.n_batches),
             ],
-            global_size=(accel.roundup(int(np.product(out_visibilities_buffer.shape)), wgs), 1, 1),
+            global_size=(accel.roundup(int(np.prod(out_visibilities_buffer.shape)), wgs), 1, 1),
             local_size=(wgs, 1, 1),
         )
 
