@@ -26,7 +26,7 @@ import spead2.recv.asyncio
 import spead2.send.asyncio
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from katgpucbf import N_POLS
+from katgpucbf import BYTE_BITS, COMPLEX, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.send import Chunk, make_descriptor_heap, make_streams
 from katgpucbf.utils import TimeConverter, gaussian_dtype
@@ -186,6 +186,7 @@ async def test_send(
 
     rng = np.random.default_rng(seed=1)
     first_timestamp = 0x123456780000
+    skip_frames = 3
     for i, chunk in enumerate(chunks):
         _fill_random(chunk.data, rng)
         # Note: this doesn't correspond in any way to the values in data.
@@ -193,8 +194,11 @@ async def test_send(
         _fill_random(chunk.saturated, rng)
         chunk.present[:] = True
         chunk.timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP * N_FRAMES
+    # Knock out the first few frames, to test partial transmission
+    chunks[0].present[:skip_frames] = False
     data = np.concatenate([chunk.data for chunk in chunks])
-    saturated = np.sum([chunk.saturated for chunk in chunks], axis=(0, 1), dtype=np.uint64)
+    saturated = np.concatenate([chunk.saturated for chunk in chunks])
+    saturated = np.sum(saturated[skip_frames:], axis=0, dtype=np.uint64)
 
     with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
         # Send all the chunks, without waiting for the first one to complete
@@ -219,7 +223,7 @@ async def test_send(
         for iface in INTERFACES:
             recv_stream = recv_streams[iface][i]
             ig = spead2.ItemGroup()
-            frame = 0
+            frame = skip_frames
             async for heap in recv_stream:
                 updated = ig.update(heap)
                 if not updated:
@@ -236,20 +240,20 @@ async def test_send(
                 seen_frames[frame] = True
                 frame += 1
                 heaps_per_iface[iface] += 1
-        assert np.all(seen_frames)  # Check that we received all the data we expected
+        assert np.all(seen_frames[skip_frames:])  # Check that we received all the data we expected
     # Check the load balancing
+    good_frames = N_CHUNKS * N_FRAMES - skip_frames
     for iface in INTERFACES:
-        assert heaps_per_iface[iface] == N_SUBSTREAMS * N_CHUNKS * N_FRAMES // len(INTERFACES)
+        assert heaps_per_iface[iface] == N_SUBSTREAMS * good_frames // len(INTERFACES)
 
     # Check the sensors and Prometheus metrics
     labels = {"stream": NAME}
-    assert prom_diff.get_sample_diff("output_heaps_total", labels) == N_CHUNKS * N_FRAMES * N_SUBSTREAMS
-    assert prom_diff.get_sample_diff("output_bytes_total", labels) == data.nbytes
-    assert (
-        prom_diff.get_sample_diff("output_samples_total", labels)
-        == N_CHUNKS * N_FRAMES * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
-    )
-    assert prom_diff.get_sample_diff("output_skipped_heaps_total", labels) == 0
+    assert prom_diff.get_sample_diff("output_heaps_total", labels) == good_frames * N_SUBSTREAMS
+    expected_samples = good_frames * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
+    assert prom_diff.get_sample_diff("output_samples_total", labels) == expected_samples
+    expected_bytes = expected_samples * COMPLEX * sample_bits // BYTE_BITS
+    assert prom_diff.get_sample_diff("output_bytes_total", labels) == expected_bytes
+    assert prom_diff.get_sample_diff("output_skipped_heaps_total", labels) == skip_frames * N_SUBSTREAMS
     for pol in range(N_POLS):
         pol_labels = {"stream": NAME, "pol": str(pol)}
         assert prom_diff.get_sample_diff("output_clipped_samples_total", pol_labels) == saturated[pol]
