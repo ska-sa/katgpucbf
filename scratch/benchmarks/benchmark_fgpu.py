@@ -279,8 +279,8 @@ async def process(
 async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     """Perform a single trial."""
     sync_time = int(time.time())
-    async with await run_fgpus(adc_sample_rate, sync_time, args):
-        async with await run_dsims(adc_sample_rate, sync_time, args):
+    async with await run_dsims(adc_sample_rate, sync_time, args):
+        async with await run_fgpus(adc_sample_rate, sync_time, args):
             return await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
     raise AssertionError("should be unreachable")
 
