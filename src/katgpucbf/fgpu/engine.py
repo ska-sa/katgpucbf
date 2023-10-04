@@ -548,7 +548,7 @@ class Pipeline:
         self.descriptor_heap = send.make_descriptor_heap(
             channels_per_substream=output.channels // len(output.dst),
             spectra_per_heap=engine.spectra_per_heap,
-            bits=engine.dst_sample_bits,
+            sample_bits=engine.dst_sample_bits,
         )
 
     def _populate_sensors(self) -> None:

@@ -164,3 +164,18 @@ def packbits(data: np.ndarray, sample_bits: int = DIG_SAMPLE_BITS) -> NDArray[np
     bits = bits[..., -sample_bits:]
     bits = bits.reshape(bits.shape[:-2] + (-1,))
     return np.packbits(bits, axis=-1)
+
+
+def unpack_complex(data: np.ndarray) -> np.ndarray:
+    """Unpack array of Gaussian integers to complex dtype.
+
+    The dtype of `data` must be a type returned by :func:`.gaussian_dtype`.
+    """
+    if data.dtype.itemsize == 1:
+        # It's 4-bit packed. We assume that >> will sign extend on signed types
+        real = data.view(np.int8) >> 4
+        imag = data.view(np.int8) << 4 >> 4
+    else:
+        real = data["real"]
+        imag = data["imag"]
+    return real.astype(np.float32) + 1j * imag.astype(np.float32)
