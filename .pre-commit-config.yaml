@@ -62,7 +62,8 @@ repos:
             'spead2==4.1.0',
             'types-decorator==5.1.1',
             'types-docutils==0.18.1',
-            'types-redis==4.6.0',
+            'types-redis==4.6.0',  # Indirectly needed by katsdptelstate
+            'types-setuptools==68.2.0.0',  # Indirectly needed via redis
             'types-six==1.16.0',
         ]
   - repo: https://github.com/jazzband/pip-tools
