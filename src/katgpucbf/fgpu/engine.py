@@ -282,7 +282,7 @@ class MappedArray:
         """
         assert isinstance(slot, accel.IOSlot)
         padded_shape = slot.required_padded_shape()
-        n_bytes = int(np.product(padded_shape)) * slot.dtype.itemsize
+        n_bytes = int(np.prod(padded_shape)) * slot.dtype.itemsize
         with context:
             handle = vkgdr.pycuda.Memory(vkgdr_handle, n_bytes)
         # Slice out the shape from the padded shape

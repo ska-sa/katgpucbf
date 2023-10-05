@@ -42,7 +42,7 @@ class SharedArray:
 
     @staticmethod
     def _byte_size(shape: tuple[int, ...], dtype: DTypeLike) -> int:
-        return int(np.product(shape)) * np.dtype(dtype).itemsize
+        return int(np.prod(shape)) * np.dtype(dtype).itemsize
 
     def __init__(self, fd: int, shape: tuple[int, ...], dtype: DTypeLike) -> None:
         size = self._byte_size(shape, dtype)

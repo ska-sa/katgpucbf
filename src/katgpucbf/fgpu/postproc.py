@@ -202,7 +202,7 @@ class Postproc(accel.Operation):
                 self.buffer("gains").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
-                np.int32(np.product(in_.padded_shape[1:])),  # in_stride
+                np.int32(np.prod(in_.padded_shape[1:])),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
