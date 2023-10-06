@@ -17,6 +17,7 @@
 """Unit tests for :mod:`katgpucbf.fgpu.send`."""
 
 import asyncio
+from typing import Sequence
 from unittest import mock
 
 import aiokatcp
@@ -41,7 +42,6 @@ N_CHANNELS = 1024
 N_SPECTRA_PER_HEAP = 32  # Small to make the test fast
 SPECTRA_SAMPLES = 2 * N_CHANNELS
 FENG_ID = 3
-INTERFACES = ["10.0.0.1", "10.0.0.2"]
 NAME = "foo"
 
 
@@ -50,15 +50,21 @@ def sample_bits(request) -> int:
     return request.param
 
 
+@pytest.fixture(params=[1, 2])
+def interfaces(request) -> Sequence[str]:
+    # request.param gives number of interfaces to use
+    return ["10.0.0.1", "10.0.0.2"][: request.param]
+
+
 @pytest.fixture
 def time_converter() -> TimeConverter:
     return TimeConverter(1234567890.0, 1e9)
 
 
 @pytest.fixture
-def queues() -> dict[str, list[spead2.InprocQueue]]:
+def queues(interfaces: Sequence[str]) -> dict[str, list[spead2.InprocQueue]]:
     """Create in-process queues to connect the test code to the test."""
-    return {iface: [spead2.InprocQueue() for _ in range(N_SUBSTREAMS)] for iface in INTERFACES}
+    return {iface: [spead2.InprocQueue() for _ in range(N_SUBSTREAMS)] for iface in interfaces}
 
 
 @pytest.fixture
@@ -104,7 +110,7 @@ def send_streams(
             output_name=NAME,
             thread_pool=spead2.ThreadPool(1),
             endpoints=expected_endpoints,
-            interfaces=INTERFACES,
+            interfaces=list(queues.keys()),
             ttl=4,
             ibv=False,
             packet_payload=8192,
@@ -124,7 +130,7 @@ def recv_streams(queues: dict[str, list[spead2.InprocQueue]]) -> dict[str, list[
     """Create streams for receiving the transmitted data."""
     config = spead2.recv.StreamConfig()
     streams: dict[str, list[spead2.recv.asyncio.Stream]] = {}
-    for iface in INTERFACES:
+    for iface in queues.keys():
         streams[iface] = []
         for queue in queues[iface]:
             tp = spead2.ThreadPool(1)
@@ -156,6 +162,22 @@ def _fill_random(data: np.ndarray, rng: np.random.Generator) -> None:
     """
     view = data.view(np.uint8)
     view[:] = rng.integers(0, 256, view.shape, dtype=np.uint8)
+
+
+def test_bad_substreams():
+    """Test that :class:`Chunk` raises an exception if n_substreams doesn't divide n_channels.
+
+    This is really just for code coverage; nothing really depends on it.
+    """
+    dtype = gaussian_dtype(8)
+    with pytest.raises(ValueError):
+        Chunk(
+            np.zeros((N_FRAMES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
+            np.zeros((N_FRAMES, N_POLS), np.uint32),
+            n_substreams=5,
+            feng_id=FENG_ID,
+            spectra_samples=SPECTRA_SAMPLES,
+        )
 
 
 async def test_send(
@@ -193,7 +215,10 @@ async def test_send(
         # That isn't necessary for this test.
         _fill_random(chunk.saturated, rng)
         chunk.present[:] = True
-        chunk.timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP * N_FRAMES
+        timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP * N_FRAMES
+        chunk.timestamp = timestamp
+        # Check that the property works as expected
+        assert chunk.timestamp == timestamp
     # Knock out the first few frames, to test partial transmission
     chunks[0].present[:skip_frames] = False
     data = np.concatenate([chunk.data for chunk in chunks])
@@ -214,13 +239,13 @@ async def test_send(
             queue.stop()
 
     n_channels_per_substream = N_CHANNELS // N_SUBSTREAMS
-    heaps_per_iface = {iface: 0 for iface in INTERFACES}
+    heaps_per_iface = {iface: 0 for iface in queues.keys()}
     for i in range(N_SUBSTREAMS):
         seen_frames = np.zeros(N_CHUNKS * N_FRAMES, bool)
         # Only one of the two interfaces should be receiving any data for
         # this substream, but it's simpler to just iterate over both and
         # find the data wherever it happened to fall.
-        for iface in INTERFACES:
+        for iface in queues.keys():
             recv_stream = recv_streams[iface][i]
             ig = spead2.ItemGroup()
             frame = skip_frames
@@ -243,8 +268,8 @@ async def test_send(
         assert np.all(seen_frames[skip_frames:])  # Check that we received all the data we expected
     # Check the load balancing
     good_frames = N_CHUNKS * N_FRAMES - skip_frames
-    for iface in INTERFACES:
-        assert heaps_per_iface[iface] == N_SUBSTREAMS * good_frames // len(INTERFACES)
+    for iface in queues.keys():
+        assert heaps_per_iface[iface] == N_SUBSTREAMS * good_frames // len(queues)
 
     # Check the sensors and Prometheus metrics
     labels = {"stream": NAME}
