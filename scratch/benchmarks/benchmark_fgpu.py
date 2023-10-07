@@ -350,7 +350,7 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
     # The magic numbers are determined from fit.py.
     slope = {
         1: -342.212919,
-        2: -400.0,  # TODO: need to measure
+        2: -173.264274,
         4: -582.668296,
     }[args.n]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
