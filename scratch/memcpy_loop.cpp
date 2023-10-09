@@ -49,6 +49,7 @@ enum class memory_function
     MEMCPY,
     MEMCPY_STREAM_SSE2,
     MEMCPY_STREAM_AVX,
+    MEMCPY_STREAM_AVX512,
     MEMSET,
     MEMSET_STREAM_SSE2,
     READ
@@ -73,6 +74,7 @@ static string memory_function_name(memory_function func)
     case memory_function::MEMCPY: return "memcpy";
     case memory_function::MEMCPY_STREAM_SSE2: return "memcpy_stream_sse2";
     case memory_function::MEMCPY_STREAM_AVX: return "memcpy_stream_avx";
+    case memory_function::MEMCPY_STREAM_AVX512:return "memcpy_stream_avx512";
     case memory_function::MEMSET: return "memset";
     case memory_function::MEMSET_STREAM_SSE2: return "memset_stream_sse2";
     case memory_function::READ:   return "read";
@@ -215,6 +217,66 @@ static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict
     return dest;
 }
 
+// memcpy, with AVX-512 streaming stores
+[[gnu::target("avx512f")]]
+static void *memcpy_stream_avx512(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    char * __restrict__ dest_c = (char *) dest;
+    const char * __restrict__ src_c = (const char *) src;
+    // Align the destination to a cache-line boundary
+    std::uintptr_t dest_i = std::uintptr_t(dest_c);
+    constexpr std::uintptr_t cache_line_mask = cache_line_size - 1;
+    std::uintptr_t aligned = (dest_i + cache_line_mask) & ~cache_line_mask;
+    std::size_t head = aligned - dest_i;
+    if (head > 0)
+    {
+        if (head >= n)
+        {
+            std::memcpy(dest_c, src_c, n);
+            /* Not normally required, but if the destination is
+             * write-combining memory then this will flush the combining
+             * buffers. That may be necessary if the memory is actually on
+             * a GPU or other accelerator.
+             */
+            _mm_sfence();
+            return dest;
+        }
+        std::memcpy(dest_c, src_c, head);
+        dest_c += head;
+        src_c += head;
+        n -= head;
+    }
+    std::size_t offset = 0;
+    for (offset = 0; offset + 512 <= n; offset += 512)
+    {
+        __m512i value0 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 0));
+        __m512i value1 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 1));
+        __m512i value2 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 2));
+        __m512i value3 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 3));
+        __m512i value4 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 4));
+        __m512i value5 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 5));
+        __m512i value6 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 6));
+        __m512i value7 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 7));
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 0), value0);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 1), value1);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 2), value2);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 3), value3);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 4), value4);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 5), value5);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 6), value6);
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 7), value7);
+    }
+    for (; offset + 64 <= n; offset += 64)
+    {
+        __m512i value0 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 0));
+        _mm512_stream_si512((__m512i *) (dest_c + offset + 0), value0);
+    }
+    std::size_t tail = n - offset;
+    std::memcpy(dest_c + offset, src_c + offset, tail);
+    _mm_sfence();
+    return dest;
+}
+
 /* memset, but using SSE streaming stores */
 static void memset_stream_sse2(void *dst, int c, std::size_t bytes) noexcept
 {
@@ -350,6 +412,10 @@ static void worker(
             for (int p = 0; p < passes; p++)
                 memcpy_stream_avx(dst, src, buffer_size);
             break;
+        case memory_function::MEMCPY_STREAM_AVX512:
+            for (int p = 0; p < passes; p++)
+                memcpy_stream_avx512(dst, src, buffer_size);
+            break;
         case memory_function::MEMSET:
             for (int p = 0; p < passes; p++)
                 memset(dst, 0, buffer_size);
@@ -402,6 +468,8 @@ int main(int argc, char *const argv[])
                 mem_func = memory_function::MEMCPY_STREAM_SSE2;
             else if (optarg == "memcpy_stream_avx"s)
                 mem_func = memory_function::MEMCPY_STREAM_AVX;
+            else if (optarg == "memcpy_stream_avx512"s)
+                mem_func = memory_function::MEMCPY_STREAM_AVX512;
             else if (optarg == "memset"s)
                 mem_func = memory_function::MEMSET;
             else if (optarg == "memset_stream_sse2"s)
@@ -410,7 +478,7 @@ int main(int argc, char *const argv[])
                 mem_func = memory_function::READ;
             else
             {
-                std::cerr << "Invalid memory function (must be memcpy, memcpy_stream_sse2, memcpy_stream_avx, memset, memset_stream_sse2 or read)\n";
+                std::cerr << "Invalid memory function (must be memcpy, memcpy_stream_sse2, memcpy_stream_avx, memcpy_stream_avx512, memset, memset_stream_sse2 or read)\n";
                 return 1;
             }
             break;
