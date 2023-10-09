@@ -23,11 +23,13 @@ import katsdpsigproc.accel as accel
 import numpy as np
 import spead2
 import spead2.send.asyncio
+from aiokatcp import SensorSet
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
+from ..spead import BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
+from ..utils import TimeConverter
 from .output import BOutput
 
 # NOTE: ICD suggests `beng_out_bits_per_sample`,
@@ -35,30 +37,118 @@ from .output import BOutput
 SEND_DTYPE = np.dtype(np.int8)
 
 
-class Heap:
-    """Hold all data for a heap.
+class Frame:
+    """Hold all data for heaps with a single timestamp.
 
-    # TODO: This will likely need to be updated to the 'fgpu.send.Chunk' methodology
-            - Especially to dictate 'Frames' within the Chunk
+    It does not own its memory - the backing store is in :class:`Chunk`.
+
+    Parameters
+    ----------
+    timestamp
+        Zero-dimensional array of dtype ``>u8`` holding the timestamp
+    data
+        Payload data for the frame with shape (n_channels_per_substream, spectra_per_heap, COMPLEX)
+    saturated
+        Total number of complex samples that saturated during requantisation
+    n_substreams
+        # TODO Re-word this
+        Number of beams requiring data to be transmitted
     """
 
     def __init__(
         self,
-        context: AbstractContext,
-        n_channels_per_substream: int,
-        n_spectra_per_heap: int,
+        timestamp: np.ndarray,
+        data: np.ndarray,
+        saturated: np.ndarray,
+        *,
+        channel_offset: int,
+        n_substreams: int,
     ) -> None:
-        self.buffer: Final = accel.HostArray(
-            (n_channels_per_substream, n_spectra_per_heap, COMPLEX), SEND_DTYPE, context=context
-        )
+        self.heaps = []
+        self.data = data
+        self.saturated = saturated
+        for i in range(n_substreams):
+            heap = spead2.send.Heap(flavour=FLAVOUR)
+            heap.repeat_pointers = True
+            heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
+            heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
+            # TODO: Update `self.data` to slice off beam data for each substream
+            heap.add_item(
+                spead2.Item(
+                    BF_RAW_ID,
+                    "bf_raw",
+                    "",
+                    shape=data.shape,
+                    dtype=data.dtype,
+                    value=data,
+                )
+            )
+            self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
+
+
+class Chunk:
+    """An array of :class:`Heaps`."""
+
+    def __init__(
+        self,
+        data: np.ndarray,
+        saturated: np.ndarray,
+        *,
+        channel_offset: int,
+        n_substreams: int,
+    ) -> None:
+        # data.shape[0] should be some outer element indicating n_heaps
+        # to fill a Chunk.
+        # NOTE: I think this value == heaps-per-feng-per-chunk????
+        n_heaps = data.shape[0]
+        n_channels_per_substream = data.shape[1]
+        spectra_per_heap = data.shape[2]
+        self.data = data  # data should have all the dimensions required
+        self.saturated = saturated
+
+        # TODO: Clarify whether the timestamp_step is the same as the
+        #       `engine.rx_heap_timestamp_step`.
+        self._timestamp = 0
+        self._timestamp_step = n_channels_per_substream * spectra_per_heap
+        self._timestamps = (np.arange(n_heaps) * self._timestamp_step).astype(">u8")
+
+        # Need a future for each heap to be sent
+        self.futures: list[asyncio.Future] = [asyncio.get_running_loop().create_future() for _ in range(n_heaps)]
+        for future in self.futures:
+            future.set_result(None)
+
+        self._frames = [
+            Frame(
+                self._timestamps[i, ...],
+                data[i],
+                saturated[i],
+                channel_offset=channel_offset,
+                n_substreams=n_substreams,
+            )
+            for i in range(n_heaps)
+        ]
+
+    @property
+    def timestamp(self) -> int:
+        """
+        Timestamp of the first heap.
+
+        Setting this property updates the timestamps stored in all the heaps.
+        This should not be done while a previous call to :meth:`send` is still
+        in progress.
+        """
+        return self._timestamp
+
+    @timestamp.setter
+    def timestamp(self, value: int) -> None:
+        delta = value - self.timestamp
+        # TODO: This specifically needs some attention Re: Casting error
+        self._timestamps = self._timestamps + delta
+        self._timestamp = value
 
 
 class BSend:
-    """
-    Class for turning tied array channelised voltage products into SPEAD heaps.
-
-    NOTE: Each BSend shouldn't need its own *version* of a descriptor heap
-    """
+    """Class for turning tied array channelised voltage products into SPEAD heaps."""
 
     descriptor_heap: spead2.send.Heap
     header_size: Final[int] = 64
@@ -66,6 +156,8 @@ class BSend:
     def __init__(
         self,
         output: BOutput,
+        heaps_per_fengine_per_chunk: int,
+        n_tx_items: int,
         n_channels_per_substream: int,
         spectra_per_heap: int,
         send_rate_factor: float,
@@ -81,23 +173,34 @@ class BSend:
         # - The `send` function will need to keep track of "which substream
         #   is enabled/disabled" Re: capture-{start, stop} <stream_name>
         self.enabled_stream_ids: list[int] = []
+        self.tx_enabled = tx_enabled
 
-        self._heaps_queue: asyncio.Queue[Heap] = asyncio.Queue()
-        buffers: list[accel.HostArray] = []
+        self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
+        buffers: list[np.ndarray] = []
 
         # `n_heaps_to_send` is actually used to dictate the amount of buffers (in XSend)
         # So perhaps we need to change the number of buffers to be range(send_free_queue.maxsize)
-        n_heaps_to_send = len(buffers) // spectra_per_heap
+        # n_heaps_to_send = len(buffers) // spectra_per_heap
 
-        for _ in range(n_heaps_to_send):
-            heap = Heap(context, n_channels_per_substream, spectra_per_heap)
-            self._heaps_queue.put_nowait(heap)
-            buffers.append(heap.buffer)
+        send_shape = (heaps_per_fengine_per_chunk, n_channels_per_substream, spectra_per_heap, COMPLEX)
+        for _ in range(n_tx_items):
+            chunk = Chunk(
+                accel.HostArray(send_shape, SEND_DTYPE, context=context),
+                accel.HostArray(
+                    (heaps_per_fengine_per_chunk,),
+                    np.uint32,
+                ),
+                channel_offset=channel_offset,
+                n_substreams=1,  # TODO: Update once single-beam is working
+            )
+            self._chunks_queue.put_nowait(chunk)
+            buffers.append(chunk.data)
 
         # Multicast stream parameters
         self.heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
         # Transport-agnostic stream information
         # Used in XSend to calculate `send_rate_bytes_per_second`, do we need it here?
+        # TODO: Scope to move this calculation into a helper in utils
         # packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
         # packet_header_overhead_bytes = packets_per_heap * BSend.header_size
 
@@ -107,7 +210,7 @@ class BSend:
             rate_method=spead2.send.RateMethod.AUTO,
             rate=0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
         )
-        self.source_stream = stream_factory(stream_config, buffers)
+        self.stream = stream_factory(stream_config, buffers)
 
         item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         item_group.add_item(
@@ -134,9 +237,28 @@ class BSend:
 
         self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
 
-    async def send_heap(self, heap: Heap) -> None:
-        """Take in a buffer and send it as a SPEAD heap."""
-        pass
+    async def send_chunk(
+        self,
+        chunk: Chunk,
+        time_converter: TimeConverter,
+        sensors: SensorSet,
+    ) -> None:
+        """
+        Transmit a Chunk's heaps.
+
+        .. todo::
+            Also update its relevant counters and sensor values.
+
+            This might need to be moved outside BSend because it looks
+            a bit awkward. Stream already owns the Chunks.
+        """
+        if self.tx_enabled:
+            chunk.futures = [
+                self.stream.async_send_heaps(frame.heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                for frame in chunk._frames
+            ]
+            # await asyncio.gather(*chunk.futures)
+            self._chunks_queue.put_nowait(chunk)
 
     def enable_substream(self, stream_id: int, enable: bool = True) -> None:
         """Enable/Disable a substream's data transmission.
@@ -155,6 +277,23 @@ class BSend:
             disabled.
         """
         pass
+
+    async def get_free_chunk(self) -> Chunk:
+        """Return a Chunk once it has completed its send futures."""
+        chunk = await self._chunks_queue.get()
+        # TODO: Do we need to do this if we gather the futures in `send_chunk`?
+        await asyncio.wait(chunk.futures)
+        return chunk
+
+    async def send_stop_heap(self) -> None:
+        """Send a Stop Heap over the spead2 transport."""
+        stop_heap = spead2.send.Heap(FLAVOUR)
+        stop_heap.add_end()
+        # Flush just to ensure that we don't overflow the stream's queue.
+        # It's a heavy-handed approach, but we don't care about performance
+        # during shutdown.
+        await self.stream.async_flush()
+        await self.stream.async_send_heap(stop_heap)
 
 
 def make_stream(

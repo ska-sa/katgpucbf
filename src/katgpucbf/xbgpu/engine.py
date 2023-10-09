@@ -276,11 +276,31 @@ class BPipeline(Pipeline):
     output: BOutput
 
     def __init__(
-        self, output: BOutput, engine: "XBEngine", context: AbstractContext, name: str = DEFAULT_BPIPELINE_NAME
+        self,
+        output: BOutput,
+        engine: "XBEngine",
+        context: AbstractContext,
+        init_tx_enabled: bool,
+        name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
         super().__init__(output, name, engine, context)
-        # TODO: We don't need individual Beams
         self.n_beams = 1
+
+        # TODO: Obtain this in a neater way once the beamformer OpSequence is done
+        buffer_shape = (
+            engine.heaps_per_fengine_per_chunk,
+            engine.n_channels_per_substream,
+            engine.src_layout.n_spectra_per_heap,
+            COMPLEX,
+        )
+        for _ in range(self.n_tx_items):
+            # TODO: Declare shapes, dtypes, etc
+            buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=np.int32)
+            saturated = accel.DeviceArray(context, shape=(), dtype=np.uint32)
+            present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
+            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
+            self._tx_free_item_queue.put_nowait(tx_item)
+
         # We can dictate non-contiguous multicast endpoints as substreams
         # in the stream config!
         # Still, need to collate all output.dst addresses into one list to give to BSend
@@ -288,7 +308,9 @@ class BPipeline(Pipeline):
         # To keep the output.name and output.dst in lock-step, probably best to
         # pass `outputs` to BSend constructor?
         self.send_stream = BSend(
-            output=output,
+            output,
+            engine.heaps_per_fengine_per_chunk,
+            self.n_tx_items,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             send_rate_factor=engine.send_rate_factor,
@@ -305,6 +327,7 @@ class BPipeline(Pipeline):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
+            tx_enabled=init_tx_enabled,
         )
 
     def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
@@ -314,15 +337,100 @@ class BPipeline(Pipeline):
 
         pass
 
+    async def _flush_out(self, tx_item: TxQueueItem, new_timestamp: int) -> TxQueueItem:
+        """Emit the current `tx_item` and prepare a new one."""
+        tx_item.add_marker(self._proc_command_queue)
+        self._tx_item_queue.put_nowait(tx_item)
+
+        tx_item = await self._tx_free_item_queue.get()
+        await tx_item.async_wait_for_events()
+        tx_item.reset(new_timestamp)
+        return tx_item
+
     async def gpu_proc_loop(self) -> None:  # noqa: D102
-        pass
+        # NOTE: Have the first tx_item obtained to have a timestamp
+        # of -1, to show it still needs to be filled in.
+        tx_item = await self._tx_free_item_queue.get()
+        await tx_item.async_wait_for_events()
+
+        tx_item.timestamp = -1
+        # Bind output buffers
+        while True:
+            # Get item from the receiver loop.
+            # - Wait for the HtoD transfers to complete, then
+            # - Give the chunk back to the receiver for reuse.
+            rx_item = await self._rx_item_queue.get()
+            if rx_item is None:
+                break
+            await rx_item.async_wait_for_events()
+
+            # Bind input buffers
+            # Queue GPU work
+            # - For now, just fill it with zeros
+            tx_item.buffer_device.zero(self._proc_command_queue)
+            tx_item.saturated.zero(self._proc_command_queue)
+            # TODO: Timestamp needs to be corrected
+            tx_item = await self._flush_out(tx_item, rx_item.timestamp + self.engine.rx_heap_timestamp_step)
+
+            # Finish with the rx_item
+            rx_item.add_marker(self._proc_command_queue)
+            self.engine.free_rx_item(rx_item)
+        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # it will never exit. Upon receiving this NoneType, the sender_loop can
+        # stop waiting and exit.
+        logger.debug("gpu_proc_loop completed")
+        self._tx_item_queue.put_nowait(None)
 
     async def sender_loop(self) -> None:  # noqa: D102
         # NOTE: This function passes the entire downloaded data to
         # chunk.send, which then takes care of directing data to each beam's
         # output destination.
-        # TODO: Probably something like
-        pass
+
+        # Get a populated TxQueueItem from the tx_item_queue
+        while True:
+            item = await self._tx_item_queue.get()
+            if item is None:
+                break
+            await item.async_wait_for_events()
+            # For now, assume item.timestamp has been populated correctly
+
+            # Get a free Chunk from the send_stream
+            chunk = await self.send_stream.get_free_chunk()
+            # Any send events to be completed should be taken care of in the
+            # await above.
+
+            # Kick off any data downloads from the GPU
+            item.buffer_device.get_async(self._download_command_queue, chunk.data)
+            item.saturated.get_async(self._download_command_queue, chunk.saturated)
+
+            # Wait for the transfer
+            event = self._download_command_queue.enqueue_marker()
+            await katsdpsigproc.resource.async_wait_for_events([event])
+
+            # Set the Chunk timestamp
+            chunk.timestamp = item.timestamp
+            if self.send_stream.tx_enabled:
+                # Update beng-clip-cnt sensor
+                # But fgpu does it all in chunk.send by passing it
+                # - Send stream(s),
+                # - Frames (int, to send)
+                # - time_converter, to get `end_time` for setting clip-cnt sensor
+                # - engine.sensors, to obtain the clip-cnt sensor
+                # - output_name, because the Chunk didn't have access to it
+                #   (to find sensor name).
+
+                pass
+            await self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
+            await self._tx_free_item_queue.put(item)
+
+        await self.send_stream.send_stop_heap()
+        logger.debug("sender_loop completed")
+
+        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # it will never exit. Upon receiving this NoneType, the sender_loop can
+        # stop waiting and exit.
+        logger.debug("gpu_proc_loop completed")
+        self._tx_item_queue.put_nowait(None)
 
 
 class XPipeline(Pipeline):
@@ -866,7 +974,7 @@ class XBEngine(DeviceServer):
         self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in x_outputs]
         if len(b_outputs) == 1:
             # TODO: Update once more BOutput's are supported
-            self._pipelines.append(BPipeline(b_outputs[0], self, context))
+            self._pipelines.append(BPipeline(b_outputs[0], self, context, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()
 
@@ -1044,7 +1152,7 @@ class XBEngine(DeviceServer):
             # TODO: Make this parametrisable somehow for XPipeline vs BPipeline
             # BPipeline needs to stagger the sending of descriptors
             descriptor_sender = DescriptorSender(
-                pipeline.send_stream.source_stream,  # type: ignore
+                pipeline.send_stream.stream,  # type: ignore
                 pipeline.send_stream.descriptor_heap,  # type: ignore
                 descriptor_interval_s,
             )
