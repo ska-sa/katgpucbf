@@ -69,12 +69,12 @@ code during the course of their run.
   configuration as described in `coverage's documentation`_. This produces a
   slightly different output which conveys more or less similar information.
 
-  .. _coverage's documentation: https://coverage.readthedocs.io/en/stable/contexts.html#dynamic-contexts
+  .. _coverage's documentation: https://coverage.readthedocs.io/en/latest/contexts.html#dynamic-contexts
 
   :mod:`.coverage`\'s `static context`_ is more difficult to specify in a way that
   is useful. To generate the report above, I executed the following command:
 
-  .. _static context: https://coverage.readthedocs.io/en/stable/contexts.html#static-contexts
+  .. _static context: https://coverage.readthedocs.io/en/latest/contexts.html#static-contexts
 
   .. code-block:: bash
 
