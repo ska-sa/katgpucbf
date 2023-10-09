@@ -42,7 +42,7 @@ class TestXSend:
         """Send a fixed number of heaps."""
         # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
-        await send_stream.source_stream.async_send_heap(send_stream.descriptor_heap)
+        await send_stream.stream.async_send_heap(send_stream.descriptor_heap)
 
         for i in range(TOTAL_HEAPS):
             # Get a free heap - there is not always a free one available. This
@@ -60,7 +60,7 @@ class TestXSend:
             send_stream.send_heap(heap)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
-        await send_stream.source_stream.async_flush()
+        await send_stream.stream.async_flush()
 
     @staticmethod
     async def _recv_data(

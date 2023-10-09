@@ -967,7 +967,7 @@ class XBEngine(DeviceServer):
         # before any data makes its way through the pipeline.
         for pipeline in self._pipelines:
             descriptor_sender = DescriptorSender(
-                pipeline.send_stream.source_stream,
+                pipeline.send_stream.stream,
                 pipeline.send_stream.descriptor_heap,
                 descriptor_interval_s,
             )

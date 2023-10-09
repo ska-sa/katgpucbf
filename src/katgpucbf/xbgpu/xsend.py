@@ -268,10 +268,10 @@ class XSend:
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )
-        self.source_stream = stream_factory(stream_config, buffers)
+        self.stream = stream_factory(stream_config, buffers)
         # Set heap count sequence to allow a receiver to ingest multiple
         # X-engine outputs, if they should so choose.
-        self.source_stream.set_cnt_sequence(
+        self.stream.set_cnt_sequence(
             channel_offset // n_channels_per_substream,
             n_channels // n_channels_per_substream,
         )
@@ -314,7 +314,7 @@ class XSend:
         """
         if self.tx_enabled:
             saturated = int(heap.saturated)  # Save a copy before giving away the heap
-            heap.future = self.source_stream.async_send_heap(heap.heap)
+            heap.future = self.stream.async_send_heap(heap.heap)
             self._heaps_queue.put_nowait(heap)
             # NOTE: It's not strictly true to say that the data has been sent at
             # this point; it's only been queued for sending. But it should be close
@@ -327,7 +327,7 @@ class XSend:
         else:
             # :meth:`get_free_heap` still needs to await some Future before
             # returning a buffer.
-            heap.future = asyncio.create_task(self.source_stream.async_flush())
+            heap.future = asyncio.create_task(self.stream.async_flush())
             self._heaps_queue.put_nowait(heap)
 
     async def get_free_heap(self) -> Heap:
@@ -358,5 +358,5 @@ class XSend:
         # Flush just to ensure that we don't overflow the stream's queue.
         # It's a heavy-handed approach, but we don't care about performance
         # during shutdown.
-        await self.source_stream.async_flush()
-        await self.source_stream.async_send_heap(stop_heap)
+        await self.stream.async_flush()
+        await self.stream.async_send_heap(stop_heap)
