@@ -12,7 +12,7 @@ aiohttp==3.8.5
     # via
     #   -c requirements.txt
     #   prometheus-async
-aiokatcp==1.7.0
+aiokatcp==1.8.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -327,7 +327,7 @@ six==1.16.0
     #   python-dateutil
 snowballstemmer==2.2.0
     # via sphinx
-spead2==4.0.1
+spead2==4.1.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -393,7 +393,7 @@ tzdata==2023.3
     # via
     #   -c requirements.txt
     #   pandas
-urllib3==2.0.4
+urllib3==2.0.6
     # via requests
 virtualenv==20.24.2
     # via pre-commit

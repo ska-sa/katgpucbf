@@ -35,7 +35,7 @@ from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
 from ..send import DescriptorSender
-from ..utils import TimeConverter, add_signal_handlers
+from ..utils import TimeConverter, add_gc_stats, add_signal_handlers
 from . import descriptors, send, signal
 from .server import DeviceServer
 
@@ -242,6 +242,7 @@ async def async_main() -> None:
     await server.start()
 
     add_signal_handlers(server)
+    add_gc_stats()
 
     now = time.time()
     if args.sync_time is None:

@@ -564,7 +564,7 @@ class TestEngine:
             #   we test that output dumps are aligned correctly, despite
             #   the first data processed not being on an accumulation
             #   boundary.
-            n_heaps = np.product(heap_accumulation_thresholds)
+            n_heaps = np.prod(heap_accumulation_thresholds)
             batch_start_index = 12 * n_heaps  # Somewhere arbitrary that isn't zero
             batch_end_index = batch_start_index + n_heaps
             # Add an extra chunk before the first full accumulation

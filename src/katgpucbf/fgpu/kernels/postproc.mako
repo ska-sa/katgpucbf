@@ -22,8 +22,21 @@
 #define OUT_CHANNELS ${out_high - out_low}
 #define n ${unzip_factor}
 #define m ${channels // unzip_factor}
+#define OUT_BITS ${out_bits}
 
-<%transpose:transpose_data_class class_name="scratch_t" type="char4" block="${block}" vtx="${vtx}" vty="${vty}"/>
+#if OUT_BITS == 4
+// quantised complex number
+typedef unsigned char qcomplex;
+// quantised Jones vector (pair of complex numbers)
+typedef uchar2 qjones;
+#define QMAX 7.0f
+#else
+typedef char2 qcomplex;
+typedef char4 qjones;
+#define QMAX 127.0f
+#endif
+
+<%transpose:transpose_data_class class_name="scratch_t" type="qjones" block="${block}" vtx="${vtx}" vty="${vty}"/>
 <%transpose:transpose_coords_class class_name="transpose_coords" block="${block}" vtx="${vtx}" vty="${vty}"/>
 
 DEVICE_FN float2 cmul(float2 a, float2 b)
@@ -48,41 +61,46 @@ DEVICE_FN float2 csub(float2 a, float2 b)
 }
 
 // Quantise, and return saturation flag
-DEVICE_FN bool quant(float value, signed char *out)
+DEVICE_FN bool quant(float value, int *out)
 {
-    bool saturated = false;
-    if (value < -127.0f)
-    {
-        value = -127.0f;
-        saturated = true;
-    }
-    else if (value > 127.0f)
-    {
-        value = 127.0f;
-        saturated = true;
-    }
+    float clamped = fmin(fmax(value, -QMAX), QMAX);
+    bool saturated = value != clamped;
 
     int q;
     // Convert to s8, round to nearest integer, and saturate
     // (saturation is redundant due to the test above, but automatic
     // for float-to-int conversions on CUDA hardware).
 #ifdef __OPENCL_VERSION__
-    q = convert_char_sat_rte(value);
+    q = convert_char_sat_rte(clamped);
 #else
-    asm("cvt.rni.sat.s8.f32 %0, %1;" : "=r" (q) : "f"(value));
+    asm("cvt.rni.sat.s8.f32 %0, %1;" : "=r" (q) : "f"(clamped));
 #endif
-    // Returning an int as a char can lose values, but since we have
-    // just made sure it's s8 in the previous line, it's guaranteed
-    // not to.
     *out = q;
     return saturated;
 }
 
-// Quantise, and return saturation flag
-DEVICE_FN bool quant_complex(float2 value, signed char *out_x, signed char *out_y)
+#if OUT_BITS == 4
+// Pack two 4-bit values into a char
+DEVICE_FN unsigned char pack_4bit(int2 q)
 {
-    // Note: | not || to avoid short-circuiting
-    return quant(value.x, out_x) | quant(value.y, out_y);
+    return (q.x << 4) | (q.y & 0xF);
+}
+#endif // OUT_BITS == 4
+
+// Quantise a Jones vector, and update number of complex values that saturated
+DEVICE_FN qjones quant_jones(const float2 value[2], unsigned int saturated[2])
+{
+    int2 q[2];  // Quantised but not packed values
+    for (int i = 0; i < 2; i++)
+    {
+        // Note: | not || to avoid short-circuiting
+        saturated[i] += quant(value[i].x, &q[i].x) | quant(value[i].y, &q[i].y);
+    }
+#if OUT_BITS == 4
+    return make_uchar2(pack_4bit(q[0]), pack_4bit(q[1]));
+#else
+    return make_char4(q[0].x, q[0].y, q[1].x, q[1].y);
+#endif
 }
 
 /* Turn a float2 into an array of 2 floats for easier indexing */
@@ -308,7 +326,7 @@ DEVICE_FN int delay_channel(int k)
  * possible changes.
  */
 KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
-    GLOBAL char4 * RESTRICT out,              // Output memory
+    GLOBAL qjones * RESTRICT out,              // Output memory
     GLOBAL unsigned int (* RESTRICT out_saturated)[2], // Output saturation count, per heap and pol
     const GLOBAL float2 * RESTRICT in,       // Complex input voltages
     const GLOBAL float2 * RESTRICT fine_delay, // Fine delay, in fraction of a sample (per pol)
@@ -414,10 +432,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                     }
 
                     // Interleave polarisations. Quantise at the same time.
-                    char4 packed;
-                    saturated[0] += quant_complex(out[0], &packed.x, &packed.y);
-                    saturated[1] += quant_complex(out[1], &packed.z, &packed.w);
-                    scratch[p][i].arr[${lr}][${lc}] = packed;
+                    scratch[p][i].arr[${lr}][${lc}] = quant_jones(out, saturated);
                 }
             }
         }
@@ -432,7 +447,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
         int s = ${r};
         if (s * 2 <= m)  // Note: <= not <. We need to process fft_channels/2 + 1 times
         {
-            char4 *base = out + z * out_stride_z + ${c};
+            qjones *base = out + z * out_stride_z + ${c};
             for (int p = 0; p < n; p++)
             {
                 int k = p * m + s;

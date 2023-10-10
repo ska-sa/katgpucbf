@@ -14,7 +14,7 @@ aiohttp==3.8.5
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   prometheus-async
-aiokatcp==1.7.0
+aiokatcp==1.8.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -227,7 +227,7 @@ partd==1.4.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-pillow==10.0.0
+pillow==10.0.1
     # via matplotlib
 pluggy==1.2.0
     # via
@@ -321,7 +321,7 @@ six==1.16.0
     #   -c qualification/../requirements.txt
     #   katsdptelstate
     #   python-dateutil
-spead2==4.0.1
+spead2==4.1.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -354,7 +354,7 @@ tzdata==2023.3
     #   pandas
 tzlocal==5.0.1
     # via dateparser
-urllib3==2.0.4
+urllib3==2.0.6
     # via
     #   -c qualification/../requirements-dev.txt
     #   requests

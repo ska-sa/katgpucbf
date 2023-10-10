@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -242,7 +242,7 @@ class Correlation(accel.Operation):
                 mid_visibilities_buffer.buffer,
                 np.uint32(self.n_batches),
             ],
-            global_size=(accel.roundup(int(np.product(out_visibilities_buffer.shape)), wgs), 1, 1),
+            global_size=(accel.roundup(int(np.prod(out_visibilities_buffer.shape)), wgs), 1, 1),
             local_size=(wgs, 1, 1),
         )
 

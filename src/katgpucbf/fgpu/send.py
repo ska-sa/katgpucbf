@@ -36,6 +36,8 @@ from . import METRIC_NAMESPACE
 PREAMBLE_SIZE = 72
 #: Data type of the output payload
 SEND_DTYPE = np.dtype(np.int8)
+#: Number of bits per real component in SEND_DTYPE
+SEND_BITS = 8
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter(
     "output_bytes", "number of payload bytes transmitted", ["stream"], namespace=METRIC_NAMESPACE
@@ -61,7 +63,7 @@ class Frame:
     timestamp
         Zero-dimensional array of dtype ``>u8`` holding the timestamp.
     data
-        Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS, COMPLEX).
+        Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS).
     saturated
         Saturation data for the frame, of shape (N_POLS,)
     feng_id
@@ -172,7 +174,7 @@ class Chunk:
         if not future.cancelled() and future.exception() is None:
             output_heaps_counter.labels(output_name).inc(len(frame.heaps))
             output_bytes_counter.labels(output_name).inc(frame.data.nbytes)
-            output_samples_counter.labels(output_name).inc(frame.data.size // COMPLEX)
+            output_samples_counter.labels(output_name).inc(frame.data.size)
             for pol in range(N_POLS):
                 output_clip_counter.labels(output_name, pol).inc(frame.saturated[pol])
 
@@ -220,7 +222,8 @@ def make_streams(
     ibv: bool,
     packet_payload: int,
     comp_vector: int,
-    adc_sample_rate: float,
+    buffer: int,
+    bandwidth: float,
     send_rate_factor: float,
     feng_id: int,
     num_ants: int,
@@ -233,10 +236,10 @@ def make_streams(
     differ only in the network interface used (there is one per interface).
     Thus, they can be used interchangeably for load-balancing purposes.
     """
-    dtype = chunks[0].data.dtype
+    dtype = chunks[0].data.dtype  # Type for each complex value
     memory_regions: list[object] = [chunk.data for chunk in chunks]
     # Send a bit faster than nominal rate to account for header overheads
-    rate = N_POLS * adc_sample_rate * dtype.itemsize * send_rate_factor / len(interfaces)
+    rate = N_POLS * bandwidth * dtype.itemsize * send_rate_factor / len(interfaces)
     config = spead2.send.StreamConfig(
         rate=rate,
         max_packet_size=packet_payload + PREAMBLE_SIZE,
@@ -252,6 +255,7 @@ def make_streams(
                 ttl=ttl,
                 comp_vector=comp_vector,
                 memory_regions=memory_regions,
+                buffer_size=buffer // len(interfaces),
             )
             for interface in interfaces
         ]
@@ -259,7 +263,12 @@ def make_streams(
     else:
         streams = [
             spead2.send.asyncio.UdpStream(
-                thread_pool, [(ep.host, ep.port) for ep in endpoints], config, ttl=ttl, interface_address=interface
+                thread_pool,
+                [(ep.host, ep.port) for ep in endpoints],
+                config,
+                ttl=ttl,
+                interface_address=interface,
+                buffer_size=buffer // len(interfaces),
             )
             for interface in interfaces
         ]

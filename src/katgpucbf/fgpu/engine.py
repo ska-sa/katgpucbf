@@ -37,7 +37,6 @@ from katsdpsigproc.resource import async_wait_for_events
 
 from .. import (
     BYTE_BITS,
-    COMPLEX,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
     MIN_SENSOR_UPDATE_PERIOD,
@@ -53,7 +52,7 @@ from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
+from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, gaussian_dtype
 from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -283,7 +282,7 @@ class MappedArray:
         """
         assert isinstance(slot, accel.IOSlot)
         padded_shape = slot.required_padded_shape()
-        n_bytes = int(np.product(padded_shape)) * slot.dtype.itemsize
+        n_bytes = int(np.prod(padded_shape)) * slot.dtype.itemsize
         with context:
             handle = vkgdr.pycuda.Memory(vkgdr_handle, n_bytes)
         # Slice out the shape from the padded shape
@@ -511,7 +510,12 @@ class Pipeline:
         else:
             narrowband_config = None
         template = ComputeTemplate(
-            context, output.taps, output.channels, engine.src_layout.sample_bits, narrowband=narrowband_config
+            context,
+            output.taps,
+            output.channels,
+            engine.src_layout.sample_bits,
+            send.SEND_BITS,
+            narrowband=narrowband_config,
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, engine.spectra_per_heap)
         # Pre-allocate the memory for some buffers that we know we won't be
@@ -617,11 +621,13 @@ class Pipeline:
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
             heaps = spectra // self.engine.spectra_per_heap
-            send_shape = (heaps, self.output.channels, self.engine.spectra_per_heap, N_POLS, COMPLEX)
+            send_shape = (heaps, self.output.channels, self.engine.spectra_per_heap, N_POLS)
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
-                        accel.HostArray(send_shape, send.SEND_DTYPE, context=self._compute.template.context),
+                        accel.HostArray(
+                            send_shape, gaussian_dtype(send.SEND_BITS), context=self._compute.template.context
+                        ),
                         accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
                         n_substreams=len(self.output.dst),
                         feng_id=self.engine.feng_id,
@@ -1093,7 +1099,7 @@ class Engine(aiokatcp.DeviceServer):
     src_packet_samples
         The number of samples per digitiser packet.
     src_buffer
-        The size of the network receive buffer (per polarisation).
+        The size of the network receive buffer.
     dst_interface
         IP addresses of the network devices to use for output.
     dst_ttl
@@ -1108,6 +1114,8 @@ class Engine(aiokatcp.DeviceServer):
     dst_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
+    dst_buffer
+        Size of the network send buffer.
     outputs
         Output streams to generate. At present this must be a single
         WidebandOutput.
@@ -1174,6 +1182,7 @@ class Engine(aiokatcp.DeviceServer):
         dst_packet_payload: int,
         dst_affinity: int,
         dst_comp_vector: int,
+        dst_buffer: int,
         outputs: list[Output],
         adc_sample_rate: float,
         send_rate_factor: float,
@@ -1209,6 +1218,7 @@ class Engine(aiokatcp.DeviceServer):
         self._dst_ibv = dst_ibv
         self._dst_packet_payload = dst_packet_payload
         self._dst_comp_vector = dst_comp_vector
+        self._dst_buffer = dst_buffer
         self._send_rate_factor = send_rate_factor
         self.adc_sample_rate = adc_sample_rate
         self.feng_id = feng_id
@@ -1361,8 +1371,9 @@ class Engine(aiokatcp.DeviceServer):
             ibv=self._dst_ibv,
             packet_payload=self._dst_packet_payload,
             comp_vector=self._dst_comp_vector,
-            adc_sample_rate=self.adc_sample_rate,
-            send_rate_factor=self._send_rate_factor * output.send_rate_factor,
+            buffer=self._dst_buffer,
+            bandwidth=self.adc_sample_rate * 0.5 / output.decimation,
+            send_rate_factor=self._send_rate_factor,
             feng_id=self.feng_id,
             num_ants=self.n_ants,
             n_data_heaps=n_data_heaps,
@@ -1473,6 +1484,8 @@ class Engine(aiokatcp.DeviceServer):
         """
         prev_item = None
         assert isinstance(group.data_ringbuffer, ChunkRingbuffer)
+        for stream in group:
+            stream.start()
         async for chunk in recv.iter_chunks(group.data_ringbuffer, layout, self.sensors, self.time_converter):
             assert isinstance(chunk, base_recv.Chunk)
             with self.monitor.with_state("run_receive", "wait in_free_queue"):

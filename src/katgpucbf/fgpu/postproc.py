@@ -27,7 +27,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
-from .. import COMPLEX, N_POLS
+from .. import N_POLS, utils
 
 
 class PostprocTemplate:
@@ -47,6 +47,9 @@ class PostprocTemplate:
         considered to be the centre of the band i.e. it is written to the
         middle of the output rather than the start (and similarly, gains for
         it are loaded from the middle of the gain array etc).
+    out_bits
+        Bits per real/imaginary value. Only 4 or 8 are currently supported.
+        When 4, the real part is in the most-significant bits.
     out_channels
         Range of channels to write to the output (defaults to all).
     """
@@ -58,6 +61,7 @@ class PostprocTemplate:
         unzip_factor: int = 1,
         *,
         complex_pfb: bool,
+        out_bits: int,
         out_channels: tuple[int, int] | None = None,
     ) -> None:
         self.block = 32
@@ -65,12 +69,15 @@ class PostprocTemplate:
         self.vty = 1
         self.channels = channels
         self.unzip_factor = unzip_factor
+        self.out_bits = out_bits
         if channels <= 0 or channels & (channels - 1):
             raise ValueError("channels must be a power of 2")
         if channels % unzip_factor:
             raise ValueError("channels must be a multiple of unzip_factor")
         if unzip_factor not in {1, 2, 4}:
             raise ValueError("unzip_factor must be 1, 2 or 4")
+        if out_bits not in {4, 8}:
+            raise ValueError("out_bits must be 4 or 8")
         if out_channels is None:
             self.out_channels = (0, channels)
         else:
@@ -88,6 +95,7 @@ class PostprocTemplate:
                     "channels": channels,
                     "out_low": self.out_channels[0],
                     "out_high": self.out_channels[1],
+                    "out_bits": self.out_bits,
                     "unzip_factor": unzip_factor,
                     "complex_pfb": complex_pfb,
                 },
@@ -114,9 +122,9 @@ class Postproc(accel.Operation):
         Input channelised data for the two polarisations. These are formed by
         taking the complex-to-complex Fourier transform of the input
         reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
-    **out** : spectra // spectra_per_heap × out_channels × spectra_per_heap × N_POLS × COMPLEX, int8
+    **out** : spectra // spectra_per_heap × out_channels × spectra_per_heap × N_POLS
         Output F-engine data, quantised and corner-turned, ready for
-        transmission on the network.
+        transmission on the network. See :func:`.gaussian_dtype` for the type.
     **saturated** : heaps × N_POLS, uint32
         Number of saturated complex values in **out**.
     **fine_delay** : spectra × N_POLS, float32
@@ -156,7 +164,6 @@ class Postproc(accel.Operation):
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
         pols = accel.Dimension(N_POLS, exact=True)
-        cplx = accel.Dimension(COMPLEX, exact=True)
         heaps = spectra // spectra_per_heap
 
         in_shape = (
@@ -166,8 +173,9 @@ class Postproc(accel.Operation):
             accel.Dimension(template.channels // template.unzip_factor, exact=True),
         )
         n_out_channels = template.out_channels[1] - template.out_channels[0]
+        out_dtype = utils.gaussian_dtype(template.out_bits)
         self.slots["in"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["out"] = accel.IOSlot((heaps, n_out_channels, spectra_per_heap, pols, cplx), np.int8)
+        self.slots["out"] = accel.IOSlot((heaps, n_out_channels, spectra_per_heap, pols), out_dtype)
         self.slots["saturated"] = accel.IOSlot((heaps, pols), np.uint32)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
@@ -194,7 +202,7 @@ class Postproc(accel.Operation):
                 self.buffer("gains").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
-                np.int32(np.product(in_.padded_shape[1:])),  # in_stride
+                np.int32(np.prod(in_.padded_shape[1:])),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),

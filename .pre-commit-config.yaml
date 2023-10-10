@@ -51,7 +51,7 @@ repos:
         types: []
         types_or: [python, pyi]
         additional_dependencies: [
-            'aiokatcp==1.7.0',
+            'aiokatcp==1.8.0',
             'asyncssh==2.13.2',
             'dask==2023.7.1',
             'katsdpsigproc==1.8.0',
@@ -59,10 +59,11 @@ repos:
             'numpy==1.24.4',
             'pyparsing==3.0.9',
             'pytest==7.4.0',
-            'spead2==3.12.0',
+            'spead2==4.1.0',
             'types-decorator==5.1.1',
             'types-docutils==0.18.1',
-            'types-redis==4.6.0',
+            'types-redis==4.6.0',  # Indirectly needed by katsdptelstate
+            'types-setuptools==68.2.0.0',  # Indirectly needed via redis
             'types-six==1.16.0',
         ]
   - repo: https://github.com/jazzband/pip-tools
