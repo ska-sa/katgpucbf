@@ -335,24 +335,7 @@ class BPipeline(Pipeline):
 
         pass
 
-    async def _flush_out(self, tx_item: TxQueueItem, new_timestamp: int) -> TxQueueItem:
-        """Emit the current `tx_item` and prepare a new one."""
-        tx_item.add_marker(self._proc_command_queue)
-        self._tx_item_queue.put_nowait(tx_item)
-
-        tx_item = await self._tx_free_item_queue.get()
-        await tx_item.async_wait_for_events()
-        tx_item.reset(new_timestamp)
-        return tx_item
-
     async def gpu_proc_loop(self) -> None:  # noqa: D102
-        # NOTE: Have the first tx_item obtained to have a timestamp
-        # of -1, to show it still needs to be filled in.
-        tx_item = await self._tx_free_item_queue.get()
-        await tx_item.async_wait_for_events()
-
-        tx_item.timestamp = -1
-        # Bind output buffers
         while True:
             # Get item from the receiver loop.
             # - Wait for the HtoD transfers to complete, then
@@ -362,13 +345,21 @@ class BPipeline(Pipeline):
                 break
             await rx_item.async_wait_for_events()
 
+            tx_item = await self._tx_free_item_queue.get()
+            await tx_item.async_wait_for_events()
+            # TODO: Is it fine to update the timestamp like this?
+            tx_item.reset(rx_item.timestamp)
+
             # Bind input buffers
+
             # Queue GPU work
             # - For now, just fill it with zeros
             tx_item.buffer_device.zero(self._proc_command_queue)
             tx_item.saturated.zero(self._proc_command_queue)
-            # TODO: Timestamp needs to be corrected
-            tx_item = await self._flush_out(tx_item, rx_item.timestamp + self.engine.rx_heap_timestamp_step)
+
+            # Bind output buffers
+            tx_item.add_marker(self._proc_command_queue)
+            self._tx_item_queue.put_nowait(tx_item)
 
             # Finish with the rx_item
             rx_item.add_marker(self._proc_command_queue)
@@ -389,13 +380,12 @@ class BPipeline(Pipeline):
             item = await self._tx_item_queue.get()
             if item is None:
                 break
-            await item.async_wait_for_events()
-            # For now, assume item.timestamp has been populated correctly
+            # The CPU doesn't need to wait, but the GPU does to ensure it
+            # won't start the download before computation is done.
+            item.enqueue_wait_for_events(self._download_command_queue)
 
             # Get a free Chunk from the send_stream
             chunk = await self.send_stream.get_free_chunk()
-            # Any send events to be completed should be taken care of in the
-            # await above.
 
             # Kick off any data downloads from the GPU
             item.buffer_device.get_async(self._download_command_queue, chunk.data)
@@ -416,19 +406,12 @@ class BPipeline(Pipeline):
                 # - engine.sensors, to obtain the clip-cnt sensor
                 # - output_name, because the Chunk didn't have access to it
                 #   (to find sensor name).
-
                 pass
             await self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
-            await self._tx_free_item_queue.put(item)
+            self._tx_free_item_queue.put_nowait(item)
 
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
-
-        # When the stream is closed, if the sender loop is waiting for a tx item,
-        # it will never exit. Upon receiving this NoneType, the sender_loop can
-        # stop waiting and exit.
-        logger.debug("gpu_proc_loop completed")
-        self._tx_item_queue.put_nowait(None)
 
 
 class XPipeline(Pipeline):
