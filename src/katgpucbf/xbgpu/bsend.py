@@ -106,8 +106,7 @@ class Chunk:
         self.data = data  # data should have all the dimensions required
         self.saturated = saturated
 
-        # TODO: Clarify whether the timestamp_step is the same as the
-        #       `engine.rx_heap_timestamp_step`.
+        # TODO: Timestamp step is the same as XBEngine's rx_heap_timestamp_step
         self._timestamp = 0
         self._timestamp_step = n_channels_per_substream * spectra_per_heap
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
@@ -142,7 +141,6 @@ class Chunk:
     @timestamp.setter
     def timestamp(self, value: int) -> None:
         delta = value - self.timestamp
-        # TODO: This specifically needs some attention Re: Casting error
         self._timestamps += delta
         self._timestamp = value
 
@@ -206,9 +204,9 @@ class BSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
-            max_heaps=10,  # TODO: Update this to be proper
+            max_heaps=n_tx_items * heaps_per_fengine_per_chunk + 1,  # TODO: Update this to be proper
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
+            rate=0.0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
         )
         self.stream = stream_factory(stream_config, buffers)
 
@@ -231,17 +229,17 @@ class BSend:
             BF_RAW_ID,
             "bf_raw",
             "",  # TODO: What to even say here? ICD says "Channelised complex data"
-            shape=buffers[0].shape,
+            shape=buffers[0].shape[1:],
             dtype=buffers[0].dtype,
         )
 
         self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
 
-    async def send_chunk(
+    def send_chunk(
         self,
         chunk: Chunk,
-        time_converter: TimeConverter,
-        sensors: SensorSet,
+        time_converter: TimeConverter | None = None,
+        sensors: SensorSet | None = None,
     ) -> None:
         """
         Transmit a Chunk's heaps.

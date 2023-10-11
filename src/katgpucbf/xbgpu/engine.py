@@ -407,7 +407,7 @@ class BPipeline(Pipeline):
                 # - output_name, because the Chunk didn't have access to it
                 #   (to find sensor name).
                 pass
-            await self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
+            self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
             self._tx_free_item_queue.put_nowait(item)
 
         await self.send_stream.send_stop_heap()
