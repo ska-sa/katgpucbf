@@ -62,8 +62,7 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
-from .bsend import BSend
+from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, bsend, recv
 from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
 from .output import BOutput, Output, XOutput
@@ -295,19 +294,18 @@ class BPipeline(Pipeline):
         )
         for _ in range(self.n_tx_items):
             # TODO: Declare shapes, dtypes, etc
-            buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=np.int32)
+            buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=bsend.SEND_DTYPE)
             saturated = accel.DeviceArray(context, shape=(), dtype=np.uint32)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        # We can dictate non-contiguous multicast endpoints as substreams
-        # in the stream config!
-        # Still, need to collate all output.dst addresses into one list to give to BSend
+        # TODO: Collate all output.dst addresses into one list to give to BSend
         # The order doesn't *matter*, it's more for peace of mind
         # To keep the output.name and output.dst in lock-step, probably best to
         # pass `outputs` to BSend constructor?
-        self.send_stream = BSend(
+        # TODO: The way this is imported will change once the OperationSequence is in place
+        self.send_stream = bsend.BSend(
             output,
             engine.heaps_per_fengine_per_chunk,
             self.n_tx_items,
