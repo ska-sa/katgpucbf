@@ -97,10 +97,10 @@ class Chunk:
         channel_offset: int,
         n_substreams: int,
     ) -> None:
-        # data.shape[0] should be some outer element indicating n_heaps
+        # data.shape[0] should be some outer element indicating n_frames
         # to fill a Chunk.
         # NOTE: I think this value == heaps-per-feng-per-chunk????
-        n_heaps = data.shape[0]
+        n_frames = data.shape[0]
         n_channels_per_substream = data.shape[1]
         spectra_per_heap = data.shape[2]
         self.data = data  # data should have all the dimensions required
@@ -110,10 +110,10 @@ class Chunk:
         #       `engine.rx_heap_timestamp_step`.
         self._timestamp = 0
         self._timestamp_step = n_channels_per_substream * spectra_per_heap
-        self._timestamps = (np.arange(n_heaps) * self._timestamp_step).astype(">u8")
+        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
 
         # Need a future for each heap to be sent
-        self.futures: list[asyncio.Future] = [asyncio.get_running_loop().create_future() for _ in range(n_heaps)]
+        self.futures: list[asyncio.Future] = [asyncio.get_running_loop().create_future() for _ in range(n_frames)]
         for future in self.futures:
             future.set_result(None)
 
@@ -125,7 +125,7 @@ class Chunk:
                 channel_offset=channel_offset,
                 n_substreams=n_substreams,
             )
-            for i in range(n_heaps)
+            for i in range(n_frames)
         ]
 
     @property
@@ -143,7 +143,7 @@ class Chunk:
     def timestamp(self, value: int) -> None:
         delta = value - self.timestamp
         # TODO: This specifically needs some attention Re: Casting error
-        self._timestamps = self._timestamps + delta
+        self._timestamps += delta
         self._timestamp = value
 
 
