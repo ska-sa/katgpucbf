@@ -45,8 +45,10 @@ def dsim_factory(
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run dsim."""
-    ncpus_per_quadrant = server_info.ncpus // 4
-    cpu_base = index * ncpus_per_quadrant
+    step = server_info.ncpus // args.n
+    if single_pol:
+        step //= 2
+    cpu_base = index * step
     interface = server.interfaces[index % len(server.interfaces)]
     katcp_port = 7140 + index
     prometheus_port = 7150 + index
@@ -57,8 +59,9 @@ def dsim_factory(
         addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --net=host "
-        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
+        f"--name={name} --cap-add=SYS_NICE --net=host "
+        + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
+        + f"--ulimit=memlock=-1 --rm {args.image} "
         f"taskset -c {cpu_base} "
         f"dsim --affinity={cpu_base + 1} "
         "--ibv "
@@ -89,9 +92,10 @@ def fgpu_factory(
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
-    ncpus_per_quadrant = server_info.ncpus // 4
-    hstep = ncpus_per_quadrant // 2
-    cpu_base = index * ncpus_per_quadrant
+    step = server_info.ncpus // n
+    hstep = step // 2
+    qstep = step // 4
+    cpu_base = index * step
     if args.use_vkgdr:
         src_chunk_samples = 2**24 // n
         dst_chunk_jones = src_chunk_samples // 2
@@ -100,22 +104,20 @@ def fgpu_factory(
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = (
-            f"0,1,2,3,{ncpus_per_quadrant},{ncpus_per_quadrant+1},{ncpus_per_quadrant+2},{ncpus_per_quadrant+3}"
-        )
-        dst_affinity = f"{2 * ncpus_per_quadrant}"
-        other_affinity = f"{3 * ncpus_per_quadrant}"
+        src_affinity = f"0,1,2,3,{qstep},{qstep + 1},{qstep + 2},{qstep + 3}"
+        dst_affinity = f"{2 * qstep}"
+        other_affinity = f"{3 * qstep}"
     elif n == 2:
         interface = server.interfaces[index % len(server.interfaces)]
-        cpu_base *= 2
-        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + ncpus_per_quadrant},{cpu_base + ncpus_per_quadrant + 1}"
-        dst_affinity = f"{cpu_base + hstep}"
-        other_affinity = f"{cpu_base + ncpus_per_quadrant + hstep}"
+        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + hstep},{cpu_base + hstep + 1}"
+        dst_affinity = f"{cpu_base + qstep}"
+        other_affinity = f"{cpu_base + hstep + qstep}"
     else:
         interface = server.interfaces[index % len(server.interfaces)]
         src_affinity = f"{cpu_base}"
         dst_affinity = f"{cpu_base + hstep}"
         other_affinity = f"{cpu_base + hstep + 1}"
+
     katcp_port = 7140 + index
     prometheus_port = 7150 + index
     name = f"fgpu-{index}"
@@ -352,6 +354,7 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
         1: -342.212919,
         2: -173.264274,
         4: -582.668296,
+        8: -582.668296,  # Guess: just copying n == 4
     }[args.n]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
     mid_rates = np.r_[args.low, mid_rates, args.high]
