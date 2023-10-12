@@ -92,15 +92,18 @@ def fgpu_factory(
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
+    # When we run > 4, we assume we have enough RAM (GPU and host) that we
+    # don't need to scale buffers down to tiny amounts.
+    scaling_n = min(n, 4)
     step = server_info.ncpus // n
     hstep = step // 2
     qstep = step // 4
     cpu_base = index * step
     if args.use_vkgdr:
-        src_chunk_samples = 2**24 // n
+        src_chunk_samples = 2**24 // scaling_n
         dst_chunk_jones = src_chunk_samples // 2
     else:
-        src_chunk_samples = 2**27 // n
+        src_chunk_samples = 2**27 // scaling_n
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
@@ -130,7 +133,7 @@ def fgpu_factory(
         f"schedrr taskset -c {other_affinity} fgpu "
         f"--src-packet-samples={args.dig_heap_samples} "
         f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
-        f"--src-buffer={256 * 1024 * 1024 // n} "
+        f"--src-buffer={256 * 1024 * 1024 // scaling_n} "
         f"--src-interface={interface} --src-ibv "
         f"--dst-interface={interface} --dst-ibv "
         f"--src-affinity={src_affinity} --src-comp-vector={src_affinity} "
@@ -352,6 +355,7 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
         2: -173.264274,
         4: -582.668296,
         8: -582.668296,  # Guess: just copying n == 4
+        10: -582.668296,  # Guess: just copying n == 4
     }[args.n]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
     mid_rates = np.r_[args.low, mid_rates, args.high]
