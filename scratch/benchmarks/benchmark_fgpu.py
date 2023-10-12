@@ -48,12 +48,17 @@ def dsim_factory(
     if single_pol:
         step //= 2
     cpu_base = index * step
-    interface = server.interfaces[index % len(server.interfaces)]
+    if args.n == 1 or not single_pol:
+        interface = server.interfaces[index % len(server.interfaces)]
+    else:
+        # For larger n, send the two pols over the same interface
+        # (because fgpu_factory expects them to arrive on the same interface)
+        interface = server.interfaces[index // 2 % len(server.interfaces)]
     katcp_port = 7140 + index
     prometheus_port = 7150 + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = ["239.102.0.64+7:7148", "239.102.0.72+7:7148"][index]
+        addresses = f"239.102.{index // 2}.{64 + index % 2 * 8}+7:7148"
     else:
         addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
     command = (
@@ -72,7 +77,7 @@ def dsim_factory(
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
-        f"--first-id={index} "
+        f"--first-id={index if single_pol else 2 * index} "
         f"{addresses} "
     )
     if args.dig_sample_bits is not None:
@@ -175,8 +180,8 @@ async def run_dsims(
     """
     single_pol = False
     n = args.n
-    if n == 1:
-        n = 2
+    if n <= 2:
+        n *= 2
         single_pol = True
     factory = functools.partial(
         dsim_factory,
