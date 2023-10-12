@@ -117,13 +117,14 @@ def fgpu_factory(
         src_affinity = f"{cpu_base}"
         dst_affinity = f"{cpu_base + hstep}"
         other_affinity = f"{cpu_base + hstep + 1}"
+    gpu = server.gpus[index % len(server.gpus)]
 
     katcp_port = 7140 + index
     prometheus_port = 7150 + index
     name = f"fgpu-{index}"
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=all --net=host "
+        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
         f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "

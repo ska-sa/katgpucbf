@@ -40,6 +40,7 @@ class Server:
     hostname: str
     username: str
     interfaces: list[str] = field(default_factory=list)
+    gpus: list[str] = field(default_factory=lambda: ["0"])
     ncpus: int | None = None
 
 
