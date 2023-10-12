@@ -24,7 +24,6 @@ from remote import Server, ServerInfo, run_tasks, servers_from_toml
 from sighandler import add_sigint_handler
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
-SAMPLES_PER_HEAP = 4096
 N_POLS = 2
 DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/cbf/katgpucbf"
 NOISE = 0.01  #: Minimum probability of an incorrect result from each trial
@@ -67,6 +66,7 @@ def dsim_factory(
         "--ibv "
         f"--interface={interface} "
         f"--adc-sample-rate={adc_sample_rate} "
+        f"--heap-samples={args.dig_heap_samples} "
         "--ttl=2 "
         "--period=16777216 "  # Speeds things up
         f"--katcp-port={katcp_port} "
@@ -127,6 +127,7 @@ def fgpu_factory(
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
         f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
+        f"--src-packet-samples={args.dig_heap_samples} "
         f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
         f"--src-buffer={256 * 1024 * 1024 // n} "
         f"--src-interface={interface} --src-ibv "
@@ -257,20 +258,17 @@ class Result:
 
 async def process(
     adc_sample_rate: float,
-    n: int,
-    startup_time: float,
-    runtime: float,
-    fgpu_server: Server,
+    args: argparse.Namespace,
 ) -> Result:
     """Perform a single trial on running engines."""
     async with aiohttp.client.ClientSession() as session:
-        await asyncio.sleep(startup_time)  # Give a chance for startup losses
-        sleeper = asyncio.create_task(asyncio.sleep(runtime))
-        orig_heaps, orig_missing = await heap_counts(session, fgpu_server, n)
+        await asyncio.sleep(args.startup_time)  # Give a chance for startup losses
+        sleeper = asyncio.create_task(asyncio.sleep(args.runtime))
+        orig_heaps, orig_missing = await heap_counts(session, args.fgpu_server, args.n)
         await sleeper
-        new_heaps, new_missing = await heap_counts(session, fgpu_server, n)
+        new_heaps, new_missing = await heap_counts(session, args.fgpu_server, args.n)
 
-    expected_heaps = runtime * adc_sample_rate * n * N_POLS / SAMPLES_PER_HEAP
+    expected_heaps = args.runtime * adc_sample_rate * args.n * N_POLS / args.dig_heap_samples
     return Result(
         expected_heaps=expected_heaps,
         heaps=new_heaps - orig_heaps,
@@ -283,7 +281,7 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     sync_time = int(time.time())
     async with await run_dsims(adc_sample_rate, sync_time, args):
         async with await run_fgpus(adc_sample_rate, sync_time, args):
-            return await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
+            return await process(adc_sample_rate, args)
     raise AssertionError("should be unreachable")
 
 
@@ -301,9 +299,7 @@ async def calibrate(args: argparse.Namespace) -> None:
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                 async with await run_dsims(adc_sample_rate, sync_time, args):
                     async with await run_fgpus(adc_sample_rate, sync_time, args):
-                        result = await process(
-                            adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server
-                        )
+                        result = await process(adc_sample_rate, args)
                 if result.good():
                     successes[j] += 1
                 elif result.missing_heaps == 0:
@@ -401,6 +397,13 @@ async def main():  # noqa: D103
         type=int,
         metavar="SPECTRA",
         help="Spectra in each output heap",
+    )
+    parser.add_argument(
+        "--dig-heap-samples",
+        type=int,
+        metavar="SAMPLES",
+        default=4096,
+        help="Number of samples in each digitiser heap",
     )
     parser.add_argument(
         "--dig-sample-bits",
