@@ -189,13 +189,7 @@ async def test_send(
     sensors: aiokatcp.SensorSet,
     time_converter: TimeConverter,
 ) -> None:
-    """Test sending data via the :class:`katgpucbf.fgpu.send.Chunk` interface.
-
-    .. todo::
-
-       This is a very limited test that does not cover sensors, metrics or
-       missing data.
-    """
+    """Test sending data via the :class:`katgpucbf.fgpu.send.Chunk` interface."""
     # Send descriptors to all the streams
     descriptor_heap = make_descriptor_heap(
         channels_per_substream=N_CHANNELS // N_SUBSTREAMS,
