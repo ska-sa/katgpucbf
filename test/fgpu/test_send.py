@@ -35,6 +35,7 @@ from katgpucbf.utils import TimeConverter, gaussian_dtype
 from .. import PromDiff, unpack_complex
 
 pytest_mark = pytest.mark.parametrize("bits", [4, 8])
+ADC_SAMPLE_RATE = 1e9
 N_SUBSTREAMS = 16
 N_CHUNKS = 5
 N_FRAMES = 7  # frames per chunk
@@ -58,7 +59,7 @@ def interfaces(request) -> Sequence[str]:
 
 @pytest.fixture
 def time_converter() -> TimeConverter:
-    return TimeConverter(1234567890.0, 1e9)
+    return TimeConverter(1234567890.0, ADC_SAMPLE_RATE)
 
 
 @pytest.fixture
@@ -106,6 +107,10 @@ def send_streams(
         return spead2.send.asyncio.InprocStream(thread_pool, queues[interface_address], config)
 
     with mock.patch("spead2.send.asyncio.UdpStream", make_inproc_stream):
+        # These are somewhat typical values and generally match the defaults in
+        # katgpucbf.fgpu.main. Most of them don't actually matter, because they
+        # control stream creation and that's been mocked out, or they control
+        # transmission rate.
         return make_streams(
             output_name=NAME,
             thread_pool=spead2.ThreadPool(1),
@@ -116,8 +121,8 @@ def send_streams(
             packet_payload=8192,
             comp_vector=0,
             buffer=65536,
-            bandwidth=1e9,
-            send_rate_factor=1.05,
+            bandwidth=0.5 * ADC_SAMPLE_RATE,
+            send_rate_factor=0.0,  # Just send as fast as possible
             feng_id=FENG_ID,
             num_ants=64,
             n_data_heaps=N_CHUNKS * N_FRAMES * N_SUBSTREAMS,
