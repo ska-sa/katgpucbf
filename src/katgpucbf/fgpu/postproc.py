@@ -125,7 +125,7 @@ class Postproc(accel.Operation):
     **out** : spectra // spectra_per_heap × out_channels × spectra_per_heap × N_POLS
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network. See :func:`.gaussian_dtype` for the type.
-    **saturated** : heaps × N_POLS, uint32
+    **saturated** : spectra // spectra_per_heap × N_POLS, uint32
         Number of saturated complex values in **out**.
     **fine_delay** : spectra × N_POLS, float32
         Fine delay in samples (one value per pol).

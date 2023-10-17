@@ -21,7 +21,7 @@ import argparse
 import numpy as np
 from katsdpsigproc import accel
 
-from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu.ddc import DDCTemplate
 from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
 
@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--subsampling", type=int, default=8)
     parser.add_argument("--samples", type=int, default=32 * 1024 * 1024)
     parser.add_argument("--input-sample-bits", type=int, default=DIG_SAMPLE_BITS)
+    parser.add_argument("--pols", type=int, default=N_POLS)
     parser.add_argument("--passes", type=int, default=1000)
     args = parser.parse_args()
     if args.taps is None:
@@ -43,7 +44,7 @@ def main():
         template = DDCTemplate(
             context, taps=args.taps, subsampling=args.subsampling, input_sample_bits=args.input_sample_bits
         )
-        fn = template.instantiate(command_queue, samples=args.samples)
+        fn = template.instantiate(command_queue, samples=args.samples, n_pols=args.pols)
         fn.ensure_all_bound()
         fn.buffer("in").zero(command_queue)
         fn.configure(0.25, np.ones(args.taps, np.float32))

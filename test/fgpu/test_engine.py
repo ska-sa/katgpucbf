@@ -601,13 +601,13 @@ class TestEngine:
                 data[CHANNELS // 2 + 1] = 0
             np.testing.assert_equal(data, pytest.approx(0, abs=tol))
 
-    # Just test 2 values for dig_sample_bits; it gets expensive otherwise
-    # Also just do it for one test, as a sanity check.
+    # Just test 2 values for dig_sample_bits and dst_sample_bits; it gets
+    # expensive otherwise. Also just do it for one test, as a sanity check.
     @pytest.mark.parametrize(
-        "dig_sample_bits",
+        "dig_sample_bits,dst_sample_bits",
         [
-            DIG_SAMPLE_BITS,
-            pytest.param(12, marks=pytest.mark.cmdline_args("--dig-sample-bits=12")),
+            pytest.param(DIG_SAMPLE_BITS, 4, marks=pytest.mark.cmdline_args("--dst-sample-bits=4")),
+            pytest.param(12, 8, marks=pytest.mark.cmdline_args("--dig-sample-bits=12", "--dst-sample-bits=8")),
         ],
     )
     async def test_delay_phase_rate(
@@ -620,13 +620,19 @@ class TestEngine:
         extra_delay_samples: float,
         extra_phase: float,
         dig_sample_bits: int,
+        dst_sample_bits: int,
     ) -> None:
         """Test that delay rate and phase rate setting works."""
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
         tone_channels = [CHANNELS // 2, CHANNELS - 123]
         tones = [
-            CW(frac_channel=frac_channel(output, channel), magnitude=110, delay=extra_delay_samples, phase=extra_phase)
+            CW(
+                frac_channel=frac_channel(output, channel),
+                magnitude=round(0.4 * 2**dst_sample_bits),
+                delay=extra_delay_samples,
+                phase=extra_phase,
+            )
             for channel in tone_channels
         ]
         src_layout = engine_server.src_layout
@@ -660,9 +666,10 @@ class TestEngine:
         )
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
+        atol = 2 * 0.5**dst_sample_bits
         timestamps = timestamps[:, np.newaxis]
         expected_phase = phase_rate_per_sample * timestamps
-        assert_angles_allclose(np.angle(out_data[tone_channels[0]]), expected_phase, atol=0.01)
+        assert_angles_allclose(np.angle(out_data[tone_channels[0]]), expected_phase, atol=atol)
 
         # Adjust expected phase from the centre frequency to the other channel
         bw = ADC_SAMPLE_RATE / 2 / output.decimation
@@ -670,7 +677,7 @@ class TestEngine:
         expected_phase -= (
             2 * np.pi * (tone_channels[1] - tone_channels[0]) * channel_bw * delay_rate * (timestamps / ADC_SAMPLE_RATE)
         )
-        assert_angles_allclose(np.angle(out_data[tone_channels[1]]), expected_phase, atol=0.01)
+        assert_angles_allclose(np.angle(out_data[tone_channels[1]]), expected_phase, atol=atol)
 
     def _watch_sensors(self, sensors: Sequence[aiokatcp.Sensor]) -> dict[str, list]:
         """Set up observers on sensors that record updates.
