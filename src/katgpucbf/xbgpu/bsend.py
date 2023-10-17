@@ -50,6 +50,8 @@ class Frame:
         Payload data for the frame with shape (n_channels_per_substream, spectra_per_heap, COMPLEX)
     saturated
         Total number of complex samples that saturated during requantisation
+    channel_offset
+        The first frequency channel processed.
     n_substreams
         # TODO Re-word this
         Number of beams requiring data to be transmitted
@@ -95,20 +97,19 @@ class Chunk:
         saturated: np.ndarray,
         *,
         channel_offset: int,
+        timestamp_step: int,
         n_substreams: int,
     ) -> None:
         # data.shape[0] should be some outer element indicating n_frames
         # to fill a Chunk.
         # NOTE: I think this value == heaps-per-feng-per-chunk????
         n_frames = data.shape[0]
-        n_channels_per_substream = data.shape[1]
-        spectra_per_heap = data.shape[2]
         self.data = data  # data should have all the dimensions required
         self.saturated = saturated
 
         # TODO: Timestamp step is the same as XBEngine's rx_heap_timestamp_step
         self._timestamp = 0
-        self._timestamp_step = n_channels_per_substream * spectra_per_heap
+        self._timestamp_step = timestamp_step
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
 
         # Need a future for each heap to be sent
@@ -146,7 +147,37 @@ class Chunk:
 
 
 class BSend:
-    """Class for turning tied array channelised voltage products into SPEAD heaps."""
+    """
+    Class for turning tied array channelised voltage products into SPEAD heaps.
+
+    This is some text.
+
+    Parameters
+    ----------
+    output
+        The BOutput containing the beam name and destination address.
+    heaps_per_fengine_per_chunk
+        Number of SPEAD heaps from one F-engine in a single received Chunk.
+    n_tx_items
+        # TODO: Reword
+        Number of Chunks to create in order to download data off the GPU.
+    n_channels_per_substream, spectra_per_heap, channel_offset
+        Engine configuration parameters.
+    timestamp_step
+        The timestamp step between successive heaps, as dictated by the XBEngine.
+    send_rate_factor
+        Factor dictating how fast the send-stream should transmit data.
+    context
+        Device context to create buffers.
+    stream_factory
+        Callback function to create the spead2 send stream. It is passed the
+        stream ocnfiguration and memory buffers.
+    packet_payload
+        Size, in bytes, for the output packets (tied array channelised voltage
+        payload only, headers and padding are added to this).
+    tx_enabled
+        Enable/Disable transmission. Defaults to starting enabled.
+    """
 
     descriptor_heap: spead2.send.Heap
     header_size: Final[int] = 64
@@ -158,6 +189,7 @@ class BSend:
         n_tx_items: int,
         n_channels_per_substream: int,
         spectra_per_heap: int,
+        timestamp_step: int,
         send_rate_factor: float,
         channel_offset: int,
         context: AbstractContext,
@@ -189,6 +221,7 @@ class BSend:
                     np.uint32,
                 ),
                 channel_offset=channel_offset,
+                timestamp_step=timestamp_step,
                 n_substreams=1,  # TODO: Update once single-beam is working
             )
             self._chunks_queue.put_nowait(chunk)
@@ -291,6 +324,7 @@ class BSend:
         # It's a heavy-handed approach, but we don't care about performance
         # during shutdown.
         await self.stream.async_flush()
+        # TODO: Send across all substreams once multiple beams are supported
         await self.stream.async_send_heap(stop_heap)
 
 

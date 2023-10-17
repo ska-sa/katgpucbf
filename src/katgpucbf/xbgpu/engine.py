@@ -311,6 +311,7 @@ class BPipeline(Pipeline):
             self.n_tx_items,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            timestamp_step=engine.rx_heap_timestamp_step,
             send_rate_factor=engine.send_rate_factor,
             channel_offset=engine.channel_offset_value,
             context=context,

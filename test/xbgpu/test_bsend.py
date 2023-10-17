@@ -19,6 +19,7 @@
 from typing import Final
 
 import numpy as np
+import pytest
 import spead2
 import spead2.recv.asyncio
 from katsdpsigproc.abc import AbstractContext
@@ -29,11 +30,11 @@ from katgpucbf.spead import BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.xbgpu.bsend import BSend
 from katgpucbf.xbgpu.output import BOutput
 
+from . import test_parameters
+
 HEAPS_PER_FENG_PER_CHUNK: Final[int] = 5
 n_channels_per_substream = 512
-channel_offset = n_channels_per_substream * 2
-n_spectra_per_heap = 256
-TIMESTAMP_STEP: Final[int] = n_channels_per_substream * n_spectra_per_heap
+channel_offset = n_channels_per_substream * 3  # Arbitrarily chosen
 N_TX_ITEMS: Final[int] = 2
 TOTAL_HEAPS: Final[int] = N_TX_ITEMS * HEAPS_PER_FENG_PER_CHUNK
 
@@ -42,7 +43,7 @@ class TestBSend:
     """Test :class:`katgpucbf.xbgpu.bsend.BSend`."""
 
     @staticmethod
-    async def _send_data(send_stream: BSend) -> None:
+    async def _send_data(send_stream: BSend, heap_timestamp_step: int) -> None:
         """Send a fixed number of heaps.
 
         More specifically, send `N_TX_ITEMS` Chunks, each of which contain
@@ -62,10 +63,7 @@ class TestBSend:
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
-            # TODO: The `timestamp` needs some attention, maybe replicate actual use?
-            # Need some kind of `n_samples_between_spectra` to dictate the
-            # `rx_heap_timestamp_step` that's used in 'reality'.
-            chunk.timestamp = i * TIMESTAMP_STEP
+            chunk.timestamp = i * HEAPS_PER_FENG_PER_CHUNK * heap_timestamp_step
             send_stream.send_chunk(chunk)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
@@ -77,6 +75,7 @@ class TestBSend:
         channel_offset: int,
         n_channels_per_substream: int,
         n_spectra_per_heap: int,
+        heap_timestamp_step: int,
     ) -> None:
         """Receive data transmitted from :func:`_send_data`.
 
@@ -98,7 +97,7 @@ class TestBSend:
             items = ig.update(heap)
             assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
             assert items["timestamp"].id == TIMESTAMP_ID
-            assert items["timestamp"].value == i * TIMESTAMP_STEP
+            assert items["timestamp"].value == i * heap_timestamp_step
             assert items["frequency"].id == FREQUENCY_ID
             assert items["frequency"].value == channel_offset
             assert items["bf_raw"].id == BF_RAW_ID
@@ -106,7 +105,14 @@ class TestBSend:
             assert items["bf_raw"].value.dtype == np.int8
             np.testing.assert_equal(items["bf_raw"].value, zero_data)
 
-    async def test_send_simple(self, context: AbstractContext) -> None:
+    @pytest.mark.parametrize("num_channels", test_parameters.num_channels)
+    @pytest.mark.parametrize("num_spectra_per_heap", test_parameters.num_spectra_per_heap)
+    async def test_send_simple(
+        self,
+        context: AbstractContext,
+        num_channels: int,
+        num_spectra_per_heap: int,
+    ) -> None:
         """
         Test :class:`katgpucbf.xbgpu.bsend.BSend`.
 
@@ -120,14 +126,21 @@ class TestBSend:
         ----------
         context
             Device context for allocating buffers.
+        num_channels
+            Total number of channels processed by a (theoretical) F-engine.
+        num_spectra_per_heap
+            Total number of packed spectra in every recevied channel.
         """
+        # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
+        heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
         queue = spead2.InprocQueue()
         send_stream = BSend(
             output=BOutput(name="test", dst=Endpoint("localhost", 7150)),
             heaps_per_fengine_per_chunk=HEAPS_PER_FENG_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
             n_channels_per_substream=n_channels_per_substream,
-            spectra_per_heap=n_spectra_per_heap,
+            spectra_per_heap=num_spectra_per_heap,
+            timestamp_step=heap_timestamp_step,
             send_rate_factor=0.0,
             channel_offset=channel_offset,
             context=context,
@@ -136,9 +149,11 @@ class TestBSend:
             ),
             tx_enabled=True,
         )
-        await self._send_data(send_stream)
+        await self._send_data(send_stream, heap_timestamp_step)
         queue.stop()
 
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(1), spead2.recv.StreamConfig())
         recv_stream.add_inproc_reader(queue)
-        await self._recv_data(recv_stream, channel_offset, n_channels_per_substream, n_spectra_per_heap)
+        await self._recv_data(
+            recv_stream, channel_offset, n_channels_per_substream, num_spectra_per_heap, heap_timestamp_step
+        )
