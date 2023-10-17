@@ -19,6 +19,7 @@
 import asyncio
 import functools
 from collections.abc import Callable, Sequence
+from typing import TypedDict
 
 import numpy as np
 import spead2.send
@@ -34,16 +35,12 @@ from . import METRIC_NAMESPACE
 
 #: Number of non-payload bytes per packet (header, 8 items pointers)
 PREAMBLE_SIZE = 72
-#: Data type of the output payload
-SEND_DTYPE = np.dtype(np.int8)
-#: Number of bits per real component in SEND_DTYPE
-SEND_BITS = 8
 output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE)
 output_bytes_counter = Counter(
     "output_bytes", "number of payload bytes transmitted", ["stream"], namespace=METRIC_NAMESPACE
 )
 output_samples_counter = Counter(
-    "output_samples", "number of samples transmitted", ["stream"], namespace=METRIC_NAMESPACE
+    "output_samples", "number of complex samples transmitted", ["stream"], namespace=METRIC_NAMESPACE
 )
 skipped_heaps_counter = Counter(
     "output_skipped_heaps", "heaps not sent because input data was incomplete", ["stream"], namespace=METRIC_NAMESPACE
@@ -119,7 +116,25 @@ def _multi_send(
 
 
 class Chunk:
-    """An array of frames, spanning multiple timestamps."""
+    """An array of frames, spanning multiple timestamps.
+
+    Parameters
+    ----------
+    data
+        Storage for voltage data, with shape (n_frames, n_channels,
+        n_spectra_per_heap, N_POLS) and a dtype returned by
+        :func:`.gaussian_dtype`.
+    saturated
+        Storage for saturation counts, with shape (n_frames, N_POLS)
+        and dtype uint32.
+    n_substreams
+        Number of substreams over which the data will be divided
+        (must divide evenly into the number of channels).
+    feng_id
+        F-Engine ID to place in the SPEAD heaps
+    spectra_samples
+        Difference in timestamps between successive frames
+    """
 
     def __init__(
         self,
@@ -189,7 +204,7 @@ class Chunk:
         """Transmit heaps over SPEAD streams.
 
         Frames from 0 to `frames` - 1 are sent asynchronously. The contents of
-        each frames are distributed over the streams. If the number of streams
+        each frame are distributed over the streams. If the number of streams
         does not divide into the number of destination endpoints, there will be
         imbalances, because the partitioning is the same for every frame.
         """
@@ -289,10 +304,18 @@ def make_streams(
     return streams
 
 
+class _RawKwargs(TypedDict, total=False):
+    """Helper class for type annotations."""
+
+    dtype: np.dtype
+    format: list[tuple[str, int]]
+
+
 def make_descriptor_heap(
     *,
     channels_per_substream: int,
     spectra_per_heap: int,
+    sample_bits: int,
 ) -> "spead2.send.Heap":
     """Create a descriptor heap for output F-Engine data."""
     heap_data_shape = (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
@@ -319,12 +342,19 @@ def make_descriptor_heap(
         shape=(),
         format=IMMEDIATE_FORMAT,
     )
+
+    raw_kwargs: _RawKwargs = {}
+    try:
+        raw_kwargs["dtype"] = np.dtype(f"int{sample_bits}")
+    except TypeError:
+        # The number of bits doesn't neatly fit a numpy dtype
+        raw_kwargs["format"] = [("i", sample_bits)]
     ig.add_item(
         FENG_RAW_ID,
         "feng_raw",
         "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
         shape=heap_data_shape,
-        dtype=SEND_DTYPE,
+        **raw_kwargs,
     )
 
     return ig.get_heap(descriptors="all", data="none")

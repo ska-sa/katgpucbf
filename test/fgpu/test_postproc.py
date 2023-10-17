@@ -26,6 +26,8 @@ from numpy.typing import DTypeLike
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import postproc
 
+from .. import unpack_complex
+
 pytestmark = [pytest.mark.cuda_only]
 
 
@@ -117,18 +119,6 @@ def postproc_host(
         out.append(pol_out)
         saturated.append(pol_saturated)
     return np.stack(out, axis=3), np.stack(saturated, axis=1)
-
-
-def unpack_complex(data: np.ndarray) -> np.ndarray:
-    """Unpack array of Gaussian integers to complex dtype."""
-    if data.dtype.itemsize == 1:
-        # It's 4-bit packed. We assume that >> will sign extend on signed types
-        real = data.view(np.int8) >> 4
-        imag = data.view(np.int8) << 4 >> 4
-    else:
-        real = data["real"]
-        imag = data["imag"]
-    return real.astype(np.float32) + 1j * imag.astype(np.float32)
 
 
 def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex64) -> np.ndarray:
