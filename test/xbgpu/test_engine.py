@@ -51,23 +51,15 @@ SAMPLE_BITWIDTH: Final[int] = 8
 
 @njit
 def bounded_int8(val):
-    """Create an int8 value bounded to the range [-127, 127].
-
-    Returns
-    -------
-    np.int32
-        This datatype is used to avoid overflow issues when the output is used
-        in multiplication operations, but the value is bounded by the closed
-        interval described above.
-    """
+    """Create an int8 value bounded to the range [-127, 127]."""
     val = np.int8(val)
     if val == -128:
         val += 1
-    return np.int32(val)
+    return val
 
 
 @njit
-def feng_sample(batch: int, channel: int, antenna: int) -> np.ndarray:
+def feng_sample(batch: int, channel: int, antenna: int, out: np.ndarray) -> None:
     """Compute a dummy F-engine dual-pol complex sample.
 
     This is done in a deterministic way so that the expected result of the
@@ -89,28 +81,35 @@ def feng_sample(batch: int, channel: int, antenna: int) -> np.ndarray:
     not supported by the Tensor Cores.
     """
     sign = 1 if batch % 2 == 0 else -1
-    return np.array(
-        [
-            [bounded_int8(sign * batch), bounded_int8(sign * channel)],
-            [bounded_int8(-sign * antenna), bounded_int8(-sign * channel)],
-        ],
-        dtype=np.int8,
-    )
+    out[0, 0] = bounded_int8(sign * batch)
+    out[0, 1] = bounded_int8(sign * channel)
+    out[1, 0] = bounded_int8(-sign * antenna)
+    out[1, 1] = bounded_int8(-sign * channel)
 
 
 @njit
-def cmult_and_scale(a, b, c):
-    """Multiply ``a`` and ``conj(b)``, and scale the result by ``c``.
+def feng_samples(batch: int, antenna: int, n_channels: int) -> np.ndarray:
+    """Compute dummy F-engine samples.
+
+    This calls :func:`feng_sample` across a range of channels and collects
+    the results in one array.
+    """
+    samples = np.empty((n_channels, N_POLS, COMPLEX), np.int8)
+    for channel in range(n_channels):
+        feng_sample(batch, channel, antenna, samples[channel, :, :])
+    return samples
+
+
+@njit
+def cmult_and_scale(a, b, c, out):
+    """Multiply ``a`` and ``conj(b)``, scale the result by ``c``, and add to ``out``.
 
     Both ``a`` and ``b`` inputs and the output are 2-element arrays of
     np.int32, representing the real and imaginary components. ``c`` is a
     scalar.
     """
-    result = np.empty((2,), dtype=np.int32)
-    result[0] = a[0] * b[0] + a[1] * b[1]
-    result[1] = a[1] * b[0] - a[0] * b[1]
-    result *= c
-    return result
+    out[0] += (a[0] * b[0] + a[1] * b[1]) * c
+    out[1] += (a[1] * b[0] - a[0] * b[1]) * c
 
 
 @njit
@@ -139,17 +138,19 @@ def generate_expected_output(
         return output_array
     for b in range(batch_start_idx, batch_start_idx + num_batches):
         for c in range(channels):
+            # This is allocated as int32 so that cmult_and_scale won't overflow. The actual
+            # stored values are in the range -127..127.
             in_data = np.empty((antennas, N_POLS, COMPLEX), np.int32)
             for a in range(antennas):
-                in_data[a] = feng_sample(b, c, a)
+                feng_sample(b, c, a, in_data[a])
             for a2 in range(antennas):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
                     output_piece = output_array[c, 4 * bl_idx : 4 * bl_idx + 4, :]
-                    output_piece[0] += cmult_and_scale(in_data[a1, 0], in_data[a2, 0], n_spectra_per_heap)
-                    output_piece[1] += cmult_and_scale(in_data[a1, 1], in_data[a2, 0], n_spectra_per_heap)
-                    output_piece[2] += cmult_and_scale(in_data[a1, 0], in_data[a2, 1], n_spectra_per_heap)
-                    output_piece[3] += cmult_and_scale(in_data[a1, 1], in_data[a2, 1], n_spectra_per_heap)
+                    cmult_and_scale(in_data[a1, 0], in_data[a2, 0], n_spectra_per_heap, output_piece[0])
+                    cmult_and_scale(in_data[a1, 1], in_data[a2, 0], n_spectra_per_heap, output_piece[1])
+                    cmult_and_scale(in_data[a1, 0], in_data[a2, 1], n_spectra_per_heap, output_piece[2])
+                    cmult_and_scale(in_data[a1, 1], in_data[a2, 1], n_spectra_per_heap, output_piece[3])
 
     # Flag missing data
     for a2 in range(antennas):
@@ -215,7 +216,7 @@ class TestEngine:
         same timestamp. A heap is composed of multiple channels. Per channel,
         all values are kept constant. This makes for faster verification with
         the downside being that if samples within the channel range get mixed
-        up, this will not be detected. See :meth:`feng_sample` for the formula
+        up, this will not be detected. See :func:`feng_sample` for the formula
         used.
 
         This results in a deterministic expected output value without the need
@@ -246,19 +247,14 @@ class TestEngine:
         heaps
             A list of HeapReference objects as accepted by :func:`.send_heaps`.
         """
-        # Define heap shapes needed to generate simulated data.
-        heap_shape = (n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX)
-
         # Generate all the heaps for the different antennas.
         heaps: list[spead2.send.HeapReference] = []
         for ant_index in range(n_ants):
             if ant_index in missing_antennas:
                 continue
-            sample_array = np.zeros(heap_shape, np.int8)
-
-            # Generate the data for the heap iterating assigning a different value to each channel.
-            for chan_index in range(n_channels_per_substream):
-                sample_array[chan_index] = feng_sample(batch_index, chan_index, ant_index)
+            sample_array = feng_samples(batch_index, ant_index, n_channels_per_substream)
+            # Replicate the value to all spectra in the heap
+            sample_array = sample_array[:, np.newaxis, :, :].repeat(n_spectra_per_heap, axis=1)
 
             # Create the heap, add it to a list of HeapReferences.
             heap = gen_heap(timestamp, ant_index, frequency, sample_array)
