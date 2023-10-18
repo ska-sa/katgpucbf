@@ -22,6 +22,8 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <random>
+#include <algorithm>
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -109,36 +111,57 @@ static char *allocate(std::size_t size, memory_type type)
     return (char *) addr;
 }
 
-// memcpy, with SSE2 streaming stores
-static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+/* Wrap another memcpy operation and use it to handle the aligned part of the copy,
+ * fixing up the head and tail with std::memcpy. Specifically, the inner
+ * function may assume that
+ * - dest is aligned to a multiple of A
+ * - n is a multiple of M
+ */
+template<std::size_t A, std::size_t M, typename F>
+static void *memcpy_align(void * __restrict__ dest, const void * __restrict__ src, std::size_t n, const F &inner) noexcept
+{
+    static_assert(A > 0 && !(A & (A - 1)), "A must be a power of 2");
+    static_assert(M > 0 && !(M & (M - 1)), "M must be a power of 2");
+
+    void *aligned_dest = dest;
+    const void *aligned_src = src;  // not necessarily aligned, but corresponds to aligned_dest
+    std::size_t aligned_n = n;
+    if (!std::align(A, M, aligned_dest, aligned_n))
+    {
+        // Not even room for one aligned block. Just fall back to plain memcpy
+        return std::memcpy(dest, src, n);
+    }
+    // Copy the head
+    std::size_t head = (char *) aligned_dest - (char *) dest;
+    if (head != 0)
+    {
+        std::memcpy(dest, src, head);
+        aligned_src = (const void *) ((const char *) src + head);
+    }
+    // Round aligned_n down to a multiple of M
+    std::size_t truncated_n = aligned_n & ~(M - 1);
+
+    inner(aligned_dest, aligned_src, truncated_n);
+
+    std::size_t tail = aligned_n - truncated_n;
+    if (tail != 0)
+    {
+        std::memcpy(
+            (void *) ((char *) aligned_dest + truncated_n),
+            (const void *) ((const char *) aligned_src + truncated_n),
+            tail
+        );
+    }
+
+    return dest;
+}
+
+// memcpy, with SSE2 streaming stores (requires dest to be 16-byte aligned and n to be a multiple of 64)
+static void *memcpy_stream_sse2_impl(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
 {
     char * __restrict__ dest_c = (char *) dest;
     const char * __restrict__ src_c = (const char *) src;
-    // Align the destination to a cache-line boundary
-    std::uintptr_t dest_i = std::uintptr_t(dest_c);
-    constexpr std::uintptr_t cache_line_mask = cache_line_size - 1;
-    std::uintptr_t aligned = (dest_i + cache_line_mask) & ~cache_line_mask;
-    std::size_t head = aligned - dest_i;
-    if (head > 0)
-    {
-        if (head >= n)
-        {
-            std::memcpy(dest_c, src_c, n);
-            /* Not normally required, but if the destination is
-             * write-combining memory then this will flush the combining
-             * buffers. That may be necessary if the memory is actually on
-             * a GPU or other accelerator.
-             */
-            _mm_sfence();
-            return dest;
-        }
-        std::memcpy(dest_c, src_c, head);
-        dest_c += head;
-        src_c += head;
-        n -= head;
-    }
-    std::size_t offset;
-    for (offset = 0; offset + 64 <= n; offset += 64)
+    for (std::size_t offset = 0; offset + 64 <= n; offset += 64)
     {
         __m128i value0 = _mm_loadu_si128((__m128i const *) (src_c + offset + 0));
         __m128i value1 = _mm_loadu_si128((__m128i const *) (src_c + offset + 16));
@@ -149,41 +172,21 @@ static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restric
         _mm_stream_si128((__m128i *) (dest_c + offset + 32), value2);
         _mm_stream_si128((__m128i *) (dest_c + offset + 48), value3);
     }
-    std::size_t tail = n - offset;
-    std::memcpy(dest_c + offset, src_c + offset, tail);
     _mm_sfence();
     return dest;
 }
 
-// memcpy, with AVX streaming stores
+static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    return memcpy_align<cache_line_size, 64>(dest, src, n, memcpy_stream_sse2_impl);
+}
+
+// memcpy, with AVX streaming stores (requires dest to be 32-byte aligned and n to be a multiple of 64)
 [[gnu::target("avx2")]]
-static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+static void *memcpy_stream_avx_impl(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
 {
     char * __restrict__ dest_c = (char *) dest;
     const char * __restrict__ src_c = (const char *) src;
-    // Align the destination to a cache-line boundary
-    std::uintptr_t dest_i = std::uintptr_t(dest_c);
-    constexpr std::uintptr_t cache_line_mask = cache_line_size - 1;
-    std::uintptr_t aligned = (dest_i + cache_line_mask) & ~cache_line_mask;
-    std::size_t head = aligned - dest_i;
-    if (head > 0)
-    {
-        if (head >= n)
-        {
-            std::memcpy(dest_c, src_c, n);
-            /* Not normally required, but if the destination is
-             * write-combining memory then this will flush the combining
-             * buffers. That may be necessary if the memory is actually on
-             * a GPU or other accelerator.
-             */
-            _mm_sfence();
-            return dest;
-        }
-        std::memcpy(dest_c, src_c, head);
-        dest_c += head;
-        src_c += head;
-        n -= head;
-    }
     std::size_t offset = 0;
     for (offset = 0; offset + 256 <= n; offset += 256)
     {
@@ -211,41 +214,21 @@ static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict
         _mm256_stream_si256((__m256i *) (dest_c + offset + 0), value0);
         _mm256_stream_si256((__m256i *) (dest_c + offset + 32), value1);
     }
-    std::size_t tail = n - offset;
-    std::memcpy(dest_c + offset, src_c + offset, tail);
     _mm_sfence();
     return dest;
 }
 
-// memcpy, with AVX-512 streaming stores
+static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    return memcpy_align<cache_line_size, 64>(dest, src, n, memcpy_stream_avx_impl);
+}
+
+// memcpy, with AVX-512 streaming stores (requires 64-byte alignment)
 [[gnu::target("avx512f")]]
-static void *memcpy_stream_avx512(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+static void *memcpy_stream_avx512_impl(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
 {
     char * __restrict__ dest_c = (char *) dest;
     const char * __restrict__ src_c = (const char *) src;
-    // Align the destination to a cache-line boundary
-    std::uintptr_t dest_i = std::uintptr_t(dest_c);
-    constexpr std::uintptr_t cache_line_mask = cache_line_size - 1;
-    std::uintptr_t aligned = (dest_i + cache_line_mask) & ~cache_line_mask;
-    std::size_t head = aligned - dest_i;
-    if (head > 0)
-    {
-        if (head >= n)
-        {
-            std::memcpy(dest_c, src_c, n);
-            /* Not normally required, but if the destination is
-             * write-combining memory then this will flush the combining
-             * buffers. That may be necessary if the memory is actually on
-             * a GPU or other accelerator.
-             */
-            _mm_sfence();
-            return dest;
-        }
-        std::memcpy(dest_c, src_c, head);
-        dest_c += head;
-        src_c += head;
-        n -= head;
-    }
     std::size_t offset = 0;
     for (offset = 0; offset + 512 <= n; offset += 512)
     {
@@ -271,10 +254,13 @@ static void *memcpy_stream_avx512(void * __restrict__ dest, const void * __restr
         __m512i value0 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 0));
         _mm512_stream_si512((__m512i *) (dest_c + offset + 0), value0);
     }
-    std::size_t tail = n - offset;
-    std::memcpy(dest_c + offset, src_c + offset, tail);
     _mm_sfence();
     return dest;
+}
+
+static void *memcpy_stream_avx512(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    return memcpy_align<64, 64>(dest, src, n, memcpy_stream_avx512_impl);
 }
 
 /* memset, but using SSE streaming stores */
@@ -357,6 +343,18 @@ static void memory_read(const void *src, std::size_t bytes) noexcept
     (void) sink2;
 }
 
+static void post(sem_t &sem)
+{
+    int result = sem_post(&sem);
+    assert(result == 0);
+}
+
+static void wait(sem_t &sem)
+{
+    int result = sem_wait(&sem);
+    assert(result == 0);
+}
+
 struct thread_data
 {
     sem_t start_sem;
@@ -373,6 +371,82 @@ struct thread_data
     }
 };
 
+static void run_passes(
+    int passes,
+    memory_function mem_func,
+    void * __restrict__ dest,
+    const void * __restrict__ src,
+    std::size_t buffer_size
+)
+{
+    switch (mem_func)
+    {
+    case memory_function::MEMCPY:
+        for (int p = 0; p < passes; p++)
+            memcpy(dest, src, buffer_size);
+        break;
+    case memory_function::MEMCPY_STREAM_SSE2:
+        for (int p = 0; p < passes; p++)
+            memcpy_stream_sse2(dest, src, buffer_size);
+        break;
+    case memory_function::MEMCPY_STREAM_AVX:
+        for (int p = 0; p < passes; p++)
+            memcpy_stream_avx(dest, src, buffer_size);
+        break;
+    case memory_function::MEMCPY_STREAM_AVX512:
+        for (int p = 0; p < passes; p++)
+            memcpy_stream_avx512(dest, src, buffer_size);
+        break;
+    case memory_function::MEMSET:
+        for (int p = 0; p < passes; p++)
+            memset(dest, 0, buffer_size);
+        break;
+    case memory_function::MEMSET_STREAM_SSE2:
+        for (int p = 0; p < passes; p++)
+            memset_stream_sse2(dest, 0, buffer_size);
+        break;
+    case memory_function::READ:
+        for (int p = 0; p < passes; p++)
+            memory_read(src, buffer_size);
+    }
+}
+
+static void self_test(
+    memory_function mem_func,
+    void * __restrict__ dest,
+    void * __restrict__ src,
+    std::size_t buffer_size)
+{
+    std::mt19937 engine;
+    std::uniform_int_distribution<int> distribution(0, 255);
+    unsigned char *dest_c = static_cast<unsigned char *>(dest);
+    unsigned char *src_c = static_cast<unsigned char *>(src);
+    for (std::size_t i = 0; i < buffer_size; i++)
+    {
+        dest_c[i] = distribution(engine);
+        src_c[i] = distribution(engine);
+    }
+    run_passes(1, mem_func, dest, src, buffer_size);
+    switch (mem_func)
+    {
+    case memory_function::MEMCPY:
+    case memory_function::MEMCPY_STREAM_SSE2:
+    case memory_function::MEMCPY_STREAM_AVX:
+    case memory_function::MEMCPY_STREAM_AVX512:
+        // TODO: should also keep a backup copy to ensure that the src
+        // wasn't modified
+        assert(std::memcmp(dest, src, buffer_size) == 0);
+        break;
+    case memory_function::MEMSET:
+    case memory_function::MEMSET_STREAM_SSE2:
+        assert(std::size_t(std::count(dest_c, dest_c + buffer_size, 0)) == buffer_size);
+        break;
+    case memory_function::READ:
+        /* Not much one can test here */
+        break;
+    }
+}
+
 static void worker(
     int core,
     std::size_t buffer_size,
@@ -381,6 +455,7 @@ static void worker(
     int src_align,
     int dst_align,
     int passes,
+    bool do_self_test,
     thread_data &data
 )
 {
@@ -394,42 +469,14 @@ static void worker(
     }
     char *src = allocate(buffer_size + src_align, mem_type) + src_align;
     char *dst = allocate(buffer_size + dst_align, mem_type) + dst_align;
+    if (do_self_test)
+        self_test(mem_func, dst, src, buffer_size);
+    post(data.done_sem);  // Tell the main thread we're ready for work
     while (true)
     {
-        int result = sem_wait(&data.start_sem);
-        assert(result == 0);
-        switch (mem_func)
-        {
-        case memory_function::MEMCPY:
-            for (int p = 0; p < passes; p++)
-                memcpy(dst, src, buffer_size);
-            break;
-        case memory_function::MEMCPY_STREAM_SSE2:
-            for (int p = 0; p < passes; p++)
-                memcpy_stream_sse2(dst, src, buffer_size);
-            break;
-        case memory_function::MEMCPY_STREAM_AVX:
-            for (int p = 0; p < passes; p++)
-                memcpy_stream_avx(dst, src, buffer_size);
-            break;
-        case memory_function::MEMCPY_STREAM_AVX512:
-            for (int p = 0; p < passes; p++)
-                memcpy_stream_avx512(dst, src, buffer_size);
-            break;
-        case memory_function::MEMSET:
-            for (int p = 0; p < passes; p++)
-                memset(dst, 0, buffer_size);
-            break;
-        case memory_function::MEMSET_STREAM_SSE2:
-            for (int p = 0; p < passes; p++)
-                memset_stream_sse2(dst, 0, buffer_size);
-            break;
-        case memory_function::READ:
-            for (int p = 0; p < passes; p++)
-                memory_read(src, buffer_size);
-        }
-        result = sem_post(&data.done_sem);
-        assert(result == 0);
+        wait(data.start_sem);
+        run_passes(passes, mem_func, dst, src, buffer_size);
+        post(data.done_sem);
     }
 }
 
@@ -441,8 +488,9 @@ int main(int argc, char *const argv[])
     int src_align = 0, dst_align = 0;  // relative to cache line size
     std::vector<int> cores;
     int passes = 10;
+    bool do_self_test = false;
     int opt;
-    while ((opt = getopt(argc, argv, "t:f:b:p:S:D:")) != -1)
+    while ((opt = getopt(argc, argv, "t:f:b:p:S:D:T")) != -1)
     {
         switch (opt)
         {
@@ -494,6 +542,9 @@ int main(int argc, char *const argv[])
         case 'D':
             dst_align = atoi(optarg);
             break;
+        case 'T':
+            do_self_test = true;
+            break;
         default:
             return 1;
         }
@@ -513,21 +564,20 @@ int main(int argc, char *const argv[])
         data[i].future = std::async(
             std::launch::async, worker, cores[i],
             buffer_size, mem_type, mem_func, src_align, dst_align,
-            passes, std::ref(data[i])
+            passes, do_self_test, std::ref(data[i])
         );
+
+    // Wait for all threads to signal they've finished the allocation
+    for (size_t i = 0; i < n; i++)
+        wait(data[i].done_sem);
+
     auto start = high_resolution_clock::now();
     while (true)
     {
         for (size_t i = 0; i < n; i++)
-        {
-            int result = sem_post(&data[i].start_sem);
-            assert(result == 0);
-        }
+            post(data[i].start_sem);
         for (size_t i = 0; i < n; i++)
-        {
-            int result = sem_wait(&data[i].done_sem);
-            assert(result == 0);
-        }
+            wait(data[i].done_sem);
         auto now = high_resolution_clock::now();
         duration<double> elapsed = now - start;
         double rate = passes / elapsed.count() * n * buffer_size;
