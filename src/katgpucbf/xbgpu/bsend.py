@@ -126,10 +126,11 @@ class Chunk:
         self._timestamp_step = timestamp_step
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
 
-        # Need a future for each frame's async_send_heaps(frame.heaps)
-        self.futures: list[asyncio.Future] = [asyncio.get_running_loop().create_future() for _ in range(n_frames)]
-        for future in self.futures:
-            future.set_result(None)
+        # NOTE: The chunk's future should hold the future returned from
+        # gathering all :meth:`spead2.send.asyncio.AsyncStream.async_send_heaps`
+        # calls for each frame's heaps.
+        self.future = asyncio.get_running_loop().create_future()
+        self.future.set_result(None)
 
         self._frames = [
             Frame(
@@ -159,6 +160,35 @@ class Chunk:
         self._timestamps += delta
         self._timestamp = value
 
+    def send(
+        self,
+        send_stream: "BSend",
+        time_converter: TimeConverter,
+        sensors: SensorSet,
+    ) -> None:
+        """
+        Transmit a chunk's heaps over a SPEAD stream.
+
+        The chunk holds a reference to the gathered future, which needs to be
+        awaited before using again.
+
+        .. todo::
+            Also update its relevant counters and sensor values.
+        """
+        if send_stream.tx_enabled:
+            send_futures = [
+                send_stream.stream.async_send_heaps(frame.heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                for frame in self._frames
+            ]
+            self.future = asyncio.gather(*send_futures)
+            send_stream._chunks_queue.put_nowait(self)
+            # TODO: Update counters and sensor with chunk.saturation
+        else:
+            # :meth:`.BSend.get_free_chunk` still needs to await some future
+            # before returning a :class:`.Chunk`.
+            self.future = asyncio.create_task(send_stream.stream.async_flush())
+            send_stream._chunks_queue.put_nowait(self)
+
 
 class BSend:
     """
@@ -173,7 +203,7 @@ class BSend:
     heaps_per_fengine_per_chunk
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
-        # TODO: There must be a better way to say this
+        TODO: There must be a better way to say this
         Number of Chunks to create in order to download data off the GPU.
     n_channels_per_substream, spectra_per_heap, channel_offset
         See :class:`.xbgpu.engine.XBEngine` for further information.
@@ -270,36 +300,12 @@ class BSend:
         item_group.add_item(
             BF_RAW_ID,
             "bf_raw",
-            "",  # TODO: What to even say here? ICD says "Channelised complex data"
+            "Channelised complex data.",  # TODO: Straight from the ICD, is this sufficient?
             shape=buffers[0].shape[2:],
             dtype=buffers[0].dtype,
         )
 
         self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
-
-    def send_chunk(
-        self,
-        chunk: Chunk,
-        time_converter: TimeConverter | None = None,
-        sensors: SensorSet | None = None,
-    ) -> None:
-        """
-        Transmit a Chunk's heaps.
-
-        .. todo::
-            Also update its relevant counters and sensor values.
-
-            This might need to be moved outside BSend because it looks
-            a bit awkward. Stream already owns the Chunks.
-        """
-        if self.tx_enabled:
-            chunk.futures = [
-                self.stream.async_send_heaps(frame.heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
-                for frame in chunk._frames
-            ]
-            # TODO: Update counters and sensor with chunk.saturation
-            # await asyncio.gather(*chunk.futures)
-            self._chunks_queue.put_nowait(chunk)
 
     def enable_substream(self, stream_id: int, enable: bool = True) -> None:
         """Enable/Disable a substream's data transmission.
@@ -322,8 +328,7 @@ class BSend:
     async def get_free_chunk(self) -> Chunk:
         """Return a Chunk once it has completed its send futures."""
         chunk = await self._chunks_queue.get()
-        # TODO: Do we need to do this if we gather the futures in `send_chunk`?
-        await asyncio.wait(chunk.futures)
+        await chunk.future
         return chunk
 
     async def send_stop_heap(self) -> None:

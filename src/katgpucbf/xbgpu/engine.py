@@ -336,6 +336,22 @@ class BPipeline(Pipeline):
             tx_enabled=init_tx_enabled,
         )
 
+        self._populate_sensors()
+
+    def _populate_sensors(self) -> None:
+        sensors = self.engine.sensors
+        # Dynamic sensors
+        # TODO: Update once multiple beams are supported
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                f"{self.output.name}-beng-clip-cnt",
+                "Number of complex samples that saturated.",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
+
     def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
         # TODO: Maybe pass this off to BSend?
         # If enable is True, ensure that this `beam_name` is present
@@ -415,7 +431,7 @@ class BPipeline(Pipeline):
                 # - output_name, because the Chunk didn't have access to it
                 #   (to find sensor name).
                 pass
-            self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
+            chunk.send(self.send_stream, self.engine.time_converter, self.engine.sensors)
             self._tx_free_item_queue.put_nowait(item)
 
         await self.send_stream.send_stop_heap()

@@ -22,28 +22,52 @@ import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
+from aiokatcp import Sensor, SensorSet
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf import COMPLEX
 from katgpucbf.spead import BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu.bsend import BSend
 from katgpucbf.xbgpu.output import BOutput
 
 from . import test_parameters
 
 HEAPS_PER_FENG_PER_CHUNK: Final[int] = 5
-n_channels_per_substream = 512
-channel_offset = n_channels_per_substream * 3  # Arbitrarily chosen
 N_TX_ITEMS: Final[int] = 2
 TOTAL_HEAPS: Final[int] = N_TX_ITEMS * HEAPS_PER_FENG_PER_CHUNK
+
+
+@pytest.fixture
+def time_converter() -> TimeConverter:
+    # TODO: Probably best to use adc_sample_rate from meerkat.py::BANDS
+    return TimeConverter(123456789.0, 1712e6)
+
+
+@pytest.fixture
+def output() -> BOutput:
+    return BOutput(name="test", dst=Endpoint("localhost", 7150))
+
+
+@pytest.fixture
+def sensors(output: BOutput) -> SensorSet:
+    """Create sensors that the send code updates."""
+    sensors = SensorSet()
+    sensors.add(Sensor(int, f"{output.name}.beng-clip-cnt", "Number of output samples that are saturated."))
+    return sensors
 
 
 class TestBSend:
     """Test :class:`katgpucbf.xbgpu.bsend.BSend`."""
 
     @staticmethod
-    async def _send_data(send_stream: BSend, heap_timestamp_step: int) -> None:
+    async def _send_data(
+        send_stream: BSend,
+        heap_timestamp_step: int,
+        time_converter: TimeConverter,
+        sensors: SensorSet,
+    ) -> None:
         """Send a fixed number of heaps.
 
         More specifically, send `N_TX_ITEMS` Chunks, each of which contain
@@ -54,7 +78,7 @@ class TestBSend:
         await send_stream.stream.async_send_heap(send_stream.descriptor_heap)
 
         for i in range(N_TX_ITEMS):
-            # Get a free heap - there is not always a free one available. This
+            # Get a free chunk - there is not always a free one available. This
             # function yields until one it available.
             chunk = await send_stream.get_free_chunk()
 
@@ -64,7 +88,7 @@ class TestBSend:
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
             chunk.timestamp = i * HEAPS_PER_FENG_PER_CHUNK * heap_timestamp_step
-            send_stream.send_chunk(chunk)
+            chunk.send(send_stream, time_converter, sensors)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
         await send_stream.stream.async_flush()
@@ -112,6 +136,9 @@ class TestBSend:
         context: AbstractContext,
         num_channels: int,
         num_spectra_per_heap: int,
+        output: BOutput,
+        time_converter: TimeConverter,
+        sensors: SensorSet,
     ) -> None:
         """
         Test :class:`katgpucbf.xbgpu.bsend.BSend`.
@@ -133,9 +160,13 @@ class TestBSend:
         """
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
         heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
+        # Arbitrarily chosen, channels-per-substream is dictated by the
+        # F-engine anyway.
+        n_channels_per_substream = 512
+        channel_offset = n_channels_per_substream * 3
         queue = spead2.InprocQueue()
         send_stream = BSend(
-            output=BOutput(name="test", dst=Endpoint("localhost", 7150)),
+            output=output,
             heaps_per_fengine_per_chunk=HEAPS_PER_FENG_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
             n_channels_per_substream=n_channels_per_substream,
@@ -149,7 +180,7 @@ class TestBSend:
             ),
             tx_enabled=True,
         )
-        await self._send_data(send_stream, heap_timestamp_step)
+        await self._send_data(send_stream, heap_timestamp_step, time_converter, sensors)
         queue.stop()
 
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(1), spead2.recv.StreamConfig())
