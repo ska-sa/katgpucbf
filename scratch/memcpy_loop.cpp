@@ -52,6 +52,7 @@ enum class memory_function
     MEMCPY_STREAM_SSE2,
     MEMCPY_STREAM_AVX,
     MEMCPY_STREAM_AVX512,
+    MEMCPY_REP_MOVSB,
     MEMSET,
     MEMSET_STREAM_SSE2,
     READ
@@ -76,7 +77,8 @@ static string memory_function_name(memory_function func)
     case memory_function::MEMCPY: return "memcpy";
     case memory_function::MEMCPY_STREAM_SSE2: return "memcpy_stream_sse2";
     case memory_function::MEMCPY_STREAM_AVX: return "memcpy_stream_avx";
-    case memory_function::MEMCPY_STREAM_AVX512:return "memcpy_stream_avx512";
+    case memory_function::MEMCPY_STREAM_AVX512: return "memcpy_stream_avx512";
+    case memory_function::MEMCPY_REP_MOVSB: return "memcpy_rep_movsb";
     case memory_function::MEMSET: return "memset";
     case memory_function::MEMSET_STREAM_SSE2: return "memset_stream_sse2";
     case memory_function::READ:   return "read";
@@ -263,6 +265,13 @@ static void *memcpy_stream_avx512(void * __restrict__ dest, const void * __restr
     return memcpy_align<64, 64>(dest, src, n, memcpy_stream_avx512_impl);
 }
 
+static void *memcpy_rep_movsb(void * __restrict__ dest, const void * __restrict__ src, std::size_t n) noexcept
+{
+    void *orig_dest = dest;
+    asm volatile("rep movsb" : "+c" (n), "+D" (dest), "+S" (src) : : "memory");
+    return orig_dest;
+}
+
 /* memset, but using SSE streaming stores */
 static void memset_stream_sse2(void *dst, int c, std::size_t bytes) noexcept
 {
@@ -397,6 +406,10 @@ static void run_passes(
         for (int p = 0; p < passes; p++)
             memcpy_stream_avx512(dest, src, buffer_size);
         break;
+    case memory_function::MEMCPY_REP_MOVSB:
+        for (int p = 0; p < passes; p++)
+            memcpy_rep_movsb(dest, src, buffer_size);
+        break;
     case memory_function::MEMSET:
         for (int p = 0; p < passes; p++)
             memset(dest, 0, buffer_size);
@@ -433,6 +446,7 @@ static void self_test(
     case memory_function::MEMCPY_STREAM_SSE2:
     case memory_function::MEMCPY_STREAM_AVX:
     case memory_function::MEMCPY_STREAM_AVX512:
+    case memory_function::MEMCPY_REP_MOVSB:
         // TODO: should also keep a backup copy to ensure that the src
         // wasn't modified
         assert(std::memcmp(dest, src, buffer_size) == 0);
@@ -518,6 +532,8 @@ int main(int argc, char *const argv[])
                 mem_func = memory_function::MEMCPY_STREAM_AVX;
             else if (optarg == "memcpy_stream_avx512"s)
                 mem_func = memory_function::MEMCPY_STREAM_AVX512;
+            else if (optarg == "memcpy_rep_movsb"s)
+                mem_func = memory_function::MEMCPY_REP_MOVSB;
             else if (optarg == "memset"s)
                 mem_func = memory_function::MEMSET;
             else if (optarg == "memset_stream_sse2"s)
