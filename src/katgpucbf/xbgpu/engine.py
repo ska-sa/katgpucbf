@@ -307,10 +307,6 @@ class BPipeline(Pipeline):
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        # TODO: Collate all output.dst addresses into one list to give to BSend
-        # The order doesn't *matter*, it's more for peace of mind
-        # To keep the output.name and output.dst in lock-step, probably best to
-        # pass `outputs` to BSend constructor?
         # TODO: The way this is imported will change once the OperationSequence is in place
         self.send_stream = bsend.BSend(
             output,
@@ -353,11 +349,10 @@ class BPipeline(Pipeline):
         )
 
     def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
-        # TODO: Maybe pass this off to BSend?
-        # If enable is True, ensure that this `beam_name` is present
-        # else: Remove the entry
-
-        pass
+        # NOTE: Defaulting to handle its single output for now.
+        # Actual implementation will require some kind of 'stream_id' arg,
+        # which currently contravenes the base function signature.
+        self.send_stream.enable_substream(enable=enable)
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:

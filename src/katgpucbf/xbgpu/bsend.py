@@ -307,13 +307,16 @@ class BSend:
 
         self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
 
-    def enable_substream(self, stream_id: int, enable: bool = True) -> None:
+    def enable_substream(self, stream_id: int = 0, enable: bool = True) -> None:
         """Enable/Disable a substream's data transmission.
 
         :class:`.BSend` operates as a large single stream with multiple
         substreams. Each substream is its own data product and is required
         to be enabled/disabled independently.
 
+        .. todo::
+            Update to actually carry out substream enable/disable once
+            multiple substreams are supported.
         Parameters
         ----------
         stream_id
@@ -323,7 +326,7 @@ class BSend:
             Boolean indicating whether the `stream_id` should be enabled or
             disabled.
         """
-        pass
+        self.tx_enabled = enable
 
     async def get_free_chunk(self) -> Chunk:
         """Return a Chunk once it has completed its send futures."""
@@ -339,8 +342,8 @@ class BSend:
         # It's a heavy-handed approach, but we don't care about performance
         # during shutdown.
         await self.stream.async_flush()
-        # TODO: Send across all substreams once multiple beams are supported
-        await self.stream.async_send_heap(stop_heap)
+        for i in range(self.n_beams):
+            await self.stream.async_send_heap(stop_heap, substream_index=i)
 
 
 def make_stream(
