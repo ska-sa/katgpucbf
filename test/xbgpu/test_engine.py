@@ -458,14 +458,14 @@ class TestEngine:
         await xbengine.stop()
 
     @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna",
+        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna, heap_accumulation_threshold",
         test_parameters.array_size,
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
         [None, 0, 3],
+        [(3, 7), (4, 8), (5, 9)],
         filter=valid_end_to_end_combination,
     )
-    @pytest.mark.parametrize("heap_accumulation_threshold", [(3, 7), (4, 8), (5, 9)])
     async def test_xengine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
