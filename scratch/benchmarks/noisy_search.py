@@ -110,22 +110,25 @@ async def noisy_search(
         # Determine the current confidence interval
         csum = np.cumsum(a)
         low = int(np.searchsorted(csum, 0.5 * tolerance)) - 1
-        high = int(np.searchsorted(csum, 1 - 0.5 * tolerance))
+        high = int(np.searchsorted(csum, 1.0 - 0.5 * tolerance))
         if high - low <= max_interval or (max_comparisons is not None and comparisons >= max_comparisons):
             confidence = a[high] - (a[low] if low >= 0 else 0.0)
             return NoisySearchResult(low=low, high=high, comparisons=comparisons, confidence=float(confidence))
 
-        # Determine query point that gives the lowest expected entropy afterwards
+        # Compute what the updated distribution would be, for each possible
+        # query value and each possible outcome.
         yes = a[np.newaxis, :] * yes_scale
-        yes /= np.sum(yes, axis=1, keepdims=True)
+        prob_yes = np.sum(yes, axis=1)
+        yes /= prob_yes[:, np.newaxis]
         no = a[np.newaxis, :] * no_scale
-        no /= np.sum(no, axis=1, keepdims=True)
-        entropy = _entropy(yes, axis=1) * csum[:n] + _entropy(no, axis=1) * (1 - csum[:n])
+        prob_no = 1.0 - prob_yes
+        no /= prob_no[:, np.newaxis]
+        # Determine expected entropy after the query for each query value
+        entropy = _entropy(yes, axis=1) * prob_yes + _entropy(no, axis=1) * prob_no
+        # Pick the query value that will minimise expected entropy
         i = int(np.argmin(entropy))
         comparisons += 1
         if await compare(items[i]):
-            a *= yes_scale[i]
+            a[:] = yes[i]
         else:
-            a *= no_scale[i]
-        # Normalise
-        a /= np.sum(a)
+            a[:] = no[i]
