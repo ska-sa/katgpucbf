@@ -112,7 +112,7 @@ async def noisy_search(
         low = int(np.searchsorted(csum, 0.5 * tolerance)) - 1
         high = int(np.searchsorted(csum, 1.0 - 0.5 * tolerance))
         if high - low <= max_interval or (max_comparisons is not None and comparisons >= max_comparisons):
-            confidence = a[high] - (a[low] if low >= 0 else 0.0)
+            confidence = (csum[high] if high < n else 1.0) - (csum[low] if low >= 0 else 0.0)
             return NoisySearchResult(low=low, high=high, comparisons=comparisons, confidence=float(confidence))
 
         # Compute what the updated distribution would be, for each possible
