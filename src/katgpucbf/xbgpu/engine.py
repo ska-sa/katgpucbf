@@ -274,7 +274,7 @@ class Pipeline:
 
 
 class BPipeline(Pipeline):
-    """Processing pipeline for a collection of :class:`BOutput`s."""
+    """Processing pipeline for a collection of :class:`~output.BOutput`."""
 
     output: BOutput
 
