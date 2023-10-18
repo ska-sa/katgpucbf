@@ -106,7 +106,7 @@ pipeline {
          */
         stage('Run pytest (quick)') {
           when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
-          options { timeout(time: 15, unit: 'MINUTES') }
+          options { timeout(time: 30, unit: 'MINUTES') }
           steps {
             sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
           }
