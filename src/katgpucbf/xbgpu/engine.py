@@ -108,6 +108,10 @@ class TxQueueItem(QueueItem):
     of which antennas have missed data at any point in the accumulation being
     processed. This is used to determine whether any baselines were affected, and have
     their data zeroed accordingly.
+
+    .. todo::
+        Update final sentence above to accommodate for BPipeline usage, i.e.
+        Not X-engine-specific wording.
     """
 
     def __init__(
@@ -270,7 +274,7 @@ class Pipeline:
 
 
 class BPipeline(Pipeline):
-    """Processing pipeline for a collection of :class:`Beam`s."""
+    """Processing pipeline for a collection of :class:`BOutput`s."""
 
     output: BOutput
 
@@ -288,14 +292,17 @@ class BPipeline(Pipeline):
         # TODO: Obtain this in a neater way once the beamformer OpSequence is done
         buffer_shape = (
             engine.heaps_per_fengine_per_chunk,
+            self.n_beams,
             engine.n_channels_per_substream,
             engine.src_layout.n_spectra_per_heap,
             COMPLEX,
         )
         for _ in range(self.n_tx_items):
-            # TODO: Declare shapes, dtypes, etc
             buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=bsend.SEND_DTYPE)
-            saturated = accel.DeviceArray(context, shape=(), dtype=np.uint32)
+            # TODO: Clarify shape of `saturated`
+            saturated = accel.DeviceArray(
+                context, shape=(engine.heaps_per_fengine_per_chunk, self.n_beams), dtype=np.uint32
+            )
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)

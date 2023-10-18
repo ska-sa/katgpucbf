@@ -47,14 +47,16 @@ class Frame:
     timestamp
         Zero-dimensional array of dtype ``>u8`` holding the timestamp
     data
-        Payload data for the frame with shape (n_channels_per_substream, spectra_per_heap, COMPLEX)
+        Payload data for the frame with shape (n_beams,
+        n_channels_per_substream, spectra_per_heap, COMPLEX).
     saturated
-        Total number of complex samples that saturated during requantisation
+        Total number of complex samples that saturated during requantisation,
+        with shape (n_beams,).
     channel_offset
         The first frequency channel processed.
     n_substreams
-        # TODO Re-word this
-        Number of beams requiring data to be transmitted
+        Number of beams requiring data to be transmitted.
+        NOTE: Hardcoded to 1 in the BSend constructor, for now.
     """
 
     def __init__(
@@ -74,22 +76,38 @@ class Frame:
             heap.repeat_pointers = True
             heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
             heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
-            # TODO: Update `self.data` to slice off beam data for each substream
             heap.add_item(
                 spead2.Item(
                     BF_RAW_ID,
                     "bf_raw",
                     "",
-                    shape=data.shape,
+                    shape=data.shape[1:],  # Get rid of the 'beam' dimension
                     dtype=data.dtype,
-                    value=data,
+                    value=self.data[i, ...],
                 )
             )
             self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
 
 
 class Chunk:
-    """An array of :class:`Heaps`."""
+    """
+    An array of :class:`Heaps`.
+
+    Parameters
+    ----------
+    data
+        Storage for tied-array-channelised-voltage data, with shape (n_frames,
+        n_beams, n_channels_per_substream, n_spectra_per_heap, COMPLEX) and
+        dtype `SEND_DTYPE`.
+    saturated
+        TODO: Clarify the shape
+        Storage for saturation counts, with shape (n_frames, n_beams) and dtype
+        uint32.
+    channel_offset
+        The first frequency channel processed.
+    timestamp_step
+        Timestamp step between successive `:class:.Frame`s in a chunk.
+    """
 
     def __init__(
         self,
@@ -98,21 +116,17 @@ class Chunk:
         *,
         channel_offset: int,
         timestamp_step: int,
-        n_substreams: int,
     ) -> None:
-        # data.shape[0] should be some outer element indicating n_frames
-        # to fill a Chunk.
-        # NOTE: I think this value == heaps-per-feng-per-chunk????
         n_frames = data.shape[0]
         self.data = data  # data should have all the dimensions required
+        n_substreams = saturated.shape[1]
         self.saturated = saturated
 
-        # TODO: Timestamp step is the same as XBEngine's rx_heap_timestamp_step
         self._timestamp = 0
         self._timestamp_step = timestamp_step
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
 
-        # Need a future for each heap to be sent
+        # Need a future for each frame's async_send_heaps(frame.heaps)
         self.futures: list[asyncio.Future] = [asyncio.get_running_loop().create_future() for _ in range(n_frames)]
         for future in self.futures:
             future.set_result(None)
@@ -159,10 +173,10 @@ class BSend:
     heaps_per_fengine_per_chunk
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
-        # TODO: Reword
+        # TODO: There must be a better way to say this
         Number of Chunks to create in order to download data off the GPU.
     n_channels_per_substream, spectra_per_heap, channel_offset
-        Engine configuration parameters.
+        See :class:`.xbgpu.engine.XBEngine` for further information.
     timestamp_step
         The timestamp step between successive heaps, as dictated by the XBEngine.
     send_rate_factor
@@ -197,13 +211,9 @@ class BSend:
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
         tx_enabled: bool = False,
     ) -> None:
-        # Now that we've moved away from *multiple* BSend objects, towards
-        # a single send_stream with multiple substreams, the BSend object
-        # probably still needs to exist
-        # - The `send` function will need to keep track of "which substream
-        #   is enabled/disabled" Re: capture-{start, stop} <stream_name>
-        self.enabled_stream_ids: list[int] = []
+        # TODO: Update to track individual substreams once multiple beams are supported
         self.tx_enabled = tx_enabled
+        self.n_beams = 1
 
         self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
@@ -212,17 +222,16 @@ class BSend:
         # So perhaps we need to change the number of buffers to be range(send_free_queue.maxsize)
         # n_heaps_to_send = len(buffers) // spectra_per_heap
 
-        send_shape = (heaps_per_fengine_per_chunk, n_channels_per_substream, spectra_per_heap, COMPLEX)
+        send_shape = (heaps_per_fengine_per_chunk, self.n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
         for _ in range(n_tx_items):
             chunk = Chunk(
                 accel.HostArray(send_shape, SEND_DTYPE, context=context),
                 accel.HostArray(
-                    (heaps_per_fengine_per_chunk,),
+                    (heaps_per_fengine_per_chunk, self.n_beams),
                     np.uint32,
                 ),
                 channel_offset=channel_offset,
                 timestamp_step=timestamp_step,
-                n_substreams=1,  # TODO: Update once single-beam is working
             )
             self._chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
@@ -262,7 +271,7 @@ class BSend:
             BF_RAW_ID,
             "bf_raw",
             "",  # TODO: What to even say here? ICD says "Channelised complex data"
-            shape=buffers[0].shape[1:],
+            shape=buffers[0].shape[2:],
             dtype=buffers[0].dtype,
         )
 
@@ -288,6 +297,7 @@ class BSend:
                 self.stream.async_send_heaps(frame.heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 for frame in chunk._frames
             ]
+            # TODO: Update counters and sensor with chunk.saturation
             # await asyncio.gather(*chunk.futures)
             self._chunks_queue.put_nowait(chunk)
 
