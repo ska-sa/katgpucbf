@@ -369,6 +369,7 @@ struct thread_data
     sem_t start_sem;
     sem_t done_sem;
     std::future<void> future;
+    bool shutdown = false;
 
     thread_data()
     {
@@ -489,6 +490,8 @@ static void worker(
     while (true)
     {
         wait(data.start_sem);
+        if (data.shutdown)
+            break;
         run_passes(passes, mem_func, dst, src, buffer_size);
         post(data.done_sem);
     }
@@ -501,10 +504,11 @@ int main(int argc, char *const argv[])
     std::size_t buffer_size = 128 * 1024 * 1024;
     int src_align = 0, dst_align = 0;  // relative to cache line size
     std::vector<int> cores;
-    int passes = 10;
+    long long passes = 10;
+    long long repeats = -1;
     bool do_self_test = false;
     int opt;
-    while ((opt = getopt(argc, argv, "t:f:b:p:S:D:T")) != -1)
+    while ((opt = getopt(argc, argv, "t:f:b:p:r:S:D:T")) != -1)
     {
         switch (opt)
         {
@@ -550,7 +554,10 @@ int main(int argc, char *const argv[])
             buffer_size = atoll(optarg);
             break;
         case 'p':
-            passes = atoi(optarg);
+            passes = atoll(optarg);
+            break;
+        case 'r':
+            repeats = atoll(optarg);
             break;
         case 'S':
             src_align = atoi(optarg);
@@ -588,7 +595,7 @@ int main(int argc, char *const argv[])
         wait(data[i].done_sem);
 
     auto start = high_resolution_clock::now();
-    while (true)
+    while (repeats != 0)
     {
         for (size_t i = 0; i < n; i++)
             post(data[i].start_sem);
@@ -599,5 +606,13 @@ int main(int argc, char *const argv[])
         double rate = passes / elapsed.count() * n * buffer_size;
         cout << rate / 1e9 << " GB/s" << endl;
         start = now;
+        if (repeats > 0)
+            repeats--;
+    }
+    for (size_t i = 0; i < n; i++)
+    {
+        data[i].shutdown = true;
+        post(data[i].start_sem);
+        data[i].future.get();
     }
 }
