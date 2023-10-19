@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Wall -O2 -pthread
+CXXFLAGS = -std=c++17 -Wall -O2 -pthread
 TARGETS = memcpy_loop
 
 all: $(TARGETS)
