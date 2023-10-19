@@ -14,6 +14,34 @@
  * limitations under the License.
  ******************************************************************************/
 
+/**
+ * Memory copy micro-benchmark. It is designed to test both the memory
+ * thoughput of a system and of various subsets of cores, as well as to
+ * test various methods of performing a copy.
+ *
+ * The command-line takes a list of cores on which to run copies, as well
+ * as the following options:
+ *
+ * -t: memory allocation method (malloc/mmap/mmap_huge/madv_huge)
+ * -f: memory copy function (see below)
+ * -p: number of times to do a copy before printing a rate
+ * -r: number of times to run -p passes and print a rate (default is infinite)
+ * -b: size of the buffer to copy
+ * -S: an offset to add to the source address
+ * -D: an offset to add to the destination address
+ * -T: run a test to ensure that the chosen copy function works
+ *
+ * The supported functions are:
+ *
+ * - memcpy: the library memcpy implementation
+ * - memcpy_stream_sse2/memory_stream_avx/memory_stream_avx512: SIMD copies,
+ *     using streaming stores
+ * - memcpy_rep_movsb: use the x86 "REP MOVSB" instruction
+ * - memset: use library memset to clear the destination
+ * - memset: use SSE2 streaming stores to clear the destination
+ * - read: just read the source (using SSE2) and do not write anything
+ */
+
 #include <iostream>
 #include <vector>
 #include <cassert>
