@@ -80,6 +80,16 @@ pipeline {
           }
         }
 
+        stage('Compile and test memcpy_loop') {
+          steps {
+            dir('scratch') {
+              sh 'make clean'
+              sh 'make'
+              sh './memcpy_loop -T'
+            }
+          }
+        }
+
         /* This stage ensures that all the python style guidelines checks pass.
          * This will catch if someone has committed to the repo without
          * installing the required pre-commit hooks, or has bypassed them.
