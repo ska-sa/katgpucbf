@@ -8,6 +8,7 @@ See :doc:`benchmarking`.
 import argparse
 import asyncio
 import functools
+import sys
 import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ import aiohttp.client
 import asyncssh
 import numpy as np
 from prometheus_client.parser import text_string_to_metric_families
+from scipy.special import expit
 
 from noisy_search import noisy_search
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
@@ -25,11 +27,10 @@ HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
 SAMPLES_PER_HEAP = 4096
 N_POLS = 2
 DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/cbf/katgpucbf"
-NOISE = 0.02  #: Probability of an incorrect result from each trial
-#: Minimum relative difference for comparisons to be reliable i.e. for the
-#: failure probability to be :const:`NOISE`.
-FUZZ = 0.005
+NOISE = 0.01  #: Minimum probability of an incorrect result from each trial
 TOLERANCE = 0.001  #: Complement of confidence interval probability
+#: Verbosity level at which individual test results are reported
+VERBOSE_RESULTS = 1
 
 
 def dsim_factory(
@@ -99,9 +100,17 @@ def fgpu_factory(
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = f"0,1,{ncpus_per_quadrant},{ncpus_per_quadrant+1}"
+        src_affinity = (
+            f"0,1,2,3,{ncpus_per_quadrant},{ncpus_per_quadrant+1},{ncpus_per_quadrant+2},{ncpus_per_quadrant+3}"
+        )
         dst_affinity = f"{2 * ncpus_per_quadrant}"
         other_affinity = f"{3 * ncpus_per_quadrant}"
+    elif n == 2:
+        interface = server.interfaces[index % len(server.interfaces)]
+        cpu_base *= 2
+        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + ncpus_per_quadrant},{cpu_base + ncpus_per_quadrant + 1}"
+        dst_affinity = f"{cpu_base + hstep}"
+        other_affinity = f"{cpu_base + ncpus_per_quadrant + hstep}"
     else:
         interface = server.interfaces[index % len(server.interfaces)]
         src_affinity = f"{cpu_base}"
@@ -113,9 +122,11 @@ def fgpu_factory(
     command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=all --net=host "
-        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
+        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
+        f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
         f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
+        f"--src-buffer={256 * 1024 * 1024 // n} "
         f"--src-interface={interface} --src-ibv "
         f"--dst-interface={interface} --dst-ibv "
         f"--src-affinity={src_affinity} --src-comp-vector={src_affinity} "
@@ -126,22 +137,22 @@ def fgpu_factory(
         f"--sync-epoch={sync_time} "
         f"--feng-id={index} "
         f"{'--use-vkgdr --max-delay-diff=65536' if args.use_vkgdr else ''} "
-        f"--wideband=name=wideband,channels={args.channels},dst=239.102.{200 + index}.0+63:7148 "
-        # "--narrowband=name=narrowband,channels=32768,decimation=8,"
-        # f"ddc_taps=96,centre_frequency=200e6,dst=239.102.{216 + index}.0+7:7148 "
+        f"--wideband=name=wideband,channels={args.channels},dst=239.102.{200 + index}.0+{args.xb - 1}:7148 "
         f"239.102.{index}.64+15:7148 "
     )
     if args.narrowband:
         command += (
             f"--narrowband=name=narrowband,channels={args.narrowband_channels},"
             f"decimation={args.narrowband_decimation},centre_frequency={adc_sample_rate / 4},"
-            f"dst=239.102.{216 + index}.0+7:7148 "
+            f"dst=239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148 "
         )
     for arg in ["spectra_per_heap", "array_size", "dig_sample_bits"]:
         value = getattr(args, arg)
         if value is not None:
             dashed = arg.replace("_", "-")
             command += f"--{dashed}={value} "
+    for extra in args.extra:
+        command += f"{extra} "
     return command
 
 
@@ -245,12 +256,13 @@ class Result:
 async def process(
     adc_sample_rate: float,
     n: int,
+    startup_time: float,
     runtime: float,
     fgpu_server: Server,
 ) -> Result:
     """Perform a single trial on running engines."""
     async with aiohttp.client.ClientSession() as session:
-        await asyncio.sleep(1)  # Give a chance for startup losses
+        await asyncio.sleep(startup_time)  # Give a chance for startup losses
         sleeper = asyncio.create_task(asyncio.sleep(runtime))
         orig_heaps, orig_missing = await heap_counts(session, fgpu_server, n)
         await sleeper
@@ -267,33 +279,40 @@ async def process(
 async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     """Perform a single trial."""
     sync_time = int(time.time())
-    async with await run_fgpus(adc_sample_rate, sync_time, args):
-        async with await run_dsims(adc_sample_rate, sync_time, args):
-            return await process(adc_sample_rate, args.n, args.runtime, args.fgpu_server)
+    async with await run_dsims(adc_sample_rate, sync_time, args):
+        async with await run_fgpus(adc_sample_rate, sync_time, args):
+            return await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
     raise AssertionError("should be unreachable")
 
 
 async def calibrate(args: argparse.Namespace) -> None:
     """Run multiple trials on all the possible rates."""
-    for adc_sample_rate in np.arange(args.low, args.high + 0.01 * args.step, args.step):
-        sync_time = int(time.time())
-        async with await run_dsims(adc_sample_rate, sync_time, args):
-            trials = 0
-            successes = 0
-            while trials < args.calibrate_repeat:
-                async with await run_fgpus(adc_sample_rate, sync_time, args):
-                    if args.verbose:
-                        print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
-                    result = await process(adc_sample_rate, args.n, args.runtime, args.fgpu_server)
-                    if args.verbose:
-                        print(result.message())
-                    if result.good():
-                        trials += 1
-                        successes += 1
-                    elif result.missing_heaps > 0:
-                        # If missing == 0, we need to rerun the experiment
-                        trials += 1
-            print(adc_sample_rate, successes / trials)
+    rates = np.arange(args.low, args.high + 0.01 * args.step, args.step)
+    successes = [0] * len(rates)
+    for trial in range(args.calibrate_repeat):
+        for j, adc_sample_rate in enumerate(rates):
+            sync_time = int(time.time())
+            redo = True
+            while redo:
+                redo = False
+                if args.verbose >= VERBOSE_RESULTS:
+                    print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+                async with await run_dsims(adc_sample_rate, sync_time, args):
+                    async with await run_fgpus(adc_sample_rate, sync_time, args):
+                        result = await process(
+                            adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server
+                        )
+                if result.good():
+                    successes[j] += 1
+                elif result.missing_heaps == 0:
+                    redo = True  # Unexpected number of heaps received
+                if args.verbose >= VERBOSE_RESULTS:
+                    if redo:
+                        print(f"{result.message()}, rerunning", flush=True, file=sys.stderr)
+                    else:
+                        print(f"{result.message()}, {successes[j]}/{trial + 1} passed", flush=True, file=sys.stderr)
+    for success, adc_sample_rate in zip(successes, rates):
+        print(adc_sample_rate, success, args.calibrate_repeat)
 
 
 async def search(args: argparse.Namespace) -> tuple[float, float]:
@@ -301,12 +320,15 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
 
     async def measure(adc_sample_rate: float) -> Result:
         while True:
-            print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True)
+            if args.verbose >= VERBOSE_RESULTS:
+                print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
             result = await trial(adc_sample_rate, args)
             if not result.good() and result.missing_heaps == 0:
-                print(f"{result.message()}, re-running")
+                if args.verbose >= VERBOSE_RESULTS:
+                    print(f"{result.message()}, re-running", file=sys.stderr)
             else:
-                print(result.message())
+                if args.verbose >= VERBOSE_RESULTS:
+                    print(result.message(), file=sys.stderr)
                 return result
 
     async def compare(adc_sample_rate: float) -> bool:
@@ -322,14 +344,23 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
     if high_result.good():
         raise RuntimeError("succeeded on high")
 
-    # Compute error estimate. This is a heuristic based on gut feel rather
-    # than measurement. Assume that results are 1-NOISE reliable when at least
-    # FUZZ away from the critical value, and vary logarithmically in between.
+    # Compute error estimate. The model is a logistic regression on the
+    # log of the sample rate (log is used mainly to make the slope invariant
+    # to the scale of the rates, rather than for the shape).
+    # The magic numbers are determined from fit.py.
+    slope = {
+        1: -342.212919,
+        2: -173.264274,
+        4: -582.668296,
+    }[args.n]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
     mid_rates = np.r_[args.low, mid_rates, args.high]
     l_rates = np.log(rates)[:, np.newaxis]
     l_mid_rates = np.log(mid_rates)[np.newaxis, :]
-    noise = np.clip(0.5 + (l_rates - l_mid_rates) / np.log1p(FUZZ) * (0.5 - NOISE), NOISE, 1 - NOISE)
+    noise = expit((l_mid_rates - l_rates) * slope)
+    # Don't allow probabilities to get too close to 0/1, as there are may be some
+    # external factor that makes things go wrong even at very low/high rates.
+    noise = np.clip(noise, NOISE, 1 - NOISE)
 
     result = await noisy_search(
         list(rates),
@@ -351,7 +382,7 @@ async def main():  # noqa: D103
     add_sigint_handler()
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
-    parser.add_argument("--channels", type=int, default=32768, help="Wideband channel count [%(default)s]")
+    parser.add_argument("--channels", type=int, default=1024, help="Wideband channel count [%(default)s]")
     parser.add_argument(
         "--use-vkgdr",
         action="store_true",
@@ -379,7 +410,12 @@ async def main():  # noqa: D103
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
     )
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
+    parser.add_argument("--xb", type=int, default=64, help="Number of XB-engines [%(default)s]")
+    parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
 
+    parser.add_argument(
+        "--startup-time", type=float, default=1.0, help="Time to run before starting measurement [%(default)s]"
+    )
     parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
     parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
@@ -390,13 +426,14 @@ async def main():  # noqa: D103
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
     parser.add_argument("--fgpu-server", type=str, default="fgpu", help="Server on which to run fgpu [%(default)s]")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Emit stdout/stderr [no]")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity [no]")
     parser.add_argument(
         "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
     )
     parser.add_argument(
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
     )
+    parser.add_argument("extra", nargs="*", help="Remaining arguments are passed to fgpu")
     args = parser.parse_args()
 
     servers = servers_from_toml(args.servers)

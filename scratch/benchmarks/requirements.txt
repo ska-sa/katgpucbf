@@ -69,6 +69,25 @@ numpy==1.23.5
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   -r scratch/benchmarks/requirements.in
+    #   pandas
+    #   patsy
+    #   scipy
+    #   statsmodels
+packaging==23.1
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   statsmodels
+pandas==2.0.3
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   -r scratch/benchmarks/requirements.in
+    #   statsmodels
+patsy==0.5.3
+    # via statsmodels
 prometheus-client==0.17.1
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
@@ -79,6 +98,34 @@ pycparser==2.21
     # via
     #   -c scratch/benchmarks/../../requirements.txt
     #   cffi
+python-dateutil==2.8.2
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   pandas
+pytz==2023.3
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   pandas
+scipy==1.11.1
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   -r scratch/benchmarks/requirements.in
+    #   statsmodels
+six==1.16.0
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   patsy
+    #   python-dateutil
+statsmodels==0.14.0
+    # via -r scratch/benchmarks/requirements.in
 tomli==2.0.1 ; python_version < "3.11"
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
@@ -90,6 +137,12 @@ typing-extensions==4.7.1
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   asyncssh
+tzdata==2023.3
+    # via
+    #   -c scratch/benchmarks/../../qualification/requirements.txt
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -c scratch/benchmarks/../../requirements.txt
+    #   pandas
 yarl==1.9.2
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt

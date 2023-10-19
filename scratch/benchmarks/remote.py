@@ -30,6 +30,8 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
+VERBOSE_PASS_OUTPUT = 2  #: Verbosity level at which process output is passed through
+
 
 @dataclass
 class Server:
@@ -96,7 +98,7 @@ async def run_tasks(
     image: str,
     port_base: int,
     *,
-    verbose: bool,
+    verbose: int,
     timeout: float = 20.0,
 ) -> AsyncExitStack:
     """Run a set of `n` tasks remotely on a server.
@@ -124,7 +126,8 @@ async def run_tasks(
     port_base
         Port number for the first task. The tasks must use consecutive ports.
     verbose
-        If true, pass through the stdout and stderr of the tasks
+        If at least :const:`VERBOSE_PASS_OUTPUT`, pass through the stdout and
+        stderr of the tasks
     timeout
         Time to wait for the ports to be open after starting the tasks
     """
@@ -140,8 +143,8 @@ async def run_tasks(
                 await conn.create_process(
                     command=command,
                     stdin=asyncssh.DEVNULL,
-                    stdout=asyncssh.DEVNULL if not verbose else "/dev/stdout",
-                    stderr=asyncssh.DEVNULL if not verbose else "/dev/stderr",
+                    stdout=asyncssh.DEVNULL if verbose < VERBOSE_PASS_OUTPUT else "/dev/stdout",
+                    stderr=asyncssh.DEVNULL if verbose < VERBOSE_PASS_OUTPUT else "/dev/stderr",
                 )
             )
             await stack.enter_async_context(procs[-1])

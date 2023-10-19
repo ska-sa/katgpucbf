@@ -143,8 +143,7 @@ be perfect would reduce to classical binary search, which as already discussed
 is problematic). The benchmark script also supports a "calibration" mode, in
 which every candidate rate is tested a large number of times and the fraction
 of successes is printed. This does not automatically feed this information
-back into the (hard-coded) model, but it provides some data to guide the
-developer in writing or updating the model.
+back into the (hard-coded) model.
 
 .. option:: --calibrate
 
@@ -157,3 +156,13 @@ developer in writing or updating the model.
 It is highly recommended that :option:`--low`, :option:`--high` are used to specify
 a much smaller range around the critical rate, as this process is extremely
 slow.
+
+The output of this calibration process is a text file of space-separated
+values.  Previously-collected results are in the :file:`fgpu_benchmarks`
+subdirectory, and new additions should go here too. After adding or updating
+one of these files, run :program:`./fit.py` and pass it the filename. It will
+print out the coefficients for a fitted logistic regression model. The key
+information is the ``np.log(rate)`` term, which can then be stored in the
+``slope`` variable in :file:`benchmark.py`. You can also pass
+:option:`!--plot` to :program:`./fit.py` to get a plot of the calibration
+results versus the fitted model (requires matplotlib).

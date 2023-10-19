@@ -8,5 +8,8 @@ asyncssh
 async-timeout
 aiohttp
 numpy
+pandas       # Only needed for fit.py
 prometheus-client
+scipy
+statsmodels  # Only needed for fit.py
 tomli >= 1.1.0; python_version < "3.11"

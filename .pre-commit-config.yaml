@@ -57,6 +57,9 @@ repos:
             'katsdpsigproc==1.8.0',
             'katsdptelstate==0.13',
             'numpy==1.24.4',
+            # Note: actual pandas version is 2.0.3, but the stubs for it depend
+            # on a newer version of numpy.
+            'pandas-stubs==2.0.2.230605',
             'pyparsing==3.0.9',
             'pytest==7.4.0',
             'spead2==4.1.0',
