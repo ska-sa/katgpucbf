@@ -34,8 +34,8 @@
  * The supported functions are:
  *
  * - memcpy: the library memcpy implementation
- * - memcpy_stream_sse2/memory_stream_avx/memory_stream_avx512: SIMD copies,
- *     using streaming stores
+ * - memcpy_sse2/avx/avx512: SIMD copies
+ * - memcpy_stream_sse2/avx/avx512: SIMD copies, using streaming stores
  * - memcpy_rep_movsb: use the x86 "REP MOVSB" instruction
  * - memset: use library memset to clear the destination
  * - memset: use SSE2 streaming stores to clear the destination
@@ -77,6 +77,9 @@ enum class memory_type
 enum class memory_function
 {
     MEMCPY,
+    MEMCPY_SSE2,
+    MEMCPY_AVX,
+    MEMCPY_AVX512,
     MEMCPY_STREAM_SSE2,
     MEMCPY_STREAM_AVX,
     MEMCPY_STREAM_AVX512,
@@ -189,6 +192,17 @@ static void *memcpy_generic(
 }
 #pragma GCC diagnostic pop
 
+// memcpy, with SSE2
+static void *memcpy_sse2(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    return memcpy_generic<__m128i, 4, 4, cache_line_size>(
+        dest, src, n,
+        [](const __m128i *ptr, __m128i &value) { value = _mm_loadu_si128(ptr); },
+        [](__m128i *ptr, __m128i value) { _mm_store_si128(ptr, value); },
+        []() { _mm_sfence(); }
+    );
+}
+
 // memcpy, with SSE2 streaming stores
 static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
@@ -196,6 +210,18 @@ static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restric
         dest, src, n,
         [](const __m128i *ptr, __m128i &value) { value = _mm_loadu_si128(ptr); },
         [](__m128i *ptr, __m128i value) { _mm_stream_si128(ptr, value); },
+        []() { _mm_sfence(); }
+    );
+}
+
+// memcpy, with AVX
+[[gnu::target("avx2")]]
+static void *memcpy_avx(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    return memcpy_generic<__m256i, 8, 2, cache_line_size>(
+        dest, src, n,
+        [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
+        [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_store_si256(ptr, value); },
         []() { _mm_sfence(); }
     );
 }
@@ -208,6 +234,18 @@ static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict
         dest, src, n,
         [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
         [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_stream_si256(ptr, value); },
+        []() { _mm_sfence(); }
+    );
+}
+
+// memcpy, with AVX-512
+[[gnu::target("avx512f")]]
+static void *memcpy_avx512(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    return memcpy_generic<__m512i, 8, 1, cache_line_size>(
+        dest, src, n,
+        [] [[gnu::target("avx512f")]] (const __m512i *ptr, __m512i &value) { value = _mm512_loadu_si512(ptr); },
+        [] [[gnu::target("avx512f")]] (__m512i *ptr, __m512i value) { _mm512_store_si512(ptr, value); },
         []() { _mm_sfence(); }
     );
 }
@@ -341,6 +379,27 @@ static const struct
         "memcpy",
         true,
         { .memcpy_impl = &std::memcpy },
+    },
+    {
+        memory_function::MEMCPY_SSE2,
+        memory_function_type::MEMCPY,
+        "memcpy_sse2",
+        bool(__builtin_cpu_supports("sse2")),
+        { .memcpy_impl = &memcpy_sse2 },
+    },
+    {
+        memory_function::MEMCPY_AVX,
+        memory_function_type::MEMCPY,
+        "memcpy_avx",
+        bool(__builtin_cpu_supports("avx")),
+        { .memcpy_impl = &memcpy_avx },
+    },
+    {
+        memory_function::MEMCPY_AVX512,
+        memory_function_type::MEMCPY,
+        "memcpy_avx512",
+        bool(__builtin_cpu_supports("avx512f")),
+        { .memcpy_impl = &memcpy_avx512 },
     },
     {
         memory_function::MEMCPY_STREAM_SSE2,
