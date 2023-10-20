@@ -167,22 +167,29 @@ static char *allocate(size_t size, memory_type type)
     return (char *) addr;
 }
 
-/* Wrap another memcpy operation and use it to handle the aligned part of the copy,
- * fixing up the head and tail with std::memcpy. Specifically, the inner
- * function may assume that
- * - dest is aligned to a multiple of A
- * - n is a multiple of M
+/**
+ * Template for memcpy implementations. The copy uses elements of type V, which
+ * are loaded with L and stored with S. The main loop is unrolled by a factor
+ * of unroll1, and the tail is handled with a loop unrolled by unroll2 (should
+ * divide into unroll1). At the end, F is called.
+ *
+ * This is intended to be wrapped by memcpy_aligned, since it does no internal
+ * alignment, and requires n to be a multiple of unroll2 elements.
  */
-template<size_t A, size_t M, typename F>
-static void *memcpy_align(void * __restrict__ dest, const void * __restrict__ src, size_t n, const F &inner) noexcept
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"  // GCC warns that it might not be inlinable
+template<typename V, int unroll1, int unroll2, int alignment, typename L, typename S, typename F>
+[[gnu::always_inline]]
+static void *memcpy_generic(
+    void * __restrict__ dest, const void * __restrict__ src, size_t n,
+    const L &load, const S &store, const F &fence) noexcept
 {
-    static_assert(A > 0 && !(A & (A - 1)), "A must be a power of 2");
-    static_assert(M > 0 && !(M & (M - 1)), "M must be a power of 2");
+    static_assert(unroll1 % unroll2 == 0, "unroll1 must be a multiple of unroll2");
+    static_assert(alignment > 0 && (alignment & (alignment - 1)) == 0, "unalignment must be a power of 2");
 
     void *aligned_dest = dest;
     const void *aligned_src = src;  // not necessarily aligned, but corresponds to aligned_dest
-    size_t aligned_n = n;
-    if (!align(A, M, aligned_dest, aligned_n))
+    if (!align(alignment, unroll2 * sizeof(V), aligned_dest, n))
     {
         // Not even room for one aligned block. Just fall back to plain memcpy
         return std::memcpy(dest, src, n);
@@ -194,129 +201,74 @@ static void *memcpy_align(void * __restrict__ dest, const void * __restrict__ sr
         std::memcpy(dest, src, head);
         aligned_src = (const void *) ((const char *) src + head);
     }
-    // Round aligned_n down to a multiple of M
-    size_t truncated_n = aligned_n & ~(M - 1);
 
-    inner(aligned_dest, aligned_src, truncated_n);
+    char * __restrict__ dest_c = (char *) aligned_dest;
+    const char * __restrict__ src_c = (const char *) aligned_src;
+    size_t offset = 0;
+    for (; offset + unroll1 * sizeof(V) <= n; offset += unroll1 * sizeof(V))
+    {
+        V values[unroll1];
+        for (int i = 0; i < unroll1; i++)
+            load((V const *) (src_c + offset + i * sizeof(V)), values[i]);
+        for (int i = 0; i < unroll1; i++)
+            store((V *) (dest_c + offset + i * sizeof(V)), values[i]);
+    }
+    if constexpr (unroll2 != unroll1)
+    {
+        for (; offset + unroll2 * sizeof(V) <= n; offset += unroll2 * sizeof(V))
+        {
+            V values[unroll2];
+            for (int i = 0; i < unroll2; i++)
+                load((V const *) (src_c + offset + i * sizeof(V)), values[i]);
+            for (int i = 0; i < unroll2; i++)
+                store((V *) (dest_c + offset + i * sizeof(V)), values[i]);
+        }
+    }
+    fence();
 
-    size_t tail = aligned_n - truncated_n;
+    size_t tail = n - offset;
     if (tail != 0)
     {
-        std::memcpy(
-            (void *) ((char *) aligned_dest + truncated_n),
-            (const void *) ((const char *) aligned_src + truncated_n),
-            tail
-        );
+        std::memcpy(dest_c + offset, src_c + offset, tail);
     }
 
     return dest;
 }
+#pragma GCC diagnostic pop
 
-// memcpy, with SSE2 streaming stores (requires dest to be 16-byte aligned and n to be a multiple of 64)
-static void *memcpy_stream_sse2_impl(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
-{
-    char * __restrict__ dest_c = (char *) dest;
-    const char * __restrict__ src_c = (const char *) src;
-    for (size_t offset = 0; offset + 64 <= n; offset += 64)
-    {
-        __m128i value0 = _mm_loadu_si128((__m128i const *) (src_c + offset + 0));
-        __m128i value1 = _mm_loadu_si128((__m128i const *) (src_c + offset + 16));
-        __m128i value2 = _mm_loadu_si128((__m128i const *) (src_c + offset + 32));
-        __m128i value3 = _mm_loadu_si128((__m128i const *) (src_c + offset + 48));
-        _mm_stream_si128((__m128i *) (dest_c + offset + 0), value0);
-        _mm_stream_si128((__m128i *) (dest_c + offset + 16), value1);
-        _mm_stream_si128((__m128i *) (dest_c + offset + 32), value2);
-        _mm_stream_si128((__m128i *) (dest_c + offset + 48), value3);
-    }
-    _mm_sfence();
-    return dest;
-}
-
+// memcpy, with SSE2 streaming stores
 static void *memcpy_stream_sse2(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
-    return memcpy_align<cache_line_size, 64>(dest, src, n, memcpy_stream_sse2_impl);
+    return memcpy_generic<__m128i, 4, 4, cache_line_size>(
+        dest, src, n,
+        [](const __m128i *ptr, __m128i &value) { value = _mm_loadu_si128(ptr); },
+        [](__m128i *ptr, __m128i value) { _mm_stream_si128(ptr, value); },
+        []() { _mm_sfence(); }
+    );
 }
 
-// memcpy, with AVX streaming stores (requires dest to be 32-byte aligned and n to be a multiple of 64)
+// memcpy, with AVX streaming stores
 [[gnu::target("avx2")]]
-static void *memcpy_stream_avx_impl(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
-{
-    char * __restrict__ dest_c = (char *) dest;
-    const char * __restrict__ src_c = (const char *) src;
-    size_t offset = 0;
-    for (offset = 0; offset + 256 <= n; offset += 256)
-    {
-        __m256i value0 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 0));
-        __m256i value1 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 1));
-        __m256i value2 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 2));
-        __m256i value3 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 3));
-        __m256i value4 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 4));
-        __m256i value5 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 5));
-        __m256i value6 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 6));
-        __m256i value7 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32 * 7));
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 0), value0);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 1), value1);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 2), value2);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 3), value3);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 4), value4);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 5), value5);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 6), value6);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32 * 7), value7);
-    }
-    for (; offset + 64 <= n; offset += 64)
-    {
-        __m256i value0 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 0));
-        __m256i value1 = _mm256_loadu_si256((__m256i const *) (src_c + offset + 32));
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 0), value0);
-        _mm256_stream_si256((__m256i *) (dest_c + offset + 32), value1);
-    }
-    _mm_sfence();
-    return dest;
-}
-
 static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
-    return memcpy_align<cache_line_size, 64>(dest, src, n, memcpy_stream_avx_impl);
+    return memcpy_generic<__m256i, 8, 2, cache_line_size>(
+        dest, src, n,
+        [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
+        [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_stream_si256(ptr, value); },
+        []() { _mm_sfence(); }
+    );
 }
 
-// memcpy, with AVX-512 streaming stores (requires 64-byte alignment)
+// memcpy, with AVX-512 streaming stores
 [[gnu::target("avx512f")]]
-static void *memcpy_stream_avx512_impl(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
-{
-    char * __restrict__ dest_c = (char *) dest;
-    const char * __restrict__ src_c = (const char *) src;
-    size_t offset = 0;
-    for (offset = 0; offset + 512 <= n; offset += 512)
-    {
-        __m512i value0 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 0));
-        __m512i value1 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 1));
-        __m512i value2 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 2));
-        __m512i value3 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 3));
-        __m512i value4 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 4));
-        __m512i value5 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 5));
-        __m512i value6 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 6));
-        __m512i value7 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 64 * 7));
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 0), value0);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 1), value1);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 2), value2);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 3), value3);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 4), value4);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 5), value5);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 6), value6);
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 64 * 7), value7);
-    }
-    for (; offset + 64 <= n; offset += 64)
-    {
-        __m512i value0 = _mm512_loadu_si512((__m512i const *) (src_c + offset + 0));
-        _mm512_stream_si512((__m512i *) (dest_c + offset + 0), value0);
-    }
-    _mm_sfence();
-    return dest;
-}
-
 static void *memcpy_stream_avx512(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
-    return memcpy_align<64, 64>(dest, src, n, memcpy_stream_avx512_impl);
+    return memcpy_generic<__m512i, 8, 1, cache_line_size>(
+        dest, src, n,
+        [] [[gnu::target("avx512f")]] (const __m512i *ptr, __m512i &value) { value = _mm512_loadu_si512(ptr); },
+        [] [[gnu::target("avx512f")]] (__m512i *ptr, __m512i value) { _mm512_stream_si512(ptr, value); },
+        []() { _mm_sfence(); }
+    );
 }
 
 static void *memcpy_rep_movsb(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
