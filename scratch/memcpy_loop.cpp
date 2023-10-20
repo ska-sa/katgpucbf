@@ -27,6 +27,7 @@
  * -p: number of times to do a copy before printing a rate
  * -r: number of times to run -p passes and print a rate (default is infinite)
  * -b: size of the buffer to copy
+ * -c: size of individual calls to copy function
  * -S: an offset to add to the source address
  * -D: an offset to add to the destination address
  * -T: run tests of the function implementations
@@ -505,23 +506,54 @@ static void run_passes(
     memory_function mem_func,
     void * __restrict__ dest,
     const void * __restrict__ src,
-    size_t buffer_size
+    size_t buffer_size,
+    size_t chunk_size = 0  // 0 means use buffer_size
 )
 {
     const auto &info = enum_lookup(begin(memory_functions), end(memory_functions), mem_func);
+    if (chunk_size == 0)
+        chunk_size = buffer_size;
     switch (info.type)
     {
     case memory_function_type::MEMCPY:
         for (int p = 0; p < passes; p++)
-            info.impl.memcpy_impl(dest, src, buffer_size);
+        {
+            size_t offset = 0;
+            while (offset < buffer_size)
+            {
+                size_t n = min(chunk_size, buffer_size);
+                info.impl.memcpy_impl(
+                    (void *) ((byte *) dest + offset),
+                    (const void *) ((const byte *) src + offset),
+                    n
+                );
+                offset += n;
+            }
+        }
         break;
     case memory_function_type::MEMSET:
         for (int p = 0; p < passes; p++)
-            info.impl.memset_impl(dest, 0, buffer_size);
+        {
+            size_t offset = 0;
+            while (offset < buffer_size)
+            {
+                size_t n = min(chunk_size, buffer_size - offset);
+                info.impl.memset_impl((void *) ((byte *) dest + offset), 0, n);
+                offset += n;
+            }
+        }
         break;
     case memory_function_type::READ:
         for (int p = 0; p < passes; p++)
-            info.impl.read_impl(src, buffer_size);
+        {
+            size_t offset = 0;
+            while (offset < buffer_size)
+            {
+                size_t n = min(chunk_size, buffer_size - offset);
+                info.impl.read_impl((const void *) ((const byte *) src + offset), n);
+                offset += n;
+            }
+        }
     }
 }
 
@@ -580,6 +612,7 @@ static void self_test()
 static void worker(
     int core,
     size_t buffer_size,
+    size_t chunk_size,
     memory_type mem_type,
     memory_function mem_func,
     int src_align,
@@ -604,7 +637,7 @@ static void worker(
         wait(data.start_sem);
         if (data.shutdown)
             break;
-        run_passes(passes, mem_func, dst, src, buffer_size);
+        run_passes(passes, mem_func, dst, src, buffer_size, chunk_size);
         post(data.done_sem);
     }
 }
@@ -631,13 +664,14 @@ int main(int argc, char *const argv[])
     memory_type mem_type = memory_type::MMAP;
     memory_function mem_func = memory_function::MEMCPY;
     size_t buffer_size = 128 * 1024 * 1024;
+    size_t chunk_size = 0;
     int src_align = 0, dst_align = 0;  // relative to cache line size
     vector<int> cores;
     long long passes = 10;
     long long repeats = -1;
     bool do_self_test = false;
     int opt;
-    while ((opt = getopt(argc, argv, "t:f:b:p:r:S:D:T")) != -1)
+    while ((opt = getopt(argc, argv, "t:f:b:c:p:r:S:D:T")) != -1)
     {
         switch (opt)
         {
@@ -649,6 +683,9 @@ int main(int argc, char *const argv[])
             break;
         case 'b':
             buffer_size = atoll(optarg);
+            break;
+        case 'c':
+            chunk_size = atoll(optarg);
             break;
         case 'p':
             passes = atoll(optarg);
@@ -694,7 +731,7 @@ int main(int argc, char *const argv[])
     for (size_t i = 0; i < n; i++)
         data[i].future = async(
             std::launch::async, worker, cores[i],
-            buffer_size, mem_type, mem_func, src_align, dst_align,
+            buffer_size, chunk_size, mem_type, mem_func, src_align, dst_align,
             passes, ref(data[i])
         );
 
