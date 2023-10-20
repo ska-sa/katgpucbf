@@ -93,53 +93,6 @@ enum class memory_function_type
     READ
 };
 
-static const struct
-{
-    memory_type value;
-    string name;
-} memory_types[] = {
-    { memory_type::MALLOC, "malloc"s },
-    { memory_type::MMAP, "mmap"s },
-    { memory_type::MMAP_HUGE, "mmap_huge"s },
-    { memory_type::MADV_HUGE, "madv_huge"s },
-};
-
-static const struct
-{
-    memory_function value;
-    memory_function_type type;
-    string name;
-    bool supported;
-} memory_functions[] = {
-    { memory_function::MEMCPY, memory_function_type::MEMCPY, "memcpy", true },
-    { memory_function::MEMCPY_STREAM_SSE2, memory_function_type::MEMCPY, "memcpy_stream_sse2", bool(__builtin_cpu_supports("sse2")) },
-    { memory_function::MEMCPY_STREAM_AVX, memory_function_type::MEMCPY, "memcpy_stream_avx", bool(__builtin_cpu_supports("avx")) },
-    { memory_function::MEMCPY_STREAM_AVX512, memory_function_type::MEMCPY, "memcpy_stream_avx512", bool(__builtin_cpu_supports("avx512f")) },
-    { memory_function::MEMCPY_REP_MOVSB, memory_function_type::MEMCPY, "memcpy_rep_movsb", true },
-    { memory_function::MEMSET, memory_function_type::MEMSET, "memset", true },
-    { memory_function::MEMSET_STREAM_SSE2, memory_function_type::MEMSET, "memset_stream_sse2", bool(__builtin_cpu_supports("sse2")) },
-    { memory_function::READ, memory_function_type::READ, "read", true },
-};
-
-template<typename T, typename V>
-static const auto &enum_lookup(T first, T last, V value)
-{
-    for (T it = first; it != last; ++it)
-        if (it->value == value)
-            return *it;
-    abort();
-}
-
-static string memory_type_name(memory_type type)
-{
-    return enum_lookup(begin(memory_types), end(memory_types), type).name;
-}
-
-static string memory_function_name(memory_function func)
-{
-    return enum_lookup(begin(memory_functions), end(memory_functions), func).name;
-}
-
 static char *allocate(size_t size, memory_type type)
 {
     void *addr;
@@ -279,13 +232,12 @@ static void *memcpy_rep_movsb(void * __restrict__ dest, const void * __restrict_
 }
 
 /* memset, but using SSE streaming stores */
-static void memset_stream_sse2(void *dst, int c, size_t bytes) noexcept
+static void *memset_stream_sse2(void *dst, int c, size_t bytes) noexcept
 {
     // Simplifies some edge cases
     if (bytes <= 16)
     {
-        std::memset(dst, c, bytes);
-        return;
+        return std::memset(dst, c, bytes);
     }
 
     // Process prefix up to 16-byte alignment
@@ -299,7 +251,7 @@ static void memset_stream_sse2(void *dst, int c, size_t bytes) noexcept
 
     // Use streaming stores for the bulk
     __m128i value;
-    std::memset(&value, 0, sizeof(value));
+    std::memset(&value, c, sizeof(value));
     __m128i *mdst = (__m128i *) cdst_round;
     __m128i *mend = mdst + (bytes / 16);
     bytes -= 16 * (mend - mdst);
@@ -313,6 +265,7 @@ static void memset_stream_sse2(void *dst, int c, size_t bytes) noexcept
     // Handle suffix
     if (bytes > 0)
         std::memset(mdst, c, bytes);
+    return dst;
 }
 
 /* Read all the data in [src, src + bytes) and do nothing with it. */
@@ -358,6 +311,107 @@ static void memory_read(const void *src, size_t bytes) noexcept
     (void) sink2;
 }
 
+static const struct
+{
+    memory_type value;
+    string name;
+} memory_types[] = {
+    { memory_type::MALLOC, "malloc"s },
+    { memory_type::MMAP, "mmap"s },
+    { memory_type::MMAP_HUGE, "mmap_huge"s },
+    { memory_type::MADV_HUGE, "madv_huge"s },
+};
+
+static const struct
+{
+    memory_function value;
+    memory_function_type type;
+    string name;
+    bool supported;
+    union
+    {
+        void *(*memcpy_impl)(void * __restrict__, const void * __restrict__, size_t) noexcept;
+        void *(*memset_impl)(void *, int, size_t) noexcept;
+        void (*read_impl)(const void *, size_t) noexcept;
+    } impl;
+} memory_functions[] = {
+    {
+        memory_function::MEMCPY,
+        memory_function_type::MEMCPY,
+        "memcpy",
+        true,
+        { .memcpy_impl = &std::memcpy },
+    },
+    {
+        memory_function::MEMCPY_STREAM_SSE2,
+        memory_function_type::MEMCPY,
+        "memcpy_stream_sse2",
+        bool(__builtin_cpu_supports("sse2")),
+        { .memcpy_impl = &memcpy_stream_sse2 },
+    },
+    {
+        memory_function::MEMCPY_STREAM_AVX,
+        memory_function_type::MEMCPY,
+        "memcpy_stream_avx",
+        bool(__builtin_cpu_supports("avx")),
+        { .memcpy_impl = &memcpy_stream_avx },
+    },
+    {
+        memory_function::MEMCPY_STREAM_AVX512,
+        memory_function_type::MEMCPY,
+        "memcpy_stream_avx512",
+        bool(__builtin_cpu_supports("avx512f")),
+        { .memcpy_impl = &memcpy_stream_avx512 },
+    },
+    {
+        memory_function::MEMCPY_REP_MOVSB,
+        memory_function_type::MEMCPY,
+        "memcpy_rep_movsb",
+        true,
+        { .memcpy_impl = &memcpy_rep_movsb },
+    },
+    {
+        memory_function::MEMSET,
+        memory_function_type::MEMSET,
+        "memset",
+        true,
+        { .memset_impl = &std::memset },
+    },
+    {
+        memory_function::MEMSET_STREAM_SSE2,
+        memory_function_type::MEMSET,
+        "memset_stream_sse2",
+        bool(__builtin_cpu_supports("sse2")),
+        { .memset_impl = &memset_stream_sse2 },
+    },
+    {
+        memory_function::READ,
+        memory_function_type::READ,
+        "read",
+        true,
+        { .read_impl = &memory_read },
+    },
+};
+
+template<typename T, typename V>
+static const auto &enum_lookup(T first, T last, V value)
+{
+    for (T it = first; it != last; ++it)
+        if (it->value == value)
+            return *it;
+    abort();
+}
+
+static string memory_type_name(memory_type type)
+{
+    return enum_lookup(begin(memory_types), end(memory_types), type).name;
+}
+
+static string memory_function_name(memory_function func)
+{
+    return enum_lookup(begin(memory_functions), end(memory_functions), func).name;
+}
+
 static void post(sem_t &sem)
 {
     int result = sem_post(&sem);
@@ -395,39 +449,20 @@ static void run_passes(
     size_t buffer_size
 )
 {
-    switch (mem_func)
+    const auto &info = enum_lookup(begin(memory_functions), end(memory_functions), mem_func);
+    switch (info.type)
     {
-    case memory_function::MEMCPY:
+    case memory_function_type::MEMCPY:
         for (int p = 0; p < passes; p++)
-            memcpy(dest, src, buffer_size);
+            info.impl.memcpy_impl(dest, src, buffer_size);
         break;
-    case memory_function::MEMCPY_STREAM_SSE2:
+    case memory_function_type::MEMSET:
         for (int p = 0; p < passes; p++)
-            memcpy_stream_sse2(dest, src, buffer_size);
+            info.impl.memset_impl(dest, 0, buffer_size);
         break;
-    case memory_function::MEMCPY_STREAM_AVX:
+    case memory_function_type::READ:
         for (int p = 0; p < passes; p++)
-            memcpy_stream_avx(dest, src, buffer_size);
-        break;
-    case memory_function::MEMCPY_STREAM_AVX512:
-        for (int p = 0; p < passes; p++)
-            memcpy_stream_avx512(dest, src, buffer_size);
-        break;
-    case memory_function::MEMCPY_REP_MOVSB:
-        for (int p = 0; p < passes; p++)
-            memcpy_rep_movsb(dest, src, buffer_size);
-        break;
-    case memory_function::MEMSET:
-        for (int p = 0; p < passes; p++)
-            memset(dest, 0, buffer_size);
-        break;
-    case memory_function::MEMSET_STREAM_SSE2:
-        for (int p = 0; p < passes; p++)
-            memset_stream_sse2(dest, 0, buffer_size);
-        break;
-    case memory_function::READ:
-        for (int p = 0; p < passes; p++)
-            memory_read(src, buffer_size);
+            info.impl.read_impl(src, buffer_size);
     }
 }
 
