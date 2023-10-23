@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 
+################################################################################
+# Copyright (c) 2023, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Benchmark critical rate of fgpu.
 
 See :doc:`benchmarking`.
@@ -24,7 +40,6 @@ from remote import Server, ServerInfo, run_tasks, servers_from_toml
 from sighandler import add_sigint_handler
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
-SAMPLES_PER_HEAP = 4096
 N_POLS = 2
 DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/cbf/katgpucbf"
 NOISE = 0.01  #: Minimum probability of an incorrect result from each trial
@@ -45,31 +60,40 @@ def dsim_factory(
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run dsim."""
-    ncpus_per_quadrant = server_info.ncpus // 4
-    cpu_base = index * ncpus_per_quadrant
-    interface = server.interfaces[index % len(server.interfaces)]
+    step = server_info.ncpus // args.n
+    if single_pol:
+        step //= 2
+    cpu_base = index * step
+    if args.n == 1 or not single_pol:
+        interface = server.interfaces[index % len(server.interfaces)]
+    else:
+        # For larger n, send the two pols over the same interface
+        # (because fgpu_factory expects them to arrive on the same interface)
+        interface = server.interfaces[index // 2 % len(server.interfaces)]
     katcp_port = 7140 + index
     prometheus_port = 7150 + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = ["239.102.0.64+7:7148", "239.102.0.72+7:7148"][index]
+        addresses = f"239.102.{index // 2}.{64 + index % 2 * 8}+7:7148"
     else:
         addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --net=host "
-        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
+        f"--name={name} --cap-add=SYS_NICE --net=host "
+        + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
+        + f"--ulimit=memlock=-1 --rm {args.image} "
         f"taskset -c {cpu_base} "
         f"dsim --affinity={cpu_base + 1} "
         "--ibv "
         f"--interface={interface} "
         f"--adc-sample-rate={adc_sample_rate} "
+        f"--heap-samples={args.dig_heap_samples} "
         "--ttl=2 "
         "--period=16777216 "  # Speeds things up
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
-        f"--first-id={index} "
+        f"--first-id={index if single_pol else 2 * index} "
         f"{addresses} "
     )
     if args.dig_sample_bits is not None:
@@ -89,44 +113,48 @@ def fgpu_factory(
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
-    ncpus_per_quadrant = server_info.ncpus // 4
-    hstep = ncpus_per_quadrant // 2
-    cpu_base = index * ncpus_per_quadrant
+    # When we run > 4, we assume we have enough RAM (GPU and host) that we
+    # don't need to scale buffers down to tiny amounts.
+    scaling_n = min(n, 4)
+    step = server_info.ncpus // n
+    hstep = step // 2
+    qstep = step // 4
+    cpu_base = index * step
     if args.use_vkgdr:
-        src_chunk_samples = 2**24 // n
+        src_chunk_samples = 2**24 // scaling_n
         dst_chunk_jones = src_chunk_samples // 2
     else:
-        src_chunk_samples = 2**27 // n
+        src_chunk_samples = 2**27 // scaling_n
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = (
-            f"0,1,2,3,{ncpus_per_quadrant},{ncpus_per_quadrant+1},{ncpus_per_quadrant+2},{ncpus_per_quadrant+3}"
-        )
-        dst_affinity = f"{2 * ncpus_per_quadrant}"
-        other_affinity = f"{3 * ncpus_per_quadrant}"
+        src_affinity = f"0,1,2,3,{qstep},{qstep + 1},{qstep + 2},{qstep + 3}"
+        dst_affinity = f"{2 * qstep}"
+        other_affinity = f"{3 * qstep}"
     elif n == 2:
         interface = server.interfaces[index % len(server.interfaces)]
-        cpu_base *= 2
-        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + ncpus_per_quadrant},{cpu_base + ncpus_per_quadrant + 1}"
-        dst_affinity = f"{cpu_base + hstep}"
-        other_affinity = f"{cpu_base + ncpus_per_quadrant + hstep}"
+        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + hstep},{cpu_base + hstep + 1}"
+        dst_affinity = f"{cpu_base + qstep}"
+        other_affinity = f"{cpu_base + hstep + qstep}"
     else:
         interface = server.interfaces[index % len(server.interfaces)]
         src_affinity = f"{cpu_base}"
         dst_affinity = f"{cpu_base + hstep}"
         other_affinity = f"{cpu_base + hstep + 1}"
+    gpu = server.gpus[index % len(server.gpus)]
+
     katcp_port = 7140 + index
     prometheus_port = 7150 + index
     name = f"fgpu-{index}"
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=all --net=host "
+        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
         f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
+        f"--src-packet-samples={args.dig_heap_samples} "
         f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
-        f"--src-buffer={256 * 1024 * 1024 // n} "
+        f"--src-buffer={256 * 1024 * 1024 // scaling_n} "
         f"--src-interface={interface} --src-ibv "
         f"--dst-interface={interface} --dst-ibv "
         f"--src-affinity={src_affinity} --src-comp-vector={src_affinity} "
@@ -168,8 +196,8 @@ async def run_dsims(
     """
     single_pol = False
     n = args.n
-    if n == 1:
-        n = 2
+    if n <= 2:
+        n *= 2
         single_pol = True
     factory = functools.partial(
         dsim_factory,
@@ -255,20 +283,17 @@ class Result:
 
 async def process(
     adc_sample_rate: float,
-    n: int,
-    startup_time: float,
-    runtime: float,
-    fgpu_server: Server,
+    args: argparse.Namespace,
 ) -> Result:
     """Perform a single trial on running engines."""
     async with aiohttp.client.ClientSession() as session:
-        await asyncio.sleep(startup_time)  # Give a chance for startup losses
-        sleeper = asyncio.create_task(asyncio.sleep(runtime))
-        orig_heaps, orig_missing = await heap_counts(session, fgpu_server, n)
+        await asyncio.sleep(args.startup_time)  # Give a chance for startup losses
+        sleeper = asyncio.create_task(asyncio.sleep(args.runtime))
+        orig_heaps, orig_missing = await heap_counts(session, args.fgpu_server, args.n)
         await sleeper
-        new_heaps, new_missing = await heap_counts(session, fgpu_server, n)
+        new_heaps, new_missing = await heap_counts(session, args.fgpu_server, args.n)
 
-    expected_heaps = runtime * adc_sample_rate * n * N_POLS / SAMPLES_PER_HEAP
+    expected_heaps = args.runtime * adc_sample_rate * args.n * N_POLS / args.dig_heap_samples
     return Result(
         expected_heaps=expected_heaps,
         heaps=new_heaps - orig_heaps,
@@ -281,7 +306,7 @@ async def trial(adc_sample_rate: float, args: argparse.Namespace) -> Result:
     sync_time = int(time.time())
     async with await run_dsims(adc_sample_rate, sync_time, args):
         async with await run_fgpus(adc_sample_rate, sync_time, args):
-            return await process(adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server)
+            return await process(adc_sample_rate, args)
     raise AssertionError("should be unreachable")
 
 
@@ -299,9 +324,7 @@ async def calibrate(args: argparse.Namespace) -> None:
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                 async with await run_dsims(adc_sample_rate, sync_time, args):
                     async with await run_fgpus(adc_sample_rate, sync_time, args):
-                        result = await process(
-                            adc_sample_rate, args.n, args.startup_time, args.runtime, args.fgpu_server
-                        )
+                        result = await process(adc_sample_rate, args)
                 if result.good():
                     successes[j] += 1
                 elif result.missing_heaps == 0:
@@ -352,6 +375,8 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
         1: -342.212919,
         2: -173.264274,
         4: -582.668296,
+        8: -582.668296,  # Guess: just copying n == 4
+        10: -582.668296,  # Guess: just copying n == 4
     }[args.n]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
     mid_rates = np.r_[args.low, mid_rates, args.high]
@@ -398,6 +423,13 @@ async def main():  # noqa: D103
         type=int,
         metavar="SPECTRA",
         help="Spectra in each output heap",
+    )
+    parser.add_argument(
+        "--dig-heap-samples",
+        type=int,
+        metavar="SAMPLES",
+        default=4096,
+        help="Number of samples in each digitiser heap",
     )
     parser.add_argument(
         "--dig-sample-bits",
