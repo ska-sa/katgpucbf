@@ -35,6 +35,7 @@ import logging
 import math
 import time
 from abc import abstractmethod
+from typing import Sequence
 
 import aiokatcp
 import katsdpsigproc
@@ -161,8 +162,8 @@ class Pipeline:
 
     Parameters
     ----------
-    output
-        Output config for data product (BOutput or XOutput).
+    outputs
+        List of Output config for data product (BOutput or XOutput).
     name
         Name of Pipeline.
     engine
@@ -181,8 +182,8 @@ class Pipeline:
     n_rx_items = DEFAULT_N_RX_ITEMS
     n_tx_items = DEFAULT_N_TX_ITEMS
 
-    def __init__(self, output: Output, name: str, engine: "XBEngine", context: AbstractContext) -> None:
-        self.output = output
+    def __init__(self, outputs: Sequence[Output], name: str, engine: "XBEngine", context: AbstractContext) -> None:
+        self._outputs = outputs
         self.name = name
         self.engine = engine
 
@@ -268,8 +269,8 @@ class Pipeline:
         raise NotImplementedError  # pragma: nocover
 
     @abstractmethod
-    def capture_enable(self, enable: bool = True) -> None:
-        """Enable/Disable the transmission of this data product's stream."""
+    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:
+        """Enable/Disable the transmission of a data product's stream."""
         raise NotImplementedError  # pragma: nocover
 
 
@@ -280,19 +281,19 @@ class BPipeline(Pipeline):
 
     def __init__(
         self,
-        output: BOutput,
+        outputs: list[BOutput],
         engine: "XBEngine",
         context: AbstractContext,
         init_tx_enabled: bool,
         name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
-        super().__init__(output, name, engine, context)
-        self.n_beams = 1
+        super().__init__(outputs, name, engine, context)
+        n_beams = len(outputs)
 
         # TODO: Obtain this in a neater way once the beamformer OpSequence is done
         buffer_shape = (
             engine.heaps_per_fengine_per_chunk,
-            self.n_beams,
+            n_beams,
             engine.n_channels_per_substream,
             engine.src_layout.n_spectra_per_heap,
             COMPLEX,
@@ -300,18 +301,18 @@ class BPipeline(Pipeline):
         for _ in range(self.n_tx_items):
             buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=bsend.SEND_DTYPE)
             # TODO: Clarify shape of `saturated`
-            saturated = accel.DeviceArray(
-                context, shape=(engine.heaps_per_fengine_per_chunk, self.n_beams), dtype=np.uint32
-            )
+            saturated = accel.DeviceArray(context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         # TODO: The way this is imported will change once the OperationSequence is in place
         self.send_stream = bsend.BSend(
-            output,
-            engine.heaps_per_fengine_per_chunk,
-            self.n_tx_items,
+            # TODO: Do I need to sort the outputs in alphabetical order (or similar)?
+            # To keep stream-id's in step with the stream-name (?)
+            outputs=outputs,
+            heaps_per_fengine_per_chunk=engine.heaps_per_fengine_per_chunk,
+            n_tx_items=self.n_tx_items,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             timestamp_step=engine.rx_heap_timestamp_step,
@@ -320,7 +321,7 @@ class BPipeline(Pipeline):
             context=context,
             packet_payload=engine.dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_bstream(
-                endpoints=[output.dst],
+                endpoints=[output.dst for output in outputs],
                 interface=engine.dst_interface,
                 ttl=engine.dst_ttl,
                 use_ibv=engine.dst_ibv,
@@ -334,25 +335,24 @@ class BPipeline(Pipeline):
 
         self._populate_sensors()
 
+    @property
+    def outputs(self) -> list[str]:
+        """Alias the parent-level, private :class:`Output` list."""
+        return [output.name for output in self._outputs]
+
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         # Dynamic sensors
-        # TODO: Update once multiple beams are supported
-        sensors.add(
-            aiokatcp.Sensor(
-                int,
-                f"{self.output.name}-beng-clip-cnt",
-                "Number of complex samples that saturated.",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+        for output_name in self.outputs:
+            sensors.add(
+                aiokatcp.Sensor(
+                    int,
+                    f"{output_name}-beng-clip-cnt",
+                    "Number of complex samples that saturated.",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
             )
-        )
-
-    def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
-        # NOTE: Defaulting to handle its single output for now.
-        # Actual implementation will require some kind of 'stream_id' arg,
-        # which currently contravenes the base function signature.
-        self.send_stream.enable_substream(enable=enable)
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:
@@ -426,28 +426,31 @@ class BPipeline(Pipeline):
                 # - output_name, because the Chunk didn't have access to it
                 #   (to find sensor name).
                 pass
-            chunk.send(self.send_stream, self.engine.time_converter, self.engine.sensors)
+            await self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
             self._tx_free_item_queue.put_nowait(item)
 
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
+    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
+        self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
+
 
 class XPipeline(Pipeline):
     """Processing pipeline for a single baseline-correlation-products stream."""
 
-    output: XOutput
-
     def __init__(
         self,
-        output: XOutput,
+        outputs: Sequence[XOutput],
         engine: "XBEngine",
         context: AbstractContext,
         init_tx_enabled: bool,
         name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
-        super().__init__(output, name, engine, context)
-        self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
+        super().__init__(outputs, name, engine, context)
+        self.timestamp_increment_per_accumulation = (
+            self.output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
+        )
 
         # NOTE: This value staggers the send so that packets within a heap are
         # transmitted onto the network across the entire time between dumps.
@@ -475,7 +478,7 @@ class XPipeline(Pipeline):
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = XSend(
-            output_name=output.name,
+            output_name=self.output.name,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_total,
             n_channels_per_substream=engine.n_channels_per_substream,
@@ -485,9 +488,9 @@ class XPipeline(Pipeline):
             context=context,
             packet_payload=engine.dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_xstream(
-                output_name=output.name,
-                dest_ip=output.dst.host,
-                dest_port=output.dst.port,
+                output_name=self.output.name,
+                dest_ip=self.output.dst.host,
+                dest_port=self.output.dst.port,
                 interface_ip=engine.dst_interface,
                 ttl=engine.dst_ttl,
                 use_ibv=engine.dst_ibv,
@@ -500,6 +503,13 @@ class XPipeline(Pipeline):
         )
 
         self._populate_sensors()
+
+    @property
+    def output(self) -> XOutput:
+        """Alias the parent-level, private :class:`Output` list."""
+        # TODO: Type ignore below is due to _outputs being of type Output,
+        # whereas the return type indicates XOutput expected.
+        return self._outputs[0]  # type: ignore
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
@@ -733,7 +743,7 @@ class XPipeline(Pipeline):
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
-    def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
+    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
         self.send_stream.tx_enabled = enable
 
 
@@ -968,13 +978,13 @@ class XBEngine(DeviceServer):
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
 
-        self._pipelines: list[Pipeline]
+        self._pipelines: list[Pipeline] = []
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
-        self._pipelines = [XPipeline(output, self, context, tx_enabled) for output in x_outputs]
-        if len(b_outputs) == 1:
-            # TODO: Update once more BOutput's are supported
-            self._pipelines.append(BPipeline(b_outputs[0], self, context, tx_enabled))
+        if len(x_outputs):
+            self._pipelines = [XPipeline(x_outputs, self, context, tx_enabled)]
+        elif len(b_outputs):
+            self._pipelines.append(BPipeline(b_outputs, self, context, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()
 
@@ -1011,6 +1021,11 @@ class XBEngine(DeviceServer):
             present = np.zeros(n_ants * self.heaps_per_fengine_per_chunk, np.uint8)
             chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
+
+    @property
+    def pipeline_list(self) -> list[tuple[str, Pipeline]]:
+        """List of tuples as (stream_name, parent Pipeline)."""
+        return [(output.name, pipeline) for pipeline in self._pipelines for output in pipeline._outputs]
 
     def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
@@ -1087,24 +1102,20 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             pipeline.shutdown()
 
-    def _request_pipeline(self, stream_name: str) -> Pipeline:
+    def _request_pipeline(self, stream_name: str) -> tuple[Pipeline, int]:
         """Get the pipeline related to the katcp request.
 
-        Return the first Pipeline that matches by name.
+        Return the first Pipeline that matches by name, as well as the index
+        of the data-stream it transmits.
 
         Raises
         ------
         FailReply
             If the `stream_name` is not a known output.
         """
-        # TODO: Need to update this logic when working with multiple beams
-        # - e.g. Make `_pipelines` a property, and return according to
-        #   the types of Pipelines it's parsed.
-        #   - e.g. BPipeline.output could be a property containing all
-        #     BOutputs.
-        for pipeline in self._pipelines:
-            if stream_name == pipeline.output.name:
-                return pipeline
+        for output_name, pipeline in self.pipeline_list:
+            if stream_name == output_name:
+                return pipeline, self.pipeline_list.index((stream_name, pipeline))
         raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
 
     async def request_capture_start(self, ctx, stream_name: str) -> None:
@@ -1115,8 +1126,8 @@ class XBEngine(DeviceServer):
         stream_name
             Output stream name.
         """
-        pipeline = self._request_pipeline(stream_name)
-        pipeline.capture_enable()
+        pipeline, stream_id = self._request_pipeline(stream_name)
+        pipeline.capture_enable(stream_id=stream_id)
 
     async def request_capture_stop(self, ctx, stream_name: str) -> None:
         """Stop transmission of a stream.
@@ -1126,8 +1137,8 @@ class XBEngine(DeviceServer):
         stream_name
             Output stream name.
         """
-        pipeline = self._request_pipeline(stream_name)
-        pipeline.capture_enable(enable=False)
+        pipeline, stream_id = self._request_pipeline(stream_name)
+        pipeline.capture_enable(stream_id=stream_id, enable=False)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
@@ -1157,7 +1168,7 @@ class XBEngine(DeviceServer):
                 descriptor_interval_s,
             )
             descriptor_task = asyncio.create_task(
-                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
+                descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
             )
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
@@ -1176,13 +1187,13 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             proc_task = asyncio.create_task(
                 pipeline.gpu_proc_loop(),
-                name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
+                name=f"{pipeline.name}.{GPU_PROC_TASK_NAME}",
             )
             self.add_service_task(proc_task)
 
             send_task = asyncio.create_task(
                 pipeline.sender_loop(),
-                name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
+                name=f"{pipeline.name}.{SEND_TASK_NAME}",
             )
             self.add_service_task(send_task)
 

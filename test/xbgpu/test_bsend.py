@@ -166,7 +166,7 @@ class TestBSend:
         channel_offset = n_channels_per_substream * 3
         queue = spead2.InprocQueue()
         send_stream = BSend(
-            output=output,
+            outputs=[output],
             heaps_per_fengine_per_chunk=HEAPS_PER_FENG_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
             n_channels_per_substream=n_channels_per_substream,

@@ -54,9 +54,6 @@ class Frame:
         with shape (n_beams,).
     channel_offset
         The first frequency channel processed.
-    n_substreams
-        Number of beams requiring data to be transmitted.
-        NOTE: Hardcoded to 1 in the BSend constructor, for now.
     """
 
     def __init__(
@@ -66,11 +63,11 @@ class Frame:
         saturated: np.ndarray,
         *,
         channel_offset: int,
-        n_substreams: int,
     ) -> None:
-        self.heaps = []
+        self.heaps: list[spead2.send.HeapReference] = []
         self.data = data
         self.saturated = saturated
+        n_substreams = saturated.shape[0]
         for i in range(n_substreams):
             heap = spead2.send.Heap(flavour=FLAVOUR)
             heap.repeat_pointers = True
@@ -100,7 +97,6 @@ class Chunk:
         n_beams, n_channels_per_substream, n_spectra_per_heap, COMPLEX) and
         dtype `SEND_DTYPE`.
     saturated
-        TODO: Clarify the shape
         Storage for saturation counts, with shape (n_frames, n_beams) and dtype
         uint32.
     channel_offset
@@ -119,18 +115,11 @@ class Chunk:
     ) -> None:
         n_frames = data.shape[0]
         self.data = data  # data should have all the dimensions required
-        n_substreams = saturated.shape[1]
         self.saturated = saturated
 
         self._timestamp = 0
         self._timestamp_step = timestamp_step
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
-
-        # NOTE: The chunk's future should hold the future returned from
-        # gathering all :meth:`spead2.send.asyncio.AsyncStream.async_send_heaps`
-        # calls for each frame's heaps.
-        self.future = asyncio.get_running_loop().create_future()
-        self.future.set_result(None)
 
         self._frames = [
             Frame(
@@ -138,7 +127,6 @@ class Chunk:
                 data[i],
                 saturated[i],
                 channel_offset=channel_offset,
-                n_substreams=n_substreams,
             )
             for i in range(n_frames)
         ]
@@ -165,7 +153,7 @@ class Chunk:
         send_stream: "BSend",
         time_converter: TimeConverter,
         sensors: SensorSet,
-    ) -> None:
+    ) -> asyncio.Future:
         """
         Transmit a chunk's heaps over a SPEAD stream.
 
@@ -175,19 +163,18 @@ class Chunk:
         .. todo::
             Also update its relevant counters and sensor values.
         """
-        if send_stream.tx_enabled:
-            send_futures = [
-                send_stream.stream.async_send_heaps(frame.heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
-                for frame in self._frames
-            ]
-            self.future = asyncio.gather(*send_futures)
-            send_stream._chunks_queue.put_nowait(self)
+        if any(send_stream.tx_enabled):
+            send_futures = []
+            for frame in self._frames:
+                heaps_to_send = [heap for heap, enabled in zip(frame.heaps, send_stream.tx_enabled) if enabled]
+                send_futures.append(
+                    send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                )
             # TODO: Update counters and sensor with chunk.saturation
+            return asyncio.gather(*send_futures)
         else:
-            # :meth:`.BSend.get_free_chunk` still needs to await some future
-            # before returning a :class:`.Chunk`.
-            self.future = asyncio.create_task(send_stream.stream.async_flush())
-            send_stream._chunks_queue.put_nowait(self)
+            # TODO: Is it necessary to handle this case?
+            return asyncio.create_task(send_stream.stream.async_flush())
 
 
 class BSend:
@@ -198,8 +185,8 @@ class BSend:
 
     Parameters
     ----------
-    output
-        The BOutput containing the beam name and destination address.
+    outputs
+        List of :class:`.output.BOutput`.
     heaps_per_fengine_per_chunk
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
@@ -228,7 +215,7 @@ class BSend:
 
     def __init__(
         self,
-        output: BOutput,
+        outputs: Sequence[BOutput],
         heaps_per_fengine_per_chunk: int,
         n_tx_items: int,
         n_channels_per_substream: int,
@@ -241,11 +228,10 @@ class BSend:
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
         tx_enabled: bool = False,
     ) -> None:
-        # TODO: Update to track individual substreams once multiple beams are supported
-        self.tx_enabled = tx_enabled
-        self.n_beams = 1
+        self.tx_enabled = [tx_enabled] * len(outputs)
+        self.n_beams = len(outputs)
 
-        self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
+        self._free_chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
 
         # `n_heaps_to_send` is actually used to dictate the amount of buffers (in XSend)
@@ -263,7 +249,7 @@ class BSend:
                 channel_offset=channel_offset,
                 timestamp_step=timestamp_step,
             )
-            self._chunks_queue.put_nowait(chunk)
+            self._free_chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
 
         # Multicast stream parameters
@@ -276,7 +262,7 @@ class BSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
-            max_heaps=n_tx_items * heaps_per_fengine_per_chunk + 1,  # TODO: Update this to be proper
+            max_heaps=n_tx_items * heaps_per_fengine_per_chunk * self.n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
             rate=0.0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
         )
@@ -307,16 +293,13 @@ class BSend:
 
         self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
 
-    def enable_substream(self, stream_id: int = 0, enable: bool = True) -> None:
+    def enable_substream(self, stream_id: int, enable: bool = True) -> None:
         """Enable/Disable a substream's data transmission.
 
         :class:`.BSend` operates as a large single stream with multiple
         substreams. Each substream is its own data product and is required
         to be enabled/disabled independently.
 
-        .. todo::
-            Update to actually carry out substream enable/disable once
-            multiple substreams are supported.
         Parameters
         ----------
         stream_id
@@ -326,13 +309,30 @@ class BSend:
             Boolean indicating whether the `stream_id` should be enabled or
             disabled.
         """
-        self.tx_enabled = enable
+        self.tx_enabled[stream_id] = enable
 
     async def get_free_chunk(self) -> Chunk:
-        """Return a Chunk once it has completed its send futures."""
-        chunk = await self._chunks_queue.get()
-        await chunk.future
+        """
+        Obtain a :class:`.Chunk` for transmission.
+
+        .. todo::
+
+            Is this entirely necessary? Left in because it felt a bit strange
+            to dig into the :class:`.BSend` from the :class:`.XBEngine`.
+        """
+        chunk = await self._free_chunks_queue.get()
         return chunk
+
+    async def send_chunk(self, chunk: Chunk, time_converter: TimeConverter, sensors: SensorSet) -> None:
+        """Send a chunk's data and put it on the queue."""
+        try:
+            await chunk.send(self, time_converter, sensors)
+        except asyncio.CancelledError:
+            pass
+        except Exception as ex:
+            raise ex
+        finally:
+            self._free_chunks_queue.put_nowait(chunk)
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""
