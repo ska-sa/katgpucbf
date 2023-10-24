@@ -28,7 +28,6 @@
 
 pipeline {
   agent {
-    label 'cuda-A30'
     dockerfile {
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
