@@ -48,6 +48,8 @@ pipeline {
        * image).
        */
       args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
+
+      label 'cuda-A30'
     }
   }
 
