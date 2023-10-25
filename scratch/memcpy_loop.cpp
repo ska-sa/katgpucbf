@@ -91,6 +91,7 @@ enum class memory_function
     MEMCPY_STREAM_AVX512,
     MEMCPY_STREAM_AVX512_REVERSE,
     MEMCPY_REP_MOVSB,
+    MEMCPY_REP_MOVSB_REVERSE,
     MEMSET,
     MEMSET_STREAM_SSE2,
     READ
@@ -410,6 +411,15 @@ static void *memcpy_rep_movsb(void * __restrict__ dest, const void * __restrict_
     return orig_dest;
 }
 
+static void *memcpy_rep_movsb_reverse(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    void *orig_dest = dest;
+    dest = (char *) dest + (n - 1);
+    src = (const char *) src + (n - 1);
+    asm volatile("std; rep movsb; cld" : "+c" (n), "+D" (dest), "+S" (src) : : "memory");
+    return orig_dest;
+}
+
 /* memset, but using SSE streaming stores */
 static void *memset_stream_sse2(void *dst, int c, size_t bytes) noexcept
 {
@@ -611,6 +621,13 @@ static const struct
         "memcpy_rep_movsb",
         true,
         { .memcpy_impl = &memcpy_rep_movsb },
+    },
+    {
+        memory_function::MEMCPY_REP_MOVSB_REVERSE,
+        memory_function_type::MEMCPY,
+        "memcpy_rep_movsb_reverse",
+        true,
+        { .memcpy_impl = &memcpy_rep_movsb_reverse },
     },
     {
         memory_function::MEMSET,
