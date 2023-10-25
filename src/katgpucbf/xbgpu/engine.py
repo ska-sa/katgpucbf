@@ -180,7 +180,7 @@ class Pipeline:
     n_tx_items = DEFAULT_N_TX_ITEMS
 
     def __init__(self, outputs: Sequence[Output], name: str, engine: "XBEngine", context: AbstractContext) -> None:
-        self._outputs = outputs
+        self.outputs = outputs
         self.name = name
         self.engine = engine
 
@@ -274,8 +274,6 @@ class Pipeline:
 class BPipeline(Pipeline):
     """Processing pipeline for a collection of :class:`.output.BOutput`."""
 
-    output: BOutput
-
     def __init__(
         self,
         outputs: list[BOutput],
@@ -332,19 +330,14 @@ class BPipeline(Pipeline):
 
         self._populate_sensors()
 
-    @property
-    def outputs(self) -> list[str]:
-        """Alias the parent-level, private :class:`Output` list."""
-        return [output.name for output in self._outputs]
-
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         # Dynamic sensors
-        for output_name in self.outputs:
+        for output in self.outputs:
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"{output_name}-beng-clip-cnt",
+                    f"{output.name}-beng-clip-cnt",
                     "Number of complex samples that saturated.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -502,10 +495,10 @@ class XPipeline(Pipeline):
 
     @property
     def output(self) -> XOutput:
-        """Alias the parent-level, private :class:`Output` list."""
-        # TODO: Type ignore below is due to _outputs being of type Output,
+        """Alias the parent-level :class:`Output` list."""
+        # TODO: Type ignore below is due to outputs being of type Output,
         # whereas the return type indicates XOutput expected.
-        return self._outputs[0]  # type: ignore
+        return self.outputs[0]  # type: ignore
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
@@ -1017,11 +1010,6 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
-    @property
-    def pipeline_list(self) -> list[tuple[str, Pipeline]]:
-        """List of tuples as (stream_name, parent Pipeline)."""
-        return [(output.name, pipeline) for pipeline in self._pipelines for output in pipeline._outputs]
-
     def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Dynamic sensors
@@ -1108,9 +1096,10 @@ class XBEngine(DeviceServer):
         FailReply
             If the `stream_name` is not a known output.
         """
-        for output_name, pipeline in self.pipeline_list:
-            if stream_name == output_name:
-                return pipeline, self.pipeline_list.index((stream_name, pipeline))
+        for pipeline in self._pipelines:
+            for output in pipeline.outputs:
+                if stream_name == output.name:
+                    return pipeline, pipeline.outputs.index(output)
         raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
 
     async def request_capture_start(self, ctx, stream_name: str) -> None:
