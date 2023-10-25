@@ -88,7 +88,7 @@ class TestBSend:
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
             chunk.timestamp = i * HEAPS_PER_FENG_PER_CHUNK * heap_timestamp_step
-            chunk.send(send_stream, time_converter, sensors)
+            send_stream.send_chunk(chunk, time_converter, sensors)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
         await send_stream.stream.async_flush()

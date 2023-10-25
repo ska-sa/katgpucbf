@@ -121,6 +121,12 @@ class Chunk:
         self._timestamp_step = timestamp_step
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
 
+        # NOTE: The future indicates when it is safe to modify the chunk,
+        # i.e. it is not being transmitted. At construction there is nothing to
+        # wait for, so we mark it ready.
+        self.future = asyncio.get_running_loop().create_future()
+        self.future.set_result(None)
+
         self._frames = [
             Frame(
                 self._timestamps[i, ...],
@@ -137,8 +143,8 @@ class Chunk:
         Timestamp of the first heap.
 
         Setting this property updates the timestamps stored in all the heaps.
-        This should not be done while a previous call to :meth:`send` is still
-        in progress.
+        This should only be done after obtaining a new chunk to ensure its
+        :attr:`future` has completed.
         """
         return self._timestamp
 
@@ -157,8 +163,8 @@ class Chunk:
         """
         Transmit a chunk's heaps over a SPEAD stream.
 
-        The chunk holds a reference to the gathered future, which needs to be
-        awaited before using again.
+        This method returns immediately and sends the data asynchronously. Before
+        modifying the chunk, first await :attr:`future`.
 
         .. todo::
 
@@ -172,10 +178,11 @@ class Chunk:
                     send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
             # TODO: Update counters and sensor with chunk.saturation
-            return asyncio.gather(*send_futures)
+            self.future = asyncio.gather(*send_futures)
         else:
             # TODO: Is it necessary to handle this case?
-            return asyncio.create_task(send_stream.stream.async_flush())
+            self.future = asyncio.create_task(send_stream.stream.async_flush())
+        return self.future
 
 
 class BSend:
@@ -246,7 +253,7 @@ class BSend:
         self.tx_enabled = [tx_enabled] * len(outputs)
         self.n_beams = len(outputs)
 
-        self._free_chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
+        self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
 
         send_shape = (heaps_per_fengine_per_chunk, self.n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
@@ -261,7 +268,7 @@ class BSend:
                 channel_offset=channel_offset,
                 timestamp_step=timestamp_step,
             )
-            self._free_chunks_queue.put_nowait(chunk)
+            self._chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
 
         # TODO: Follow suit with other Engines to calculate `rate`
@@ -317,27 +324,28 @@ class BSend:
         self.tx_enabled[stream_id] = enable
 
     async def get_free_chunk(self) -> Chunk:
+        """Obtain a :class:`.Chunk` for transmission.
+
+        Raises
+        ------
+        asyncio.CancelledError
+            If the chunk's future is cancelled at any point.
+        Exception
+            For any other unexpected error.
         """
-        Obtain a :class:`.Chunk` for transmission.
-
-        .. todo::
-
-            Is this entirely necessary? Left in because it felt a bit strange
-            to dig into the :class:`.BSend` from the :class:`.XBEngine`.
-        """
-        chunk = await self._free_chunks_queue.get()
-        return chunk
-
-    async def send_chunk(self, chunk: Chunk, time_converter: TimeConverter, sensors: SensorSet) -> None:
-        """Send a chunk's data and put it on the queue."""
+        chunk = await self._chunks_queue.get()
         try:
-            await chunk.send(self, time_converter, sensors)
+            await chunk.future
         except asyncio.CancelledError:
             pass
         except Exception as ex:
-            raise ex
-        finally:
-            self._free_chunks_queue.put_nowait(chunk)
+            raise Exception(ex.args)
+        return chunk
+
+    def send_chunk(self, chunk: Chunk, time_converter: TimeConverter, sensors: SensorSet) -> None:
+        """Send a chunk's data and put it on the :attr:`_chunks_queue`."""
+        chunk.send(self, time_converter, sensors)
+        self._chunks_queue.put_nowait(chunk)
 
     async def send_stop_heap(self) -> None:
         """Send a Stop Heap over the spead2 transport."""

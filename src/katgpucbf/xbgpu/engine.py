@@ -422,7 +422,7 @@ class BPipeline(Pipeline):
                 # - output_name, because the Chunk didn't have access to it
                 #   (to find sensor name).
                 pass
-            await self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
+            self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
             self._tx_free_item_queue.put_nowait(item)
 
         await self.send_stream.send_stop_heap()
@@ -977,9 +977,8 @@ class XBEngine(DeviceServer):
         self._pipelines: list[Pipeline] = []
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
-        if len(x_outputs):
-            self._pipelines = [XPipeline(x_outputs, self, context, tx_enabled)]
-        elif len(b_outputs):
+        self._pipelines = [XPipeline([x_output], self, context, tx_enabled) for x_output in x_outputs]
+        if len(b_outputs):
             self._pipelines.append(BPipeline(b_outputs, self, context, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()
