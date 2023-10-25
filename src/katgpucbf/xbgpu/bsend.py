@@ -95,14 +95,14 @@ class Chunk:
     data
         Storage for tied-array-channelised-voltage data, with shape (n_frames,
         n_beams, n_channels_per_substream, n_spectra_per_heap, COMPLEX) and
-        dtype `SEND_DTYPE`.
+        dtype :const:`SEND_DTYPE`.
     saturated
         Storage for saturation counts, with shape (n_frames, n_beams) and dtype
         uint32.
     channel_offset
         The first frequency channel processed.
     timestamp_step
-        Timestamp step between successive `:class:.Frame`s in a chunk.
+        Timestamp step between successive :class:`Frame` in a chunk.
     """
 
     def __init__(
@@ -161,6 +161,7 @@ class Chunk:
         awaited before using again.
 
         .. todo::
+
             Also update its relevant counters and sensor values.
         """
         if any(send_stream.tx_enabled):
@@ -181,7 +182,21 @@ class BSend:
     """
     Class for turning tied array channelised voltage products into SPEAD heaps.
 
-    This is some text.
+    This class creates a queue of chunks that can be sent out onto the network.
+    To obtain a chunk, call :meth:`get_free_chunk` - which will return a
+    :class:`Chunk`. This object will create a limited number of transmit
+    buffers and keep recycling them, avoiding any memory allocation at runtime.
+
+    The transmission of a chunk's data is abstracted by :meth:`send_chunk`, which
+    invokes, then waits on transmission before putting it back on the queue for
+    reuse.
+
+    This object keeps track of each tied-array-channelised-voltage data stream by
+    means of a substreams in :class:`spead2.send.asyncio.AsyncStream`, allowing
+    for individual enabling and disabling of the data product.
+
+    To allow this class to be used with multiple transports, the constructor
+    takes a factory function to create the stream.
 
     Parameters
     ----------
@@ -193,7 +208,7 @@ class BSend:
         TODO: There must be a better way to say this
         Number of Chunks to create in order to download data off the GPU.
     n_channels_per_substream, spectra_per_heap, channel_offset
-        See :class:`.xbgpu.engine.XBEngine` for further information.
+        See :class:`.XBEngine` for further information.
     timestamp_step
         The timestamp step between successive heaps, as dictated by the XBEngine.
     send_rate_factor
@@ -202,12 +217,12 @@ class BSend:
         Device context to create buffers.
     stream_factory
         Callback function to create the spead2 send stream. It is passed the
-        stream ocnfiguration and memory buffers.
+        stream configuration and memory buffers.
     packet_payload
         Size, in bytes, for the output packets (tied array channelised voltage
         payload only, headers and padding are added to this).
     tx_enabled
-        Enable/Disable transmission. Defaults to starting enabled.
+        Enable/Disable transmission.
     """
 
     descriptor_heap: spead2.send.Heap
@@ -234,10 +249,6 @@ class BSend:
         self._free_chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
 
-        # `n_heaps_to_send` is actually used to dictate the amount of buffers (in XSend)
-        # So perhaps we need to change the number of buffers to be range(send_free_queue.maxsize)
-        # n_heaps_to_send = len(buffers) // spectra_per_heap
-
         send_shape = (heaps_per_fengine_per_chunk, self.n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
         for _ in range(n_tx_items):
             chunk = Chunk(
@@ -245,6 +256,7 @@ class BSend:
                 accel.HostArray(
                     (heaps_per_fengine_per_chunk, self.n_beams),
                     np.uint32,
+                    context=context,
                 ),
                 channel_offset=channel_offset,
                 timestamp_step=timestamp_step,
@@ -252,13 +264,7 @@ class BSend:
             self._free_chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
 
-        # Multicast stream parameters
-        self.heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
-        # Transport-agnostic stream information
-        # Used in XSend to calculate `send_rate_bytes_per_second`, do we need it here?
-        # TODO: Scope to move this calculation into a helper in utils
-        # packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
-        # packet_header_overhead_bytes = packets_per_heap * BSend.header_size
+        # TODO: Follow suit with other Engines to calculate `rate`
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
@@ -286,7 +292,7 @@ class BSend:
         item_group.add_item(
             BF_RAW_ID,
             "bf_raw",
-            "Channelised complex data.",  # TODO: Straight from the ICD, is this sufficient?
+            "Beamformer output for frequency-domain beam.",
             shape=buffers[0].shape[2:],
             dtype=buffers[0].dtype,
         )
@@ -303,8 +309,7 @@ class BSend:
         Parameters
         ----------
         stream_id
-            ID of the substream, corresponds to the <beam-id><pol>
-            convention, e.g. stream_id 3 has a stream_name ending in <1x>.
+            Index of the substream's data product.
         enable
             Boolean indicating whether the `stream_id` should be enabled or
             disabled.

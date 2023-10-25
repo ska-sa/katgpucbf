@@ -105,14 +105,10 @@ class TxQueueItem(QueueItem):
     """
     Extension of the QueueItem to track antennas that have missed data.
 
-    The TxQueueItem between the gpu-proc and sender loops needs to carry a record
-    of which antennas have missed data at any point in the accumulation being
-    processed. This is used to determine whether any baselines were affected, and have
-    their data zeroed accordingly.
-
-    .. todo::
-        Update final sentence above to accommodate for BPipeline usage, i.e.
-        Not X-engine-specific wording.
+    The TxQueueItem between the gpu-proc and sender loops needs to carry a
+    record of which antennas have missed data at any point in the accumulation
+    being processed. This is used to determine whether any output products were
+    affected, and have their data zeroed accordingly.
     """
 
     def __init__(
@@ -156,6 +152,7 @@ class Pipeline:
     complete.
 
     .. todo::
+
         Update the `output` parameter to be a list of `Output`s once multiple
         beams are supported. This will require some updates to the plumbing
         that uses `output` to e.g. capture-{start, stop}.
@@ -275,7 +272,7 @@ class Pipeline:
 
 
 class BPipeline(Pipeline):
-    """Processing pipeline for a collection of :class:`~output.BOutput`."""
+    """Processing pipeline for a collection of :class:`.output.BOutput`."""
 
     output: BOutput
 
@@ -366,7 +363,6 @@ class BPipeline(Pipeline):
 
             tx_item = await self._tx_free_item_queue.get()
             await tx_item.async_wait_for_events()
-            # TODO: Is it fine to update the timestamp like this?
             tx_item.reset(rx_item.timestamp)
 
             # Bind input buffers
@@ -394,8 +390,8 @@ class BPipeline(Pipeline):
         # chunk.send, which then takes care of directing data to each beam's
         # output destination.
 
-        # Get a populated TxQueueItem from the tx_item_queue
         while True:
+            # Get a populated TxQueueItem from the tx_item_queue
             item = await self._tx_item_queue.get()
             if item is None:
                 break
@@ -417,7 +413,7 @@ class BPipeline(Pipeline):
             # Set the Chunk timestamp
             chunk.timestamp = item.timestamp
             if self.send_stream.tx_enabled:
-                # Update beng-clip-cnt sensor
+                # TODO: Update beng-clip-cnt sensor
                 # But fgpu does it all in chunk.send by passing it
                 # - Send stream(s),
                 # - Frames (int, to send)
