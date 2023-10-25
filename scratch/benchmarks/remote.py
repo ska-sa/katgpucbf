@@ -41,7 +41,7 @@ class Server:
     username: str
     interfaces: list[str] = field(default_factory=list)
     gpus: list[str] = field(default_factory=lambda: ["0"])
-    ncpus: int | None = None
+    cpus: list[int] = field(default_factory=list)
 
 
 def servers_from_toml(filename: str) -> dict[str, "Server"]:
@@ -66,7 +66,7 @@ def servers_from_toml(filename: str) -> dict[str, "Server"]:
 class ServerInfo:
     """Dynamic information discovered about a server."""
 
-    ncpus: int
+    cpus: list[int]
     infiniband_devices: list[str]
 
 
@@ -136,17 +136,18 @@ async def run_tasks(
     """
     async with AsyncExitStack() as stack:
         conn = await stack.enter_async_context(asyncssh.connect(server.hostname, username=server.username))
-        if server.ncpus is None:
+        if not server.cpus:
             ncpus = int((await conn.run("nproc", check=True)).stdout)  # type: ignore[arg-type]
+            cpus = list(range(ncpus))
         else:
-            ncpus = int(server.ncpus)
+            cpus = list(server.cpus)
         infiniband_devices_stdout = (await conn.run("find /dev/infiniband -type c -print0")).stdout
         assert isinstance(infiniband_devices_stdout, str)
         infiniband_devices = infiniband_devices_stdout.split("\0")
         if infiniband_devices and infiniband_devices[-1] == "":
             # split will also split on the \0 after the last entry, leaving an empty entry
             infiniband_devices.pop()
-        server_info = ServerInfo(ncpus=ncpus, infiniband_devices=infiniband_devices)
+        server_info = ServerInfo(cpus=cpus, infiniband_devices=infiniband_devices)
         await conn.run(f"docker pull {image}", check=True)
         procs = []
         for i in range(n):
