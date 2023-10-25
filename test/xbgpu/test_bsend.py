@@ -79,7 +79,7 @@ class TestBSend:
 
         for i in range(N_TX_ITEMS):
             # Get a free chunk - there is not always a free one available. This
-            # function yields until one it available.
+            # function blocks until one is available.
             chunk = await send_stream.get_free_chunk()
 
             # Populate the buffer with dummy data.
@@ -129,8 +129,11 @@ class TestBSend:
             assert items["bf_raw"].value.dtype == np.int8
             np.testing.assert_equal(items["bf_raw"].value, zero_data)
 
-    @pytest.mark.parametrize("num_channels", test_parameters.num_channels)
-    @pytest.mark.parametrize("num_spectra_per_heap", test_parameters.num_spectra_per_heap)
+    @pytest.mark.combinations(
+        "num_channels, num_spectra_per_heap",
+        test_parameters.num_channels,
+        test_parameters.num_spectra_per_heap,
+    )
     async def test_send_simple(
         self,
         context: AbstractContext,
