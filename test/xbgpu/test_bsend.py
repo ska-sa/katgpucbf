@@ -16,12 +16,13 @@
 
 """Unit tests for the :mod:`katgpucbf.xbgpu.bsend` module."""
 
-from typing import Final
+from typing import Final, Sequence
 
 import numpy as np
 import pytest
 import spead2
 import spead2.recv.asyncio
+import spead2.send.asyncio
 from aiokatcp import Sensor, SensorSet
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
@@ -36,7 +37,7 @@ from . import test_parameters
 
 HEAPS_PER_FENG_PER_CHUNK: Final[int] = 5
 N_TX_ITEMS: Final[int] = 2
-TOTAL_HEAPS: Final[int] = N_TX_ITEMS * HEAPS_PER_FENG_PER_CHUNK
+TOTAL_DATA_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * HEAPS_PER_FENG_PER_CHUNK
 
 
 @pytest.fixture
@@ -46,15 +47,20 @@ def time_converter() -> TimeConverter:
 
 
 @pytest.fixture
-def output() -> BOutput:
-    return BOutput(name="test", dst=Endpoint("localhost", 7150))
+def outputs() -> Sequence[BOutput]:
+    """Simulating `--beam` configuration."""
+    return [
+        BOutput(name="foo", dst=Endpoint("239.10.11.0", 7149)),
+        BOutput(name="bar", dst=Endpoint("239.10.12.0", 7149)),
+    ]
 
 
 @pytest.fixture
-def sensors(output: BOutput) -> SensorSet:
+def sensors(outputs: Sequence[BOutput]) -> SensorSet:
     """Create sensors that the send code updates."""
     sensors = SensorSet()
-    sensors.add(Sensor(int, f"{output.name}.beng-clip-cnt", "Number of output samples that are saturated."))
+    for output in outputs:
+        sensors.add(Sensor(int, f"{output.name}.beng-clip-cnt", "Number of output samples that are saturated."))
     return sensors
 
 
@@ -63,6 +69,7 @@ class TestBSend:
 
     @staticmethod
     async def _send_data(
+        outputs: Sequence[BOutput],
         send_stream: BSend,
         heap_timestamp_step: int,
         time_converter: TimeConverter,
@@ -70,12 +77,17 @@ class TestBSend:
     ) -> None:
         """Send a fixed number of heaps.
 
-        More specifically, send `N_TX_ITEMS` Chunks, each of which contain
-        `HEAPS_PER_FENG_PER_CHUNK` heaps.
+        More specifically, in addition to a descriptor heap per substream, send
+        `N_TX_ITEMS` Chunks, each of which contain `HEAPS_PER_FENG_PER_CHUNK`
+        heaps.
         """
         # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
-        await send_stream.stream.async_send_heap(send_stream.descriptor_heap)
+        for i, _ in enumerate(outputs):
+            await send_stream.stream.async_send_heap(
+                send_stream.descriptor_heap,
+                substream_index=i,
+            )
 
         for i in range(N_TX_ITEMS):
             # Get a free chunk - there is not always a free one available. This
@@ -95,7 +107,7 @@ class TestBSend:
 
     @staticmethod
     async def _recv_data(
-        recv_stream: spead2.recv.asyncio.Stream,
+        queues: list[spead2.InprocQueue],
         channel_offset: int,
         n_channels_per_substream: int,
         n_spectra_per_heap: int,
@@ -104,30 +116,46 @@ class TestBSend:
         """Receive data transmitted from :func:`_send_data`.
 
         Error-check data here as well.
+
+        Parameters
+        ----------
+        outputs
+            Fixture
+        queues
+            List of :class:`spead2.InprocQueue` used to transmit heaps
+            in :meth:`_send_data`.
+        channel_offset, n_channels_per_substream, n_spectra_per_heap, heap_timestamp_step
+            Variables declared by the calling unit test to verify
+            transmitted data.
         """
-        ig = spead2.ItemGroup()
+        out_config = spead2.recv.StreamConfig(max_heaps=100)
+        out_tp = spead2.ThreadPool()
+        for queue in queues:
+            stream = spead2.recv.asyncio.Stream(out_tp, out_config)
+            stream.add_inproc_reader(queue)
 
-        # Wait for the first packet to arrive - it is expected to be the
-        # SPEAD descriptor.
-        heap = await recv_stream.get()
-        # TODO: No checks on the count sequence yet
-        items = ig.update(heap)
-        assert items == {}, "This heap contains item values not just the expected descriptors."
-
-        # Check the data heaps
-        zero_data = np.zeros(shape=(n_channels_per_substream, n_spectra_per_heap, COMPLEX), dtype=np.int8)
-        for i in range(TOTAL_HEAPS):
-            heap = await recv_stream.get()
+            # Wait for the first packet to arrive - it is expected to be the
+            # SPEAD descriptor.
+            ig = spead2.ItemGroup()
+            heap = await stream.get()
+            # TODO: No checks on the count sequence yet
             items = ig.update(heap)
-            assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
-            assert items["timestamp"].id == TIMESTAMP_ID
-            assert items["timestamp"].value == i * heap_timestamp_step
-            assert items["frequency"].id == FREQUENCY_ID
-            assert items["frequency"].value == channel_offset
-            assert items["bf_raw"].id == BF_RAW_ID
-            assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
-            assert items["bf_raw"].value.dtype == np.int8
-            np.testing.assert_equal(items["bf_raw"].value, zero_data)
+            assert items == {}, "This heap contains item values not just the expected descriptors."
+
+            # Check the data heaps
+            zero_data = np.zeros(shape=(n_channels_per_substream, n_spectra_per_heap, COMPLEX), dtype=np.int8)
+            for i in range(TOTAL_DATA_HEAPS_PER_SUBSTREAM):
+                heap = await stream.get()
+                items = ig.update(heap)
+                assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
+                assert items["timestamp"].id == TIMESTAMP_ID
+                assert items["timestamp"].value == i * heap_timestamp_step
+                assert items["frequency"].id == FREQUENCY_ID
+                assert items["frequency"].value == channel_offset
+                assert items["bf_raw"].id == BF_RAW_ID
+                assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
+                assert items["bf_raw"].value.dtype == np.int8
+                np.testing.assert_equal(items["bf_raw"].value, zero_data)
 
     @pytest.mark.combinations(
         "num_channels, num_spectra_per_heap",
@@ -139,7 +167,7 @@ class TestBSend:
         context: AbstractContext,
         num_channels: int,
         num_spectra_per_heap: int,
-        output: BOutput,
+        outputs: Sequence[BOutput],
         time_converter: TimeConverter,
         sensors: SensorSet,
     ) -> None:
@@ -152,6 +180,12 @@ class TestBSend:
         This test does not generate random data as it will take much more compute
         to check that the random data is received correctly.
 
+        .. todo::
+
+            Update this test to make use of mock_{send, recv}_stream fixtures.
+            Perhaps just mock_send_stream, as mock_recv_stream might require
+            more refactoring.
+
         Parameters
         ----------
         context
@@ -160,6 +194,8 @@ class TestBSend:
             Total number of channels processed by a (theoretical) F-engine.
         num_spectra_per_heap
             Total number of packed spectra in every recevied channel.
+        outputs, time_converter, sensors
+            Fixtures.
         """
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
         heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
@@ -167,9 +203,9 @@ class TestBSend:
         # F-engine anyway.
         n_channels_per_substream = 512
         channel_offset = n_channels_per_substream * 3
-        queue = spead2.InprocQueue()
+        queues = [spead2.InprocQueue() for _ in outputs]
         send_stream = BSend(
-            outputs=[output],
+            outputs=outputs,
             heaps_per_fengine_per_chunk=HEAPS_PER_FENG_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
             n_channels_per_substream=n_channels_per_substream,
@@ -179,15 +215,14 @@ class TestBSend:
             channel_offset=channel_offset,
             context=context,
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
-                spead2.ThreadPool(1), [queue], stream_config
+                spead2.ThreadPool(1), queues, stream_config
             ),
             tx_enabled=True,
         )
-        await self._send_data(send_stream, heap_timestamp_step, time_converter, sensors)
-        queue.stop()
+        await self._send_data(outputs, send_stream, heap_timestamp_step, time_converter, sensors)
+        for queue in queues:
+            queue.stop()
 
-        recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(1), spead2.recv.StreamConfig())
-        recv_stream.add_inproc_reader(queue)
         await self._recv_data(
-            recv_stream, channel_offset, n_channels_per_substream, num_spectra_per_heap, heap_timestamp_step
+            queues, channel_offset, n_channels_per_substream, num_spectra_per_heap, heap_timestamp_step
         )
