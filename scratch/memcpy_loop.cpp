@@ -38,6 +38,7 @@
  * - memcpy_sse2/avx/avx512: SIMD copies
  * - memcpy_stream_sse2/avx/avx512: SIMD copies, using streaming stores
  * - memcpy_rep_movsb: use the x86 "REP MOVSB" instruction
+ * - memcpy_*_reverse: variants that copy from highest address to lowest
  * - memset: use library memset to clear the destination
  * - memset_stream_sse2: use SSE2 streaming stores to clear the destination
  * - read: just read the source (using SSE2) and do not write anything
