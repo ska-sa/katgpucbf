@@ -104,25 +104,6 @@ RUN pip install --no-deps "$(grep '^pycuda==' /tmp/katgpucbf/requirements.txt)" 
 
 #######################################################################
 
-# Image used by Jenkins
-FROM build-base as jenkins
-
-# docker so that Jenkins can build a Docker image
-# All the TeX stuff for building the documentation and qualification report
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-    docker.io \
-    docker-buildx \
-    latexmk \
-    lmodern \
-    pdf2svg \
-    tex-gyre \
-    texlive-base \
-    texlive-latex-extra \
-    texlive-latex-recommended \
-    texlive-science
-
-#######################################################################
-
 # The above image is independent of the contents of this package (except
 # for requirements.txt), and is used to form the image for Jenkins
 # testing. We now install the package in a new build stage.
@@ -138,6 +119,29 @@ RUN pip install -r requirements.txt
 # pip check will complain.
 COPY . .
 RUN pip install --no-deps . && pip check
+
+#######################################################################
+
+# Image used by Jenkins
+FROM build-py as jenkins
+
+# docker so that Jenkins can build a Docker image
+# All the TeX stuff for building the documentation and qualification report
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    docker.io \
+    docker-buildx \
+    latexmk \
+    lmodern \
+    pdf2svg \
+    tex-gyre \
+    texlive-base \
+    texlive-latex-extra \
+    texlive-latex-recommended \
+    texlive-science
+
+WORKDIR /tmp/katgpucbf
+RUN pip install -r requirements-dev.txt
+
 
 #######################################################################
 

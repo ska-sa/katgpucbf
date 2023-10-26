@@ -57,6 +57,7 @@ pipeline {
     timeout(time: 2, unit: 'HOURS')
   }
 
+  /*
   stages {
     stage('Install Python packages') {
       steps {
@@ -69,6 +70,7 @@ pipeline {
         sh 'pip install --no-deps ".[test]" && pip check'
       }
     }
+    */
 
     stage('Parallel stage') {
       parallel {
