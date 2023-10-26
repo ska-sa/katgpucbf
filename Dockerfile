@@ -22,6 +22,8 @@
 
 FROM nvidia/cuda:12.0.1-base-ubuntu22.04 as base
 
+RUN groupadd -g 1000 kat && useradd -u 1000 -g kat kat
+
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
 # image. Additionally, for the Vulkan drivers to work one needs
