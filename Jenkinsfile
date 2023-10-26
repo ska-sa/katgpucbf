@@ -57,8 +57,8 @@ pipeline {
     timeout(time: 2, unit: 'HOURS')
   }
 
-  /*
   stages {
+  /*
     stage('Install Python packages') {
       steps {
         sh 'pip install -r requirements.txt -r requirements-dev.txt'
