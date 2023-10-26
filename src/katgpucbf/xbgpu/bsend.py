@@ -17,6 +17,7 @@
 """Module for sending tied array channelised voltage products onto the network."""
 
 import asyncio
+import logging
 from typing import Callable, Final, Sequence
 
 import katsdpsigproc.accel as accel
@@ -32,6 +33,7 @@ from ..spead import BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAM
 from ..utils import TimeConverter
 from .output import BOutput
 
+logger = logging.getLogger(__name__)
 # NOTE: ICD suggests `beng_out_bits_per_sample`,
 # MK correlator doesn't make this configurable.
 SEND_DTYPE = np.dtype(np.int8)
@@ -88,7 +90,7 @@ class Frame:
 
 class Chunk:
     """
-    An array of :class:`Heaps`.
+    An array of :class:`Frame`.
 
     Parameters
     ----------
@@ -114,7 +116,7 @@ class Chunk:
         timestamp_step: int,
     ) -> None:
         n_frames = data.shape[0]
-        self.data = data  # data should have all the dimensions required
+        self.data = data
         self.saturated = saturated
 
         self._timestamp = 0
@@ -143,8 +145,7 @@ class Chunk:
         Timestamp of the first heap.
 
         Setting this property updates the timestamps stored in all the heaps.
-        This should only be done after obtaining a new chunk to ensure its
-        :attr:`future` has completed.
+        This should only be done when :attr:`future` is done.
         """
         return self._timestamp
 
@@ -171,14 +172,14 @@ class Chunk:
             Also update its relevant counters and sensor values.
         """
         if any(send_stream.tx_enabled):
-            send_futures = []
             for frame in self._frames:
                 heaps_to_send = [heap for heap, enabled in zip(frame.heaps, send_stream.tx_enabled) if enabled]
-                send_futures.append(
-                    send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
-                )
+                send_future = send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
             # TODO: Update counters and sensor with chunk.saturation
-            self.future = asyncio.gather(*send_futures)
+            # NOTE: We use the last future returned above as the data is sent
+            # in-order. Once the last frame has been transmitted, the rest have
+            # too.
+            self.future = send_future
         else:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
@@ -194,9 +195,9 @@ class BSend:
     :class:`Chunk`. This object will create a limited number of transmit
     buffers and keep recycling them, avoiding any memory allocation at runtime.
 
-    The transmission of a chunk's data is abstracted by :meth:`send_chunk`, which
-    invokes, then waits on transmission before putting it back on the queue for
-    reuse.
+    The transmission of a chunk's data is abstracted by :meth:`send_chunk`. This
+    invokes transmission and immediately returns the :class:`Chunk` back to the
+    queue for reuse.
 
     This object keeps track of each tied-array-channelised-voltage data stream by
     means of a substreams in :class:`spead2.send.asyncio.AsyncStream`, allowing
@@ -212,8 +213,7 @@ class BSend:
     heaps_per_fengine_per_chunk
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
-        TODO: There must be a better way to say this
-        Number of Chunks to create in order to download data off the GPU.
+        Number of :class:`Chunk` to create.
     n_channels_per_substream, spectra_per_heap, channel_offset
         See :class:`.XBEngine` for further information.
     timestamp_step
@@ -275,7 +275,8 @@ class BSend:
 
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
-            max_heaps=n_tx_items * heaps_per_fengine_per_chunk * self.n_beams,
+            # + 1 below for the descriptor per beam
+            max_heaps=(n_tx_items * heaps_per_fengine_per_chunk + 1) * self.n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
             rate=0.0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
         )
@@ -326,20 +327,15 @@ class BSend:
     async def get_free_chunk(self) -> Chunk:
         """Obtain a :class:`.Chunk` for transmission.
 
-        Raises
-        ------
-        asyncio.CancelledError
-            If the chunk's future is cancelled at any point.
-        Exception
-            For any other unexpected error.
+        If the chunk's :attr:`future` is cancelled
         """
         chunk = await self._chunks_queue.get()
         try:
             await chunk.future
         except asyncio.CancelledError:
             pass
-        except Exception as ex:
-            raise Exception(ex.args)
+        except Exception:
+            logger.exception("Error sending chunk")
         return chunk
 
     def send_chunk(self, chunk: Chunk, time_converter: TimeConverter, sensors: SensorSet) -> None:
