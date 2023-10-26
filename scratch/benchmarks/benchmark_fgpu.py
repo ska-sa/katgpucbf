@@ -60,10 +60,11 @@ def dsim_factory(
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run dsim."""
-    step = server_info.ncpus // args.n
+    ncpus = len(server_info.cpus)
+    step = ncpus // args.n
     if single_pol:
         step //= 2
-    cpu_base = index * step
+    my_cpus = server_info.cpus[index * step : (index + 1) * step]
     if args.n == 1 or not single_pol:
         interface = server.interfaces[index % len(server.interfaces)]
     else:
@@ -71,7 +72,7 @@ def dsim_factory(
         # (because fgpu_factory expects them to arrive on the same interface)
         interface = server.interfaces[index // 2 % len(server.interfaces)]
     katcp_port = 7140 + index
-    prometheus_port = 7150 + index
+    prometheus_port = 7250 + index
     name = f"feng-dsim-{index}"
     if single_pol:
         addresses = f"239.102.{index // 2}.{64 + index % 2 * 8}+7:7148"
@@ -82,8 +83,8 @@ def dsim_factory(
         f"--name={name} --cap-add=SYS_NICE --net=host "
         + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
         + f"--ulimit=memlock=-1 --rm {args.image} "
-        f"taskset -c {cpu_base} "
-        f"dsim --affinity={cpu_base + 1} "
+        f"taskset -c {my_cpus[0]} "
+        f"dsim --affinity={my_cpus[1]} "
         "--ibv "
         f"--interface={interface} "
         f"--adc-sample-rate={adc_sample_rate} "
@@ -116,10 +117,10 @@ def fgpu_factory(
     # When we run > 4, we assume we have enough RAM (GPU and host) that we
     # don't need to scale buffers down to tiny amounts.
     scaling_n = min(n, 4)
-    step = server_info.ncpus // n
+    step = len(server_info.cpus) // n
     hstep = step // 2
     qstep = step // 4
-    cpu_base = index * step
+    my_cpus = server_info.cpus[index * step : (index + 1) * step]
     if args.use_vkgdr:
         src_chunk_samples = 2**24 // scaling_n
         dst_chunk_jones = src_chunk_samples // 2
@@ -133,18 +134,18 @@ def fgpu_factory(
         other_affinity = f"{3 * qstep}"
     elif n == 2:
         interface = server.interfaces[index % len(server.interfaces)]
-        src_affinity = f"{cpu_base},{cpu_base + 1},{cpu_base + hstep},{cpu_base + hstep + 1}"
-        dst_affinity = f"{cpu_base + qstep}"
-        other_affinity = f"{cpu_base + hstep + qstep}"
+        src_affinity = f"{my_cpus[0]},{my_cpus[1]},{my_cpus[hstep]},{my_cpus[hstep + 1]}"
+        dst_affinity = f"{my_cpus[qstep]}"
+        other_affinity = f"{my_cpus[hstep + qstep]}"
     else:
         interface = server.interfaces[index % len(server.interfaces)]
-        src_affinity = f"{cpu_base}"
-        dst_affinity = f"{cpu_base + hstep}"
-        other_affinity = f"{cpu_base + hstep + 1}"
+        src_affinity = f"{my_cpus[0]}"
+        dst_affinity = f"{my_cpus[hstep]}"
+        other_affinity = f"{my_cpus[hstep + 1]}"
     gpu = server.gpus[index % len(server.gpus)]
 
     katcp_port = 7140 + index
-    prometheus_port = 7150 + index
+    prometheus_port = 7250 + index
     name = f"fgpu-{index}"
     command = (
         "docker run "
@@ -244,7 +245,7 @@ async def _heap_counts1(session: aiohttp.client.ClientSession, url: str) -> tupl
 async def heap_counts(session: aiohttp.client.ClientSession, server: Server, n: int) -> tuple[int, int]:
     """Query the number of heaps received and missing, for all n fgpu instances."""
     tasks = [
-        asyncio.create_task(_heap_counts1(session, f"http://{server.hostname}:{7150 + i}/metrics")) for i in range(n)
+        asyncio.create_task(_heap_counts1(session, f"http://{server.hostname}:{7250 + i}/metrics")) for i in range(n)
     ]
     partials = await asyncio.gather(*tasks)
     heaps, missing_heaps = zip(*partials)
@@ -370,14 +371,13 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
     # Compute error estimate. The model is a logistic regression on the
     # log of the sample rate (log is used mainly to make the slope invariant
     # to the scale of the rates, rather than for the shape).
-    # The magic numbers are determined from fit.py.
+    # The magic numbers are determined from fit.py. For n > 4 we don't have
+    # data, so just assume it is the same as for n = 4.
     slope = {
         1: -342.212919,
         2: -173.264274,
         4: -582.668296,
-        8: -582.668296,  # Guess: just copying n == 4
-        10: -582.668296,  # Guess: just copying n == 4
-    }[args.n]
+    }[min(args.n, 4)]
     mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
     mid_rates = np.r_[args.low, mid_rates, args.high]
     l_rates = np.log(rates)[:, np.newaxis]
