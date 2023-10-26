@@ -614,9 +614,7 @@ class TestEngine:
                 np.testing.assert_equal(expected_output, device_result)
             incomplete_accums_counters.append(incomplete_accums_counter)
 
-        xpipelines: list[XPipeline] = [
-            pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)  # type: ignore
-        ]
+        xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
         for pipeline, device_result, incomplete_accums_counter in zip(
             xpipelines, device_results, incomplete_accums_counters
         ):
