@@ -330,7 +330,7 @@ class OutItem(QueueItem):
     #: Output data, a collection of spectra, arranged in memory by pol and by heap.
     spectra: accel.DeviceArray
     #: Output saturation count, per pol
-    saturation: accel.DeviceArray
+    saturated: accel.DeviceArray
     #: Output sum of squared samples, per pol
     dig_total_power: accel.DeviceArray | None
     #: Per-spectrum fine delays
