@@ -310,49 +310,49 @@ static void *memcpy_stream_sse2_reverse(void * __restrict__ dest, const void * _
 }
 
 // memcpy, with AVX
-[[gnu::target("avx2")]]
+[[gnu::target("avx")]]
 static void *memcpy_avx(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
     return memcpy_generic<__m256i, 8, 2, cache_line_size>(
         dest, src, n,
-        [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
-        [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_store_si256(ptr, value); },
+        [] [[gnu::target("avx")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
+        [] [[gnu::target("avx")]] (__m256i *ptr, __m256i value) { _mm256_store_si256(ptr, value); },
         []() { _mm_sfence(); }
     );
 }
 
 // memcpy, with AVX, reversed
-[[gnu::target("avx2")]]
+[[gnu::target("avx")]]
 static void *memcpy_avx_reverse(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
     return memcpy_generic_reverse<__m256i, 8, 2, cache_line_size>(
         dest, src, n,
-        [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
-        [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_store_si256(ptr, value); },
+        [] [[gnu::target("avx")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
+        [] [[gnu::target("avx")]] (__m256i *ptr, __m256i value) { _mm256_store_si256(ptr, value); },
         []() { _mm_sfence(); }
     );
 }
 
 // memcpy, with AVX streaming stores
-[[gnu::target("avx2")]]
+[[gnu::target("avx")]]
 static void *memcpy_stream_avx(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
     return memcpy_generic<__m256i, 8, 2, cache_line_size>(
         dest, src, n,
-        [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
-        [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_stream_si256(ptr, value); },
+        [] [[gnu::target("avx")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
+        [] [[gnu::target("avx")]] (__m256i *ptr, __m256i value) { _mm256_stream_si256(ptr, value); },
         []() { _mm_sfence(); }
     );
 }
 
 // memcpy, with AVX streaming stores, reversed
-[[gnu::target("avx2")]]
+[[gnu::target("avx")]]
 static void *memcpy_stream_avx_reverse(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
     return memcpy_generic_reverse<__m256i, 8, 2, cache_line_size>(
         dest, src, n,
-        [] [[gnu::target("avx2")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
-        [] [[gnu::target("avx2")]] (__m256i *ptr, __m256i value) { _mm256_stream_si256(ptr, value); },
+        [] [[gnu::target("avx")]] (const __m256i *ptr, __m256i &value) { value = _mm256_loadu_si256(ptr); },
+        [] [[gnu::target("avx")]] (__m256i *ptr, __m256i value) { _mm256_stream_si256(ptr, value); },
         []() { _mm_sfence(); }
     );
 }
