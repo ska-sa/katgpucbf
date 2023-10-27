@@ -154,7 +154,7 @@ class Pipeline:
     Parameters
     ----------
     outputs
-        List of Output config for data product (BOutput or XOutput).
+        Sequence of Output config for data product (BOutput or XOutput).
     name
         Name of Pipeline.
     engine
@@ -943,7 +943,7 @@ class XBEngine(DeviceServer):
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
         self._pipelines = [XPipeline(x_output, self, context, tx_enabled) for x_output in x_outputs]
-        if len(b_outputs):
+        if b_outputs:
             self._pipelines.append(BPipeline(b_outputs, self, context, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()

@@ -209,7 +209,7 @@ class BSend:
     Parameters
     ----------
     outputs
-        List of :class:`.output.BOutput`.
+        Sequence of :class:`.output.BOutput`.
     heaps_per_fengine_per_chunk
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
@@ -271,8 +271,7 @@ class BSend:
             self._chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
 
-        # TODO: Follow suit with other Engines to calculate `rate`
-
+        # TODO: Follow suit with other Engines to calculate `rate` below
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
             # + 1 below for the descriptor per beam
@@ -327,13 +326,16 @@ class BSend:
     async def get_free_chunk(self) -> Chunk:
         """Obtain a :class:`.Chunk` for transmission.
 
-        If the chunk's :attr:`future` is cancelled
+        Raises
+        ------
+        asyncio.CancelledError
+            If the chunk's send future is cancelled.
         """
         chunk = await self._chunks_queue.get()
         try:
             await chunk.future
         except asyncio.CancelledError:
-            pass
+            raise asyncio.CancelledError("Sending chunk was cancelled")
         except Exception:
             logger.exception("Error sending chunk")
         return chunk

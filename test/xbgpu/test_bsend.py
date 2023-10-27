@@ -200,7 +200,7 @@ class TestBSend:
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
         heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
         # Arbitrarily chosen, channels-per-substream is dictated by the
-        # F-engine anyway.
+        # top-level correlator configuration anyway.
         n_channels_per_substream = 512
         channel_offset = n_channels_per_substream * 3
         queues = [spead2.InprocQueue() for _ in outputs]
