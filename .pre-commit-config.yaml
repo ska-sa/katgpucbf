@@ -54,7 +54,7 @@ repos:
             'aiokatcp==1.8.0',
             'asyncssh==2.13.2',
             'dask==2023.7.1',
-            'katsdpsigproc==1.8.0',
+            'katsdpsigproc==1.8.1',
             'katsdptelstate==0.13',
             'numpy==1.24.4',
             # Note: actual pandas version is 2.0.3, but the stubs for it depend
