@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+from math import ceil
 from typing import Callable, Final, Sequence
 
 import katsdpsigproc.accel as accel
@@ -214,7 +215,7 @@ class BSend:
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
         Number of :class:`Chunk` to create.
-    n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
+    adc_sample_rate, n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
         See :class:`.XBEngine` for further information.
     timestamp_step
         The timestamp step between successive heaps, as dictated by the XBEngine.
@@ -243,6 +244,7 @@ class BSend:
         n_channels: int,
         n_channels_per_substream: int,
         spectra_per_heap: int,
+        adc_sample_rate: float,
         timestamp_step: int,
         send_rate_factor: float,
         channel_offset: int,
@@ -277,13 +279,24 @@ class BSend:
             self._chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
 
-        # TODO: Follow suit with other Engines to calculate `rate` below
+        # Multicast stream parameters
+        heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
+
+        # Transport-agnostic stream information
+        packets_per_heap = ceil(heap_payload_size_bytes / packet_payload)
+        packet_header_overhead_bytes = packets_per_heap * BSend.header_size
+
+        heap_interval = timestamp_step / adc_sample_rate
+        send_rate_bytes_per_second = (
+            (heap_payload_size_bytes + packet_header_overhead_bytes) / heap_interval * send_rate_factor * self.n_beams
+        )
+
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
             # + 1 below for the descriptor per beam
             max_heaps=(n_tx_items * heaps_per_fengine_per_chunk + 1) * self.n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=0.0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
+            rate=send_rate_bytes_per_second,
         )
         self.stream = stream_factory(stream_config, buffers)
         # Set heap count sequence to allow a receiver to ingest multiple

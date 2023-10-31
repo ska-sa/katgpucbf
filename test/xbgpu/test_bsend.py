@@ -216,8 +216,9 @@ class TestBSend:
             n_channels=num_channels,
             n_channels_per_substream=n_channels_per_substream,
             spectra_per_heap=num_spectra_per_heap,
+            adc_sample_rate=time_converter.adc_sample_rate,
             timestamp_step=heap_timestamp_step,
-            send_rate_factor=0.0,
+            send_rate_factor=0.0,  # Send as fast as possible
             channel_offset=channel_offset,
             context=context,
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
