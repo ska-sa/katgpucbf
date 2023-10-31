@@ -335,7 +335,7 @@ class BSend:
         try:
             await chunk.future
         except asyncio.CancelledError:
-            raise asyncio.CancelledError("Sending chunk was cancelled")
+            raise
         except Exception:
             logger.exception("Error sending chunk")
         return chunk

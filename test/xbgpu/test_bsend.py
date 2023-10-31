@@ -35,20 +35,19 @@ from katgpucbf.xbgpu.output import BOutput
 
 from . import test_parameters
 
-HEAPS_PER_FENG_PER_CHUNK: Final[int] = 5
+HEAPS_PER_CHUNK: Final[int] = 5
 N_TX_ITEMS: Final[int] = 2
-TOTAL_DATA_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * HEAPS_PER_FENG_PER_CHUNK
+TOTAL_DATA_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * HEAPS_PER_CHUNK
 
 
 @pytest.fixture
 def time_converter() -> TimeConverter:
-    # TODO: Probably best to use adc_sample_rate from meerkat.py::BANDS
-    return TimeConverter(123456789.0, 1712e6)
+    return TimeConverter(123456789.0, 1234e6)
 
 
 @pytest.fixture
 def outputs() -> Sequence[BOutput]:
-    """Simulating `--beam` configuration."""
+    """Simulate `--beam` configuration."""
     return [
         BOutput(name="foo", dst=Endpoint("239.10.11.0", 7149)),
         BOutput(name="bar", dst=Endpoint("239.10.12.0", 7149)),
@@ -78,7 +77,7 @@ class TestBSend:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
-        `N_TX_ITEMS` Chunks, each of which contain `HEAPS_PER_FENG_PER_CHUNK`
+        `N_TX_ITEMS` Chunks, each of which contain `HEAPS_PER_CHUNK`
         heaps.
         """
         # Send the descriptors as the recv_stream object needs it to
@@ -99,7 +98,7 @@ class TestBSend:
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
-            chunk.timestamp = i * HEAPS_PER_FENG_PER_CHUNK * heap_timestamp_step
+            chunk.timestamp = i * HEAPS_PER_CHUNK * heap_timestamp_step
             send_stream.send_chunk(chunk, time_converter, sensors)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
@@ -113,7 +112,7 @@ class TestBSend:
         n_spectra_per_heap: int,
         heap_timestamp_step: int,
     ) -> None:
-        """Receive data transmitted from :func:`_send_data`.
+        """Receive data transmitted from :meth:`_send_data`.
 
         Error-check data here as well.
 
@@ -128,7 +127,7 @@ class TestBSend:
             Variables declared by the calling unit test to verify
             transmitted data.
         """
-        out_config = spead2.recv.StreamConfig(max_heaps=100)
+        out_config = spead2.recv.StreamConfig()
         out_tp = spead2.ThreadPool()
         for queue in queues:
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
@@ -180,12 +179,6 @@ class TestBSend:
         This test does not generate random data as it will take much more compute
         to check that the random data is received correctly.
 
-        .. todo::
-
-            Update this test to make use of mock_{send, recv}_stream fixtures.
-            Perhaps just mock_send_stream, as mock_recv_stream might require
-            more refactoring.
-
         Parameters
         ----------
         context
@@ -206,7 +199,7 @@ class TestBSend:
         queues = [spead2.InprocQueue() for _ in outputs]
         send_stream = BSend(
             outputs=outputs,
-            heaps_per_fengine_per_chunk=HEAPS_PER_FENG_PER_CHUNK,
+            heaps_per_fengine_per_chunk=HEAPS_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
             n_channels_per_substream=n_channels_per_substream,
             spectra_per_heap=num_spectra_per_heap,
