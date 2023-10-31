@@ -299,6 +299,7 @@ class BPipeline(Pipeline):
             outputs=outputs,
             heaps_per_fengine_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_tx_items=self.n_tx_items,
+            n_channels=engine.n_channels_total,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             timestamp_step=engine.rx_heap_timestamp_step,

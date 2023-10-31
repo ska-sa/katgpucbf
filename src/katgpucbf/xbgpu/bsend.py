@@ -214,7 +214,7 @@ class BSend:
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
         Number of :class:`Chunk` to create.
-    n_channels_per_substream, spectra_per_heap, channel_offset
+    n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
         See :class:`.XBEngine` for further information.
     timestamp_step
         The timestamp step between successive heaps, as dictated by the XBEngine.
@@ -240,6 +240,7 @@ class BSend:
         outputs: Sequence[BOutput],
         heaps_per_fengine_per_chunk: int,
         n_tx_items: int,
+        n_channels: int,
         n_channels_per_substream: int,
         spectra_per_heap: int,
         timestamp_step: int,
@@ -250,6 +251,11 @@ class BSend:
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
         tx_enabled: bool = False,
     ) -> None:
+        if n_channels % n_channels_per_substream != 0:
+            raise ValueError("n_channels must be an integer multiple of n_channels_per_substream")
+        if channel_offset % n_channels_per_substream != 0:
+            raise ValueError("channel_offset must be an integer multiple of n_channels_per_substream")
+
         self.tx_enabled = [tx_enabled] * len(outputs)
         self.n_beams = len(outputs)
 
@@ -280,6 +286,12 @@ class BSend:
             rate=0.0,  # TODO: Update to use `send_rate_bytes_per_second`, this sends as fast as possible
         )
         self.stream = stream_factory(stream_config, buffers)
+        # Set heap count sequence to allow a receiver to ingest multiple
+        # B-engine outputs, if they should so choose.
+        self.stream.set_cnt_sequence(
+            channel_offset // n_channels_per_substream,
+            n_channels // n_channels_per_substream,
+        )
 
         item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
         item_group.add_item(

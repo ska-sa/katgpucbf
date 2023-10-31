@@ -107,6 +107,8 @@ class TestBSend:
     @staticmethod
     async def _recv_data(
         queues: list[spead2.InprocQueue],
+        n_engines: int,
+        engine_id: int,
         channel_offset: int,
         n_channels_per_substream: int,
         n_spectra_per_heap: int,
@@ -137,7 +139,7 @@ class TestBSend:
             # SPEAD descriptor.
             ig = spead2.ItemGroup()
             heap = await stream.get()
-            # TODO: No checks on the count sequence yet
+            assert heap.cnt % n_engines == engine_id % n_engines, "The heap IDs are not correctly strided"
             items = ig.update(heap)
             assert items == {}, "This heap contains item values not just the expected descriptors."
 
@@ -157,13 +159,15 @@ class TestBSend:
                 np.testing.assert_equal(items["bf_raw"].value, zero_data)
 
     @pytest.mark.combinations(
-        "num_channels, num_spectra_per_heap",
+        "num_ants, num_channels, num_spectra_per_heap",
+        test_parameters.array_size,
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
     )
     async def test_send_simple(
         self,
         context: AbstractContext,
+        num_ants: int,
         num_channels: int,
         num_spectra_per_heap: int,
         outputs: Sequence[BOutput],
@@ -190,17 +194,26 @@ class TestBSend:
         outputs, time_converter, sensors
             Fixtures.
         """
+        # We need the "total number of engines required" to process this array
+        # configuration.
+        n_engines = 1
+        while n_engines < num_ants * 4:
+            n_engines *= 2
+
+        # The test still needs to have some idea of "which engine" this is in a
+        # sequence of B-engines.
+        engine_id = 4  # Arbitrarily chosen
+
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
         heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
-        # Arbitrarily chosen, channels-per-substream is dictated by the
-        # top-level correlator configuration anyway.
-        n_channels_per_substream = 512
-        channel_offset = n_channels_per_substream * 3
+        n_channels_per_substream = num_channels // n_engines
+        channel_offset = n_channels_per_substream * engine_id
         queues = [spead2.InprocQueue() for _ in outputs]
         send_stream = BSend(
             outputs=outputs,
             heaps_per_fengine_per_chunk=HEAPS_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
+            n_channels=num_channels,
             n_channels_per_substream=n_channels_per_substream,
             spectra_per_heap=num_spectra_per_heap,
             timestamp_step=heap_timestamp_step,
@@ -217,5 +230,11 @@ class TestBSend:
             queue.stop()
 
         await self._recv_data(
-            queues, channel_offset, n_channels_per_substream, num_spectra_per_heap, heap_timestamp_step
+            queues,
+            n_engines,
+            engine_id,
+            channel_offset,
+            n_channels_per_substream,
+            num_spectra_per_heap,
+            heap_timestamp_step,
         )
