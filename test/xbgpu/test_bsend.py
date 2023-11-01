@@ -37,7 +37,7 @@ from . import test_parameters
 
 HEAPS_PER_CHUNK: Final[int] = 5
 N_TX_ITEMS: Final[int] = 2
-TOTAL_DATA_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * HEAPS_PER_CHUNK
+TX_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * HEAPS_PER_CHUNK
 
 
 @pytest.fixture
@@ -69,22 +69,30 @@ class TestBSend:
     @staticmethod
     async def _send_data(
         outputs: Sequence[BOutput],
-        send_stream: BSend,
-        heap_timestamp_step: int,
-        n_channels_per_substream: int,
-        n_spectra_per_heap: int,
         time_converter: TimeConverter,
         sensors: SensorSet,
+        send_stream: BSend,
+        n_channels_per_substream: int,
+        n_spectra_per_heap: int,
+        heap_timestamp_step: int,
     ) -> np.ndarray:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
         `N_TX_ITEMS` Chunks, each of which contain `HEAPS_PER_CHUNK` heaps.
 
+        Parameters
+        ----------
+        outputs, time_converter, sensors
+            Fixtures
+        send_stream, n_channels_per_substream, n_spectra_per_heap, heap_timestamp_step
+            Variables declared in the calling unit test
+
         Returns
         -------
         data
-            Array of shape (HEAPS_PER_CHUNK, len(outputs), n_channels_per_substream, )
+            Array of shape
+            (N_TX_ITEMS, HEAPS_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
         """
         # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
@@ -99,13 +107,13 @@ class TestBSend:
             dtype=SEND_DTYPE,
         )
 
+        rng = np.random.default_rng(seed=1)
         for i in range(N_TX_ITEMS):
             # Get a free chunk - there is not always a free one available. This
             # function blocks until one is available.
             chunk = await send_stream.get_free_chunk()
 
             # Generate random data for the i-th chunk
-            rng = np.random.default_rng(seed=1)
             data[i, ...] = rng.integers(low=-128, high=127, size=(data.shape[1:]), dtype=np.int8)
 
             # Populate the buffer with dummy data.
@@ -124,7 +132,6 @@ class TestBSend:
     @staticmethod
     async def _recv_data(
         data: np.ndarray,
-        outputs: Sequence[BOutput],
         queues: list[spead2.InprocQueue],
         n_engines: int,
         engine_id: int,
@@ -145,11 +152,12 @@ class TestBSend:
         queues
             List of :class:`spead2.InprocQueue` used to transmit heaps
             in :meth:`_send_data`.
+        n_engines, engine_id, channel_offset, n_channels_per_substream, n_spectra_per_heap, heap_timestamp_step
+            Variables declared by the calling unit test to verify
+            transmitted data.
         """
         # Reshape as we verify *heaps* per substream, not chunks
-        data = data.reshape(
-            (TOTAL_DATA_HEAPS_PER_SUBSTREAM, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
-        )
+        data = data.reshape((TX_HEAPS_PER_SUBSTREAM,) + data.shape[2:])
 
         out_config = spead2.recv.StreamConfig()
         out_tp = spead2.ThreadPool()
@@ -161,12 +169,12 @@ class TestBSend:
             # SPEAD descriptor.
             ig = spead2.ItemGroup()
             heap = await stream.get()
-            assert heap.cnt % n_engines == engine_id % n_engines, "The heap IDs are not correctly strided"
+            assert heap.cnt % n_engines == engine_id, "The heap IDs are not correctly strided"
             items = ig.update(heap)
             assert items == {}, "This heap contains item values not just the expected descriptors."
 
             # Check the data heaps
-            for j in range(TOTAL_DATA_HEAPS_PER_SUBSTREAM):
+            for j in range(TX_HEAPS_PER_SUBSTREAM):
                 heap = await stream.get()
                 items = ig.update(heap)
                 assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
@@ -181,7 +189,7 @@ class TestBSend:
 
     @pytest.mark.combinations(
         "num_ants, num_channels, num_spectra_per_heap",
-        test_parameters.array_size,
+        [1, 19, 80],
         test_parameters.num_channels,
         test_parameters.num_spectra_per_heap,
     )
@@ -219,8 +227,10 @@ class TestBSend:
             n_engines *= 2
 
         # The test still needs to have some idea of "which engine" this is in a
-        # sequence of B-engines.
-        engine_id = 4  # Arbitrarily chosen
+        # sequence of B-engines. The value is chosen arbitrarily, but to ensure
+        # it satisfies all values of `n_engines`, which can be as small as 4
+        # for `num_ants` == 1.
+        engine_id = 3
 
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
         heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
@@ -246,19 +256,18 @@ class TestBSend:
         )
         data = await self._send_data(
             outputs,
-            send_stream,
-            heap_timestamp_step,
-            n_channels_per_substream,
-            num_spectra_per_heap,
             time_converter,
             sensors,
+            send_stream,
+            n_channels_per_substream,
+            num_spectra_per_heap,
+            heap_timestamp_step,
         )
         for queue in queues:
             queue.stop()
 
         await self._recv_data(
             data,
-            outputs,
             queues,
             n_engines,
             engine_id,
