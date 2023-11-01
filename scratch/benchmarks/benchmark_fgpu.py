@@ -129,12 +129,12 @@ def fgpu_factory(
         dst_chunk_jones = src_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = f"0,1,2,3,{qstep},{qstep + 1},{qstep + 2},{qstep + 3}"
+        src_affinity = f"0,1,{qstep},{qstep + 1}"
         dst_affinity = f"{2 * qstep}"
         other_affinity = f"{3 * qstep}"
     elif n == 2:
         interface = server.interfaces[index % len(server.interfaces)]
-        src_affinity = f"{my_cpus[0]},{my_cpus[1]},{my_cpus[hstep]},{my_cpus[hstep + 1]}"
+        src_affinity = f"{my_cpus[0]},{my_cpus[hstep]}"
         dst_affinity = f"{my_cpus[qstep]}"
         other_affinity = f"{my_cpus[hstep + qstep]}"
     else:
