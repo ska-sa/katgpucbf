@@ -279,7 +279,6 @@ class BSend:
             self._chunks_queue.put_nowait(chunk)
             buffers.append(chunk.data)
 
-        # Multicast stream parameters
         heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
 
         # Transport-agnostic stream information
