@@ -20,7 +20,7 @@ import ctypes
 import time
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -315,7 +315,7 @@ def make_stream_group(
     max_active_chunks: int,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
-    affinity: Iterable[int],
+    affinity: Sequence[int],
     stream_stats: list[str],
     user_data: np.ndarray,
     max_heap_extra: int = 0,
