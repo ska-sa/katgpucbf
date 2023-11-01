@@ -173,14 +173,14 @@ class Chunk:
             Also update its relevant counters and sensor values.
         """
         if any(send_stream.tx_enabled):
+            send_futures = []
             for frame in self._frames:
                 heaps_to_send = [heap for heap, enabled in zip(frame.heaps, send_stream.tx_enabled) if enabled]
-                send_future = send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                send_futures.append(
+                    send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                )
             # TODO: Update counters and sensor with chunk.saturation
-            # NOTE: We use the last future returned above as the data is sent
-            # in-order. Once the last frame has been transmitted, the rest have
-            # too.
-            self.future = send_future
+            self.future = asyncio.gather(*send_futures)
         else:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
@@ -350,6 +350,10 @@ class BSend:
 
     async def get_free_chunk(self) -> Chunk:
         """Obtain a :class:`.Chunk` for transmission.
+
+        We await the chunk's :attr:`future` to be sure we are not overwriting
+        data that is still being transmitted. If sending failed, it is no
+        longer being transmitted, and therefore safe to return the chunk.
 
         Raises
         ------
