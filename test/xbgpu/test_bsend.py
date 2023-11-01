@@ -30,7 +30,7 @@ from katsdptelstate.endpoint import Endpoint
 from katgpucbf import COMPLEX
 from katgpucbf.spead import BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
-from katgpucbf.xbgpu.bsend import BSend
+from katgpucbf.xbgpu.bsend import SEND_DTYPE, BSend
 from katgpucbf.xbgpu.output import BOutput
 
 from . import test_parameters
@@ -71,14 +71,20 @@ class TestBSend:
         outputs: Sequence[BOutput],
         send_stream: BSend,
         heap_timestamp_step: int,
+        n_channels_per_substream: int,
+        n_spectra_per_heap: int,
         time_converter: TimeConverter,
         sensors: SensorSet,
-    ) -> None:
+    ) -> np.ndarray:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
-        `N_TX_ITEMS` Chunks, each of which contain `HEAPS_PER_CHUNK`
-        heaps.
+        `N_TX_ITEMS` Chunks, each of which contain `HEAPS_PER_CHUNK` heaps.
+
+        Returns
+        -------
+        data
+            Array of shape (HEAPS_PER_CHUNK, len(outputs), n_channels_per_substream, )
         """
         # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
@@ -88,13 +94,22 @@ class TestBSend:
                 substream_index=i,
             )
 
+        data = np.zeros(
+            shape=(N_TX_ITEMS, HEAPS_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+            dtype=SEND_DTYPE,
+        )
+
         for i in range(N_TX_ITEMS):
             # Get a free chunk - there is not always a free one available. This
             # function blocks until one is available.
             chunk = await send_stream.get_free_chunk()
 
+            # Generate random data for the i-th chunk
+            rng = np.random.default_rng(seed=1)
+            data[i, ...] = rng.integers(low=-128, high=127, size=(data.shape[1:]), dtype=np.int8)
+
             # Populate the buffer with dummy data.
-            chunk.data.fill(0)
+            chunk.data[:] = data[i, ...]
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
@@ -104,8 +119,12 @@ class TestBSend:
         # Flush to ensure that the data all gets sent before we return.
         await send_stream.stream.async_flush()
 
+        return data
+
     @staticmethod
     async def _recv_data(
+        data: np.ndarray,
+        outputs: Sequence[BOutput],
         queues: list[spead2.InprocQueue],
         n_engines: int,
         engine_id: int,
@@ -120,18 +139,21 @@ class TestBSend:
 
         Parameters
         ----------
-        outputs
-            Fixture
+        data
+            Random data generated during data transmission, of shape
+            - (N_TX_ITEMS, HEAPS_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
         queues
             List of :class:`spead2.InprocQueue` used to transmit heaps
             in :meth:`_send_data`.
-        channel_offset, n_channels_per_substream, n_spectra_per_heap, heap_timestamp_step
-            Variables declared by the calling unit test to verify
-            transmitted data.
         """
+        # Reshape as we verify *heaps* per substream, not chunks
+        data = data.reshape(
+            (TOTAL_DATA_HEAPS_PER_SUBSTREAM, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
+        )
+
         out_config = spead2.recv.StreamConfig()
         out_tp = spead2.ThreadPool()
-        for queue in queues:
+        for i, queue in enumerate(queues):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
             stream.add_inproc_reader(queue)
 
@@ -144,19 +166,18 @@ class TestBSend:
             assert items == {}, "This heap contains item values not just the expected descriptors."
 
             # Check the data heaps
-            zero_data = np.zeros(shape=(n_channels_per_substream, n_spectra_per_heap, COMPLEX), dtype=np.int8)
-            for i in range(TOTAL_DATA_HEAPS_PER_SUBSTREAM):
+            for j in range(TOTAL_DATA_HEAPS_PER_SUBSTREAM):
                 heap = await stream.get()
                 items = ig.update(heap)
                 assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
                 assert items["timestamp"].id == TIMESTAMP_ID
-                assert items["timestamp"].value == i * heap_timestamp_step
+                assert items["timestamp"].value == j * heap_timestamp_step
                 assert items["frequency"].id == FREQUENCY_ID
                 assert items["frequency"].value == channel_offset
                 assert items["bf_raw"].id == BF_RAW_ID
                 assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
                 assert items["bf_raw"].value.dtype == np.int8
-                np.testing.assert_equal(items["bf_raw"].value, zero_data)
+                np.testing.assert_equal(items["bf_raw"].value, data[j, i, ...])
 
     @pytest.mark.combinations(
         "num_ants, num_channels, num_spectra_per_heap",
@@ -179,9 +200,6 @@ class TestBSend:
 
         This test transmits a number of heaps from a BSend object over a spead2
         in-process transport. The received heaps are then checked.
-
-        This test does not generate random data as it will take much more compute
-        to check that the random data is received correctly.
 
         Parameters
         ----------
@@ -226,11 +244,21 @@ class TestBSend:
             ),
             tx_enabled=True,
         )
-        await self._send_data(outputs, send_stream, heap_timestamp_step, time_converter, sensors)
+        data = await self._send_data(
+            outputs,
+            send_stream,
+            heap_timestamp_step,
+            n_channels_per_substream,
+            num_spectra_per_heap,
+            time_converter,
+            sensors,
+        )
         for queue in queues:
             queue.stop()
 
         await self._recv_data(
+            data,
+            outputs,
             queues,
             n_engines,
             engine_id,
