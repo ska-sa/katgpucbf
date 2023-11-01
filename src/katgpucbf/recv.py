@@ -360,7 +360,12 @@ def make_stream_group(
         max_heap_extra=max_heap_extra,
         place=layout.chunk_place(user_data),
     )
-    group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_active_chunks, eviction_mode=EVICTION_MODE)
+    max_chunks = max_active_chunks
+    # If there is more than one stream in the group, allow the group to have
+    # one extra active chunk to reduce inter-thread communication.
+    if len(affinity) > 1:
+        max_chunks += 1
+    group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_chunks, eviction_mode=EVICTION_MODE)
 
     group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
     for core in affinity:
