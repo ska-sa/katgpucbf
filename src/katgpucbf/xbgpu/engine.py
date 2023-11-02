@@ -63,7 +63,9 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, bsend, recv
+from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
+from .beamform import BeamformTemplate
+from .bsend import BSend
 from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
 from .output import BOutput, Output, XOutput
@@ -279,23 +281,23 @@ class BPipeline(Pipeline):
         super().__init__(outputs, name, engine, context)
         n_beams = len(outputs)
 
-        # TODO: Obtain this in a neater way once the beamformer OpSequence is done
-        buffer_shape = (
-            engine.heaps_per_fengine_per_chunk,
-            n_beams,
-            engine.n_channels_per_substream,
-            engine.src_layout.n_spectra_per_heap,
-            COMPLEX,
+        template = BeamformTemplate(context, [output.pol for output in outputs])
+        self._beamform = template.instantiate(
+            self._proc_command_queue,
+            n_frames=engine.heaps_per_fengine_per_chunk,
+            n_ants=engine.n_ants,
+            n_channels=engine.n_channels_per_substream,
+            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
         )
+        allocator = accel.DeviceAllocator(context=context)
         for _ in range(self.n_tx_items):
-            buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=bsend.SEND_DTYPE)
+            buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
             saturated = accel.DeviceArray(context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
             tx_item = TxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
-        # TODO: The way this is imported will change once the OperationSequence is in place
-        self.send_stream = bsend.BSend(
+        self.send_stream = BSend(
             outputs=outputs,
             frames_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_tx_items=self.n_tx_items,
@@ -352,9 +354,9 @@ class BPipeline(Pipeline):
             tx_item.reset(rx_item.timestamp)
 
             # Queue GPU work
-            # - For now, just fill it with zeros
-            tx_item.buffer_device.zero(self._proc_command_queue)
-            tx_item.saturated.zero(self._proc_command_queue)
+            self._beamform.bind(**{"in": rx_item.buffer_device, "out": tx_item.buffer_device})
+            # TODO: need to bind weights and delays
+            self._beamform()
 
             tx_item.add_marker(self._proc_command_queue)
             self._tx_item_queue.put_nowait(tx_item)
