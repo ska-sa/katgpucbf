@@ -103,7 +103,7 @@ class RxQueueItem(QueueItem):
         self.chunk: recv.Chunk | None = None
 
 
-class TxQueueItem(QueueItem):
+class XTxQueueItem(QueueItem):
     """
     Extension of the QueueItem to track antennas that have missed data.
 
@@ -130,6 +130,18 @@ class TxQueueItem(QueueItem):
         super().reset(timestamp=timestamp)
         self.present_ants.fill(True)  # Assume they're fine until told otherwise
         self.batches = 0
+
+
+class BTxQueueItem(QueueItem):
+    """Transmit queue item for the beamformer pipeline."""
+
+    def __init__(
+        self,
+        buffer_device: accel.DeviceArray,
+        timestamp: int = 0,
+    ) -> None:
+        self.buffer_device = buffer_device
+        super().__init__(timestamp)
 
 
 class Pipeline:
@@ -200,12 +212,8 @@ class Pipeline:
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
             f"{name}.rx_item_queue", self.n_rx_items
         )
-        self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = engine.monitor.make_queue(
-            f"{name}.tx_item_queue", self.n_tx_items
-        )
-        self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = engine.monitor.make_queue(
-            f"{name}.tx_free_item_queue", self.n_tx_items
-        )
+        self._tx_item_queue = engine.monitor.make_queue(f"{name}.tx_item_queue", self.n_tx_items)
+        self._tx_free_item_queue = engine.monitor.make_queue(f"{name}.tx_free_item_queue", self.n_tx_items)
 
     def add_rx_item(self, item: RxQueueItem) -> None:
         """Append a newly-received :class:`RxQueueItem` to the :attr:`_rx_item_queue`."""
@@ -228,12 +236,12 @@ class Pipeline:
 
             - Bind input buffer(s) accordingly
 
-        - Obtain a free TxQueueItem from the tx_free_item_queue
+        - Obtain a free QueueItem from the tx_free_item_queue
 
             - Add event marker to wait for the proc_command_queue
-            - Put the prepared TxQueueItem on the tx_item_queue
+            - Put the prepared QueueItem on the tx_item_queue
 
-        NOTE: An initial TxQueueItem needs to be obtained from the tx_free_item_queue
+        NOTE: An initial QueueItem needs to be obtained from the tx_free_item_queue
         for the first round of processing:
 
         - The gpu_proc_loop requires logic to decipher the timestamp of the
@@ -248,7 +256,7 @@ class Pipeline:
 
         This method does the following:
 
-        - Get a TxQueueItem from the tx_item_queue
+        - Get a QueueItem from the tx_item_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
         - Wait for events on the item to complete (likely GPU processing)
         - Wait for an available heap buffer from the send_stream
@@ -257,7 +265,7 @@ class Pipeline:
             - Wait for the transfer to complete, before
 
         - Transmit heap buffer onto the network
-        - Place the TxQueueItem back on the tx_free_item_queue once complete
+        - Place the QueueItem back on the tx_free_item_queue once complete
         """
         raise NotImplementedError  # pragma: nocover
 
@@ -270,6 +278,9 @@ class Pipeline:
 class BPipeline(Pipeline):
     """Processing pipeline for a collection of :class:`.output.BOutput`."""
 
+    _tx_item_queue: asyncio.Queue[BTxQueueItem | None]
+    _tx_free_item_queue: asyncio.Queue[BTxQueueItem]
+
     def __init__(
         self,
         outputs: Sequence[BOutput],
@@ -279,7 +290,6 @@ class BPipeline(Pipeline):
         name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
         super().__init__(outputs, name, engine, context)
-        n_beams = len(outputs)
 
         template = BeamformTemplate(context, [output.pol for output in outputs])
         self._beamform = template.instantiate(
@@ -292,9 +302,11 @@ class BPipeline(Pipeline):
         allocator = accel.DeviceAllocator(context=context)
         for _ in range(self.n_tx_items):
             buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
-            saturated = accel.DeviceArray(context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32)
-            present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
+            # TODO: bring it back once support is inplemented
+            # saturated = accel.DeviceArray(
+            #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
+            # )
+            tx_item = BTxQueueItem(buffer_device)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = BSend(
@@ -386,7 +398,9 @@ class BPipeline(Pipeline):
             chunk = await self.send_stream.get_free_chunk()
 
             item.buffer_device.get_async(self._download_command_queue, chunk.data)
-            item.saturated.get_async(self._download_command_queue, chunk.saturated)
+            # TODO: re-enable once supported
+            # item.saturated.get_async(self._download_command_queue, chunk.saturated)
+            chunk.saturated.fill(0)
 
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
@@ -407,6 +421,8 @@ class BPipeline(Pipeline):
 class XPipeline(Pipeline):
     """Processing pipeline for a single baseline-correlation-products stream."""
 
+    _tx_item_queue: asyncio.Queue[XTxQueueItem | None]
+    _tx_free_item_queue: asyncio.Queue[XTxQueueItem]
     outputs: Sequence[XOutput]
 
     def __init__(
@@ -442,7 +458,7 @@ class XPipeline(Pipeline):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
+            tx_item = XTxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = XSend(
@@ -511,7 +527,7 @@ class XPipeline(Pipeline):
             )
         )
 
-    async def _flush_accumulation(self, tx_item: TxQueueItem, next_accum: int) -> TxQueueItem:
+    async def _flush_accumulation(self, tx_item: XTxQueueItem, next_accum: int) -> XTxQueueItem:
         """Emit the current `tx_item` and prepare a new one."""
         if tx_item.batches == 0:
             # We never actually started this accumulation. We can just
@@ -545,7 +561,7 @@ class XPipeline(Pipeline):
         # NOTE: The ratio of rx_items to tx_items is not one-to-one; there are expected
         # to be many more rx_items in for every tx_item out. For this reason, and in
         # addition to the steps outlined in :meth:`.Pipeline.gpu_proc_loop`, data is
-        # only transferred to a `TxQueueItem` once sufficient correlations have occurred.
+        # only transferred to a `XTxQueueItem` once sufficient correlations have occurred.
         rx_item: RxQueueItem | None
 
         def do_correlation() -> None:
