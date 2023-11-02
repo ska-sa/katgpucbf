@@ -90,8 +90,8 @@ class Frame:
 
 
 class Chunk:
-    """
-    An array of :class:`Frame`.
+    r"""
+    An array of :class:`Frame`\ s.
 
     Parameters
     ----------
@@ -105,7 +105,7 @@ class Chunk:
     channel_offset
         The first frequency channel processed.
     timestamp_step
-        Timestamp step between successive :class:`Frame` in a chunk.
+        Timestamp step between successive :class:`Frame`\ s in a chunk.
     """
 
     def __init__(
@@ -211,14 +211,14 @@ class BSend:
     ----------
     outputs
         Sequence of :class:`.output.BOutput`.
-    heaps_per_fengine_per_chunk
+    frames_per_chunk
         Number of SPEAD heaps from one F-engine in a single received Chunk.
     n_tx_items
         Number of :class:`Chunk` to create.
     adc_sample_rate, n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
         See :class:`.XBEngine` for further information.
     timestamp_step
-        The timestamp step between successive heaps, as dictated by the XBEngine.
+        The timestamp step between successive heaps.
     send_rate_factor
         Factor dictating how fast the send-stream should transmit data.
     context
@@ -228,7 +228,7 @@ class BSend:
         stream configuration and memory buffers.
     packet_payload
         Size, in bytes, for the output packets (tied array channelised voltage
-        payload only, headers and padding are added to this).
+        payload only; headers and padding are added to this).
     tx_enabled
         Enable/Disable transmission.
     """
@@ -239,7 +239,7 @@ class BSend:
     def __init__(
         self,
         outputs: Sequence[BOutput],
-        heaps_per_fengine_per_chunk: int,
+        frames_per_chunk: int,
         n_tx_items: int,
         n_channels: int,
         n_channels_per_substream: int,
@@ -264,12 +264,12 @@ class BSend:
         self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
 
-        send_shape = (heaps_per_fengine_per_chunk, self.n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
+        send_shape = (frames_per_chunk, self.n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
         for _ in range(n_tx_items):
             chunk = Chunk(
                 accel.HostArray(send_shape, SEND_DTYPE, context=context),
                 accel.HostArray(
-                    (heaps_per_fengine_per_chunk, self.n_beams),
+                    (frames_per_chunk, self.n_beams),
                     np.uint32,
                     context=context,
                 ),
@@ -293,7 +293,7 @@ class BSend:
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
             # + 1 below for the descriptor per beam
-            max_heaps=(n_tx_items * heaps_per_fengine_per_chunk + 1) * self.n_beams,
+            max_heaps=(n_tx_items * frames_per_chunk + 1) * self.n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate_bytes_per_second,
         )

@@ -297,7 +297,7 @@ class BPipeline(Pipeline):
         # TODO: The way this is imported will change once the OperationSequence is in place
         self.send_stream = bsend.BSend(
             outputs=outputs,
-            heaps_per_fengine_per_chunk=engine.heaps_per_fengine_per_chunk,
+            frames_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_tx_items=self.n_tx_items,
             n_channels=engine.n_channels_total,
             n_channels_per_substream=engine.n_channels_per_substream,
