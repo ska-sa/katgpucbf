@@ -35,6 +35,7 @@ import logging
 import math
 import time
 from abc import abstractmethod
+from typing import Sequence
 
 import aiokatcp
 import katsdpsigproc
@@ -62,10 +63,12 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
+from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, bsend, recv
+from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
-from .output import Output, XOutput
-from .xsend import XSend, incomplete_accum_counter, make_stream
+from .output import BOutput, Output, XOutput
+from .xsend import XSend, incomplete_accum_counter
+from .xsend import make_stream as make_xstream
 
 logger = logging.getLogger(__name__)
 MISSING = np.array([-(2**31), 1], dtype=np.int32)
@@ -102,10 +105,10 @@ class TxQueueItem(QueueItem):
     """
     Extension of the QueueItem to track antennas that have missed data.
 
-    The TxQueueItem between the gpu-proc and sender loops needs to carry a record
-    of which antennas have missed data at any point in the accumulation being
-    processed. This is used to determine whether any baselines were affected, and have
-    their data zeroed accordingly.
+    The TxQueueItem between the gpu-proc and sender loops needs to carry a
+    record of which antennas have missed data at any point in the accumulation
+    being processed. This is used to determine whether any output products were
+    affected, and have their data zeroed accordingly.
     """
 
     def __init__(
@@ -150,6 +153,8 @@ class Pipeline:
 
     Parameters
     ----------
+    outputs
+        Sequence of Output config for data product (BOutput or XOutput).
     name
         Name of Pipeline.
     engine
@@ -168,9 +173,10 @@ class Pipeline:
     n_rx_items = DEFAULT_N_RX_ITEMS
     n_tx_items = DEFAULT_N_TX_ITEMS
 
-    def __init__(self, name: str, engine: "XBEngine", context: AbstractContext) -> None:
-        self.engine = engine
+    def __init__(self, outputs: Sequence[Output], name: str, engine: "XBEngine", context: AbstractContext) -> None:
+        self.outputs = outputs
         self.name = name
+        self.engine = engine
 
         self._proc_command_queue = context.create_command_queue()
         self._download_command_queue = context.create_command_queue()
@@ -254,13 +260,152 @@ class Pipeline:
         raise NotImplementedError  # pragma: nocover
 
     @abstractmethod
-    def capture_enable(self, enable: bool = True) -> None:
-        """Enable/Disable the transmission of this data product's stream."""
+    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:
+        """Enable/Disable the transmission of a data product's stream."""
         raise NotImplementedError  # pragma: nocover
+
+
+class BPipeline(Pipeline):
+    """Processing pipeline for a collection of :class:`.output.BOutput`."""
+
+    def __init__(
+        self,
+        outputs: Sequence[BOutput],
+        engine: "XBEngine",
+        context: AbstractContext,
+        init_tx_enabled: bool,
+        name: str = DEFAULT_BPIPELINE_NAME,
+    ) -> None:
+        super().__init__(outputs, name, engine, context)
+        n_beams = len(outputs)
+
+        # TODO: Obtain this in a neater way once the beamformer OpSequence is done
+        buffer_shape = (
+            engine.heaps_per_fengine_per_chunk,
+            n_beams,
+            engine.n_channels_per_substream,
+            engine.src_layout.n_spectra_per_heap,
+            COMPLEX,
+        )
+        for _ in range(self.n_tx_items):
+            buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=bsend.SEND_DTYPE)
+            saturated = accel.DeviceArray(context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32)
+            present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
+            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
+            self._tx_free_item_queue.put_nowait(tx_item)
+
+        # TODO: The way this is imported will change once the OperationSequence is in place
+        self.send_stream = bsend.BSend(
+            outputs=outputs,
+            frames_per_chunk=engine.heaps_per_fengine_per_chunk,
+            n_tx_items=self.n_tx_items,
+            n_channels=engine.n_channels_total,
+            n_channels_per_substream=engine.n_channels_per_substream,
+            spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            adc_sample_rate=engine.adc_sample_rate_hz,
+            timestamp_step=engine.rx_heap_timestamp_step,
+            send_rate_factor=engine.send_rate_factor,
+            channel_offset=engine.channel_offset_value,
+            context=context,
+            packet_payload=engine.dst_packet_payload,
+            stream_factory=lambda stream_config, buffers: make_bstream(
+                endpoints=[output.dst for output in outputs],
+                interface=engine.dst_interface,
+                ttl=engine.dst_ttl,
+                use_ibv=engine.dst_ibv,
+                affinity=engine.dst_affinity,
+                comp_vector=engine.dst_comp_vector,
+                stream_config=stream_config,
+                buffers=buffers,
+            ),
+            tx_enabled=init_tx_enabled,
+        )
+
+        self._populate_sensors()
+
+    def _populate_sensors(self) -> None:
+        sensors = self.engine.sensors
+        # Dynamic sensors
+        for output in self.outputs:
+            sensors.add(
+                aiokatcp.Sensor(
+                    int,
+                    f"{output.name}-beng-clip-cnt",
+                    "Number of complex samples that saturated.",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+
+    async def gpu_proc_loop(self) -> None:  # noqa: D102
+        while True:
+            # Get item from the receiver loop.
+            # - Wait for the HtoD transfers to complete, then
+            # - Give the chunk back to the receiver for reuse.
+            rx_item = await self._rx_item_queue.get()
+            if rx_item is None:
+                break
+            await rx_item.async_wait_for_events()
+
+            tx_item = await self._tx_free_item_queue.get()
+            await tx_item.async_wait_for_events()
+            tx_item.reset(rx_item.timestamp)
+
+            # Queue GPU work
+            # - For now, just fill it with zeros
+            tx_item.buffer_device.zero(self._proc_command_queue)
+            tx_item.saturated.zero(self._proc_command_queue)
+
+            tx_item.add_marker(self._proc_command_queue)
+            self._tx_item_queue.put_nowait(tx_item)
+
+            # Finish with the rx_item
+            rx_item.add_marker(self._proc_command_queue)
+            self.engine.free_rx_item(rx_item)
+        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # it will never exit. Upon receiving this NoneType, the sender_loop can
+        # stop waiting and exit.
+        logger.debug("gpu_proc_loop completed")
+        self._tx_item_queue.put_nowait(None)
+
+    async def sender_loop(self) -> None:  # noqa: D102
+        # NOTE: This function passes the entire downloaded data to
+        # chunk.send, which then takes care of directing data to each beam's
+        # output destination.
+
+        while True:
+            item = await self._tx_item_queue.get()
+            if item is None:
+                break
+            # The CPU doesn't need to wait, but the GPU does to ensure it
+            # won't start the download before computation is done.
+            item.enqueue_wait_for_events(self._download_command_queue)
+
+            chunk = await self.send_stream.get_free_chunk()
+
+            item.buffer_device.get_async(self._download_command_queue, chunk.data)
+            item.saturated.get_async(self._download_command_queue, chunk.saturated)
+
+            event = self._download_command_queue.enqueue_marker()
+            await katsdpsigproc.resource.async_wait_for_events([event])
+
+            chunk.timestamp = item.timestamp
+            # TODO: Update beng-clip-cnt sensor, regardless of whether data
+            # is being transmitted
+            self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
+            self._tx_free_item_queue.put_nowait(item)
+
+        await self.send_stream.send_stop_heap()
+        logger.debug("sender_loop completed")
+
+    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
+        self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
 
 
 class XPipeline(Pipeline):
     """Processing pipeline for a single baseline-correlation-products stream."""
+
+    outputs: Sequence[XOutput]
 
     def __init__(
         self,
@@ -270,8 +415,7 @@ class XPipeline(Pipeline):
         init_tx_enabled: bool,
         name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
-        super().__init__(name, engine, context)
-        self.output = output
+        super().__init__([output], name, engine, context)
         self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
 
         # NOTE: This value staggers the send so that packets within a heap are
@@ -309,7 +453,7 @@ class XPipeline(Pipeline):
             channel_offset=engine.channel_offset_value,
             context=context,
             packet_payload=engine.dst_packet_payload,
-            stream_factory=lambda stream_config, buffers: make_stream(
+            stream_factory=lambda stream_config, buffers: make_xstream(
                 output_name=output.name,
                 dest_ip=output.dst.host,
                 dest_port=output.dst.port,
@@ -325,6 +469,11 @@ class XPipeline(Pipeline):
         )
 
         self._populate_sensors()
+
+    @property
+    def output(self) -> XOutput:
+        """The single :class:`Output` produced by this pipeline."""
+        return self.outputs[0]
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
@@ -558,7 +707,7 @@ class XPipeline(Pipeline):
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
-    def capture_enable(self, enable: bool = True) -> None:  # noqa: D102
+    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
         self.send_stream.tx_enabled = enable
 
 
@@ -622,7 +771,7 @@ class XBEngine(DeviceServer):
         this XB-Engine. Used to set the value in the XB-Engine output heaps for
         spectrum reassembly by the downstream receiver.
     outputs
-        Output streams to generate. Currently only XOutputs supported.
+        Output streams to generate.
     src
         Endpoint for the incoming data.
     src_interface
@@ -708,9 +857,6 @@ class XBEngine(DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
 
-        # B-engine doesn't work yet
-        assert all(isinstance(output, XOutput) for output in outputs)
-
         if sample_bits != 8:
             raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
@@ -794,9 +940,13 @@ class XBEngine(DeviceServer):
         # time. This keeps the pipelines synchronised to avoid running out of
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
-        self._pipelines = [
-            XPipeline(output, self, context, tx_enabled) for output in outputs if isinstance(output, XOutput)
-        ]
+
+        self._pipelines: list[Pipeline] = []
+        x_outputs = [output for output in outputs if isinstance(output, XOutput)]
+        b_outputs = [output for output in outputs if isinstance(output, BOutput)]
+        self._pipelines = [XPipeline(x_output, self, context, tx_enabled) for x_output in x_outputs]
+        if b_outputs:
+            self._pipelines.append(BPipeline(b_outputs, self, context, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()
 
@@ -909,10 +1059,11 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             pipeline.shutdown()
 
-    def _request_pipeline(self, stream_name: str) -> Pipeline:
+    def _request_pipeline(self, stream_name: str) -> tuple[Pipeline, int]:
         """Get the pipeline related to the katcp request.
 
-        Return the first Pipeline that matches by name.
+        Return the first Pipeline that matches by name, as well as the index
+        of the data-stream it transmits.
 
         Raises
         ------
@@ -920,8 +1071,9 @@ class XBEngine(DeviceServer):
             If the `stream_name` is not a known output.
         """
         for pipeline in self._pipelines:
-            if stream_name == pipeline.output.name:
-                return pipeline
+            for i, output in enumerate(pipeline.outputs):
+                if stream_name == output.name:
+                    return pipeline, i
         raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
 
     async def request_capture_start(self, ctx, stream_name: str) -> None:
@@ -932,8 +1084,8 @@ class XBEngine(DeviceServer):
         stream_name
             Output stream name.
         """
-        pipeline = self._request_pipeline(stream_name)
-        pipeline.capture_enable()
+        pipeline, stream_id = self._request_pipeline(stream_name)
+        pipeline.capture_enable(stream_id=stream_id)
 
     async def request_capture_stop(self, ctx, stream_name: str) -> None:
         """Stop transmission of a stream.
@@ -943,8 +1095,8 @@ class XBEngine(DeviceServer):
         stream_name
             Output stream name.
         """
-        pipeline = self._request_pipeline(stream_name)
-        pipeline.capture_enable(enable=False)
+        pipeline, stream_id = self._request_pipeline(stream_name)
+        pipeline.capture_enable(stream_id=stream_id, enable=False)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
@@ -966,13 +1118,15 @@ class XBEngine(DeviceServer):
         # Create the descriptor task first to ensure descriptor will be sent
         # before any data makes its way through the pipeline.
         for pipeline in self._pipelines:
+            # TODO: Make this parametrisable somehow for XPipeline vs BPipeline
+            # BPipeline needs to stagger the sending of descriptors
             descriptor_sender = DescriptorSender(
-                pipeline.send_stream.stream,
-                pipeline.send_stream.descriptor_heap,
+                pipeline.send_stream.stream,  # type: ignore
+                pipeline.send_stream.descriptor_heap,  # type: ignore
                 descriptor_interval_s,
             )
             descriptor_task = asyncio.create_task(
-                descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
+                descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
             )
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
@@ -991,13 +1145,13 @@ class XBEngine(DeviceServer):
         for pipeline in self._pipelines:
             proc_task = asyncio.create_task(
                 pipeline.gpu_proc_loop(),
-                name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
+                name=f"{pipeline.name}.{GPU_PROC_TASK_NAME}",
             )
             self.add_service_task(proc_task)
 
             send_task = asyncio.create_task(
                 pipeline.sender_loop(),
-                name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
+                name=f"{pipeline.name}.{SEND_TASK_NAME}",
             )
             self.add_service_task(send_task)
 
