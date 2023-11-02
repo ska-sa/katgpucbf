@@ -63,7 +63,7 @@ DEVICE_FN float2 csub(float2 a, float2 b)
 // Quantise, and return saturation flag
 DEVICE_FN bool quant(float value, int *out)
 {
-    float clamped = fmin(fmax(value, -QMAX), QMAX);
+    float clamped = fminf(fmaxf(value, -QMAX), QMAX);
     bool saturated = value != clamped;
 
     int q;

@@ -7,6 +7,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.xbgpu.beamform
    katgpucbf.xbgpu.bsend
    katgpucbf.xbgpu.correlation
    katgpucbf.xbgpu.engine
