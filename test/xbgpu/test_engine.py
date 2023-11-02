@@ -32,8 +32,9 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import XBEngine, XOutput, XPipeline
+from katgpucbf.xbgpu.engine import XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_corrprod
+from katgpucbf.xbgpu.output import XOutput
 
 from .. import PromDiff
 from . import test_parameters
@@ -196,8 +197,16 @@ class TestEngine:
         ]
 
     @pytest.fixture
+    def beam_args(self) -> list[str]:
+        """Arguments to pass to the command-line parser for multiple beams."""
+        return [
+            "name=beam_0x,dst=239.10.12.0:7148,pol=0",
+            "name=beam_0y,dst=239.10.12.1:7148,pol=1",
+        ]
+
+    @pytest.fixture
     def corrprod_outputs(self, corrprod_args: list[str]) -> list[XOutput]:
-        """The outputs to run tests against."""
+        """The outputs to run correlation tests against."""
         return [parse_corrprod(corrprod_arg) for corrprod_arg in corrprod_args]
 
     @staticmethod
@@ -421,12 +430,11 @@ class TestEngine:
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         corrprod_args: list[str],
+        beam_args: list[str],
     ) -> list[str]:
-        return [
+        args = [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
-            f"--corrprod={corrprod_args[0]}",
-            f"--corrprod={corrprod_args[1]}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
             f"--channels={n_channels_total}",
@@ -441,6 +449,11 @@ class TestEngine:
             "--tx-enabled",
             "239.10.11.4:7149",  # src
         ]
+        for corrprod in corrprod_args:
+            args.append(f"--corrprod={corrprod}")
+        for beam in beam_args:
+            args.append(f"--beam={beam}")
+        return args
 
     @pytest.fixture
     async def xbengine(
