@@ -188,7 +188,7 @@ class Chunk:
 
 
 class BSend:
-    """
+    r"""
     Class for turning tied array channelised voltage products into SPEAD heaps.
 
     This class creates a queue of chunks that can be sent out onto the network.
@@ -212,7 +212,7 @@ class BSend:
     outputs
         Sequence of :class:`.output.BOutput`.
     frames_per_chunk
-        Number of SPEAD heaps from one F-engine in a single received Chunk.
+        Number of :class:`Frame`\ s in each transmitted :class:`Chunk`.
     n_tx_items
         Number of :class:`Chunk` to create.
     adc_sample_rate, n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
