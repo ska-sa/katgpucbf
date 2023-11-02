@@ -59,12 +59,13 @@ class BeamformTemplate:
     def instantiate(
         self,
         command_queue: AbstractCommandQueue,
+        frames: int,
         antennas: int,
         channels: int,
         times: int,
     ) -> "Beamform":
         """Generate a :class:`Beamform` object based on the template."""
-        return Beamform(self, command_queue, antennas, channels, times)
+        return Beamform(self, command_queue, frames, antennas, channels, times)
 
 
 class Beamform(accel.Operation):
@@ -72,9 +73,9 @@ class Beamform(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : antennas × channels × times × N_POLS × COMPLEX, int8
+    **in** : frames × antennas × channels × times × N_POLS × COMPLEX, int8
         Complex (Gaussian integer) input channelised voltages
-    **out** : beams × channels × times × COMPLEX, int8
+    **out** : frames × beams × channels × times × COMPLEX, int8
         Complex (Gaussian integer) output channelised voltages
     **weights** : antennas × beams, complex64
         Complex scale factor to apply to each antenna for each beam
@@ -91,6 +92,8 @@ class Beamform(accel.Operation):
         The template for the operation
     command_queue
         The command queue on which to enqueue the work
+    frames
+        Number of instances of the problem (coarse time dimension)
     antennas
         Number of antennas
     channels
@@ -100,15 +103,21 @@ class Beamform(accel.Operation):
     """
 
     def __init__(
-        self, template: BeamformTemplate, command_queue: AbstractCommandQueue, antennas: int, channels: int, times: int
+        self,
+        template: BeamformTemplate,
+        command_queue: AbstractCommandQueue,
+        frames: int,
+        antennas: int,
+        channels: int,
+        times: int,
     ) -> None:
         super().__init__(command_queue)
         self.template = template
         pol_dim = accel.Dimension(N_POLS, exact=True)
         complex_dim = accel.Dimension(COMPLEX, exact=True)
         beams = len(template.beam_pols)
-        self.slots["in"] = accel.IOSlot((antennas, channels, times, pol_dim, complex_dim), np.int8)
-        self.slots["out"] = accel.IOSlot((beams, channels, times, complex_dim), np.int8)
+        self.slots["in"] = accel.IOSlot((frames, antennas, channels, times, pol_dim, complex_dim), np.int8)
+        self.slots["out"] = accel.IOSlot((frames, beams, channels, times, complex_dim), np.int8)
         weights_dims = (antennas, accel.Dimension(beams, exact=True))
         self.slots["weights"] = accel.IOSlot(weights_dims, np.complex64)
         self.slots["delays"] = accel.IOSlot(weights_dims, np.float32)
@@ -123,17 +132,20 @@ class Beamform(accel.Operation):
                 in_buffer.buffer,
                 self.buffer("weights").buffer,
                 self.buffer("delays").buffer,
-                np.int32(out_buffer.padded_shape[2]),
-                np.int32(out_buffer.padded_shape[1] * out_buffer.padded_shape[2]),
-                np.int32(in_buffer.padded_shape[2]),
-                np.int32(in_buffer.padded_shape[1] * in_buffer.padded_shape[2]),
-                np.int32(in_buffer.shape[0]),
+                np.int32(out_buffer.padded_shape[3]),
+                np.int32(out_buffer.padded_shape[2] * out_buffer.padded_shape[3]),
+                np.int32(out_buffer.padded_shape[1] * out_buffer.padded_shape[2] * out_buffer.padded_shape[3]),
+                np.int32(in_buffer.padded_shape[3]),
+                np.int32(in_buffer.padded_shape[2] * in_buffer.padded_shape[3]),
+                np.int32(in_buffer.padded_shape[1] * in_buffer.padded_shape[2] * in_buffer.padded_shape[3]),
                 np.int32(in_buffer.shape[1]),
                 np.int32(in_buffer.shape[2]),
+                np.int32(in_buffer.shape[3]),
             ],
             global_size=(
-                accel.roundup(in_buffer.shape[2], self.template.block_time),
-                accel.roundup(in_buffer.shape[1], self.template.block_channels),
+                accel.roundup(in_buffer.shape[3], self.template.block_time),
+                accel.roundup(in_buffer.shape[2], self.template.block_channels),
+                in_buffer.shape[0],
             ),
-            local_size=(self.template.block_time, self.template.block_channels),
+            local_size=(self.template.block_time, self.template.block_channels, 1),
         )

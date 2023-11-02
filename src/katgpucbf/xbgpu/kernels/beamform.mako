@@ -53,8 +53,8 @@ DEVICE_FN float2 cmad(float2 a, float2 b, float2 c)
     return make_float2(a.x * b.x - a.y * b.y + c.x, a.x * b.y + a.y * b.x + c.y);
 }
 
-// out: shape beam, channel, time
-// in: shape antenna, channel, time, pol
+// out: shape frame, beam, channel, time
+// in: shape frame, antenna, channel, time, pol
 // weight: shape antenna, beam, tightly packed
 // delays: shape antenna, beam, tightly packed
 // Each thread computes all beams for one (channel, time)
@@ -65,8 +65,10 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_TIME, BLOCK_CHANNELS, 1) void beamform(
     GLOBAL const float * RESTRICT delays,
     int out_stride,
     int out_beam_stride,
+    int out_frame_stride,
     int in_stride,
     int in_antenna_stride,
+    int in_frame_stride,
     int n_antennas,
     int n_channels,
     int n_times
@@ -74,18 +76,21 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_TIME, BLOCK_CHANNELS, 1) void beamform(
 {
     int time = get_global_id(0);
     int channel = get_global_id(1);
+    int frame = get_group_id(2);
     if (time >= n_times || channel >= n_channels)
         return;  // out-of-bounds
-    int in_addr = channel * in_stride + time;
+    in += frame * in_frame_stride + channel * in_stride + time;
+    out += frame * out_frame_stride + channel * out_stride + time;
+
     float2 accum[N_BEAMS];
     for (int i = 0; i < N_BEAMS; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
     for (int a = 0; a < n_antennas; a++)
     {
-        char4 sample = in[in_addr];
+        char4 sample = *in;
         float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
-        in_addr += in_antenna_stride;
+        in += in_antenna_stride;
 % for i, pol in enumerate(beam_pols):
         {
             int i = ${i};
@@ -110,6 +115,6 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_TIME, BLOCK_CHANNELS, 1) void beamform(
         // TODO: report saturation flags somewhere
         quant(accum[i].x, &re);
         quant(accum[i].y, &im);
-        out[out_beam_stride * i + out_stride * channel + time] = make_char2(re, im);
+        out[out_beam_stride * i] = make_char2(re, im);
     }
 }
