@@ -35,13 +35,14 @@ import logging
 import math
 import time
 from abc import abstractmethod
-from typing import Sequence
+from typing import Generic, Sequence, TypeVar
 
 import aiokatcp
 import katsdpsigproc
 import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
+import vkgdr.pycuda
 from aiokatcp import DeviceServer
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
@@ -57,6 +58,7 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
+from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
@@ -74,6 +76,8 @@ from .xsend import make_stream as make_xstream
 
 logger = logging.getLogger(__name__)
 MISSING = np.array([-(2**31), 1], dtype=np.int32)
+_O = TypeVar("_O", bound=Output)
+_T = TypeVar("_T", bound=QueueItem)
 
 
 class RxQueueItem(QueueItem):
@@ -138,13 +142,19 @@ class BTxQueueItem(QueueItem):
     def __init__(
         self,
         buffer_device: accel.DeviceArray,
+        weights: MappedArray,
+        delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
         self.buffer_device = buffer_device
+        self.weights = weights
+        self.delays = delays
+        #: Version of weights and delays (for comparison to BPipeline.weights_version)
+        self.weights_version = -1
         super().__init__(timestamp)
 
 
-class Pipeline:
+class Pipeline(Generic[_O, _T]):
     r"""Base Pipeline class to build on.
 
     SPEAD heaps utilised by this pipeline are first received at the
@@ -187,7 +197,7 @@ class Pipeline:
     n_rx_items = DEFAULT_N_RX_ITEMS
     n_tx_items = DEFAULT_N_TX_ITEMS
 
-    def __init__(self, outputs: Sequence[Output], name: str, engine: "XBEngine", context: AbstractContext) -> None:
+    def __init__(self, outputs: Sequence[_O], name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.outputs = outputs
         self.name = name
         self.engine = engine
@@ -212,8 +222,12 @@ class Pipeline:
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
             f"{name}.rx_item_queue", self.n_rx_items
         )
-        self._tx_item_queue = engine.monitor.make_queue(f"{name}.tx_item_queue", self.n_tx_items)
-        self._tx_free_item_queue = engine.monitor.make_queue(f"{name}.tx_free_item_queue", self.n_tx_items)
+        self._tx_item_queue: asyncio.Queue[_T | None] = engine.monitor.make_queue(
+            f"{name}.tx_item_queue", self.n_tx_items
+        )
+        self._tx_free_item_queue: asyncio.Queue[_T] = engine.monitor.make_queue(
+            f"{name}.tx_free_item_queue", self.n_tx_items
+        )
 
     def add_rx_item(self, item: RxQueueItem) -> None:
         """Append a newly-received :class:`RxQueueItem` to the :attr:`_rx_item_queue`."""
@@ -275,17 +289,15 @@ class Pipeline:
         raise NotImplementedError  # pragma: nocover
 
 
-class BPipeline(Pipeline):
+class BPipeline(Pipeline[BOutput, BTxQueueItem]):
     """Processing pipeline for a collection of :class:`.output.BOutput`."""
-
-    _tx_item_queue: asyncio.Queue[BTxQueueItem | None]
-    _tx_free_item_queue: asyncio.Queue[BTxQueueItem]
 
     def __init__(
         self,
         outputs: Sequence[BOutput],
         engine: "XBEngine",
         context: AbstractContext,
+        vkgdr_handle: vkgdr.Vkgdr,
         init_tx_enabled: bool,
         name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
@@ -306,7 +318,11 @@ class BPipeline(Pipeline):
             # saturated = accel.DeviceArray(
             #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
             # )
-            tx_item = BTxQueueItem(buffer_device)
+            weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
+            weights.host.fill(1)
+            delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
+            delays.host.fill(0)
+            tx_item = BTxQueueItem(buffer_device, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = BSend(
@@ -366,8 +382,14 @@ class BPipeline(Pipeline):
             tx_item.reset(rx_item.timestamp)
 
             # Queue GPU work
-            self._beamform.bind(**{"in": rx_item.buffer_device, "out": tx_item.buffer_device})
-            # TODO: need to bind weights and delays
+            self._beamform.bind(
+                **{
+                    "in": rx_item.buffer_device,
+                    "out": tx_item.buffer_device,
+                    "weights": tx_item.weights.device,
+                    "delays": tx_item.delays.device,
+                }
+            )
             self._beamform()
 
             tx_item.add_marker(self._proc_command_queue)
@@ -418,12 +440,8 @@ class BPipeline(Pipeline):
         self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
 
 
-class XPipeline(Pipeline):
+class XPipeline(Pipeline[XOutput, XTxQueueItem]):
     """Processing pipeline for a single baseline-correlation-products stream."""
-
-    _tx_item_queue: asyncio.Queue[XTxQueueItem | None]
-    _tx_free_item_queue: asyncio.Queue[XTxQueueItem]
-    outputs: Sequence[XOutput]
 
     def __init__(
         self,
@@ -964,7 +982,12 @@ class XBEngine(DeviceServer):
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
         self._pipelines = [XPipeline(x_output, self, context, tx_enabled) for x_output in x_outputs]
         if b_outputs:
-            self._pipelines.append(BPipeline(b_outputs, self, context, tx_enabled))
+            with context:
+                # We could quite easily make do with non-coherent mappings and
+                # explicit flushing, but since NVIDIA currently only provides
+                # host-coherent memory, this is a simpler option.
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
+            self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()
 
