@@ -28,7 +28,7 @@ from katgpucbf.xbgpu.beamform import BeamformTemplate
 @numba.njit
 def quant(x):
     """Round to integer and clamp to [-127, 127]."""
-    return np.fmin(np.fmax(np.round(x), -127), 127)
+    return np.fmin(np.fmax(np.rint(x), -127), 127)
 
 
 @numba.njit

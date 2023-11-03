@@ -115,14 +115,14 @@ def cmult_and_scale(a, b, c, out):
 
 @njit
 def generate_expected_corrprods(
-    batch_start_idx,
-    num_batches,
-    heap_accumulation_threshold,
-    channels,
-    antennas,
-    n_spectra_per_heap,
-    missing_antenna,
-):
+    batch_start_idx: int,
+    num_batches: int,
+    heap_accumulation_threshold: int,
+    channels: int,
+    antennas: int,
+    n_spectra_per_heap: int,
+    missing_antenna: int | None,
+) -> np.ndarray:
     """Calculate the expected correlator output.
 
     This doesn't do a full correlator. It calculates the results according to
@@ -162,6 +162,41 @@ def generate_expected_corrprods(
                 output_array[:, 4 * bl_idx : 4 * bl_idx + 4, 1] = 1
 
     return output_array
+
+
+@njit
+def generate_expected_beams(
+    batch_start_idx: int,
+    num_batches: int,
+    channels: int,
+    antennas: int,
+    n_spectra_per_heap: int,
+    missing_antenna: int | None,
+    beam_pols: np.ndarray,
+) -> np.ndarray:
+    out = np.empty((len(beam_pols), num_batches, channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
+    accum = np.zeros((len(beam_pols), num_batches, channels), np.complex64)
+    sample = np.empty((N_POLS, COMPLEX), np.int8)
+    sample_fp = np.empty(N_POLS, np.complex64)
+    for batch in range(num_batches):
+        for channel in range(channels):
+            for antenna in range(antennas):
+                if antenna == missing_antenna:
+                    continue
+                feng_sample(batch + batch_start_idx, channel, antenna, sample)
+                sample_fp[0] = sample[0, 0] + np.complex64(1j) * sample[0, 1]
+                sample_fp[1] = sample[1, 0] + np.complex64(1j) * sample[1, 1]
+                for beam, pol in enumerate(beam_pols):
+                    # TODO: apply weights and delays once implemented
+                    accum[beam, batch, channel] += sample_fp[pol]
+            for beam in range(len(beam_pols)):
+                value = accum[beam, batch, channel]
+                sample[0, 0] = np.fmin(np.fmax(np.rint(value.real), -127), 127)
+                sample[0, 1] = np.fmin(np.fmax(np.rint(value.imag), -127), 127)
+                # Copy to all spectra in the batch
+                out[beam, batch, channel] = sample[0]
+
+    return out
 
 
 def valid_end_to_end_combination(combo: dict) -> bool:
@@ -300,7 +335,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    ) -> tuple[list[np.ndarray], np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
         Each full accumulation (for each corrprod-output) requires
@@ -332,9 +367,8 @@ class TestEngine:
             corrprod_output, where each array has shape
             (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
         beam_results
-            List of arrays of beamformer output. One output array per beam,
-            where each array has shape (n_frames, n_channels_per_substream,
-            n_spectra_per_heap, COMPLEX).
+            Beamformer output, with shape (n_beams, n_frames,
+            n_channels_per_substream, n_spectra_per_heap, COMPLEX).
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
@@ -409,7 +443,10 @@ class TestEngine:
 
                 corrprod_results[i][j] = ig_recv["xeng_raw"].value
 
-        beam_results = []
+        beam_results = np.zeros(
+            (len(beam_outputs), len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+            bsend.SEND_DTYPE,
+        )
         for i in range(len(beam_outputs)):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
             stream.add_inproc_reader(mock_send_stream[i + len(corrprod_outputs)])
@@ -419,9 +456,6 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            beam_results.append(
-                np.zeros((len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
-            )
             for j, index in enumerate(batch_indices):
                 heap = await stream.get()
                 while (updated_items := set(ig_recv.update(heap))) == set():
@@ -431,7 +465,7 @@ class TestEngine:
                 assert updated_items == {"frequency", "timestamp", "bf_raw"}
                 assert ig_recv["timestamp"].value == index * timestamp_step
                 assert ig_recv["frequency"].value == frequency
-                beam_results[-1][j, ...] = ig_recv["bf_raw"].value
+                beam_results[i, j, ...] = ig_recv["bf_raw"].value
 
         return corrprod_results, beam_results
 
@@ -642,7 +676,7 @@ class TestEngine:
                 if j == 0:
                     # This is to handle the first accumulation processed. The value
                     # checked here is simply the first in the range.
-                    # - Even though :meth:`generate_expected_corrprods` returns a
+                    # - Even though :func:`generate_expected_corrprods` returns a
                     #   zeroed array for an incomplete accumulation, we still need
                     #   to maintain programmatic sense in the values generated here.
                     num_batches_in_current_accumulation = HEAPS_PER_FENGINE_PER_CHUNK
@@ -704,6 +738,21 @@ class TestEngine:
                 )
 
         assert actual_sensor_updates == expected_sensor_updates
+
+        expected_beams = generate_expected_beams(
+            batch_start_index,
+            batch_end_index - batch_start_index,
+            n_channels_per_substream,
+            n_ants,
+            n_spectra_per_heap,
+            missing_antenna,
+            np.array([beam_output.pol for beam_output in beam_outputs]),
+        )
+        # assert_allclose converts to float, which bloats memory usage.
+        # To keep it manageable, compare a batch at a time.
+        for i in range(beam_results.shape[0]):
+            for j in range(beam_results.shape[1]):
+                np.testing.assert_allclose(beam_results[i, j], expected_beams[i, j], atol=1)
 
     # This uses parametrize to set fixture values for the test rather than to
     # create multiple tests.
