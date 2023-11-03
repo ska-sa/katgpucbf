@@ -31,11 +31,12 @@ The script will perform the following actions:
 
 Sourcing the script instead of executing it directly will keep your virtual
 environment active, so you can get going straight away. Next time you want to
-work, you can just source the virtual environment directly:
+work, navigate into the :mod:`katgpucbf` directory and source the virtual
+environment directly:
 
 .. code-block:: bash
 
-  user@host:~/katgpucbf$ source .venv/bin/activate
+  source .venv/bin/activate
 
 And you are ready to start developing with :mod:`katgpucbf`!
 
@@ -156,15 +157,14 @@ Module documentation updates
 :external+sphinx-apidoc:doc:`sphinx-apidoc <index>` provides a manner to generate
 module documentation as reStructuredText. If you, the developer, add or remove
 a module or file, execute the full ``sphinx-apidoc`` command below to regenerate
-the module documentation with your updates.
+the module documentation with your updates. The incantation below is run from the
+root :mod:`katgpucbf` directory.
 
 .. code-block:: bash
 
-  user@host:~/katgpucbf$ sphinx-apidoc -efo doc/ src/
+  sphinx-apidoc -efo doc/ src/
 
 .. note::
 
     The above command will likely generate a :file:`modules.rst` file, which is
-    not necessary to commit. Furthermore, if you aren't comfortable generating
-    the documents straight away, you can append a ``--dry-run`` to the above
-    command to see what files will be generated.
+    not necessary to commit.
