@@ -31,7 +31,8 @@ The script will perform the following actions:
 
 Sourcing the script instead of executing it directly will keep your virtual
 environment active, so you can get going straight away. Next time you want to
-work, you can just source the virtual environment directly:
+work, navigate into the :mod:`katgpucbf` directory and source the virtual
+environment directly:
 
 .. code-block:: bash
 
@@ -59,15 +60,6 @@ The installation and initialisation of the pre-commit flow is handled in
 :program:`dev-setup.sh`.
 
 .. _pre-commit: https://pre-commit.com/
-
-.. note::
-    Contributors who prefer to develop without pre-commit enabled will be required
-    to ensure that any submissions (i.e. pull-requests) pass all the checks
-    described here before they can be accepted and merged.
-
-    No judgement, we know pre-commit can be annoying if you're not used to it.
-    This is in place in order to keep the code-base consistent so we can focus
-    on the work at hand - rather than maintaining code readability and appearance.
 
 Configuration Files
 ^^^^^^^^^^^^^^^^^^^
@@ -143,3 +135,36 @@ The module contains the following boiler-plate files:
   :external+pip:doc:`here <reference/build-system/pyproject-toml>`.
 
 .. _pip-compile: https://pip-tools.readthedocs.io/en/latest/#without-setup-py
+
+Preparing to raise a Pull Request
+---------------------------------
+
+Pre-commit compliance
+^^^^^^^^^^^^^^^^^^^^^
+
+Contributors who prefer to develop without pre-commit enabled will be required
+to ensure that any submissions pass all the checks described here before they
+can be accepted and merged.
+
+No judgement, we know pre-commit can be annoying if you're not used to it.
+This is in place in order to keep the code-base consistent so we can focus
+on the work at hand - rather than maintaining code readability and appearance.
+
+Module documentation updates
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:mod:`katgpucbf` holds documentation within its code-base.
+:external+sphinx-apidoc:doc:`sphinx-apidoc <index>` provides a manner to generate
+module documentation as reStructuredText. If you, the developer, add or remove
+a module or file, execute the full ``sphinx-apidoc`` command below to regenerate
+the module documentation with your updates. The incantation below is run from the
+root :mod:`katgpucbf` directory.
+
+.. code-block:: bash
+
+  sphinx-apidoc -efo doc/ src/
+
+.. note::
+
+    The above command will likely generate a :file:`modules.rst` file, which is
+    not necessary to commit.

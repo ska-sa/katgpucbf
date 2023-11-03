@@ -83,6 +83,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "setuptools": ("https://setuptools.pypa.io/en/stable/", None),
     "spead2": ("https://spead2.readthedocs.io/en/latest", None),
+    "sphinx-apidoc": ("https://www.sphinx-doc.org/en/master/", None),
 }
 
 
