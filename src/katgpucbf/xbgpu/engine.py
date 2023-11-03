@@ -355,8 +355,19 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
-        # Dynamic sensors
         for output in self.outputs:
+            # Static sensors
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.chan-range",
+                    "The range of channels processed by this B-engine, inclusive",
+                    default=f"({self.engine.channel_offset_value},"
+                    f"{self.engine.channel_offset_value + self.engine.n_channels_per_substream - 1})",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            # Dynamic sensors
             sensors.add(
                 aiokatcp.Sensor(
                     int,
@@ -1165,6 +1176,7 @@ class XBEngine(DeviceServer):
                 pipeline.send_stream.stream,  # type: ignore
                 pipeline.send_stream.descriptor_heap,  # type: ignore
                 descriptor_interval_s,
+                substreams=range(pipeline.send_stream.stream.num_substreams),  # type: ignore
             )
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
