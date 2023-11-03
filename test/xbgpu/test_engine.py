@@ -16,7 +16,7 @@
 
 """Unit tests for XBEngine module."""
 
-from typing import AbstractSet, AsyncGenerator, Callable, Final, Iterable
+from typing import AbstractSet, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
 import numpy as np
@@ -30,11 +30,11 @@ from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
-from katgpucbf.xbgpu import METRIC_NAMESPACE
+from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import XBEngine, XPipeline
-from katgpucbf.xbgpu.main import make_engine, parse_args, parse_corrprod
-from katgpucbf.xbgpu.output import XOutput
+from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
+from katgpucbf.xbgpu.output import BOutput, XOutput
 
 from .. import PromDiff
 from . import test_parameters
@@ -114,7 +114,7 @@ def cmult_and_scale(a, b, c, out):
 
 
 @njit
-def generate_expected_output(
+def generate_expected_corrprods(
     batch_start_idx,
     num_batches,
     heap_accumulation_threshold,
@@ -209,6 +209,11 @@ class TestEngine:
         """The outputs to run correlation tests against."""
         return [parse_corrprod(corrprod_arg) for corrprod_arg in corrprod_args]
 
+    @pytest.fixture
+    def beam_outputs(self, beam_args: list[str]) -> list[BOutput]:
+        """The outputs to run beamforming against."""
+        return [parse_beam(beam_arg) for beam_arg in beam_args]
+
     @staticmethod
     def _create_heaps(
         timestamp: int,
@@ -286,15 +291,16 @@ class TestEngine:
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
         corrprod_outputs: list[XOutput],
+        beam_outputs: list[BOutput],
         *,
         heap_factory: Callable[[int], list[spead2.send.HeapReference]],
-        batch_indices: Iterable[int],
+        batch_indices: Sequence[int],
         timestamp_step: int,
         n_ants: int,
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-    ) -> list[np.ndarray]:
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
         Each full accumulation (for each corrprod-output) requires
@@ -321,10 +327,14 @@ class TestEngine:
 
         Returns
         -------
-        device_results
+        corrprod_results
             List of arrays of all GPU-generated data. One output array per
-            corrprod_output, each array has shape
-            - (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX)
+            corrprod_output, where each array has shape
+            (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
+        beam_results
+            List of arrays of beamformer output. One output array per beam,
+            where each array has shape (n_frames, n_channels_per_substream,
+            n_spectra_per_heap, COMPLEX).
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
@@ -342,7 +352,7 @@ class TestEngine:
             queue.stop()
 
         n_baselines = n_ants * (n_ants + 1) * 2
-        device_results = [
+        corrprod_results = [
             np.zeros(
                 shape=(
                     len(acc_index_set),  # n_accumulations for this XPipeline
@@ -397,9 +407,33 @@ class TestEngine:
                     f"actual: {ig_recv['frequency'].value}."
                 )
 
-                device_results[i][j] = ig_recv["xeng_raw"].value
+                corrprod_results[i][j] = ig_recv["xeng_raw"].value
 
-        return device_results
+        beam_results = []
+        for i in range(len(beam_outputs)):
+            stream = spead2.recv.asyncio.Stream(out_tp, out_config)
+            stream.add_inproc_reader(mock_send_stream[i + len(corrprod_outputs)])
+            # It is expected that the first packet will be a descriptor.
+            ig_recv = spead2.ItemGroup()
+            heap = await stream.get()
+            items = ig_recv.update(heap)
+            assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
+
+            beam_results.append(
+                np.zeros((len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
+            )
+            for j, index in enumerate(batch_indices):
+                heap = await stream.get()
+                while (updated_items := set(ig_recv.update(heap))) == set():
+                    # Test has gone on long enough that we've received another descriptor
+                    heap = await stream.get()
+
+                assert updated_items == {"frequency", "timestamp", "bf_raw"}
+                assert ig_recv["timestamp"].value == index * timestamp_step
+                assert ig_recv["frequency"].value == frequency
+                beam_results[-1][j, ...] = ig_recv["bf_raw"].value
+
+        return corrprod_results, beam_results
 
     @pytest.fixture
     def n_engines(self, n_ants: int) -> int:
@@ -479,7 +513,7 @@ class TestEngine:
         [(3, 7), (4, 8), (5, 9)],
         filter=valid_end_to_end_combination,
     )
-    async def test_xengine_end_to_end(
+    async def test_engine_end_to_end(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
@@ -491,6 +525,7 @@ class TestEngine:
         frequency: int,
         n_samples_between_spectra: int,
         corrprod_outputs: list[XOutput],
+        beam_outputs: list[BOutput],
         missing_antenna: int | None,
     ):
         """
@@ -499,8 +534,8 @@ class TestEngine:
         Simulated input data is generated and passed to the XBEngine, yielding
         output results which are then verified.
 
-        The simulated data is not random, it is encoded based on certain
-        parameters, this allows the verification function to generate the
+        The simulated data is not random but is encoded based on certain
+        parameters. This allows the verification function to generate the
         correct data to compare to the xbengine without performing the full
         correlation algorithm, greatly improving processing time.
 
@@ -531,6 +566,8 @@ class TestEngine:
         range_end = range_start + n_channels_per_substream - 1
         for corrprod_output in corrprod_outputs:
             assert xbengine.sensors[f"{corrprod_output.name}.chan-range"].value == f"({range_start},{range_end})"
+        for beam_output in beam_outputs:
+            assert xbengine.sensors[f"{beam_output.name}.chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates
         # as they happen in the XBEngine
@@ -579,10 +616,11 @@ class TestEngine:
             # Add an extra chunk before the first full accumulation
             batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
 
-            device_results = await self._send_data(
+            corrprod_results, beam_results = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs=corrprod_outputs,
+                beam_outputs=beam_outputs,
                 batch_indices=range(batch_start_index, batch_end_index),
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
@@ -597,14 +635,14 @@ class TestEngine:
             # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
             incomplete_accums_counter = 0
             base_batch_index = batch_start_index
-            for j, device_result in enumerate(device_results[i]):
+            for j, corrprod_result in enumerate(corrprod_results[i]):
                 # The first heap is an incomplete accumulation containing a
                 # single batch, we need to make sure that this is taken into
                 # account by the verification function.
                 if j == 0:
                     # This is to handle the first accumulation processed. The value
                     # checked here is simply the first in the range.
-                    # - Even though :meth:`generate_expected_output` returns a
+                    # - Even though :meth:`generate_expected_corrprods` returns a
                     #   zeroed array for an incomplete accumulation, we still need
                     #   to maintain programmatic sense in the values generated here.
                     num_batches_in_current_accumulation = HEAPS_PER_FENGINE_PER_CHUNK
@@ -614,7 +652,7 @@ class TestEngine:
                     if missing_antenna is not None:
                         incomplete_accums_counter += 1
 
-                expected_output = generate_expected_output(
+                expected_output = generate_expected_corrprods(
                     base_batch_index,
                     num_batches_in_current_accumulation,
                     corrprod_output.heap_accumulation_threshold,
@@ -624,15 +662,15 @@ class TestEngine:
                     missing_antenna,
                 )
                 base_batch_index += num_batches_in_current_accumulation
-                np.testing.assert_equal(expected_output, device_result)
+                np.testing.assert_equal(expected_output, corrprod_result)
             incomplete_accums_counters.append(incomplete_accums_counter)
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
-        for pipeline, device_result, incomplete_accums_counter in zip(
-            xpipelines, device_results, incomplete_accums_counters
+        for pipeline, corrprod_result, incomplete_accums_counter in zip(
+            xpipelines, corrprod_results, incomplete_accums_counters
         ):
             output_name = pipeline.output.name
-            n_accumulations_completed = device_result.shape[0]
+            n_accumulations_completed = corrprod_result.shape[0]
             assert (
                 prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": output_name})
                 == incomplete_accums_counter
@@ -687,6 +725,7 @@ class TestEngine:
         n_spectra_per_heap: int,
         heap_accumulation_threshold: list[int],
         corrprod_outputs: list[XOutput],
+        beam_outputs: list[BOutput],
     ):
         """Test saturation statistics.
 
@@ -711,6 +750,7 @@ class TestEngine:
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs,
+                beam_outputs,
                 batch_indices=range(0, heap_accumulation_threshold[0]),
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
