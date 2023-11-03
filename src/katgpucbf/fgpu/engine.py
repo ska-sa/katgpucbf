@@ -23,7 +23,6 @@ import logging
 import math
 import numbers
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
 from functools import partial
 
 import aiokatcp
@@ -47,6 +46,7 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
+from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
@@ -250,46 +250,6 @@ class InItem(QueueItem):
     def end_timestamp(self) -> int:  # noqa: D401
         """Past-the-end (i.e. latest plus 1) timestamp of the item."""
         return self.timestamp + self.n_samples
-
-
-@dataclass
-class MappedArray:
-    """An array visible in the address space of both the host and the device.
-
-    The host view can be updated using normal numpy code, and the changes will
-    be visible to subsequently enqueued kernels on the device.
-    """
-
-    host: np.ndarray
-    device: accel.DeviceArray
-
-    @classmethod
-    def from_slot(cls, vkgdr_handle: vkgdr.Vkgdr, context: AbstractContext, slot: accel.IOSlotBase) -> "MappedArray":
-        """Allocate a :class:`MappedArray` to match a slot.
-
-        Parameters
-        ----------
-        vkgdr_handle
-            Handle for allocating memory from vkgdr. It must be created from the same device
-            as `context`.
-        context
-            CUDA context in which the device view will be used.
-        slot
-            Slot from which the dtype, shape and padded shape will be
-            extracted. The parameter is annotated as
-            :class:`~katsdpsigproc.accel.IOSlotBase` for convenience, but it
-            must actually be an instance of :class:`~katsdpsigproc.accel.IOSlot`.
-        """
-        assert isinstance(slot, accel.IOSlot)
-        padded_shape = slot.required_padded_shape()
-        n_bytes = int(np.prod(padded_shape)) * slot.dtype.itemsize
-        with context:
-            handle = vkgdr.pycuda.Memory(vkgdr_handle, n_bytes)
-        # Slice out the shape from the padded shape
-        index = tuple(slice(0, x) for x in slot.shape)
-        host = np.asarray(handle).view(slot.dtype).reshape(padded_shape)[index]
-        device = accel.DeviceArray(context, slot.shape, slot.dtype, padded_shape, raw=handle)
-        return cls(host=host, device=device)
 
 
 class OutItem(QueueItem):

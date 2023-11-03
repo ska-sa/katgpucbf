@@ -17,6 +17,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.mapped_array
    katgpucbf.meerkat
    katgpucbf.monitor
    katgpucbf.queue_item
