@@ -136,7 +136,9 @@ async def run_tasks(
     """
     async with AsyncExitStack() as stack:
         conn_options = asyncssh.SSHClientConnectionOptions(keepalive_interval="15s")
-        conn = await stack.enter_async_context(asyncssh.connect(server.hostname, username=server.username, options=conn_options))
+        conn = await stack.enter_async_context(
+            asyncssh.connect(server.hostname, username=server.username, options=conn_options)
+        )
         if not server.cpus:
             ncpus = int((await conn.run("nproc", check=True)).stdout)  # type: ignore[arg-type]
             cpus = list(range(ncpus))
