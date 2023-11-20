@@ -23,7 +23,7 @@ async-timeout==4.0.2
     #   -c scratch/benchmarks/../../requirements.txt
     #   -r scratch/benchmarks/requirements.in
     #   aiohttp
-asyncssh==2.13.2
+asyncssh==2.14.1
     # via -r scratch/benchmarks/requirements.in
 attrs==23.1.0
     # via
