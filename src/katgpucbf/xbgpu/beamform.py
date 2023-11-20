@@ -40,7 +40,7 @@ class BeamformTemplate:
 
     def __init__(self, context: AbstractContext, beam_pols: Sequence[int]) -> None:
         # TODO: tune these. And maybe adapt to input shape?
-        self.block_time = 128
+        self.block_spectra = 128
         self.block_channels = 1
         self.beam_pols = beam_pols
         with resources.as_file(resources.files(__package__)) as resource_dir:
@@ -48,7 +48,7 @@ class BeamformTemplate:
                 context,
                 "kernels/beamform.mako",
                 {
-                    "block_time": self.block_time,
+                    "block_spectra": self.block_spectra,
                     "block_channels": self.block_channels,
                     "beam_pols": self.beam_pols,
                 },
@@ -59,27 +59,31 @@ class BeamformTemplate:
     def instantiate(
         self,
         command_queue: AbstractCommandQueue,
-        frames: int,
-        antennas: int,
-        channels: int,
-        times: int,
+        n_frames: int,
+        n_ants: int,
+        n_channels: int,
+        n_spectra_per_frame: int,
     ) -> "Beamform":
         """Generate a :class:`Beamform` object based on the template."""
-        return Beamform(self, command_queue, frames, antennas, channels, times)
+        return Beamform(self, command_queue, n_frames, n_ants, n_channels, n_spectra_per_frame)
 
 
 class Beamform(accel.Operation):
     r"""Operation for beamforming.
 
+    For ease-of-use with the data formats used in the rest of katgpucbf,
+    time is split into two dimensions: a coarse outer dimension (called
+    "frames") and a finer inner dimension ("spectra").
+
     .. rubric:: Slots
 
-    **in** : frames × antennas × channels × times × N_POLS × COMPLEX, int8
+    **in** : n_frames × n_ants × n_channels × n_spectra_per_frame × N_POLS × COMPLEX, int8
         Complex (Gaussian integer) input channelised voltages
-    **out** : frames × beams × channels × times × COMPLEX, int8
+    **out** : n_frames × n_beams × n_channels × n_spectra_per_frame × COMPLEX, int8
         Complex (Gaussian integer) output channelised voltages
-    **weights** : antennas × beams, complex64
+    **weights** : n_ants × n_beams, complex64
         Complex scale factor to apply to each antenna for each beam
-    **delays** : antennas × beams, float32
+    **delays** : n_ants × n_beams, float32
         Delay used to compute channel-dependent phase rotation. The
         rotation applied is :math:`e^{\pi cd}` where :math:`c` is
         the channel number and :math:`d` is the delay value. Note
@@ -92,33 +96,35 @@ class Beamform(accel.Operation):
         The template for the operation
     command_queue
         The command queue on which to enqueue the work
-    frames
-        Number of instances of the problem (coarse time dimension)
-    antennas
+    n_frames
+        Number of frames (coarse time dimension)
+    n_ants
         Number of antennas
-    channels
+    n_channels
         Number of frequency channels
-    times
-        Number of samples in time axis
+    n_spectra_per_frame
+        Number of samples in time axis for each frame (fine time dimension)
     """
 
     def __init__(
         self,
         template: BeamformTemplate,
         command_queue: AbstractCommandQueue,
-        frames: int,
-        antennas: int,
-        channels: int,
-        times: int,
+        n_frames: int,
+        n_ants: int,
+        n_channels: int,
+        n_spectra_per_frame: int,
     ) -> None:
         super().__init__(command_queue)
         self.template = template
         pol_dim = accel.Dimension(N_POLS, exact=True)
         complex_dim = accel.Dimension(COMPLEX, exact=True)
-        beams = len(template.beam_pols)
-        self.slots["in"] = accel.IOSlot((frames, antennas, channels, times, pol_dim, complex_dim), np.int8)
-        self.slots["out"] = accel.IOSlot((frames, beams, channels, times, complex_dim), np.int8)
-        weights_dims = (antennas, accel.Dimension(beams, exact=True))
+        n_beams = len(template.beam_pols)
+        self.slots["in"] = accel.IOSlot(
+            (n_frames, n_ants, n_channels, n_spectra_per_frame, pol_dim, complex_dim), np.int8
+        )
+        self.slots["out"] = accel.IOSlot((n_frames, n_beams, n_channels, n_spectra_per_frame, complex_dim), np.int8)
+        weights_dims = (n_ants, accel.Dimension(n_beams, exact=True))
         self.slots["weights"] = accel.IOSlot(weights_dims, np.complex64)
         self.slots["delays"] = accel.IOSlot(weights_dims, np.float32)
 
@@ -143,9 +149,9 @@ class Beamform(accel.Operation):
                 np.int32(in_buffer.shape[3]),
             ],
             global_size=(
-                accel.roundup(in_buffer.shape[3], self.template.block_time),
+                accel.roundup(in_buffer.shape[3], self.template.block_spectra),
                 accel.roundup(in_buffer.shape[2], self.template.block_channels),
                 in_buffer.shape[0],
             ),
-            local_size=(self.template.block_time, self.template.block_channels, 1),
+            local_size=(self.template.block_spectra, self.template.block_channels, 1),
         )

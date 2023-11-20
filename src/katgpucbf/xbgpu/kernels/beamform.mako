@@ -17,7 +17,7 @@
 <%include file="/port.mako"/>
 
 #define N_BEAMS ${len(beam_pols)}
-#define BLOCK_TIME ${block_time}
+#define BLOCK_SPECTRA ${block_spectra}
 #define BLOCK_CHANNELS ${block_channels}
 #define QMAX 127
 
@@ -58,7 +58,7 @@ DEVICE_FN float2 cmad(float2 a, float2 b, float2 c)
 // weight: shape antenna, beam, tightly packed
 // delays: shape antenna, beam, tightly packed
 // Each thread computes all beams for one (channel, time)
-KERNEL REQD_WORK_GROUP_SIZE(BLOCK_TIME, BLOCK_CHANNELS, 1) void beamform(
+KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
     GLOBAL char2 * RESTRICT out,
     GLOBAL const char4 * RESTRICT in,
     GLOBAL const float2 * RESTRICT weights,
@@ -69,7 +69,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_TIME, BLOCK_CHANNELS, 1) void beamform(
     int in_stride,
     int in_antenna_stride,
     int in_frame_stride,
-    int n_antennas,
+    int n_ants,
     int n_channels,
     int n_times
 )
@@ -86,7 +86,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_TIME, BLOCK_CHANNELS, 1) void beamform(
     for (int i = 0; i < N_BEAMS; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
-    for (int a = 0; a < n_antennas; a++)
+    for (int a = 0; a < n_ants; a++)
     {
         char4 sample = *in;
         float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
