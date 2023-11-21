@@ -91,9 +91,14 @@ def test_beamform(
 
     rng = np.random.default_rng(seed=123)
     h_in[:] = rng.integers(-127, 127, h_in.shape)
+    # Scale is chosen to have some (but not all) values saturate. The sqrt
+    # scale factor is because that's how the standard deviation grows when
+    # adding independent normal random variables.
     scale = 2.0 / np.sqrt(n_antennas)
     h_weights[:] = rng.uniform(-scale, scale, h_weights.shape) + 1j * rng.uniform(-scale, scale, h_weights.shape)
-    h_delays[:] = rng.uniform(-0.1, 0.1, h_delays.shape)
+    # Delay value is phase step per channel. We want delays to wrap a little
+    # across the whole band, but not an excessive number of times.
+    h_delays[:] = rng.uniform(-100.0 / n_channels, 100.0 / n_channels, h_delays.shape)
     h_out.fill(0)
     expected = beamform_host(h_in, h_weights, h_delays, np.array(beam_pols))
 
