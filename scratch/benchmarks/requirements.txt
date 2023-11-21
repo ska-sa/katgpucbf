@@ -4,7 +4,7 @@
 #
 #    pip-compile --config=pyproject.toml --output-file=scratch/benchmarks/requirements.txt scratch/benchmarks/requirements.in
 #
-aiohttp==3.8.5
+aiohttp==3.8.6
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
