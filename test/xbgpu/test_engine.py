@@ -49,6 +49,11 @@ ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
+# Mark that can be applied to a test that just needs one set of parameters
+DEFAULT_PARAMETERS = pytest.mark.parametrize(
+    "n_ants, n_channels_total, n_spectra_per_heap, heap_accumulation_threshold",
+    [(4, 1024, 256, [300, 300])],
+)
 
 
 @njit
@@ -827,12 +832,7 @@ class TestEngine:
             for j in range(beam_results.shape[1]):
                 np.testing.assert_allclose(beam_results[i, j], expected_beams[i, j], atol=1)
 
-    # This uses parametrize to set fixture values for the test rather than to
-    # create multiple tests.
-    @pytest.mark.parametrize("n_ants", [4])
-    @pytest.mark.parametrize("n_channels_total", [1024])
-    @pytest.mark.parametrize("n_spectra_per_heap", [256])
-    @pytest.mark.parametrize("heap_accumulation_threshold", [[300, 300]])
+    @DEFAULT_PARAMETERS
     async def test_saturation(
         self,
         context: AbstractContext,
@@ -892,3 +892,27 @@ class TestEngine:
             prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"})
             == n_channels_per_substream * n_baselines
         )
+
+    @DEFAULT_PARAMETERS
+    async def test_bad_requests(self, client: aiokatcp.Client, n_ants: int) -> None:
+        # Trying to use beamformer request on wrong stream type
+        with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
+            await client.request("beam-quant-gains", "bcp1", 1.0)
+        with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
+            await client.request("beam-weights", "bcp1", *([1.0] * n_ants))
+        with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
+            await client.request("beam-delays", "bcp1", *(["0.0:0.0"] * n_ants))
+
+        # Vector requests with wrong number of parameters
+        with pytest.raises(aiokatcp.FailReply, match=r"Incorrect number of weights \(expected 4, received 3\)"):
+            await client.request("beam-weights", "beam_0x", 1.0, 2.0, 3.0)
+        with pytest.raises(aiokatcp.FailReply, match=r"Incorrect number of delays \(expected 4, received 5\)"):
+            await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3", "4:4")
+
+        # Bad delay formatting
+        with pytest.raises(aiokatcp.FailReply):
+            await client.request("beam-delays", "beam_0x", "0", "1", "2", "3")  # Missing ":"
+        with pytest.raises(aiokatcp.FailReply):
+            await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3:3")  # Too many :'s
+        with pytest.raises(aiokatcp.FailReply):
+            await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:2j")  # Not float
