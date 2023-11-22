@@ -74,7 +74,7 @@ class BOutputDict(OutputDict, total=False):
     See :class:`OutputDict` for further information.
     """
 
-    pass
+    pol: int
 
 
 class XOutputDict(OutputDict, total=False):
@@ -123,14 +123,23 @@ def parse_beam(value: str) -> BOutput:
 
     - name
     - dst
+    - pol
     """
 
     def _field_callback(kws: BOutputDict, key: str, data: str) -> None:
-        raise ValueError(f"unknown key {key}")
+        match key:
+            case "pol":
+                kws[key] = int(data)
+                if kws[key] not in {0, 1}:
+                    raise ValueError("pol must be either 0 or 1")
+            case _:
+                raise ValueError(f"unknown key {key}")
 
     try:
         kws: BOutputDict = {}
         _parse_stream(value, kws, _field_callback)
+        if "pol" not in kws:
+            raise ValueError("pol is missing")
         return BOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--beam: {exc}") from exc
@@ -174,7 +183,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a half-beam output (may be repeated). The required keys are: name, dst.",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol.",
     )
     parser.add_argument(
         "--corrprod",

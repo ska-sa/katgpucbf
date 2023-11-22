@@ -28,16 +28,18 @@ class TestParseBeam:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_beam("name=beam1,dst=239.1.2.3:7148") == BOutput(
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1") == BOutput(
             name="beam1",
             dst=Endpoint("239.1.2.3", 7148),
+            pol=1,
         )
 
     @pytest.mark.parametrize(
         "missing,value",
         [
-            ("dst", "name=foo"),
-            ("name", "dst=239.1.2.3:7148"),
+            ("dst", "name=foo,pol=0"),
+            ("name", "dst=239.1.2.3:7148,pol=1"),
+            ("pol", "name=foo,dst=239.1.2.3:7148"),
         ],
     )
     def test_missing_key(self, missing: str, value: str) -> None:
@@ -48,12 +50,17 @@ class TestParseBeam:
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
         with pytest.raises(ValueError, match="--beam: name already specified"):
-            parse_beam("name=foo,name=bar,dst=239.1.2.3:7148")
+            parse_beam("name=foo,name=bar,dst=239.1.2.3:7148,pol=0")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
         with pytest.raises(ValueError, match="--beam: unknown key fizz"):
-            parse_beam("fizz=buzz,name=foo,dst=239.1.2.3:7148")
+            parse_beam("fizz=buzz,name=foo,dst=239.1.2.3:7148,pol=0")
+
+    def test_bad_pol(self) -> None:
+        """Test with a polarisation value that isn't 0 or 1."""
+        with pytest.raises(ValueError, match="--beam: pol must be either 0 or 1"):
+            parse_beam("name=foo,dst=239.1.2.3:7148,pol=2")
 
 
 class TestParseCorrprod:

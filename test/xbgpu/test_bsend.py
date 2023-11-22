@@ -49,8 +49,8 @@ def time_converter() -> TimeConverter:
 def outputs() -> Sequence[BOutput]:
     """Simulate `--beam` configuration."""
     return [
-        BOutput(name="foo", dst=Endpoint("239.10.11.0", 7149)),
-        BOutput(name="bar", dst=Endpoint("239.10.12.0", 7149)),
+        BOutput(name="foo", dst=Endpoint("239.10.11.0", 7149), pol=0),
+        BOutput(name="bar", dst=Endpoint("239.10.12.0", 7149), pol=1),
     ]
 
 

@@ -41,4 +41,4 @@ class XOutput(Output):
 class BOutput(Output):
     """Static configuration for an output beam stream."""
 
-    pass
+    pol: int
