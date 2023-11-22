@@ -322,7 +322,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
             tx_item = BTxQueueItem(buffer_device, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
-        # These are the original weights, delays and gainsas provided by the
+        # These are the original weights, delays and gains as provided by the
         # user, rather than the processed values passed to the kernel.
         self._weights = np.ones((len(outputs), engine.n_ants), np.float64)
         self._delays = np.zeros((len(outputs), engine.n_ants, 2), np.float64)
