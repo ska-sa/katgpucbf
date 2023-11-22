@@ -1253,7 +1253,7 @@ class XBEngine(DeviceServer):
         delays
             A sequence of strings (one per input). Each string has the form
             ``delay:fringe-offset``, where ``delay`` is a delay in seconds, and
-            ``fringe-offset` is the net phase adjustment at the centre
+            ``fringe-offset`` is the net phase adjustment at the centre
             frequency (of the whole stream, not of this engine).
         """
         pipeline, stream_id = self._request_bpipeline(stream_name)
