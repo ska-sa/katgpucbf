@@ -19,6 +19,7 @@
 from typing import AbstractSet, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
+import async_timeout
 import numpy as np
 import pytest
 import spead2
@@ -173,13 +174,53 @@ def generate_expected_beams(
     n_spectra_per_heap: int,
     missing_antenna: int | None,
     beam_pols: np.ndarray,
+    weights: np.ndarray,
+    delays: np.ndarray,
+    quant_gains: np.ndarray,
+    channel_spacing: float,
+    centre_channel: int,
 ) -> np.ndarray:
+    """Calculate the expected beamformer output.
+
+    It calculates the results according to what is expected from the specific
+    input generated in :meth:`TestEngine._create_heaps`.
+
+    Parameters
+    ----------
+    batch_start_idx
+        First batch index to output.
+    num_batches
+        Number of consecutive batches to emit.
+    channels
+        Number of channels.
+    antennas
+        Number of antennas.
+    n_spectra_per_heap
+        Number of spectra in each batch.
+    missing_antenna
+        If not None, data for this antenna is excluded from the beam.
+    beam_pols
+        Indicates, for each beam, which polarisation is used to form the beam.
+    weights
+        Real-valued weights for summing the beams, with shape (beams, antennas).
+    delays
+        Real-valued delay model, with shape (beams, antennas, 2). In each pair,
+        the first element is the delay in seconds and the second is the phase
+        to be applied at the centre frequency.
+    channel_spacing
+        Frequency difference between adjacent channels, in Hz
+    centre_channel
+        Index of the centre channel of the whole stream, relative to the first
+        channel processed by this engine.
+    """
     out = np.empty((len(beam_pols), num_batches, channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
     accum = np.zeros((len(beam_pols), num_batches, channels), np.complex64)
     sample = np.empty((N_POLS, COMPLEX), np.int8)
     sample_fp = np.empty(N_POLS, np.complex64)
     for batch in range(num_batches):
         for channel in range(channels):
+            # Compute scale factor for turning a delay into a phase
+            delay_to_phase = -2 * np.pi * channel_spacing * (channel - centre_channel)
             for antenna in range(antennas):
                 if antenna == missing_antenna:
                     continue
@@ -187,10 +228,11 @@ def generate_expected_beams(
                 sample_fp[0] = sample[0, 0] + np.complex64(1j) * sample[0, 1]
                 sample_fp[1] = sample[1, 0] + np.complex64(1j) * sample[1, 1]
                 for beam, pol in enumerate(beam_pols):
-                    # TODO: apply weights and delays once implemented
-                    accum[beam, batch, channel] += sample_fp[pol]
+                    phase = delay_to_phase * delays[beam, antenna, 0] + delays[beam, antenna, 1]
+                    rotation = np.exp(1j * phase)
+                    accum[beam, batch, channel] += sample_fp[pol] * weights[beam, antenna] * rotation
             for beam in range(len(beam_pols)):
-                value = accum[beam, batch, channel]
+                value = accum[beam, batch, channel] * quant_gains[beam]
                 sample[0, 0] = np.fmin(np.fmax(np.rint(value.real), -127), 127)
                 sample[0, 1] = np.fmin(np.fmax(np.rint(value.imag), -127), 127)
                 # Copy to all spectra in the batch
@@ -538,6 +580,17 @@ class TestEngine:
 
         await xbengine.stop()
 
+    @pytest.fixture
+    async def client(self, xbengine: XBEngine) -> AsyncGenerator[aiokatcp.Client, None]:
+        host, port = xbengine.sockets[0].getsockname()[:2]
+        async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+            client = await aiokatcp.Client.connect(host, port)
+
+        yield client
+
+        client.close()
+        await client.wait_closed()
+
     @pytest.mark.combinations(
         "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna, heap_accumulation_threshold",
         test_parameters.array_size,
@@ -552,6 +605,7 @@ class TestEngine:
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
         xbengine: XBEngine,
+        client: aiokatcp.Client,
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels_total: int,
@@ -650,6 +704,18 @@ class TestEngine:
             # Add an extra chunk before the first full accumulation
             batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
 
+            rng = np.random.default_rng(seed=1)
+            weights = rng.uniform(0.5, 2.0, size=(len(beam_outputs), n_ants))
+            quant_gains = rng.uniform(0.5, 2.0, size=(len(beam_outputs)))
+            delays = np.zeros((len(beam_outputs), n_ants, 2), np.float64)
+            # Delay is in seconds, so needs to be very small
+            delays[..., 0] = rng.uniform(-1e-9, 1e-9, size=(len(beam_outputs), n_ants))
+            # Phase is in radians
+            delays[..., 1] = rng.uniform(-2 * np.pi, 2 * np.pi, size=(len(beam_outputs), n_ants))
+            for i, output in enumerate(beam_outputs):
+                await client.request("beam-weights", output.name, *weights[i])
+                await client.request("beam-quant-gains", output.name, quant_gains[i])
+                await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
             corrprod_results, beam_results = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
@@ -739,6 +805,8 @@ class TestEngine:
 
         assert actual_sensor_updates == expected_sensor_updates
 
+        # TODO (NGC-1169) have a separate command-line argument for this
+        channel_spacing = ADC_SAMPLE_RATE / n_samples_between_spectra
         expected_beams = generate_expected_beams(
             batch_start_index,
             batch_end_index - batch_start_index,
@@ -747,6 +815,11 @@ class TestEngine:
             n_spectra_per_heap,
             missing_antenna,
             np.array([beam_output.pol for beam_output in beam_outputs]),
+            weights=weights,
+            delays=delays,
+            quant_gains=quant_gains,
+            channel_spacing=channel_spacing,
+            centre_channel=n_channels_total // 2 - frequency,
         )
         # assert_allclose converts to float, which bloats memory usage.
         # To keep it manageable, compare a batch at a time.

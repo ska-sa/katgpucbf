@@ -474,7 +474,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
     def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
         self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
 
-    def set_weights(self, *, stream_id: int, weights: np.ndarray) -> None:
+    def set_weights(self, stream_id: int, weights: np.ndarray) -> None:
         """Set the beam weights for one beam.
 
         Parameters
@@ -487,7 +487,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         self._weights[stream_id] = weights
         self._weights_version += 1
 
-    def set_quant_gain(self, *, stream_id: int, gain: float) -> None:
+    def set_quant_gain(self, stream_id: int, gain: float) -> None:
         """Set the quantisation gain for one beam.
 
         Parameters
@@ -500,7 +500,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         self._quant_gains[stream_id] = gain
         self._weights_version += 1
 
-    def set_delays(self, *, stream_id: int, delays: np.ndarray) -> None:
+    def set_delays(self, stream_id: int, delays: np.ndarray) -> None:
         """Set the beam steering delays for one beam.
 
         Parameters
@@ -1195,6 +1195,17 @@ class XBEngine(DeviceServer):
                     return pipeline, i
         raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
 
+    def _request_bpipeline(self, stream_name: str) -> tuple[BPipeline, int]:
+        """Get the :class:`BPipeline` related to the katcp request.
+
+        This wraps :meth:`_request_bpipeline` to check that the requested
+        stream is a tied-array-channelised-voltage stream.
+        """
+        pipeline, stream_id = self._request_pipeline(stream_name)
+        if not isinstance(pipeline, BPipeline):
+            raise aiokatcp.FailReply(f"Output {stream_name!r} is not a tied-array-channelised-voltage stream")
+        return pipeline, stream_id
+
     async def request_capture_start(self, ctx, stream_name: str) -> None:
         """Start transmission of stream.
 
@@ -1216,6 +1227,57 @@ class XBEngine(DeviceServer):
         """
         pipeline, stream_id = self._request_pipeline(stream_name)
         pipeline.capture_enable(stream_id=stream_id, enable=False)
+
+    async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
+        """Set the weights for all inputs of a given beam.
+
+        Parameters
+        ----------
+        stream_name
+            The beam to modify
+        weights
+            A sequence of real floating-point values (one per input).
+        """
+        pipeline, stream_id = self._request_bpipeline(stream_name)
+        if len(weights) != self.n_ants:
+            raise aiokatcp.FailReply(f"Incorrect number of weights (expected {self.n_ants}, received {len(weights)})")
+        pipeline.set_weights(stream_id, np.array(weights))
+
+    async def request_beam_delays(self, ctx, stream_name: str, *delays: str) -> None:
+        """Set the delays for all inputs of a given beam.
+
+        Parameters
+        ----------
+        stream_name
+            The beam to modify
+        delays
+            A sequence of strings (one per input). Each string has the form
+            ``delay:fringe-offset``, where ``delay`` is a delay in seconds, and
+            ``fringe-offset` is the net phase adjustment at the centre
+            frequency (of the whole stream, not of this engine).
+        """
+        pipeline, stream_id = self._request_bpipeline(stream_name)
+        if len(delays) != self.n_ants:
+            raise aiokatcp.FailReply(f"Incorrect number of delays (expected {self.n_ants}, received {len(delays)})")
+        new_delays = np.empty((self.n_ants, 2), np.float64)
+        for i, entry in enumerate(delays):
+            delay_str, phase_str = entry.split(":")
+            new_delays[i, 0] = float(delay_str)
+            new_delays[i, 1] = float(phase_str)
+        pipeline.set_delays(stream_id, new_delays)
+
+    async def request_beam_quant_gains(self, ctx, stream_name: str, gain: float) -> None:
+        """Set the quantisation gain for a beam.
+
+        Parameters
+        ----------
+        stream_name
+            The beam to modify.
+        gain
+            The new gain to apply.
+        """
+        pipeline, stream_id = self._request_bpipeline(stream_name)
+        pipeline.set_quant_gain(stream_id, gain)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
