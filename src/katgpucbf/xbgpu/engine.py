@@ -149,7 +149,7 @@ class BTxQueueItem(QueueItem):
         self.buffer_device = buffer_device
         self.weights = weights
         self.delays = delays
-        #: Version of weights and delays (for comparison to BPipeline.weights_version)
+        #: Version of weights and delays (for comparison to BPipeline._weights_version)
         self.weights_version = -1
         super().__init__(timestamp)
 
@@ -319,11 +319,15 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
             # )
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
-            weights.host.fill(1)
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            delays.host.fill(0)
             tx_item = BTxQueueItem(buffer_device, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
+        # These are the original weights, delays and gainsas provided by the
+        # user, rather than the processed values passed to the kernel.
+        self._weights = np.ones((len(outputs), engine.n_ants), np.float64)
+        self._delays = np.zeros((len(outputs), engine.n_ants, 2), np.float64)
+        self._quant_gains = np.ones(len(outputs), np.float64)
+        self._weights_version = 1
 
         self.send_stream = BSend(
             outputs=outputs,
@@ -392,6 +396,26 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             await tx_item.async_wait_for_events()
             tx_item.reset(rx_item.timestamp)
 
+            # Recompute the weights and delays if necessary
+            if tx_item.weights_version != self._weights_version:
+                # TODO: this should be a command-line parameter. This calculation only
+                # works for a critically-sampled PFB
+                channel_spacing = self.engine.adc_sample_rate_hz / self.engine.n_samples_between_spectra
+                # The user provides a fringe phase for the centre frequency. We
+                # need to adjust that to the target fringe phase for the first
+                # channel processed by this engine (channel_offset_value).
+                centre_channel = self.engine.n_channels_total / 2
+                fringe_scale = -2 * np.pi * channel_spacing * (self.engine.channel_offset_value - centre_channel)
+                fringe_phase = self._delays.T[1] + fringe_scale * self._delays.T[0]
+                fringe_rotator = np.exp(1j * fringe_phase)
+                tx_item.weights.host[:] = self._weights.T * self._quant_gains * fringe_rotator
+                # The factor of 2 combines with the factor of pi used by the
+                # kernel to give a factor of 2pi, to convert cycles to radians.
+                # The minus sign is because delaying the wave results in a
+                # decrease in the phase at a fixed time.
+                tx_item.delays.host[:] = -2 * channel_spacing * self._delays.T[0]
+                tx_item.weights_version = self._weights_version
+
             # Queue GPU work
             self._beamform.bind(
                 **{
@@ -449,6 +473,48 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
     def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
         self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
+
+    def set_weights(self, *, stream_id: int, weights: np.ndarray) -> None:
+        """Set the beam weights for one beam.
+
+        Parameters
+        ----------
+        stream_id
+            The index of the beam whose weights are being set.
+        weights
+            A 1D array containing real-valued weights (per input).
+        """
+        self._weights[stream_id] = weights
+        self._weights_version += 1
+
+    def set_quant_gain(self, *, stream_id: int, gain: float) -> None:
+        """Set the quantisation gain for one beam.
+
+        Parameters
+        ----------
+        stream_id
+            The index of the beam whose quantisation gain is being set.
+        gain
+            Real-valued quantisation gain.
+        """
+        self._quant_gains[stream_id] = gain
+        self._weights_version += 1
+
+    def set_delays(self, *, stream_id: int, delays: np.ndarray) -> None:
+        """Set the beam steering delays for one beam.
+
+        Parameters
+        ----------
+        stream_id
+            The index of the beam whose quantisation gain is being set.
+        delays
+            A 2D array of delay coefficients. The first axis corresponds to
+            inputs. The second axis has length two, with the first element
+            containing the delay in seconds, and the second containing a
+            channel-independent phase rotation in radians.
+        """
+        self._delays[stream_id] = delays
+        self._weights_version += 1
 
 
 class XPipeline(Pipeline[XOutput, XTxQueueItem]):
@@ -936,6 +1002,7 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
+        self.n_samples_between_spectra = n_samples_between_spectra
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
