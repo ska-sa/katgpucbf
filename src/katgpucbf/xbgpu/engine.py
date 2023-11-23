@@ -35,13 +35,14 @@ import logging
 import math
 import time
 from abc import abstractmethod
-from typing import Sequence
+from typing import Generic, Sequence, TypeVar
 
 import aiokatcp
 import katsdpsigproc
 import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
+import vkgdr.pycuda
 from aiokatcp import DeviceServer
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
@@ -57,13 +58,16 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
+from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
-from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, bsend, recv
+from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
+from .beamform import BeamformTemplate
+from .bsend import BSend
 from .bsend import make_stream as make_bstream
 from .correlation import Correlation, CorrelationTemplate
 from .output import BOutput, Output, XOutput
@@ -72,6 +76,8 @@ from .xsend import make_stream as make_xstream
 
 logger = logging.getLogger(__name__)
 MISSING = np.array([-(2**31), 1], dtype=np.int32)
+_O = TypeVar("_O", bound=Output)
+_T = TypeVar("_T", bound=QueueItem)
 
 
 class RxQueueItem(QueueItem):
@@ -101,7 +107,7 @@ class RxQueueItem(QueueItem):
         self.chunk: recv.Chunk | None = None
 
 
-class TxQueueItem(QueueItem):
+class XTxQueueItem(QueueItem):
     """
     Extension of the QueueItem to track antennas that have missed data.
 
@@ -130,7 +136,30 @@ class TxQueueItem(QueueItem):
         self.batches = 0
 
 
-class Pipeline:
+class BTxQueueItem(QueueItem):
+    """Transmit queue item for the beamformer pipeline.
+
+    The `buffer_device`, `weights` and `delays` must have the same shape and
+    type as the ``in``, ``weights`` and ``delays`` slots in
+    :class:`.Beamform`.
+    """
+
+    def __init__(
+        self,
+        buffer_device: accel.DeviceArray,
+        weights: MappedArray,
+        delays: MappedArray,
+        timestamp: int = 0,
+    ) -> None:
+        self.buffer_device = buffer_device
+        self.weights = weights
+        self.delays = delays
+        #: Version of weights and delays (for comparison to BPipeline._weights_version)
+        self.weights_version = -1
+        super().__init__(timestamp)
+
+
+class Pipeline(Generic[_O, _T]):
     r"""Base Pipeline class to build on.
 
     SPEAD heaps utilised by this pipeline are first received at the
@@ -173,7 +202,7 @@ class Pipeline:
     n_rx_items = DEFAULT_N_RX_ITEMS
     n_tx_items = DEFAULT_N_TX_ITEMS
 
-    def __init__(self, outputs: Sequence[Output], name: str, engine: "XBEngine", context: AbstractContext) -> None:
+    def __init__(self, outputs: Sequence[_O], name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.outputs = outputs
         self.name = name
         self.engine = engine
@@ -198,10 +227,10 @@ class Pipeline:
         self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
             f"{name}.rx_item_queue", self.n_rx_items
         )
-        self._tx_item_queue: asyncio.Queue[TxQueueItem | None] = engine.monitor.make_queue(
+        self._tx_item_queue: asyncio.Queue[_T | None] = engine.monitor.make_queue(
             f"{name}.tx_item_queue", self.n_tx_items
         )
-        self._tx_free_item_queue: asyncio.Queue[TxQueueItem] = engine.monitor.make_queue(
+        self._tx_free_item_queue: asyncio.Queue[_T] = engine.monitor.make_queue(
             f"{name}.tx_free_item_queue", self.n_tx_items
         )
 
@@ -226,12 +255,12 @@ class Pipeline:
 
             - Bind input buffer(s) accordingly
 
-        - Obtain a free TxQueueItem from the tx_free_item_queue
+        - Obtain a free QueueItem from the tx_free_item_queue
 
             - Add event marker to wait for the proc_command_queue
-            - Put the prepared TxQueueItem on the tx_item_queue
+            - Put the prepared QueueItem on the tx_item_queue
 
-        NOTE: An initial TxQueueItem needs to be obtained from the tx_free_item_queue
+        NOTE: An initial QueueItem needs to be obtained from the tx_free_item_queue
         for the first round of processing:
 
         - The gpu_proc_loop requires logic to decipher the timestamp of the
@@ -246,7 +275,7 @@ class Pipeline:
 
         This method does the following:
 
-        - Get a TxQueueItem from the tx_item_queue
+        - Get a QueueItem from the tx_item_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
         - Wait for events on the item to complete (likely GPU processing)
         - Wait for an available heap buffer from the send_stream
@@ -255,7 +284,7 @@ class Pipeline:
             - Wait for the transfer to complete, before
 
         - Transmit heap buffer onto the network
-        - Place the TxQueueItem back on the tx_free_item_queue once complete
+        - Place the QueueItem back on the tx_free_item_queue once complete
         """
         raise NotImplementedError  # pragma: nocover
 
@@ -265,7 +294,7 @@ class Pipeline:
         raise NotImplementedError  # pragma: nocover
 
 
-class BPipeline(Pipeline):
+class BPipeline(Pipeline[BOutput, BTxQueueItem]):
     """Processing pipeline for a collection of :class:`.output.BOutput`."""
 
     def __init__(
@@ -273,29 +302,39 @@ class BPipeline(Pipeline):
         outputs: Sequence[BOutput],
         engine: "XBEngine",
         context: AbstractContext,
+        vkgdr_handle: vkgdr.Vkgdr,
         init_tx_enabled: bool,
         name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
         super().__init__(outputs, name, engine, context)
-        n_beams = len(outputs)
 
-        # TODO: Obtain this in a neater way once the beamformer OpSequence is done
-        buffer_shape = (
-            engine.heaps_per_fengine_per_chunk,
-            n_beams,
-            engine.n_channels_per_substream,
-            engine.src_layout.n_spectra_per_heap,
-            COMPLEX,
+        template = BeamformTemplate(context, [output.pol for output in outputs])
+        self._beamform = template.instantiate(
+            self._proc_command_queue,
+            n_frames=engine.heaps_per_fengine_per_chunk,
+            n_ants=engine.n_ants,
+            n_channels=engine.n_channels_per_substream,
+            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
         )
+        allocator = accel.DeviceAllocator(context=context)
         for _ in range(self.n_tx_items):
-            buffer_device = accel.DeviceArray(context, shape=buffer_shape, dtype=bsend.SEND_DTYPE)
-            saturated = accel.DeviceArray(context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32)
-            present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
+            buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
+            # TODO: bring it back once support is inplemented
+            # saturated = accel.DeviceArray(
+            #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
+            # )
+            weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
+            delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
+            tx_item = BTxQueueItem(buffer_device, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
+        # These are the original weights, delays and gains as provided by the
+        # user, rather than the processed values passed to the kernel.
+        self._weights = np.ones((len(outputs), engine.n_ants), np.float64)
+        self._delays = np.zeros((len(outputs), engine.n_ants, 2), np.float64)
+        self._quant_gains = np.ones(len(outputs), np.float64)
+        self._weights_version = 1
 
-        # TODO: The way this is imported will change once the OperationSequence is in place
-        self.send_stream = bsend.BSend(
+        self.send_stream = BSend(
             outputs=outputs,
             frames_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_tx_items=self.n_tx_items,
@@ -325,8 +364,19 @@ class BPipeline(Pipeline):
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
-        # Dynamic sensors
         for output in self.outputs:
+            # Static sensors
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.chan-range",
+                    "The range of channels processed by this B-engine, inclusive",
+                    default=f"({self.engine.channel_offset_value},"
+                    f"{self.engine.channel_offset_value + self.engine.n_channels_per_substream - 1})",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            # Dynamic sensors
             sensors.add(
                 aiokatcp.Sensor(
                     int,
@@ -351,10 +401,36 @@ class BPipeline(Pipeline):
             await tx_item.async_wait_for_events()
             tx_item.reset(rx_item.timestamp)
 
+            # Recompute the weights and delays if necessary
+            if tx_item.weights_version != self._weights_version:
+                # TODO: this should be a command-line parameter. This calculation only
+                # works for a critically-sampled PFB
+                channel_spacing = self.engine.adc_sample_rate_hz / self.engine.n_samples_between_spectra
+                # The user provides a fringe phase for the centre frequency. We
+                # need to adjust that to the target fringe phase for the first
+                # channel processed by this engine (channel_offset_value).
+                centre_channel = self.engine.n_channels_total / 2
+                fringe_scale = -2 * np.pi * channel_spacing * (self.engine.channel_offset_value - centre_channel)
+                fringe_phase = self._delays.T[1] + fringe_scale * self._delays.T[0]
+                fringe_rotator = np.exp(1j * fringe_phase)
+                tx_item.weights.host[:] = self._weights.T * self._quant_gains * fringe_rotator
+                # The factor of 2 combines with the factor of pi used by the
+                # kernel to give a factor of 2pi, to convert cycles to radians.
+                # The minus sign is because delaying the wave results in a
+                # decrease in the phase at a fixed time.
+                tx_item.delays.host[:] = -2 * channel_spacing * self._delays.T[0]
+                tx_item.weights_version = self._weights_version
+
             # Queue GPU work
-            # - For now, just fill it with zeros
-            tx_item.buffer_device.zero(self._proc_command_queue)
-            tx_item.saturated.zero(self._proc_command_queue)
+            self._beamform.bind(
+                **{
+                    "in": rx_item.buffer_device,
+                    "out": tx_item.buffer_device,
+                    "weights": tx_item.weights.device,
+                    "delays": tx_item.delays.device,
+                }
+            )
+            self._beamform()
 
             tx_item.add_marker(self._proc_command_queue)
             self._tx_item_queue.put_nowait(tx_item)
@@ -384,7 +460,9 @@ class BPipeline(Pipeline):
             chunk = await self.send_stream.get_free_chunk()
 
             item.buffer_device.get_async(self._download_command_queue, chunk.data)
-            item.saturated.get_async(self._download_command_queue, chunk.saturated)
+            # TODO: re-enable once supported
+            # item.saturated.get_async(self._download_command_queue, chunk.saturated)
+            chunk.saturated.fill(0)
 
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
@@ -401,11 +479,51 @@ class BPipeline(Pipeline):
     def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
         self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
 
+    def set_weights(self, stream_id: int, weights: np.ndarray) -> None:
+        """Set the beam weights for one beam.
 
-class XPipeline(Pipeline):
+        Parameters
+        ----------
+        stream_id
+            The index of the beam whose weights are being set.
+        weights
+            A 1D array containing real-valued weights (per input).
+        """
+        self._weights[stream_id] = weights
+        self._weights_version += 1
+
+    def set_quant_gain(self, stream_id: int, gain: float) -> None:
+        """Set the quantisation gain for one beam.
+
+        Parameters
+        ----------
+        stream_id
+            The index of the beam whose quantisation gain is being set.
+        gain
+            Real-valued quantisation gain.
+        """
+        self._quant_gains[stream_id] = gain
+        self._weights_version += 1
+
+    def set_delays(self, stream_id: int, delays: np.ndarray) -> None:
+        """Set the beam steering delays for one beam.
+
+        Parameters
+        ----------
+        stream_id
+            The index of the beam whose quantisation gain is being set.
+        delays
+            A 2D array of delay coefficients. The first axis corresponds to
+            inputs. The second axis has length two, with the first element
+            containing the delay in seconds, and the second containing a
+            channel-independent phase rotation in radians.
+        """
+        self._delays[stream_id] = delays
+        self._weights_version += 1
+
+
+class XPipeline(Pipeline[XOutput, XTxQueueItem]):
     """Processing pipeline for a single baseline-correlation-products stream."""
-
-    outputs: Sequence[XOutput]
 
     def __init__(
         self,
@@ -440,7 +558,7 @@ class XPipeline(Pipeline):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
-            tx_item = TxQueueItem(buffer_device, saturated, present_ants)
+            tx_item = XTxQueueItem(buffer_device, saturated, present_ants)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = XSend(
@@ -509,7 +627,7 @@ class XPipeline(Pipeline):
             )
         )
 
-    async def _flush_accumulation(self, tx_item: TxQueueItem, next_accum: int) -> TxQueueItem:
+    async def _flush_accumulation(self, tx_item: XTxQueueItem, next_accum: int) -> XTxQueueItem:
         """Emit the current `tx_item` and prepare a new one."""
         if tx_item.batches == 0:
             # We never actually started this accumulation. We can just
@@ -543,7 +661,7 @@ class XPipeline(Pipeline):
         # NOTE: The ratio of rx_items to tx_items is not one-to-one; there are expected
         # to be many more rx_items in for every tx_item out. For this reason, and in
         # addition to the steps outlined in :meth:`.Pipeline.gpu_proc_loop`, data is
-        # only transferred to a `TxQueueItem` once sufficient correlations have occurred.
+        # only transferred to a `XTxQueueItem` once sufficient correlations have occurred.
         rx_item: RxQueueItem | None
 
         def do_correlation() -> None:
@@ -889,6 +1007,7 @@ class XBEngine(DeviceServer):
 
         self.monitor = monitor
 
+        self.n_samples_between_spectra = n_samples_between_spectra
         self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
@@ -946,7 +1065,12 @@ class XBEngine(DeviceServer):
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
         self._pipelines = [XPipeline(x_output, self, context, tx_enabled) for x_output in x_outputs]
         if b_outputs:
-            self._pipelines.append(BPipeline(b_outputs, self, context, tx_enabled))
+            with context:
+                # We could quite easily make do with non-coherent mappings and
+                # explicit flushing, but since NVIDIA currently only provides
+                # host-coherent memory, this is a simpler option.
+                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
+            self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle, tx_enabled))
 
         self._upload_command_queue = context.create_command_queue()
 
@@ -1076,6 +1200,17 @@ class XBEngine(DeviceServer):
                     return pipeline, i
         raise aiokatcp.FailReply(f"No output stream called {stream_name!r}")
 
+    def _request_bpipeline(self, stream_name: str) -> tuple[BPipeline, int]:
+        """Get the :class:`BPipeline` related to the katcp request.
+
+        This wraps :meth:`_request_bpipeline` to check that the requested
+        stream is a tied-array-channelised-voltage stream.
+        """
+        pipeline, stream_id = self._request_pipeline(stream_name)
+        if not isinstance(pipeline, BPipeline):
+            raise aiokatcp.FailReply(f"Output {stream_name!r} is not a tied-array-channelised-voltage stream")
+        return pipeline, stream_id
+
     async def request_capture_start(self, ctx, stream_name: str) -> None:
         """Start transmission of stream.
 
@@ -1097,6 +1232,57 @@ class XBEngine(DeviceServer):
         """
         pipeline, stream_id = self._request_pipeline(stream_name)
         pipeline.capture_enable(stream_id=stream_id, enable=False)
+
+    async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
+        """Set the weights for all inputs of a given beam.
+
+        Parameters
+        ----------
+        stream_name
+            The beam to modify
+        weights
+            A sequence of real floating-point values (one per input).
+        """
+        pipeline, stream_id = self._request_bpipeline(stream_name)
+        if len(weights) != self.n_ants:
+            raise aiokatcp.FailReply(f"Incorrect number of weights (expected {self.n_ants}, received {len(weights)})")
+        pipeline.set_weights(stream_id, np.array(weights))
+
+    async def request_beam_delays(self, ctx, stream_name: str, *delays: str) -> None:
+        """Set the delays for all inputs of a given beam.
+
+        Parameters
+        ----------
+        stream_name
+            The beam to modify
+        delays
+            A sequence of strings (one per input). Each string has the form
+            ``delay:fringe-offset``, where ``delay`` is a delay in seconds, and
+            ``fringe-offset`` is the net phase adjustment at the centre
+            frequency (of the whole stream, not of this engine).
+        """
+        pipeline, stream_id = self._request_bpipeline(stream_name)
+        if len(delays) != self.n_ants:
+            raise aiokatcp.FailReply(f"Incorrect number of delays (expected {self.n_ants}, received {len(delays)})")
+        new_delays = np.empty((self.n_ants, 2), np.float64)
+        for i, entry in enumerate(delays):
+            delay_str, phase_str = entry.split(":")
+            new_delays[i, 0] = float(delay_str)
+            new_delays[i, 1] = float(phase_str)
+        pipeline.set_delays(stream_id, new_delays)
+
+    async def request_beam_quant_gains(self, ctx, stream_name: str, gain: float) -> None:
+        """Set the quantisation gain for a beam.
+
+        Parameters
+        ----------
+        stream_name
+            The beam to modify.
+        gain
+            The new gain to apply.
+        """
+        pipeline, stream_id = self._request_bpipeline(stream_name)
+        pipeline.set_quant_gain(stream_id, gain)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
@@ -1124,6 +1310,7 @@ class XBEngine(DeviceServer):
                 pipeline.send_stream.stream,  # type: ignore
                 pipeline.send_stream.descriptor_heap,  # type: ignore
                 descriptor_interval_s,
+                substreams=range(pipeline.send_stream.stream.num_substreams),  # type: ignore
             )
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
