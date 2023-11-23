@@ -77,7 +77,6 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
 
     int l_time = get_local_id(0);
     int time = get_global_id(0);
-    int l_channel = get_local_id(1);
     int channel = get_global_id(1);
     int frame = get_group_id(2);
     bool valid = (time < n_times);
