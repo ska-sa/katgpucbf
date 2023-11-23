@@ -403,9 +403,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
             # Recompute the weights and delays if necessary
             if tx_item.weights_version != self._weights_version:
-                # TODO: this should be a command-line parameter. This calculation only
-                # works for a critically-sampled PFB
-                channel_spacing = self.engine.adc_sample_rate_hz / self.engine.n_samples_between_spectra
+                channel_spacing = self.engine.bandwidth_hz / self.engine.n_channels_total
                 # The user provides a fringe phase for the centre frequency. We
                 # need to adjust that to the target fringe phase for the first
                 # channel processed by this engine (channel_offset_value).
@@ -865,6 +863,9 @@ class XBEngine(DeviceServer):
         set incorrectly, the packet spacing could be too large causing the
         pipeline to stall as heaps queue at the sender faster than they are
         sent.
+    bandwidth_hz
+        Total bandwidth across `n_channels_total` channels. This is used in
+        delay calculations.
     send_rate_factor
         Configure the spead2 sender with a rate proportional to this factor.
         This value is intended to dictate a data transmission rate slightly
@@ -944,6 +945,7 @@ class XBEngine(DeviceServer):
         katcp_host: str,
         katcp_port: int,
         adc_sample_rate_hz: float,
+        bandwidth_hz: float,
         send_rate_factor: float,
         n_ants: int,
         n_channels_total: int,
@@ -984,6 +986,7 @@ class XBEngine(DeviceServer):
 
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
+        self.bandwidth_hz = bandwidth_hz
         self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total

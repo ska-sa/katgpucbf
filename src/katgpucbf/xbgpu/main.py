@@ -219,6 +219,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall.",
     )
     parser.add_argument(
+        "--bandwidth",
+        type=float,
+        help="Total bandwidth (Hz) of all channels (--channels) [computed assuming critically-sampled PFB].",
+    )
+    parser.add_argument(
         "--send-rate-factor",
         type=float,
         default=1.1,
@@ -348,6 +353,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
 
     if args.sample_bits != 8:
         parser.error("Only 8-bit values are currently supported.")
+    if args.bandwidth is None:
+        args.bandwidth = args.adc_sample_rate / args.samples_between_spectra * args.channels
 
     used_names = set()
     args.outputs = []
@@ -383,6 +390,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         adc_sample_rate_hz=args.adc_sample_rate,
+        bandwidth_hz=args.bandwidth,
         send_rate_factor=args.send_rate_factor,
         n_ants=args.array_size,
         n_channels_total=args.channels,

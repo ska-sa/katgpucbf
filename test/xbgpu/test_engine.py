@@ -812,8 +812,7 @@ class TestEngine:
 
         assert actual_sensor_updates == expected_sensor_updates
 
-        # TODO (NGC-1169) have a separate command-line argument for this
-        channel_spacing = ADC_SAMPLE_RATE / n_samples_between_spectra
+        channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels_total
         expected_beams = generate_expected_beams(
             batch_start_index,
             batch_end_index - batch_start_index,
