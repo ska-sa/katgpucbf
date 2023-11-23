@@ -76,6 +76,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
      * it as a linear array.
      */
     LOCAL_DECL float2 l_weights[BATCH_ANTENNAS * N_BEAMS];
+    const int beam_pols[N_BEAMS] = { ${ ", ".join(str(p) for p in beam_pols) } };
 
     int lid = get_local_id(0);
     int spectrum = get_global_id(0);
@@ -124,18 +125,15 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
                 float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
                 in += in_antenna_stride;
 
-                /* Iterate over all beams. This is done with a mako loop
-                 * rather than a C loop to ensure that the polarisation is
-                 * resolved at compile time rather than retrieved from an
-                 * array.
+                /* It's critical that this loop gets unrolled, so that `pol` is
+                 * known at compile time.
                  */
-% for i, pol in enumerate(beam_pols):
+#pragma unroll
+                for (int i = 0; i < N_BEAMS; i++)
                 {
-                    int i = ${i};
-                    int pol = ${pol};
+                    int pol = beam_pols[i];
                     accum[i] = cmad(l_weights[a * N_BEAMS + i], sample_pols[pol], accum[i]);
                 }
-% endfor
             }
         }
         BARRIER();  // protect against next loop iteration overwriting l_weights
