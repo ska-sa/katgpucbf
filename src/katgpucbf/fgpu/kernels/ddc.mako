@@ -19,6 +19,7 @@
  */
 
 <%include file="/port.mako"/>
+<%include file="/kernels/complex.mako"/>
 
 #define WGS ${wgs}
 #define TAPS ${taps}
@@ -86,11 +87,6 @@ DEVICE_FN static int decode(
     return ((ssample_word) shifted) >> (SAMPLE_WORD_BITS - INPUT_SAMPLE_BITS);
 }
 
-DEVICE_FN static float2 cmul(float2 a, float2 b)
-{
-    return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}
-
 // Cooperatively copy n elements from in to out
 DEVICE_FN static void copy_to_local_float(LOCAL float *out, const GLOBAL float * RESTRICT in, unsigned int n)
 {
@@ -112,10 +108,10 @@ DEVICE_FN static void copy_to_local_float(LOCAL float *out, const GLOBAL float *
 }
 
 // Cooperatively copy n elements from in to out
-DEVICE_FN static void copy_to_local_float2(LOCAL float2 *out, const GLOBAL float2 * RESTRICT in, unsigned int n)
+DEVICE_FN static void copy_to_local_cplx(LOCAL cplx *out, const GLOBAL cplx * RESTRICT in, unsigned int n)
 {
     /* This relies on some behaviour that's not totally defined (aliasing
-     * float2 as float[2] but which nvcc seems to handle sanely.
+     * float2 as float[2]) but which nvcc seems to handle sanely.
      *
      * This approach does perform marginally better than copying a float2
      * at a time, presumably due to bank conflicts.
@@ -125,10 +121,10 @@ DEVICE_FN static void copy_to_local_float2(LOCAL float2 *out, const GLOBAL float
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1)
 void ddc(
-    GLOBAL float2 * RESTRICT out,
+    GLOBAL cplx * RESTRICT out,
     const GLOBAL sample_word * RESTRICT in,
-    const GLOBAL float2 * RESTRICT weights,
-    unsigned int out_stride, // stride between pols, unit: float2
+    const GLOBAL cplx * RESTRICT weights,
+    unsigned int out_stride, // stride between pols, unit: cplx
     unsigned int in_stride,  // stride between pols, unit: sample_word
     unsigned int out_size,
     unsigned int in_size_words,
@@ -145,9 +141,9 @@ void ddc(
         struct
         {
             sample_word in[group_in_words];
-            float2 weights[TAPS];
+            cplx weights[TAPS];
         };
-        float out[2][C * WGS];  // Logically float2, but split to reduce bank conflicts
+        float out[2][C * WGS];  // Logically cplx, but split to reduce bank conflicts
     } local;
 
     int pol = get_group_id(1);
@@ -172,11 +168,11 @@ void ddc(
     }
 
     /* Copy weights to local memory */
-    copy_to_local_float2(local.weights, weights, TAPS);
+    copy_to_local_cplx(local.weights, weights, TAPS);
 
     BARRIER();
 
-    float2 accum[C];
+    cplx accum[C];
     sample_word buffer[C + W - 1];
     float samples[C + W - 1];
 
@@ -196,7 +192,7 @@ void ddc(
 #pragma unroll
         for (int j = 0; j < w; j++)
         {
-            float2 w = local.weights[j * SUBSAMPLING + i];
+            cplx w = local.weights[j * SUBSAMPLING + i];
             for (int k = 0; k < C; k++)
             {
                 accum[k].x += samples[j + k] * w.x;
@@ -209,7 +205,7 @@ void ddc(
 #pragma unroll
     for (int i = 0; i < C; i++)
     {
-        float2 mix;
+        cplx mix;
         // Casting from unsigned int to int changes the range from [0, 2pi) to
         // [-pi, pi). The magic number is 2^32, used to convert fixed-point
         // representation to real.
