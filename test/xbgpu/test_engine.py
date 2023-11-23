@@ -213,7 +213,7 @@ def generate_expected_beams(
         the first element is the delay in seconds and the second is the phase
         to be applied at the centre frequency.
     channel_spacing
-        Frequency difference between adjacent channels, in Hz
+        Frequency difference between adjacent channels, in Hz.
     centre_channel
         Index of the centre channel of the whole stream, relative to the first
         channel processed by this engine.
@@ -388,6 +388,8 @@ class TestEngine:
         Each full accumulation (for each corrprod-output) requires
         `heap_accumulation_threshold` batches of heaps. However, `batch_indices`
         is not required to contain full accumulations.
+
+        Results are returned for both correlation products and beams.
 
         Parameters
         ----------

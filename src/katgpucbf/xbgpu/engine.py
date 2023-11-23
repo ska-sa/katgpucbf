@@ -137,7 +137,12 @@ class XTxQueueItem(QueueItem):
 
 
 class BTxQueueItem(QueueItem):
-    """Transmit queue item for the beamformer pipeline."""
+    """Transmit queue item for the beamformer pipeline.
+
+    The `buffer_device`, `weights` and `delays` must have the same shape and
+    type as the ``in``, ``weights`` and ``delays`` slots in
+    :class:`.Beamform`.
+    """
 
     def __init__(
         self,
