@@ -19,6 +19,7 @@
 #define N_BEAMS ${len(beam_pols)}
 #define BLOCK_SPECTRA ${block_spectra}
 #define BLOCK_CHANNELS ${block_channels}
+#define BATCH_ANTENNAS 16
 #define QMAX 127
 
 // Quantise, and return saturation flag
@@ -74,7 +75,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
     int n_times
 )
 {
-    LOCAL_DECL float2 l_weights[BLOCK_CHANNELS][N_BEAMS];
+    LOCAL_DECL float2 l_weights[BLOCK_CHANNELS][N_BEAMS * BATCH_ANTENNAS];
 
     int l_time = get_local_id(0);
     int time = get_global_id(0);
@@ -89,16 +90,13 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
     for (int i = 0; i < N_BEAMS; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
-    for (int a = 0; a < n_ants; a++)
+    for (int a_batch = 0; a_batch < n_ants; a_batch += BATCH_ANTENNAS)
     {
-        char4 sample = valid ? *in : make_char4(0, 0, 0, 0);
-        float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
-        in += in_antenna_stride;
-
-        // Precompute the weights for all beams for this antenna
-        for (int i = l_time; i < N_BEAMS; i += BLOCK_SPECTRA)
+        int batch_size = min(BATCH_ANTENNAS, n_ants - a_batch);
+        // Precompute the weights for all beams for this antenna batch
+        for (int i = l_time; i < N_BEAMS * batch_size; i += BLOCK_SPECTRA)
         {
-            int addr = a * N_BEAMS + i;
+            int addr = a_batch * N_BEAMS + i;
             float2 w = weights[addr];
             float d = delays[addr] * channel;
             float2 rot;
@@ -108,13 +106,20 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
         }
         BARRIER();
 
-% for i, pol in enumerate(beam_pols):
+        for (int a = 0; a < batch_size; a++)
         {
-            int i = ${i};
-            int pol = ${pol};
-            accum[i] = cmad(l_weights[l_channel][i], sample_pols[pol], accum[i]);
-        }
+            char4 sample = valid ? *in : make_char4(0, 0, 0, 0);
+            float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
+            in += in_antenna_stride;
+
+% for i, pol in enumerate(beam_pols):
+            {
+                int i = ${i};
+                int pol = ${pol};
+                accum[i] = cmad(l_weights[l_channel][a * N_BEAMS + i], sample_pols[pol], accum[i]);
+            }
 % endfor
+        }
         BARRIER();  // protect against next loop iteration overwriting l_weights
     }
 
