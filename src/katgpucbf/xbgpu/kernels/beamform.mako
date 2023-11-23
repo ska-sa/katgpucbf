@@ -74,11 +74,14 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
     int n_times
 )
 {
+    LOCAL_DECL float2 l_weights[BLOCK_CHANNELS][N_BEAMS];
+
+    int l_time = get_local_id(0);
     int time = get_global_id(0);
+    int l_channel = get_local_id(1);
     int channel = get_global_id(1);
     int frame = get_group_id(2);
-    if (time >= n_times || channel >= n_channels)
-        return;  // out-of-bounds
+    bool valid = (time < n_times && channel < n_channels);
     in += frame * in_frame_stride + channel * in_stride + time;
     out += frame * out_frame_stride + channel * out_stride + time;
 
@@ -88,27 +91,35 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
 
     for (int a = 0; a < n_ants; a++)
     {
-        char4 sample = *in;
+        char4 sample = valid ? *in : make_char4(0, 0, 0, 0);
         float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
         in += in_antenna_stride;
-% for i, pol in enumerate(beam_pols):
-        {
-            int i = ${i};
-            int pol = ${pol};
 
-            // TODO: w is time-invariant. Compute it once
-            // for all work-items with the same channel.
+        // Precompute the weights for all beams for this antenna
+        for (int i = l_time; i < N_BEAMS; i += BLOCK_SPECTRA)
+        {
             int addr = a * N_BEAMS + i;
             float2 w = weights[addr];
             float d = delays[addr] * channel;
             float2 rot;
             sincospif(d, &rot.y, &rot.x);
             w = cmul(w, rot);
+            l_weights[l_channel][i] = w;
+        }
+        BARRIER();
 
-            accum[i] = cmad(w, sample_pols[pol], accum[i]);
+% for i, pol in enumerate(beam_pols):
+        {
+            int i = ${i};
+            int pol = ${pol};
+            accum[i] = cmad(l_weights[l_channel][i], sample_pols[pol], accum[i]);
         }
 % endfor
+        BARRIER();  // protect against next loop iteration overwriting l_weights
     }
+
+    if (!valid)
+        return;
     for (int i = 0; i < N_BEAMS; i++)
     {
         int re, im;
