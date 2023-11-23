@@ -83,7 +83,7 @@ class Beamform(accel.Operation):
         Complex scale factor to apply to each antenna for each beam
     **delays** : n_ants × n_beams, float32
         Delay used to compute channel-dependent phase rotation. The
-        rotation applied is :math:`e^{\pi cd}` where :math:`c` is
+        rotation applied is :math:`e^{j\pi cd}` where :math:`c` is
         the channel number and :math:`d` is the delay value. Note
         that this will not apply any rotation to the first channel
         in the data; any such rotation needs to be baked into **weights**.
