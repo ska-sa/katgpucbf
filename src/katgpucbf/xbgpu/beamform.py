@@ -143,7 +143,6 @@ class Beamform(accel.Operation):
                 np.int32(in_buffer.padded_shape[2] * in_buffer.padded_shape[3]),
                 np.int32(in_buffer.padded_shape[1] * in_buffer.padded_shape[2] * in_buffer.padded_shape[3]),
                 np.int32(in_buffer.shape[1]),
-                np.int32(in_buffer.shape[2]),
                 np.int32(in_buffer.shape[3]),
             ],
             global_size=(
