@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import itertools
 
 import katsdpsigproc.accel
 
@@ -16,13 +15,13 @@ def main():
     )
     parser.add_argument("--spectra-per-heap", type=int, default=256, help="Spectra in each frame [%(default)s]")
     parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=5, help="Frames per chunk [%(default)s]")
-    parser.add_argument("--beams", type=int, default=4, help="Number of beams [%(default)s]")
+    parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams [%(default)s]")
     parser.add_argument("--passes", type=int, default=10000, help="Number of times to repeat the test [%(default)s]")
     args = parser.parse_args()
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = BeamformTemplate(ctx, list(itertools.islice(itertools.cycle([0, 1]), args.beams)))
+    template = BeamformTemplate(ctx, [0, 1] * args.beams)
     fn = template.instantiate(
         command_queue,
         n_frames=args.heaps_per_fengine_per_chunk,
