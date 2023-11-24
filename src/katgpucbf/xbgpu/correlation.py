@@ -116,8 +116,7 @@ class CorrelationTemplate:
         else:
             raise ValueError(f"ants_per_block must equal either 64 or 48, currently equal to {self._n_ants_per_block}.")
 
-        with importlib.resources.path("katgpucbf.xbgpu", "kernels") as kernels:
-            source = (kernels / "tensor_core_correlation_kernel.cu").read_text()
+        source = (importlib.resources.files(__package__) / "kernels" / "tensor_core_correlation_kernel.cu").read_text()
         program = context.compile(
             source,
             [
