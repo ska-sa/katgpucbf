@@ -41,7 +41,6 @@ class BeamformTemplate:
     def __init__(self, context: AbstractContext, beam_pols: Sequence[int]) -> None:
         # TODO: tune these. And maybe adapt to input shape?
         self.block_spectra = 128
-        self.block_channels = 1
         self.beam_pols = beam_pols
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
@@ -49,7 +48,6 @@ class BeamformTemplate:
                 "kernels/beamform.mako",
                 {
                     "block_spectra": self.block_spectra,
-                    "block_channels": self.block_channels,
                     "beam_pols": self.beam_pols,
                 },
                 extra_dirs=[str(resource_dir)],
@@ -85,7 +83,7 @@ class Beamform(accel.Operation):
         Complex scale factor to apply to each antenna for each beam
     **delays** : n_ants × n_beams, float32
         Delay used to compute channel-dependent phase rotation. The
-        rotation applied is :math:`e^{\pi cd}` where :math:`c` is
+        rotation applied is :math:`e^{j\pi cd}` where :math:`c` is
         the channel number and :math:`d` is the delay value. Note
         that this will not apply any rotation to the first channel
         in the data; any such rotation needs to be baked into **weights**.
@@ -145,13 +143,12 @@ class Beamform(accel.Operation):
                 np.int32(in_buffer.padded_shape[2] * in_buffer.padded_shape[3]),
                 np.int32(in_buffer.padded_shape[1] * in_buffer.padded_shape[2] * in_buffer.padded_shape[3]),
                 np.int32(in_buffer.shape[1]),
-                np.int32(in_buffer.shape[2]),
                 np.int32(in_buffer.shape[3]),
             ],
             global_size=(
                 accel.roundup(in_buffer.shape[3], self.template.block_spectra),
-                accel.roundup(in_buffer.shape[2], self.template.block_channels),
+                in_buffer.shape[2],
                 in_buffer.shape[0],
             ),
-            local_size=(self.template.block_spectra, self.template.block_channels, 1),
+            local_size=(self.template.block_spectra, 1, 1),
         )

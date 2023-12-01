@@ -17,8 +17,10 @@
 <%include file="/port.mako"/>
 
 #define N_BEAMS ${len(beam_pols)}
+// Number of spectra processed in each work group
 #define BLOCK_SPECTRA ${block_spectra}
-#define BLOCK_CHANNELS ${block_channels}
+// Number of antennas whose data is loaded and processed at a time
+#define BATCH_ANTENNAS 16
 #define QMAX 127
 
 // Quantise, and return saturation flag
@@ -50,65 +52,96 @@ DEVICE_FN float2 cmul(float2 a, float2 b)
 // Compute a * b + c in complex numbers
 DEVICE_FN float2 cmad(float2 a, float2 b, float2 c)
 {
-    return make_float2(a.x * b.x - a.y * b.y + c.x, a.x * b.y + a.y * b.x + c.y);
+    return make_float2(c.x + a.x * b.x - a.y * b.y, c.y + a.x * b.y + a.y * b.x);
 }
 
-// out: shape frame, beam, channel, time
-// in: shape frame, antenna, channel, time, pol
-// weight: shape antenna, beam, tightly packed
-// delays: shape antenna, beam, tightly packed
 // Each thread computes all beams for one (channel, time)
-KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, BLOCK_CHANNELS, 1) void beamform(
-    GLOBAL char2 * RESTRICT out,
-    GLOBAL const char4 * RESTRICT in,
-    GLOBAL const float2 * RESTRICT weights,
-    GLOBAL const float * RESTRICT delays,
-    int out_stride,
-    int out_beam_stride,
-    int out_frame_stride,
-    int in_stride,
-    int in_antenna_stride,
-    int in_frame_stride,
+KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
+    GLOBAL char2 * RESTRICT out,             // shape frame, beam, channel, time
+    GLOBAL const char4 * RESTRICT in,        // shape frame, antenna, channel, time, pol
+    GLOBAL const float2 * RESTRICT weights,  // shape antenna, beam, tightly packed
+    GLOBAL const float * RESTRICT delays,    // shape antenna, beam, tightly packed
+    int out_stride,                          // elements between channels
+    int out_beam_stride,                     // elements between beams
+    int out_frame_stride,                    // elements between frames
+    int in_stride,                           // elements between channels
+    int in_antenna_stride,                   // elements between antennas
+    int in_frame_stride,                     // elements between frames
     int n_ants,
-    int n_channels,
-    int n_times
+    int n_spectra
 )
 {
-    int time = get_global_id(0);
-    int channel = get_global_id(1);
-    int frame = get_group_id(2);
-    if (time >= n_times || channel >= n_channels)
-        return;  // out-of-bounds
-    in += frame * in_frame_stride + channel * in_stride + time;
-    out += frame * out_frame_stride + channel * out_stride + time;
+    /* Local storage for computed weights. The logical shape is
+     * [BATCH_ANTENNAS][N_BEAMS] but some parts of the code index
+     * it as a linear array.
+     */
+    LOCAL_DECL float2 l_weights[BATCH_ANTENNAS * N_BEAMS];
+    const int beam_pols[N_BEAMS] = { ${ ", ".join(str(p) for p in beam_pols) } };
 
+    int lid = get_local_id(0);
+    int spectrum = get_global_id(0);
+    int channel = get_global_id(1);
+    int frame = get_global_id(2);
+    /* Whether this thread works on actual input/output values. Some work
+     * items will hang off the end of the data but need to keep running to
+     * participate in the coefficient calculations.
+     */
+    bool valid = (spectrum < n_spectra);
+    // Point to the first input/output handled by this work item
+    in += frame * in_frame_stride + channel * in_stride + spectrum;
+    out += frame * out_frame_stride + channel * out_stride + spectrum;
+
+    // Zero out the accumulators
     float2 accum[N_BEAMS];
     for (int i = 0; i < N_BEAMS; i++)
         accum[i] = make_float2(0.0f, 0.0f);
 
-    for (int a = 0; a < n_ants; a++)
+    for (int a_batch = 0; a_batch < n_ants; a_batch += BATCH_ANTENNAS)
     {
-        char4 sample = *in;
-        float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
-        in += in_antenna_stride;
-% for i, pol in enumerate(beam_pols):
+        int batch_size = min(BATCH_ANTENNAS, n_ants - a_batch);
+        /* Precompute the weights for all beams for this antenna batch.
+         * The work items collectively iterate over the interval
+         * [0, N_BEAMS * batch_size).
+         */
+        for (int i = lid; i < N_BEAMS * batch_size; i += BLOCK_SPECTRA)
         {
-            int i = ${i};
-            int pol = ${pol};
-
-            // TODO: w is time-invariant. Compute it once
-            // for all work-items with the same channel.
-            int addr = a * N_BEAMS + i;
+            // Address into the global memory
+            int addr = a_batch * N_BEAMS + i;
             float2 w = weights[addr];
-            float d = delays[addr] * channel;
+            float cd = channel * delays[addr];
             float2 rot;
-            sincospif(d, &rot.y, &rot.x);
-            w = cmul(w, rot);
-
-            accum[i] = cmad(w, sample_pols[pol], accum[i]);
+            sincospif(cd, &rot.y, &rot.x);
+            l_weights[i] = cmul(w, rot);
         }
-% endfor
+        BARRIER(); // Complete all weight calculations before using them
+
+        if (valid)
+        {
+            for (int a = 0; a < batch_size; a++)
+            {
+                char4 sample = *in;
+                // Convert to float, and split the polarisations into an
+                // array.
+                float2 sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
+                in += in_antenna_stride;
+
+                /* It's critical that this loop gets unrolled, so that `pol` is
+                 * known at compile time.
+                 */
+#pragma unroll
+                for (int i = 0; i < N_BEAMS; i++)
+                {
+                    int pol = beam_pols[i];
+                    accum[i] = cmad(l_weights[a * N_BEAMS + i], sample_pols[pol], accum[i]);
+                }
+            }
+        }
+        BARRIER();  // protect against next loop iteration overwriting l_weights
     }
+
+    if (!valid)
+        return;
+    // Write accumulators to output
     for (int i = 0; i < N_BEAMS; i++)
     {
         int re, im;
