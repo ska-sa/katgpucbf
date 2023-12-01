@@ -4,11 +4,11 @@ Beamforming
 GPU kernel
 ----------
 For the low number of beams required for MeerKAT (8 single-pol beams), the
-beamforming operation is entirely bandwidth-limited. There is thus no benefit
-to using tensor cores, and potentially significant downsides (implementation
-complexity and reduced accuracy for steering coefficients). The kernel thus
-uses standard single-precision floating-point operations, and is written to
-maximise bandwidth usage.
+beamforming operation is entirely limited by the GPU DRAM bandwidth. There is
+thus no benefit to using tensor cores, and potentially significant downsides
+(implementation complexity and reduced accuracy for steering coefficients). The
+kernel thus uses standard single-precision floating-point operations, and is
+written to maximise bandwidth usage.
 
 The beamforming operation consists of two phases: coefficient generation and
 coefficient application. To minimise use of system memory, the coefficients
