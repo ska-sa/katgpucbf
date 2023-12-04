@@ -99,7 +99,7 @@ class PostprocTemplate:
                     "unzip_factor": unzip_factor,
                     "complex_pfb": complex_pfb,
                 },
-                extra_dirs=[str(resource_dir)],
+                extra_dirs=[str(resource_dir), str(resource_dir.parent)],
             )
         self.kernel = program.get_kernel("postproc")
 

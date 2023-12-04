@@ -50,7 +50,7 @@ class BeamformTemplate:
                     "block_spectra": self.block_spectra,
                     "beam_pols": self.beam_pols,
                 },
-                extra_dirs=[str(resource_dir)],
+                extra_dirs=[str(resource_dir), str(resource_dir.parent)],
             )
         self.kernel = program.get_kernel("beamform")
 
