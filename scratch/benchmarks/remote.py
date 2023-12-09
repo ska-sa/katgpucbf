@@ -152,7 +152,7 @@ async def run_tasks(
             infiniband_devices.pop()
         server_info = ServerInfo(cpus=cpus, infiniband_devices=infiniband_devices)
         await conn.run(f"docker pull {image}", check=True)
-        procs = []
+        procs: list[asyncssh.SSHClientProcess] = []
         for i in range(n):
             command = factory(server, server_info, conn, i)
             procs.append(
