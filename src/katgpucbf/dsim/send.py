@@ -65,9 +65,9 @@ class HeapSet:
     """
 
     def __init__(self, data: xr.Dataset) -> None:
-        if data.dims["time"] < 2:
+        if data.sizes["time"] < 2:
             raise ValueError("time dimension must have at least 2 elements")
-        middle = data.dims["time"] // 2
+        middle = data.sizes["time"] // 2
         self.data = data
         self.parts = [data.isel(time=np.s_[:middle]), data.isel(time=np.s_[middle:])]
         for part in self.parts:
@@ -297,7 +297,7 @@ class Sender:
         self._next_timestamp = first_timestamp
         self.time_converter = time_converter
         # Prepare initial timestamps
-        first_end_timestamp = first_timestamp + self.heap_set.data.dims["time"] * self.heap_samples
+        first_end_timestamp = first_timestamp + self.heap_set.data.sizes["time"] * self.heap_samples
         self.heap_set.data["timestamps"][:] = np.arange(
             first_timestamp, first_end_timestamp, self.heap_samples, dtype=">u8"
         )
@@ -309,12 +309,12 @@ class Sender:
                     # set_heaps may have swapped heap_set out from under us during
                     # the await, so re-initialise part.
                     part = self.heap_set.parts[i]
-                    part["timestamps"] += self.heap_set.data.dims["time"] * self.heap_samples
+                    part["timestamps"] += self.heap_set.data.sizes["time"] * self.heap_samples
                 send_future = self.stream.async_send_heaps(
                     part.attrs["heap_reference_list"], spead2.send.GroupMode.SERIAL
                 )
                 self._futures[i] = send_future
-                self._next_timestamp += part.dims["time"] * self.heap_samples
+                self._next_timestamp += part.sizes["time"] * self.heap_samples
                 send_future.add_done_callback(
                     functools.partial(
                         self._update_metrics, self._next_timestamp, part["heaps"].size, part["payload"].nbytes

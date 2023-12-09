@@ -9,7 +9,7 @@ aioconsole==0.6.2
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-aiohttp==3.8.6
+aiohttp==3.9.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -34,7 +34,7 @@ appdirs==1.4.4
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdpsigproc
-async-timeout==4.0.2
+async-timeout==4.0.3
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -47,36 +47,34 @@ attrs==23.1.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiohttp
-certifi==2023.7.22
+certifi==2023.11.17
     # via
     #   -c qualification/../requirements-dev.txt
     #   requests
-charset-normalizer==3.2.0
+charset-normalizer==3.3.2
     # via
     #   -c qualification/../requirements-dev.txt
-    #   -c qualification/../requirements.txt
-    #   aiohttp
     #   requests
-click==8.1.6
+click==8.1.7
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-cloudpickle==2.2.1
+cloudpickle==3.0.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-contourpy==1.1.0
+contourpy==1.2.0
     # via matplotlib
-cycler==0.11.0
+cycler==0.12.1
     # via matplotlib
-dask==2023.7.1
+dask==2023.12.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-dateparser==1.1.8
+dateparser==1.2.0
     # via prometheus-api-client
 decorator==5.1.1
     # via
@@ -84,15 +82,15 @@ decorator==5.1.1
     #   -c qualification/../requirements.txt
     #   aiokatcp
     #   katsdpsigproc
-docutils==0.18.1
+docutils==0.20.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)
-exceptiongroup==1.1.2
+exceptiongroup==1.2.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   pytest
-fonttools==4.41.1
+fonttools==4.46.0
     # via matplotlib
 frozenlist==1.4.0
     # via
@@ -100,7 +98,7 @@ frozenlist==1.4.0
     #   -c qualification/../requirements.txt
     #   aiohttp
     #   aiosignal
-fsspec==2023.6.0
+fsspec==2023.12.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -112,13 +110,13 @@ hiredis==2.2.3
     #   katsdptelstate
 httmock==1.4.0
     # via prometheus-api-client
-idna==3.4
+idna==3.6
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   requests
     #   yarl
-importlib-metadata==6.8.0
+importlib-metadata==7.0.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -142,9 +140,9 @@ katsdptelstate==0.13
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-kiwisolver==1.4.4
+kiwisolver==1.4.5
     # via matplotlib
-llvmlite==0.39.1
+llvmlite==0.41.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -154,7 +152,7 @@ locket==1.0.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   partd
-mako==1.2.4
+mako==1.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -164,11 +162,11 @@ markupsafe==2.1.3
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   mako
-matplotlib==3.7.2
+matplotlib==3.8.2
     # via
     #   katgpucbf (setup.cfg)
     #   prometheus-api-client
-msgpack==1.0.5
+msgpack==1.0.7
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -184,13 +182,13 @@ netifaces==0.11.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdpservices
-numba==0.56.4
+numba==0.58.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
     #   katsdpsigproc
-numpy==1.23.5
+numpy==1.26.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -207,7 +205,7 @@ numpy==1.23.5
     #   xarray
 ordered-set==4.1.0
     # via pylatex
-packaging==23.1
+packaging==23.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -215,32 +213,32 @@ packaging==23.1
     #   matplotlib
     #   pytest
     #   xarray
-pandas==2.0.3
+pandas==2.1.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdpsigproc
     #   prometheus-api-client
     #   xarray
-partd==1.4.0
+partd==1.4.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-pillow==10.0.1
+pillow==10.1.0
     # via matplotlib
-pluggy==1.2.0
+pluggy==1.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   pytest
-prometheus-api-client==0.5.3
+prometheus-api-client==0.5.4
     # via katgpucbf (setup.cfg)
 prometheus-async==22.2.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-prometheus-client==0.17.1
+prometheus-client==0.19.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -251,7 +249,7 @@ pygelf==0.4.2
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdpservices
-pylatex==1.4.1
+pylatex==1.4.2
     # via katgpucbf (setup.cfg)
 pyparsing==3.0.9
     # via
@@ -259,7 +257,7 @@ pyparsing==3.0.9
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
     #   matplotlib
-pytest==7.4.0
+pytest==7.4.3
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)
@@ -267,11 +265,11 @@ pytest==7.4.0
     #   pytest-check
     #   pytest-custom-exit-code
     #   pytest-reportlog
-pytest-asyncio==0.21.1
+pytest-asyncio==0.23.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)
-pytest-check==2.2.0
+pytest-check==2.2.2
     # via katgpucbf (setup.cfg)
 pytest-custom-exit-code==0.3.0
     # via
@@ -286,7 +284,7 @@ python-dateutil==2.8.2
     #   dateparser
     #   matplotlib
     #   pandas
-pytz==2023.3
+pytz==2023.3.post1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -297,19 +295,19 @@ pyyaml==6.0.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-redis==4.6.0
+redis==5.0.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdptelstate
-regex==2023.6.3
+regex==2023.10.3
     # via dateparser
 requests==2.31.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   httmock
     #   prometheus-api-client
-scipy==1.11.1
+scipy==1.11.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -341,7 +339,7 @@ toolz==0.12.0
     #   -c qualification/../requirements.txt
     #   dask
     #   partd
-typing-extensions==4.7.1
+typing-extensions==4.8.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -352,32 +350,29 @@ tzdata==2023.3
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   pandas
-tzlocal==5.0.1
+tzlocal==5.2
     # via dateparser
-urllib3==2.0.7
+urllib3==2.1.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   requests
-wrapt==1.15.0
+wrapt==1.16.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   prometheus-async
-xarray==2023.7.0
+xarray==2023.12.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-yarl==1.9.2
+yarl==1.9.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiohttp
-zipp==3.16.2
+zipp==3.17.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   importlib-metadata
-
-# The following packages are considered to be unsafe in a requirements file:
-# setuptools
