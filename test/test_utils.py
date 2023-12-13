@@ -19,7 +19,7 @@
 import asyncio
 import gc
 import weakref
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Generator
 from unittest import mock
 
 import aiokatcp
@@ -28,11 +28,6 @@ import pytest
 from aiokatcp import DeviceStatus
 
 from katgpucbf.utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
-
-
-class AsyncSolipsismPolicy(asyncio.DefaultEventLoopPolicy):
-    def new_event_loop(self) -> async_solipsism.EventLoop:
-        return async_solipsism.EventLoop()
 
 
 class TestDeviceStatusSensor:
@@ -80,9 +75,11 @@ class TestTimeoutSensorStatus:
     """Tests for :func:`katgpucbf.utils.timeout_sensor_status`."""
 
     @pytest.fixture
-    def event_loop_policy(self) -> asyncio.AbstractEventLoopPolicy:
+    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
         """Use async_solipsism event loop."""
-        return AsyncSolipsismPolicy()
+        loop = async_solipsism.EventLoop()
+        yield loop
+        loop.close()
 
     @pytest.fixture
     def sensor(self) -> aiokatcp.Sensor:

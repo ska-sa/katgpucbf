@@ -23,16 +23,12 @@ what is coming out of the F-engines rather than to test the X-engines.
 import asyncio
 
 import numpy as np
-import pytest
 from numpy.typing import ArrayLike
 
 from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 
 from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
 from ..reporter import Reporter
-
-# Make the event_loop package-scoped
-pytestmark = pytest.mark.asyncio(scope="package")
 
 
 async def sample_tone_response_hdr(

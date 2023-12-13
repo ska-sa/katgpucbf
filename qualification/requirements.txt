@@ -265,7 +265,7 @@ pytest==7.4.3
     #   pytest-check
     #   pytest-custom-exit-code
     #   pytest-reportlog
-pytest-asyncio==0.23.2
+pytest-asyncio==0.21.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)

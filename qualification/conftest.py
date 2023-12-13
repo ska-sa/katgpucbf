@@ -171,6 +171,14 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("n_channels, narrowband_decimation", configs, indirect=True)
 
 
+# Need to redefine this from pytest-asyncio to have it at package scope
+@pytest.fixture(scope="package")
+def event_loop():  # noqa: D103
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
 @pytest.fixture(scope="package")
 def n_antennas(request: pytest.FixtureRequest):  # noqa: D401
     """Number of antennas, i.e. size of the array."""
