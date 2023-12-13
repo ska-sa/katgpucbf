@@ -209,10 +209,11 @@ class CW(Signal):
     frequency: float
 
     @staticmethod
-    def _sample_chunk(offset: np.int64, *, amplitude: np.float32, chunk_size: int, scale: float) -> np.ndarray:
+    def _sample_chunk(offset: np.ndarray, *, amplitude: np.float32, chunk_size: int, scale: float) -> np.ndarray:
         """Compute :math:`np.cos(np.arange(offset, n + offset) * scale) * amplitude` efficiently.
 
-        The return value is single precision.
+        The return value is single precision. `offset` must be an array with a
+        single element.
         """
         # Compute the complex exponential. Because it is being regularly
         # sampled, it is possible to do this efficiently by repeated
@@ -220,7 +221,7 @@ class CW(Signal):
         # computation in single precision without losing much precision
         # (experimentally the results seem to be off by less than 1e-6).
         out = np.empty(chunk_size, np.complex64)
-        out[0] = np.exp(offset * scale * 1j) * amplitude
+        out[0] = np.exp(offset[0] * scale * 1j) * amplitude
         valid = 1
         while valid < chunk_size:
             # Rotate the segment [0, valid) by valid steps, giving the segment
