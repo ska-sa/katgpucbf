@@ -234,21 +234,23 @@ def pdf_report(request, monkeypatch) -> Reporter:
     request.node.user_properties.append(("pdf_report_data", data))
     reporter = Reporter(data, raw_data=request.config.getini("raw_data"))
     orig_log_failure = pytest_check.check_log.log_failure
-    orig_get_full_context = pytest_check.pseudo_traceback.get_full_context
+    orig_stack = inspect.stack
 
-    def get_full_context(level):
+    def stack():
         # The real log_failure function constructs a backtrace, and inserting
         # our wrapper into the call stack messes that up. We need to have it
         # skip an extra level for each wrapper we're injecting.
-        return orig_get_full_context(level + 2)
+        return orig_stack()[2:]
 
-    def log_failure(msg="", check_str=""):
+    def log_failure(msg="", check_str="", tb=None):
         __tracebackhide__ = True
         if check_str:
             reporter.failure(f"Failed assertion: {msg}: {check_str}")
         else:
             reporter.failure(f"Failed assertion: {msg}")
-        return orig_log_failure(msg, check_str)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(inspect, "stack", stack)
+            return orig_log_failure(msg, check_str, tb)
 
     # Patch the central point where pytest-check logs failures so that we can
     # insert them into the test procedure.
@@ -256,7 +258,6 @@ def pdf_report(request, monkeypatch) -> Reporter:
     # context_manager uses `from .check_log import log_failure` so we have to
     # patch it under that name.
     monkeypatch.setattr(pytest_check.context_manager, "log_failure", log_failure)
-    monkeypatch.setattr(pytest_check.pseudo_traceback, "get_full_context", get_full_context)
     return reporter
 
 
