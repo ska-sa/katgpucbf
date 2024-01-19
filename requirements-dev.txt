@@ -129,7 +129,7 @@ ipython==8.18.1
     # via -r requirements-dev.in
 jedi==0.19.1
     # via ipython
-jinja2==3.1.2
+jinja2==3.1.3
     # via sphinx
 katsdpservices==1.2
     # via
