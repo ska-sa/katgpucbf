@@ -275,7 +275,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
         {
             # Serif fonts better match the rest of the document
             "font.family": "serif",
-            "font.serif": ["Times New Roman"],
+            "font.serif": ["Liberation Serif"],
         }
     ):
         yield
