@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,6 +18,7 @@
 
 """Generate a PDF based on the intermediate JSON output."""
 import argparse
+import base64
 import copy
 import json
 import logging
@@ -46,6 +47,7 @@ from pylatex import (
     NoEscape,
     Section,
     SmallText,
+    StandAloneGraphic,
     Subsection,
     Subsubsection,
     TextColor,
@@ -208,21 +210,21 @@ class Failure:
 
 
 @dataclass
-class Figure:
-    """A figure created by ``pdf_report.figure`` or ``pdf_report.raw_figure``."""
+class RawFigure:
+    """A figure created by ``pdf_report.raw_figure``."""
 
     code: str
 
-    def __post_init__(self) -> None:
-        # Matplotlib relies on commands with @ in them, and uses
-        # \makeatletter to change the category code. However, because of the
-        # way longtable and multicolumn interact, the content is scanned
-        # before the category code can be changed. Fix it by using \csname,
-        # which is more robust.
-        self.code = re.sub(r"\\(pgfsys@[a-z@]+)", r"\\csname \1\\endcsname", self.code)
+
+@dataclass
+class Figure:
+    """A figure created by ``pdf_report.figure``."""
+
+    content: bytes
+    type: str
 
 
-Item = Union[Detail, Failure, Figure]  # Any information provided inside a ``pdf_report.step``
+Item = Union[Detail, Failure, Figure, RawFigure]  # Any information provided inside a ``pdf_report.step``
 
 
 @dataclass
@@ -337,7 +339,9 @@ def _parse_item(item: dict) -> Item:
     elif msg_type == "failure":
         return Failure(item["message"], item["timestamp"])
     elif msg_type == "figure":
-        return Figure(item["code"])
+        return RawFigure(item["code"])
+    elif msg_type == "binary_figure":
+        return Figure(base64.standard_b64decode(item["content"]), item["type"])
     else:
         raise ValueError(f"Do not know how to parse item $msg_type of {msg_type!r}")
 
@@ -817,7 +821,7 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
             config_table.add_hline()
 
 
-def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> Document:
+def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *, make_report=True) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
     Parameters
@@ -826,6 +830,8 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
         A list containing the test results.
     doc_id
         The document number that will be embedded into the PDF output.
+    tmp_dir
+        Temporary directory in which to write ancillary files.
     make_report
         Make a report rather than a procedure if true, a procedure rather than
         a report if false.
@@ -835,6 +841,7 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
     doc
         A PyLatex document
     """
+    next_figure_id = 1
     test_configuration, results = parse(result_list)
     sort_results(test_configuration, results)
     requirements_verified = extract_requirements_verified(results)
@@ -903,10 +910,24 @@ def document_from_list(result_list: list, doc_id: str, *, make_report=True) -> D
                                                 NoEscape(cell),
                                             ]
                                         )
-                                    elif isinstance(item, Figure):
+                                    elif isinstance(item, RawFigure):
+                                        filename = f"figure{next_figure_id:04}.tex"
+                                        (tmp_dir / filename).write_text(item.code)
+                                        next_figure_id += 1
                                         mp = MiniPage(width=NoEscape(r"\textwidth"))
                                         mp.append(NoEscape(r"\center"))
-                                        mp.append(NoEscape(item.code))
+                                        mp.append(NoEscape(r"\input{" + filename + "}"))
+                                        procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                                    elif isinstance(item, Figure):
+                                        filename = f"figure{next_figure_id:04}.{item.type}"
+                                        (tmp_dir / filename).write_bytes(item.content)
+                                        next_figure_id += 1
+                                        mp = MiniPage(width=NoEscape(r"\textwidth"))
+                                        mp.append(NoEscape(r"\center"))
+                                        # pagebox=artbox is needed because the images generated
+                                        # by matplotlib lack a CropBox and without it, graphicx
+                                        # will not fall back to anything else to determine the size.
+                                        mp.append(StandAloneGraphic(filename, "pagebox=artbox"))
                                         procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
                                     procedure_table.add_hline()
 
@@ -989,21 +1010,22 @@ def main():
     result_list = list_from_json(args.input)
     if args.commit_id:
         print(test_image_commit(result_list))
-    doc = document_from_list(result_list, args.doc_id, make_report=args.make_report)
-    if args.pdf.endswith(".pdf"):
-        args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
-    with tempfile.NamedTemporaryFile(mode="w", prefix="latexmkrc") as latexmkrc:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_dir = pathlib.Path(tmp_dir)
+        doc = document_from_list(result_list, args.doc_id, make_report=args.make_report, tmp_dir=tmp_dir)
+        if args.pdf.endswith(".pdf"):
+            args.pdf = args.pdf[:-4]  # Strip .pdf suffix, because generate_pdf appends it
+        latexmkrc = tmp_dir / "latexmkrc"
         # TODO: latexmk uses Perl, which has different string parsing to
         # Python. If the path contains both a single quote and a special
         # symbol it will not produce a valid Perl string.
         parent_dir = str(RESOURCE_PATH)
-        latexmkrc.write(f"ensure_path('TEXINPUTS', {parent_dir!r})\n")
-        latexmkrc.flush()
+        latexmkrc.write_text(f"ensure_path('TEXINPUTS', {parent_dir!r}, {str(tmp_dir)!r})\n")
         # Give TeX an order of magnitude more memory than usual. This is needed
         # to handle the reams of text generated for plots.
         os.environ.setdefault("buf_size", "2000000")
         os.environ.setdefault("extra_mem_top", "50000000")
-        doc.generate_pdf(args.pdf, compiler="latexmk", compiler_args=["--pdf", "-r", latexmkrc.name])
+        doc.generate_pdf(args.pdf, compiler="latexmk", compiler_args=["--pdf", "-r", str(latexmkrc)])
 
 
 if __name__ == "__main__":

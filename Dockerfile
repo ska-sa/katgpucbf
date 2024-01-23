@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1
 
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -106,10 +106,11 @@ RUN pip install --no-deps "$(grep '^pycuda==' /tmp/katgpucbf/requirements.txt)" 
 FROM build-base as jenkins
 
 # docker so that Jenkins can build a Docker image
-# All the TeX stuff for building the documentation and qualification report
+# All the TeX and font stuff for building the docs and qualification report
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     docker.io \
     docker-buildx \
+    fonts-liberation2 \
     latexmk \
     lmodern \
     pdf2svg \

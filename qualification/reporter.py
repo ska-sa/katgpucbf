@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -15,6 +15,7 @@
 ################################################################################
 
 """Mechanism for logging Pytest's output to a PDF."""
+import base64
 import io
 import logging
 import time
@@ -109,7 +110,7 @@ class Reporter:
         potentially contain tables too.
         """
         if self._cur_step is None:
-            raise ValueError("Cannot have figure without a current step")
+            raise ValueError("Cannot have raw_figure without a current step")
         value: dict[str, Any] = {"$msg_type": "figure", "code": code}
         if self._raw_data:
             value["data"] = data
@@ -123,10 +124,17 @@ class Reporter:
         figure
             The figure to plot
         """
+        if self._cur_step is None:
+            raise ValueError("Cannot have figure without a current step")
         data = []
         for ax in figure.axes:
             for line in ax.get_lines():
                 data.append(line.get_xydata().tolist())
-        content = io.StringIO()
-        figure.savefig(content, format="pgf", backend="pgf")
-        self.raw_figure(content.getvalue(), data=data)
+        content = io.BytesIO()
+        figure.savefig(content, format="pdf", backend="pdf")
+        # The .decode converts from bytes to str
+        content_b64 = base64.standard_b64encode(content.getvalue()).decode()
+        value: dict[str, Any] = {"$msg_type": "binary_figure", "content": content_b64, "type": "pdf"}
+        if self._raw_data:
+            value["data"] = data
+        self._cur_step.append(value)
