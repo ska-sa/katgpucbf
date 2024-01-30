@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -81,7 +81,6 @@ async def sample_tone_response_hdr(
         await correlator.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
         data = await sample_tone_response(rel_freqs, amplitude, receiver)
-        data = data.astype(np.float64)
 
         # Store gain adjusted data for SFDR measurement.
         # Use current gain to capture spikes, then adjust gain.
@@ -160,7 +159,7 @@ async def sample_tone_response(
     freqs = receiver.center_freq + (np.asarray(rel_freqs) - receiver.n_chans / 2) * channel_width
     amplitude = np.asarray(amplitude)
     out_shape = np.broadcast_shapes(freqs.shape, amplitude.shape) + (receiver.n_chans,)
-    out = np.empty(out_shape, np.int32)
+    out = np.empty(out_shape, np.float64)
     # Each element is an (out_index, signal_spec) pair. When it fills up to the
     # number of antennas available, `flush` is called.
     tasks: list[tuple[tuple[int, ...], str]] = []
@@ -177,7 +176,7 @@ async def sample_tone_response(
             # In the absence of noise this should be purely real, but
             # due to quantization noise it is complex. Take the absolute
             # value.
-            out[task[0]] = np.hypot(data[:, bl_idx, 0], data[:, bl_idx, 1])
+            np.hypot(data[:, bl_idx, 0], data[:, bl_idx, 1], out=out[task[0]])
 
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
