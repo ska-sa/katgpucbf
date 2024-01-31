@@ -9,7 +9,7 @@ aioconsole==0.6.2
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-aiohttp==3.9.1
+aiohttp==3.9.3
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
