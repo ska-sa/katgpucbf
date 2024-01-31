@@ -4,7 +4,7 @@
 #
 #    pip-compile --output-file=scratch/benchmarks/requirements.txt scratch/benchmarks/requirements.in
 #
-aiohttp==3.9.1
+aiohttp==3.9.3
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
