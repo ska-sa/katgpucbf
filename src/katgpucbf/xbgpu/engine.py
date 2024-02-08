@@ -379,6 +379,34 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             # Dynamic sensors
             sensors.add(
                 aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.delay",
+                    "The delay settings of the inputs for this beam: (loadmcnt"
+                    "<ADC sample count when model was loaded>, delay <in seconds>,"
+                    "phase <radians>, ...)",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    float,
+                    f"{output.name}.quantiser-gain",
+                    "Non-complex post-summation quantiser gain applied to this beam",
+                    default=0.0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.weight",
+                    "The summing weights applied to all the inputs of this beam",
+                    default="",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
                     int,
                     f"{output.name}-beng-clip-cnt",
                     "Number of complex samples that saturated.",
