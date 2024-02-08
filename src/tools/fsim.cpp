@@ -110,6 +110,12 @@ template <typename T> static boost::program_options::typed_value<T> *make_opt(T 
     return boost::program_options::value<T>(&var)->default_value(var);
 }
 
+// Overload that treats boolean options as argument-less flags
+static boost::program_options::typed_value<bool> *make_opt(bool &var)
+{
+    return boost::program_options::bool_switch(&var)->default_value(var);
+}
+
 // Parse command line parameters - this has been kludged together. It can probably be done in a neater way.
 static options parse_options(int argc, const char **argv)
 {
