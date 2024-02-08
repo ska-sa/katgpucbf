@@ -32,8 +32,12 @@ Where:
 
 The above command will transmit data at about `7.8 * (y+1)` Gbps by default.
 
-The ``fsim`` executable needs ``CAP_NET_RAW`` capability to run. The easiest
-way to do it is with ``spead2_net_raw``.
+For improved performance, use :option:`!--ibv` to enable ibverbs acceleration [#]_.
+This requires the ``CAP_NET_RAW`` capability to run. The easiest way to do it
+is with ``spead2_net_raw``.
 
 See the fsim source code (in ``src/tools/``) for a  detailed description of how the
 F-Engine simulator works and the useful configuration arguments.
+
+.. [#] See the spead2 documentation for information on the requirements
+   (particularly hardware requirements) for ibverbs.

@@ -143,7 +143,7 @@ single :ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu`
 instance on ``host2``::
 
     [Connect to host1, navigate to the location of the fsim and build it using 'make']
-    user@host1:~/katgpucbf/src/tools$ spead2_net_raw ./fsim --interface <100GbE NIC IP> \
+    user@host1:~/katgpucbf/src/tools$ spead2_net_raw ./fsim --interface <100GbE NIC IP> --ibv \
                                       --array-size 4 --channels 4096 \
                                       --channels-per-substream 512 \
                                       --spectra-per-heap 256 \
