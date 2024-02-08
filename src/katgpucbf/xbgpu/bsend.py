@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -67,7 +67,7 @@ class Frame:
         *,
         channel_offset: int,
     ) -> None:
-        self.heaps: list[spead2.send.HeapReference] = []
+        self.heaps: list[spead2.send.Heap] = []
         self.data = data
         self.saturated = saturated
         n_substreams = saturated.shape[0]
@@ -86,7 +86,7 @@ class Frame:
                     value=self.data[i, ...],
                 )
             )
-            self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
+            self.heaps.append(heap)
 
 
 class Chunk:
@@ -172,10 +172,18 @@ class Chunk:
 
             Also update its relevant counters and sensor values.
         """
-        if any(send_stream.tx_enabled):
+        n_enabled = sum(send_stream.tx_enabled)
+        rate = send_stream.bytes_per_second_per_beam * n_enabled
+        if n_enabled > 0:
             send_futures = []
             for frame in self._frames:
-                heaps_to_send = [heap for heap, enabled in zip(frame.heaps, send_stream.tx_enabled) if enabled]
+                # TODO: building this list every time may be too expensive.
+                # Consider caching it and invalidating when streams are enabled/disabled.
+                heaps_to_send = [
+                    spead2.send.HeapReference(heap, substream_index=i, rate=rate)
+                    for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled))
+                    if enabled
+                ]
                 send_futures.append(
                     send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
@@ -286,8 +294,8 @@ class BSend:
         packet_header_overhead_bytes = packets_per_heap * BSend.header_size
 
         heap_interval = timestamp_step / adc_sample_rate
-        send_rate_bytes_per_second = (
-            (heap_payload_size_bytes + packet_header_overhead_bytes) / heap_interval * send_rate_factor * self.n_beams
+        self.bytes_per_second_per_beam = (
+            (heap_payload_size_bytes + packet_header_overhead_bytes) / heap_interval * send_rate_factor
         )
 
         stream_config = spead2.send.StreamConfig(
@@ -295,7 +303,6 @@ class BSend:
             # + 1 below for the descriptor per beam
             max_heaps=(n_tx_items * frames_per_chunk + 1) * self.n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=send_rate_bytes_per_second,
         )
         self.stream = stream_factory(stream_config, buffers)
         # Set heap count sequence to allow a receiver to ingest multiple
