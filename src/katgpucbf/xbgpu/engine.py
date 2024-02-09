@@ -401,7 +401,6 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    default="",
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
