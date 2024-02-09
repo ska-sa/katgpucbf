@@ -381,8 +381,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 aiokatcp.Sensor(
                     str,
                     f"{output.name}.delay",
-                    "The delay settings of the inputs for this beam: (loadmcnt"
-                    "<ADC sample count when model was loaded>, delay <in seconds>,"
+                    "The delay settings of the inputs for this beam: (loadmcnt "
+                    "<ADC sample count when model was loaded>, delay <in seconds>, "
                     "phase <radians>, ...)",
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
