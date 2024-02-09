@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020-2021, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2021, 2024 National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -54,6 +54,8 @@
  * document.
  */
 
+#include <spead2/send_stream.h>
+#include <spead2/send_udp.h>
 #include <spead2/send_udp_ibv.h>
 
 #include <boost/program_options.hpp>
@@ -80,6 +82,7 @@ struct options
     int n_spectra_per_heap = 256;
     size_t packet_payload_size_bytes = 8192;
     bool run_once = false;
+    bool ibv = false;
 
     // The variables below are not command-line arguments, they are just calculated based on values provided by the
     // command line. This method of passing these arguments is a bit clunky, but I have not put effort into fixing it.
@@ -107,6 +110,12 @@ template <typename T> static boost::program_options::typed_value<T> *make_opt(T 
     return boost::program_options::value<T>(&var)->default_value(var);
 }
 
+// Overload that treats boolean options as argument-less flags
+static boost::program_options::typed_value<bool> *make_opt(bool &var)
+{
+    return boost::program_options::bool_switch(&var)->default_value(var);
+}
+
 // Parse command line parameters - this has been kludged together. It can probably be done in a neater way.
 static options parse_options(int argc, const char **argv)
 {
@@ -127,6 +136,7 @@ static options parse_options(int argc, const char **argv)
                        "The F-Engine cornerturn groups a number of samples into each channel per packet");
     desc.add_options()("dst-packet-payload", make_opt(opts.packet_payload_size_bytes),
                        "The number of payload bytes per packet");
+    desc.add_options()("ibv", make_opt(opts.ibv), "Use ibverbs acceleration");
     desc.add_options()("run-once", make_opt(opts.run_once), "Transmit a single collection of heaps before exiting");
     hidden.add_options()(
         "address", boost::program_options::value<std::string>(&opts.mcast_addr)->composing(),
@@ -329,7 +339,7 @@ struct fengines
     const bool run_once;
 
     // SPEAD 2 stream that every heap will be queued on.
-    spead2::send::udp_ibv_stream stream;
+    std::unique_ptr<spead2::send::stream> stream;
 
     /* Constructor for the fengines simulator.
      *
@@ -343,20 +353,37 @@ struct fengines
              const boost::asio::ip::address &interface_address, boost::asio::io_service &ios)
         : heaps_per_feng(opts.max_heaps), all_heaps(make_heaps(opts)), NUM_ANTS(opts.n_ants),
           timestamp_step(opts.timestamp_step), run_once(opts.run_once),
-          stream(ios,
-                 spead2::send::stream_config()
-                     .set_max_packet_size(opts.packet_payload_size_bytes + PACKET_HEADER_SIZE_BYTES)
-                     .set_rate(opts.adc_sample_rate * N_POLS * SAMPLE_BITS / 8.0 *
-                               opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
-                               (opts.heap_size_bytes + opts.packets_per_heap * PACKET_HEADER_SIZE_BYTES) /
-                               opts.heap_size_bytes)
-                     .set_max_heaps(opts.max_heaps * opts.n_ants),
-                 spead2::send::udp_ibv_config()
-                     .set_endpoints(endpoints)
-                     .set_interface_address(interface_address)
-                     .set_ttl(opts.ttl)
-                     .set_memory_regions(get_memory_regions(opts, all_heaps)))
+          stream(make_stream(ios, opts, endpoints, interface_address, all_heaps))
     {
+    }
+
+    static std::unique_ptr<spead2::send::stream> make_stream(
+        boost::asio::io_service &ios,
+        const options &opts,
+        const std::vector<boost::asio::ip::udp::endpoint> &endpoints,
+        const boost::asio::ip::address &interface_address,
+        const std::vector<std::vector<heap_data>> &all_heaps)
+    {
+        auto stream_config = spead2::send::stream_config()
+            .set_max_packet_size(opts.packet_payload_size_bytes + PACKET_HEADER_SIZE_BYTES)
+            .set_rate(opts.adc_sample_rate * N_POLS * SAMPLE_BITS / 8.0 *
+                      opts.n_ants * opts.n_chans_per_output_stream / opts.n_chans_total *
+                      (opts.heap_size_bytes + opts.packets_per_heap * PACKET_HEADER_SIZE_BYTES) /
+                      opts.heap_size_bytes)
+            .set_max_heaps(opts.max_heaps * opts.n_ants);
+        if (opts.ibv)
+        {
+            auto udp_ibv_config = spead2::send::udp_ibv_config()
+                .set_endpoints(endpoints)
+                .set_interface_address(interface_address)
+                .set_ttl(opts.ttl)
+                .set_memory_regions(get_memory_regions(opts, all_heaps));
+            return std::make_unique<spead2::send::udp_ibv_stream>(ios, stream_config, udp_ibv_config);
+        }
+        else
+        {
+            return std::make_unique<spead2::send::udp_stream>(ios, endpoints, stream_config, opts.ttl, interface_address);
+        }
     }
 
     /* Registers all heap data in memory regions and returns a vector of these regions to be used by spead2.
@@ -432,9 +459,9 @@ struct fengines
         }
 
         bool queue_success =
-            stream.async_send_heaps(heaps_to_interleave.begin(), heaps_to_interleave.end(),
-                                    std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
-                                    spead2::send::group_mode::ROUND_ROBIN);
+            stream->async_send_heaps(heaps_to_interleave.begin(), heaps_to_interleave.end(),
+                                     std::bind(&fengines::callback, this, std::placeholders::_1, std::placeholders::_2),
+                                     spead2::send::group_mode::ROUND_ROBIN);
         if (queue_success == false)
         {
             std::cerr << "Error: Heaps not queued succesfully on queue" << std::endl;
