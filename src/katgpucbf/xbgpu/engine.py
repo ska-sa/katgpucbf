@@ -408,7 +408,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"{output.name}-beng-clip-cnt",
+                    f"{output.name}.beng-clip-cnt",
                     "Number of complex samples that saturated.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
