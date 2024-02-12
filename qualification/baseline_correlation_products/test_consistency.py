@@ -42,7 +42,7 @@ async def test_consistency(
     pdf_report.step("Configure the D-sim with Gaussian noise.")
     amplitude = 0.2
     max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
-    period = receiver.n_samples_between_spectra * receiver.spectra_per_heap
+    period = receiver.n_samples_between_spectra * receiver.n_spectra_per_heap
     period = min(period, max_period)
     await cbf.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;", period)
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}, period {period} on both pols.")
