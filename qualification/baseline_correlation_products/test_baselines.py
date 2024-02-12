@@ -20,13 +20,13 @@ import numpy as np
 import pytest
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0087,CBF-REQ-0104")
 async def test_baseline_correlation_products(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -40,13 +40,13 @@ async def test_baseline_correlation_products(
     expected output appears in the correct baseline product.
     """
     receiver = receive_baseline_correlation_products  # Just to reduce typing
-    pdf_report.step("Connect to correlator's product controller to retrieve configuration for the running correlator.")
-    pc_client = correlator.product_controller_client
+    pdf_report.step("Connect to CBF's product controller to retrieve configuration for the running CBF.")
+    pc_client = cbf.product_controller_client
 
     pdf_report.step("Configure the D-sim with Gaussian noise.")
 
     amplitude = 0.2
-    await correlator.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;")
+    await cbf.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):

@@ -21,7 +21,7 @@ import pytest
 from matplotlib.figure import Figure
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import POTLocator, Reporter
 from . import sample_tone_response_hdr
 
@@ -58,7 +58,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> list[floa
 @pytest.mark.name("Channelisation and SFDR")
 @pytest.mark.requirements("CBF-REQ-0126")
 async def test_channelisation_and_sfdr(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -95,7 +95,7 @@ async def test_channelisation_and_sfdr(
 
     pdf_report.detail(f"Collect power measurements for {len(rel_freqs)} channels.")
     hdr_data = await sample_tone_response_hdr(
-        correlator=correlator,
+        cbf=cbf,
         receiver=receiver,
         pdf_report=pdf_report,
         amplitude=amplitude,

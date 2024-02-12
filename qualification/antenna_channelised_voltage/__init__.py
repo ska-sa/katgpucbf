@@ -27,12 +27,12 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import DIG_SAMPLE_BITS, N_POLS
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
 
 
 async def sample_tone_response_hdr(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receiver: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     amplitude: float,
@@ -48,8 +48,8 @@ async def sample_tone_response_hdr(
 
     Parameters
     ----------
-    correlator
-        Container for correlator control using katcp.
+    cbf
+        Container for CBF control using katcp.
     receiver
         Correlation receiver stream.
     pdf_report
@@ -78,7 +78,7 @@ async def sample_tone_response_hdr(
     # whose power is low enough not to saturate.
     for i in range(iterations):
         pdf_report.detail(f"Set gain to {gain}.")
-        await correlator.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
+        await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
         data = await sample_tone_response(rel_freqs, amplitude, receiver)
 
@@ -108,8 +108,8 @@ def compute_tone_gain(
 
     Parameters
     ----------
-    correlator
-        Connection to the correlator.
+    cbf
+        Connection to the CBF.
     amplitude
         Amplitude of the tones, on a scale of 0 to 1.
     target_voltage
@@ -150,7 +150,7 @@ async def sample_tone_response(
     """
     # Identify baselines using the two pols from each dsim.
     # The fixtures set up a one-to-one relationship between dsims and antennas.
-    assert len(receiver.input_labels) == N_POLS * len(receiver.correlator.dsim_clients)
+    assert len(receiver.input_labels) == N_POLS * len(receiver.cbf.dsim_clients)
     corrs = []
     for i in range(0, len(receiver.input_labels), 2):
         corrs.append(receiver.bls_ordering.index((receiver.input_labels[i], receiver.input_labels[i + 1])))
@@ -169,7 +169,7 @@ async def sample_tone_response(
         requests = []
         for i in range(len(tasks)):
             signal = tasks[i][1] * N_POLS
-            requests.append(asyncio.create_task(receiver.correlator.dsim_clients[i].request("signals", signal)))
+            requests.append(asyncio.create_task(receiver.cbf.dsim_clients[i].request("signals", signal)))
         await asyncio.gather(*requests)
         _, data = await receiver.next_complete_chunk()
         for task, bl_idx in zip(tasks, corrs):
@@ -181,7 +181,7 @@ async def sample_tone_response(
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
             tasks.append((it.multi_index, f"cw({a}, {f});"))
-            if len(tasks) == len(receiver.correlator.dsim_clients):
+            if len(tasks) == len(receiver.cbf.dsim_clients):
                 await flush()
                 tasks = []
     if tasks:

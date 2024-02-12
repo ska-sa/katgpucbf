@@ -65,7 +65,7 @@ RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
 
-def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
+def make_cbf_mode_str(config: dict, *, expand: bool = False) -> str:
     """Generate a description string from a configuration dictionary.
 
     The input is expected to be in the format of, e.g.:
@@ -94,7 +94,7 @@ def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
 
     Returns
     -------
-    Short or long description of correlator mode.
+    Short or long description of CBF mode.
     """
     config_mode: str
 
@@ -118,8 +118,8 @@ def make_correlator_mode_str(config: dict, *, expand: bool = False) -> str:
     return config_mode
 
 
-def correlator_sort_key(config: dict) -> tuple:
-    """Generate a sort key to sort correlators."""
+def cbf_sort_key(config: dict) -> tuple:
+    """Generate a sort key to sort CBFs."""
     # It seems at least some of these get stringified, so ensure they are numeric
     return (
         float(config["bandwidth"]),
@@ -305,7 +305,7 @@ class Host:
 
 @dataclass
 class Task:
-    """A single Mesos task within a correlator."""
+    """A single Mesos task within a CBF."""
 
     host: str
     version: str  # Docker image
@@ -314,8 +314,8 @@ class Task:
 
 
 @dataclass
-class CorrelatorConfiguration:
-    """Configuration information for a correlator instance."""
+class CBFConfiguration:
+    """Configuration information for a CBF instance."""
 
     mode_config: dict
     uuid: UUID
@@ -328,7 +328,7 @@ class TestConfiguration:
 
     params: dict[str, str] = field(default_factory=dict)
     hosts: dict[Host, list[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
-    correlators: list[CorrelatorConfiguration] = field(default_factory=list)
+    cbfs: list[CBFConfiguration] = field(default_factory=list)
 
 
 def _parse_item(item: dict) -> Item:
@@ -375,6 +375,8 @@ def _parse_report_data(result: Result, msg: dict) -> None:
     elif msg_type == "config":
         msg = dict(msg)  # Avoid mutating the caller's copy
         msg.pop("$msg_type")  # We don't need this.
+        if "correlator" in msg:  # Backwards compatibility: handle this old name
+            msg["cbf"] = msg.pop("correlator")
         result.config.update(msg)
     else:
         raise ValueError(f"Do not know how to parse $msg_type of {msg_type!r}")
@@ -460,9 +462,9 @@ def _parse_task(msg: dict) -> Task:
     )
 
 
-def _parse_correlator_configuration(msg: dict) -> CorrelatorConfiguration:
+def _parse_cbf_configuration(msg: dict) -> CBFConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CorrelatorConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
+    return CBFConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
 def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
@@ -488,8 +490,9 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
         elif line["$report_type"] == "HostConfiguration":
             hostname, host = _parse_host(line)
             test_configuration.hosts[host].append(hostname)
-        elif line["$report_type"] == "CorrelatorConfiguration":
-            test_configuration.correlators.append(_parse_correlator_configuration(line))
+        elif line["$report_type"] in ["CorrelatorConfiguration", "CBFConfiguration"]:
+            # "CorrelatorConfiguration" is for backwards compatibility
+            test_configuration.cbfs.append(_parse_cbf_configuration(line))
 
         if line["$report_type"] != "TestReport":
             continue
@@ -527,20 +530,20 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
 
 
 def sort_results(test_configuration: TestConfiguration, results: list[Result]) -> None:
-    """Sort correlators and results (in-place)."""
-    test_configuration.correlators.sort(key=lambda correlator: correlator_sort_key(correlator.mode_config))
-    correlator_uuids = [correlator.uuid for correlator in test_configuration.correlators]
+    """Sort CBFs and results (in-place)."""
+    test_configuration.cbfs.sort(key=lambda cbf: cbf_sort_key(cbf.mode_config))
+    cbf_uuids = [cbf.uuid for cbf in test_configuration.cbfs]
 
     def result_key(result: Result) -> tuple:
         try:
-            correlator_idx = correlator_uuids.index(UUID(result.config["correlator"]))
+            cbf_idx = cbf_uuids.index(UUID(result.config["cbf"]))
         except KeyError:
-            correlator_idx = -1
+            cbf_idx = -1
         test_dir = result.nodeid.split("/")[0]
         # This is not a unique key, but pytest generally runs tests from the same file
         # in definition order, which is a good choice (and Python's sort is
         # stable).
-        return test_dir, correlator_idx
+        return test_dir, cbf_idx
 
     results.sort(key=result_key)
 
@@ -613,13 +616,13 @@ def _format_image(image: str) -> LatexObject:
 
 
 def _doc_test_configuration_global(section: Container, test_configuration: TestConfiguration) -> None:
-    # Identify versions running on the correlator. Ideally it should be unique
+    # Identify versions running on the CBF. Ideally it should be unique
     images = set()
     git_versions = set()
     product_controller_image = "unknown"
     product_controller_git_version = "unknown"
-    for correlator in test_configuration.correlators:
-        for task_name, task in correlator.tasks.items():
+    for cbf in test_configuration.cbfs:
+        for task_name, task in cbf.tasks.items():
             if task_name == "product_controller":
                 product_controller_image = task.version
                 product_controller_git_version = task.git_version
@@ -635,7 +638,7 @@ def _doc_test_configuration_global(section: Container, test_configuration: TestC
             config_table.add_row([config_key, config_value])
             config_table.add_hline()
 
-        config_table.add_row([MultiColumn(2, align="|c|", data=bold("Correlator"))])
+        config_table.add_row([MultiColumn(2, align="|c|", data=bold("CBF"))])
         config_table.add_hline()
         image = collapse_versions(images)
         config_table.add_row("Image", _format_image(image))
@@ -688,7 +691,7 @@ def _doc_hosts(section: Container, hosts: Mapping[Host, Sequence[str]]) -> None:
                 host_table.add_hline()
 
 
-def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfiguration]) -> None:
+def _doc_cbfs(section: Container, cbfs: Sequence[CBFConfiguration]) -> None:
     patterns = [
         ("Product controller", re.compile("product_controller")),
         ("DSim {i}", re.compile(r"sim\.dsim(\d+)\.\d+\.0")),
@@ -696,17 +699,15 @@ def _doc_correlators(section: Container, correlators: Sequence[CorrelatorConfigu
         ("XB-engine {i}", re.compile(r"xb\.baseline-correlation-products\.(\d+)")),
         ("WB XB-engine {i}", re.compile(r"xb\.wideband-baseline-correlation-products\.(\d+)")),
     ]
-    for i, correlator in enumerate(correlators, start=1):
-        with section.create(
-            Subsection(f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}")
-        ) as subsec:
-            subsec.append(Label(Marker(str(correlator.uuid), prefix="correlator")))
-            subsec.append(make_correlator_mode_str(correlator.mode_config, expand=True))
+    for i, cbf in enumerate(cbfs, start=1):
+        with section.create(Subsection(f"Configuration {i}: {make_cbf_mode_str(cbf.mode_config)}")) as subsec:
+            subsec.append(Label(Marker(str(cbf.uuid), prefix="cbf")))
+            subsec.append(make_cbf_mode_str(cbf.mode_config, expand=True))
             with subsec.create(LongTable(r"|l|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
                     tasks = []
-                    for task_name, task in correlator.tasks.items():
+                    for task_name, task in cbf.tasks.items():
                         if match := pattern.fullmatch(task_name):
                             try:
                                 tasks.append((int(match.group(1)), task))
@@ -742,8 +743,8 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
         _doc_test_configuration_global(config_section, test_configuration)
     with doc.create(Section("Hosts")) as hosts_section:
         _doc_hosts(hosts_section, test_configuration.hosts)
-    with doc.create(Section("Correlators")) as correlators_section:
-        _doc_correlators(correlators_section, test_configuration.correlators)
+    with doc.create(Section("CBFs")) as cbfs_section:
+        _doc_cbfs(cbfs_section, test_configuration.cbfs)
 
 
 def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
@@ -808,14 +809,12 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
         config_table.add_row((MultiColumn(2, align="|c|", data=bold("Test Configuration")),))
         config_table.add_hline()
         for key, value in result.config.items():
-            if key == "correlator":
+            if key == "cbf":
                 # Turn the raw UUID into a section reference
-                for i, correlator in enumerate(test_configuration.correlators, start=1):
-                    if correlator.uuid == UUID(value):
-                        marker = Marker(value, prefix="correlator")
-                        value = Hyperref(
-                            marker, f"Configuration {i}: {make_correlator_mode_str(correlator.mode_config)}"
-                        )
+                for i, cbf in enumerate(test_configuration.cbfs, start=1):
+                    if cbf.uuid == UUID(value):
+                        marker = Marker(value, prefix="cbf")
+                        value = Hyperref(marker, f"Configuration {i}: {make_cbf_mode_str(cbf.mode_config)}")
                         break
             config_table.add_row([key.capitalize(), value])
             config_table.add_hline()
@@ -959,8 +958,8 @@ def test_image_commit(result_list: list) -> str:
     """
     test_configuration = parse(result_list)[0]
     git_versions = set()
-    for correlator in test_configuration.correlators:
-        for task_name, task in correlator.tasks.items():
+    for cbf in test_configuration.cbfs:
+        for task_name, task in cbf.tasks.items():
             if task_name != "product_controller":
                 git_versions.add(task.git_version)
     return collapse_versions(git_versions)

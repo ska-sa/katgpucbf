@@ -1,6 +1,6 @@
 Qualification framework
 =======================
-While the unit tests ensure that individual pieces of the correlator work
+While the unit tests ensure that individual pieces of the CBF work
 correctly, the qualification tests ensure that the system as a whole functions
 correctly and meets requirements. In software engineering terms these are
 integration tests.
@@ -13,8 +13,8 @@ assorted plots showing results.
 
 The tests do not run the katgpucbf code from the local machine. Instead, they
 connect to an `SDP Master Controller`_ and use it to start appropriate
-correlators which they interact with. Facilities are provided for the test to
-interact with the correlator, both by sending it KATCP requests and by
+CBFs which they interact with. Facilities are provided for the test to
+interact with the CBF, both by sending it KATCP requests and by
 ingesting the output data. It's thus necessary to have a master controller set
 up (which is beyond the scope of this document) and to have a Docker image of
 katgpucbf stored in a Docker registry.
@@ -44,7 +44,7 @@ parts can be installed with
    pip install ".[qualification]"
 
 The machine running the tests needs to be able to receive data from the
-correlator network. The data rate can become quite high for larger array sizes.
+CBF network. The data rate can become quite high for larger array sizes.
 
 Configuration
 -------------
@@ -61,7 +61,7 @@ and it'll look something like this:
    master_controller_host = lab5.sdp.kat.ac.za
    master_controller_port = 5001
    prometheus_url = http://lab5.sdp.kat.ac.za:9090
-   product_name = bobs_qualification_correlator  # Use your own name
+   product_name = bobs_qualification_cbf  # Use your own name
    interface = enp193s0f0
    use_ibv = true
    log_cli = true

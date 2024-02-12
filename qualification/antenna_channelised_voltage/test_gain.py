@@ -23,13 +23,13 @@ import pytest
 from numpy.typing import NDArray
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
 from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0119")
 async def test_gains(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -54,11 +54,11 @@ async def test_gains(
     scale = 0.02
     signals = f"common=wgn({scale}, 1); common; common;"
     # Compute repeat period guaranteed to divide into accumulation length.
-    max_period = await get_sensor_val(correlator.dsim_clients[0], "max-period")
+    max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
     period = receiver.n_samples_between_spectra * receiver.spectra_per_heap
     period = min(period, max_period)
     pdf_report.detail(f"Set white Gaussian noise with scale {scale}, period {period} samples.")
-    await asyncio.gather(*[client.request("signals", signals, period) for client in correlator.dsim_clients])
+    await asyncio.gather(*[client.request("signals", signals, period) for client in cbf.dsim_clients])
 
     pdf_report.step("Measure response with default gain.")
     orig = await next_chunk_data()
@@ -74,7 +74,7 @@ async def test_gains(
     loop = asyncio.get_running_loop()
     start_time = loop.time()
     for input_gain, input_label in zip(gains_text, receiver.input_labels):
-        await correlator.product_controller_client.request(
+        await cbf.product_controller_client.request(
             "gain",
             "antenna-channelised-voltage",
             input_label,

@@ -42,7 +42,7 @@ pipeline {
        * to launch correctly.
        *
        * --network=host: The Docker container requires access to the high-speed
-       * correlator network. This command passes all the host network interfaces to the
+       * CBF network. This command passes all the host network interfaces to the
        * container to be used as required.
        *
        * --ulimit=memlock=-1: This argument is required when using ibverbs.
@@ -119,7 +119,7 @@ pipeline {
   /* This post stage is configured to always run at the end of this pipeline,
    * regardless of the completion status. In this stage an email is sent to
    * the specified address with details of the Jenkins job and a PDF report
-   * containing the qualification test results. Any runnning correlator part
+   * containing the qualification test results. Any running CBF part
    * of the Jenkins qualification test that continues to run at this point will be
    * stopped.
    */
@@ -140,9 +140,9 @@ pipeline {
       script {
         ARRAYS = sh(script: 'katcpcmd lab5.sdp.kat.ac.za:5001 product-list', returnStdout: true).trim()
         echo "Currently Running Arrays: ${ARRAYS}"
-        if (ARRAYS.contains("jenkins_qualification_correlator")) {
-          echo "Destroying jenkins_qualification_correlator"
-          sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_correlator 1'
+        if (ARRAYS.contains("jenkins_qualification_cbf")) {
+          echo "Destroying jenkins_qualification_cbf"
+          sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_cbf 1'
         }
       }
     }

@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""A few handy things intended for correlator qualification.
+"""A few handy things intended for CBF qualification.
 
 .. todo::
 
@@ -72,13 +72,13 @@ async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
 
 
 @dataclass
-class CorrelatorRemoteControl:
+class CBFRemoteControl:
     """A container class for katcp clients needed by qualification tests."""
 
     name: str
     product_controller_client: aiokatcp.Client
     dsim_clients: list[aiokatcp.Client]
-    config: dict  # JSON dictionary used to configure the correlator
+    config: dict  # JSON dictionary used to configure the CBF
     mode_config: dict  # Configuration values used for MeerKAT mode string
     sensor_watcher: aiokatcp.SensorWatcher
     uuid: UUID = field(default_factory=uuid4)
@@ -96,13 +96,11 @@ class CorrelatorRemoteControl:
         return self.sensor_watcher.sensors
 
     @classmethod
-    async def connect(
-        cls, name: str, host: str, port: int, config: Mapping, mode_config: dict
-    ) -> "CorrelatorRemoteControl":
-        """Connect to a correlator's product controller.
+    async def connect(cls, name: str, host: str, port: int, config: Mapping, mode_config: dict) -> "CBFRemoteControl":
+        """Connect to a CBF's product controller.
 
         The function connects and gathers sufficient metadata in order for the
-        user to know how to use the correlator for whatever testing needs to be
+        user to know how to use the CBF for whatever testing needs to be
         done.
         """
         pcc = aiokatcp.Client(host, port)
@@ -124,7 +122,7 @@ class CorrelatorRemoteControl:
 
         logger.info("Sensors synchronised; %d dsims found", len(dsim_clients))
 
-        return CorrelatorRemoteControl(
+        return CBFRemoteControl(
             name=name,
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
@@ -187,12 +185,10 @@ class CorrelatorRemoteControl:
 class BaselineCorrelationProductsReceiver:
     """Wrap a receive stream with helper functions."""
 
-    def __init__(
-        self, correlator: CorrelatorRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False
-    ) -> None:
+    def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
         # Some metadata we know already from the config.
-        acv_name = correlator.config["outputs"][stream_name]["src_streams"][0]
-        acv_config = correlator.config["outputs"][acv_name]
+        acv_name = cbf.config["outputs"][stream_name]["src_streams"][0]
+        acv_config = cbf.config["outputs"][acv_name]
         self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
         self.n_chans = acv_config["n_chans"]
@@ -204,23 +200,21 @@ class BaselineCorrelationProductsReceiver:
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
-        self.n_bls = correlator.sensors[f"{stream_name}.n-bls"].value
-        self.n_chans_per_substream = correlator.sensors[f"{stream_name}.n-chans-per-substream"].value
-        self.n_bits_per_sample = correlator.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
-        self.n_spectra_per_acc = correlator.sensors[f"{stream_name}.n-accs"].value
-        self.int_time = correlator.sensors[f"{stream_name}.int-time"].value
-        self.spectra_per_heap = correlator.sensors[f"{acv_name}.spectra-per-heap"].value
-        self.n_samples_between_spectra = correlator.sensors[f"{acv_name}.n-samples-between-spectra"].value
-        self.bls_ordering = ast.literal_eval(correlator.sensors[f"{stream_name}.bls-ordering"].value.decode())
-        self.sync_time = correlator.sensors[f"{acv_name}.sync-time"].value
-        self.scale_factor_timestamp = correlator.sensors[f"{acv_name}.scale-factor-timestamp"].value
-        self.bandwidth = correlator.sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq = correlator.sensors[f"{acv_name}.center-freq"].value
+        self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
+        self.n_chans_per_substream = cbf.sensors[f"{stream_name}.n-chans-per-substream"].value
+        self.n_bits_per_sample = cbf.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc = cbf.sensors[f"{stream_name}.n-accs"].value
+        self.int_time = cbf.sensors[f"{stream_name}.int-time"].value
+        self.spectra_per_heap = cbf.sensors[f"{acv_name}.spectra-per-heap"].value
+        self.n_samples_between_spectra = cbf.sensors[f"{acv_name}.n-samples-between-spectra"].value
+        self.bls_ordering = ast.literal_eval(cbf.sensors[f"{stream_name}.bls-ordering"].value.decode())
+        self.sync_time = cbf.sensors[f"{acv_name}.sync-time"].value
+        self.scale_factor_timestamp = cbf.sensors[f"{acv_name}.scale-factor-timestamp"].value
+        self.bandwidth = cbf.sensors[f"{acv_name}.bandwidth"].value
+        self.center_freq = cbf.sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints = [
             (endpoint.host, endpoint.port)
-            for endpoint in endpoint_list_parser(DEFAULT_PORT)(
-                correlator.sensors[f"{stream_name}.destination"].value.decode()
-            )
+            for endpoint in endpoint_list_parser(DEFAULT_PORT)(cbf.sensors[f"{stream_name}.destination"].value.decode())
         ]
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
@@ -237,7 +231,7 @@ class BaselineCorrelationProductsReceiver:
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
-        self.correlator = correlator
+        self.cbf = cbf
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -277,7 +271,7 @@ class BaselineCorrelationProductsReceiver:
         min_timestamp
             Chunks with a timestamp less than this value are discarded. If the
             default of ``None`` is used, a value is computed via
-            :meth:`CorrelatorRemoteControl.steady_state_timestamp`.
+            :meth:`CBFRemoteControl.steady_state_timestamp`.
         all_timestamps
             If set to true (the default is false), discarded chunks still
             yield a ``(timestamp, None)`` pair.
@@ -286,7 +280,7 @@ class BaselineCorrelationProductsReceiver:
             the calculation of `min_timestamp` when no value is provided.
         """
         if min_timestamp is None:
-            min_timestamp = await self.correlator.steady_state_timestamp(max_delay=max_delay)
+            min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
         data_ringbuffer = self.stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
