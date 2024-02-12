@@ -629,6 +629,9 @@ async def receive_tied_array_channelised_voltage(
         cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
     )
 
-    # TODO: wait for some data first, as in the previous function
+    # Ensure that the data is flowing, and that we throw away any data that
+    # predates the start of this test (to prevent any state leaks from previous
+    # tests).
+    await receiver.next_complete_chunk(max_delay=0)
     yield receiver
     receiver.stream.stop()

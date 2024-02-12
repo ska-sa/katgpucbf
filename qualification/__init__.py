@@ -29,7 +29,7 @@ import math
 import re
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import Callable, Literal, Sequence, overload
+from typing import TYPE_CHECKING, Callable, Literal, Sequence, overload
 from uuid import UUID, uuid4
 
 import aiokatcp
@@ -186,6 +186,10 @@ class CBFRemoteControl:
 class XBReceiver:
     """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
 
+    # Attributes instantiated by the derived classes
+    stream: spead2.recv.ChunkStreamRingGroup
+    timestamp_step: int  # Step (in ADC samples) between chunk timestamps
+
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
         acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
@@ -223,34 +227,6 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
-
-
-class BaselineCorrelationProductsReceiver(XBReceiver):
-    """Wrap a baseline-correlation-products stream with helper functions."""
-
-    def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
-        super().__init__(cbf, [stream_name])
-
-        # Fill in extra sensors specific to baseline-correlation-products
-        self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
-        self.n_bits_per_sample = cbf.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
-        self.n_spectra_per_acc = cbf.sensors[f"{stream_name}.n-accs"].value
-        self.int_time = cbf.sensors[f"{stream_name}.int-time"].value
-        self.bls_ordering = ast.literal_eval(cbf.sensors[f"{stream_name}.bls-ordering"].value.decode())
-        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
-
-        self.stream = create_baseline_correlation_product_receive_stream(
-            interface_address,
-            multicast_endpoints=self.multicast_endpoints[0],
-            n_bls=self.n_bls,
-            n_chans=self.n_chans,
-            n_chans_per_substream=self.n_chans_per_substream,
-            n_bits_per_sample=self.n_bits_per_sample,
-            n_spectra_per_acc=self.n_spectra_per_acc,
-            int_time=self.int_time,
-            n_samples_between_spectra=self.n_samples_between_spectra,
-            use_ibv=use_ibv,
-        )
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -310,7 +286,9 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
             elif not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
-            elif np.any(chunk.data == -(2**31)):
+            elif chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31)):
+                # TODO: need a way to determine missing antennas in
+                # tied-array-channelised-voltage data.
                 logger.debug("Chunk with missing antenna(s)", chunk.chunk_id)
             else:
                 yield timestamp, chunk
@@ -327,7 +305,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
         timeout: float | None = 10.0,
-    ) -> tuple[int, NDArray[np.int32]]:
+    ) -> tuple[int, np.ndarray]:
         """Return the data from the next complete chunk from the stream.
 
         The return value includes the timestamp.
@@ -373,6 +351,45 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
                 if len(chunks) == n:
                     return chunks
         raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
+
+
+class BaselineCorrelationProductsReceiver(XBReceiver):
+    """Wrap a baseline-correlation-products stream with helper functions."""
+
+    def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
+        super().__init__(cbf, [stream_name])
+
+        # Fill in extra sensors specific to baseline-correlation-products
+        self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
+        self.n_bits_per_sample = cbf.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc = cbf.sensors[f"{stream_name}.n-accs"].value
+        self.int_time = cbf.sensors[f"{stream_name}.int-time"].value
+        self.bls_ordering = ast.literal_eval(cbf.sensors[f"{stream_name}.bls-ordering"].value.decode())
+        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
+
+        self.stream = create_baseline_correlation_product_receive_stream(
+            interface_address,
+            multicast_endpoints=self.multicast_endpoints[0],
+            n_bls=self.n_bls,
+            n_chans=self.n_chans,
+            n_chans_per_substream=self.n_chans_per_substream,
+            n_bits_per_sample=self.n_bits_per_sample,
+            n_spectra_per_acc=self.n_spectra_per_acc,
+            int_time=self.int_time,
+            n_samples_between_spectra=self.n_samples_between_spectra,
+            use_ibv=use_ibv,
+        )
+
+    if TYPE_CHECKING:
+        # Just refine the return type, without any run-time implementation
+        async def next_complete_chunk(
+            self,
+            min_timestamp: int | None = None,
+            *,
+            max_delay: int = DEFAULT_MAX_DELAY,
+            timeout: float | None = 10.0,
+        ) -> tuple[int, NDArray[np.int32]]:  # noqa: D102
+            ...
 
 
 class TiedArrayChannelisedVoltageReceiver(XBReceiver):
