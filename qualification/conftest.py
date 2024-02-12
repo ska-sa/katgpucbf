@@ -37,7 +37,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
+from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver, get_sensor_val
 from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
@@ -262,7 +262,7 @@ def pdf_report(request, monkeypatch) -> Reporter:
 
 
 @pytest.fixture(scope="session")
-def host_config_querier(pytestconfig) -> HostConfigQuerier:
+def host_config_querier(pytestconfig: pytest.Config) -> HostConfigQuerier:
     """Querier for getting host config."""
     url = pytestconfig.getini("prometheus_url")
     return HostConfigQuerier(url)
@@ -283,7 +283,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 
 @pytest.fixture(scope="package")
 async def _cbf_config_and_description(
-    pytestconfig,
+    pytestconfig: pytest.Config,
     n_antennas: int,
     n_channels: int,
     n_dsims: int,
@@ -571,26 +571,27 @@ async def cbf(
     # Reset the CBF to default state
     pcc = session_cbf.product_controller_client
     await asyncio.gather(*[client.request("signals", "0;0;") for client in session_cbf.dsim_clients])
+    capture_types = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
     for name, conf in session_cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
             sync_time = session_cbf.sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
-        elif conf["type"] == "gpucbf.baseline_correlation_products":
+        elif conf["type"] in capture_types:
             await pcc.request("capture-start", name)
 
     pdf_report.config(cbf=str(session_cbf.uuid))
     yield session_cbf
 
     for name, conf in session_cbf.config["outputs"].items():
-        if conf["type"] == "gpucbf.baseline_correlation_products":
+        if conf["type"] in capture_types:
             await pcc.request("capture-stop", name)
 
 
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig, cbf: CBFRemoteControl
+    pytestconfig: pytest.Config, cbf: CBFRemoteControl
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -607,5 +608,27 @@ async def receive_baseline_correlation_products(
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
+    yield receiver
+    receiver.stream.stop()
+
+
+@pytest.fixture
+async def receive_tied_array_channelised_voltage(
+    pytestconfig: pytest.Config, cbf: CBFRemoteControl, cbf_config: dict
+) -> AsyncGenerator[TiedArrayChannelisedVoltageReceiver, None]:
+    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
+    interface_address = get_interface_address(pytestconfig.getini("interface"))
+    use_ibv = pytestconfig.getini("use_ibv")
+
+    stream_names = [
+        name
+        for name, config in cbf_config["outputs"].items()
+        if config["type"] == "gpucbf.tied_array_channelised_voltage"
+    ]
+    receiver = TiedArrayChannelisedVoltageReceiver(
+        cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
+    )
+
+    # TODO: wait for some data first, as in the previous function
     yield receiver
     receiver.stream.stop()

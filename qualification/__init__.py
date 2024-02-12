@@ -29,7 +29,7 @@ import math
 import re
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import Callable, Literal, overload
+from typing import Callable, Literal, Sequence, overload
 from uuid import UUID, uuid4
 
 import aiokatcp
@@ -186,9 +186,9 @@ class CBFRemoteControl:
 class XBReceiver:
     """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
 
-    def __init__(self, cbf: CBFRemoteControl, stream_name: str) -> None:
+    def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
-        acv_name = cbf.config["outputs"][stream_name]["src_streams"][0]
+        acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
         acv_config = cbf.config["outputs"][acv_name]
         self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
@@ -201,7 +201,9 @@ class XBReceiver:
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
-        self.n_chans_per_substream = cbf.sensors[f"{stream_name}.n-chans-per-substream"].value
+        #
+        # We assume the streams all have the same information except for addresses.
+        self.n_chans_per_substream = cbf.sensors[f"{stream_names[0]}.n-chans-per-substream"].value
         self.n_spectra_per_heap = cbf.sensors[f"{acv_name}.spectra-per-heap"].value
         self.n_samples_between_spectra = cbf.sensors[f"{acv_name}.n-samples-between-spectra"].value
         self.sync_time = cbf.sensors[f"{acv_name}.sync-time"].value
@@ -209,8 +211,13 @@ class XBReceiver:
         self.bandwidth = cbf.sensors[f"{acv_name}.bandwidth"].value
         self.center_freq = cbf.sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints = [
-            (endpoint.host, endpoint.port)
-            for endpoint in endpoint_list_parser(DEFAULT_PORT)(cbf.sensors[f"{stream_name}.destination"].value.decode())
+            [
+                (endpoint.host, endpoint.port)
+                for endpoint in endpoint_list_parser(DEFAULT_PORT)(
+                    cbf.sensors[f"{stream_name}.destination"].value.decode()
+                )
+            ]
+            for stream_name in stream_names
         ]
 
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
@@ -222,7 +229,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
     """Wrap a baseline-correlation-products stream with helper functions."""
 
     def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
-        super().__init__(cbf, stream_name)
+        super().__init__(cbf, [stream_name])
 
         # Fill in extra sensors specific to baseline-correlation-products
         self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
@@ -234,7 +241,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
 
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
-            multicast_endpoints=self.multicast_endpoints,
+            multicast_endpoints=self.multicast_endpoints[0],
             n_bls=self.n_bls,
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
@@ -371,10 +378,12 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
 class TiedArrayChannelisedVoltageReceiver(XBReceiver):
     """Wrap a tied-array-channelised-voltage stream with helper functions."""
 
-    def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
-        super().__init__(cbf, stream_name)
+    def __init__(
+        self, cbf: CBFRemoteControl, stream_names: Sequence[str], interface_address: str, use_ibv: bool = False
+    ) -> None:
+        super().__init__(cbf, stream_names)
 
-        self.n_bits_per_sample = cbf.sensors[f"{stream_name}.beng-out-bits-per-sample"].value
+        self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
 
         self.stream = create_tied_array_channelised_voltage_receive_stream(
@@ -389,39 +398,39 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
         )
 
 
-def _create_receive_stream(
+def _create_receive_stream_group(
     interface_address: str,
-    multicast_endpoints: list[tuple[str, int]],
+    multicast_endpoints: list[list[tuple[str, int]]],
     use_ibv: bool,
     stream_config: spead2.recv.StreamConfig,
     chunk_stream_config: spead2.recv.ChunkStreamConfig,
-    chunk_factory: Callable[[spead2.recv.ChunkRingStream], katgpucbf.recv.Chunk],
-) -> spead2.recv.ChunkRingStream:
+    chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
+) -> spead2.recv.ChunkStreamRingGroup:
     n_extra_chunks = 2  # Chunks that are being processed
     free_ringbuffer = spead2.recv.ChunkRingbuffer(chunk_stream_config.max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
-    stream = spead2.recv.ChunkRingStream(
-        spead2.ThreadPool(),
-        stream_config,
-        chunk_stream_config,
-        data_ringbuffer,
-        free_ringbuffer,
+    group_config = spead2.recv.ChunkStreamGroupConfig(
+        eviction_mode=spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY,
+        max_chunks=chunk_stream_config.max_chunks,
     )
-
+    group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
     for _ in range(free_ringbuffer.maxsize):
-        chunk = chunk_factory(stream)
+        chunk = chunk_factory(group)
         chunk.recycle()
 
-    if use_ibv:
-        config = spead2.recv.UdpIbvConfig(
-            endpoints=multicast_endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
-        )
-        stream.add_udp_ibv_reader(config)
-    else:
-        for ep in multicast_endpoints:
-            stream.add_udp_reader(*ep, interface_address=interface_address)
+    for i, endpoints in enumerate(multicast_endpoints):
+        stream_config.stream_id = i
+        stream = group.emplace_back(spead2.ThreadPool(), stream_config, chunk_stream_config)
+        if use_ibv:
+            config = spead2.recv.UdpIbvConfig(
+                endpoints=endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
+            )
+            stream.add_udp_ibv_reader(config)
+        else:
+            for ep in endpoints:
+                stream.add_udp_reader(*ep, interface_address=interface_address)
 
-    return stream
+    return group
 
 
 def create_baseline_correlation_product_receive_stream(
@@ -435,7 +444,7 @@ def create_baseline_correlation_product_receive_stream(
     int_time: float,
     n_samples_between_spectra: int,
     use_ibv: bool = False,
-) -> spead2.recv.ChunkRingStream:
+) -> spead2.recv.ChunkStreamRingGroup:
     """Create a spead2 recv stream for ingesting baseline correlation product data."""
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * COMPLEX * n_bits_per_sample // 8  # noqa: N806
@@ -472,9 +481,9 @@ def create_baseline_correlation_product_receive_stream(
         place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
     )
 
-    return _create_receive_stream(
+    return _create_receive_stream_group(
         interface_address,
-        multicast_endpoints,
+        [multicast_endpoints],
         use_ibv,
         stream_config,
         chunk_stream_config,
@@ -488,17 +497,18 @@ def create_baseline_correlation_product_receive_stream(
 
 def create_tied_array_channelised_voltage_receive_stream(
     interface_address: str,
-    multicast_endpoints: list[tuple[str, int]],
+    multicast_endpoints: list[list[tuple[str, int]]],
     n_chans: int,
     n_chans_per_substream: int,
     n_bits_per_sample: int,
     n_spectra_per_heap: int,
     n_samples_between_spectra: int,
     use_ibv: bool = False,
-) -> spead2.recv.ChunkRingStream:
+) -> spead2.recv.ChunkStreamRingGroup:
     """Create a spead2 recv stream for ingesting tied array channelised voltage data."""
     items = [FREQUENCY_ID, TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
     n_substreams = n_chans // n_chans_per_substream
+    n_beams = len(multicast_endpoints)
     expected_payload_size = n_chans_per_substream * n_spectra_per_heap * COMPLEX * n_bits_per_sample // 8
     timestamp_step = n_spectra_per_heap * n_samples_between_spectra
 
@@ -509,16 +519,17 @@ def create_tied_array_channelised_voltage_receive_stream(
         channel_offset = items[0]
         timestamp = items[1]
         payload_size = items[2]
+        beam = data[0].stream_id
         # If the payload size doesn't match, discard the heap (could be descriptors etc).
         if payload_size == expected_payload_size and timestamp >= 0:
             data[0].chunk_id = timestamp // timestamp_step
-            data[0].heap_index = channel_offset // n_chans_per_substream
+            data[0].heap_index = channel_offset // n_chans_per_substream + beam * n_substreams
             data[0].heap_offset = data[0].heap_index * payload_size
 
     stream_config = spead2.recv.StreamConfig(substreams=n_substreams)
 
     # Allow about 1 GiB for resynchronising the B-engines.
-    chunk_size = expected_payload_size * n_substreams
+    chunk_size = expected_payload_size * n_substreams * n_beams
     max_chunks = math.ceil(1024**3 / chunk_size)
     chunk_stream_config = spead2.recv.ChunkStreamConfig(
         items=items,
@@ -526,15 +537,15 @@ def create_tied_array_channelised_voltage_receive_stream(
         place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
     )
 
-    return _create_receive_stream(
+    return _create_receive_stream_group(
         interface_address,
         multicast_endpoints,
         use_ibv,
         stream_config,
         chunk_stream_config,
         lambda stream: katgpucbf.recv.Chunk(
-            present=np.empty(n_substreams, np.uint8),
-            data=np.empty((n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
+            present=np.empty((n_beams, n_substreams), np.uint8),
+            data=np.empty((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
             sink=stream,
         ),
     )
