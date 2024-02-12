@@ -24,6 +24,7 @@
 """
 import ast
 import asyncio
+import ctypes
 import logging
 import math
 import re
@@ -420,24 +421,37 @@ def _create_receive_stream_group(
     multicast_endpoints: list[list[tuple[str, int]]],
     use_ibv: bool,
     stream_config: spead2.recv.StreamConfig,
-    chunk_stream_config: spead2.recv.ChunkStreamConfig,
+    max_chunks: int,
+    chunk_place: Callable,  # Actual type comes from ctypes.CFUNCTYPE, but it doesn't have a static name
     chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
 ) -> spead2.recv.ChunkStreamRingGroup:
     n_extra_chunks = 2  # Chunks that are being processed
-    free_ringbuffer = spead2.recv.ChunkRingbuffer(chunk_stream_config.max_chunks + n_extra_chunks)
+    free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
     group_config = spead2.recv.ChunkStreamGroupConfig(
         eviction_mode=spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY,
-        max_chunks=chunk_stream_config.max_chunks,
+        max_chunks=max_chunks,
     )
     group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
     for _ in range(free_ringbuffer.maxsize):
         chunk = chunk_factory(group)
         chunk.recycle()
 
+    # Needed for placing the individual heaps within the chunk.
+    items = [FREQUENCY_ID, TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
     for i, endpoints in enumerate(multicast_endpoints):
-        stream_config.stream_id = i
+        user_data = np.array([i], np.int64)
+        chunk_stream_config = spead2.recv.ChunkStreamConfig(
+            items=items,
+            max_chunks=max_chunks,
+            place=scipy.LowLevelCallable(
+                chunk_place,
+                signature="void (void *, size_t, void *)",
+                user_data=user_data.ctypes.data_as(ctypes.c_void_p),
+            ),
+        )
         stream = group.emplace_back(spead2.ThreadPool(), stream_config, chunk_stream_config)
+
         if use_ibv:
             config = spead2.recv.UdpIbvConfig(
                 endpoints=endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
@@ -466,15 +480,12 @@ def create_baseline_correlation_product_receive_stream(
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
     HEAP_PAYLOAD_SIZE = n_chans_per_substream * n_bls * COMPLEX * n_bits_per_sample // 8  # noqa: N806
     HEAPS_PER_CHUNK = n_chans // n_chans_per_substream  # noqa: N806
-
-    # Needed for placing the individual heaps within the chunk.
-    items = [FREQUENCY_ID, TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
     timestamp_step = n_samples_between_spectra * n_spectra_per_acc
 
     # Heap placement function. Gets compiled so that spead2's C code can call it.
     # A chunk consists of all channels and all baselines for a single point in time.
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t), nopython=True)
-    def chunk_place(data_ptr, data_size):
+    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)), nopython=True)
+    def chunk_place(data_ptr, data_size, user_data_ptr):
         data = numba.carray(data_ptr, 1)
         items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
         channel_offset = items[0]
@@ -492,18 +503,14 @@ def create_baseline_correlation_product_receive_stream(
     # one extra chunk for luck. May need to revisit that assumption for much
     # larger array sizes.
     max_chunks = max(round(0.5 / int_time), 1) + 1
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=items,
-        max_chunks=max_chunks,
-        place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
-    )
 
     return _create_receive_stream_group(
         interface_address,
         [multicast_endpoints],
         use_ibv,
         stream_config,
-        chunk_stream_config,
+        max_chunks,
+        chunk_place.ctypes,
         lambda stream: katgpucbf.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
             data=np.empty((n_chans, n_bls, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
@@ -523,20 +530,20 @@ def create_tied_array_channelised_voltage_receive_stream(
     use_ibv: bool = False,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a spead2 recv stream for ingesting tied array channelised voltage data."""
-    items = [FREQUENCY_ID, TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
     n_substreams = n_chans // n_chans_per_substream
     n_beams = len(multicast_endpoints)
     expected_payload_size = n_chans_per_substream * n_spectra_per_heap * COMPLEX * n_bits_per_sample // 8
     timestamp_step = n_spectra_per_heap * n_samples_between_spectra
 
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t), nopython=True)
-    def chunk_place(data_ptr, data_size):
+    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)), nopython=True)
+    def chunk_place(data_ptr, data_size, user_data_ptr):
         data = numba.carray(data_ptr, 1)
+        user_data = numba.carray(user_data_ptr, 1)  # Contains the beam index
         items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
         channel_offset = items[0]
         timestamp = items[1]
         payload_size = items[2]
-        beam = data[0].stream_id
+        beam = user_data[0]
         # If the payload size doesn't match, discard the heap (could be descriptors etc).
         if payload_size == expected_payload_size and timestamp >= 0:
             data[0].chunk_id = timestamp // timestamp_step
@@ -548,18 +555,14 @@ def create_tied_array_channelised_voltage_receive_stream(
     # Allow about 1 GiB for resynchronising the B-engines.
     chunk_size = expected_payload_size * n_substreams * n_beams
     max_chunks = math.ceil(1024**3 / chunk_size)
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=items,
-        max_chunks=max_chunks,
-        place=scipy.LowLevelCallable(chunk_place.ctypes, signature="void (void *, size_t)"),
-    )
 
     return _create_receive_stream_group(
         interface_address,
         multicast_endpoints,
         use_ibv,
         stream_config,
-        chunk_stream_config,
+        max_chunks,
+        chunk_place.ctypes,
         lambda stream: katgpucbf.recv.Chunk(
             present=np.empty((n_beams, n_substreams), np.uint8),
             data=np.empty((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
