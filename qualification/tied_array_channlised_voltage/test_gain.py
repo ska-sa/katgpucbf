@@ -28,6 +28,14 @@ async def test_gain(
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
 ) -> None:
+    r"""Test that the ``?beam-quant-gains`` command functions.
+
+    Verification method
+    -------------------
+    Verification by means of test. Set gain factors of :math:`\tfrac14`, 1 and
+    4 on three different beams. Check that the outputs values are in these
+    ratios.
+    """
     receiver = receive_tied_array_channelised_voltage
     _, data = await receiver.next_complete_chunk()
     pass  # TODO: actually test stuff!

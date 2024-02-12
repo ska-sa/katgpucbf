@@ -578,7 +578,8 @@ async def cbf(
             sync_time = session_cbf.sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
-        elif conf["type"] in capture_types:
+        # TODO: reset gains, weights, delays for beam streams
+        if conf["type"] in capture_types:
             await pcc.request("capture-start", name)
 
     pdf_report.config(cbf=str(session_cbf.uuid))
