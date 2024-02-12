@@ -75,14 +75,15 @@ def make_cbf_mode_str(config: dict, *, expand: bool = False) -> str:
         "bandwidth": "856",
         "band": "L",
         "integration_time": "0.5",
-        "dsims": "4"
+        "dsims": "4",
+        "beams": "4",
     }
 
     If `expand` is True, it will return a 'long description' as a sentence:
-    - 4 antennas, 8192 channels, L-band, 0.5s integrations, 4 dsims
+    - 4 antennas, 8192 channels, 4 beams, L-band, 0.5s integrations, 4 dsims
 
     If `expand` is False, it will return a MeerKAT config mode string of:
-    - 8n856M8k
+    - c8n856M8k
 
     Parameters
     ----------
@@ -103,6 +104,7 @@ def make_cbf_mode_str(config: dict, *, expand: bool = False) -> str:
         parts = [
             f'{config["antennas"]} antennas',
             f'{config["channels"]} channels',
+            f'{config["beams"]} beams',
             f'{config["band"]}-band',
             f'{config["integration_time"]}s integrations',
             f'{config["dsims"]} dsims',
@@ -113,7 +115,8 @@ def make_cbf_mode_str(config: dict, *, expand: bool = False) -> str:
     else:
         antpols = int(config["antennas"]) * 2
         chans = int(config["channels"]) // 1000
-        config_mode = f'{antpols}n{config["bandwidth"]}M{chans}k'
+        mode = "bc" if int(config["beams"]) > 0 else "c"
+        config_mode = f'{mode}{antpols}n{config["bandwidth"]}M{chans}k'
 
     return config_mode
 
@@ -125,6 +128,7 @@ def cbf_sort_key(config: dict) -> tuple:
         float(config["bandwidth"]),
         int(config["channels"]),
         int(config["antennas"]),
+        int(config["beams"]),
         float(config["integration_time"]),
         int(config["dsims"]),
     )
@@ -464,7 +468,9 @@ def _parse_task(msg: dict) -> Task:
 
 def _parse_cbf_configuration(msg: dict) -> CBFConfiguration:
     tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
-    return CBFConfiguration(mode_config=msg["mode_config"], uuid=UUID(msg["uuid"]), tasks=tasks)
+    mode_config = msg["mode_config"].copy()
+    mode_config.setdefault("beams", "0")  # For backwards compatibility with old inputs
+    return CBFConfiguration(mode_config=mode_config, uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
 def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:

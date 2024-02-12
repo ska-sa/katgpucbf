@@ -292,7 +292,7 @@ async def _cbf_config_and_description(
     narrowband_decimation: int,
 ) -> tuple[dict, dict]:
     config: dict = {
-        "version": "3.4",
+        "version": "3.5",
         "config": {},
         "inputs": {},
         "outputs": {},
@@ -355,6 +355,15 @@ async def _cbf_config_and_description(
         "int_time": int_time,
     }
 
+    n_beams = 4
+    for beam in range(n_beams):
+        for pol_idx, pol in enumerate("xy"):
+            config["outputs"][f"tied-array-channelised-voltage-{beam}{pol}"] = {
+                "type": "gpucbf.tied_array_channelised_voltage",
+                "src_streams": ["antenna-channelised-voltage"],
+                "src_pol": pol_idx,
+            }
+
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
     # CBF description in the final report.
@@ -367,9 +376,10 @@ async def _cbf_config_and_description(
         "integration_time": str(int_time),
         "narrowband_decimation": str(narrowband_decimation),
         "dsims": str(n_dsims),
+        "beams": str(n_beams),
     }
     long_description = (
-        f"{n_antennas} antennas, {n_channels} channels, "
+        f"{n_antennas} antennas, {n_channels} channels, {n_beams} beams, "
         f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
     )
     if narrowband_decimation > 1:
