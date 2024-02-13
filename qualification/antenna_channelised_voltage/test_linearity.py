@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,13 +18,13 @@
 import numpy as np
 from matplotlib.figure import Figure
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
 from . import compute_tone_gain, sample_tone_response
 
 
 async def test_linearity(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -53,7 +53,7 @@ async def test_linearity(
     gain = compute_tone_gain(receiver=receiver, amplitude=max(cw_scales), target_voltage=110)
 
     pdf_report.detail(f"Setting gain to: {gain}")
-    await correlator.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
+    await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
     base_corr_prod = await sample_tone_response(
         rel_freqs=sel_chan_center,

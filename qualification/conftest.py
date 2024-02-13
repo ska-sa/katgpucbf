@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Fixtures and options for qualification testing of the correlator."""
+"""Fixtures and options for qualification testing of the CBF."""
 
 import asyncio
 import copy
@@ -37,7 +37,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
+from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
 from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
@@ -61,7 +61,7 @@ ini_options = [
     ),
     IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
-    IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_correlator"),
+    IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
     IniOption(
@@ -282,7 +282,7 @@ def matplotlib_report_style() -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="package")
-async def _correlator_config_and_description(
+async def _cbf_config_and_description(
     pytestconfig,
     n_antennas: int,
     n_channels: int,
@@ -356,10 +356,10 @@ async def _correlator_config_and_description(
     }
 
     # The first three key/values are used for the traditional MeerKAT
-    # correlator mode string, while the rest are used for a more complete
-    # correlator description in the final report.
+    # CBF mode string, while the rest are used for a more complete
+    # CBF description in the final report.
     # TODO: Update the key to be the actual parameter/fixture name
-    correlator_mode_config: dict[str, str] = {
+    cbf_mode_config: dict[str, str] = {
         "antennas": str(n_antennas),
         "channels": str(n_channels),
         "bandwidth": f"{round(adc_sample_rate / 1e6 / 2 / narrowband_decimation)}",
@@ -374,21 +374,21 @@ async def _correlator_config_and_description(
     )
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
-    logger.info("Config for correlator generation: %s.", long_description)
+    logger.info("Config for CBF generation: %s.", long_description)
 
-    return config, correlator_mode_config
+    return config, cbf_mode_config
 
 
 @pytest.fixture(scope="package")
-async def correlator_config(_correlator_config_and_description: tuple[dict, str, str]) -> dict:
+async def cbf_config(_cbf_config_and_description: tuple[dict, str, str]) -> dict:
     """Produce the configuration dict from the given parameters."""
-    return _correlator_config_and_description[0]
+    return _cbf_config_and_description[0]
 
 
 @pytest.fixture(scope="package")
-async def correlator_mode_config(_correlator_config_and_description: tuple[dict, str, str]) -> str:
-    """Produce a dictionary describing the correlator config."""
-    return _correlator_config_and_description[1]
+async def cbf_mode_config(_cbf_config_and_description: tuple[dict, str, str]) -> str:
+    """Produce a dictionary describing the CBF config."""
+    return _cbf_config_and_description[1]
 
 
 async def _get_git_version_conn(conn: aiokatcp.Client) -> str:
@@ -406,10 +406,10 @@ async def _get_git_version(host: str, port: int) -> str:
         return await _get_git_version_conn(conn)
 
 
-async def _report_correlator_config(
+async def _report_cbf_config(
     pytestconfig: pytest.Config,
     host_config_querier: HostConfigQuerier,
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     master_controller_client: aiokatcp.Client,
 ) -> None:
     async def get_task_details_multi(suffix: str, type: type[_T]) -> dict[str, dict[tuple[str, ...], _T]]:
@@ -421,7 +421,7 @@ async def _report_correlator_config(
         """
         regex = rf"^(.*)\.{suffix}$"
         r = re.compile(regex)
-        _, informs = await correlator.product_controller_client.request("sensor-value", f"/{regex}/")
+        _, informs = await cbf.product_controller_client.request("sensor-value", f"/{regex}/")
         result: dict[str, dict[tuple[str, ...], _T]] = {}
         for inform in informs:
             if inform.arguments[3] == b"nominal":
@@ -457,10 +457,10 @@ async def _report_correlator_config(
             "git_version": await git_version_futures[task_name],
         }
     tasks["product_controller"] = {
-        "host": await get_sensor_val(master_controller_client, f"{correlator.name}.host"),
+        "host": await get_sensor_val(master_controller_client, f"{cbf.name}.host"),
         "interfaces": {},
-        "version": await get_sensor_val(master_controller_client, f"{correlator.name}.version"),
-        "git_version": await _get_git_version_conn(correlator.product_controller_client),
+        "version": await get_sensor_val(master_controller_client, f"{cbf.name}.version"),
+        "git_version": await _get_git_version_conn(cbf.product_controller_client),
     }
 
     for task in tasks.values():
@@ -474,9 +474,9 @@ async def _report_correlator_config(
     custom_report_log(
         pytestconfig,
         {
-            "$report_type": "CorrelatorConfiguration",
-            "mode_config": correlator.mode_config,
-            "uuid": str(correlator.uuid),
+            "$report_type": "CBFConfiguration",
+            "mode_config": cbf.mode_config,
+            "uuid": str(cbf.uuid),
             "tasks": tasks,
         },
     )
@@ -498,50 +498,48 @@ async def master_controller_client(pytestconfig: pytest.Config) -> AsyncGenerato
 
 
 @pytest.fixture(scope="package")
-async def session_correlator(
+async def session_cbf(
     pytestconfig: pytest.Config,
     host_config_querier: HostConfigQuerier,
     master_controller_client: aiokatcp.Client,
-    correlator_config: dict,
-    correlator_mode_config: dict,
-) -> AsyncGenerator[CorrelatorRemoteControl, None]:
-    """Start a correlator using the SDP master controller.
+    cbf_config: dict,
+    cbf_mode_config: dict,
+) -> AsyncGenerator[CBFRemoteControl, None]:
+    """Start a CBF using the master controller.
 
-    Shut the correlator down afterwards also.
+    Shut the CBF down afterwards also.
 
-    Generally this fixture should not be used directly. Use :meth:`correlator`
-    instead, which will reuse the same correlator across multiple tests.
+    Generally this fixture should not be used directly. Use :meth:`cbf`
+    instead, which will reuse the same CBF across multiple tests.
     """
     product_name = pytestconfig.getini("product_name")
     try:
-        reply, _ = await master_controller_client.request(
-            "product-configure", product_name, json.dumps(correlator_config)
-        )
+        reply, _ = await master_controller_client.request("product-configure", product_name, json.dumps(cbf_config))
 
     except aiokatcp.FailReply:
-        logger.exception("Something went wrong with starting the correlator!")
+        logger.exception("Something went wrong with starting the CBF!")
         raise
 
     product_controller_host = aiokatcp.decode(str, reply[1])
     product_controller_port = aiokatcp.decode(int, reply[2])
     logger.info(
-        "Correlator created, connecting to product controller at %s:%d",
+        "CBF created, connecting to product controller at %s:%d",
         product_controller_host,
         product_controller_port,
     )
     try:
-        remote_control = await CorrelatorRemoteControl.connect(
+        remote_control = await CBFRemoteControl.connect(
             product_name,
             product_controller_host,
             product_controller_port,
-            correlator_config,
-            correlator_mode_config,
+            cbf_config,
+            cbf_mode_config,
         )
-        await _report_correlator_config(pytestconfig, host_config_querier, remote_control, master_controller_client)
+        await _report_cbf_config(pytestconfig, host_config_querier, remote_control, master_controller_client)
 
         yield remote_control
 
-        logger.info("Tearing down correlator.")
+        logger.info("Tearing down CBF.")
         await remote_control.close()
 
     finally:
@@ -551,38 +549,38 @@ async def session_correlator(
 
 
 @pytest.fixture
-async def correlator(
-    session_correlator: CorrelatorRemoteControl,
+async def cbf(
+    session_cbf: CBFRemoteControl,
     pdf_report: Reporter,
-) -> AsyncGenerator[CorrelatorRemoteControl, None]:
-    """Set up a correlator for a single test.
+) -> AsyncGenerator[CBFRemoteControl, None]:
+    """Set up a CBF for a single test.
 
-    The returned correlator might not be specific to this test, but it will have
+    The returned CBF might not be specific to this test, but it will have
     been reset to a default state, with the dsim outputting zeros.
     """
-    # Reset the correlator to default state
-    pcc = session_correlator.product_controller_client
-    await asyncio.gather(*[client.request("signals", "0;0;") for client in session_correlator.dsim_clients])
-    for name, conf in session_correlator.config["outputs"].items():
+    # Reset the CBF to default state
+    pcc = session_cbf.product_controller_client
+    await asyncio.gather(*[client.request("signals", "0;0;") for client in session_cbf.dsim_clients])
+    for name, conf in session_cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
-            sync_time = session_correlator.sensors[f"{name}.sync-time"].value
+            sync_time = session_cbf.sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.baseline_correlation_products":
             await pcc.request("capture-start", name)
 
-    pdf_report.config(correlator=str(session_correlator.uuid))
-    yield session_correlator
+    pdf_report.config(cbf=str(session_cbf.uuid))
+    yield session_cbf
 
-    for name, conf in session_correlator.config["outputs"].items():
+    for name, conf in session_cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.baseline_correlation_products":
             await pcc.request("capture-stop", name)
 
 
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig, correlator: CorrelatorRemoteControl
+    pytestconfig, cbf: CBFRemoteControl
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -590,7 +588,7 @@ async def receive_baseline_correlation_products(
     use_ibv = pytestconfig.getini("use_ibv")
 
     receiver = BaselineCorrelationProductsReceiver(
-        correlator=correlator,
+        cbf=cbf,
         stream_name="baseline-correlation-products",
         interface_address=interface_address,
         use_ibv=use_ibv,

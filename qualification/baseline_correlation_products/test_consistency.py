@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022, 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,12 +19,12 @@
 import matplotlib.figure
 import numpy as np
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl, get_sensor_val
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
 from ..reporter import POTLocator, Reporter
 
 
 async def test_consistency(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -41,10 +41,10 @@ async def test_consistency(
 
     pdf_report.step("Configure the D-sim with Gaussian noise.")
     amplitude = 0.2
-    max_period = await get_sensor_val(correlator.dsim_clients[0], "max-period")
+    max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
     period = receiver.n_samples_between_spectra * receiver.spectra_per_heap
     period = min(period, max_period)
-    await correlator.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;", period)
+    await cbf.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;", period)
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}, period {period} on both pols.")
 
     pdf_report.step("Collect two accumulations of data.")

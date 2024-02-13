@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,7 +22,7 @@ from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
 from . import sample_tone_response_hdr
 
@@ -58,7 +58,7 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
 
 @pytest.mark.requirements("CBF-REQ-0126")
 async def test_channel_shape(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -90,7 +90,7 @@ async def test_channel_shape(
         rel_freq = base_channel - np.asarray(offsets)
         pdf_report.detail(f"Collect power measurements ({resolution} per channel).")
         hdr_data = await sample_tone_response_hdr(
-            correlator=correlator,
+            cbf=cbf,
             receiver=receiver,
             pdf_report=pdf_report,
             amplitude=amplitude,

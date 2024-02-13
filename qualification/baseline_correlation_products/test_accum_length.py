@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -20,14 +20,14 @@ import numpy as np
 import pytest
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CorrelatorRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0096")
 @pytest.mark.xfail(reason="requirement needs to be updated")
 async def test_accum_length(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -48,7 +48,7 @@ async def test_accum_length(
 
 @pytest.mark.requirements("CBF-REQ-0096")
 async def test_accum_power(
-    correlator: CorrelatorRemoteControl,
+    cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
@@ -64,7 +64,7 @@ async def test_accum_power(
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
-    await correlator.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
+    await cbf.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
 
     pdf_report.step("Collect two dumps and check the timestamp difference.")
     chunks = await receiver.consecutive_chunks(2)
