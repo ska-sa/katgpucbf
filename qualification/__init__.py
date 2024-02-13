@@ -425,6 +425,33 @@ def _create_receive_stream_group(
     chunk_place: Callable,  # Actual type comes from ctypes.CFUNCTYPE, but it doesn't have a static name
     chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
 ) -> spead2.recv.ChunkStreamRingGroup:
+    """Create a stream group to receive data from an engine.
+
+    Parameters
+    ----------
+    interface_address
+        IP address of receiving interface
+    multicast_endpoints
+        List of list of (group, port) pairs. Each list corresponds to a single
+        stream.
+    use_ibv
+        If true, use ibverbs.
+    stream_config
+        Configuration for individual streams. It *must* have `explicit_start` set
+        to true.
+    max_chunks
+        Maximum number of chunks to have under construction at once. Some
+        additional chunks are allocated to account for those in the data ringbuffer
+        or being processed.
+    chunk_place
+        Chunk placement callback (compatible with
+        :class:`scipy.LowLevelCallable`). It will receive the `frequency`,
+        `timestamp` and heap length items. It must also accept a user data
+        pointer, which will point to the stream index (indexing into
+        `multicast_endpoints`) as an int64.
+    chunk_factory
+        Factory function to initialise the chunks.
+    """
     n_extra_chunks = 2  # Chunks that are being processed
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
@@ -461,6 +488,8 @@ def _create_receive_stream_group(
             for ep in endpoints:
                 stream.add_udp_reader(*ep, interface_address=interface_address)
 
+    for stream in group:
+        stream.start()
     return group
 
 
@@ -498,6 +527,8 @@ def create_baseline_correlation_product_receive_stream(
             data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
 
     stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK)
+    # Assigned as attribute instead of construct kwarg due to bug in spead2's annotations
+    stream_config.explicit_start = True
 
     # Assuming X-engines are at most 500ms out of sync with each other, with
     # one extra chunk for luck. May need to revisit that assumption for much
@@ -551,6 +582,8 @@ def create_tied_array_channelised_voltage_receive_stream(
             data[0].heap_offset = data[0].heap_index * payload_size
 
     stream_config = spead2.recv.StreamConfig(substreams=n_substreams)
+    # Assigned as attribute instead of construct kwarg due to bug in spead2's annotations
+    stream_config.explicit_start = True
 
     # Allow about 1 GiB for resynchronising the B-engines.
     chunk_size = expected_payload_size * n_substreams * n_beams
