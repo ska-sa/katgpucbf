@@ -319,7 +319,7 @@ six==1.16.0
     #   -c qualification/../requirements.txt
     #   katsdptelstate
     #   python-dateutil
-spead2==4.1.1
+spead2==4.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt

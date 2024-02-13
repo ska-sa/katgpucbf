@@ -63,7 +63,7 @@ repos:
             'pyparsing==3.0.9',
             'pytest==7.4.3',
             'redis==5.0.1',  # Indirect dependency of katsdptelstate
-            'spead2==4.1.1',
+            'spead2==4.3.0',
             'types-decorator==5.1.1',
             # Note: actual docutils version is 0.20.1, but types-docutils
             # doesn't have a release for that yet.
