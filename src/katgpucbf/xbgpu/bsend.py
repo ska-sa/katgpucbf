@@ -177,7 +177,7 @@ class Chunk:
         if n_enabled > 0:
             send_futures = []
             for frame in self._frames:
-                # TODO: building this list every time may be too expensive.
+                # TODO (NGC-1232): building this list every time may be too expensive.
                 # Consider caching it and invalidating when streams are enabled/disabled.
                 heaps_to_send = [
                     spead2.send.HeapReference(heap, substream_index=i, rate=rate)
