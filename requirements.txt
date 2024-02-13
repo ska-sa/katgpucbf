@@ -133,7 +133,7 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==4.1.1
+spead2==4.3.1
     # via katgpucbf (setup.cfg)
 terminaltables==3.1.10
     # via aiomonitor

@@ -526,9 +526,7 @@ def create_baseline_correlation_product_receive_stream(
             data[0].heap_index = channel_offset // n_chans_per_substream
             data[0].heap_offset = data[0].heap_index * HEAP_PAYLOAD_SIZE
 
-    stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK)
-    # Assigned as attribute instead of construct kwarg due to bug in spead2's annotations
-    stream_config.explicit_start = True
+    stream_config = spead2.recv.StreamConfig(substreams=HEAPS_PER_CHUNK, explicit_start=True)
 
     # Assuming X-engines are at most 500ms out of sync with each other, with
     # one extra chunk for luck. May need to revisit that assumption for much
@@ -581,9 +579,7 @@ def create_tied_array_channelised_voltage_receive_stream(
             data[0].heap_index = channel_offset // n_chans_per_substream + beam * n_substreams
             data[0].heap_offset = data[0].heap_index * payload_size
 
-    stream_config = spead2.recv.StreamConfig(substreams=n_substreams)
-    # Assigned as attribute instead of construct kwarg due to bug in spead2's annotations
-    stream_config.explicit_start = True
+    stream_config = spead2.recv.StreamConfig(substreams=n_substreams, explicit_start=True)
 
     # Allow about 1 GiB for resynchronising the B-engines.
     chunk_size = expected_payload_size * n_substreams * n_beams
