@@ -290,7 +290,7 @@ class XBReceiver:
             elif chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31)):
                 # TODO: need a way to determine missing antennas in
                 # tied-array-channelised-voltage data.
-                logger.debug("Chunk with missing antenna(s)", chunk.chunk_id)
+                logger.debug("Chunk with missing antenna(s) (%d)", chunk.chunk_id)
             else:
                 yield timestamp, chunk
                 continue
