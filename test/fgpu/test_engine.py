@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -1050,7 +1050,7 @@ class TestEngine:
         )
 
     def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, output: Output, *request) -> list[int]:
-        """Patch Pipeline._fill_in` to make a request partway through the stream.
+        """Patch :meth:`~.Pipeline._fill_in` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
