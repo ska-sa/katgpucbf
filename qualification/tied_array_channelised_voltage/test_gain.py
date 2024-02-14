@@ -26,7 +26,6 @@ from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0117")
-@pytest.mark.xfail(reason="Gain control isn't implemented yet (NGC-446)")
 async def test_gain(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
