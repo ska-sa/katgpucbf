@@ -21,13 +21,6 @@ The XBEngine comprises multiple Pipeline objects that facilitate output data
 products. Additionally, the RxQueueItem and TxQueueItem objects, used in the
 XBEngine for passing information between different async processing loops,
 are defined here.
-
-.. todo::
-
-    - The B-Engine logic has not been implemented yet - this needs to be added
-      eventually. It is expected that this logic will need to go in the
-      _gpu_proc_loop for the B-Engine processing and then a seperate sender
-      loop would need to be created for sending B-Engine data.
 """
 
 import asyncio
