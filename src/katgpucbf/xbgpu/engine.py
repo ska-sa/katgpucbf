@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -57,7 +57,7 @@ from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors
+from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .beamform import BeamformTemplate
 from .bsend import BSend
@@ -326,6 +326,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         self._delays = np.zeros((len(outputs), engine.n_ants, 2), np.float64)
         self._quant_gains = np.ones(len(outputs), np.float64)
         self._weights_version = 1
+        # Timestamp which will include effect of a weights update made now
+        self._weights_steady = 0
 
         self.send_stream = BSend(
             outputs=outputs,
@@ -380,12 +382,19 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 )
             )
 
+    async def _get_rx_item(self) -> RxQueueItem | None:
+        """Get the next :class:`RxQueueItem`.
+
+        This is wrapped in a method so that it can be mocked.
+        """
+        return await self._rx_item_queue.get()
+
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:
             # Get item from the receiver loop.
             # - Wait for the HtoD transfers to complete, then
             # - Give the chunk back to the receiver for reuse.
-            rx_item = await self._rx_item_queue.get()
+            rx_item = await self._get_rx_item()
             if rx_item is None:
                 break
             await rx_item.async_wait_for_events()
@@ -393,6 +402,12 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             tx_item = await self._tx_free_item_queue.get()
             await tx_item.async_wait_for_events()
             tx_item.reset(rx_item.timestamp)
+
+            # After this point it's too late for set_weights etc to update
+            # the weights for this timestamp.
+            self._weights_steady = (
+                rx_item.timestamp + self.engine.heaps_per_fengine_per_chunk * self.engine.rx_heap_timestamp_step
+            )
 
             # Recompute the weights and delays if necessary
             if tx_item.weights_version != self._weights_version:
@@ -470,6 +485,11 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
     def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
         self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
 
+    def _weights_updated(self) -> None:
+        """Update version tracking when weight-related parameters are updated."""
+        self._weights_version += 1
+        self.engine.update_steady_state_timestamp(self._weights_steady)
+
     def set_weights(self, stream_id: int, weights: np.ndarray) -> None:
         """Set the beam weights for one beam.
 
@@ -481,7 +501,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             A 1D array containing real-valued weights (per input).
         """
         self._weights[stream_id] = weights
-        self._weights_version += 1
+        self._weights_updated()
 
     def set_quant_gain(self, stream_id: int, gain: float) -> None:
         """Set the quantisation gain for one beam.
@@ -494,7 +514,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             Real-valued quantisation gain.
         """
         self._quant_gains[stream_id] = gain
-        self._weights_version += 1
+        self._weights_updated()
 
     def set_delays(self, stream_id: int, delays: np.ndarray) -> None:
         """Set the beam steering delays for one beam.
@@ -510,7 +530,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             channel-independent phase rotation in radians.
         """
         self._delays[stream_id] = delays
-        self._weights_version += 1
+        self._weights_updated()
 
 
 class XPipeline(Pipeline[XOutput, XTxQueueItem]):
@@ -1109,7 +1129,7 @@ class XBEngine(DeviceServer):
         # Dynamic sensors
         for sensor in recv.make_sensors(rx_sensor_timeout).values():
             sensors.add(sensor)
-
+        sensors.add(steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
 
         time_sync_task = add_time_sync_sensors(sensors)
@@ -1134,6 +1154,11 @@ class XBEngine(DeviceServer):
         item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
             pipeline.add_rx_item(item)
+
+    def update_steady_state_timestamp(self, timestamp: int) -> None:
+        """Update ``steady-state-timestamp`` sensor to at least `timestamp`."""
+        sensor = self.sensors["steady-state-timestamp"]
+        sensor.value = max(sensor.value, timestamp)
 
     async def _receiver_loop(self) -> None:
         """
