@@ -86,7 +86,8 @@ pipeline {
          sh '''
            spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification\
            --suppress-tests-failed-exit-code \
-           --image-override katgpucbf:${katgpucbf_image:-harbor.sdp.kat.ac.za/cbf/katgpucbf:latest} \
+           --image-override katgpucbf:${katgpucbf_image} \
+           --image-override katsdpcontroller:${katsdpcontroller_image} \
            --junitxml=result.xml
          '''
        }
