@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -48,8 +48,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
         "--last-stage",
-        choices=["d", "f", "x", "ingest"],
-        default="x",
+        choices=["d", "f", "xb", "ingest"],
+        default="xb",
         help="Do not run any stages past the given one [%(default)s]",
     )
     parser.add_argument(
@@ -61,6 +61,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--band", default="l", choices=BANDS.keys(), help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
+    parser.add_argument("--beams", type=int, default=0, help="Number of dual-polarisation wideband beams [%(default)s]")
     parser.add_argument("--narrowband", action="store_true", help="Enable a narrowband output [no]")
     parser.add_argument(
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
@@ -68,6 +69,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
     parser.add_argument(
         "--narrowband-centre-frequency", type=float, help="Narrow baseband centre frequency [centre of wideband]"
+    )
+    parser.add_argument(
+        "--narrowband-beams", type=int, default=0, help="Number of dual-polarisation narrowband beams [%(default)s]"
     )
     parser.add_argument("--image-tag", help="Docker image tag (for all images)")
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
@@ -92,29 +96,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def generate_config(args: argparse.Namespace) -> dict:
-    """Produce the configuration dict from the parsed command-line arguments."""
-    config: dict = {
-        "version": "3.4",
-        "config": {},
-        "inputs": {},
-        "outputs": {},
-    }
-    if args.image_tag is not None:
-        config["config"]["image_tag"] = args.image_tag
-    if args.image_override is not None:
-        image_overrides = {}
-        for override in args.image_override:
-            name, image = override.split(":", 1)
-            image_overrides[name] = image
-        config["config"]["image_overrides"] = image_overrides
-    if args.develop is not None:
-        if args.develop is True or args.develop == "":
-            # Use passed --develop with no argument or --develop= with empty argument
-            config["config"]["develop"] = True
-        else:
-            # User passed a comma-separated list of options
-            config["config"]["develop"] = {key: True for key in args.develop.split(",")}
+def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
+    """Populate configuration for digitisers.
+
+    Returns
+    -------
+    dig_names
+        Names of the digitiser streams
+    """
     next_dig_ip = args.digitiser_address
     dig_names = []
     for ant_index in range(args.digitisers):
@@ -140,10 +129,12 @@ def generate_config(args: argparse.Namespace) -> dict:
                     "url": f"spead://{next_dig_ip}+7:7148",
                 }
                 next_dig_ip += 8
-    if args.last_stage == "d":
-        return config
+    return dig_names
 
-    config["outputs"]["antenna-channelised-voltage"] = {
+
+def generate_antenna_channelised_voltage(args: argparse.Namespace, outputs: dict, dig_names: list[str]) -> None:
+    """Populate configuration for antenna-channelised-voltage streams."""
+    outputs["antenna-channelised-voltage"] = {
         "type": "gpucbf.antenna_channelised_voltage",
         # Cycle through digitisers as necessary
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * args.antennas)],
@@ -151,31 +142,51 @@ def generate_config(args: argparse.Namespace) -> dict:
         "n_chans": args.channels,
     }
     if args.narrowband:
-        config["outputs"]["narrow0-antenna-channelised-voltage"] = {
-            **config["outputs"]["antenna-channelised-voltage"],  # Copy from wideband
+        outputs["narrow0-antenna-channelised-voltage"] = {
+            **outputs["antenna-channelised-voltage"],  # Copy from wideband
             "n_chans": args.narrowband_channels,
             "narrowband": {
                 "decimation_factor": args.narrowband_decimation,
                 "centre_frequency": args.narrowband_centre_frequency,
             },
         }
-    if args.last_stage == "f":
-        return config
 
-    config["outputs"]["baseline-correlation-products"] = {
+
+def generate_baseline_correlation_products(args: argparse.Namespace, outputs: dict) -> None:
+    """Populate configuration for baseline-correlation-products streams."""
+    outputs["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
         "src_streams": ["antenna-channelised-voltage"],
         "int_time": args.int_time,
     }
     if args.narrowband:
-        config["outputs"]["narrow0-baseline-correlation-products"] = {
-            **config["outputs"]["baseline-correlation-products"],  # Copy from wideband
+        outputs["narrow0-baseline-correlation-products"] = {
+            **outputs["baseline-correlation-products"],  # Copy from wideband
             "src_streams": ["narrow0-antenna-channelised-voltage"],
         }
-    if args.last_stage == "x":
-        return config
 
-    config["outputs"]["sdp_l0"] = {
+
+def generate_tied_array_channelised_voltage(args: argparse.Namespace, outputs: dict) -> None:
+    """Populate configuration for tied-array-channelised-voltage streams."""
+    for i in range(args.beams):
+        for pol_idx, pol_name in enumerate("xy"):
+            outputs[f"tied-array-channelised-voltage-{i}{pol_name}"] = {
+                "type": "gpucbf.tied_array_channelised_voltage",
+                "src_streams": ["antenna-channelised-voltage"],
+                "src_pol": pol_idx,
+            }
+    if args.narrowband:
+        for i in range(args.narrowband_beams):
+            for pol_idx, pol_name in enumerate("xy"):
+                outputs[f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"] = {
+                    "type": "gpucbf.tied_array_channelised_voltage",
+                    "src_streams": ["narrow0-antenna-channelised-voltage"],
+                    "src_pol": pol_idx,
+                }
+
+
+def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
+    outputs["sdp_l0"] = {
         "type": "sdp.vis",
         "src_streams": ["baseline-correlation-products"],
         "output_int_time": args.int_time,
@@ -184,10 +195,50 @@ def generate_config(args: argparse.Namespace) -> dict:
         "continuum_factor": 1,
     }
     if args.narrowband:
-        config["outputs"]["sdp_l0_narrow0"] = {
-            **config["outputs"]["sdp_l0"],  # Copy from wideband
+        outputs["sdp_l0_narrow0"] = {
+            **outputs["sdp_l0"],  # Copy from wideband
             "src_streams": ["narrow0-baseline-correlation-products"],
         }
+
+
+def generate_config(args: argparse.Namespace) -> dict:
+    """Produce the configuration dict from the parsed command-line arguments."""
+    config: dict = {
+        "version": "3.5",
+        "config": {},
+        "inputs": {},
+        "outputs": {},
+    }
+    if args.image_tag is not None:
+        config["config"]["image_tag"] = args.image_tag
+    if args.image_override is not None:
+        image_overrides = {}
+        for override in args.image_override:
+            name, image = override.split(":", 1)
+            image_overrides[name] = image
+        config["config"]["image_overrides"] = image_overrides
+    if args.develop is not None:
+        if args.develop is True or args.develop == "":
+            # Use passed --develop with no argument or --develop= with empty argument
+            config["config"]["develop"] = True
+        else:
+            # User passed a comma-separated list of options
+            config["config"]["develop"] = {key: True for key in args.develop.split(",")}
+
+    dig_names = generate_digitisers(args, config)
+    if args.last_stage == "d":
+        return config
+
+    generate_antenna_channelised_voltage(args, config["outputs"], dig_names)
+    if args.last_stage == "f":
+        return config
+
+    generate_baseline_correlation_products(args, config["outputs"])
+    generate_tied_array_channelised_voltage(args, config["outputs"])
+    if args.last_stage == "xb":
+        return config
+
+    generate_sdp(args, config["outputs"])
 
     return config
 
@@ -210,7 +261,7 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
         for output_name, output in config["outputs"].items():
-            if output["type"] == "gpucbf.baseline_correlation_products":
+            if output["type"] in {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}:
                 print(f"Enabling {output_name} transmission...")
                 await product_client.request("capture-start", output_name)
     except (aiokatcp.FailReply, ConnectionError) as exc:

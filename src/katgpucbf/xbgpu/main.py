@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -33,6 +33,7 @@ import argparse
 import asyncio
 import gc
 import logging
+import os
 from collections.abc import Callable, Sequence
 from typing import TypedDict, TypeVar
 
@@ -445,6 +446,10 @@ async def async_main(args: argparse.Namespace) -> None:
 
         add_signal_handlers(xbengine)
         add_gc_stats()
+        # katsdpcontroller launches us with real-time scheduling, but we don't
+        # want that for the main Python thread since it can starve the
+        # latency-sensitive network threads.
+        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
 
         await xbengine.start()
         # Avoid garbage collections needing to iterate over all the objects
