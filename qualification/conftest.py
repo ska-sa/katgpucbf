@@ -60,6 +60,9 @@ ini_options = [
         name="prometheus_url", help="URL to Prometheus server for querying hardware configuration", type="string"
     ),
     IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
+    IniOption(
+        name="interface_gbps", help="Maximum bandwidth to subscribe to on 'interface'", type="string", default="90"
+    ),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
@@ -627,6 +630,7 @@ async def receive_tied_array_channelised_voltage(
     """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     use_ibv = pytestconfig.getini("use_ibv")
+    interface_gbps = float(pytestconfig.getini("interface_gbps"))
 
     stream_names = [
         name
@@ -637,7 +641,7 @@ async def receive_tied_array_channelised_voltage(
     # Subscribe to only as many beams as can reliably be squeezed through a
     # 100 Gb/s adapter.
     n_bls = n_antennas * (n_antennas + 1) * 2
-    budget = 90e9 - n_bls * n_channels / int_time * 64  # 64 bits per visibility
+    budget = interface_gbps * 1e9 - n_bls * n_channels / int_time * 64  # 64 bits per visibility
     adc_sample_rate = BANDS[band].adc_sample_rate
     stream_bandwidth = adc_sample_rate * 8  # 8 bits per component
     max_streams = min(len(stream_names), int(budget // stream_bandwidth))

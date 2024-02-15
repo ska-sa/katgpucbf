@@ -63,6 +63,7 @@ and it'll look something like this:
    prometheus_url = http://lab5.sdp.kat.ac.za:9090
    product_name = bobs_qualification_cbf  # Use your own name
    interface = enp193s0f0
+   interface_gbps = 90  # Maximum bandwidth to expect from the NIC
    use_ibv = true
    log_cli = true
    log_cli_level = info
