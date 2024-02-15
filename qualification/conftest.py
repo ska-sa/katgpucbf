@@ -285,6 +285,17 @@ def matplotlib_report_style() -> Generator[None, None, None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def quiet_spead2(caplog: pytest.LogCaptureFixture) -> None:
+    """Ensure spead2 only logs warnings and bug.
+
+    Every time we shut down a stream we get INFO logs about heaps that were
+    dropped, which drowns out the more useful INFO logs from the test itself.
+    """
+    if logging.getLogger("spead2").getEffectiveLevel() < logging.WARN:
+        caplog.set_level(logging.WARN, logger="spead2")
+
+
 @pytest.fixture(scope="package")
 async def _cbf_config_and_description(
     pytestconfig: pytest.Config,
