@@ -83,6 +83,7 @@ ini_options = [
         default=["8"],
     ),
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
+    IniOption(name="beams", help="Number of beams to produce", type="string", default="4"),
     IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
 ]
 
@@ -355,7 +356,7 @@ async def _cbf_config_and_description(
         "int_time": int_time,
     }
 
-    n_beams = 4
+    n_beams = int(pytestconfig.getini("beams"))
     for beam in range(n_beams):
         for pol_idx, pol in enumerate("xy"):
             config["outputs"][f"tied-array-channelised-voltage-{beam}{pol}"] = {
@@ -615,7 +616,13 @@ async def receive_baseline_correlation_products(
 
 @pytest.fixture
 async def receive_tied_array_channelised_voltage(
-    pytestconfig: pytest.Config, cbf: CBFRemoteControl, cbf_config: dict
+    pytestconfig: pytest.Config,
+    cbf: CBFRemoteControl,
+    cbf_config: dict,
+    n_antennas: int,
+    n_channels: int,
+    int_time: float,
+    band: str,
 ) -> AsyncGenerator[TiedArrayChannelisedVoltageReceiver, None]:
     """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -626,6 +633,20 @@ async def receive_tied_array_channelised_voltage(
         for name, config in cbf_config["outputs"].items()
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ]
+
+    # Subscribe to only as many beams as can reliably be squeezed through a
+    # 100 Gb/s adapter.
+    n_bls = n_antennas * (n_antennas + 1) * 2
+    budget = 90e9 - n_bls * n_channels / int_time * 64  # 64 bits per visibility
+    adc_sample_rate = BANDS[band].adc_sample_rate
+    stream_bandwidth = adc_sample_rate * 8  # 8 bits per component
+    max_streams = min(len(stream_names), int(budget // stream_bandwidth))
+    if max_streams < 4:
+        pytest.skip("Not enough network bandwidth for two dual-pol beams")
+    else:
+        logger.info("Subscribing to %d beam streams", max_streams)
+
+    stream_names = stream_names[:max_streams]
     receiver = TiedArrayChannelisedVoltageReceiver(
         cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
     )
