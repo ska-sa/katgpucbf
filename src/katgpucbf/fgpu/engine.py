@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -52,7 +52,13 @@ from ..queue_item import QueueItem
 from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, gaussian_dtype
+from ..utils import (
+    DeviceStatusSensor,
+    TimeConverter,
+    add_time_sync_sensors,
+    gaussian_dtype,
+    steady_state_timestamp_sensor,
+)
 from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -1303,17 +1309,7 @@ class Engine(aiokatcp.DeviceServer):
 
         for sensor in recv.make_sensors(rx_sensor_timeout).values():
             sensors.add(sensor)
-        sensors.add(
-            aiokatcp.Sensor(
-                int,
-                "steady-state-timestamp",
-                "Heaps with this timestamp or greater are guaranteed to "
-                "reflect the effects of previous katcp requests.",
-                default=0,
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            )
-        )
-
+        sensors.add(steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
 
         time_sync_task = add_time_sync_sensors(sensors)

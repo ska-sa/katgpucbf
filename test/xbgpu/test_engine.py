@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -33,11 +33,11 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import XBEngine, XPipeline
+from katgpucbf.xbgpu.engine import BPipeline, RxQueueItem, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
-from .. import PromDiff
+from .. import PromDiff, get_sensor
 from . import test_parameters
 from .test_recv import gen_heap
 
@@ -244,6 +244,18 @@ def generate_expected_beams(
                 out[beam, batch, channel] = sample[0]
 
     return out
+
+
+def cancel_delays(n_ants: int) -> tuple[str, ...]:
+    """Generate beam delays that, given identical input signals, will cause a zero output.
+
+    This is implemented by using no delays but with phase corrections
+    evenly spread around the unit circle. This requires more than one
+    antenna to work.
+    """
+    assert n_ants > 0
+    angles = np.arange(n_ants) / n_ants * 2 * np.pi
+    return tuple(f"0:{a}" for a in angles)
 
 
 def valid_end_to_end_combination(combo: dict) -> bool:
@@ -836,12 +848,10 @@ class TestEngine:
     @DEFAULT_PARAMETERS
     async def test_saturation(
         self,
-        context: AbstractContext,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
         xbengine: XBEngine,
         n_ants: int,
-        n_channels_total: int,
         n_channels_per_substream: int,
         frequency: int,
         n_samples_between_spectra: int,
@@ -893,6 +903,98 @@ class TestEngine:
             prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"})
             == n_channels_per_substream * n_baselines
         )
+
+    def _patch_get_rx_item(
+        self, monkeypatch: pytest.MonkeyPatch, count: int, client: aiokatcp.Client, *request
+    ) -> list[int]:
+        """Patch :meth:`~.BPipeline._get_rx_item` to make a request partway through the stream.
+
+        The returned list will be populated with the value of the
+        ``steady-state-timestamp`` sensor immediately after executing the
+        request.
+        """
+        counter = 0
+        timestamp = []
+        orig_get_rx_item = BPipeline._get_rx_item
+
+        async def get_rx_item(self: BPipeline) -> RxQueueItem | None:
+            nonlocal counter
+            counter += 1
+            if counter == count:
+                await client.request(*request)
+                _, informs = await client.request("sensor-value", "steady-state-timestamp")
+                timestamp.append(int(informs[0].arguments[4]))
+            return await orig_get_rx_item(self)
+
+        monkeypatch.setattr(BPipeline, "_get_rx_item", get_rx_item)
+        return timestamp
+
+    @DEFAULT_PARAMETERS
+    @pytest.mark.parametrize(
+        "request_factory",
+        [
+            pytest.param(lambda name, n_ants: ("beam-quant-gains", name, 0.0), id="beam-quant-gains"),
+            pytest.param(lambda name, n_ants: ("beam-weights", name) + (0.0,) * n_ants, id="beam-weights"),
+            pytest.param(lambda name, n_ants: ("beam-delays", name) + cancel_delays(n_ants), id="beam-delays"),
+        ],
+    )
+    async def test_steady_state(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_recv_streams: list[spead2.InprocQueue],
+        mock_send_stream: list[spead2.InprocQueue],
+        xbengine: XBEngine,
+        client: aiokatcp.Client,
+        n_ants: int,
+        n_channels_per_substream: int,
+        frequency: int,
+        n_samples_between_spectra: int,
+        n_spectra_per_heap: int,
+        heap_accumulation_threshold: list[int],
+        corrprod_outputs: list[XOutput],
+        beam_outputs: list[BOutput],
+        request_factory: Callable[[str, int], tuple],
+    ):
+        """Test that the steady-state-timestamp sensor works."""
+        assert (await get_sensor(client, "steady-state-timestamp")) == 0
+
+        timestamp_step = n_samples_between_spectra * n_spectra_per_heap
+
+        def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
+            timestamp = batch_index * timestamp_step
+            data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 10, np.int8)
+            return [
+                spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
+                for ant_index in range(n_ants)
+            ]
+
+        request = request_factory(beam_outputs[0].name, n_ants)
+        timestamp_list = self._patch_get_rx_item(monkeypatch, 4, client, *request)
+        n_batches = heap_accumulation_threshold[0]
+        _, data = await self._send_data(
+            mock_recv_streams,
+            mock_send_stream,
+            corrprod_outputs,
+            beam_outputs,
+            batch_indices=range(n_batches),
+            heap_factory=heap_factory,
+            timestamp_step=timestamp_step,
+            n_ants=n_ants,
+            n_channels_per_substream=n_channels_per_substream,
+            frequency=frequency,
+            n_spectra_per_heap=n_spectra_per_heap,
+        )
+        await xbengine.stop()
+        assert len(timestamp_list) == 1
+        steady_state_timestamp = timestamp_list[0]
+        # Not technically required by the definition, but ought to be true
+        # in practice, and it makes the rest of the test simpler to write
+        assert steady_state_timestamp % timestamp_step == 0
+        steady_state_batch = steady_state_timestamp // timestamp_step
+        assert 0 < steady_state_batch < n_batches
+        # Should be all zeros after the steady state, but not before
+        np.testing.assert_equal(data[0, :steady_state_batch] != 0, True)
+        np.testing.assert_equal(data[0, steady_state_batch:], 0)
 
     @DEFAULT_PARAMETERS
     async def test_bad_requests(self, client: aiokatcp.Client, n_ants: int) -> None:

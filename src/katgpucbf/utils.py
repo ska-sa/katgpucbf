@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -291,6 +291,17 @@ def add_time_sync_sensors(sensors: aiokatcp.SensorSet) -> asyncio.Task:
             await asyncio.sleep(MIN_SENSOR_UPDATE_PERIOD)
 
     return asyncio.create_task(run(), name=TIME_SYNC_TASK_NAME)
+
+
+def steady_state_timestamp_sensor() -> aiokatcp.Sensor[int]:
+    """Create ``steady-state-timestamp`` sensor."""
+    return aiokatcp.Sensor(
+        int,
+        "steady-state-timestamp",
+        "Heaps with this timestamp or greater are guaranteed to reflect the effects of previous katcp requests.",
+        default=0,
+        initial_status=aiokatcp.Sensor.Status.NOMINAL,
+    )
 
 
 class TimeConverter:
