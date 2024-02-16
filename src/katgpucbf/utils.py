@@ -298,7 +298,7 @@ def steady_state_timestamp_sensor() -> aiokatcp.Sensor[int]:
     return aiokatcp.Sensor(
         int,
         "steady-state-timestamp",
-        "Heaps with this timestamp or greater are guaranteed to " "reflect the effects of previous katcp requests.",
+        "Heaps with this timestamp or greater are guaranteed to reflect the effects of previous katcp requests.",
         default=0,
         initial_status=aiokatcp.Sensor.Status.NOMINAL,
     )
