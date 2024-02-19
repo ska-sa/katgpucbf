@@ -364,7 +364,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
-        for output in self.outputs:
+        for i, output in enumerate(self.outputs):
             # Static sensors
             sensors.add(
                 aiokatcp.Sensor(
@@ -377,8 +377,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 )
             )
             # Dynamic sensors
-            # Using the zeroth values for defaults as they're all the same at the start
-            default_delays_str = ", ".join(str(value) for value in self._delays[0].flatten())
+            default_delays_str = ", ".join(str(value) for value in self._delays[i].flatten())
             sensors.add(
                 aiokatcp.Sensor(
                     str,
@@ -395,7 +394,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     float,
                     f"{output.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
-                    default=self._quant_gains[0],
+                    default=self._quant_gains[i],
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
@@ -404,7 +403,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    default=str(list(self._weights[0])),
+                    # Cast to list first to add comma delimeter
+                    default=str(list(self._weights[i])),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
