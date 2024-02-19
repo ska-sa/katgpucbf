@@ -359,7 +359,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
-        for output in self.outputs:
+        for i, output in enumerate(self.outputs):
             # Static sensors
             sensors.add(
                 aiokatcp.Sensor(
@@ -372,10 +372,41 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 )
             )
             # Dynamic sensors
+            default_delays_str = ", ".join(str(value) for value in self._delays[i].flatten())
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.delay",
+                    "The delay settings of the inputs for this beam. Each input has "
+                    "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1, "
+                    "phase1, ...)",
+                    default=f"(0, {default_delays_str})",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    float,
+                    f"{output.name}.quantiser-gain",
+                    "Non-complex post-summation quantiser gain applied to this beam",
+                    default=self._quant_gains[i],
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.weight",
+                    "The summing weights applied to all the inputs of this beam",
+                    # Cast to list first to add comma delimiter
+                    default=str(list(self._weights[i])),
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
             sensors.add(
                 aiokatcp.Sensor(
                     int,
-                    f"{output.name}-beng-clip-cnt",
+                    f"{output.name}.beng-clip-cnt",
                     "Number of complex samples that saturated.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
