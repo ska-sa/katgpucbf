@@ -383,7 +383,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     str,
                     f"{output.name}.delay",
                     "The delay settings of the inputs for this beam. Each input has "
-                    "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1,"
+                    "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1, "
                     "phase1, ...)",
                     default=f"(0, {default_delays_str})",
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
@@ -403,7 +403,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    # Cast to list first to add comma delimeter
+                    # Cast to list first to add comma delimiter
                     default=str(list(self._weights[i])),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
