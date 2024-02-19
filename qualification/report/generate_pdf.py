@@ -83,7 +83,7 @@ def make_cbf_mode_str(config: dict, *, expand: bool = False) -> str:
     - 4 antennas, 8192 channels, 4 beams, L-band, 0.5s integrations, 4 dsims
 
     If `expand` is False, it will return a MeerKAT config mode string of:
-    - c8n856M8k
+    - bc8n856M8k
 
     Parameters
     ----------
