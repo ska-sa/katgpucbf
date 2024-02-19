@@ -49,7 +49,7 @@ idna==3.6
     # via yarl
 importlib-metadata==7.0.0
     # via dask
-katsdpservices==1.2
+katsdpservices==1.3
     # via katgpucbf (setup.cfg)
 katsdpsigproc==1.8.1
     # via katgpucbf (setup.cfg)
