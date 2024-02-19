@@ -37,7 +37,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
+from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver, get_sensor_val
 from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
@@ -60,6 +60,9 @@ ini_options = [
         name="prometheus_url", help="URL to Prometheus server for querying hardware configuration", type="string"
     ),
     IniOption(name="interface", help="Name of network to use for ingest.", type="string"),
+    IniOption(
+        name="interface_gbps", help="Maximum bandwidth to subscribe to on 'interface'", type="string", default="90"
+    ),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
@@ -83,6 +86,7 @@ ini_options = [
         default=["8"],
     ),
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
+    IniOption(name="beams", help="Number of beams to produce", type="string", default="4"),
     IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
 ]
 
@@ -150,7 +154,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "n_antennas" in metafunc.fixturenames:
         rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
         max_antennas = int(metafunc.config.getini("max_antennas"))
-        if rel_path.parts[0] == "baseline_correlation_products":
+        if rel_path.parts[0] != "antenna_channelised_voltage":
             values = FULL_ANTENNAS
         else:
             values = [min(max_antennas, DEFAULT_ANTENNAS)]
@@ -262,7 +266,7 @@ def pdf_report(request, monkeypatch) -> Reporter:
 
 
 @pytest.fixture(scope="session")
-def host_config_querier(pytestconfig) -> HostConfigQuerier:
+def host_config_querier(pytestconfig: pytest.Config) -> HostConfigQuerier:
     """Querier for getting host config."""
     url = pytestconfig.getini("prometheus_url")
     return HostConfigQuerier(url)
@@ -281,9 +285,20 @@ def matplotlib_report_style() -> Generator[None, None, None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def quiet_spead2(caplog: pytest.LogCaptureFixture) -> None:
+    """Ensure spead2 only logs warnings and above.
+
+    Every time we shut down a stream we get INFO logs about heaps that were
+    dropped, which drowns out the more useful INFO logs from the test itself.
+    """
+    if logging.getLogger("spead2").getEffectiveLevel() < logging.WARN:
+        caplog.set_level(logging.WARN, logger="spead2")
+
+
 @pytest.fixture(scope="package")
 async def _cbf_config_and_description(
-    pytestconfig,
+    pytestconfig: pytest.Config,
     n_antennas: int,
     n_channels: int,
     n_dsims: int,
@@ -292,7 +307,7 @@ async def _cbf_config_and_description(
     narrowband_decimation: int,
 ) -> tuple[dict, dict]:
     config: dict = {
-        "version": "3.4",
+        "version": "3.5",
         "config": {},
         "inputs": {},
         "outputs": {},
@@ -355,6 +370,15 @@ async def _cbf_config_and_description(
         "int_time": int_time,
     }
 
+    n_beams = int(pytestconfig.getini("beams"))
+    for beam in range(n_beams):
+        for pol_idx, pol in enumerate("xy"):
+            config["outputs"][f"tied-array-channelised-voltage-{beam}{pol}"] = {
+                "type": "gpucbf.tied_array_channelised_voltage",
+                "src_streams": ["antenna-channelised-voltage"],
+                "src_pol": pol_idx,
+            }
+
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
     # CBF description in the final report.
@@ -367,9 +391,10 @@ async def _cbf_config_and_description(
         "integration_time": str(int_time),
         "narrowband_decimation": str(narrowband_decimation),
         "dsims": str(n_dsims),
+        "beams": str(n_beams),
     }
     long_description = (
-        f"{n_antennas} antennas, {n_channels} channels, "
+        f"{n_antennas} antennas, {n_channels} channels, {n_beams} beams, "
         f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
     )
     if narrowband_decimation > 1:
@@ -561,26 +586,28 @@ async def cbf(
     # Reset the CBF to default state
     pcc = session_cbf.product_controller_client
     await asyncio.gather(*[client.request("signals", "0;0;") for client in session_cbf.dsim_clients])
+    capture_types = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
     for name, conf in session_cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
             sync_time = session_cbf.sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
-        elif conf["type"] == "gpucbf.baseline_correlation_products":
+        # TODO: reset gains, weights, delays for beam streams
+        if conf["type"] in capture_types:
             await pcc.request("capture-start", name)
 
     pdf_report.config(cbf=str(session_cbf.uuid))
     yield session_cbf
 
     for name, conf in session_cbf.config["outputs"].items():
-        if conf["type"] == "gpucbf.baseline_correlation_products":
+        if conf["type"] in capture_types:
             await pcc.request("capture-stop", name)
 
 
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig, cbf: CBFRemoteControl
+    pytestconfig: pytest.Config, cbf: CBFRemoteControl
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -593,6 +620,52 @@ async def receive_baseline_correlation_products(
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
+    # Ensure that the data is flowing, and that we throw away any data that
+    # predates the start of this test (to prevent any state leaks from previous
+    # tests).
+    await receiver.next_complete_chunk(max_delay=0)
+    yield receiver
+    receiver.stream.stop()
+
+
+@pytest.fixture
+async def receive_tied_array_channelised_voltage(
+    pytestconfig: pytest.Config,
+    cbf: CBFRemoteControl,
+    cbf_config: dict,
+    n_antennas: int,
+    n_channels: int,
+    int_time: float,
+    band: str,
+) -> AsyncGenerator[TiedArrayChannelisedVoltageReceiver, None]:
+    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
+    interface_address = get_interface_address(pytestconfig.getini("interface"))
+    use_ibv = pytestconfig.getini("use_ibv")
+    interface_gbps = float(pytestconfig.getini("interface_gbps"))
+
+    stream_names = [
+        name
+        for name, config in cbf_config["outputs"].items()
+        if config["type"] == "gpucbf.tied_array_channelised_voltage"
+    ]
+
+    # Subscribe to only as many beams as can reliably be squeezed through a
+    # 100 Gb/s adapter.
+    n_bls = n_antennas * (n_antennas + 1) * 2
+    budget = interface_gbps * 1e9 - n_bls * n_channels / int_time * 64  # 64 bits per visibility
+    adc_sample_rate = BANDS[band].adc_sample_rate
+    stream_bandwidth = adc_sample_rate * 8  # 8 bits per component
+    max_streams = min(len(stream_names), int(budget // stream_bandwidth))
+    if max_streams < 4:
+        pytest.skip("Not enough network bandwidth for two dual-pol beams")
+    else:
+        logger.info("Subscribing to %d beam streams", max_streams)
+
+    stream_names = stream_names[:max_streams]
+    receiver = TiedArrayChannelisedVoltageReceiver(
+        cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
+    )
+
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).

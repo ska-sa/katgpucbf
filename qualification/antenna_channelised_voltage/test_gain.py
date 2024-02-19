@@ -55,7 +55,7 @@ async def test_gains(
     signals = f"common=wgn({scale}, 1); common; common;"
     # Compute repeat period guaranteed to divide into accumulation length.
     max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
-    period = receiver.n_samples_between_spectra * receiver.spectra_per_heap
+    period = receiver.n_samples_between_spectra * receiver.n_spectra_per_heap
     period = min(period, max_period)
     pdf_report.detail(f"Set white Gaussian noise with scale {scale}, period {period} samples.")
     await asyncio.gather(*[client.request("signals", signals, period) for client in cbf.dsim_clients])

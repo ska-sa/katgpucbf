@@ -86,7 +86,8 @@ pipeline {
          sh '''
            spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification\
            --suppress-tests-failed-exit-code \
-           --image-override katgpucbf:${katgpucbf_image:-harbor.sdp.kat.ac.za/cbf/katgpucbf:latest} \
+           --image-override katgpucbf:${katgpucbf_image} \
+           --image-override katsdpcontroller:${katsdpcontroller_image} \
            --junitxml=result.xml
          '''
        }
@@ -130,7 +131,9 @@ pipeline {
       <b>Node:</b> ${env.NODE_NAME}<br>
       <b>Duration:</b> ${currentBuild.durationString}<br>
       <b>Build URL:</b> ${env.BUILD_URL}<br>
-      <b>Test Image Commit ID:</b> ${COMMIT_ID}<br>
+      <b>Test Image Commit ID:</b> ${COMMIT_ID} (${params.katgpucbf_image})<br>
+      <b>katsdpcontroller image:</b> ${params.katsdpcontroller_image}<br>
+      <b>Qualification Tests Commit ID:</b> ${env.GIT_COMMIT} (${params.branch})<br>
       <br>
       <i>Note: This is an Automated email notification.</i>""",
       recipientProviders: [developers(), requestor()],

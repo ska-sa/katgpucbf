@@ -324,7 +324,7 @@ six==1.16.0
     #   python-dateutil
 snowballstemmer==2.2.0
     # via sphinx
-spead2==4.3.0
+spead2==4.3.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
