@@ -377,13 +377,16 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 )
             )
             # Dynamic sensors
+            # Using the zeroth values for defaults as they're all the same at the start
+            default_delays_str = ", ".join(str(value) for value in self._delays[0].flatten())
             sensors.add(
                 aiokatcp.Sensor(
                     str,
                     f"{output.name}.delay",
-                    "The delay settings of the inputs for this beam: (loadmcnt "
-                    "<ADC sample count when model was loaded>, delay <in seconds>, "
-                    "phase <radians>, ...)",
+                    "The delay settings of the inputs for this beam. Each input has "
+                    "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1,"
+                    "phase1, ...)",
+                    default=f"(0, {default_delays_str})",
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
@@ -392,7 +395,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     float,
                     f"{output.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
-                    default=0.0,
+                    default=self._quant_gains[0],
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
@@ -401,6 +404,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
+                    default=str(list(self._weights[0])),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
