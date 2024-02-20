@@ -16,6 +16,7 @@
 
 """Fixtures and options for qualification testing of the CBF."""
 
+import ast
 import asyncio
 import copy
 import inspect
@@ -593,7 +594,12 @@ async def cbf(
             sync_time = session_cbf.sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
-        # TODO: reset gains, weights, delays for beam streams
+        elif conf["type"] == "gpucbf.tied_array_channelised_voltage":
+            source_indices = ast.literal_eval(session_cbf.sensors[f"{name}.source-indices"].value.decode())
+            n_inputs = len(source_indices)
+            await pcc.request("beam-quant-gains", name, 1.0)
+            await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
+            await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
         if conf["type"] in capture_types:
             await pcc.request("capture-start", name)
 

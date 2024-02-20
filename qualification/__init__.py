@@ -195,6 +195,7 @@ class XBReceiver:
         # Some metadata we know already from the config.
         acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
         acv_config = cbf.config["outputs"][acv_name]
+        self.stream_names = list(stream_names)
         self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
         self.n_chans = acv_config["n_chans"]
