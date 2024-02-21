@@ -18,6 +18,7 @@
 
 import numpy as np
 import pytest
+from pytest_check import check
 
 from katgpucbf import DIG_SAMPLE_BITS
 
@@ -35,28 +36,52 @@ async def test_gain(
 
     Verification method
     -------------------
-    Verification by means of test. Set gain factors of :math:`\frac{1}{4}`, 1
-    and 4 on three different beams. Check that the outputs values are in these
+    Verification by means of test. Set gain factors of :math:`\frac{1}{2}`, 1
+    and 2 on three different beams. Check that the output values are in these
     ratios.
     """
     receiver = receive_tied_array_channelised_voltage
-    # TODO: the test can't be implemented until katsdpcontroller supports
-    # setting the gain (NGC-446). For now just check that the beams have
-    # approximately the expected power. That also tends to fail, because
-    # without control of the gains, we have to set the input level very low
-    # to avoid saturation, and that leads to quantisation effects.
     pdf_report.step("Configure the D-sim with Gaussian noise.")
     dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    amplitude = 32 / dig_max / receiver.n_ants
-    await cbf.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;")
-    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}")
+    amplitude = 32 / dig_max
+    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
+    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
-    _, data = await receiver.next_complete_chunk()
-    power = np.sum(np.square(data, dtype=np.float32), axis=(1, 2, 3)) / (data.shape[1] * data.shape[2])
-    pdf_report.detail(f"Power measured as {list(power)}")
-    expected_power = np.square(amplitude * dig_max * receiver.n_ants)
-    pdf_report.detail(f"Expected power is {expected_power}")
-    # The variation from expected power seems to be dominated by quantisation
-    # effects rather than noise. I've picked 5% tolerance since that's plenty
-    # of wiggle room while still being tight enough to catch major errors.
-    np.testing.assert_equal(power, pytest.approx(expected_power, rel=0.05))
+    gains = [0.5, 1.0, 2.0]
+    stream_names = receiver.stream_names[: len(gains)]  # Only need 3 half-beams for the test
+    pdf_report.step("Set weights to 1/n_ants")
+    weights = (1.0 / receiver.n_ants,) * receiver.n_ants
+    client = cbf.product_controller_client
+    for stream_name in stream_names:
+        await client.request("beam-weights", stream_name, *weights)
+        pdf_report.detail(f"Set weights for {stream_name} to {weights}.")
+
+    pdf_report.step("Set gains to 1/2, 1 and 2.")
+    for gain, stream_name in zip(gains, stream_names):
+        await client.request("beam-quant-gains", stream_name, gain)
+        pdf_report.detail(f"Set gain for {stream_name} to {gain}.")
+
+    pdf_report.step("Collect data.")
+    timestamp, data = await receiver.next_complete_chunk()
+    pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
+
+    pdf_report.step("Check power level of each beam.")
+    for gain, stream_name, stream_data in zip(gains, stream_names, data):
+        power = np.sum(np.square(stream_data, dtype=np.float32)) / (stream_data.shape[0] * stream_data.shape[1])
+        expected_power = np.square(amplitude * dig_max * gain)
+        pdf_report.detail(f"{stream_name}: power measured as {power:.2f}, expected {expected_power:.2f}.")
+        # The variation from expected power seems to be dominated by quantisation
+        # effects rather than noise. I've picked 5% tolerance since that's plenty
+        # of wiggle room while still being tight enough to catch major errors.
+        assert power == pytest.approx(expected_power, rel=0.05)
+
+    pdf_report.step("Compare beams to each other.")
+    for i in range(1, len(gains)):
+        scale = gains[i] / gains[0]
+        expected = data[0] * scale
+        # The actual data gets clamped, so we should clamp expected values too
+        max_value = 2 ** (receiver.n_bits_per_sample - 1) - 1
+        expected = np.clip(expected, -max_value, max_value)
+        with check:
+            np.testing.assert_allclose(data[i], expected, atol=round(0.5 * scale))
+            pdf_report.detail(f"Beams {stream_names[0]} and {stream_names[i]} agree.")
