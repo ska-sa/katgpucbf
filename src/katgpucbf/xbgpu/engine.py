@@ -431,7 +431,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             await rx_item.async_wait_for_events()
 
             tx_item = await self._tx_free_item_queue.get()
-            await tx_item.async_wait_for_events()
+            tx_item.enqueue_wait_for_events(self._proc_command_queue)
             tx_item.reset(rx_item.timestamp)
 
             # After this point it's too late for set_weights etc to update
@@ -719,7 +719,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                 self.correlation.first_batch = last_batch
 
         tx_item = await self._tx_free_item_queue.get()
-        await tx_item.async_wait_for_events()
+        tx_item.enqueue_wait_for_events(self._proc_command_queue)
 
         # Indicate that the timestamp still needs to be filled in.
         tx_item.timestamp = -1
