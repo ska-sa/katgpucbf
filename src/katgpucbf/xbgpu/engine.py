@@ -590,6 +590,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
             n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            sample_bitwidth=engine.sample_bits,
         )
         self.correlation = correlation_template.instantiate(
             self._proc_command_queue, n_batches=engine.src_layout.heaps_per_fengine_per_chunk

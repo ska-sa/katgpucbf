@@ -73,13 +73,20 @@ class CorrelationTemplate:
         The number of time samples to be processed per frequency channel.
     """
 
-    def __init__(self, context: AbstractContext, n_ants: int, n_channels: int, n_spectra_per_heap: int) -> None:
+    def __init__(
+        self,
+        context: AbstractContext,
+        n_ants: int,
+        n_channels: int,
+        n_spectra_per_heap: int,
+        sample_bitwidth: int,
+    ) -> None:
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
-        self._sample_bitwidth = 8  # hardcoded to 8 for now, but 4 and 16 bits are also supported
+        self._sample_bitwidth = sample_bitwidth  # hardcoded to 8 upstream, but 4 and 16 bits are also supported
         self._n_ants_per_block = 32  # Hardcoded to 32 for now, but can be set to 32/48/64.
 
         # This 128 is hardcoded in the original Tensor-Core kernel. It loads
@@ -195,7 +202,10 @@ class Correlation(accel.Operation):
         )
 
         # TODO: dtypes must depend on input bitwidth
-        self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
+        self.slots["in_samples"] = accel.IOSlot(
+            dimensions=input_data_dimensions,
+            dtype=np.dtype(f"int{self.template._sample_bitwidth}"),
+        )
         self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
         self.slots["out_saturated"] = accel.IOSlot(dimensions=(), dtype=np.uint32)
