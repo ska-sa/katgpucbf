@@ -164,13 +164,13 @@ pipeline {
           // Supply credentials to Dockerhub so that we can reliably pull the base image
           docker.withRegistry("", "dockerhub") {
             dockerImage = docker.build(
-              "harbor.sdp.kat.ac.za/cbf/katgpucbf:${tag}",
+              "harbor.sdp.kat.ac.za/telescope/katgpucbf:${tag}",
               "--pull "
               + "--label=org.opencontainers.image.revision=${env.GIT_COMMIT} "
               + "--label=org.opencontainers.image.source=${env.GIT_URL} ."
             )
           }
-          docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-cbf") {
+          docker.withRegistry("https://harbor.sdp.kat.ac.za/", "harbor-telescope") {
             dockerImage.push()
           }
           // Remove the built and pushed Docker image from host
