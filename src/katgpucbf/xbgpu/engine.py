@@ -1286,7 +1286,7 @@ class XBEngine(DeviceServer):
         pipeline.capture_enable(stream_id=stream_id, enable=False)
 
     async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
-        """Set the weights for all inputs of a given beam.
+        """Set the weights for all inputs of a given beam and update the sensor.
 
         Parameters
         ----------
@@ -1299,9 +1299,10 @@ class XBEngine(DeviceServer):
         if len(weights) != self.n_ants:
             raise aiokatcp.FailReply(f"Incorrect number of weights (expected {self.n_ants}, received {len(weights)})")
         pipeline.set_weights(stream_id, np.array(weights))
+        self.sensors[f"{stream_name}.weight"].set_value(str(list(weights)))
 
     async def request_beam_delays(self, ctx, stream_name: str, *delays: str) -> None:
-        """Set the delays for all inputs of a given beam.
+        """Set the delays for all inputs of a given beam and update the sensor.
 
         Parameters
         ----------
@@ -1322,9 +1323,11 @@ class XBEngine(DeviceServer):
             new_delays[i, 0] = float(delay_str)
             new_delays[i, 1] = float(phase_str)
         pipeline.set_delays(stream_id, new_delays)
+        delays_formatted_str = ", ".join(str(value) for value in new_delays.flatten())
+        self.sensors[f"{stream_name}-delays"].set_value(f"({pipeline._weights_steady}, {delays_formatted_str})")
 
     async def request_beam_quant_gains(self, ctx, stream_name: str, gain: float) -> None:
-        """Set the quantisation gain for a beam.
+        """Set the quantisation gain for a beam and update the sensor.
 
         Parameters
         ----------
@@ -1335,6 +1338,7 @@ class XBEngine(DeviceServer):
         """
         pipeline, stream_id = self._request_bpipeline(stream_name)
         pipeline.set_quant_gain(stream_id, gain)
+        self.sensors[f"{stream_name}.quantiser-gain"].set_value(gain)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
