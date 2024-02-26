@@ -269,6 +269,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--sample-bits",
         type=int,
         default=8,
+        choices=[8],
         help="Number of bits for each real and imaginary value in a sample. [%(default)s]",
     )
     parser.add_argument(
@@ -352,8 +353,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
 
     args = parser.parse_args(arglist)
 
-    if args.sample_bits != 8:
-        parser.error("Only 8-bit values are currently supported.")
     if args.bandwidth is None:
         args.bandwidth = args.adc_sample_rate / args.samples_between_spectra * args.channels
 

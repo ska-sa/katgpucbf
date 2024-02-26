@@ -590,6 +590,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
             n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            input_sample_bits=engine.sample_bits,
         )
         self.correlation = correlation_template.instantiate(
             self._proc_command_queue, n_batches=engine.src_layout.heaps_per_fengine_per_chunk
@@ -1020,9 +1021,6 @@ class XBEngine(DeviceServer):
     ):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
-
-        if sample_bits != 8:
-            raise ValueError("sample_bits must equal 8 - no other values supported at the moment.")
 
         for output in outputs:
             if channel_offset_value % n_channels_per_substream != 0:
