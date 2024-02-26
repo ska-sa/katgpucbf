@@ -29,7 +29,9 @@ esac
 
 exec spead2_net_raw ../../src/tools/fsim \
     --interface $iface_ip \
+    --ibv \
     --array-size ${array_size:-64} \
+    --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --channels ${channels:-32768} \
     --channels-per-substream ${channels_per_substream:-512} \
     --spectra-per-heap ${spectra_per_heap:-256} \
