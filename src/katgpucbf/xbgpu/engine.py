@@ -1324,7 +1324,7 @@ class XBEngine(DeviceServer):
             new_delays[i, 1] = float(phase_str)
         pipeline.set_delays(stream_id, new_delays)
         delays_formatted_str = ", ".join(str(value) for value in new_delays.flatten())
-        self.sensors[f"{stream_name}-delays"].set_value(f"({pipeline._weights_steady}, {delays_formatted_str})")
+        self.sensors[f"{stream_name}.delay"].set_value(f"({pipeline._weights_steady}, {delays_formatted_str})")
 
     async def request_beam_quant_gains(self, ctx, stream_name: str, gain: float) -> None:
         """Set the quantisation gain for a beam and update the sensor.
