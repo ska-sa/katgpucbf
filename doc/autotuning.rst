@@ -16,8 +16,8 @@ compiler version) that will be deployed, the autotuning should be run inside
 the Docker image. This can be done something like this (the Docker image path
 is just an example; adjust as necessary), and takes roughly 30 minutes::
 
-    docker pull harbor.sdp.kat.ac.za/telescope/katgpucbf
-    docker run -it --rm --gpus=all -v $PWD/docker:/output harbor.sdp.kat.ac.za/telescope/katgpucbf /output/autotune.py /output/tuning.db
+    docker pull harbor.sdp.kat.ac.za/dpp/katgpucbf
+    docker run -it --rm --gpus=all -v $PWD/docker:/output harbor.sdp.kat.ac.za/dpp/katgpucbf /output/autotune.py /output/tuning.db
 
 Note that this may cause the database (:file:`docker/tuning.db`) to be
 owned by root and require fixing. Check that the database is non-empty, then

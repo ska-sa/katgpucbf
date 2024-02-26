@@ -41,7 +41,7 @@ from sighandler import add_sigint_handler
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
 N_POLS = 2
-DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/telescope/katgpucbf"
+DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/dpp/katgpucbf"
 NOISE = 0.01  #: Minimum probability of an incorrect result from each trial
 TOLERANCE = 0.001  #: Complement of confidence interval probability
 #: Verbosity level at which individual test results are reported
