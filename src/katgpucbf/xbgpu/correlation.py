@@ -71,6 +71,8 @@ class CorrelationTemplate:
         The number of frequency channels to be processed.
     n_spectra_per_heap
         The number of time samples to be processed per frequency channel.
+    input_sample_bits
+        The number of bits per input sample. Only 8 bits is supported at the moment.
     """
 
     def __init__(
@@ -79,30 +81,33 @@ class CorrelationTemplate:
         n_ants: int,
         n_channels: int,
         n_spectra_per_heap: int,
-        sample_bitwidth: int,
+        input_sample_bits: int,
     ) -> None:
+        if input_sample_bits != 8:
+            raise ValueError(f"input_sample_bits of 8 is only supported, given {input_sample_bits}.")
+
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
-        self._sample_bitwidth = sample_bitwidth  # hardcoded to 8 upstream, but 4 and 16 bits are also supported
+        self.input_sample_bits = input_sample_bits  # hardcoded to 8 upstream
         self._n_ants_per_block = 32  # Hardcoded to 32 for now, but can be set to 32/48/64.
 
         # This 128 is hardcoded in the original Tensor-Core kernel. It loads
         # each block as two int4's, which is 256 bits (the extra factor of 2
-        # is because _sample_bitwidth only counts the real part of a complex
+        # is because input_sample_bits only counts the real part of a complex
         # number).
-        n_times_per_block = 128 // self._sample_bitwidth
+        n_times_per_block = 128 // self.input_sample_bits
 
         valid_bitwidths = [4, 8, 16]
-        if self._sample_bitwidth not in valid_bitwidths:
+        if self.input_sample_bits not in valid_bitwidths:
             raise ValueError(
-                f"Sample_bitwidth must equal either 4, 8 or 16, currently equal to {self._sample_bitwidth}."
+                f"input_sample_bits must equal either 4, 8 or 16, currently equal to {self.input_sample_bits}."
             )
-        elif self._sample_bitwidth == 4 or self._sample_bitwidth == 16:
+        elif self.input_sample_bits == 4 or self.input_sample_bits == 16:
             raise ValueError(
-                f"Sample bitwidth of {self._sample_bitwidth} "
+                f"Sample bitwidth of {self.input_sample_bits} "
                 "will eventually be supported but has not yet been implemented."
             )
 
@@ -129,7 +134,7 @@ class CorrelationTemplate:
             [
                 f"-DNR_RECEIVERS={self.n_ants}",
                 f"-DNR_RECEIVERS_PER_BLOCK={self._n_ants_per_block}",
-                f"-DNR_BITS={self._sample_bitwidth}",
+                f"-DNR_BITS={self.input_sample_bits}",
                 f"-DNR_CHANNELS={self.n_channels}",
                 f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
                 f"-DNR_POLARIZATIONS={N_POLS}",
@@ -201,11 +206,10 @@ class Correlation(accel.Operation):
             accel.Dimension(COMPLEX, exact=True),
         )
 
-        # TODO: dtypes must depend on input bitwidth
-        self.slots["in_samples"] = accel.IOSlot(
-            dimensions=input_data_dimensions,
-            dtype=np.dtype(f"int{self.template._sample_bitwidth}"),
-        )
+        assert (
+            self.template.input_sample_bits == 8
+        ), f"{self.template.input_sample_bits}-bit mode not supported yet, only 8-bit."
+        self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
         self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
         self.slots["out_saturated"] = accel.IOSlot(dimensions=(), dtype=np.uint32)

@@ -115,7 +115,7 @@ def test_correlator(
         n_ants=num_ants,
         n_channels=n_chans_per_stream,
         n_spectra_per_heap=num_spectra_per_heap,
-        sample_bitwidth=8,
+        input_sample_bits=8,
     )
 
     correlation = template.instantiate(command_queue, n_batches)
@@ -163,7 +163,7 @@ def test_correlator(
 
 def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
     """Test that values that overflow are saturated."""
-    template = CorrelationTemplate(context, n_ants=2, n_channels=4, n_spectra_per_heap=256, sample_bitwidth=8)
+    template = CorrelationTemplate(context, n_ants=2, n_channels=4, n_spectra_per_heap=256, input_sample_bits=8)
     correlation = template.instantiate(command_queue, 2)
     correlation.ensure_all_bound()
 
