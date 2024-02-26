@@ -83,9 +83,6 @@ class CorrelationTemplate:
         n_spectra_per_heap: int,
         input_sample_bits: int,
     ) -> None:
-        if input_sample_bits != 8:
-            raise ValueError(f"input_sample_bits of 8 is only supported, given {input_sample_bits}.")
-
         self.n_ants = n_ants
         self.n_channels = n_channels
         self.n_spectra_per_heap = n_spectra_per_heap
