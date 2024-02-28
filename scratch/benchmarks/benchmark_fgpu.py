@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -41,7 +41,7 @@ from sighandler import add_sigint_handler
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
 N_POLS = 2
-DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/cbf/katgpucbf"
+DEFAULT_IMAGE = "harbor.sdp.kat.ac.za/dpp/katgpucbf"
 NOISE = 0.01  #: Minimum probability of an incorrect result from each trial
 TOLERANCE = 0.001  #: Complement of confidence interval probability
 #: Verbosity level at which individual test results are reported

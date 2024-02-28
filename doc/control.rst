@@ -95,7 +95,7 @@ full command to run a 4k, 4-antenna, L-band correlator::
     ./sim_correlator -a 4 -c 4096 -i 0.5
     --adc-sample-rate 1712e6
     --name my_test_correlator
-    --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest
+    --image-override katgpucbf:harbor.sdp.kat.ac.za/dpp/katgpucbf:latest
     lab5.sdp.kat.ac.za
 
 The execution of this command contacts the master controller to request a new

@@ -82,7 +82,7 @@ this directory:
 
 .. code:: sh
 
-   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/cbf/katgpucbf:latest
+   spead2_net_raw pytest -v qualification --image-override katgpucbf:harbor.sdp.kat.ac.za/dpp/katgpucbf:latest
 
 Explanation:
 
