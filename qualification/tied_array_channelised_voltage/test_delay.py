@@ -79,14 +79,16 @@ async def test_delay(
     delays = [-509e-9, 509e-9]
     for delay in delays:
         pdf_report.step(f"Test with delay {delay * 1e12} ps.")
-        now = await cbf.dsim_time()
+        # Ensure load time is in the past, so that it is already applied when we
+        # receive data.
+        load_time = await cbf.dsim_time() - 5.0
         input_delays = ["0,0:0,0"] * receiver.n_inputs
         input_delays[delay_input] = f"{delay},0:0,0"
-        await client.request("delays", "antenna-channelised-voltage", now, *input_delays)
+        await client.request("delays", "antenna-channelised-voltage", load_time, *input_delays)
         pdf_report.detail(f"Set input delays to {input_delays}")
-        beam_delays = ["0:0"] * len(receiver.source_indices[ref_beam])
+        beam_delays = ["0:0"] * len(receiver.source_indices[delay_beam])
         beam_delays[delay_input_idx] = f"{-delay}:0"
-        await client.request("beam-delays", receiver.stream_names[ref_beam], *beam_delays)
+        await client.request("beam-delays", receiver.stream_names[delay_beam], *beam_delays)
         pdf_report.detail(f"Set beam {delay_beam} delays to {beam_delays}")
         timestamp, data = await receiver.next_complete_chunk()
         pdf_report.detail(f"Received chunk with timestamp {timestamp}")
