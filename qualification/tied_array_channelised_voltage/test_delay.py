@@ -27,12 +27,12 @@ from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0220")
-async def test_delay(
+async def test_delay_small(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
 ) -> None:
-    r"""Test beam steering delay application.
+    r"""Test beam steering delay application, for small delays.
 
     Verification method
     -------------------
@@ -40,6 +40,11 @@ async def test_delay(
     from it with a compensating delay. Use a different input with no delay
     to form a reference beam. Check that the results are consistent to within 1
     ULP.
+
+    This test is only valid for delays less than half a sample. For larger
+    delays, the F-engine delay is done partially in the time domain, which the
+    compensating beam delay is purely a phase correction, and so they aren't
+    expected to cancel out.
     """
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
@@ -76,7 +81,9 @@ async def test_delay(
     pdf_report.detail(f"Set weights on {receiver.stream_names[ref_beam]} to {delay_weights}")
 
     # TODO: need the final version of the requirements to know what values to test
-    delays = [-509e-9, 509e-9]
+    max_delay = 0.5 / receiver.adc_sample_rate
+    delays = [-200e-12, -10e-12, 0.0, 16e-12, 400e-12]
+    delays = [delay for delay in delays if abs(delay) <= max_delay]
     for delay in delays:
         pdf_report.step(f"Test with delay {delay * 1e12} ps.")
         # Ensure load time is in the past, so that it is already applied when we
