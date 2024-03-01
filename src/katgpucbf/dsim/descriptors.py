@@ -57,7 +57,13 @@ def create_descriptors_heap() -> spead2.send.Heap:
         shape=(),
         format=IMMEDIATE_FORMAT,
     )
-
+    item_group.add_item(
+        0x3535,
+        "smartNIC_sum_of_squares",
+        "Output of the smartNIC sum of squares calculation",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
     item_group.add_item(
         ADC_SAMPLES_ID,
         "adc_samples",
