@@ -16,7 +16,7 @@
 
 """Unit tests for XBEngine module."""
 
-from typing import AbstractSet, AsyncGenerator, Callable, Final, Sequence
+from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
 import async_timeout
@@ -276,7 +276,7 @@ def verify_corrprod_sensors(
     prom_diff: PromDiff,
     n_channels_per_substream: int,
     n_baselines: int,
-    actual_sensor_updates: dict[str, list[tuple[bool | float | str, aiokatcp.Sensor.Status]]],
+    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
 ):
     """Verify katcp and Prometheus sensors for processed XPipeline data.
 
@@ -347,8 +347,9 @@ def verify_corrprod_sensors(
 
 def verify_beam_sensors(
     beam_outputs: list[BOutput],
-    timestamps: tuple[int, int],
-    actual_sensor_updates: dict[str, list[tuple[bool | float | str, aiokatcp.Sensor.Status]]],
+    first_timestamp: int,
+    last_timestamp: int,
+    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     weights: np.ndarray,
     quant_gains: np.ndarray,
     delays: np.ndarray,
@@ -359,7 +360,7 @@ def verify_beam_sensors(
     ----------
     beam_outputs
         Output beam configurations parsed into BOutput objects.
-    timestamps
+    first_timestamp, last_timestamp
         Two timestamps indicating the start and end of data processing
         by the :class:`BPipeline`.
     actual_sensor_updates
@@ -380,30 +381,25 @@ def verify_beam_sensors(
         is implemented.
     """
     # Generate expected sensor updates from BPipeline and compare
-    first_timestamp = timestamps[0]
-    last_timestamp = timestamps[1]
     for i, beam_output in enumerate(beam_outputs):
         assert first_timestamp < last_timestamp, (
             "Timestamp before katcp requests is not less than timestamp after data"
-            f"has been processed: {first_timestamp} > {last_timestamp}"
+            f"has been processed: {first_timestamp} >= {last_timestamp}"
         )
-        assert actual_sensor_updates[f"{beam_output.name}.weight"][0] == (
-            str(list(weights[i])),
-            aiokatcp.Sensor.Status.NOMINAL,
-        )
-        assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"][0] == (
-            quant_gains[i],
-            aiokatcp.Sensor.Status.NOMINAL,
-        )
+        assert actual_sensor_updates[f"{beam_output.name}.weight"] == [
+            (str(list(weights[i])), aiokatcp.Sensor.Status.NOMINAL)
+        ]
+        assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"] == [
+            (quant_gains[i], aiokatcp.Sensor.Status.NOMINAL)
+        ]
 
         delay_updates_str = ", ".join(f"{delay}, {phase}" for delay, phase in delays[i])
         # The ?beam-delay request is submitted before the xbengine starts
         # receiving/processing data, so the `loadmcnt` is zero (it is
         # applied immediately).
-        assert actual_sensor_updates[f"{beam_output.name}.delay"][0] == (
-            f"({first_timestamp}, {delay_updates_str})",
-            aiokatcp.Sensor.Status.NOMINAL,
-        )
+        assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
+            (f"({first_timestamp}, {delay_updates_str})", aiokatcp.Sensor.Status.NOMINAL)
+        ]
 
 
 class TestEngine:
@@ -817,7 +813,7 @@ class TestEngine:
         # Need a method of capturing synchronised aiokatcp.Sensor updates as
         # they happen in the XBEngine
         dynamic_bsensor_names = ["delay", "quantiser-gain", "weight"]
-        actual_sensor_updates: dict[str, list[tuple[bool | float | str, aiokatcp.Sensor.Status]]] = {
+        actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]] = {
             f"{beam_output.name}.{dynamic_bsensor_name}": list()
             for beam_output in beam_outputs
             for dynamic_bsensor_name in dynamic_bsensor_names
@@ -832,10 +828,10 @@ class TestEngine:
 
         for corrprod_output in corrprod_outputs:
             xbengine.sensors[f"{corrprod_output.name}.rx.synchronised"].attach(sensor_observer)
+
         for beam_output in beam_outputs:
-            xbengine.sensors[f"{beam_output.name}.delay"].attach(sensor_observer)
-            xbengine.sensors[f"{beam_output.name}.quantiser-gain"].attach(sensor_observer)
-            xbengine.sensors[f"{beam_output.name}.weight"].attach(sensor_observer)
+            for dynamic_bsensor_name in dynamic_bsensor_names:
+                xbengine.sensors[f"{beam_output.name}.{dynamic_bsensor_name}"].attach(sensor_observer)
 
         def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
@@ -849,9 +845,6 @@ class TestEngine:
                 missing_antennas=missing_antennas,
             )
 
-        # There should only be one BPipeline, we need a handle on it to track
-        # steady-state-timestamp across ?beam requests and xbengine processing
-        bpipeline = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, BPipeline)][0]
         first_timestamp = last_timestamp = 0
         # Also need to access the request arguments later when generating expected sensor updates
         rng = np.random.default_rng(seed=1)
@@ -875,7 +868,9 @@ class TestEngine:
             #   we test that output dumps are aligned correctly, despite
             #   the first data processed not being on an accumulation
             #   boundary.
-            n_heaps = np.prod(heap_accumulation_thresholds)
+            # Explicitly cast to python int as the np.int64 returned wasn't
+            # playing nice with `last_timestamp`
+            n_heaps = int(np.prod(heap_accumulation_thresholds))
             batch_start_index = 12 * n_heaps  # Somewhere arbitrary that isn't zero
             batch_end_index = batch_start_index + n_heaps
             # Add an extra chunk before the first full accumulation
@@ -886,8 +881,9 @@ class TestEngine:
                 # requests are executed as we only need to ensure it has
                 # increased across all three requests (not in between).
                 # The first timestamp should be zero as the xbengine has not
-                # been given data to process yet.
-                first_timestamp = bpipeline._weights_steady
+                # been given data to process yet. That is, the xbengine is
+                # currently at idle.
+                first_timestamp = 0
                 await client.request("beam-weights", output.name, *weights[i])
                 await client.request("beam-quant-gains", output.name, quant_gains[i])
                 await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
@@ -905,7 +901,7 @@ class TestEngine:
                 frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
             )
-            last_timestamp = bpipeline._weights_steady
+            last_timestamp = batch_end_index * timestamp_step
 
         incomplete_accums_counters = []
         for i, corrprod_output in enumerate(corrprod_outputs):
@@ -976,7 +972,7 @@ class TestEngine:
                 np.testing.assert_allclose(beam_results[i, j], expected_beams[i, j], atol=1)
 
         verify_beam_sensors(
-            beam_outputs, (first_timestamp, last_timestamp), actual_sensor_updates, weights, quant_gains, delays
+            beam_outputs, first_timestamp, last_timestamp, actual_sensor_updates, weights, quant_gains, delays
         )
 
     @DEFAULT_PARAMETERS
