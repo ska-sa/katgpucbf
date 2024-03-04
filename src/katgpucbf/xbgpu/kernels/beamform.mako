@@ -14,6 +14,11 @@
  * limitations under the License.
  ******************************************************************************/
 
+extern "C++"
+{
+#include <curand_kernel.h>
+}
+
 <%include file="/port.mako"/>
 <%include file="/kernels/complex.mako"/>
 <%include file="/kernels/quant.mako"/>
@@ -57,7 +62,8 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
      */
     bool valid = (spectrum < n_spectra);
     // Point to the first input/output handled by this work item
-    in += frame * in_frame_stride + channel * in_stride + spectrum;
+    unsigned int in_offset = frame * in_frame_stride + channel * in_stride + spectrum;
+    in += in_offset;
     out += frame * out_frame_stride + channel * out_stride + spectrum;
 
     // Zero out the accumulators
@@ -110,13 +116,16 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
 
     if (!valid)
         return;
+
+    curandState_t state;
+    curand_init(123, in_offset, 0, &state);
     // Write accumulators to output
     for (int i = 0; i < N_BEAMS; i++)
     {
         int re, im;
         // TODO: report saturation flags somewhere
-        quant_8bit(accum[i].x, &re);
-        quant_8bit(accum[i].y, &im);
+        quant_8bit(accum[i].x + curand_uniform(&state) - 0.5f, &re);
+        quant_8bit(accum[i].y + curand_uniform(&state) - 0.5f, &im);
         out[out_beam_stride * i] = make_char2(re, im);
     }
 }
