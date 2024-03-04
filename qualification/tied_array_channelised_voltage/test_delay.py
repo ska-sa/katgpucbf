@@ -18,12 +18,25 @@
 
 import numpy as np
 import pytest
+from matplotlib.figure import Figure
 from pytest_check import check
 
 from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf.fgpu.delay import wrap_angle
 
 from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
+from ..reporter import POTLocator, Reporter
+
+
+async def dsim_gaussian(cbf: CBFRemoteControl, pdf_report: Reporter, amplitude: float) -> None:
+    """Configure the dsim with Gaussian noise."""
+    pdf_report.step("Configure the D-sim with Gaussian noise.")
+    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+    # Small so that we don't saturate, as delaying and undelaying a saturated
+    # value won't round-trip properly
+    amplitude /= dig_max
+    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
+    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
 
 @pytest.mark.requirements("CBF-REQ-0220")
@@ -49,13 +62,9 @@ async def test_delay_small(
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
 
-    pdf_report.step("Configure the D-sim with Gaussian noise.")
-    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    # Small so that we don't saturate, as delaying and undelaying a saturated
-    # value won't round-trip properly
-    amplitude = 16 / dig_max
-    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
-    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
+    # Small amplitude so that we don't saturate, as delaying and undelaying a
+    # saturated value won't round-trip properly
+    await dsim_gaussian(cbf, pdf_report, 16)
 
     pdf_report.step("Choose random inputs for delay and reference beams and set weights.")
     rng = np.random.default_rng(seed=123)
@@ -105,3 +114,99 @@ async def test_delay_small(
         with check:
             assert max_error <= 1
         pdf_report.detail(f"Maximum difference is {max_error} ULP")
+
+
+@pytest.mark.requirements("CBF-REQ-0220")
+async def test_delay(
+    cbf: CBFRemoteControl,
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    pdf_report: Reporter,
+) -> None:
+    r"""Test beam steering delay application.
+
+    Verification method
+    -------------------
+    Verification by means of test. Set a delay on one beam (for all inputs)
+    and no delay on another. Check that the results match expectations to
+    within 1 ULP. Correlate the beams and check that the angle of the
+    correlation product matches expectations to within 1°.
+    """
+    receiver = receive_tied_array_channelised_voltage
+    client = cbf.product_controller_client
+
+    # Small amplitude so that we don't saturate.
+    await dsim_gaussian(cbf, pdf_report, 16)
+
+    delay_beam = 0
+    delay_name = receiver.stream_names[delay_beam]
+    ref_beam = 1
+    ref_name = receiver.stream_names[ref_beam]
+    n_indices = len(receiver.source_indices[delay_beam])
+    quant_gain = 1.0 / n_indices
+    pdf_report.step("Set beam gains.")
+    await client.request("beam-quant-gains", delay_name, quant_gain)
+    pdf_report.detail(f"Set gain for {delay_name} to {quant_gain}.")
+    await client.request("beam-quant-gains", ref_name, quant_gain)
+    pdf_report.detail(f"Set gain for {ref_name} to {quant_gain}.")
+
+    channel_width = receiver.bandwidth / receiver.n_chans
+    # Per-channel coefficient for delay -> phase mapping
+    phase_scale = -2 * np.pi * (np.arange(receiver.n_chans) - receiver.n_chans / 2) * channel_width
+
+    # TODO: need requirements to know what values to test
+    delay_phases = [
+        (-509e-9, 1.0),
+        (-100e-9, np.pi / 2),
+        (15.9e-12, 0.0),
+        (509e-9, -np.pi / 2),
+    ]
+    for delay, phase in delay_phases:
+        pdf_report.step(f"Test with delay {delay * 1e12} ps and phase {phase}.")
+        await client.request("beam-delays", delay_name, *([f"{delay}:{phase}"] * n_indices))
+        pdf_report.detail(f"Set beam delays on {delay_name} to {delay}:{phase} on all inputs.")
+        timestamp, data = await receiver.next_complete_chunk()
+        pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
+
+        data = data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
+        expected_phase = phase_scale * delay + phase
+        rotate = np.cos(expected_phase) + 1j * np.sin(expected_phase)
+        expected = data[ref_beam] * rotate[:, np.newaxis]
+        max_error = np.max(np.abs(data[delay_beam] - expected))
+        pdf_report.detail(f"Maximum difference from expected is {max_error:.3f} ULP.")
+        with check:
+            assert max_error <= 1
+
+        corr = np.sum(data[delay_beam] * data[ref_beam].conj(), axis=1)
+        # Collect more chunks so that quantisation effects average out
+        n_chunks = 10
+        for _ in range(n_chunks - 1):
+            timestamp, data = await receiver.next_complete_chunk()
+            data = data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
+            corr += np.sum(data[delay_beam] * data[ref_beam].conj(), axis=1)
+        pdf_report.detail(f"Correlated delay and reference beams over {n_chunks} chunks.")
+
+        corr_phase = np.angle(corr)
+        fig = Figure(tight_layout=True)
+        ax, ax_err = fig.subplots(2)
+        x = range(receiver.n_chans)
+        delta = wrap_angle(corr_phase - expected_phase)
+        max_error_deg = np.max(np.abs(np.rad2deg(delta)))
+        pdf_report.detail(f"Maximum phase error is {max_error_deg:.3f}°.")
+        with check:
+            assert max_error_deg < 1.0
+
+        ax.set_title(f"Phase with delay {delay}:{phase}")
+        ax.set_xlabel("Channel")
+        ax.set_ylabel("Phase (degrees)")
+        ax.xaxis.set_major_locator(POTLocator())
+        ax.plot(x, np.rad2deg(corr_phase), label="Actual")
+        ax.plot(x, np.rad2deg(wrap_angle(expected_phase)), label="Expected")
+        ax.legend()
+
+        ax_err.set_title(f"Phase error with delay {delay}:{phase}")
+        ax_err.set_xlabel("Channel")
+        ax_err.set_ylabel("Error (degrees)")
+        ax_err.xaxis.set_major_locator(POTLocator())
+        ax_err.plot(x, np.rad2deg(delta))
+
+        pdf_report.figure(fig)

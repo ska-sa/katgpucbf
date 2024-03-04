@@ -281,6 +281,9 @@ def matplotlib_report_style() -> Generator[None, None, None]:
             # Serif fonts better match the rest of the document
             "font.family": "serif",
             "font.serif": ["Liberation Serif"],
+            # A lot of the graphs are noisy and a narrower linewidth makes
+            # the detail easier to see.
+            "lines.linewidth": 0.3,
         }
     ):
         yield

@@ -289,16 +289,15 @@ def check_phases(
     ax.set_xlabel("Channel")
     ax.set_ylabel("Phase (degrees)")
     ax.xaxis.set_major_locator(POTLocator())
-    # It's very noisy, and a thinner linewidth allows more detail to be seen
-    ax.plot(x, np.rad2deg(wrap_angle(actual)), linewidth=0.3, label="Actual")
-    ax.plot(x, np.rad2deg(wrap_angle(expected)), linewidth=0.3, label="Expected")
+    ax.plot(x, np.rad2deg(wrap_angle(actual)), label="Actual")
+    ax.plot(x, np.rad2deg(wrap_angle(expected)), label="Expected")
     ax.legend()
 
     ax_err.set_title(f"Phase error with {caption}")
     ax_err.set_xlabel("Channel")
     ax_err.set_ylabel("Error (degrees)")
     ax_err.xaxis.set_major_locator(POTLocator())
-    ax_err.plot(x, np.rad2deg(delta), linewidth=0.3)
+    ax_err.plot(x, np.rad2deg(delta))
 
     pdf_report.figure(fig)
 
