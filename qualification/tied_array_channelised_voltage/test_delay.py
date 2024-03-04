@@ -41,8 +41,8 @@ async def test_delay_small(
     to form a reference beam. Check that the results are consistent to within 1
     ULP.
 
-    This test is only valid for delays less than half a sample. For larger
-    delays, the F-engine delay is done partially in the time domain, which the
+    This test is only valid for delays of less than half a sample. For larger
+    delays, the F-engine delay is done partially in the time domain, while the
     compensating beam delay is purely a phase correction, and so they aren't
     expected to cancel out.
     """
