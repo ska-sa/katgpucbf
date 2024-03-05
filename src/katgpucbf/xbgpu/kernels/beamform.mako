@@ -123,8 +123,8 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     {
         int re, im;
         // TODO: report saturation flags somewhere
-        quant_8bit(accum[i].x + curand_uniform(rand_state) - 0.5f, &re);
-        quant_8bit(accum[i].y + curand_uniform(rand_state) - 0.5f, &im);
+        quant_8bit(accum[i].x + (curand_uniform(rand_state) - 0.5f), &re);
+        quant_8bit(accum[i].y + (curand_uniform(rand_state) - 0.5f), &im);
         out[out_beam_stride * i] = make_char2(re, im);
     }
 }
