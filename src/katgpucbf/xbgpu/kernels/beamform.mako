@@ -32,7 +32,12 @@ extern "C++"  // PyCUDA wraps the whole file in extern "C"
 /// Generate a random value in (-0.5, 0.5)
 DEVICE_FN float dither(GLOBAL curandStateXORWOW_t *state)
 {
-    const float scale = 2.3283063e-10f; // largest float32 value less than 2**-32
+    /* This magic value is chosen so that the largest possible return value
+     * can be added to 127 and still produce 127.49999 rather than 127.5
+     * (found experimentally). That ensures that exact integer values will not
+     * be altered by dithering.
+     */
+    const float scale = 2.3282709e-10f;  // == 0xffff7f00p-64
     /* curand(state) returns a value in [0, 2**32). Casting it to int gives
      * a value in [-2**31, 2**31).
      */
