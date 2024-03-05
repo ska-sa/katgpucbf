@@ -97,7 +97,7 @@ RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) &&
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
 # Jenkins image has a clean environment to start from).
-RUN pip install --no-deps "$(grep '^pycuda==' /tmp/katgpucbf/requirements.txt)" && \
+RUN pip install --no-deps -c /tmp/katgpucbf/requirements.txt pycuda && \
     pip uninstall -y pycuda
 
 #######################################################################
@@ -124,7 +124,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 
 # The above image is independent of the contents of this package (except
 # for requirements.txt), and is used to form the image for Jenkins
-# testing. We now install the package in a new build stage.
+# testing. We now install the requirements in a new build stage.
 
 FROM build-base as build-py
 
@@ -132,11 +132,16 @@ FROM build-base as build-py
 WORKDIR /tmp/katgpucbf
 RUN pip install -r requirements.txt
 
-# Install the package itself. Using --no-deps ensures that if there are
-# requirements that aren't pinned in requirements.txt, the subsequent
-# pip check will complain.
+#######################################################################
+
+FROM build-base as build-wheel
+
+# Build a wheel for the package. Note that this happens independently
+# of the build-py image.
+WORKDIR /tmp/katgpucbf
 COPY . .
-RUN pip install --no-deps . && pip check
+RUN pip install -c requirements-dev.txt build
+RUN python -m build --wheel
 
 #######################################################################
 
@@ -185,9 +190,14 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     libcap2-bin \
     netbase
 
-COPY --from=build-py /venv /venv
-COPY --from=build-cxx /tmp/tools/fsim /usr/local/bin
-COPY --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+COPY --link --from=build-py /venv /venv
+COPY --link --from=build-cxx /tmp/tools/fsim /usr/local/bin
+COPY --link --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+COPY --link --from=build-wheel /tmp/katgpucbf/dist/katgpucbf-*.whl /tmp/
+ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
+# Install the package itself. Using --no-deps ensures that if there are
+# requirements that aren't pinned in requirements.txt, the subsequent
+# pip check will fail.
+RUN pip install --no-deps /tmp/katgpucbf-*.whl && pip check && rm /tmp/katgpucbf-*.whl
 COPY docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
-ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
