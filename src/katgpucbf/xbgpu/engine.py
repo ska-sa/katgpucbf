@@ -51,6 +51,7 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
+from ..curand_helpers import RandomStateHelper
 from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
@@ -140,11 +141,13 @@ class BTxQueueItem(QueueItem):
     def __init__(
         self,
         buffer_device: accel.DeviceArray,
+        rand_states: accel.DeviceArray,
         weights: MappedArray,
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
         self.buffer_device = buffer_device
+        self.rand_states = rand_states
         self.weights = weights
         self.delays = delays
         #: Version of weights and delays (for comparison to BPipeline._weights_version)
@@ -310,15 +313,24 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
         )
         allocator = accel.DeviceAllocator(context=context)
-        for _ in range(self.n_tx_items):
+        assert isinstance(context, katsdpsigproc.cuda.Context)
+        helper = RandomStateHelper(context)
+        for i in range(self.n_tx_items):
             buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
+            assert isinstance(self._beamform.slots["rand_states"], accel.IOSlot)
+            rand_states = helper.make_states(
+                self._beamform.slots["rand_states"].shape,
+                seed=1,  # TODO do we need more control over the seed?
+                sequence_first=i,
+                sequence_step=self.n_tx_items,
+            )
             # TODO: bring it back once support is inplemented
             # saturated = accel.DeviceArray(
             #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
             # )
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(buffer_device, weights, delays)
+            tx_item = BTxQueueItem(buffer_device, rand_states, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
         # These are the original weights, delays and gains as provided by the
         # user, rather than the processed values passed to the kernel.
@@ -465,6 +477,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     "out": tx_item.buffer_device,
                     "weights": tx_item.weights.device,
                     "delays": tx_item.delays.device,
+                    "rand_states": tx_item.rand_states,
                 }
             )
             self._beamform()

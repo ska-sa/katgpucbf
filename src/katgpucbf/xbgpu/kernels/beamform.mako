@@ -14,7 +14,7 @@
  * limitations under the License.
  ******************************************************************************/
 
-extern "C++"
+extern "C++"  // PyCUDA wraps the whole file in extern "C"
 {
 #include <curand_kernel.h>
 }
@@ -35,6 +35,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     GLOBAL const char4 * RESTRICT in,        // shape frame, antenna, channel, time, pol
     GLOBAL const cplx * RESTRICT weights,    // shape antenna, beam, tightly packed
     GLOBAL const float * RESTRICT delays,    // shape antenna, beam, tightly packed
+    GLOBAL curandStateXORWOW_t * RESTRICT rand_state,  // shape frame, channel, time (packed)
     int out_stride,                          // elements between channels
     int out_beam_stride,                     // elements between beams
     int out_frame_stride,                    // elements between frames
@@ -62,9 +63,9 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
      */
     bool valid = (spectrum < n_spectra);
     // Point to the first input/output handled by this work item
-    unsigned int in_offset = frame * in_frame_stride + channel * in_stride + spectrum;
-    in += in_offset;
+    in += frame * in_frame_stride + channel * in_stride + spectrum;
     out += frame * out_frame_stride + channel * out_stride + spectrum;
+    rand_state += (frame * get_num_groups(1) + channel) * n_spectra + spectrum;
 
     // Zero out the accumulators
     cplx accum[N_BEAMS];
@@ -117,15 +118,13 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     if (!valid)
         return;
 
-    curandState_t state;
-    curand_init(123, in_offset, 0, &state);
     // Write accumulators to output
     for (int i = 0; i < N_BEAMS; i++)
     {
         int re, im;
         // TODO: report saturation flags somewhere
-        quant_8bit(accum[i].x + curand_uniform(&state) - 0.5f, &re);
-        quant_8bit(accum[i].y + curand_uniform(&state) - 0.5f, &im);
+        quant_8bit(accum[i].x + curand_uniform(rand_state) - 0.5f, &re);
+        quant_8bit(accum[i].y + curand_uniform(rand_state) - 0.5f, &im);
         out[out_beam_stride * i] = make_char2(re, im);
     }
 }
