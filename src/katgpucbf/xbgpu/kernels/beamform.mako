@@ -29,6 +29,22 @@ extern "C++"  // PyCUDA wraps the whole file in extern "C"
 // Number of antennas whose data is loaded and processed at a time
 #define BATCH_ANTENNAS 16
 
+/// Generate a random value in (-0.5, 0.5)
+DEVICE_FN float dither(GLOBAL curandStateXORWOW_t *state)
+{
+    const float scale = 2.3283063e-10f; // largest float32 value less than 2**-32
+    /* curand(state) returns a value in [0, 2**32). Casting it to int gives
+     * a value in [-2**31, 2**31).
+     */
+    int x = int(curand(state));
+    /* Add 1 to x if x is negative. This gives a distribution with zero mean
+     * There is a tiny non-uniformity because 0 is twice as likely to appear as
+     * other values in (-2**31, 2**31).
+     */
+    x -= x >> 31;
+    return x * scale;
+}
+
 // Each thread computes all beams for one (channel, time)
 KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     GLOBAL char2 * RESTRICT out,             // shape frame, beam, channel, time
@@ -123,8 +139,8 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     {
         int re, im;
         // TODO: report saturation flags somewhere
-        quant_8bit(accum[i].x + (curand_uniform(rand_state) - 0.5f), &re);
-        quant_8bit(accum[i].y + (curand_uniform(rand_state) - 0.5f), &im);
+        quant_8bit(accum[i].x + dither(rand_state), &re);
+        quant_8bit(accum[i].y + dither(rand_state), &im);
         out[out_beam_stride * i] = make_char2(re, im);
     }
 }
