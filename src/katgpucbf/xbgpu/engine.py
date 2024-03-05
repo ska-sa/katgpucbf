@@ -318,11 +318,16 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         for i in range(self.n_tx_items):
             buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
             assert isinstance(self._beamform.slots["rand_states"], accel.IOSlot)
+            # sequence_first and sequence_step are chosen to ensure unique
+            # sequence numbers across all BTxItems in all instances of the
+            # engine.
+            # The seed uses the sync epoch so that it's reproducible while still
+            # changing over time.
             rand_states = helper.make_states(
                 self._beamform.slots["rand_states"].shape,
-                seed=1,  # TODO do we need more control over the seed?
-                sequence_first=i,
-                sequence_step=self.n_tx_items,
+                seed=int(engine.time_converter.sync_epoch),
+                sequence_first=i * engine.n_channels_total + engine.channel_offset_value,
+                sequence_step=self.n_tx_items * engine.n_channels_total,
             )
             # TODO: bring it back once support is inplemented
             # saturated = accel.DeviceArray(
