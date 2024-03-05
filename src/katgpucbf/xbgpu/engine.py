@@ -51,7 +51,7 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
-from ..curand_helpers import RandomStateHelper
+from ..curand_helpers import RandomStateBuilder
 from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
@@ -314,7 +314,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         )
         allocator = accel.DeviceAllocator(context=context)
         assert isinstance(context, katsdpsigproc.cuda.Context)
-        helper = RandomStateHelper(context)
+        builder = RandomStateBuilder(context)
         for i in range(self.n_tx_items):
             buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
             assert isinstance(self._beamform.slots["rand_states"], accel.IOSlot)
@@ -323,7 +323,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             # engine.
             # The seed uses the sync epoch so that it's reproducible while still
             # changing over time.
-            rand_states = helper.make_states(
+            rand_states = builder.make_states(
                 self._beamform.slots["rand_states"].shape,
                 seed=int(engine.time_converter.sync_epoch),
                 sequence_first=i * engine.n_channels_total + engine.channel_offset_value,

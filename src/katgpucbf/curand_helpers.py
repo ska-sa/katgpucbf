@@ -23,8 +23,8 @@ from katsdpsigproc.accel import DeviceArray, roundup
 from katsdpsigproc.cuda import Context
 
 
-class RandomStateHelper:
-    """Helper to initialise random state with curand."""
+class RandomStateBuilder:
+    """Build array of initialised random states for curand."""
 
     def __init__(self, context: Context) -> None:
         source = (importlib.resources.files(__package__) / "kernels" / "curand_helpers.cu").read_text()

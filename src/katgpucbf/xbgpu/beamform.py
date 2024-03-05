@@ -24,7 +24,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import COMPLEX, N_POLS
-from ..curand_helpers import RandomStateHelper
+from ..curand_helpers import RandomStateBuilder
 
 
 class BeamformTemplate:
@@ -134,7 +134,7 @@ class Beamform(accel.Operation):
                 accel.Dimension(n_channels, exact=True),
                 accel.Dimension(n_spectra_per_frame, exact=True),
             ),
-            RandomStateHelper(command_queue.context).dtype,
+            RandomStateBuilder(command_queue.context).dtype,
         )
 
     def _run(self) -> None:

@@ -4,7 +4,7 @@ import argparse
 
 import katsdpsigproc.accel
 
-from katgpucbf.curand_helpers import RandomStateHelper
+from katgpucbf.curand_helpers import RandomStateBuilder
 from katgpucbf.xbgpu.beamform import BeamformTemplate
 
 
@@ -31,9 +31,9 @@ def main():
         n_spectra_per_frame=args.spectra_per_heap,
     )
 
-    helper = RandomStateHelper(ctx)
+    builder = RandomStateBuilder(ctx)
     slot = fn.slots["rand_states"]
-    fn.bind(rand_states=helper.make_states(slot.shape, seed=1234567, sequence_first=0))
+    fn.bind(rand_states=builder.make_states(slot.shape, seed=1234567, sequence_first=0))
 
     fn.ensure_all_bound()
     # Set non-trivial weights so the whole thing isn't just zero

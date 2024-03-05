@@ -23,7 +23,7 @@ import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.curand_helpers import RandomStateHelper
+from katgpucbf.curand_helpers import RandomStateBuilder
 from katgpucbf.xbgpu.beamform import BeamformTemplate
 
 
@@ -85,8 +85,8 @@ def test_beamform(
     # Initialise the random states
     assert isinstance(context, katsdpsigproc.cuda.Context)
     assert isinstance(fn.slots["rand_states"], katsdpsigproc.accel.IOSlot)  # keep mypy happy
-    helper = RandomStateHelper(context)
-    fn.bind(rand_states=helper.make_states(fn.slots["rand_states"].shape, seed=321, sequence_first=0))
+    builder = RandomStateBuilder(context)
+    fn.bind(rand_states=builder.make_states(fn.slots["rand_states"].shape, seed=321, sequence_first=0))
 
     fn.ensure_all_bound()
     h_in = fn.buffer("in").empty_like()
