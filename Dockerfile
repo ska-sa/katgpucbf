@@ -136,8 +136,8 @@ RUN pip install -r requirements.txt
 
 FROM build-base as build-py
 
-# Build a wheel for the package. Note that this happens independently
-# of the build-py-requirements image.
+# Build the package. Note that this happens independently of the
+# build-py-requirements image.
 WORKDIR /tmp/katgpucbf
 COPY . .
 RUN pip install --no-deps --root=/install-root .
