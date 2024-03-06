@@ -57,7 +57,8 @@ async def test_delay_small(
     This test is only valid for delays of less than half a sample. For larger
     delays, the F-engine delay is done partially in the time domain, while the
     compensating beam delay is purely a phase correction, and so they aren't
-    expected to cancel out.
+    expected to cancel out. The delays tested are a spread of positive and
+    negative values in the picosecond range.
     """
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
