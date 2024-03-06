@@ -21,22 +21,10 @@ import pytest
 from matplotlib.figure import Figure
 from pytest_check import check
 
-from katgpucbf import DIG_SAMPLE_BITS
 from katgpucbf.fgpu.delay import wrap_angle
 
 from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
 from ..reporter import POTLocator, Reporter
-
-
-async def dsim_gaussian(cbf: CBFRemoteControl, pdf_report: Reporter, amplitude: float) -> None:
-    """Configure the dsim with Gaussian noise."""
-    pdf_report.step("Configure the D-sim with Gaussian noise.")
-    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    # Small so that we don't saturate, as delaying and undelaying a saturated
-    # value won't round-trip properly
-    amplitude /= dig_max
-    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
-    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
 
 @pytest.mark.requirements("CBF-REQ-0220")
@@ -65,7 +53,7 @@ async def test_delay_small(
 
     # Small amplitude so that we don't saturate, as delaying and undelaying a
     # saturated value won't round-trip properly
-    await dsim_gaussian(cbf, pdf_report, 16)
+    await cbf.dsim_gaussian(16.0, pdf_report)
 
     pdf_report.step("Choose random inputs for delay and reference beams and set weights.")
     rng = np.random.default_rng(seed=123)
@@ -144,7 +132,7 @@ async def test_delay(
     client = cbf.product_controller_client
 
     # Small amplitude so that we don't saturate.
-    await dsim_gaussian(cbf, pdf_report, 16)
+    await cbf.dsim_gaussian(16.0, pdf_report)
 
     delay_beam = 0
     delay_name = receiver.stream_names[delay_beam]

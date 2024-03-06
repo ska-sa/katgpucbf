@@ -48,9 +48,11 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX
+from katgpucbf import COMPLEX, DIG_SAMPLE_BITS
 from katgpucbf.spead import DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
+
+from .reporter import Reporter as _Reporter
 
 logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
@@ -182,6 +184,28 @@ class CBFRemoteControl:
         """
         reply, _ = await self.dsim_clients[dsim_idx].request("time")
         return aiokatcp.decode(float, reply[0])
+
+    async def dsim_gaussian(self, amplitude: float, pdf_report: _Reporter | None = None, *, dsim_idx: int = 0) -> None:
+        """Configure a dsim with Gaussian noise.
+
+        The identical signal is produced on both polarisations.
+
+        Parameters
+        ----------
+        amplitude
+            Standard deviation, in units of the LSB of the digitiser output
+        pdf_report
+            Reporter to which this process will be reported
+        dsim_idx
+            Index of the dsim to set
+        """
+        if pdf_report is not None:
+            pdf_report.step("Configure the D-sim with Gaussian noise.")
+        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        amplitude /= dig_max  # Convert to be relative to full-scale
+        await self.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
+        if pdf_report is not None:
+            pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
 
 class XBReceiver:
