@@ -204,6 +204,7 @@ class XBReceiver:
             self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
         else:
             self.decimation_factor = 1
+        self.adc_sample_rate = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
@@ -404,6 +405,10 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
 
         self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
+        self.source_indices = [
+            ast.literal_eval(cbf.sensors[f"{stream_name}.source-indices"].value.decode())
+            for stream_name in stream_names
+        ]
 
         self.stream = create_tied_array_channelised_voltage_receive_stream(
             interface_address,
