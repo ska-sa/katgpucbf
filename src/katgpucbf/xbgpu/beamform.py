@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,6 +24,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import COMPLEX, N_POLS
+from ..curand_helpers import RandomStateBuilder
 
 
 class BeamformTemplate:
@@ -87,6 +88,8 @@ class Beamform(accel.Operation):
         the channel number and :math:`d` is the delay value. Note
         that this will not apply any rotation to the first channel
         in the data; any such rotation needs to be baked into **weights**.
+    **rand_states** : n_frames × n_channels × n_spectra_per_frame, curandStateXORWOW_t (packed)
+        Independent random states for generating dither values
 
     Parameters
     ----------
@@ -125,6 +128,14 @@ class Beamform(accel.Operation):
         weights_dims = (n_ants, accel.Dimension(n_beams, exact=True))
         self.slots["weights"] = accel.IOSlot(weights_dims, np.complex64)
         self.slots["delays"] = accel.IOSlot(weights_dims, np.float32)
+        self.slots["rand_states"] = accel.IOSlot(
+            (
+                accel.Dimension(n_frames, exact=True),
+                accel.Dimension(n_channels, exact=True),
+                accel.Dimension(n_spectra_per_frame, exact=True),
+            ),
+            RandomStateBuilder(command_queue.context).dtype,
+        )
 
     def _run(self) -> None:
         in_buffer = self.buffer("in")
@@ -136,6 +147,7 @@ class Beamform(accel.Operation):
                 in_buffer.buffer,
                 self.buffer("weights").buffer,
                 self.buffer("delays").buffer,
+                self.buffer("rand_states").buffer,
                 np.int32(out_buffer.padded_shape[3]),
                 np.int32(out_buffer.padded_shape[2] * out_buffer.padded_shape[3]),
                 np.int32(out_buffer.padded_shape[1] * out_buffer.padded_shape[2] * out_buffer.padded_shape[3]),

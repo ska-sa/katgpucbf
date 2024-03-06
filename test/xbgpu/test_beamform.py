@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,12 +16,14 @@
 
 """Test the :mod:`katgpucbf.xbgpu.beamform` module."""
 
+import katsdpsigproc
 import numba
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf import COMPLEX, N_POLS
+from katgpucbf.curand_helpers import RandomStateBuilder
 from katgpucbf.xbgpu.beamform import BeamformTemplate
 
 
@@ -79,6 +81,13 @@ def test_beamform(
 
     template = BeamformTemplate(context, beam_pols)
     fn = template.instantiate(command_queue, n_frames, n_antennas, n_channels, n_times)
+
+    # Initialise the random states
+    assert isinstance(context, katsdpsigproc.cuda.Context)
+    assert isinstance(fn.slots["rand_states"], katsdpsigproc.accel.IOSlot)  # keep mypy happy
+    builder = RandomStateBuilder(context)
+    fn.bind(rand_states=builder.make_states(fn.slots["rand_states"].shape, seed=321, sequence_first=0))
+
     fn.ensure_all_bound()
     h_in = fn.buffer("in").empty_like()
     h_out = fn.buffer("out").empty_like()
