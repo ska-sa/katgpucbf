@@ -154,9 +154,6 @@ pipeline {
         not { changeRequest() }
         equals expected: "SUCCESS", actual: currentBuild.currentResult
       }
-      environment {
-        DOCKER_BUILDKIT = '1'
-      }
       steps {
         script {
           branch = env.BRANCH_NAME
