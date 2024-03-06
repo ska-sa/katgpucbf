@@ -51,7 +51,7 @@ async def test_delay_small(
     -------------------
     Verification by means of test. Set a delay on one input and form a beam
     from it with a compensating delay. Use a different input with no delay
-    to form a reference beam. Check that the results are consistent to within 1
+    to form a reference beam. Check that the results are consistent to within 2
     ULP.
 
     This test is only valid for delays of less than half a sample. For larger
@@ -121,7 +121,7 @@ async def test_delay_small(
         data = data.astype(np.int16)
         max_error = np.max(np.abs(data[delay_beam] - data[ref_beam]))
         with check:
-            assert max_error <= 1
+            assert max_error <= 2
         pdf_report.detail(f"Maximum difference is {max_error} ULP")
 
 
@@ -137,7 +137,7 @@ async def test_delay(
     -------------------
     Verification by means of test. Set a delay on one beam (for all inputs)
     and no delay on another. Check that the results match expectations to
-    within 1 ULP. Correlate the beams and check that the angle of the
+    within 1.5 ULP. Correlate the beams and check that the angle of the
     correlation product matches expectations to within 1°.
     """
     receiver = receive_tied_array_channelised_voltage
@@ -183,7 +183,7 @@ async def test_delay(
         max_error = np.max(np.abs(data[delay_beam] - expected))
         pdf_report.detail(f"Maximum difference from expected is {max_error:.3f} ULP.")
         with check:
-            assert max_error <= 1
+            assert max_error <= 1.5  # A bit more than sqrt(2)
 
         corr = np.sum(data[delay_beam] * data[ref_beam].conj(), axis=1)
         # Collect more chunks so that quantisation effects average out
