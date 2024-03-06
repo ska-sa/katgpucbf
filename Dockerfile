@@ -126,7 +126,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 # for requirements.txt), and is used to form the image for Jenkins
 # testing. We now install the requirements in a new build stage.
 
-FROM build-base as build-py
+FROM build-base as build-py-requirements
 
 # Install requirements (already copied to build-base image).
 WORKDIR /tmp/katgpucbf
@@ -134,14 +134,13 @@ RUN pip install -r requirements.txt
 
 #######################################################################
 
-FROM build-base as build-wheel
+FROM build-base as build-py
 
 # Build a wheel for the package. Note that this happens independently
-# of the build-py image.
+# of the build-py-requirements image.
 WORKDIR /tmp/katgpucbf
 COPY . .
-RUN pip install -c requirements-dev.txt build
-RUN python -m build --wheel
+RUN pip install --no-deps --root=/install-root .
 
 #######################################################################
 
@@ -190,14 +189,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     libcap2-bin \
     netbase
 
-COPY --link --from=build-py /venv /venv
-COPY --link --from=build-cxx /tmp/tools/fsim /usr/local/bin
-COPY --link --from=build-cxx /tmp/tools/schedrr /usr/local/bin
-COPY --link --from=build-wheel /tmp/katgpucbf/dist/katgpucbf-*.whl /tmp/
 ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
-# Install the package itself. Using --no-deps ensures that if there are
-# requirements that aren't pinned in requirements.txt, the subsequent
-# pip check will fail.
-RUN pip install --no-deps /tmp/katgpucbf-*.whl && pip check && rm /tmp/katgpucbf-*.whl
-COPY docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
+
+COPY --link --from=build-cxx /tmp/tools/schedrr /usr/local/bin
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
+COPY --link --from=build-py-requirements /venv /venv
+COPY --link --from=build-cxx /tmp/tools/fsim /usr/local/bin
+COPY --link docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
+COPY --link --from=build-py /install-root/venv /venv
