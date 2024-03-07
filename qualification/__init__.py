@@ -52,7 +52,7 @@ from katgpucbf import COMPLEX, DIG_SAMPLE_BITS
 from katgpucbf.spead import DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
-from .reporter import Reporter as _Reporter
+from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
@@ -185,7 +185,7 @@ class CBFRemoteControl:
         reply, _ = await self.dsim_clients[dsim_idx].request("time")
         return aiokatcp.decode(float, reply[0])
 
-    async def dsim_gaussian(self, amplitude: float, pdf_report: _Reporter | None = None, *, dsim_idx: int = 0) -> None:
+    async def dsim_gaussian(self, amplitude: float, pdf_report: Reporter | None = None, *, dsim_idx: int = 0) -> None:
         """Configure a dsim with Gaussian noise.
 
         The identical signal is produced on both polarisations.
