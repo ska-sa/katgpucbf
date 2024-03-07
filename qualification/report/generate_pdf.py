@@ -248,6 +248,8 @@ class Result:
     """
 
     nodeid: str
+    filename: str
+    lineno: int | None
     name: str  # Name by which the test is known to pytest (including parameters)
     text_name: str = ""  # Name shown in the document (excluding parameters)
     parameters: str = ""  # Parameter part of `name`
@@ -268,6 +270,31 @@ class Result:
             return f"{self.text_name} [{self.parameters}]"
         else:
             return self.text_name
+
+    @property
+    def base_nodeid(self) -> str:
+        """Get the nodeid with parameters removed."""
+        pos = self.nodeid.find("[")
+        if pos == -1:
+            return self.nodeid
+        else:
+            return self.nodeid[:pos]
+
+
+class ResultSet:
+    """A collection of results with the same :attr:`Result.base_nodeid`."""
+
+    def __init__(self, results: Sequence[Result]) -> None:
+        self.results = list(results)
+        assert self.results, "results must not be empty"
+        self.base_nodeid = results[0].base_nodeid
+        self.text_name = results[0].text_name
+        for result in self.results:
+            assert result.base_nodeid == self.base_nodeid, "base_nodeids do not match"
+            if result.text_name != self.text_name:
+                raise ValueError(
+                    f"Inconsistent text names for tests in ResultSet ({result.text_name} != {self.text_name})"
+                )
 
 
 @dataclass(frozen=True)
@@ -509,7 +536,7 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
         if not results or results[-1].nodeid != nodeid:
             # It's the first time we've seen this nodeid (otherwise we merge
             # with the existing Result).
-            results.append(Result(nodeid, report.location[2]))
+            results.append(Result(nodeid, report.location[0], report.location[1], report.location[2]))
         result = results[-1]
         # The teardown phase has all the log messages, so we ignore the setup and call phases.
         if report.when == "teardown":
@@ -545,13 +572,21 @@ def sort_results(test_configuration: TestConfiguration, results: list[Result]) -
             cbf_idx = cbf_uuids.index(UUID(result.config["cbf"]))
         except KeyError:
             cbf_idx = -1
-        test_dir = result.nodeid.split("/")[0]
-        # This is not a unique key, but pytest generally runs tests from the same file
-        # in definition order, which is a good choice (and Python's sort is
-        # stable).
-        return test_dir, cbf_idx
+        # This is not guaranteed to be a unique key, if there are parameters
+        # that don't affect the choice of correlator. In that case, we just
+        # stick with the original order chosen by pytest (sorting is stable
+        # in Python).
+        return result.filename, result.lineno, result.base_nodeid, cbf_idx
 
     results.sort(key=result_key)
+
+
+def collate_results(results: Iterable[Result]) -> list[ResultSet]:
+    """Group Results into ResultSets."""
+    result_sets: dict[str, list[Result]] = {}
+    for result in results:
+        result_sets.setdefault(result.base_nodeid, []).append(result)
+    return [ResultSet(result_set) for result_set in result_sets.values()]
 
 
 def extract_requirements_verified(results: Iterable[Result]) -> dict[str, list[str]]:
@@ -753,37 +788,53 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
         _doc_cbfs(cbfs_section, test_configuration.cbfs)
 
 
-def _doc_result_summary(section: Container, results: Sequence[Result]) -> None:
-    with section.create(LongTable(r"|l|l|l|r|")) as summary_table:
+def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) -> None:
+    with section.create(LongTable(r"|l|r|c|c|c|")) as summary_table:
         total_duration: float = 0.0
         passed = 0
         failed = 0
+        skipped = 0
+        total = 0
         summary_table.add_hline()
         summary_table.add_row(
             [
                 bold("Test"),
-                bold("Parameters"),
-                bold("Result"),
                 bold("Duration"),
+                bold("Passed"),
+                bold("Failed"),
+                bold("Skipped"),
             ]
         )
         summary_table.add_hline()
-        for result in results:
+        for result_set in result_sets:
+            set_passed = 0
+            set_failed = 0
+            set_skipped = 0
+            set_duration = 0.0
+            for result in result_set.results:
+                if result.outcome == "passed":
+                    set_passed += 1
+                elif result.outcome in ["failed", "xfail"]:
+                    set_failed += 1
+                elif result.outcome == "skipped":
+                    set_skipped += 1
+                set_duration += result.duration
             summary_table.add_row(
                 [
-                    Hyperref(Marker(result.name, prefix="subsec"), result.text_name),
-                    result.parameters,
-                    TextColor(outcome_color(result.outcome), result.outcome),
-                    readable_duration(result.duration),
+                    Hyperref(Marker(result_set.base_nodeid, prefix="subsec"), result_set.text_name),
+                    readable_duration(set_duration),
+                    str(set_passed) if set_passed else "",
+                    TextColor("red", str(set_failed)) if set_failed else "",
+                    str(set_skipped) if set_skipped else "",
                 ]
             )
             summary_table.add_hline()
-            total_duration += result.duration
-            if result.outcome == "passed":
-                passed += 1
-            else:
-                failed += 1
-    section.append(f"{len(results)} tests run, with {passed} passing and {failed} failing.\n")
+            total_duration += set_duration
+            passed += set_passed
+            failed += set_failed
+            skipped += set_skipped
+            total += len(result_set.results)
+    section.append(f"{total} tests run, with {passed} passing, {failed} failing and {skipped} skipped.\n")
     section.append(f"Total test duration: {readable_duration(total_duration)}")
 
 
@@ -849,6 +900,7 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
     next_figure_id = 1
     test_configuration, results = parse(result_list)
     sort_results(test_configuration, results)
+    result_sets = collate_results(results)
     requirements_verified = extract_requirements_verified(results)
 
     doc = Document(
@@ -871,7 +923,7 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
         _doc_test_configuration(doc, test_configuration)
 
         with doc.create(Section("Result Summary")) as summary_section:
-            _doc_result_summary(summary_section, results)
+            _doc_result_summary(summary_section, result_sets)
 
     with doc.create(Section("Detailed Test Results" if make_report else "Test Procedures")) as section:
         for result in results:
