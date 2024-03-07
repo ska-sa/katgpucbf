@@ -16,6 +16,8 @@
 
 """Delay test."""
 
+import time
+
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
@@ -207,3 +209,40 @@ async def test_delay(
         ax_err.plot(x, np.rad2deg(delta))
 
         pdf_report.figure(fig)
+
+
+@pytest.mark.requirements("CBF-REQ-0077")
+async def test_delay_update_time(
+    cbf: CBFRemoteControl,
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    pdf_report: Reporter,
+) -> None:
+    """Test that delay updates are fast enough.
+
+    Verification method
+    -------------------
+    Verified by means of test. Measure the time taken to issue
+    ``?beam-delays`` requests for all beams.
+    """
+    receiver = receive_tied_array_channelised_voltage
+    client = cbf.product_controller_client
+
+    # Use random values just because they'll have lots of significant digits
+    # and hence take longer to format/parse.
+    rng = np.random.default_rng(1)
+    params = [
+        [f"{rng.uniform(-100e-9, 100e-9)}:{rng.uniform(-np.pi, np.pi)}" for _ in source_indices]
+        for source_indices in receiver.source_indices
+    ]
+
+    pdf_report.step("Measure delay setting time")
+    start = time.monotonic()
+    pdf_report.detail(f"Start time is {start:.6f}.")
+    for stream_name, stream_params in zip(receiver.stream_names, params):
+        await client.request("beam-delays", stream_name, *stream_params)
+        pdf_report.detail(f"Set delays on {stream_name} to {stream_params}")
+    stop = time.monotonic()
+    pdf_report.detail(f"Stop time is {stop:.6f}.")
+    elapsed = stop - start
+    pdf_report.detail(f"Elapsed time is {elapsed:.6f}.")
+    assert elapsed < 5.0
