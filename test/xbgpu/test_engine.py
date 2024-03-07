@@ -16,6 +16,7 @@
 
 """Unit tests for XBEngine module."""
 
+import logging
 from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
@@ -40,6 +41,9 @@ from katgpucbf.xbgpu.output import BOutput, XOutput
 from .. import PromDiff, get_sensor
 from . import test_parameters
 from .test_recv import gen_heap
+
+logger = logging.getLogger(__name__)
+logging.basicConfig()
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
@@ -271,12 +275,12 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 def verify_corrprod_sensors(
     xpipelines: list[XPipeline],
     corrprod_results: list[np.ndarray],
-    missing_antenna: int | None,
-    incomplete_accumulation_counters: list[int],
     prom_diff: PromDiff,
+    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
+    incomplete_accumulation_counters: list[int],
     n_channels_per_substream: int,
     n_baselines: int,
-    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
+    missing_antenna: int | None,
 ):
     """Verify katcp and Prometheus sensors for processed XPipeline data.
 
@@ -288,25 +292,25 @@ def verify_corrprod_sensors(
         List of arrays of all GPU-generated data. One output array per
         corrprod_output, where each array has shape
         (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
-    missing_antenna
-        Index of the antenna missing, if any, during the XBEngine's processing
-        of data.
-    incomplete_accumulation_counters
-        List of counts of incomplete accumulations for the unit test. This is
-        dictated in part by `missing_antenna`.
     prom_diff
         Collection of Prometheus metrics observed during the XBEngine's
-        processing of data stimulus.
-    n_channels_per_substream
-        Unit test fixture.
-    n_baselines
-        Number of baselines for the array size in the unit test.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
         names, the values are a list of tuples for each sensor update captured
         via the callback attached to :class:`XPipeline` sensors. Accommodating
         for three value types as there are three different types of sensors in
         the XBEngine.
+        processing of data stimulus.
+    incomplete_accumulation_counters
+        List of counts of incomplete accumulations for the unit test. This is
+        dictated in part by `missing_antenna`.
+    n_channels_per_substream
+        Unit test fixture.
+    n_baselines
+        Number of baselines for the array size in the unit test.
+    missing_antenna
+        Index of the antenna missing, if any, during the XBEngine's processing
+        of data.
     """
     expected_xsensor_updates: list[tuple[bool, aiokatcp.Sensor.Status]] = []
     for xpipeline, corrprod_result, incomplete_accums_counter in zip(
@@ -347,9 +351,11 @@ def verify_corrprod_sensors(
 
 def verify_beam_sensors(
     beam_outputs: list[BOutput],
+    beam_results_shape: tuple[int, ...],
+    prom_diff: PromDiff,
+    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     first_timestamp: int,
     last_timestamp: int,
-    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     weights: np.ndarray,
     quant_gains: np.ndarray,
     delays: np.ndarray,
@@ -360,28 +366,52 @@ def verify_beam_sensors(
     ----------
     beam_outputs
         Output beam configurations parsed into BOutput objects.
-    first_timestamp, last_timestamp
-        Two timestamps indicating the start and end of data processing
-        by the :class:`BPipeline`.
+    beam_results_shape
+        The shape of the verified beam data for all beams with the
+        following shape
+        - (len(beam_outputs), n_beam_heaps_sent, n_channels_per_substream,
+        n_samples_between_spectra, COMPLEX)
+    prom_diff
+        Collection of Prometheus metrics observed during the XBEngine's
+        processing of data stimulus.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
         names, the values are a list of tuples for each sensor update captured
         via the callback attached to :class:`BPipeline` sensors. Accommodating
         for three value types as there are three different types of sensors in
         the XBEngine.
+    first_timestamp, last_timestamp
+        Two timestamps indicating the start and end of data processing
+        by the :class:`BPipeline`.
+    n_heaps_total
+        Total number of heaps transmitted by the beam data stream - including
+        descriptors.
     weights
         The beam weights applied to each input of the beam data product.
         These are real floating-point values generated for the unit test.
     delays
         The beam delays applied to each beam data product. These are
-
-    .. todo::
-
-        Add verification of Prometheus counters once NGC-1154
-        is implemented.
     """
-    # Generate expected sensor updates from BPipeline and compare
+    # Get the number of total heaps transmitted by each beam output
+    # NOTE: We round up to the nearest multiple of `HEAPS_PER_FENGINE_PER_CHUNK`
+    # as the BSend currently transmits all Frames of data, regardless of how
+    # empty/full an input (received Chunk) is. Also, the number of Frames in a
+    # BSend Chunk is the same as `HEAPS_PER_FENGINE_PER_CHUNK`.
+    n_beam_heaps_sent = beam_results_shape[1]
+    n_beam_heaps_sent += n_beam_heaps_sent % HEAPS_PER_FENGINE_PER_CHUNK
+    beam_data_shape = beam_results_shape[2:]
     for i, beam_output in enumerate(beam_outputs):
+        assert prom_diff.get_sample_diff("output_b_heaps_total", {"stream": beam_output.name}) == n_beam_heaps_sent
+        assert prom_diff.get_sample_diff(
+            "output_b_bytes_total", {"stream": beam_output.name}
+        ) == n_beam_heaps_sent * np.prod(beam_data_shape)
+        # We get rid of the final (COMPLEX) dimension in the beam data as each
+        # sample has a bitwidth of eight (8).
+        assert prom_diff.get_sample_diff(
+            "output_b_samples_total", {"stream": beam_output.name}
+        ) == n_beam_heaps_sent * np.prod(beam_data_shape[:-1])
+        # TODO: NGC-1173 Add check for `output_b_clipped_samples`
+
         assert first_timestamp < last_timestamp, (
             "Timestamp before katcp requests is not less than timestamp after data"
             f"has been processed: {first_timestamp} >= {last_timestamp}"
@@ -875,6 +905,7 @@ class TestEngine:
             batch_end_index = batch_start_index + n_heaps
             # Add an extra chunk before the first full accumulation
             batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
+            logger.info(f"Sending {batch_end_index - batch_start_index} heaps")
 
             for i, output in enumerate(beam_outputs):
                 # We only capture the timestamps before and after all katcp
@@ -942,12 +973,12 @@ class TestEngine:
         verify_corrprod_sensors(
             xpipelines,
             corrprod_results,
-            missing_antenna,
-            incomplete_accums_counters,
             prom_diff,
+            actual_sensor_updates,
+            incomplete_accums_counters,
             n_channels_per_substream,
             n_baselines,
-            actual_sensor_updates,
+            missing_antenna,
         )
 
         channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels_total
@@ -971,8 +1002,19 @@ class TestEngine:
             for j in range(beam_results.shape[1]):
                 np.testing.assert_allclose(beam_results[i, j], expected_beams[i, j], atol=1)
 
+        # `beam_results` hold results for each heap transmitted by a `beam_output`
+        # for all `beam_outputs`
+        # - We can reuse its dimensions in the sensor verification below.
         verify_beam_sensors(
-            beam_outputs, first_timestamp, last_timestamp, actual_sensor_updates, weights, quant_gains, delays
+            beam_outputs=beam_outputs,
+            beam_results_shape=beam_results.shape,
+            prom_diff=prom_diff,
+            actual_sensor_updates=actual_sensor_updates,
+            first_timestamp=first_timestamp,
+            last_timestamp=last_timestamp,
+            weights=weights,
+            quant_gains=quant_gains,
+            delays=delays,
         )
 
     @DEFAULT_PARAMETERS

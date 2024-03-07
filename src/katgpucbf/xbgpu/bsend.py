@@ -17,6 +17,7 @@
 """Module for sending tied array channelised voltage products onto the network."""
 
 import asyncio
+import functools
 import logging
 from math import ceil
 from typing import Callable, Final, Sequence
@@ -171,6 +172,35 @@ class Chunk:
         self._timestamps += delta
         self._timestamp = value
 
+    @staticmethod
+    def _inc_counters(beam_data_shape: tuple[int, int, int], beam_names: Sequence[str], future: asyncio.Future) -> None:
+        """Increment beam stream Prometheus counters.
+
+        Parameters
+        ----------
+        beam_data_shape
+            The shape of the beam data being transmitted. Expected in the
+            format of (n_channels_per_substream, samples_per_spectra, COMPLEX).
+        beam_names
+            List of beam stream names that are enabled for transmission for
+            this `future`.
+        future
+            Future returned by the spead2 stream's `async_send_heaps`.
+
+        .. todo::
+
+            (NGC-1172) Handle missing data transmission for Prometheus counters.
+        """
+        if not future.cancelled() and future.exception() is None:
+            for beam_name in beam_names:
+                logger.info(f"\nCallback updating for {beam_name}")
+                output_heaps_counter.labels(beam_name).inc(1)
+                # Each beam data sample is 8-bit
+                # - Multiply across dimensions to get total bytes
+                output_bytes_counter.labels(beam_name).inc(np.prod(beam_data_shape))
+                # - Multiple across the first two dimensions to get complex sample count
+                output_samples_counter.labels(beam_name).inc(np.prod(beam_data_shape[:-1]))
+
     def send(
         self,
         send_stream: "BSend",
@@ -185,53 +215,41 @@ class Chunk:
 
         .. todo::
 
-            Also update its relevant counters and sensor values.
+            (NGC-1173): Update counter and sensor with chunk.saturation
         """
         n_enabled = sum(send_stream.tx_enabled)
         rate = send_stream.bytes_per_second_per_beam * n_enabled
-        heaps_to_send: list[spead2.send.HeapReference] = []
         if n_enabled > 0:
-            send_futures = []
+            send_futures: list[asyncio.Future] = []
             for frame in self._frames:
-                for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled)):
-                    if enabled:
-                        heaps_to_send.append(spead2.send.HeapReference(heap, substream_index=i, rate=rate))
-                        # NOTE: But also, we actually want to send as fast as possible
-                        # And keep all this housekeeping to be done asynchronously
-                        # - Maybe give the done_callback a list of beam_names that were enabled?
-                        beam_name = send_stream.beam_names[i]
-                        # This seems like a potential bottleneck/processing issue
-                        # - Incrementing the counter by 1 at ~high frequency?
-                        output_heaps_counter.labels(beam_name).inc(1)
-                        # As for the bytes counter?
-                        # - Not as simple as frame.data.nbytes, I don't think
-                        # - The outer-most dimension is `beams`, so it's all the data
-                        #   one level down?
-                        beam_data = frame.data[i, ...]
-                        # Should be the same for all beams
-                        output_bytes_counter.labels(beam_name).inc(beam_data.nbytes)
-                        # Lastly, samples counter
-                        # - fgpu uses frame.data.size, but its shape is
-                        #   (n_channels, n_spectra_per_heap, N_POLS)
-                        # - beam frame.data has shape
-                        #   (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
-                        # Size is just the product of the dimensions
-                        output_samples_counter.labels(beam_name).inc(beam_data.size)
-
                 # TODO (NGC-1232): building this list every time may be too expensive.
                 # Consider caching it and invalidating when streams are enabled/disabled.
-                # heaps_to_send = [
-                #     spead2.send.HeapReference(heap, substream_index=i, rate=rate)
-                #     for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled))
-                #     if enabled
-                # ]
+                heaps_to_send = [
+                    spead2.send.HeapReference(heap, substream_index=i, rate=rate)
+                    for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled))
+                    if enabled
+                ]
                 send_futures.append(
                     send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
-                heaps_to_send.clear()
-                # TODO: Attach _inc_counters as done_callback
-                # - However, we don't have access to beam_output names here, only IDs
-            # TODO: Update counters and sensor with chunk.saturation
+                enabled_streams = [
+                    output_name
+                    for output_name, enabled in zip(send_stream.beam_names, send_stream.tx_enabled)
+                    if enabled
+                ]
+                logger.info(f"Adding callback for {enabled_streams} with {frame.data.shape}")
+                send_futures[-1].add_done_callback(
+                    functools.partial(
+                        self._inc_counters,
+                        frame.data.shape[1:],  # Get rid of 'beam' dimension
+                        [
+                            output_name
+                            for output_name, enabled in zip(send_stream.beam_names, send_stream.tx_enabled)
+                            if enabled
+                        ],
+                    )
+                )
+
             self.future = asyncio.gather(*send_futures)
         else:
             # TODO: Is it necessary to handle this case?
