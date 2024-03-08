@@ -211,7 +211,7 @@ async def test_delay(
         pdf_report.figure(fig)
 
 
-@pytest.mark.requirements("CBF-REQ-0077")
+@pytest.mark.requirements("CBF-REQ-0076")
 async def test_delay_update_time(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
