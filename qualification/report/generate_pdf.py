@@ -65,62 +65,6 @@ RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 
 
-def make_cbf_mode_str(config: dict, *, expand: bool = False) -> str:
-    """Generate a description string from a configuration dictionary.
-
-    The input is expected to be in the format of, e.g.:
-    {
-        "antennas": "4",
-        "channels": "8192",
-        "bandwidth": "856",
-        "band": "L",
-        "integration_time": "0.5",
-        "dsims": "4",
-        "beams": "4",
-    }
-
-    If `expand` is True, it will return a 'long description' as a sentence:
-    - 4 antennas, 8192 channels, 4 beams, L-band, 0.5s integrations, 4 dsims
-
-    If `expand` is False, it will return a MeerKAT config mode string of:
-    - bc8n856M8k
-
-    Parameters
-    ----------
-    config
-        A dictionary in the format described above.
-    expand
-        To indicate whether a full-sentence description should be returned
-        or just the mode string should be generated.
-
-    Returns
-    -------
-    Short or long description of CBF mode.
-    """
-    config_mode: str
-
-    if expand:
-        # Long description required
-        parts = [
-            f'{config["antennas"]} antennas',
-            f'{config["channels"]} channels',
-            f'{config["beams"]} beams',
-            f'{config["band"]}-band',
-            f'{config["integration_time"]}s integrations',
-            f'{config["dsims"]} dsims',
-        ]
-        if int(config["narrowband_decimation"]) > 1:
-            parts.append(f'1/{config["narrowband_decimation"]} narrowband')
-        config_mode = ", ".join(parts) + "."
-    else:
-        antpols = int(config["antennas"]) * 2
-        chans = int(config["channels"]) // 1000
-        mode = "bc" if int(config["beams"]) > 0 else "c"
-        config_mode = f'{mode}{antpols}n{config["bandwidth"]}M{chans}k'
-
-    return config_mode
-
-
 def cbf_sort_key(config: dict) -> tuple:
     """Generate a sort key to sort CBFs."""
     # It seems at least some of these get stringified, so ensure they are numeric
@@ -239,64 +183,6 @@ class Step:
     items: list[Item] = field(default_factory=list)
 
 
-@dataclass
-class Result:
-    """A single test execution.
-
-    This combines the setup, call and teardown phases, which appear as separate
-    lines in the report.json file.
-    """
-
-    nodeid: str
-    filename: str
-    lineno: int | None
-    name: str  # Name by which the test is known to pytest (including parameters)
-    text_name: str = ""  # Name shown in the document (excluding parameters)
-    parameters: str = ""  # Parameter part of `name`
-    blurb: str = ""
-    requirements: list[str] = field(default_factory=list)
-    steps: list[Step] = field(default_factory=list)
-    outcome: Literal["passed", "failed", "skipped", "xfail"] = "failed"
-    xfail_reason: str | None = None
-    failure_messages: list[str] = field(default_factory=list)
-    start_time: float | None = None
-    duration: float = 0.0
-    config: dict = field(default_factory=dict)
-
-    @property
-    def full_text_name(self) -> str:
-        """Human-readable name, including parameters."""
-        if self.parameters:
-            return f"{self.text_name} [{self.parameters}]"
-        else:
-            return self.text_name
-
-    @property
-    def base_nodeid(self) -> str:
-        """Get the nodeid with parameters removed."""
-        pos = self.nodeid.find("[")
-        if pos == -1:
-            return self.nodeid
-        else:
-            return self.nodeid[:pos]
-
-
-class ResultSet:
-    """A collection of results with the same :attr:`Result.base_nodeid`."""
-
-    def __init__(self, results: Sequence[Result]) -> None:
-        self.results = list(results)
-        assert self.results, "results must not be empty"
-        self.base_nodeid = results[0].base_nodeid
-        self.text_name = results[0].text_name
-        for result in self.results:
-            assert result.base_nodeid == self.base_nodeid, "base_nodeids do not match"
-            if result.text_name != self.text_name:
-                raise ValueError(
-                    f"Inconsistent text names for tests in ResultSet ({result.text_name} != {self.text_name})"
-                )
-
-
 @dataclass(frozen=True)
 class Interface:
     """A network interface."""
@@ -351,6 +237,75 @@ class CBFConfiguration:
     mode_config: dict
     uuid: UUID
     tasks: dict[str, Task]
+    index: int = -1  # Position in the list of CBFs
+    title: str = ""  # Text to use for section name, links etc in the document
+
+    def mode_str(self, *, expand: bool = False) -> str:
+        """Generate a description string for the CBF.
+
+        The :attr:`mode_config` is expected to be in the format of, e.g.:
+
+        .. code:: python
+            {
+                "antennas": "4",
+                "channels": "8192",
+                "bandwidth": "856",
+                "band": "L",
+                "integration_time": "0.5",
+                "dsims": "4",
+                "beams": "4",
+            }
+
+        If `expand` is True, it will return a 'long description' as a sentence:
+
+        - 4 antennas, 8192 channels, 4 beams, L-band, 0.5s integrations, 4 dsims
+
+        If `expand` is False, it will return a MeerKAT config mode string of:
+
+        - bc8n856M8k
+
+        Parameters
+        ----------
+        config
+            A dictionary in the format described above.
+        expand
+            To indicate whether a full-sentence description should be returned
+            or just the mode string should be generated.
+
+        Returns
+        -------
+        Short or long description of CBF mode.
+        """
+        if expand:
+            # Long description required
+            parts = [
+                f'{self.mode_config["antennas"]} antennas',
+                f'{self.mode_config["channels"]} channels',
+                f'{self.mode_config["beams"]} beams',
+                f'{self.mode_config["band"]}-band',
+                f'{self.mode_config["integration_time"]}s integrations',
+                f'{self.mode_config["dsims"]} dsims',
+            ]
+            if int(self.mode_config["narrowband_decimation"]) > 1:
+                parts.append(f'1/{self.mode_config["narrowband_decimation"]} narrowband')
+            config_mode = ", ".join(parts) + "."
+        else:
+            antpols = int(self.mode_config["antennas"]) * 2
+            chans = int(self.mode_config["channels"]) // 1000
+            mode = "bc" if int(self.mode_config["beams"]) > 0 else "c"
+            config_mode = f'{mode}{antpols}n{self.mode_config["bandwidth"]}M{chans}k'
+
+        return config_mode
+
+    @property
+    def marker(self) -> Marker:
+        """Marker for linking to this CBF."""
+        return Marker(str(self.uuid), prefix="cbf")
+
+    @property
+    def link(self) -> Hyperref:
+        """Hyperlink to this CBF."""
+        return Hyperref(self.marker, self.title)
 
 
 @dataclass
@@ -360,6 +315,90 @@ class TestConfiguration:
     params: dict[str, str] = field(default_factory=dict)
     hosts: dict[Host, list[str]] = field(default_factory=lambda: defaultdict(list))  # Hostnames for each config
     cbfs: list[CBFConfiguration] = field(default_factory=list)
+    cbf_index: dict[UUID, CBFConfiguration] = field(default_factory=dict)
+
+
+@dataclass
+class Result:
+    """A single test execution.
+
+    This combines the setup, call and teardown phases, which appear as separate
+    lines in the report.json file.
+    """
+
+    nodeid: str
+    filename: str
+    lineno: int | None
+    name: str  # Name by which the test is known to pytest (including parameters)
+    text_name: str = ""  # Name shown in the document (excluding parameters)
+    parameters: str = ""  # Parameter part of `name`
+    subtitle: str = ""  # Title of the report within the ResultSet
+    blurb: str = ""
+    requirements: list[str] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
+    outcome: Literal["passed", "failed", "skipped", "xfail"] = "failed"
+    xfail_reason: str | None = None
+    failure_messages: list[str] = field(default_factory=list)
+    start_time: float | None = None
+    duration: float = 0.0
+    config: dict = field(default_factory=dict)
+    cbf: CBFConfiguration | None = None
+
+    @property
+    def base_nodeid(self) -> str:
+        """Get the nodeid with parameters removed."""
+        pos = self.nodeid.find("[")
+        if pos == -1:
+            return self.nodeid
+        else:
+            return self.nodeid[:pos]
+
+    @property
+    def marker(self) -> Marker:
+        """Marker for linking to this result."""
+        return Marker(self.nodeid, "ssubsec")
+
+    @property
+    def link(self) -> Hyperref:
+        """Hyperlink to this result (including only the subtitle)."""
+        return Hyperref(self.marker, self.subtitle)
+
+
+class ResultSet:
+    """A collection of results with the same :attr:`Result.base_nodeid`."""
+
+    def __init__(self, results: Sequence[Result]) -> None:
+        self.results = list(results)
+        assert self.results, "results must not be empty"
+        self.base_nodeid = results[0].base_nodeid
+        self.text_name = results[0].text_name
+        self.blurb = results[0].blurb
+        self.duration = 0.0
+        self.outcome_counts = {"passed": 0, "failed": 0, "skipped": 0, "xfail": 0}
+        self.requirements: list[str] = []
+        for result in self.results:
+            assert result.base_nodeid == self.base_nodeid, "base_nodeids do not match"
+            if result.text_name != self.text_name:
+                raise ValueError(
+                    f"Inconsistent text names for tests in ResultSet ({result.text_name} != {self.text_name})"
+                )
+            if result.blurb != self.blurb:
+                raise ValueError(f"Inconsistent blurbs for tests in ResultSet {self.base_nodeid}")
+            self.duration += result.duration
+            self.outcome_counts[result.outcome] += 1
+            for requirement in result.requirements:
+                if requirement not in self.requirements:
+                    self.requirements.append(requirement)
+
+    @property
+    def marker(self) -> Marker:
+        """Marker for linking to this ResultSet."""
+        return Marker(self.base_nodeid, prefix="subsec")
+
+    @property
+    def link(self) -> Hyperref:
+        """Hyperlink to this ResultSet."""
+        return Hyperref(self.marker, self.text_name)
 
 
 def _parse_item(item: dict) -> Item:
@@ -500,6 +539,15 @@ def _parse_cbf_configuration(msg: dict) -> CBFConfiguration:
     return CBFConfiguration(mode_config=mode_config, uuid=UUID(msg["uuid"]), tasks=tasks)
 
 
+def _fix_result_cbfs(test_configuration: TestConfiguration, results: Iterable[Result]) -> None:
+    """Populate the 'cbf' field in the results by matching up the UUIDs."""
+    for result in results:
+        try:
+            result.cbf = test_configuration.cbf_index[UUID(result.config["cbf"])]
+        except KeyError:
+            result.cbf = None
+
+
 def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
     """Parse the data written by pytest-reportlog.
 
@@ -525,7 +573,9 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
             test_configuration.hosts[host].append(hostname)
         elif line["$report_type"] in ["CorrelatorConfiguration", "CBFConfiguration"]:
             # "CorrelatorConfiguration" is for backwards compatibility
-            test_configuration.cbfs.append(_parse_cbf_configuration(line))
+            cbf = _parse_cbf_configuration(line)
+            test_configuration.cbfs.append(cbf)
+            test_configuration.cbf_index[cbf.uuid] = cbf
 
         if line["$report_type"] != "TestReport":
             continue
@@ -559,56 +609,79 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
             failure_message = re.sub("\x1b\\[.*?m", "", report.longreprtext)
             result.failure_messages.append(failure_message)
 
+    _fix_result_cbfs(test_configuration, results)
     return test_configuration, results
 
 
 def sort_results(test_configuration: TestConfiguration, results: list[Result]) -> None:
     """Sort CBFs and results (in-place)."""
     test_configuration.cbfs.sort(key=lambda cbf: cbf_sort_key(cbf.mode_config))
-    cbf_uuids = [cbf.uuid for cbf in test_configuration.cbfs]
+    for i, cbf in enumerate(test_configuration.cbfs):
+        cbf.index = i
+        cbf.title = f"Configuration {i + 1}: {cbf.mode_str()}"
 
     def result_key(result: Result) -> tuple:
         try:
-            cbf_idx = cbf_uuids.index(UUID(result.config["cbf"]))
+            cbf_index = test_configuration.cbf_index[UUID(result.config["cbf"])].index
         except KeyError:
-            cbf_idx = -1
+            cbf_index = -1
         # This is not guaranteed to be a unique key, if there are parameters
         # that don't affect the choice of correlator. In that case, we just
         # stick with the original order chosen by pytest (sorting is stable
         # in Python).
-        return result.filename, result.lineno, result.base_nodeid, cbf_idx
+        return result.filename, result.lineno, result.base_nodeid, cbf_index
 
     results.sort(key=result_key)
 
 
 def collate_results(results: Iterable[Result]) -> list[ResultSet]:
-    """Group Results into ResultSets."""
-    result_sets: dict[str, list[Result]] = {}
+    """Group Results into ResultSets.
+
+    The :attr:`Result.subtitle` attribute is also populated here.
+    """
+    result_lists: dict[str, list[Result]] = {}
     for result in results:
-        result_sets.setdefault(result.base_nodeid, []).append(result)
-    return [ResultSet(result_set) for result_set in result_sets.values()]
+        result_lists.setdefault(result.base_nodeid, []).append(result)
+    out = []
+    for result_list in result_lists.values():
+        result_set = ResultSet(result_list)
+        # Check whether the CBF titles alone give unique subtitles
+        cbf_titles = set(result.cbf.title for result in result_list if result.cbf is not None)
+        if len(cbf_titles) == len(result_list):
+            for result in result_list:
+                assert result.cbf is not None
+                result.subtitle = result.cbf.title
+        else:
+            # Have to use parameters to disambiguate
+            for result in result_list:
+                parts = [result.cbf.title] if result.cbf is not None else []
+                if result.parameters:
+                    parts.append(result.parameters)
+                if not parts:
+                    parts = ["Result"]  # Handle case of unparametrised test with no CBF
+                result.subtitle = " ".join(parts)
+        out.append(result_set)
+    return out
 
 
-def extract_requirements_verified(results: Iterable[Result]) -> dict[str, list[str]]:
+def extract_requirements_verified(result_sets: Iterable[ResultSet]) -> dict[str, list[ResultSet]]:
     """Extract a matrix of requirements verified from the list of results.
 
     Parameters
     ----------
-    results
-        Results as generated by :func:`parse`.
+    result_sets
+        Result sets as generated by :func:`collate_results`.
 
     Returns
     -------
-        A dictionary with the requirements as keys and list of the tests which
+        A dictionary with the requirements as keys and list of the ResultSets which
         verify that requirement as the values.
     """
     requirements_verified = defaultdict(list)
-    for result in results:
-        for requirement in result.requirements:
-            requirements_verified[requirement].append(result.text_name)
-    # Remove duplicates from the lists.
-    for key in requirements_verified.keys():
-        requirements_verified[key] = sorted(set(requirements_verified[key]))
+    for result_set in result_sets:
+        for requirement in result_set.requirements:
+            # TODO: put in the result_set itself, so that we can generate links
+            requirements_verified[requirement].append(result_set)
     return requirements_verified
 
 
@@ -740,10 +813,10 @@ def _doc_cbfs(section: Container, cbfs: Sequence[CBFConfiguration]) -> None:
         ("XB-engine {i}", re.compile(r"xb\.baseline-correlation-products\.(\d+)")),
         ("WB XB-engine {i}", re.compile(r"xb\.wideband-baseline-correlation-products\.(\d+)")),
     ]
-    for i, cbf in enumerate(cbfs, start=1):
-        with section.create(Subsection(f"Configuration {i}: {make_cbf_mode_str(cbf.mode_config)}")) as subsec:
+    for cbf in cbfs:
+        with section.create(Subsection(cbf.title)) as subsec:
             subsec.append(Label(Marker(str(cbf.uuid), prefix="cbf")))
-            subsec.append(make_cbf_mode_str(cbf.mode_config, expand=True))
+            subsec.append(cbf.mode_str(expand=True))
             with subsec.create(LongTable(r"|l|l|l|")) as table:
                 table.add_hline()
                 for name, pattern in patterns:
@@ -765,17 +838,17 @@ def _doc_cbfs(section: Container, cbfs: Sequence[CBFConfiguration]) -> None:
                         table.add_hline()
 
 
-def _doc_requirements_verified(doc: Document, requirements_verified: dict[str, list]) -> None:
+def _doc_requirements_verified(doc: Document, requirements_verified: dict[str, list[ResultSet]]) -> None:
     with doc.create(Section("Requirements Verified")) as req_section:
         with req_section.create(LongTable(r"|l|l|")) as table:
             table.add_hline()
             table.add_row([bold("Requirement"), bold("Tests verifying requirement")])
             table.add_hline()
-            for req, tests in sorted(requirements_verified.items(), key=lambda item: item[0]):
-                table.add_row(MultiRow(len(tests), data=req), tests[0])
-                for test in tests[1:]:
+            for req, result_sets in sorted(requirements_verified.items(), key=lambda item: item[0]):
+                table.add_row(MultiRow(len(result_sets), data=req), result_sets[0].link)
+                for result_set in result_sets[1:]:
                     table.add_hline(2)
-                    table.add_row("", test)
+                    table.add_row("", result_set.link)
                 table.add_hline()
 
 
@@ -807,29 +880,20 @@ def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) ->
         )
         summary_table.add_hline()
         for result_set in result_sets:
-            set_passed = 0
-            set_failed = 0
-            set_skipped = 0
-            set_duration = 0.0
-            for result in result_set.results:
-                if result.outcome == "passed":
-                    set_passed += 1
-                elif result.outcome in ["failed", "xfail"]:
-                    set_failed += 1
-                elif result.outcome == "skipped":
-                    set_skipped += 1
-                set_duration += result.duration
+            set_passed = result_set.outcome_counts["passed"]
+            set_failed = result_set.outcome_counts["failed"] + result_set.outcome_counts["xfail"]
+            set_skipped = result_set.outcome_counts["skipped"]
             summary_table.add_row(
                 [
                     Hyperref(Marker(result_set.base_nodeid, prefix="subsec"), result_set.text_name),
-                    readable_duration(set_duration),
+                    readable_duration(result_set.duration),
                     str(set_passed) if set_passed else "",
                     TextColor("red", str(set_failed)) if set_failed else "",
                     str(set_skipped) if set_skipped else "",
                 ]
             )
             summary_table.add_hline()
-            total_duration += set_duration
+            total_duration += result_set.duration
             passed += set_passed
             failed += set_failed
             skipped += set_skipped
@@ -847,6 +911,29 @@ def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
         section.append("None")
 
 
+def _doc_outcomes(section: Container, test_configuration: TestConfiguration, result_set: ResultSet) -> None:
+    with section.create(LongTable("|r|r|l|l|")) as table:
+        table.add_hline()
+        table.add_row([bold("Start time"), bold("Duration"), bold("Configuration"), bold("Outcome")])
+        table.add_hline()
+        for result in result_set.results:
+            if result.start_time is not None:
+                start_time = datetime.fromtimestamp(float(result.start_time), timezone.utc).strftime("%T")
+            else:
+                start_time = ""
+            table.add_row(
+                [
+                    start_time,
+                    readable_duration(result.duration),
+                    result.link,
+                    TextColor(outcome_color(result.outcome), result.outcome.upper()),
+                ]
+            )
+            table.add_hline()
+        table.add_row([bold("Total"), bold(readable_duration(result_set.duration)), "", ""])
+        table.add_hline()
+
+
 def _doc_outcome(section: Container, test_configuration: TestConfiguration, result: Result) -> None:
     section.append("Outcome: ")
     section.append(TextColor(outcome_color(result.outcome), result.outcome.upper()))
@@ -856,24 +943,22 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
     section.append(Command("hspace", "1cm"))
     if result.start_time is not None:
         section.append(
-            f"Test start time: {datetime.fromtimestamp(float(result.start_time), timezone.utc).strftime('%T')}"
+            f"Test start time: {datetime.fromtimestamp(float(result.start_time), timezone.utc).strftime('%F %T')}"
         )
         section.append(Command("hspace", "1cm"))
-    section.append(f"Duration: {readable_duration(result.duration)} seconds\n")
+    section.append(f"Duration: {readable_duration(result.duration)}\n")
 
     with section.create(LongTable(r"|l|p{0.4\linewidth}|")) as config_table:
         config_table.add_hline()
         config_table.add_row((MultiColumn(2, align="|c|", data=bold("Test Configuration")),))
         config_table.add_hline()
         for key, value in result.config.items():
-            if key == "cbf":
-                # Turn the raw UUID into a section reference
-                for i, cbf in enumerate(test_configuration.cbfs, start=1):
-                    if cbf.uuid == UUID(value):
-                        marker = Marker(value, prefix="cbf")
-                        value = Hyperref(marker, f"Configuration {i}: {make_cbf_mode_str(cbf.mode_config)}")
-                        break
-            config_table.add_row([key.capitalize(), value])
+            if key == "cbf" and result.cbf is not None:
+                key = "CBF"
+                value = result.cbf.link
+            else:
+                key = key.capitalize()
+            config_table.add_row([key, value])
             config_table.add_hline()
 
 
@@ -901,7 +986,7 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
     test_configuration, results = parse(result_list)
     sort_results(test_configuration, results)
     result_sets = collate_results(results)
-    requirements_verified = extract_requirements_verified(results)
+    requirements_verified = extract_requirements_verified(result_sets)
 
     doc = Document(
         document_options=["11pt", "english", "twoside"],
@@ -926,76 +1011,79 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
             _doc_result_summary(summary_section, result_sets)
 
     with doc.create(Section("Detailed Test Results" if make_report else "Test Procedures")) as section:
-        for result in results:
-            with section.create(Subsection(result.full_text_name, label=result.name)):
-                section.append(NoEscape(rst2latex(result.blurb) + "\n\n"))
-                with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
-                    _doc_requirements(requirements_sec, result.requirements)
+        for result_set in result_sets:
+            with section.create(Subsection(result_set.text_name, label=result_set.marker.name)) as result_set_sec:
+                result_set_sec.append(NoEscape(rst2latex(result_set.blurb) + "\n\n"))
+                with result_set_sec.create(Subsubsection("Requirements Verified")) as requirements_sec:
+                    _doc_requirements(requirements_sec, result_set.requirements)
 
                 if make_report:
-                    with section.create(Subsubsection("Results")) as results_sec:
-                        _doc_outcome(results_sec, test_configuration, result)
-
-                with section.create(Subsubsection("Procedure", label=False)) as procedure:
-                    if make_report:
-                        with procedure.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
-                            procedure_table.add_hline()
-                            for step in result.steps:
-                                assert result.start_time is not None
-                                procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
+                    with result_set_sec.create(Subsubsection("Results")) as outcomes_sec:
+                        _doc_outcomes(outcomes_sec, test_configuration, result_set)
+                    for result in result_set.results:
+                        with result_set_sec.create(
+                            Subsubsection(result.subtitle, label=result.marker.name)
+                        ) as procedure:
+                            _doc_outcome(procedure, test_configuration, result)
+                            with procedure.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
                                 procedure_table.add_hline()
-                                for item in step.items:
-                                    if isinstance(item, Detail):
-                                        procedure_table.add_row(
-                                            [
-                                                f"{readable_duration(item.timestamp - result.start_time)}",
-                                                item.message,
-                                            ]
-                                        )
-                                    elif isinstance(item, Failure):
-                                        # add_row doesn't seem to have a way to put
-                                        # more than one sequential command into a
-                                        # cell. Just construct the cell by hand.
-                                        # Without the Bflushleft there is (for some
-                                        # reason) a lot of extra vertical space.
-                                        cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
-                                        cell += "\n" + item.message + "\n"
-                                        cell += r"\end{lstlisting}\end{Bflushleft}"
-                                        procedure_table.add_row(
-                                            [
-                                                f"{readable_duration(item.timestamp - result.start_time)}",
-                                                NoEscape(cell),
-                                            ]
-                                        )
-                                    elif isinstance(item, RawFigure):
-                                        filename = f"figure{next_figure_id:04}.tex"
-                                        (tmp_dir / filename).write_text(item.code)
-                                        next_figure_id += 1
-                                        mp = MiniPage(width=NoEscape(r"\textwidth"))
-                                        mp.append(NoEscape(r"\center"))
-                                        mp.append(NoEscape(r"\input{" + filename + "}"))
-                                        procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
-                                    elif isinstance(item, Figure):
-                                        filename = f"figure{next_figure_id:04}.{item.type}"
-                                        (tmp_dir / filename).write_bytes(item.content)
-                                        next_figure_id += 1
-                                        mp = MiniPage(width=NoEscape(r"\textwidth"))
-                                        mp.append(NoEscape(r"\center"))
-                                        # pagebox=artbox is needed because the images generated
-                                        # by matplotlib lack a CropBox and without it, graphicx
-                                        # will not fall back to anything else to determine the size.
-                                        mp.append(StandAloneGraphic(filename, "pagebox=artbox"))
-                                        procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                                for step in result.steps:
+                                    assert result.start_time is not None
+                                    procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
                                     procedure_table.add_hline()
+                                    for item in step.items:
+                                        if isinstance(item, Detail):
+                                            procedure_table.add_row(
+                                                [
+                                                    f"{readable_duration(item.timestamp - result.start_time)}",
+                                                    item.message,
+                                                ]
+                                            )
+                                        elif isinstance(item, Failure):
+                                            # add_row doesn't seem to have a way to put
+                                            # more than one sequential command into a
+                                            # cell. Just construct the cell by hand.
+                                            # Without the Bflushleft there is (for some
+                                            # reason) a lot of extra vertical space.
+                                            cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
+                                            cell += "\n" + item.message + "\n"
+                                            cell += r"\end{lstlisting}\end{Bflushleft}"
+                                            procedure_table.add_row(
+                                                [
+                                                    f"{readable_duration(item.timestamp - result.start_time)}",
+                                                    NoEscape(cell),
+                                                ]
+                                            )
+                                        elif isinstance(item, RawFigure):
+                                            filename = f"figure{next_figure_id:04}.tex"
+                                            (tmp_dir / filename).write_text(item.code)
+                                            next_figure_id += 1
+                                            mp = MiniPage(width=NoEscape(r"\textwidth"))
+                                            mp.append(NoEscape(r"\center"))
+                                            mp.append(NoEscape(r"\input{" + filename + "}"))
+                                            procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                                        elif isinstance(item, Figure):
+                                            filename = f"figure{next_figure_id:04}.{item.type}"
+                                            (tmp_dir / filename).write_bytes(item.content)
+                                            next_figure_id += 1
+                                            mp = MiniPage(width=NoEscape(r"\textwidth"))
+                                            mp.append(NoEscape(r"\center"))
+                                            # pagebox=artbox is needed because the images generated
+                                            # by matplotlib lack a CropBox and without it, graphicx
+                                            # will not fall back to anything else to determine the size.
+                                            mp.append(StandAloneGraphic(filename, "pagebox=artbox"))
+                                            procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                                        procedure_table.add_hline()
 
-                        if result.failure_messages:
-                            with procedure.create(LstListing()) as failure_message:
-                                for message in result.failure_messages:
-                                    failure_message.append(message)
+                            if result.failure_messages:
+                                with procedure.create(LstListing()) as failure_message:
+                                    for message in result.failure_messages:
+                                        failure_message.append(message)
 
-                    else:
+                else:
+                    with result_set_sec.create(Subsubsection("Procedure")) as procedure:
                         with procedure.create(Enumerate()) as test_steps:
-                            for step in result.steps:
+                            for step in result_set.results[0].steps:
                                 test_steps.add_item(step.message)
 
     return doc
