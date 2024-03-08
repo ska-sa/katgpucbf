@@ -193,7 +193,6 @@ class Chunk:
         """
         if not future.cancelled() and future.exception() is None:
             for beam_name in beam_names:
-                logger.info(f"\nCallback updating for {beam_name}")
                 output_heaps_counter.labels(beam_name).inc(1)
                 # Each beam data sample is 8-bit
                 # - Multiply across dimensions to get total bytes
@@ -232,12 +231,6 @@ class Chunk:
                 send_futures.append(
                     send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
-                enabled_streams = [
-                    output_name
-                    for output_name, enabled in zip(send_stream.beam_names, send_stream.tx_enabled)
-                    if enabled
-                ]
-                logger.info(f"Adding callback for {enabled_streams} with {frame.data.shape}")
                 send_futures[-1].add_done_callback(
                     functools.partial(
                         self._inc_counters,
