@@ -20,6 +20,7 @@
 import argparse
 import base64
 import copy
+import itertools
 import json
 import logging
 import os
@@ -30,7 +31,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from typing import Literal, Union
+from typing import Iterator, Literal, Union
 from uuid import UUID
 
 import docutils.writers.latex2e
@@ -729,6 +730,19 @@ def _format_image(image: str) -> LatexObject:
     return SmallText(NoEscape(image))
 
 
+def _doc_preamble(doc: Document, doc_id: str, make_report: bool) -> None:
+    """Set up the preamble of the document."""
+    doc.packages.add(Package("hyperref", "colorlinks,linkcolor=blue"))
+    today = date.today()  # TODO: should store inside the JSON
+    doc.set_variable("theAuthor", "DSP Team")
+    doc.set_variable("docDate", today.strftime("%d %B %Y"))
+    doc.set_variable("docId", doc_id)
+    doc.set_variable("docType", f"Qualification Test {'Report' if make_report else 'Procedure'}")
+    doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
+    doc.append(Command("title", f"MeerKAT Extension CBF Qualification Test {'Report' if make_report else 'Procedure'}"))
+    doc.append(Command("makekatdocbeginning"))
+
+
 def _doc_test_configuration_global(section: Container, test_configuration: TestConfiguration) -> None:
     # Identify versions running on the CBF. Ideally it should be unique
     images = set()
@@ -911,7 +925,7 @@ def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
         section.append("None")
 
 
-def _doc_outcomes(section: Container, test_configuration: TestConfiguration, result_set: ResultSet) -> None:
+def _doc_outcomes(section: Container, result_set: ResultSet) -> None:
     with section.create(LongTable("|r|r|l|l|")) as table:
         table.add_hline()
         table.add_row([bold("Start time"), bold("Duration"), bold("Configuration"), bold("Outcome")])
@@ -934,7 +948,7 @@ def _doc_outcomes(section: Container, test_configuration: TestConfiguration, res
         table.add_hline()
 
 
-def _doc_outcome(section: Container, test_configuration: TestConfiguration, result: Result) -> None:
+def _doc_outcome(section: Container, result: Result) -> None:
     section.append("Outcome: ")
     section.append(TextColor(outcome_color(result.outcome), result.outcome.upper()))
     if result.xfail_reason:
@@ -962,6 +976,91 @@ def _doc_outcome(section: Container, test_configuration: TestConfiguration, resu
             config_table.add_hline()
 
 
+def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figure_ids: Iterator[int]) -> None:
+    _doc_outcome(section, result)
+    with section.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
+        procedure_table.add_hline()
+        for step in result.steps:
+            assert result.start_time is not None
+            procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
+            procedure_table.add_hline()
+            for item in step.items:
+                if isinstance(item, Detail):
+                    procedure_table.add_row(
+                        [
+                            f"{readable_duration(item.timestamp - result.start_time)}",
+                            item.message,
+                        ]
+                    )
+                elif isinstance(item, Failure):
+                    # add_row doesn't seem to have a way to put
+                    # more than one sequential command into a
+                    # cell. Just construct the cell by hand.
+                    # Without the Bflushleft there is (for some
+                    # reason) a lot of extra vertical space.
+                    cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
+                    cell += "\n" + item.message + "\n"
+                    cell += r"\end{lstlisting}\end{Bflushleft}"
+                    procedure_table.add_row(
+                        [
+                            f"{readable_duration(item.timestamp - result.start_time)}",
+                            NoEscape(cell),
+                        ]
+                    )
+                elif isinstance(item, RawFigure):
+                    filename = f"figure{next(figure_ids):04}.tex"
+                    (tmp_dir / filename).write_text(item.code)
+                    mp = MiniPage(width=NoEscape(r"\textwidth"))
+                    mp.append(NoEscape(r"\center"))
+                    mp.append(NoEscape(r"\input{" + filename + "}"))
+                    procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                elif isinstance(item, Figure):
+                    filename = f"figure{next(figure_ids):04}.{item.type}"
+                    (tmp_dir / filename).write_bytes(item.content)
+                    mp = MiniPage(width=NoEscape(r"\textwidth"))
+                    mp.append(NoEscape(r"\center"))
+                    # pagebox=artbox is needed because the images generated
+                    # by matplotlib lack a CropBox and without it, graphicx
+                    # will not fall back to anything else to determine the size.
+                    mp.append(StandAloneGraphic(filename, "pagebox=artbox"))
+                    procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
+                procedure_table.add_hline()
+
+    if result.failure_messages:
+        with section.create(LstListing()) as failure_message:
+            for message in result.failure_messages:
+                failure_message.append(message)
+
+
+def _doc_result_set(
+    section: Container, result_set: ResultSet, tmp_dir: pathlib.Path, figure_ids: Iterator[int], make_report: bool
+) -> None:
+    section.append(NoEscape(rst2latex(result_set.blurb) + "\n\n"))
+    with section.create(Subsubsection("Requirements Verified")) as requirements_sec:
+        _doc_requirements(requirements_sec, result_set.requirements)
+
+    if make_report:
+        with section.create(Subsubsection("Results")) as outcomes_sec:
+            _doc_outcomes(outcomes_sec, result_set)
+        for result in result_set.results:
+            with section.create(Subsubsection(result.subtitle, label=result.marker.name)) as result_sec:
+                _doc_result(result_sec, result, tmp_dir, figure_ids)
+    else:
+        with section.create(Subsubsection("Procedure")) as procedure:
+            canonical_steps = [step.message for step in result_set.results[0].steps]
+            with procedure.create(Enumerate()) as test_steps:
+                for step in canonical_steps:
+                    test_steps.add_item(step)
+            # Check whether all results in the set have the same steps.
+            all_same = True
+            for result in result_set.results:
+                steps = [step.message for step in result.steps]
+                if steps != canonical_steps:
+                    all_same = False
+            if not all_same:
+                procedure.append("Note: this procedure is an example. The exact steps will vary between modes.")
+
+
 def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *, make_report=True) -> Document:
     """Take a test result and generate a :class:`pylatex.Document` for a report.
 
@@ -982,7 +1081,6 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
     doc
         A PyLatex document
     """
-    next_figure_id = 1
     test_configuration, results = parse(result_list)
     sort_results(test_configuration, results)
     result_sets = collate_results(results)
@@ -992,16 +1090,7 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
         document_options=["11pt", "english", "twoside"],
         inputenc=None,  # katdoc inputs inputenc with specific options, so prevent a clash
     )
-    doc.packages.add(Package("hyperref", "colorlinks,linkcolor=blue"))
-    today = date.today()  # TODO: should store inside the JSON
-    doc.set_variable("theAuthor", "DSP Team")
-    doc.set_variable("docDate", today.strftime("%d %B %Y"))
-    doc.set_variable("docId", doc_id)
-    doc.set_variable("docType", f"Qualification Test {'Report' if make_report else 'Procedure'}")
-    doc.preamble.append(NoEscape((RESOURCE_PATH / "preamble.tex").read_text()))
-    doc.append(Command("title", f"MeerKAT Extension CBF Qualification Test {'Report' if make_report else 'Procedure'}"))
-    doc.append(Command("makekatdocbeginning"))
-
+    _doc_preamble(doc, doc_id, make_report)
     _doc_requirements_verified(doc, requirements_verified)
 
     if make_report:
@@ -1010,81 +1099,11 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
         with doc.create(Section("Result Summary")) as summary_section:
             _doc_result_summary(summary_section, result_sets)
 
+    figure_ids = itertools.count(1)
     with doc.create(Section("Detailed Test Results" if make_report else "Test Procedures")) as section:
         for result_set in result_sets:
             with section.create(Subsection(result_set.text_name, label=result_set.marker.name)) as result_set_sec:
-                result_set_sec.append(NoEscape(rst2latex(result_set.blurb) + "\n\n"))
-                with result_set_sec.create(Subsubsection("Requirements Verified")) as requirements_sec:
-                    _doc_requirements(requirements_sec, result_set.requirements)
-
-                if make_report:
-                    with result_set_sec.create(Subsubsection("Results")) as outcomes_sec:
-                        _doc_outcomes(outcomes_sec, test_configuration, result_set)
-                    for result in result_set.results:
-                        with result_set_sec.create(
-                            Subsubsection(result.subtitle, label=result.marker.name)
-                        ) as procedure:
-                            _doc_outcome(procedure, test_configuration, result)
-                            with procedure.create(LongTable(r"|l|p{0.7\linewidth}|")) as procedure_table:
-                                procedure_table.add_hline()
-                                for step in result.steps:
-                                    assert result.start_time is not None
-                                    procedure_table.add_row((MultiColumn(2, align="|l|", data=bold(step.message)),))
-                                    procedure_table.add_hline()
-                                    for item in step.items:
-                                        if isinstance(item, Detail):
-                                            procedure_table.add_row(
-                                                [
-                                                    f"{readable_duration(item.timestamp - result.start_time)}",
-                                                    item.message,
-                                                ]
-                                            )
-                                        elif isinstance(item, Failure):
-                                            # add_row doesn't seem to have a way to put
-                                            # more than one sequential command into a
-                                            # cell. Just construct the cell by hand.
-                                            # Without the Bflushleft there is (for some
-                                            # reason) a lot of extra vertical space.
-                                            cell = r"\color{red}\begin{Bflushleft}\begin{lstlisting}"
-                                            cell += "\n" + item.message + "\n"
-                                            cell += r"\end{lstlisting}\end{Bflushleft}"
-                                            procedure_table.add_row(
-                                                [
-                                                    f"{readable_duration(item.timestamp - result.start_time)}",
-                                                    NoEscape(cell),
-                                                ]
-                                            )
-                                        elif isinstance(item, RawFigure):
-                                            filename = f"figure{next_figure_id:04}.tex"
-                                            (tmp_dir / filename).write_text(item.code)
-                                            next_figure_id += 1
-                                            mp = MiniPage(width=NoEscape(r"\textwidth"))
-                                            mp.append(NoEscape(r"\center"))
-                                            mp.append(NoEscape(r"\input{" + filename + "}"))
-                                            procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
-                                        elif isinstance(item, Figure):
-                                            filename = f"figure{next_figure_id:04}.{item.type}"
-                                            (tmp_dir / filename).write_bytes(item.content)
-                                            next_figure_id += 1
-                                            mp = MiniPage(width=NoEscape(r"\textwidth"))
-                                            mp.append(NoEscape(r"\center"))
-                                            # pagebox=artbox is needed because the images generated
-                                            # by matplotlib lack a CropBox and without it, graphicx
-                                            # will not fall back to anything else to determine the size.
-                                            mp.append(StandAloneGraphic(filename, "pagebox=artbox"))
-                                            procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
-                                        procedure_table.add_hline()
-
-                            if result.failure_messages:
-                                with procedure.create(LstListing()) as failure_message:
-                                    for message in result.failure_messages:
-                                        failure_message.append(message)
-
-                else:
-                    with result_set_sec.create(Subsubsection("Procedure")) as procedure:
-                        with procedure.create(Enumerate()) as test_steps:
-                            for step in result_set.results[0].steps:
-                                test_steps.add_item(step.message)
+                _doc_result_set(result_set_sec, result_set, tmp_dir, figure_ids, make_report)
 
     return doc
 
