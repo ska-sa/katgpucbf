@@ -427,10 +427,10 @@ def verify_beam_sensors(
             # NOTE: The output_b_{heaps, bytes, samples} counters still think
             # `n-1` heaps were sent, so we need to increment those over by one
             # heap's worth of data respectively.
+            heap_count_diff = n_beam_heaps_sent - prom_output_b_heaps_total
             # Add the mod difference to the heaps counter so it seems less
             # 'hacked' than simply adding the difference between the two values.
             prom_output_b_heaps_total += prom_output_b_heaps_total % HEAPS_PER_FENGINE_PER_CHUNK
-            heap_count_diff = n_beam_heaps_sent - prom_output_b_heaps_total
             prom_output_b_bytes_total += heap_count_diff * heap_bytes
             prom_output_b_samples_total += heap_count_diff * heap_samples
 
