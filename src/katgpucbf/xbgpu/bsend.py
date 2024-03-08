@@ -197,7 +197,7 @@ class Chunk:
                 # Each beam data sample is 8-bit
                 # - Multiply across dimensions to get total bytes
                 output_bytes_counter.labels(beam_name).inc(np.prod(beam_data_shape))
-                # - Multiple across the first two dimensions to get complex sample count
+                # - Multiply across the first two dimensions to get complex sample count
                 output_samples_counter.labels(beam_name).inc(np.prod(beam_data_shape[:-1]))
 
     def send(
