@@ -16,7 +16,6 @@
 
 """Unit tests for XBEngine module."""
 
-import logging
 from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
@@ -41,9 +40,6 @@ from katgpucbf.xbgpu.output import BOutput, XOutput
 from .. import PromDiff, get_sensor
 from . import test_parameters
 from .test_recv import gen_heap
-
-logger = logging.getLogger(__name__)
-logging.basicConfig()
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
@@ -936,7 +932,6 @@ class TestEngine:
             batch_end_index = batch_start_index + n_heaps
             # Add an extra chunk before the first full accumulation
             batch_start_index -= HEAPS_PER_FENGINE_PER_CHUNK
-            logger.info(f"Sending {batch_end_index - batch_start_index} heaps")
 
             for i, output in enumerate(beam_outputs):
                 # We only capture the timestamps before and after all katcp
