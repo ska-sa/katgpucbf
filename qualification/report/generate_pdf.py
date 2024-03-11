@@ -681,7 +681,6 @@ def extract_requirements_verified(result_sets: Iterable[ResultSet]) -> dict[str,
     requirements_verified = defaultdict(list)
     for result_set in result_sets:
         for requirement in result_set.requirements:
-            # TODO: put in the result_set itself, so that we can generate links
             requirements_verified[requirement].append(result_set)
     return requirements_verified
 
