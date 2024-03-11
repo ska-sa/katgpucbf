@@ -429,7 +429,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
 
         self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
-        self.source_indices = [
+        self.source_indices: list[list[int]] = [
             ast.literal_eval(cbf.sensors[f"{stream_name}.source-indices"].value.decode())
             for stream_name in stream_names
         ]
