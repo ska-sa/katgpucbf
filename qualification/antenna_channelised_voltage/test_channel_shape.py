@@ -69,7 +69,7 @@ async def test_channel_shape(
     Verification by means of test. This test selects a base frequency and generates multiple independent
     spectra based on the base frequency with offsets above and below the base frequency. The frequency
     deviations produce differing channel amplitudes in frequency domain which when viewed collectively
-    and in series illustrate a channel shape. These meaurements are used to compute a -3dB and -53dB
+    and in series illustrate a channel shape. These measurements are used to compute a -3dB and -53dB
     channel bandwidth.
     """
     receiver = receive_baseline_correlation_products
