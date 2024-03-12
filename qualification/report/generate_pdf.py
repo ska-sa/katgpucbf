@@ -64,6 +64,12 @@ DEFAULT_REPORT_DOC_ID = "E1200-0000-005-dev"
 DEFAULT_PROCEDURE_DOC_ID = "E1200-0000-004"
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
+GROUP_NAMES = {
+    "antenna_channelised_voltage": "Antenna channelised voltage tests",
+    "baseline_correlation_products": "Baseline correlation products tests",
+    "tied_array_channelised_voltage": "Tied-array channelised voltage tests",
+    "demo": "Report demonstration tests",
+}
 
 
 def cbf_sort_key(config: dict) -> tuple:
@@ -364,6 +370,11 @@ class Result:
         """Hyperlink to this result (including only the subtitle)."""
         return Hyperref(self.marker, self.subtitle)
 
+    @property
+    def group(self) -> str:
+        """Top-level directory of the test."""
+        return self.filename.split("/")[0]
+
 
 class ResultSet:
     """A collection of results with the same :attr:`Result.base_nodeid`."""
@@ -377,6 +388,7 @@ class ResultSet:
         self.duration = 0.0
         self.outcome_counts = {"passed": 0, "failed": 0, "skipped": 0, "xfail": 0}
         self.requirements: list[str] = []
+        self.group = self.results[0].group
         for result in self.results:
             assert result.base_nodeid == self.base_nodeid, "base_nodeids do not match"
             if result.text_name != self.text_name:
@@ -400,6 +412,11 @@ class ResultSet:
     def link(self) -> Hyperref:
         """Hyperlink to this ResultSet."""
         return Hyperref(self.marker, self.text_name)
+
+    @property
+    def qualified_link(self) -> Hyperref:
+        """Hyperlink to this ResultSet, with a fully-qualified name."""
+        return Hyperref(self.marker, GROUP_NAMES.get(self.group, self.group) + " / " + self.text_name)
 
 
 def _parse_item(item: dict) -> Item:
@@ -858,10 +875,10 @@ def _doc_requirements_verified(doc: Document, requirements_verified: dict[str, l
             table.add_row([bold("Requirement"), bold("Tests verifying requirement")])
             table.add_hline()
             for req, result_sets in sorted(requirements_verified.items(), key=lambda item: item[0]):
-                table.add_row(MultiRow(len(result_sets), data=req), result_sets[0].link)
+                table.add_row(MultiRow(len(result_sets), data=req), result_sets[0].qualified_link)
                 for result_set in result_sets[1:]:
                     table.add_hline(2)
-                    table.add_row("", result_set.link)
+                    table.add_row("", result_set.qualified_link)
                 table.add_hline()
 
 
@@ -875,44 +892,46 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
 
 
 def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) -> None:
-    with section.create(LongTable(r"|l|r|c|c|c|")) as summary_table:
-        total_duration: float = 0.0
-        passed = 0
-        failed = 0
-        skipped = 0
-        total = 0
-        summary_table.add_hline()
-        summary_table.add_row(
-            [
-                bold("Test"),
-                bold("Duration"),
-                bold("Passed"),
-                bold("Failed"),
-                bold("Skipped"),
-            ]
-        )
-        summary_table.add_hline()
-        for result_set in result_sets:
-            set_passed = result_set.outcome_counts["passed"]
-            set_failed = result_set.outcome_counts["failed"] + result_set.outcome_counts["xfail"]
-            set_skipped = result_set.outcome_counts["skipped"]
-            summary_table.add_row(
-                [
-                    Hyperref(Marker(result_set.base_nodeid, prefix="subsec"), result_set.text_name),
-                    readable_duration(result_set.duration),
-                    str(set_passed) if set_passed else "",
-                    TextColor("red", str(set_failed)) if set_failed else "",
-                    str(set_skipped) if set_skipped else "",
-                ]
-            )
-            summary_table.add_hline()
-            total_duration += result_set.duration
-            passed += set_passed
-            failed += set_failed
-            skipped += set_skipped
-            total += len(result_set.results)
-    section.append(f"{total} tests run, with {passed} passing, {failed} failing and {skipped} skipped.\n")
-    section.append(f"Total test duration: {readable_duration(total_duration)}")
+    for key, group in itertools.groupby(result_sets, lambda result_set: result_set.group):
+        with section.create(Subsection(GROUP_NAMES.get(key, key))) as group_section:
+            with group_section.create(LongTable(r"|l|r|c|c|c|")) as summary_table:
+                total_duration: float = 0.0
+                passed = 0
+                failed = 0
+                skipped = 0
+                total = 0
+                summary_table.add_hline()
+                summary_table.add_row(
+                    [
+                        bold("Test"),
+                        bold("Duration"),
+                        bold("Passed"),
+                        bold("Failed"),
+                        bold("Skipped"),
+                    ]
+                )
+                summary_table.add_hline()
+                for result_set in group:
+                    set_passed = result_set.outcome_counts["passed"]
+                    set_failed = result_set.outcome_counts["failed"] + result_set.outcome_counts["xfail"]
+                    set_skipped = result_set.outcome_counts["skipped"]
+                    summary_table.add_row(
+                        [
+                            Hyperref(Marker(result_set.base_nodeid, prefix="subsec"), result_set.text_name),
+                            readable_duration(result_set.duration),
+                            str(set_passed) if set_passed else "",
+                            TextColor("red", str(set_failed)) if set_failed else "",
+                            str(set_skipped) if set_skipped else "",
+                        ]
+                    )
+                    summary_table.add_hline()
+                    total_duration += result_set.duration
+                    passed += set_passed
+                    failed += set_failed
+                    skipped += set_skipped
+                    total += len(result_set.results)
+            group_section.append(f"{total} tests run, with {passed} passing, {failed} failing and {skipped} skipped.\n")
+            section.append(f"Total test duration: {readable_duration(total_duration)}")
 
 
 def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
@@ -1099,10 +1118,11 @@ def document_from_list(result_list: list, doc_id: str, tmp_dir: pathlib.Path, *,
             _doc_result_summary(summary_section, result_sets)
 
     figure_ids = itertools.count(1)
-    with doc.create(Section("Detailed Test Results" if make_report else "Test Procedures")) as section:
-        for result_set in result_sets:
-            with section.create(Subsection(result_set.text_name, label=result_set.marker.name)) as result_set_sec:
-                _doc_result_set(result_set_sec, result_set, tmp_dir, figure_ids, make_report)
+    for key, group in itertools.groupby(result_sets, lambda result_set: result_set.group):
+        with doc.create(Section(GROUP_NAMES.get(key, key))) as section:
+            for result_set in group:
+                with section.create(Subsection(result_set.text_name, label=result_set.marker.name)) as result_set_sec:
+                    _doc_result_set(result_set_sec, result_set, tmp_dir, figure_ids, make_report)
 
     return doc
 
