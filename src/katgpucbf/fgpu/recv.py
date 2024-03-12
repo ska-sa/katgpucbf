@@ -262,6 +262,8 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             )
         ]
         for sensor in missing_sensors:
