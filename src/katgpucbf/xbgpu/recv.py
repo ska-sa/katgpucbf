@@ -250,6 +250,8 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
             "The timestamp (in UNIX time) when missing data was last detected",
             default=Timestamp(-1.0),
             initial_status=Sensor.Status.NOMINAL,
+            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
         )
     ]
     for sensor in missing_sensors:
