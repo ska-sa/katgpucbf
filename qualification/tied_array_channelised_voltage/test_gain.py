@@ -83,5 +83,9 @@ async def test_gain(
         max_value = 2 ** (receiver.n_bits_per_sample - 1) - 1
         expected = np.clip(expected, -max_value, max_value)
         with check:
-            np.testing.assert_allclose(data[i], expected, atol=round(0.5 * scale))
+            # Differences are typically limited to 0.5 * scale, but when
+            # n_ants is not a power of 2, the weight (1/n_ants) is inexact
+            # and so the pre-quantisation value is not exactly an integer.
+            # In that case dithering can have an effect.
+            np.testing.assert_allclose(data[i], expected, atol=scale, rtol=0.0)
             pdf_report.detail(f"Beams {stream_names[0]} and {stream_names[i]} agree.")
