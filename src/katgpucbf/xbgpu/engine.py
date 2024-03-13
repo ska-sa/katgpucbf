@@ -1159,7 +1159,7 @@ class XBEngine(DeviceServer):
             COMPLEX,
         )
         for _ in range(DEFAULT_N_RX_ITEMS):
-            # TODO: Abstract dtype, as per NGC-1000
+            # TODO: NGC-1106 update buffer_device dtype once 4-bit mode is supported
             buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             rx_item = RxQueueItem(buffer_device, present)
