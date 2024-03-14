@@ -351,7 +351,7 @@ def verify_beam_sensors(
     *,
     beam_outputs: list[BOutput],
     beam_results_shape: tuple[int, ...],
-    data_itemsize: int,
+    beam_dtype: np.dtype,
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     first_timestamp: int,
@@ -370,8 +370,9 @@ def verify_beam_sensors(
         The shape of the verified beam data for all beams with shape
         (len(beam_outputs), n_beam_heaps_sent, n_channels_per_substream,
         n_samples_between_spectra, COMPLEX).
-    data_itemsize
-        The sample data's length in bytes.
+    beam_dtype
+        The numpy data type of the beam data, used to calculate the number of
+        bytes in each heap.
     prom_diff
         Collection of Prometheus metrics observed during the XBEngine's
         processing of data stimulus.
@@ -393,7 +394,7 @@ def verify_beam_sensors(
     n_beam_heaps_sent = beam_results_shape[1]
     heap_shape = beam_results_shape[2:]
     # NOTE: Explicitly cast np.prod returns to int as the default is np.int64
-    heap_bytes = int(np.prod(heap_shape)) * data_itemsize
+    heap_bytes = int(np.prod(heap_shape)) * beam_dtype.itemsize
     # We get rid of the final dimension in the beam data as we need the total
     # number of (COMPLEX) samples.
     heap_samples = int(np.prod(heap_shape[:-1]))
@@ -1017,7 +1018,7 @@ class TestEngine:
         verify_beam_sensors(
             beam_outputs=beam_outputs,
             beam_results_shape=beam_results.shape,
-            data_itemsize=beam_results.itemsize,
+            beam_dtype=beam_results.dtype,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
             first_timestamp=first_timestamp,
