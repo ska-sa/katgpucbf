@@ -220,6 +220,9 @@ class Chunk:
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         if n_enabled > 0:
             send_futures: list[asyncio.Future] = []
+            enabled_stream_names = [
+                output_name for output_name, enabled in zip(send_stream.beam_names, send_stream.tx_enabled) if enabled
+            ]
             for frame in self._frames:
                 # TODO (NGC-1232): building this list every time may be too expensive.
                 # Consider caching it and invalidating when streams are enabled/disabled.
@@ -235,11 +238,7 @@ class Chunk:
                     functools.partial(
                         self._inc_counters,
                         frame.data.shape[1:],  # Get rid of 'beam' dimension
-                        [
-                            output_name
-                            for output_name, enabled in zip(send_stream.beam_names, send_stream.tx_enabled)
-                            if enabled
-                        ],
+                        enabled_stream_names,
                     )
                 )
 

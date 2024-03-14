@@ -27,6 +27,7 @@ import spead2.recv.asyncio
 import spead2.send
 import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
+from katsdpsigproc.accel import roundup
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
@@ -269,6 +270,7 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 
 
 def verify_corrprod_sensors(
+    *,
     xpipelines: list[XPipeline],
     corrprod_results: list[np.ndarray],
     prom_diff: PromDiff,
@@ -346,8 +348,10 @@ def verify_corrprod_sensors(
 
 
 def verify_beam_sensors(
+    *,
     beam_outputs: list[BOutput],
     beam_results_shape: tuple[int, ...],
+    data_itemsize: int,
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     first_timestamp: int,
@@ -358,22 +362,16 @@ def verify_beam_sensors(
 ) -> None:
     """Verify katcp sensors and Prometheus counters for BPipeline data.
 
-    NOTE: There is currently logic in place to compensate for the BPipeline's
-    lack of tracking missing data. More specifically, it compensates for the
-    difference in expected versus measured counter values by seemingly
-    'forcing' them to match. In actuality, it's counteracting the BPipeline's
-    BSend transmitting `HEAPS_PER_FENGINE_PER_CHUNK` heaps regardless of how
-    empty/full the incoming Chunk is.
-
     Parameters
     ----------
     beam_outputs
         Output beam configurations parsed into BOutput objects.
     beam_results_shape
-        The shape of the verified beam data for all beams with the
-        following shape
-        - (len(beam_outputs), n_beam_heaps_sent, n_channels_per_substream,
-        n_samples_between_spectra, COMPLEX)
+        The shape of the verified beam data for all beams with shape
+        (len(beam_outputs), n_beam_heaps_sent, n_channels_per_substream,
+        n_samples_between_spectra, COMPLEX).
+    data_itemsize
+        The sample data's length in bytes.
     prom_diff
         Collection of Prometheus metrics observed during the XBEngine's
         processing of data stimulus.
@@ -386,54 +384,28 @@ def verify_beam_sensors(
     first_timestamp, last_timestamp
         Two timestamps indicating the start and end of data processing
         by the :class:`BPipeline`.
-    n_heaps_total
-        Total number of heaps transmitted by the beam data stream - including
-        descriptors.
-    weights
-        The beam weights applied to each input of the beam data product.
-        These are real floating-point values generated for the unit test.
-    delays
-        The beam delays applied to each beam data product. These are
+    weights, quant_gains, delays
+        The beam weights, quantiser-gains and delays applied to each input of
+        the beam data product. These are real floating-point values generated
+        for the unit test.
     """
     # Get the number of total heaps transmitted by each beam output
-    # NOTE: We round up to the nearest multiple of `HEAPS_PER_FENGINE_PER_CHUNK`
-    # as the BSend currently transmits all Frames of data, regardless of how
-    # empty/full an input (received Chunk) is. Also, the number of Frames in a
-    # BSend Chunk is the same as `HEAPS_PER_FENGINE_PER_CHUNK`.
     n_beam_heaps_sent = beam_results_shape[1]
-    n_beam_heaps_sent += n_beam_heaps_sent % HEAPS_PER_FENGINE_PER_CHUNK
-    beam_data_shape = beam_results_shape[2:]
+    heap_shape = beam_results_shape[2:]
     # NOTE: Explicitly cast np.prod returns to int as the default is np.int64
-    heap_bytes = int(np.prod(beam_data_shape))
-    # We get rid of the final (COMPLEX) dimension in the beam data as each
-    # sample has a bitwidth of eight (8).
-    heap_samples = int(np.prod(beam_data_shape[:-1]))
+    heap_bytes = int(np.prod(heap_shape)) * data_itemsize
+    # We get rid of the final dimension in the beam data as we need the total
+    # number of (COMPLEX) samples.
+    heap_samples = int(np.prod(heap_shape[:-1]))
     for i, beam_output in enumerate(beam_outputs):
-        # `prom_diff.get_sample_diff` can return a range of data types. This
-        # behaviour is ignored as we know what to expect for the purposes of
-        # this test.
-        # Explicitly casting the counter readings to int as we expect them to
-        # be whole numbers - heaps, bytes, samples.
-        prom_output_b_heaps_total = int(
-            prom_diff.get_sample_diff("output_b_heaps_total", {"stream": beam_output.name})  # type: ignore
-        )
-        prom_output_b_bytes_total = int(
-            prom_diff.get_sample_diff("output_b_bytes_total", {"stream": beam_output.name})  # type: ignore
-        )
-        prom_output_b_samples_total = int(
-            prom_diff.get_sample_diff("output_b_samples_total", {"stream": beam_output.name})  # type: ignore
-        )
-        if prom_output_b_heaps_total != n_beam_heaps_sent:
-            # NOTE: The output_b_{heaps, bytes, samples} counters still think
-            # `n-1` heaps were sent, so we need to increment those over by one
-            # heap's worth of data respectively.
-            heap_count_diff = n_beam_heaps_sent - prom_output_b_heaps_total
-            # Add the mod difference to the heaps counter so it seems less
-            # 'hacked' than simply adding the difference between the two values.
-            prom_output_b_heaps_total += prom_output_b_heaps_total % HEAPS_PER_FENGINE_PER_CHUNK
-            prom_output_b_bytes_total += heap_count_diff * heap_bytes
-            prom_output_b_samples_total += heap_count_diff * heap_samples
-
+        # The assert statements are mainly to force mypy to realise the
+        # prom_diff values obtained are the expected data type
+        prom_output_b_heaps_total = prom_diff.get_sample_diff("output_b_heaps_total", {"stream": beam_output.name})
+        assert prom_output_b_heaps_total is not None, "output_b_heaps counter is None"
+        prom_output_b_bytes_total = prom_diff.get_sample_diff("output_b_bytes_total", {"stream": beam_output.name})
+        assert prom_output_b_bytes_total is not None, "output_b_bytes counter is None"
+        prom_output_b_samples_total = prom_diff.get_sample_diff("output_b_samples_total", {"stream": beam_output.name})
+        assert prom_output_b_samples_total is not None, "output_b_samples counter is None"
         assert prom_output_b_heaps_total == n_beam_heaps_sent
         assert prom_output_b_bytes_total == n_beam_heaps_sent * heap_bytes
         assert prom_output_b_samples_total == n_beam_heaps_sent * heap_samples
@@ -695,8 +667,15 @@ class TestEngine:
 
                 corrprod_results[i][j] = ig_recv["xeng_raw"].value
 
+        # NOTE: Update `batch_indices` to be end on a multiple of
+        # `HEAPS_PER_FENGINE_PER_CHUNK`, but only for the beam_outputs because
+        # they currently send `HEAPS_PER_FENGINE_PER_CHUNK` heaps all the time.
+        # This does not mean the final heap (for each beam_output) has sane
+        # data in it. In fact, ensure you verify data up to `n_beam_heaps - 1`.
+        n_beam_heaps = roundup(len(batch_indices), HEAPS_PER_FENGINE_PER_CHUNK)
+        beam_batch_indices = range(batch_indices[0], batch_indices[0] + n_beam_heaps)
         beam_results = np.zeros(
-            (len(beam_outputs), len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+            (len(beam_outputs), n_beam_heaps, n_channels_per_substream, n_spectra_per_heap, COMPLEX),
             bsend.SEND_DTYPE,
         )
         for i in range(len(beam_outputs)):
@@ -708,7 +687,7 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, index in enumerate(batch_indices):
+            for j, index in enumerate(beam_batch_indices):
                 heap = await stream.get()
                 while (updated_items := set(ig_recv.update(heap))) == set():
                     # Test has gone on long enough that we've received another descriptor
@@ -997,14 +976,14 @@ class TestEngine:
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
         verify_corrprod_sensors(
-            xpipelines,
-            corrprod_results,
-            prom_diff,
-            actual_sensor_updates,
-            incomplete_accums_counters,
-            n_channels_per_substream,
-            n_baselines,
-            missing_antenna,
+            xpipelines=xpipelines,
+            corrprod_results=corrprod_results,
+            prom_diff=prom_diff,
+            actual_sensor_updates=actual_sensor_updates,
+            incomplete_accumulation_counters=incomplete_accums_counters,
+            n_channels_per_substream=n_channels_per_substream,
+            n_baselines=n_baselines,
+            missing_antenna=missing_antenna,
         )
 
         channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels_total
@@ -1025,15 +1004,20 @@ class TestEngine:
         # assert_allclose converts to float, which bloats memory usage.
         # To keep it manageable, compare a batch at a time.
         for i in range(beam_results.shape[0]):
-            for j in range(beam_results.shape[1]):
+            # NOTE: As per the explanation at the end of `_send_data`, we
+            # only verify up the the penultimate heap's data for each `beam_result`
+            # because the final heap is sent coincidentally - not because it is
+            # expected to have sane data in it.
+            for j in range(beam_results.shape[1] - 1):
                 np.testing.assert_allclose(beam_results[i, j], expected_beams[i, j], atol=1)
 
-        # `beam_results` hold results for each heap transmitted by a `beam_output`
-        # for all `beam_outputs`
-        # - We can reuse its dimensions in the sensor verification below.
+        # `beam_results` holds results for each heap transmitted by a
+        # `beam_output` for all `beam_outputs`. We can reuse its dimensions in
+        # the sensor verification below.
         verify_beam_sensors(
             beam_outputs=beam_outputs,
             beam_results_shape=beam_results.shape,
+            data_itemsize=beam_results.itemsize,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
             first_timestamp=first_timestamp,
