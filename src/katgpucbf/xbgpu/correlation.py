@@ -203,6 +203,7 @@ class Correlation(accel.Operation):
             accel.Dimension(COMPLEX, exact=True),
         )
 
+        # TODO: NGC-1104 update this once 4-bit correlation is supported
         assert (
             self.template.input_sample_bits == 8
         ), f"{self.template.input_sample_bits}-bit mode not supported yet, only 8-bit."
