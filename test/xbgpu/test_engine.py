@@ -668,11 +668,19 @@ class TestEngine:
 
                 corrprod_results[i][j] = ig_recv["xeng_raw"].value
 
+        # TODO: NGC-1172 The tweaks to process beam data below rely on
+        # `batch_indices` to be contiguous. The check below is temporary until
+        # the BPipeline is able to handle missing data.
+        assert sorted(batch_indices) == (
+            list(range(min(batch_indices), max(batch_indices) + 1))
+        ), "Batch indices need to be contiguous for testing beam data"
+
         # NOTE: Update `batch_indices` to be end on a multiple of
         # `HEAPS_PER_FENGINE_PER_CHUNK`, but only for the beam_outputs because
         # they currently send `HEAPS_PER_FENGINE_PER_CHUNK` heaps all the time.
         # This does not mean the final heap (for each beam_output) has sane
-        # data in it. In fact, ensure you verify data up to `n_beam_heaps - 1`.
+        # data in it. In fact, ensure you verify data for values in
+        # `batch_indices`.
         n_beam_heaps = roundup(len(batch_indices), HEAPS_PER_FENGINE_PER_CHUNK)
         beam_batch_indices = range(batch_indices[0], batch_indices[0] + n_beam_heaps)
         beam_results = np.zeros(
@@ -1004,13 +1012,13 @@ class TestEngine:
         )
         # assert_allclose converts to float, which bloats memory usage.
         # To keep it manageable, compare a batch at a time.
-        for i in range(beam_results.shape[0]):
+        for i in range(expected_beams.shape[0]):
             # NOTE: As per the explanation at the end of `_send_data`, we
             # only verify up the the penultimate heap's data for each `beam_result`
             # because the final heap is sent coincidentally - not because it is
             # expected to have sane data in it.
-            for j in range(beam_results.shape[1] - 1):
-                np.testing.assert_allclose(beam_results[i, j], expected_beams[i, j], atol=1)
+            for j in range(expected_beams.shape[1]):
+                np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
         # `beam_results` holds results for each heap transmitted by a
         # `beam_output` for all `beam_outputs`. We can reuse its dimensions in
