@@ -174,13 +174,13 @@ class Chunk:
 
     @staticmethod
     def _inc_counters(
-        beam_data_shape: tuple[int, int, int], beam_dtype: np.dtype, beam_names: Sequence[str], future: asyncio.Future
+        data_shape: tuple[int, int, int], beam_dtype: np.dtype, beam_names: Sequence[str], future: asyncio.Future
     ) -> None:
         """Increment beam stream Prometheus counters.
 
         Parameters
         ----------
-        beam_data_shape
+        data_shape
             The shape of the beam data being transmitted. Expected in the
             format of (n_channels_per_substream, samples_per_spectra, COMPLEX).
         beam_names
@@ -198,9 +198,9 @@ class Chunk:
                 output_heaps_counter.labels(beam_name).inc(1)
                 # Each beam data sample is 8-bit
                 # - Multiply across dimensions to get total bytes
-                output_bytes_counter.labels(beam_name).inc(np.prod(beam_data_shape) * beam_dtype.itemsize)
+                output_bytes_counter.labels(beam_name).inc(np.prod(data_shape) * beam_dtype.itemsize)
                 # - Multiply across the first two dimensions to get complex sample count
-                output_samples_counter.labels(beam_name).inc(np.prod(beam_data_shape[:-1]))
+                output_samples_counter.labels(beam_name).inc(np.prod(data_shape[:-1]))
 
     def send(
         self,
