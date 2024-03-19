@@ -672,7 +672,7 @@ class TestEngine:
         # value to be a multiple of `HEAPS_PER_FENGINE_PER_CHUNK`. The check
         # below is temporary until the BPipeline is able to handle missing
         # data.
-        assert batch_indices == (
+        assert list(batch_indices) == (
             list(range(min(batch_indices), max(batch_indices) + 1))
         ), "Batch indices need to be contiguous for testing beam data"
 
