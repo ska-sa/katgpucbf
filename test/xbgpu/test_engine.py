@@ -393,11 +393,10 @@ def verify_beam_sensors(
     # Get the number of total heaps transmitted by each beam output
     n_beam_heaps_sent = beam_results_shape[1]
     heap_shape = beam_results_shape[2:]
-    # NOTE: Explicitly cast np.prod returns to int as the default is np.int64
-    heap_bytes = int(np.prod(heap_shape)) * beam_dtype.itemsize
+    heap_bytes = np.prod(heap_shape) * beam_dtype.itemsize
     # We get rid of the final dimension in the beam data as we need the total
     # number of (COMPLEX) samples.
-    heap_samples = int(np.prod(heap_shape[:-1]))
+    heap_samples = np.prod(heap_shape[:-1])
     for i, beam_output in enumerate(beam_outputs):
         # The assert statements are mainly to force mypy to realise the
         # prom_diff values obtained are the expected data type
@@ -669,13 +668,15 @@ class TestEngine:
                 corrprod_results[i][j] = ig_recv["xeng_raw"].value
 
         # TODO: NGC-1172 The tweaks to process beam data below rely on
-        # `batch_indices` to be contiguous. The check below is temporary until
-        # the BPipeline is able to handle missing data.
-        assert sorted(batch_indices) == (
+        # `batch_indices` to be contiguous and for the zeroth (and minimum)
+        # value to be a multiple of `HEAPS_PER_FENGINE_PER_CHUNK`. The check
+        # below is temporary until the BPipeline is able to handle missing
+        # data.
+        assert batch_indices == (
             list(range(min(batch_indices), max(batch_indices) + 1))
         ), "Batch indices need to be contiguous for testing beam data"
 
-        # NOTE: Update `batch_indices` to be end on a multiple of
+        # NOTE: Update `batch_indices` to end on a multiple of
         # `HEAPS_PER_FENGINE_PER_CHUNK`, but only for the beam_outputs because
         # they currently send `HEAPS_PER_FENGINE_PER_CHUNK` heaps all the time.
         # This does not mean the final heap (for each beam_output) has sane
@@ -1014,9 +1015,9 @@ class TestEngine:
         # To keep it manageable, compare a batch at a time.
         for i in range(expected_beams.shape[0]):
             # NOTE: As per the explanation at the end of `_send_data`, we
-            # only verify up the the penultimate heap's data for each `beam_result`
-            # because the final heap is sent coincidentally - not because it is
-            # expected to have sane data in it.
+            # only verify data in the range of `batch_indices` for each
+            # `beam_result` as any heaps sent afterwards are sent by default
+            # - not because it is expected to have sane data in it.
             for j in range(expected_beams.shape[1]):
                 np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
