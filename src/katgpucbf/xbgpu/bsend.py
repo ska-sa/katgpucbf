@@ -174,7 +174,7 @@ class Chunk:
 
     @staticmethod
     def _inc_counters(
-        data_shape: tuple[int, int, int], beam_dtype: np.dtype, beam_names: Sequence[str], future: asyncio.Future
+        data_shape: tuple[int, int, int], data_type: np.dtype, output_names: Sequence[str], future: asyncio.Future
     ) -> None:
         """Increment beam stream Prometheus counters.
 
@@ -183,7 +183,9 @@ class Chunk:
         data_shape
             The shape of the beam data being transmitted. Expected in the
             format of (n_channels_per_substream, samples_per_spectra, COMPLEX).
-        beam_names
+        data_type
+            The `np.dtype` of the beam data transmitted.
+        output_names
             List of beam stream names that are enabled for transmission for
             this `future`.
         future
@@ -194,13 +196,12 @@ class Chunk:
             (NGC-1172) Handle missing data transmission for Prometheus counters.
         """
         if not future.cancelled() and future.exception() is None:
-            for beam_name in beam_names:
-                output_heaps_counter.labels(beam_name).inc(1)
-                # Each beam data sample is 8-bit
-                # - Multiply across dimensions to get total bytes
-                output_bytes_counter.labels(beam_name).inc(np.prod(data_shape) * beam_dtype.itemsize)
-                # - Multiply across the first two dimensions to get complex sample count
-                output_samples_counter.labels(beam_name).inc(np.prod(data_shape[:-1]))
+            for output_name in output_names:
+                output_heaps_counter.labels(output_name).inc(1)
+                # Multiply across dimensions to get total bytes
+                output_bytes_counter.labels(output_name).inc(np.prod(data_shape) * data_type.itemsize)
+                # Multiply across the first two dimensions to get complex sample count
+                output_samples_counter.labels(output_name).inc(np.prod(data_shape[:-1]))
 
     def send(
         self,
@@ -223,7 +224,7 @@ class Chunk:
         if n_enabled > 0:
             send_futures: list[asyncio.Future] = []
             enabled_stream_names = [
-                output_name for output_name, enabled in zip(send_stream.beam_names, send_stream.tx_enabled) if enabled
+                output_name for output_name, enabled in zip(send_stream.output_names, send_stream.tx_enabled) if enabled
             ]
             for frame in self._frames:
                 # TODO (NGC-1232): building this list every time may be too expensive.
@@ -325,7 +326,7 @@ class BSend:
 
         self.tx_enabled = [tx_enabled] * len(outputs)
         n_beams = len(outputs)
-        self.beam_names = [output.name for output in outputs]
+        self.output_names = [output.name for output in outputs]
 
         self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
@@ -446,13 +447,13 @@ class BSend:
         # It's a heavy-handed approach, but we don't care about performance
         # during shutdown.
         await self.stream.async_flush()
-        for i in range(len(self.beam_names)):
+        for i in range(len(self.output_names)):
             await self.stream.async_send_heap(stop_heap, substream_index=i)
 
 
 def make_stream(
     *,
-    beam_names: list[str],
+    output_names: list[str],
     endpoints: list[Endpoint],
     interface: str,
     ttl: int,
@@ -493,10 +494,10 @@ def make_stream(
         )
     # Referencing the labels causes them to be created, in advance of data
     # actually being transmitted.
-    for beam_name in beam_names:
-        output_heaps_counter.labels(beam_name)
-        output_bytes_counter.labels(beam_name)
-        output_samples_counter.labels(beam_name)
-        output_clip_counter.labels(beam_name)
+    for output_name in output_names:
+        output_heaps_counter.labels(output_name)
+        output_bytes_counter.labels(output_name)
+        output_samples_counter.labels(output_name)
+        output_clip_counter.labels(output_name)
 
     return stream

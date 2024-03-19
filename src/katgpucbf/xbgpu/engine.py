@@ -343,7 +343,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             context=context,
             packet_payload=engine.dst_packet_payload,
             stream_factory=lambda stream_config, buffers: make_bstream(
-                beam_names=[output.name for output in outputs],
+                output_names=[output.name for output in outputs],
                 endpoints=[output.dst for output in outputs],
                 interface=engine.dst_interface,
                 ttl=engine.dst_ttl,
