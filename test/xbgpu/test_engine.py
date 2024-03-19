@@ -675,6 +675,10 @@ class TestEngine:
         assert list(batch_indices) == (
             list(range(min(batch_indices), max(batch_indices) + 1))
         ), "Batch indices need to be contiguous for testing beam data"
+        assert batch_indices[0] % HEAPS_PER_FENGINE_PER_CHUNK == 0, (
+            "Need to start data transmission with a batch index that is a multiple "
+            f"of HEAPS_PER_FENGINE_PER_CHUNK ({HEAPS_PER_FENGINE_PER_CHUNK})"
+        )
 
         # NOTE: Update `batch_indices` to end on a multiple of
         # `HEAPS_PER_FENGINE_PER_CHUNK`, but only for the beam_outputs because
@@ -1017,7 +1021,7 @@ class TestEngine:
             # NOTE: As per the explanation at the end of `_send_data`, we
             # only verify data in the range of `batch_indices` for each
             # `beam_result` as any heaps sent afterwards are sent by default
-            # - not because it is expected to have sane data in it.
+            # - not because they are expected to have sane data in it.
             for j in range(expected_beams.shape[1]):
                 np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
