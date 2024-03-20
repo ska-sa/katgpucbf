@@ -1021,7 +1021,7 @@ class TestEngine:
             # NOTE: As per the explanation at the end of `_send_data`, we
             # only verify data in the range of `batch_indices` for each
             # `beam_result` as any heaps sent afterwards are sent by default
-            # - not because they are expected to have sane data in it.
+            # - not because they are expected to have sane data in them.
             for j in range(expected_beams.shape[1]):
                 np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
