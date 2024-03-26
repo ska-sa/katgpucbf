@@ -174,12 +174,22 @@ class Chunk:
 
     @staticmethod
     def _inc_counters(
-        data_shape: tuple[int, int, int], data_dtype: np.dtype, output_names: Sequence[str], future: asyncio.Future
+        n_frames_sent: int,
+        data_shape: tuple[int, int, int],
+        data_dtype: np.dtype,
+        output_names: Sequence[str],
+        future: asyncio.Future,
     ) -> None:
         """Increment beam stream Prometheus counters.
 
+        Intended to be used on a gathered set of futures as it is
+        computationally expensive to increment Prometheus counters for each
+        call to async_send_heaps.
+
         Parameters
         ----------
+        n_frames_sent
+            The number of frames transmitted.
         data_shape
             The shape of the beam data being transmitted. Expected in the
             format of (n_channels_per_substream, samples_per_spectra, COMPLEX).
@@ -196,12 +206,14 @@ class Chunk:
             (NGC-1172) Handle missing data transmission for Prometheus counters.
         """
         if not future.cancelled() and future.exception() is None:
+            byte_count = np.prod(data_shape) * data_dtype.itemsize * n_frames_sent
+            sample_count = np.prod(data_shape[:-1]) * n_frames_sent
             for output_name in output_names:
-                output_heaps_counter.labels(output_name).inc(1)
+                output_heaps_counter.labels(output_name).inc(n_frames_sent)
                 # Multiply across dimensions to get total bytes
-                output_bytes_counter.labels(output_name).inc(np.prod(data_shape) * data_dtype.itemsize)
+                output_bytes_counter.labels(output_name).inc(byte_count)
                 # Multiply across the first two dimensions to get complex sample count
-                output_samples_counter.labels(output_name).inc(np.prod(data_shape[:-1]))
+                output_samples_counter.labels(output_name).inc(sample_count)
 
     def send(
         self,
@@ -223,9 +235,6 @@ class Chunk:
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         if n_enabled > 0:
             send_futures: list[asyncio.Future] = []
-            enabled_stream_names = [
-                output_name for output_name, enabled in zip(send_stream.output_names, send_stream.tx_enabled) if enabled
-            ]
             for frame in self._frames:
                 # TODO (NGC-1232): building this list every time may be too expensive.
                 # Consider caching it and invalidating when streams are enabled/disabled.
@@ -237,16 +246,25 @@ class Chunk:
                 send_futures.append(
                     send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
-                send_futures[-1].add_done_callback(
-                    functools.partial(
-                        self._inc_counters,
-                        frame.data.shape[1:],  # Get rid of 'beam' dimension
-                        frame.data.dtype,
-                        enabled_stream_names,
-                    )
-                )
 
             self.future = asyncio.gather(*send_futures)
+            # NOTE: Adding done-callback to all gathered futures as we currently
+            # transmit data for all frames, regardless of whether incoming data
+            # is missing.
+            # TODO: NGC-1172 update this to only increment for frames that *did
+            # not* have data missing on the input.
+            enabled_stream_names = [
+                output_name for output_name, enabled in zip(send_stream.output_names, send_stream.tx_enabled) if enabled
+            ]
+            self.future.add_done_callback(
+                functools.partial(
+                    self._inc_counters,
+                    len(send_futures),  # Increment counters for as many calls to async_send_heaps
+                    frame.data.shape[1:],  # Get rid of 'beam' dimension
+                    frame.data.dtype,
+                    enabled_stream_names,
+                )
+            )
         else:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
