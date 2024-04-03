@@ -135,6 +135,10 @@ class CorrelationTemplate:
                 f"-DNR_CHANNELS={self.n_channels}",
                 f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
                 f"-DNR_POLARIZATIONS={N_POLS}",
+                "-DCUSTOM_STORE_VISIBILITY=1",
+                # Suppress "pointless comparison of unsigned integer with zero"
+                "-Xcudafe",
+                "--diag_suppress=186",
             ],
         )
         self.correlate_kernel = program.get_kernel("correlate")
