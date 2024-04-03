@@ -365,11 +365,11 @@ template <bool add>__device__ inline void storeVisibilities(Visibilities visibil
   if ((skipCheckY || recvY <= recvX) && (skipCheckX || recvX < NR_RECEIVERS))
 #if NR_BITS == 4
     for (unsigned polX = 0; polX < NR_POLARIZATIONS; polX ++)
-      visibilities[channel][baseline][polY][polX] = scratchSpace[warp][_y][polY][_x][polX];
+      storeVisibility<add>(visibilities, channel, baseline, polY, polX, scratchSpace[warp][_y][polY][_x][polX]);
 #elif NR_BITS == 8 || NR_BITS == 16
     for (unsigned polY = 0; polY < NR_POLARIZATIONS; polY ++)
       for (unsigned polX = 0; polX < NR_POLARIZATIONS; polX ++)
-        visibilities[channel][baseline][polY][polX] = scratchSpace[warp][_y][polY][_x][polX];
+        storeVisibility<add>(visibilities, channel, baseline, polY, polX, scratchSpace[warp][_y][polY][_x][polX]);
 #endif
 #else
 #if __CUDA_ARCH__ == 700 || (__CUDA_ARCH__ == 720 && NR_BITS == 16)
