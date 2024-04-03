@@ -63,7 +63,7 @@ extern "C++" {
 #define NR_BASELINES		 (NR_RECEIVERS * (NR_RECEIVERS + 1) / 2)
 #define ALIGN(A,N)		 (((A)+(N)-1)/(N)*(N))
 
-#define NR_TIMES_PER_BLOCK	 (128 / (NR_BITS))
+#define NR_BLOCKS_PER_BATCH	 (128 / (NR_BITS))
 #define NR_RECEIVERS_PER_TCM_X	 ((NR_BITS) == 4 ? 2 : 4)
 #define NR_RECEIVERS_PER_TCM_Y	 8
 #define NR_RECEIVERS_PER_BLOCK_X (NR_RECEIVERS_PER_BLOCK == 64 ? 32 : NR_RECEIVERS_PER_BLOCK)
@@ -82,9 +82,10 @@ extern "C++" {
 #error unsupported NR_RECEIVERS_PER_BLOCK
 #endif
 
-#if NR_SAMPLES_PER_CHANNEL % NR_TIMES_PER_BLOCK != 0
-#error NR_SAMPLES_PER_CHANNEL should be a multiple of NR_TIMES_PER_BLOCK
+#if NR_SAMPLES_PER_CHANNEL % NR_BLOCKS_PER_BATCH != 0
+#error NR_SAMPLES_PER_CHANNEL should be a multiple of NR_BLOCKS_PER_BATCH
 #endif
+#define NR_TIMES_PER_BATCH (NR_SAMPLES_PER_CHANNEL / NR_BLOCKS_PER_BATCH)
 
 #define MIN(A,B) ((A)<(B)?(A):(B))
 
@@ -168,7 +169,7 @@ inline __device__ Visibility operator += (Visibility &a, Visibility b)
 }
 
 
-typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS][NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
+typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS][NR_TIMES_PER_BATCH][NR_BLOCKS_PER_BATCH][NR_POLARIZATIONS];
 
 #if !defined CUSTOM_STORE_VISIBILITY
 typedef Visibility Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
@@ -226,14 +227,14 @@ __device__ inline int4 conj_perm(int4 v)
 template <unsigned nrReceiversPerBlock = NR_RECEIVERS_PER_BLOCK> struct SharedData
 {
 #if NR_BITS == 4
-  typedef char        Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK][1];
-  typedef char        Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_TIMES_PER_BLOCK + 16][1];
+  typedef char        Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_BLOCKS_PER_BATCH][1];
+  typedef char        Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_BLOCKS_PER_BATCH + 16][1];
 #elif NR_BITS == 8
-  typedef signed char Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK][COMPLEX];
-  typedef signed char Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_TIMES_PER_BLOCK + 8][COMPLEX];
+  typedef signed char Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_BLOCKS_PER_BATCH][COMPLEX];
+  typedef signed char Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_BLOCKS_PER_BATCH + 8][COMPLEX];
 #elif NR_BITS == 16
-  typedef __half      Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK][COMPLEX];
-  typedef __half      Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_TIMES_PER_BLOCK + 4][COMPLEX];
+  typedef __half      Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_BLOCKS_PER_BATCH][COMPLEX];
+  typedef __half      Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_BLOCKS_PER_BATCH + 4][COMPLEX];
 #endif
 };
 
@@ -246,12 +247,14 @@ template <typename T> struct FetchData
   {
   }
 
-  __device__ void load(const Samples samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
+  __device__ void load(const Samples *samples, unsigned channel, unsigned time, unsigned firstReceiver, bool skipLoadCheck = NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0)
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
     {
-      data = * (T *) &samples[firstReceiver + loadRecv][channel][time][loadTime][0];
-      //memcpy(&data, &samples[firstReceiver + loadRecv][channel][time][loadTime][0], sizeof(T));
+      unsigned outerTime = time / NR_TIMES_PER_BATCH;
+      unsigned innerTime = time % NR_TIMES_PER_BATCH;
+      data = * (T *) &samples[outerTime][firstReceiver + loadRecv][channel][innerTime][loadTime][0];
+      //memcpy(&data, &samples[outerTime][firstReceiver + loadRecv][channel][innerTime][loadTime][0], sizeof(T));
     }
   }
 
@@ -409,7 +412,7 @@ template <bool add>__device__ inline void storeVisibilities(Visibilities visibil
 
 #if NR_RECEIVERS_PER_BLOCK == 64
 
-template <bool add, bool fullTriangle> __device__ void doCorrelateTriangle(Visibilities visibilities, const Samples samples, unsigned firstReceiver, unsigned warp, unsigned tid, SharedData<>::Bsamples &bSamples, ScratchSpace scratchSpace[NR_WARPS])
+template <bool add, bool fullTriangle> __device__ void doCorrelateTriangle(Visibilities visibilities, const Samples *samples, unsigned firstReceiver, unsigned warp, unsigned tid, unsigned firstBlock, unsigned nrBlocks, SharedData<>::Bsamples &bSamples, ScratchSpace scratchSpace[NR_WARPS])
 {
   const unsigned nrFragmentsX = 24 / NR_RECEIVERS_PER_TCM_X;
   const unsigned nrFragmentsY = 24 / NR_RECEIVERS_PER_TCM_Y;
@@ -433,10 +436,10 @@ template <bool add, bool fullTriangle> __device__ void doCorrelateTriangle(Visib
   FetchData<int4> tmp0((tid >> 2)                             , 32 / NR_BITS * (tid & 3));
   FetchData<int4> tmp1((tid >> 2) + NR_RECEIVERS_PER_BLOCK / 2, 32 / NR_BITS * (tid & 3));
 
-  tmp0.load(samples, channel, 0, firstReceiver, fullTriangle);
-  tmp1.load(samples, channel, 0, firstReceiver, fullTriangle);
+  tmp0.load(samples, channel, firstBlock, firstReceiver, fullTriangle);
+  tmp1.load(samples, channel, firstBlock, firstReceiver, fullTriangle);
 
-  for (unsigned majorTime = 0; majorTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK; majorTime ++) {
+  for (unsigned majorTime = 0; majorTime < nrBlocks; majorTime ++) {
     unsigned buffer = majorTime % NR_SHARED_BUFFERS;
 
     tmp0.storeB(bSamples[buffer]);
@@ -444,15 +447,15 @@ template <bool add, bool fullTriangle> __device__ void doCorrelateTriangle(Visib
 
     unsigned majorReadTime = majorTime + READ_AHEAD;
 
-    if (majorReadTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) {
-      tmp0.load(samples, channel, majorReadTime, firstReceiver, fullTriangle);
-      tmp1.load(samples, channel, majorReadTime, firstReceiver, fullTriangle);
+    if (majorReadTime < nrBlocks) {
+      tmp0.load(samples, channel, firstBlock + majorReadTime, firstReceiver, fullTriangle);
+      tmp1.load(samples, channel, firstBlock + majorReadTime, firstReceiver, fullTriangle);
     }
 
     __syncthreads();
 
 #pragma unroll
-    for (unsigned minorTime = 0; minorTime < NR_TIMES_PER_BLOCK; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
+    for (unsigned minorTime = 0; minorTime < NR_BLOCKS_PER_BATCH; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
       Afrag aFrag;
       Bfrag bFrag[nrFragmentsX];
 
@@ -500,7 +503,7 @@ template <bool add, bool fullTriangle> __device__ void doCorrelateTriangle(Visib
 #endif
 
 
-template <bool add, unsigned nrFragmentsY, unsigned nrFragmentsX, bool skipLoadYcheck, bool skipLoadXcheck, bool skipStoreYcheck, bool skipStoreXcheck> __device__ void doCorrelateRectangle(Visibilities visibilities, const Samples samples, unsigned firstReceiverY, unsigned firstReceiverX, SharedData<>::Asamples &aSamples, SharedData<NR_RECEIVERS_PER_BLOCK_X>::Bsamples &bSamples, ScratchSpace scratchSpace[NR_WARPS])
+template <bool add, unsigned nrFragmentsY, unsigned nrFragmentsX, bool skipLoadYcheck, bool skipLoadXcheck, bool skipStoreYcheck, bool skipStoreXcheck> __device__ void doCorrelateRectangle(Visibilities visibilities, const Samples *samples, unsigned firstReceiverY, unsigned firstReceiverX, unsigned firstBlock, unsigned nrBlocks, SharedData<>::Asamples &aSamples, SharedData<NR_RECEIVERS_PER_BLOCK_X>::Bsamples &bSamples, ScratchSpace scratchSpace[NR_WARPS])
 {
   Sum sum[nrFragmentsY][nrFragmentsX];
 
@@ -523,16 +526,16 @@ template <bool add, unsigned nrFragmentsY, unsigned nrFragmentsX, bool skipLoadY
   FetchData<int4> tmpY1((tid >> 2) + 32, 32 / NR_BITS * (tid & 3));
 #endif
 
-  tmpY0.load(samples, channel, 0, firstReceiverY, skipLoadYcheck);
+  tmpY0.load(samples, channel, firstBlock, firstReceiverY, skipLoadYcheck);
 #if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
-  tmpY1.load(samples, channel, 0, firstReceiverY, skipLoadYcheck);
+  tmpY1.load(samples, channel, firstBlock, firstReceiverY, skipLoadYcheck);
 #endif
-  tmpX0.load(samples, channel, 0, firstReceiverX, skipLoadXcheck);
+  tmpX0.load(samples, channel, firstBlock, firstReceiverX, skipLoadXcheck);
 #if NR_RECEIVERS_PER_BLOCK == 48
-  tmpX1.load(samples, channel, 0, firstReceiverX, skipLoadXcheck);
+  tmpX1.load(samples, channel, firstBlock, firstReceiverX, skipLoadXcheck);
 #endif
 
-  for (unsigned majorTime = 0; majorTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK; majorTime ++) {
+  for (unsigned majorTime = 0; majorTime < nrBlocks; majorTime ++) {
     unsigned buffer = majorTime % NR_SHARED_BUFFERS;
 
     tmpY0.storeA(aSamples[buffer]);
@@ -546,21 +549,21 @@ template <bool add, unsigned nrFragmentsY, unsigned nrFragmentsX, bool skipLoadY
 
     unsigned majorReadTime = majorTime + READ_AHEAD;
 
-    if (majorReadTime < NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK) {
-      tmpY0.load(samples, channel, majorReadTime, firstReceiverY, skipLoadYcheck);
+    if (majorReadTime < nrBlocks) {
+      tmpY0.load(samples, channel, firstBlock + majorReadTime, firstReceiverY, skipLoadYcheck);
 #if NR_RECEIVERS_PER_BLOCK == 48 || NR_RECEIVERS_PER_BLOCK == 64
-      tmpY1.load(samples, channel, majorReadTime, firstReceiverY, skipLoadYcheck);
+      tmpY1.load(samples, channel, firstBlock + majorReadTime, firstReceiverY, skipLoadYcheck);
 #endif
-      tmpX0.load(samples, channel, majorReadTime, firstReceiverX, skipLoadXcheck);
+      tmpX0.load(samples, channel, firstBlock + majorReadTime, firstReceiverX, skipLoadXcheck);
 #if NR_RECEIVERS_PER_BLOCK == 48
-      tmpX1.load(samples, channel, majorReadTime, firstReceiverX, skipLoadXcheck);
+      tmpX1.load(samples, channel, firstBlock + majorReadTime, firstReceiverX, skipLoadXcheck);
 #endif
     }
 
     __syncthreads();
 
 #pragma unroll
-    for (unsigned minorTime = 0; minorTime < NR_TIMES_PER_BLOCK; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
+    for (unsigned minorTime = 0; minorTime < NR_BLOCKS_PER_BATCH; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
       Afrag aFrag;
       Bfrag bFrag[nrFragmentsX];
 
@@ -610,7 +613,7 @@ union shared {
 };
 
 
-template <bool add> __device__ void doCorrelate(Visibilities visibilities, const Samples samples, union shared &u)
+template <bool add> __device__ void doCorrelate(Visibilities visibilities, const Samples *samples, unsigned firstBlock, unsigned nrBlocks, union shared &u)
 {
   constexpr unsigned nrFragmentsX = NR_RECEIVERS_PER_BLOCK_X / NR_RECEIVERS_PER_TCM_X / 2;
   constexpr unsigned nrFragmentsY = NR_RECEIVERS_PER_BLOCK   / NR_RECEIVERS_PER_TCM_Y / 2;
@@ -635,19 +638,19 @@ template <bool add> __device__ void doCorrelate(Visibilities visibilities, const
 
   if (firstReceiverX == firstReceiverY)
 #if NR_RECEIVERS_PER_BLOCK == 32 || NR_RECEIVERS_PER_BLOCK == 48
-    doCorrelateRectangle<add, nrFragmentsY, nrFragmentsX, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, false, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace); // TODO: smaller nrFragments[XY]
+    doCorrelateRectangle<add, nrFragmentsY, nrFragmentsX, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0, false, NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK == 0>(visibilities, samples, firstReceiverY, firstReceiverX, firstBlock, nrBlocks, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace); // TODO: smaller nrFragments[XY]
 #elif NR_RECEIVERS_PER_BLOCK == 64
     if (NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK != 0 && (NR_RECEIVERS < NR_RECEIVERS_PER_BLOCK || firstReceiverX >= NR_RECEIVERS / NR_RECEIVERS_PER_BLOCK * NR_RECEIVERS_PER_BLOCK))
-      doCorrelateTriangle<add, false>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
+      doCorrelateTriangle<add, false>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, firstBlock, nrBlocks, u.triangle.samples, u.scratchSpace);
     else
-      doCorrelateTriangle<add, true>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, u.triangle.samples, u.scratchSpace);
+      doCorrelateTriangle<add, true>(visibilities, samples, firstReceiverX, 2 * threadIdx.z + threadIdx.y, 64 * threadIdx.z + 32 * threadIdx.y + threadIdx.x, firstBlock, nrBlocks, u.triangle.samples, u.scratchSpace);
 #endif
 #if NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK_X != 0
   else if (firstReceiverX >= NR_RECEIVERS / NR_RECEIVERS_PER_BLOCK_X * NR_RECEIVERS_PER_BLOCK_X)
-    doCorrelateRectangle<add, nrFragmentsY, (NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK_X + 2 * NR_RECEIVERS_PER_TCM_X - 1) / (2 * NR_RECEIVERS_PER_TCM_X), true, false, true, NR_RECEIVERS % (2 * NR_RECEIVERS_PER_TCM_X) == 0>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<add, nrFragmentsY, (NR_RECEIVERS % NR_RECEIVERS_PER_BLOCK_X + 2 * NR_RECEIVERS_PER_TCM_X - 1) / (2 * NR_RECEIVERS_PER_TCM_X), true, false, true, NR_RECEIVERS % (2 * NR_RECEIVERS_PER_TCM_X) == 0>(visibilities, samples, firstReceiverY, firstReceiverX, firstBlock, nrBlocks, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 #endif
   else
-    doCorrelateRectangle<add, nrFragmentsY, nrFragmentsX, true, true, true, true>(visibilities, samples, firstReceiverY, firstReceiverX, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
+    doCorrelateRectangle<add, nrFragmentsY, nrFragmentsX, true, true, true, true>(visibilities, samples, firstReceiverY, firstReceiverX, firstBlock, nrBlocks, u.rectangle.aSamples, u.rectangle.bSamples, u.scratchSpace);
 
 #if 0
   if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
@@ -672,13 +675,12 @@ void correlate(Visibilities *visibilities, const Samples *samples, unsigned batc
   union shared &u = (union shared &) rawbuffer;
 
   unsigned batch = batchOffset + blockIdx.z;
-  visibilities += batch;
-  samples += batch;
+  visibilities += blockIdx.z;
 
   if (add)
-    doCorrelate<true>(*visibilities, *samples, u);
+    doCorrelate<true>(*visibilities, samples, batch * NR_BLOCKS_PER_BATCH, NR_BLOCKS_PER_BATCH, u);
   else
-    doCorrelate<false>(*visibilities, *samples, u);
+    doCorrelate<false>(*visibilities, samples, batch * NR_BLOCKS_PER_BATCH, NR_BLOCKS_PER_BATCH, u);
 }
 
 
