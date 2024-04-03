@@ -79,9 +79,8 @@ would probably require too much shared memory.
 :c:macro:`NR_STATIONS_PER_BLOCK` refers to the size of the subsets of antenna
 data in the input matrix which will be correlated per thread block.  It has
 three possible values (32, 48 and 64) which correspond to processing 32×32,
-48×48 or 64×32 (*not* 64×64) regions of the correlation matrix. This leads
-to the expression ``NR_STATIONS_PER_BLOCK == 64 ? 32 : NR_STATIONS_PER_BLOCK``
-appearing in a lot of places.
+48×48 or 64×32 (*not* 64×64) regions of the correlation matrix. The kernel
+uses :c:macro:`NR_STATIONS_PER_BLOCK_X` for the second dimension.
 
 :c:macro:`NR_CHANNELS` is the number of channels over which to correlate, but
 there seems to be little need for this to be baked into the kernel. It only
@@ -91,7 +90,7 @@ thread grid, and could just as easily be dynamic.
 :c:macro:`NR_STATIONS_PER_TCM_X` and :c:macro:`NR_STATIONS_PER_TCM_Y` are the
 number of (dual-pol) antennas per warp matrix multiply. Keeping in mind that
 the "Y" station corresponds to rows (and to :c:var:`aSamples` temporary
-storage, with "X" corresponding to :c:var:`bSamples`), this is 8×4 (4×2 for
+storage, with "X" corresponding to :c:var:`bSamples`), this is 8×4 (8×2 for
 4-bit samples). With dual-pol antennas that equates to 16×8 inputs. The reason
 it is not 16×16 (to match the matrix shape supported by the tensor cores) is
 the expansion of the B matrix for complex multiplication as described above.
@@ -128,7 +127,7 @@ main diagonal.
    :libs: decorations.pathreplacing
 
     [x=0.08cm, y=-0.08cm, brace/.style={decorate, decoration={brace, amplitude=4}}]
-    \foreach \x/\y/\b in {0/64/1, 32/64/2, 0/128/4, 32/128/5, 64/128/6, 96/128/7}
+    \foreach \x/\y/\b in {64/0/1, 96/0/2, 128/0/4, 160/0/5, 128/64/6, 160/64/7}
     {
         \fill[fill=green!10!white] (\x, \y) rectangle +(32, 64);
         \draw[xstep=4, ystep=-8, help lines] (\x, \y) grid +(32, 64);
@@ -139,23 +138,23 @@ main diagonal.
     }
     \foreach \x/\b in {0/0, 64/3, 128/8}
     {
-        \fill[fill=blue!10!white] (\x, \x) -- +(0, 64) -- +(64, 64) -- cycle;
+        \fill[fill=blue!10!white] (\x, \x) -- +(64, 0) -- +(64, 64) -- cycle;
         \foreach \diag in {0, 24, 48}
         {
-            \fill[fill=red!10!white] (\x, \x) ++(\diag, \diag) -- +(0, 16) -- +(16, 16) -- cycle;
-            \foreach \oy/\maxx in {0/4, 8/12}
+            \fill[fill=red!10!white] (\x, \x) ++(\diag, \diag) -- +(16, 0) -- +(16, 16) -- cycle;
+            \foreach \oy/\maxx in {0/12, 8/4}
                 \foreach \ox in {0, 4, ..., \maxx}
                 {
-                    \draw[help lines] (\x, \x) ++(\diag, \diag) ++(\ox, \oy) rectangle +(4, 8);
+                    \draw[help lines] (\x, \x) ++(\diag, \diag) ++(\oy, \oy) ++(\ox, 0) rectangle +(4, 8);
                 }
         }
-        \foreach \ox/\oy in {0/16, 0/40, 24/40}
+        \foreach \ox/\oy in {16/0, 40/0, 40/24}
         {
             \draw[xstep=4, ystep=-8, help lines] (\x, \x) ++(\ox, \oy) grid +(24, 24);
             \draw[thin] (\x, \x) ++(\ox, \oy) rectangle +(24, 24);
         }
-        \draw[thick] (\x, \x) -- +(0, 64) -- +(64, 64) -- cycle;
-        \path (\x, \x) +(24, 40) coordinate (lbl\b);
+        \draw[thick] (\x, \x) -- +(64, 0) -- +(64, 64) -- cycle;
+        \path (\x, \x) +(40, 24) coordinate (lbl\b);
         \node[fill=white] at (lbl\b) {\b};
     };
     \draw[very thick] (0, 0) rectangle (192, 192);
@@ -179,7 +178,7 @@ warps 1-3 (a lookup table indicates the starting position), while the three
 red areas in each triangle are handled by warp 0.
 
 When :c:macro:`NR_BITS` is 4 the situation is very similar, but the fragments
-are 4×2 instead of 8×4.
+are 8×2 instead of 8×4.
 
 Data loading
 ^^^^^^^^^^^^
@@ -288,7 +287,7 @@ necessary, and counts the number of saturated visibilities.
 
 The number of batches to accumulate in an accumulation
 is equal to the :option:`!--heap-accumulation-threshold` flag. The timestamp difference
-between succesive dumps is therefore equal to:
+between successive dumps is therefore equal to:
 
   `timestamp_difference = spectra_per_heap * samples_between_spectra * heap_accumulation_threshold`
 
