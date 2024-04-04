@@ -93,23 +93,23 @@ def fill_random(rng: np.random.Generator, buf: DeviceArray, command_queue: Abstr
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_samples_per_heap",
+    "num_ants, num_channels, num_jones_per_heap",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_samples_per_heap,
+    test_parameters.num_jones_per_heap,
 )
 def test_correlator(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
     num_ants: int,
-    num_samples_per_heap: int,
+    num_jones_per_heap: int,
     num_channels: int,
 ) -> None:
     """Test the Tensor Core correlation kernel for correctness."""
     n_chans_per_stream = num_channels // num_ants
     n_batches = 7
     # The kernel requires it to be a multiple of 16
-    n_spectra_per_heap = roundup(num_samples_per_heap // n_chans_per_stream, 16)
+    n_spectra_per_heap = roundup(num_jones_per_heap // n_chans_per_stream, 16)
     batch_ranges = [(1, 5), (3, 4), (0, 7)]
 
     template = CorrelationTemplate(

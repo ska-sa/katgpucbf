@@ -29,7 +29,7 @@ class Output(ABC):
 
     name: str
     channels: int
-    samples_per_heap: int
+    jones_per_heap: int
     taps: int
     w_cutoff: float
     dst: list[Endpoint]
@@ -38,13 +38,13 @@ class Output(ABC):
         if self.channels % len(self.dst) != 0:
             raise ValueError("channels must be a multiple of the number of destinations")
         channels_per_substream = self.channels // len(self.dst)
-        if self.samples_per_heap % channels_per_substream != 0:
-            raise ValueError("samples_per_heap must be a multiple of the number of channels per substream")
+        if self.jones_per_heap % channels_per_substream != 0:
+            raise ValueError("jones_per_heap must be a multiple of the number of channels per substream")
 
     @property
     def spectra_per_heap(self) -> int:
         """Number of spectra in each output heap."""
-        return self.samples_per_heap * len(self.dst) // self.channels
+        return self.jones_per_heap * len(self.dst) // self.channels
 
     @property
     @abstractmethod

@@ -47,10 +47,10 @@ from katsdptelstate.endpoint import Endpoint, endpoint_parser
 from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import (
+    DEFAULT_JONES_PER_HEAP,
     DEFAULT_KATCP_HOST,
     DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_SAMPLES_PER_HEAP,
     DEFAULT_TTL,
     __version__,
 )
@@ -267,10 +267,10 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "[%(default)s]",
     )
     parser.add_argument(
-        "--samples-per-heap",
+        "--jones-per-heap",
         type=int,
-        default=DEFAULT_SAMPLES_PER_HEAP,
-        help="Number of complex antenna-channelised-voltage samples in each heap. [%(default)s]",
+        default=DEFAULT_JONES_PER_HEAP,
+        help="Number of antenna-channelised-voltage Jones vectors in each heap. [%(default)s]",
     )
     parser.add_argument(
         "--sample-bits",
@@ -359,9 +359,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
 
     args = parser.parse_args(arglist)
-    if args.samples_per_heap % args.channels_per_substream != 0:
+    if args.jones_per_heap % args.channels_per_substream != 0:
         parser.error(
-            f"--samples-per-heap ({args.samples_per_heap}) must be a multiple of "
+            f"--jones-per-heap ({args.jones_per_heap}) must be a multiple of "
             f"--channels-per-substream ({args.channels_per_substream})"
         )
 
@@ -408,7 +408,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         n_channels_total=args.channels,
         n_channels_per_substream=args.channels_per_substream,
         n_samples_between_spectra=args.samples_between_spectra,
-        n_spectra_per_heap=args.samples_per_heap // args.channels_per_substream,
+        n_spectra_per_heap=args.jones_per_heap // args.channels_per_substream,
         sample_bits=args.sample_bits,
         sync_epoch=args.sync_epoch,
         channel_offset_value=args.channel_offset_value,

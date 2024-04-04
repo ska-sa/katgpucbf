@@ -152,8 +152,8 @@ def fgpu_factory(
         "channels": args.channels,
         "dst": f"239.102.{200 + index}.0+{args.xb - 1}:7148",
     }
-    if args.samples_per_heap is not None:
-        wideband_kwargs["samples_per_heap"] = args.samples_per_heap
+    if args.jones_per_heap is not None:
+        wideband_kwargs["jones_per_heap"] = args.jones_per_heap
     wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
     command = (
         "docker run "
@@ -431,10 +431,10 @@ async def main():  # noqa: D103
         help="The number of antennas in the array.",
     )
     parser.add_argument(
-        "--samples-per-heap",
+        "--jones-per-heap",
         type=int,
         metavar="SAMPLES",
-        help="Complex samples in each output heap",
+        help="Jones vectors in each output heap",
     )
     parser.add_argument(
         "--dig-heap-samples",

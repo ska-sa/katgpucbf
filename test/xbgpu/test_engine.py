@@ -52,7 +52,7 @@ SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 # Mark that can be applied to a test that just needs one set of parameters
 DEFAULT_PARAMETERS = pytest.mark.parametrize(
-    "n_ants, n_channels_total, n_samples_per_heap, heap_accumulation_threshold",
+    "n_ants, n_channels_total, n_jones_per_heap, heap_accumulation_threshold",
     [(4, 1024, 262144, [300, 300])],
 )
 
@@ -727,8 +727,8 @@ class TestEngine:
         return n_channels_total // n_engines
 
     @pytest.fixture
-    def n_spectra_per_heap(self, n_channels_per_substream: int, n_samples_per_heap: int) -> int:  # noqa: D102
-        return n_samples_per_heap // n_channels_per_substream
+    def n_spectra_per_heap(self, n_channels_per_substream: int, n_jones_per_heap: int) -> int:  # noqa: D102
+        return n_jones_per_heap // n_channels_per_substream
 
     @pytest.fixture
     def n_samples_between_spectra(self, n_channels_total: int) -> int:  # noqa: D102
@@ -745,7 +745,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_samples_between_spectra: int,
-        n_samples_per_heap: int,
+        n_jones_per_heap: int,
         corrprod_args: list[str],
         beam_args: list[str],
     ) -> list[str]:
@@ -758,7 +758,7 @@ class TestEngine:
             f"--channels-per-substream={n_channels_per_substream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
             f"--channel-offset-value={frequency}",
-            f"--samples-per-heap={n_samples_per_heap}",
+            f"--jones-per-heap={n_jones_per_heap}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             "--sync-epoch=1234567890",
             "--src-interface=lo",
@@ -799,10 +799,10 @@ class TestEngine:
         await client.wait_closed()
 
     @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_samples_per_heap, missing_antenna, heap_accumulation_threshold",
+        "n_ants, n_channels_total, n_jones_per_heap, missing_antenna, heap_accumulation_threshold",
         test_parameters.array_size,
         test_parameters.num_channels,
-        test_parameters.num_samples_per_heap,
+        test_parameters.num_jones_per_heap,
         [None, 0, 3],
         [(3, 7), (4, 8), (5, 9)],
         filter=valid_end_to_end_combination,

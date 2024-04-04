@@ -47,7 +47,7 @@ pytestmark = [pytest.mark.cuda_only]
 # Command-line arguments
 SYNC_EPOCH = 1632561921
 CHANNELS = 1024
-SAMPLES_PER_HEAP = 16384
+JONES_PER_HEAP = 16384
 # Lower than the default to make tests quicker
 # TODO: use a number that's not a multiple of the number of channels,
 # once _send_data can handle partial chunks.
@@ -75,11 +75,11 @@ def channels() -> int:
 
 
 @pytest.fixture
-def samples_per_heap(channels: int, request: pytest.FixtureRequest) -> int:
-    if marker := request.node.get_closest_marker("spectra_per_heap"):
+def jones_per_heap(channels: int, request: pytest.FixtureRequest) -> int:
+    if marker := request.node.get_closest_marker("jones_per_heap"):
         return marker.args[0] * channels // DSTS
     else:
-        return SAMPLES_PER_HEAP
+        return JONES_PER_HEAP
 
 
 @dataclass
@@ -137,14 +137,14 @@ class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
     @pytest.fixture
-    def wideband_args(self, channels: int, samples_per_heap: int) -> str:
+    def wideband_args(self, channels: int, jones_per_heap: int) -> str:
         """Arguments to pass to the command-line parser for the wideband output."""
-        return f"{WIDEBAND_ARGS},channels={channels},samples_per_heap={samples_per_heap}"
+        return f"{WIDEBAND_ARGS},channels={channels},jones_per_heap={jones_per_heap}"
 
     @pytest.fixture
-    def narrowband_args(self, channels: int, samples_per_heap: int) -> str:
+    def narrowband_args(self, channels: int, jones_per_heap: int) -> str:
         """Arguments to pass to the command-line parser for the narrowband output."""
-        return f"{NARROWBAND_ARGS},channels={channels},samples_per_heap={samples_per_heap}"
+        return f"{NARROWBAND_ARGS},channels={channels},jones_per_heap={jones_per_heap}"
 
     @pytest.fixture(params=["wideband", "narrowband"])
     def output(self, wideband_args: str, narrowband_args: str, request: pytest.FixtureRequest) -> Output:
@@ -838,7 +838,7 @@ class TestEngine:
 
     # Test with spectra_samples less than, equal to and greater than src-packet-samples
     @pytest.mark.parametrize("channels", [64, 2048, 8192])
-    # Use small samples-per-heap to get finer-grained testing of which spectra
+    # Use small jones-per-heap to get finer-grained testing of which spectra
     # were ditched. Fewer would be better, but there are internal alignment
     # requirements. --src-chunk-samples needs to be increased (from
     # CHUNK_SAMPLES) to ensure narrowband windows fit.
