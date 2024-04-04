@@ -95,7 +95,7 @@ class CorrelationTemplate:
         # each block as two int4's, which is 256 bits (the extra factor of 2
         # is because input_sample_bits only counts the real part of a complex
         # number).
-        n_times_per_block = 128 // self.input_sample_bits
+        self.n_times_per_block = 128 // self.input_sample_bits
 
         valid_bitwidths = [4, 8, 16]
         if self.input_sample_bits not in valid_bitwidths:
@@ -108,22 +108,18 @@ class CorrelationTemplate:
                 "will eventually be supported but has not yet been implemented."
             )
 
-        if self.n_spectra_per_heap % n_times_per_block != 0:
-            raise ValueError(f"spectra_per_heap must be divisible by {n_times_per_block}.")
+        if self.n_spectra_per_heap % self.n_times_per_block != 0:
+            raise ValueError(f"spectra_per_heap must be divisible by {self.n_times_per_block}.")
 
+        n_blocks_1d = accel.divup(self.n_ants, self._n_ants_per_block)
         if self._n_ants_per_block in {32, 48}:
-            self.n_blocks = int(
-                ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
-                * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block + 1)
-                // 2
-            )
+            self.n_blocks = n_blocks_1d * (n_blocks_1d + 1) // 2
         elif self._n_ants_per_block == 64:
-            self.n_blocks = int(
-                ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
-                * ((self.n_ants + self._n_ants_per_block - 1) // self._n_ants_per_block)
-            )
+            self.n_blocks = n_blocks_1d * n_blocks_1d
         else:
-            raise ValueError(f"ants_per_block must equal either 64 or 48, currently equal to {self._n_ants_per_block}.")
+            raise ValueError(
+                f"ants_per_block must equal either 32, 48 or 64, currently equal to {self._n_ants_per_block}."
+            )
 
         source = (importlib.resources.files(__package__) / "kernels" / "tensor_core_correlation_kernel.cu").read_text()
         program = context.compile(
@@ -192,6 +188,15 @@ class Correlation(accel.Operation):
         super().__init__(command_queue)
         self.template = template
 
+        # Determine how many accumulators to use. Fewer is better for both
+        # memory usage and I/O throughput, but too few means there will not
+        # be enough parallelism to saturate the GPU. Aim for 1024-2048
+        # work-groups, while sticking to powers of 2 since that's likely to
+        # give an even division of work across them.
+        n_mid = 1
+        while n_mid * self.template.n_channels * self.template.n_blocks < 1024:
+            n_mid *= 2
+
         input_data_dimensions = (
             accel.Dimension(n_batches),
             accel.Dimension(self.template.n_ants, exact=True),
@@ -201,7 +206,7 @@ class Correlation(accel.Operation):
             accel.Dimension(COMPLEX, exact=True),
         )
         mid_data_dimensions = (
-            accel.Dimension(n_batches),
+            accel.Dimension(n_mid),
             accel.Dimension(self.template.n_channels, exact=True),
             accel.Dimension(self.template.n_baselines * N_POLS * N_POLS, exact=True),
             accel.Dimension(COMPLEX, exact=True),
@@ -227,17 +232,33 @@ class Correlation(accel.Operation):
         """Run the correlation kernel and add the generated values to internal buffer."""
         if not 0 <= self.first_batch < self.last_batch <= self.n_batches:
             raise ValueError("Invalid batch range")
-        n_batches = self.last_batch - self.first_batch  # Number of batches for this launch
         in_samples_buffer = self.buffer("in_samples")
         mid_visibilities_buffer = self.buffer("mid_visibilities")
+        n_z = mid_visibilities_buffer.shape[0]
+
+        n_batches = self.last_batch - self.first_batch  # Number of batches for this launch
+        n_time_blocks_per_batch = self.template.n_spectra_per_heap // self.template.n_times_per_block
+        n_time_blocks = n_batches * n_time_blocks_per_batch
+        n_time_blocks_per_z = accel.divup(n_time_blocks, n_z)
+        # The rounding up of n_time_blocks_per_z may leave some z values with
+        # no work. So recompute n_z to avoid launching them at all.
+        n_z = accel.divup(n_time_blocks, n_time_blocks_per_z)
+        first_time_block = self.first_batch * n_time_blocks_per_batch
+
         self.command_queue.enqueue_kernel(
             self.template.correlate_kernel,
-            [mid_visibilities_buffer.buffer, in_samples_buffer.buffer, np.uint32(self.first_batch)],
+            [
+                mid_visibilities_buffer.buffer,
+                in_samples_buffer.buffer,
+                np.uint32(first_time_block),
+                np.uint32(n_time_blocks),
+                np.uint32(n_time_blocks_per_z),
+            ],
             # NOTE: Even though we are using CUDA, we follow OpenCL's grid/block
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * n_batches),
+            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * n_z),
             local_size=(32, 2, 2),
         )
 
@@ -255,7 +276,7 @@ class Correlation(accel.Operation):
                 out_visibilities_buffer.buffer,
                 out_saturated_buffer.buffer,
                 mid_visibilities_buffer.buffer,
-                np.uint32(self.n_batches),
+                np.uint32(mid_visibilities_buffer.shape[0]),
             ],
             global_size=(accel.roundup(int(np.prod(out_visibilities_buffer.shape)), wgs), 1, 1),
             local_size=(wgs, 1, 1),
